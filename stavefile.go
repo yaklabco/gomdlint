@@ -297,6 +297,10 @@ func CrossCompile(ctx context.Context) error {
 		{"darwin", "arm64"},
 		{"windows", "amd64"},
 		{"windows", "arm64"},
+		{"freebsd", "amd64"},
+		{"freebsd", "arm64"},
+		{"openbsd", "amd64"},
+		{"netbsd", "amd64"},
 	}
 
 	for _, p := range platforms {
