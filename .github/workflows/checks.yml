@@ -1,13 +1,10 @@
 name: checks
 
-env:
-  HOMEBREW_NO_ANALYTICS: '1'
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 concurrency:
   group: checks-${{ github.ref }}
@@ -26,56 +23,48 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Configure Go for private modules
-        run: git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Files not formatted:"
+            gofmt -l .
+            exit 1
+          fi
 
-      - name: Cache Homebrew downloads
-        id: brew_dl
-        uses: actions/cache@v4
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
         with:
-          path: |
-            ~/.cache/Homebrew
-          key: brew-cache-${{ runner.os }}-${{ hashFiles('Brewfile') }}
-          restore-keys: |
-            brew-cache-${{ runner.os }}-
+          version: latest
 
-      - name: Set up Homebrew
-        uses: Homebrew/actions/setup-homebrew@main
+      - name: Build
+        run: go build -o /dev/null ./cmd/gomdlint
 
-      - name: Detect Homebrew prefix
-        id: brew
-        run: echo "prefix=$(brew --prefix)" >> "$GITHUB_OUTPUT"
+      - name: Run tests
+        run: go test -race -coverprofile=coverage.out ./...
 
-      - name: Cache Homebrew installation
-        id: brew_install
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.brew.outputs.prefix }}/Cellar
-            ${{ steps.brew.outputs.prefix }}/opt
-            ${{ steps.brew.outputs.prefix }}/bin
-            ${{ steps.brew.outputs.prefix }}/sbin
-            ${{ steps.brew.outputs.prefix }}/lib
-            ${{ steps.brew.outputs.prefix }}/include
-            ${{ steps.brew.outputs.prefix }}/share
-            ${{ steps.brew.outputs.prefix }}/etc
-            ${{ steps.brew.outputs.prefix }}/var
-            ${{ steps.brew.outputs.prefix }}/Homebrew/Library/Taps
-          key: brew-install-${{ runner.os }}-${{ hashFiles('Brewfile') }}
-          restore-keys: |
-            brew-install-${{ runner.os }}-
+      - name: Check go.mod is tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "go.mod or go.sum not tidy"
+            git diff go.mod go.sum
+            exit 1
+          fi
 
-      - name: Install Homebrew tools (only if cache miss)
-        if: steps.brew_install.outputs.cache-hit != 'true'
-        run: brew bundle --no-upgrade --file=Brewfile
-
-      - name: Install stave
-        run: go install github.com/yaklabco/stave@ci-clean-git-status-check
-        env:
-          GOPRIVATE: github.com/yaklabco/*
-          GONOPROXY: github.com/yaklabco/*
-          GONOSUMDB: github.com/yaklabco/*
-
-      - name: Run CI gate
-        run: stave cigate
-
+      - name: Cross-compile
+        run: |
+          platforms=(
+            "linux/amd64" "linux/arm64"
+            "darwin/amd64" "darwin/arm64"
+            "windows/amd64" "windows/arm64"
+            "freebsd/amd64" "freebsd/arm64"
+            "openbsd/amd64" "netbsd/amd64"
+          )
+          for platform in "${platforms[@]}"; do
+            GOOS="${platform%/*}" GOARCH="${platform#*/}" CGO_ENABLED=0 \
+              go build -o /dev/null ./cmd/gomdlint
+            echo "✓ $platform"
+          done
