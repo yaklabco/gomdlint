@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jamesainslie/gomdlint/pkg/runner"
@@ -509,22 +510,28 @@ func TestDiscover_DirectorySymlinks(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Create a subdirectory with a file.
-	subDir := filepath.Join(dir, "real")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatalf("setup mkdir: %v", err)
+	// Create a real subdirectory with a file.
+	realDir := filepath.Join(dir, "real")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("setup mkdir real: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(subDir, "doc.md"), []byte("content"), 0644); err != nil {
-		t.Fatalf("setup write: %v", err)
+	if err := os.WriteFile(filepath.Join(realDir, "doc.md"), []byte("content"), 0644); err != nil {
+		t.Fatalf("setup write real: %v", err)
 	}
 
-	// Create directory symlink.
+	// Create external directory (outside the walk root) with a different file.
+	externalDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(externalDir, "external.md"), []byte("external"), 0644); err != nil {
+		t.Fatalf("setup write external: %v", err)
+	}
+
+	// Create a symlink inside dir pointing to the external directory.
 	linkDir := filepath.Join(dir, "linked")
-	if err := os.Symlink(subDir, linkDir); err != nil {
+	if err := os.Symlink(externalDir, linkDir); err != nil {
 		t.Skipf("symlinks not supported: %v", err)
 	}
 
-	// Test without following symlinks.
+	// Test without following symlinks - should only find real/doc.md.
 	ctx := context.Background()
 	opts := runner.Options{
 		Paths:          []string{"."},
@@ -537,21 +544,39 @@ func TestDiscover_DirectorySymlinks(t *testing.T) {
 		t.Fatalf("Discover() error = %v", err)
 	}
 
-	// Should only find file in real/, not linked/.
 	if len(discovered) != 1 {
 		t.Errorf("expected 1 file without FollowSymlinks, got %d: %v", len(discovered), discovered)
 	}
 
-	// Test with following symlinks.
+	// Verify the file is from real/, not linked/.
+	if len(discovered) == 1 && !strings.Contains(discovered[0], "real") {
+		t.Errorf("expected file from real/, got: %v", discovered[0])
+	}
+
+	// Test with following symlinks - should find both files.
 	opts.FollowSymlinks = true
 	discovered, err = runner.Discover(ctx, opts)
 	if err != nil {
 		t.Fatalf("Discover() error = %v", err)
 	}
 
-	// Should find files in both real/ and linked/.
+	// Should find 2 files: real/doc.md and the external file via symlink.
 	if len(discovered) != 2 {
 		t.Errorf("expected 2 files with FollowSymlinks, got %d: %v", len(discovered), discovered)
+	}
+
+	// Verify we found both files.
+	foundReal, foundExternal := false, false
+	for _, f := range discovered {
+		if strings.HasSuffix(f, "doc.md") {
+			foundReal = true
+		}
+		if strings.HasSuffix(f, "external.md") {
+			foundExternal = true
+		}
+	}
+	if !foundReal || !foundExternal {
+		t.Errorf("expected to find both doc.md and external.md, got: %v", discovered)
 	}
 }
 
