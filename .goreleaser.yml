@@ -43,18 +43,16 @@ checksum:
   name_template: 'checksums.txt'
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
-      - '^ci:'
+  disable: true
 
 release:
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
   make_latest: true
+  header: |
+    ## What's Changed
+
+    See [CHANGELOG.md](https://github.com/jamesainslie/gomdlint/blob/main/CHANGELOG.md) for full details.
 
 
