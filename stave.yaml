@@ -12,4 +12,5 @@ hooks:
   pre-push:
     - target: LintCI
     - target: Test
-    - target: Build
+    - target: ModTidy
+    - target: CrossCompile

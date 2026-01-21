@@ -164,6 +164,13 @@ func CIGate(ctx context.Context) error {
 	}
 	fmt.Println("✓ Build successful")
 
+	// 5. Run tests
+	fmt.Println("\n5. Running tests...")
+	if err := Test(ctx); err != nil {
+		return fmt.Errorf("tests failed: %w", err)
+	}
+	fmt.Println("✓ Tests passed")
+
 	fmt.Println("\n✓ All CI gate checks passed!")
 	return nil
 }
@@ -237,6 +244,62 @@ func Deps(ctx context.Context) error {
 func Bench(ctx context.Context) error {
 	fmt.Println("Running benchmarks...")
 	return sh(ctx, "go", "test", "-bench=.", "-benchmem", "./...")
+}
+
+// ModTidy checks that go.mod and go.sum are tidy.
+func ModTidy(ctx context.Context) error {
+	fmt.Println("Checking go.mod/go.sum are tidy...")
+
+	// Get current state of go.mod and go.sum
+	modBefore, _ := os.ReadFile("go.mod")
+	sumBefore, _ := os.ReadFile("go.sum")
+
+	// Run go mod tidy
+	if err := sh(ctx, "go", "mod", "tidy"); err != nil {
+		return err
+	}
+
+	// Check if files changed
+	modAfter, _ := os.ReadFile("go.mod")
+	sumAfter, _ := os.ReadFile("go.sum")
+
+	if string(modBefore) != string(modAfter) || string(sumBefore) != string(sumAfter) {
+		return fmt.Errorf("go.mod or go.sum changed after 'go mod tidy' - please commit the changes")
+	}
+
+	fmt.Println("✓ go.mod/go.sum are tidy")
+	return nil
+}
+
+// CrossCompile builds for all release platforms to catch platform-specific issues.
+func CrossCompile(ctx context.Context) error {
+	fmt.Println("Cross-compiling for all release platforms...")
+
+	platforms := []struct {
+		goos   string
+		goarch string
+	}{
+		{"linux", "amd64"},
+		{"linux", "arm64"},
+		{"darwin", "amd64"},
+		{"darwin", "arm64"},
+		{"windows", "amd64"},
+		{"windows", "arm64"},
+	}
+
+	for _, p := range platforms {
+		fmt.Printf("  Building %s/%s...\n", p.goos, p.goarch)
+		cmd := exec.CommandContext(ctx, "go", "build", "-o", "/dev/null", "./cmd/gomdlint")
+		cmd.Env = append(os.Environ(), "GOOS="+p.goos, "GOARCH="+p.goarch, "CGO_ENABLED=0")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("build failed for %s/%s: %w", p.goos, p.goarch, err)
+		}
+	}
+
+	fmt.Println("✓ All platforms build successfully")
+	return nil
 }
 
 // Coverage generates test coverage report.
