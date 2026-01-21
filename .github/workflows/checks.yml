@@ -1,0 +1,81 @@
+name: checks
+
+env:
+  HOMEBREW_NO_ANALYTICS: '1'
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Configure Go for private modules
+        run: git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Cache Homebrew downloads
+        id: brew_dl
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Homebrew
+          key: brew-cache-${{ runner.os }}-${{ hashFiles('Brewfile') }}
+          restore-keys: |
+            brew-cache-${{ runner.os }}-
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Detect Homebrew prefix
+        id: brew
+        run: echo "prefix=$(brew --prefix)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Homebrew installation
+        id: brew_install
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.brew.outputs.prefix }}/Cellar
+            ${{ steps.brew.outputs.prefix }}/opt
+            ${{ steps.brew.outputs.prefix }}/bin
+            ${{ steps.brew.outputs.prefix }}/sbin
+            ${{ steps.brew.outputs.prefix }}/lib
+            ${{ steps.brew.outputs.prefix }}/include
+            ${{ steps.brew.outputs.prefix }}/share
+            ${{ steps.brew.outputs.prefix }}/etc
+            ${{ steps.brew.outputs.prefix }}/var
+            ${{ steps.brew.outputs.prefix }}/Homebrew/Library/Taps
+          key: brew-install-${{ runner.os }}-${{ hashFiles('Brewfile') }}
+          restore-keys: |
+            brew-install-${{ runner.os }}-
+
+      - name: Install Homebrew tools (only if cache miss)
+        if: steps.brew_install.outputs.cache-hit != 'true'
+        run: brew bundle --no-upgrade --file=Brewfile
+
+      - name: Install stave
+        run: go install github.com/yaklabco/stave@ci-clean-git-status-check
+        env:
+          GOPRIVATE: github.com/yaklabco/*
+          GONOPROXY: github.com/yaklabco/*
+          GONOSUMDB: github.com/yaklabco/*
+
+      - name: Run CI gate
+        run: stave cigate
+

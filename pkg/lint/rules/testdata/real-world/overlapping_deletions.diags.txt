@@ -1,0 +1,5 @@
+overlapping_deletions.input.md:5:1 warning Multiple consecutive blank lines (found 3, max 1) () [fixable]
+overlapping_deletions.input.md:9:1 warning Multiple consecutive blank lines (found 3, max 1) () [fixable]
+overlapping_deletions.input.md:13:1 warning Multiple consecutive blank lines (found 4, max 1) () [fixable]
+overlapping_deletions.input.md:17:1 warning Too many trailing blank lines (found 4, max 1) () [fixable]
+overlapping_deletions.input.md:18:1 warning Multiple consecutive blank lines (found 4, max 1) () [fixable]

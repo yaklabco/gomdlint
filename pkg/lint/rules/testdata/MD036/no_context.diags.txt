@@ -1,0 +1,2 @@
+no_context.input.md:1:1 warning Emphasis used instead of a heading () [fixable]
+no_context.input.md:5:1 warning Emphasis used instead of a heading () [fixable]

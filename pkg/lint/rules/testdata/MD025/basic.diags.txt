@@ -1,0 +1,2 @@
+basic.input.md:5:3 warning Multiple H1 headings found (this is H1 #2) ()
+basic.input.md:9:3 warning Multiple H1 headings found (this is H1 #3) ()

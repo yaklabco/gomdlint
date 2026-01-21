@@ -1,0 +1,15 @@
+# Stave configuration for gomdlint
+# https://github.com/yaklabco/stave
+
+# Speed up compilation for git hooks
+hash_fast: true
+
+# Git hooks - run targets on git events
+hooks:
+  pre-commit:
+    - target: Fmt
+    - target: Lint
+  pre-push:
+    - target: LintCI
+    - target: Test
+    - target: Build

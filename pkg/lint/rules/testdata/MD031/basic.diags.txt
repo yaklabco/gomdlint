@@ -1,0 +1,4 @@
+basic.input.md:4:1 warning Missing blank line before fenced code block () [fixable]
+basic.input.md:6:1 warning Missing blank line after fenced code block () [fixable]
+basic.input.md:8:1 warning Missing blank line before fenced code block () [fixable]
+basic.input.md:10:1 warning Missing blank line after fenced code block () [fixable]

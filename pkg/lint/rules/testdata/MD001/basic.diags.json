@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD001",
+    "name": "",
+    "line": 3,
+    "column": 5,
+    "message": "Heading level jumped from H1 to H3",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD001",
+    "name": "",
+    "line": 7,
+    "column": 8,
+    "message": "Heading level jumped from H3 to H6",
+    "severity": "warning",
+    "fixable": false
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD025",
+    "name": "",
+    "line": 5,
+    "column": 3,
+    "message": "Multiple H1 headings found (this is H1 #2)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD025",
+    "name": "",
+    "line": 9,
+    "column": 3,
+    "message": "Multiple H1 headings found (this is H1 #3)",
+    "severity": "warning",
+    "fixable": false
+  }
+]

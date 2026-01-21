@@ -1,0 +1,1 @@
+basic.input.md:11:4 warning Duplicate heading text "Introduction" (first occurrence on line 3) ()

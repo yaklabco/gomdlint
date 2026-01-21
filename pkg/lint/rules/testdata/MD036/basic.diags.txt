@@ -1,0 +1,2 @@
+basic.input.md:7:1 warning Emphasis used instead of a heading () [fixable]
+basic.input.md:11:1 warning Emphasis used instead of a heading () [fixable]

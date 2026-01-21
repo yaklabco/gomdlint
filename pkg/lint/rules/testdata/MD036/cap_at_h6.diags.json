@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD036",
+    "name": "",
+    "line": 13,
+    "column": 1,
+    "message": "Emphasis used instead of a heading",
+    "severity": "warning",
+    "fixable": true
+  }
+]

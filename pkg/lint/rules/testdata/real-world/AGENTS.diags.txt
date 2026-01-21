@@ -1,0 +1,5 @@
+AGENTS.input.md:25:1 warning Missing blank line before fenced code block () [fixable]
+AGENTS.input.md:30:1 warning Missing blank line after fenced code block () [fixable]
+AGENTS.input.md:36:1 warning Missing blank line before list () [fixable]
+AGENTS.input.md:40:1 warning Too many trailing blank lines (found 2, max 1) () [fixable]
+AGENTS.input.md:41:1 warning Multiple consecutive blank lines (found 2, max 1) () [fixable]

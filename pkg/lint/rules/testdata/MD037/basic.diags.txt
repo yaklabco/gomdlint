@@ -1,0 +1,3 @@
+basic.input.md:3:9 warning Spaces inside emphasis markers () [fixable]
+basic.input.md:5:9 warning Spaces inside emphasis markers () [fixable]
+basic.input.md:11:9 warning Spaces inside emphasis markers () [fixable]

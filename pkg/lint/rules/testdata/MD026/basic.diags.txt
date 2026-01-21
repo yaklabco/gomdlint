@@ -1,0 +1,5 @@
+basic.input.md:1:22 warning Heading ends with trailing punctuation "." () [fixable]
+basic.input.md:3:22 warning Heading ends with trailing punctuation "," () [fixable]
+basic.input.md:5:27 warning Heading ends with trailing punctuation ";" () [fixable]
+basic.input.md:7:24 warning Heading ends with trailing punctuation ":" () [fixable]
+basic.input.md:9:31 warning Heading ends with trailing punctuation "!" () [fixable]

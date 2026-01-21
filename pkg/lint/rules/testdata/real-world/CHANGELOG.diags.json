@@ -1,0 +1,614 @@
+[
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 10,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 13,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 14,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 18,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 21,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 22,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 23,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 24,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 25,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 26,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 27,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 28,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 29,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 30,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 31,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 32,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 33,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 34,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 35,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 36,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 37,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 38,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 39,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 40,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 41,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 42,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 43,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 45,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 48,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 49,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 50,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 51,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 52,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 53,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 54,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 55,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 56,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 57,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 59,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 62,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 64,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 67,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 69,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 72,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 74,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 75,
+    "column": 5,
+    "message": "Duplicate heading text \"Continuous Integration\" (first occurrence on line 11)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 77,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 78,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 79,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 80,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 84,
+    "column": 5,
+    "message": "Duplicate heading text \"Features\" (first occurrence on line 19)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 86,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 87,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 88,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 90,
+    "column": 5,
+    "message": "Duplicate heading text \"Bug Fixes\" (first occurrence on line 46)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 92,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 93,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 94,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 95,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 96,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 98,
+    "column": 5,
+    "message": "Duplicate heading text \"Tests\" (first occurrence on line 65)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 100,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 102,
+    "column": 5,
+    "message": "Duplicate heading text \"Build System\" (first occurrence on line 70)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 104,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 106,
+    "column": 5,
+    "message": "Duplicate heading text \"Continuous Integration\" (first occurrence on line 11)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 108,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 109,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 110,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  }
+]

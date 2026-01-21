@@ -1,0 +1,10 @@
+complex.input.md:46:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
+complex.input.md:47:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
+complex.input.md:114:1 warning Fenced code block has no language specified ()
+complex.input.md:123:5 warning Code block style 'indented' does not match expected 'fenced' ()
+complex.input.md:142:12 warning Bare URL used () [fixable]
+complex.input.md:143:29 warning Bare URL used () [fixable]
+complex.input.md:149:19 warning Bare email address used () [fixable]
+complex.input.md:159:11 warning Bare URL used () [fixable]
+complex.input.md:238:7 warning Heading needs 1 blank line(s) below, found 0 () [fixable]
+complex.input.md:245:1 warning Missing blank line before fenced code block () [fixable]

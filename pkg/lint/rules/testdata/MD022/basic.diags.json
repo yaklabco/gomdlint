@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD022",
+    "name": "",
+    "line": 1,
+    "column": 3,
+    "message": "Heading needs 1 blank line(s) below, found 0",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD022",
+    "name": "",
+    "line": 3,
+    "column": 4,
+    "message": "Heading needs 1 blank line(s) above, found 0",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD022",
+    "name": "",
+    "line": 3,
+    "column": 4,
+    "message": "Heading needs 1 blank line(s) below, found 0",
+    "severity": "warning",
+    "fixable": true
+  }
+]

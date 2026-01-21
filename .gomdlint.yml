@@ -1,0 +1,47 @@
+# gomdlint configuration
+# See: https://github.com/jamesainslie/gomdlint
+
+# Markdown flavor: commonmark or gfm
+flavor: gfm
+
+# Default severity for all rules: error, warning, or info
+# severity_default: error
+
+# Enable auto-fix mode
+# fix: false
+
+# Number of parallel workers (0 = auto)
+# jobs: 0
+
+# File patterns to ignore (glob patterns)
+ignore:
+  # Test data files - intentionally contain lint errors for testing
+  - "pkg/lint/rules/testdata/**"
+
+  # Common directories to ignore
+  - "vendor/**"
+  - "node_modules/**"
+  - ".git/**"
+
+  # Beads issue tracker internal files
+  - ".beads/**"
+
+# Rule-specific configuration
+rules:
+  MD048:
+    enabled: true
+    auto_fix: false  # Don't autofix - mixing ~~~ and ``` is valid for nested examples
+    options:
+      style: consistent  # Allow either ~~~ or ```, just be consistent
+  MD010:
+    enabled: true
+    options:
+      code_blocks: false  # Don't check tabs inside code blocks
+  MD013:
+    enabled: true
+    options:
+      max: 80
+  MD060:
+    enabled: true
+    options:
+      style: compact

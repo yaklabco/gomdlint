@@ -1,0 +1,3 @@
+basic.input.md:1:3 warning Heading needs 1 blank line(s) below, found 0 () [fixable]
+basic.input.md:3:4 warning Heading needs 1 blank line(s) above, found 0 () [fixable]
+basic.input.md:3:4 warning Heading needs 1 blank line(s) below, found 0 () [fixable]

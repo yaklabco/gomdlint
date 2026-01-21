@@ -1,0 +1,2 @@
+basic.input.md:3:30 warning Trailing whitespace () [fixable]
+basic.input.md:5:31 warning Trailing whitespace () [fixable]

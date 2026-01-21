@@ -1,0 +1,92 @@
+[
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 46,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 47,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD040",
+    "name": "",
+    "line": 114,
+    "column": 1,
+    "message": "Fenced code block has no language specified",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD046",
+    "name": "",
+    "line": 123,
+    "column": 5,
+    "message": "Code block style 'indented' does not match expected 'fenced'",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 142,
+    "column": 12,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 143,
+    "column": 29,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 149,
+    "column": 19,
+    "message": "Bare email address used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 159,
+    "column": 11,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD022",
+    "name": "",
+    "line": 238,
+    "column": 7,
+    "message": "Heading needs 1 blank line(s) below, found 0",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD031",
+    "name": "",
+    "line": 245,
+    "column": 1,
+    "message": "Missing blank line before fenced code block",
+    "severity": "warning",
+    "fixable": true
+  }
+]

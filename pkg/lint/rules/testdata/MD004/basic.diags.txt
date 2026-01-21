@@ -1,0 +1,4 @@
+basic.input.md:6:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
+basic.input.md:7:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
+basic.input.md:9:3 warning Unordered list bullet '+' does not match expected '-' () [fixable]
+basic.input.md:10:3 warning Unordered list bullet '+' does not match expected '-' () [fixable]

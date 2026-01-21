@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD040",
+    "name": "",
+    "line": 4,
+    "column": 1,
+    "message": "Fenced code block has no language specified",
+    "severity": "warning",
+    "fixable": true
+  }
+]
