@@ -23,14 +23,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run tests
-        run: go test -race ./...
-
-      - name: Run linter
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

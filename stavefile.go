@@ -171,6 +171,18 @@ func CIGate(ctx context.Context) error {
 	}
 	fmt.Println("✓ Tests passed")
 
+	// 6. Check go.mod/go.sum are tidy
+	fmt.Println("\n6. Checking go.mod/go.sum...")
+	if err := ModTidy(ctx); err != nil {
+		return fmt.Errorf("mod tidy check failed: %w", err)
+	}
+
+	// 7. Cross-compile for all platforms
+	fmt.Println("\n7. Cross-compiling for release platforms...")
+	if err := CrossCompile(ctx); err != nil {
+		return fmt.Errorf("cross-compile failed: %w", err)
+	}
+
 	fmt.Println("\n✓ All CI gate checks passed!")
 	return nil
 }

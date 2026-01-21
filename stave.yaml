@@ -10,7 +10,4 @@ hooks:
     - target: Fmt
     - target: Lint
   pre-push:
-    - target: LintCI
     - target: Test
-    - target: ModTidy
-    - target: CrossCompile
