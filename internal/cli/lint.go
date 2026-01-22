@@ -34,6 +34,9 @@ type lintFlags struct {
 	perFile      bool
 	ruleFormat   string
 	summaryOrder string
+	cpuprofile   string
+	memprofile   string
+	trace        string
 }
 
 func newLintCommand() *cobra.Command {
@@ -234,4 +237,9 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 		"rule identifier format in output: name, id, or combined")
 	cmd.Flags().StringVar(&flags.summaryOrder, "summary-order", "rules",
 		"order of tables in summary output: rules, files")
+
+	// Profiling flags.
+	cmd.Flags().StringVar(&flags.cpuprofile, "cpuprofile", "", "write CPU profile to file")
+	cmd.Flags().StringVar(&flags.memprofile, "memprofile", "", "write memory profile to file")
+	cmd.Flags().StringVar(&flags.trace, "trace", "", "write execution trace to file")
 }
