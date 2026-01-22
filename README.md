@@ -28,9 +28,21 @@ See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for detailed benchmark methodol
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install yaklabco/tap/gomdlint
+```
+
+### Go
+
 ```bash
 go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
 ```
+
+### Binary releases
+
+Download from [GitHub Releases](https://github.com/yaklabco/gomdlint/releases).
 
 ## Quick Start
 
