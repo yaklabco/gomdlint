@@ -26,9 +26,12 @@ command -v markdownlint &>/dev/null || { echo "Error: markdownlint not found. In
 command -v jq &>/dev/null || { echo "Error: jq not found"; exit 1; }
 
 # Setup results directory
+RUN_TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 mkdir -p "$RESULTS_DIR/raw" "$RESULTS_DIR/plots"
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-RESULT_FILE="$RESULTS_DIR/raw/$(date +%Y%m%d-%H%M%S).json"
+RESULT_FILE="$RESULTS_DIR/raw/$RUN_TIMESTAMP.json"
+PROFILE_DIR="$RESULTS_DIR/profiles/$RUN_TIMESTAMP"
+mkdir -p "$PROFILE_DIR"
 
 # Get versions
 GOMDLINT_VERSION=$(gomdlint version 2>/dev/null | grep -oE 'version=[^ ]+' | cut -d= -f2 || echo "unknown")
@@ -45,13 +48,21 @@ echo ""
 run_linter() {
     local linter="$1"
     local repo_path="$2"
+    local repo_name="$3"
     local tmp_time=$(mktemp)
     local tmp_out=$(mktemp)
 
     # Run with GNU time
     # Note: gomdlint accepts directories, markdownlint needs file list via find
     if [ "$linter" = "gomdlint" ]; then
-        $TIME_CMD -f '%e %M' -o "$tmp_time" gomdlint lint "$repo_path" >"$tmp_out" 2>&1 || true
+        # Create profile directory for this repo
+        local profile_base="$PROFILE_DIR/$repo_name"
+        mkdir -p "$profile_base"
+        $TIME_CMD -f '%e %M' -o "$tmp_time" gomdlint lint \
+            --cpuprofile="$profile_base/cpu.pprof" \
+            --memprofile="$profile_base/mem.pprof" \
+            --trace="$profile_base/trace.out" \
+            "$repo_path" >"$tmp_out" 2>&1 || true
     else
         # markdownlint: use find to get recursive file list
         $TIME_CMD -f '%e %M' -o "$tmp_time" bash -c "find \"$repo_path\" -name '*.md' -type f -print0 | xargs -0 markdownlint" >"$tmp_out" 2>&1 || true
@@ -80,11 +91,12 @@ run_linter() {
 median_run() {
     local linter="$1"
     local repo_path="$2"
+    local repo_name="$3"
     local times_file=$(mktemp)
     local mems_file=$(mktemp)
 
     for ((i=1; i<=RUNS; i++)); do
-        result=$(run_linter "$linter" "$repo_path")
+        result=$(run_linter "$linter" "$repo_path" "$repo_name")
         echo "$result" | cut -d' ' -f1 >> "$times_file"
         echo "$result" | cut -d' ' -f2 >> "$mems_file"
     done
@@ -141,12 +153,12 @@ for repo_path in "$REPOS_DIR"/*/; do
     fi
 
     # Run benchmarks
-    gomdlint_result=$(median_run "gomdlint" "$repo_path")
+    gomdlint_result=$(median_run "gomdlint" "$repo_path" "$repo_name")
     gomdlint_time=$(echo "$gomdlint_result" | cut -d' ' -f1)
     gomdlint_mem=$(echo "$gomdlint_result" | cut -d' ' -f2)
     gomdlint_issues=$(count_issues "gomdlint" "$repo_path")
 
-    markdownlint_result=$(median_run "markdownlint" "$repo_path")
+    markdownlint_result=$(median_run "markdownlint" "$repo_path" "$repo_name")
     markdownlint_time=$(echo "$markdownlint_result" | cut -d' ' -f1)
     markdownlint_mem=$(echo "$markdownlint_result" | cut -d' ' -f2)
     markdownlint_issues=$(count_issues "markdownlint" "$repo_path")
@@ -209,6 +221,7 @@ fi
 
 echo ""
 echo "Results saved to: $RESULT_FILE"
+echo "Profiles saved to: $PROFILE_DIR"
 
 # Update latest symlink
 echo "$RESULT_FILE" > "$RESULTS_DIR/latest.txt"
