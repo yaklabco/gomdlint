@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -102,7 +103,7 @@ func WriteAtomicIfChanged(ctx context.Context, path string, content []byte, mode
 	}
 
 	// Compare content.
-	if bytesEqual(existing, content) {
+	if bytes.Equal(existing, content) {
 		return false, nil
 	}
 
@@ -111,17 +112,4 @@ func WriteAtomicIfChanged(ctx context.Context, path string, content []byte, mode
 		return false, err
 	}
 	return true, nil
-}
-
-// bytesEqual compares two byte slices for equality.
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

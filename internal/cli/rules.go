@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"os"
-
-	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
 	"github.com/jamesainslie/gomdlint/internal/logging"
@@ -24,11 +21,7 @@ func newRulesCommand() *cobra.Command {
 		Long: `List all available lint rules with their IDs, descriptions,
 default severity, and whether they support auto-fixing.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			logger := log.NewWithOptions(os.Stdout, log.Options{
-				ReportTimestamp: false,
-				ReportCaller:    false,
-			})
-			logger.SetLevel(log.InfoLevel)
+			logger := logging.NewInteractive()
 
 			rules := lint.DefaultRegistry.Rules()
 

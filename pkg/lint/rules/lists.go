@@ -311,8 +311,15 @@ func (r *OrderedListIncrementRule) buildNumberFix(
 			}
 		}
 
-		// Break if we found the delimiter or hit a non-digit after whitespace.
-		if delimEnd > 0 || (numEnd == 0 && ch != ' ' && ch != '\t') || (numEnd > 0 && ch != '.' && ch != ')' && (ch < '0' || ch > '9')) {
+		// Determine if we should stop parsing.
+		foundDelimiter := delimEnd > 0
+		isWhitespace := ch == ' ' || ch == '\t'
+		isDigit := ch >= '0' && ch <= '9'
+		isDelimiterChar := ch == '.' || ch == ')'
+		hitNonDigitBeforeNumber := numEnd == 0 && !isWhitespace
+		hitInvalidCharAfterNumber := numEnd > 0 && !isDelimiterChar && !isDigit
+
+		if foundDelimiter || hitNonDigitBeforeNumber || hitInvalidCharAfterNumber {
 			break
 		}
 	}

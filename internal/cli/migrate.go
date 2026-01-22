@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
 	"github.com/jamesainslie/gomdlint/internal/configloader"
@@ -55,11 +54,7 @@ Examples:
 }
 
 func runMigrate(flags *migrateFlags) error {
-	logger := log.NewWithOptions(os.Stdout, log.Options{
-		ReportTimestamp: false,
-		ReportCaller:    false,
-	})
-	logger.SetLevel(log.InfoLevel)
+	logger := logging.NewInteractive()
 
 	// Find input file
 	inputPath := flags.input

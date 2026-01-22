@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
 	"github.com/jamesainslie/gomdlint/internal/logging"
@@ -52,11 +51,7 @@ Examples:
 }
 
 func runInit(flags *initFlags) error {
-	logger := log.NewWithOptions(os.Stdout, log.Options{
-		ReportTimestamp: false,
-		ReportCaller:    false,
-	})
-	logger.SetLevel(log.InfoLevel)
+	logger := logging.NewInteractive()
 
 	// Validate format
 	if flags.format != "yaml" && flags.format != "json" {

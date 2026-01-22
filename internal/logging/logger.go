@@ -37,6 +37,18 @@ func New(level string) *log.Logger {
 	return logger
 }
 
+// NewInteractive creates a logger for interactive CLI commands.
+// It writes to stdout (not stderr) and is suitable for user-facing output
+// from commands like init, migrate, and rules.
+func NewInteractive() *log.Logger {
+	logger := log.NewWithOptions(os.Stdout, log.Options{
+		ReportTimestamp: false,
+		ReportCaller:    false,
+	})
+	logger.SetLevel(log.InfoLevel)
+	return logger
+}
+
 func setLoggerLevel(logger *log.Logger, level string) {
 	switch strings.ToLower(level) {
 	case "debug":

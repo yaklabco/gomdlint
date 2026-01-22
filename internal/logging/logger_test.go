@@ -87,3 +87,17 @@ func TestSetDefault(t *testing.T) {
 		t.Error("SetDefault did not change the default logger")
 	}
 }
+
+func TestNewInteractive(t *testing.T) {
+	t.Parallel()
+
+	logger := logging.NewInteractive()
+	if logger == nil {
+		t.Fatal("NewInteractive returned nil logger")
+	}
+
+	// Interactive loggers should default to info level
+	if logger.GetLevel() != log.InfoLevel {
+		t.Errorf("expected info level, got %v", logger.GetLevel())
+	}
+}
