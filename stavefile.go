@@ -18,11 +18,13 @@ var Default = Build
 
 // Aliases for common targets.
 var Aliases = map[string]interface{}{
-	"b": Build,
-	"t": Test,
-	"l": Lint,
-	"c": Check,
-	"i": Install,
+	"b":    Build,
+	"t":    Test,
+	"l":    Lint,
+	"c":    Check,
+	"i":    Install,
+	"cmp":  Compare,
+	"cmpf": CompareFast,
 }
 
 // ldflags returns the linker flags for version injection.
@@ -328,6 +330,102 @@ func Coverage(ctx context.Context) error {
 		return err
 	}
 	return sh(ctx, "open", "coverage.html")
+}
+
+// Compare benchmarks gomdlint against markdownlint.
+func Compare(ctx context.Context) error {
+	fmt.Println("Running gomdlint vs markdownlint comparison...")
+
+	// Ensure gomdlint is built
+	if err := Build(ctx); err != nil {
+		return fmt.Errorf("build gomdlint: %w", err)
+	}
+
+	// Check dependencies
+	if err := checkCompareDepends(); err != nil {
+		return err
+	}
+
+	// Clone repos if needed
+	if err := sh(ctx, "bench/scripts/clone-repos.sh"); err != nil {
+		return fmt.Errorf("clone repos: %w", err)
+	}
+
+	// Run benchmarks
+	if err := sh(ctx, "bench/scripts/run-bench.sh"); err != nil {
+		return fmt.Errorf("run benchmarks: %w", err)
+	}
+
+	// Generate charts
+	if err := sh(ctx, "bench/scripts/generate-plots.sh"); err != nil {
+		return fmt.Errorf("generate charts: %w", err)
+	}
+
+	return nil
+}
+
+// CompareFast runs quick comparison on smallest repos only.
+func CompareFast(ctx context.Context) error {
+	fmt.Println("Running quick gomdlint vs markdownlint comparison...")
+
+	// Ensure gomdlint is built
+	if err := Build(ctx); err != nil {
+		return fmt.Errorf("build gomdlint: %w", err)
+	}
+
+	// Check dependencies
+	if err := checkCompareDepends(); err != nil {
+		return err
+	}
+
+	// Clone repos if needed
+	if err := sh(ctx, "bench/scripts/clone-repos.sh"); err != nil {
+		return fmt.Errorf("clone repos: %w", err)
+	}
+
+	// Run benchmarks with reduced runs
+	cmd := exec.CommandContext(ctx, "bench/scripts/run-bench.sh")
+	cmd.Env = append(os.Environ(), "BENCH_RUNS=1")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	fmt.Println("-> BENCH_RUNS=1 bench/scripts/run-bench.sh")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("run benchmarks: %w", err)
+	}
+
+	return nil
+}
+
+// checkCompareDepends verifies required tools are installed.
+func checkCompareDepends() error {
+	tools := []struct {
+		name    string
+		check   string
+		install string
+	}{
+		{"markdownlint", "markdownlint --version", "npm install -g markdownlint-cli"},
+		{"jq", "jq --version", "brew install jq"},
+		{"gnuplot", "gnuplot --version", "brew install gnuplot"},
+	}
+
+	// Check for GNU time
+	hasGtime := exec.Command("which", "gtime").Run() == nil
+	hasGnuTime := false
+	if !hasGtime {
+		out, _ := exec.Command("/usr/bin/time", "--version").CombinedOutput()
+		hasGnuTime = strings.Contains(string(out), "GNU")
+	}
+	if !hasGtime && !hasGnuTime {
+		return fmt.Errorf("GNU time required. Install with: brew install gnu-time")
+	}
+
+	for _, tool := range tools {
+		if err := exec.Command("sh", "-c", tool.check).Run(); err != nil {
+			return fmt.Errorf("%s not found. Install with: %s", tool.name, tool.install)
+		}
+	}
+
+	return nil
 }
 
 // sh executes a shell command with proper output handling.
