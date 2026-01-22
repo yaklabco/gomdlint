@@ -1,0 +1,56 @@
+name: Performance Comparison
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly on Sunday at 3am UTC
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnuplot jq
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+
+      - name: Cache benchmark repos
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/gomdlint-compare
+          key: compare-repos-v1
+
+      - name: Build gomdlint
+        run: go build -o gomdlint ./cmd/gomdlint
+
+      - name: Add gomdlint to PATH
+        run: echo "$PWD" >> $GITHUB_PATH
+
+      - name: Clone benchmark repos
+        run: ./bench/scripts/clone-repos.sh
+
+      - name: Run comparison
+        run: ./bench/scripts/run-bench.sh
+
+      - name: Generate charts
+        run: ./bench/scripts/generate-plots.sh
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: comparison-results-${{ github.run_number }}
+          path: bench/results/
+          retention-days: 90
