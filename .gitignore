@@ -45,3 +45,7 @@ tmp/
 # Git worktrees
 .worktrees/
 
+# Benchmark results (generated)
+bench/results/raw/
+bench/results/plots/
+bench/results/latest.txt
