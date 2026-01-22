@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 
 	"github.com/spf13/cobra"
 
@@ -72,8 +75,65 @@ Examples:
   mdlint lint --format json      # Output as JSON for CI
   mdlint lint --strict           # Treat warnings as errors`
 
+// profileCleanup holds cleanup functions for profiling.
+type profileCleanup struct {
+	funcs []func()
+}
+
+func (p *profileCleanup) add(fn func()) {
+	p.funcs = append(p.funcs, fn)
+}
+
+func (p *profileCleanup) run() {
+	for i := len(p.funcs) - 1; i >= 0; i-- {
+		p.funcs[i]()
+	}
+}
+
+func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
+	cleanup := &profileCleanup{}
+
+	// Start CPU profiling if requested.
+	if flags.cpuprofile != "" {
+		cpuFile, err := os.Create(flags.cpuprofile)
+		if err != nil {
+			return nil, fmt.Errorf("create CPU profile: %w", err)
+		}
+		cleanup.add(func() { _ = cpuFile.Close() })
+		if err := pprof.StartCPUProfile(cpuFile); err != nil {
+			cleanup.run()
+			return nil, fmt.Errorf("start CPU profile: %w", err)
+		}
+		cleanup.add(pprof.StopCPUProfile)
+	}
+
+	// Start execution tracing if requested.
+	if flags.trace != "" {
+		traceFile, err := os.Create(flags.trace)
+		if err != nil {
+			cleanup.run()
+			return nil, fmt.Errorf("create trace file: %w", err)
+		}
+		cleanup.add(func() { _ = traceFile.Close() })
+		if err := trace.Start(traceFile); err != nil {
+			cleanup.run()
+			return nil, fmt.Errorf("start trace: %w", err)
+		}
+		cleanup.add(trace.Stop)
+	}
+
+	return cleanup, nil
+}
+
 func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags) error {
 	logger := logging.Default()
+
+	// Setup profiling.
+	profCleanup, err := setupProfiling(flags)
+	if err != nil {
+		return err
+	}
+	defer profCleanup.run()
 
 	// Map string flags to typed config values.
 	// Only set values that were explicitly provided via CLI flags.
@@ -207,6 +267,19 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	if _, err := rep.Report(ctx, result); err != nil {
 		logger.Error("report failed", "error", err)
 		return fmt.Errorf("report results: %w", err)
+	}
+
+	// Write memory profile if requested.
+	if flags.memprofile != "" {
+		memFile, err := os.Create(flags.memprofile)
+		if err != nil {
+			return fmt.Errorf("create memory profile: %w", err)
+		}
+		defer memFile.Close()
+		runtime.GC() //nolint:revive // Intentional GC before heap profile for accurate stats.
+		if err := pprof.WriteHeapProfile(memFile); err != nil {
+			return fmt.Errorf("write memory profile: %w", err)
+		}
 	}
 
 	// Determine exit code based on result.
