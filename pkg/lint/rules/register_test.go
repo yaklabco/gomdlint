@@ -3,9 +3,9 @@ package rules
 import (
 	"testing"
 
-	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 func TestRegisterAll(t *testing.T) {

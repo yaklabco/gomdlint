@@ -3,8 +3,8 @@ package cli_test
 import (
 	"testing"
 
-	"github.com/yaklabco/gomdlint/internal/cli"
 	"github.com/stretchr/testify/assert"
+	"github.com/yaklabco/gomdlint/internal/cli"
 )
 
 func TestLintCommand_RuleFormatFlag(t *testing.T) {

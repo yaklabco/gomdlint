@@ -3,8 +3,8 @@ package lint
 import (
 	"testing"
 
-	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // mockRule for testing.
