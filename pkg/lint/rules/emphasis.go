@@ -44,7 +44,7 @@ func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	punctuation := ctx.OptionString("punctuation", defaultEmphasisPunctuation)
 
-	paragraphs := lint.Paragraphs(ctx.Root)
+	paragraphs := ctx.Paragraphs()
 	var diags []lint.Diagnostic
 
 	for _, para := range paragraphs {
@@ -132,7 +132,7 @@ func (r *NoEmphasisAsHeadingRule) inferHeadingLevel(ctx *lint.RuleContext, para 
 		return defaultLevel
 	}
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	if len(headings) == 0 {
 		return defaultLevel
 	}
@@ -278,7 +278,7 @@ func (r *EmphasisStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 
 	configStyle := ctx.OptionString("style", "consistent")
 
-	emphases := lint.EmphasisNodes(ctx.Root)
+	emphases := ctx.EmphasisNodes()
 	if len(emphases) == 0 {
 		return nil, nil
 	}
@@ -383,7 +383,7 @@ func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 
 	configStyle := ctx.OptionString("style", "consistent")
 
-	strongs := lint.StrongNodes(ctx.Root)
+	strongs := ctx.StrongNodes()
 	if len(strongs) == 0 {
 		return nil, nil
 	}

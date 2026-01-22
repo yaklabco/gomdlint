@@ -214,7 +214,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	linesAbove := ctx.OptionInt("lines_above", 1)
 	linesBelow := ctx.OptionInt("lines_below", 1)
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
 	for _, heading := range headings {
@@ -396,7 +396,7 @@ func (r *RequiredHeadingsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	matchCase := ctx.OptionBool("match_case", false)
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	actualHeadings := r.buildActualHeadings(headings)
 
 	return r.matchHeadings(ctx, headings, actualHeadings, requiredHeadings, matchCase)

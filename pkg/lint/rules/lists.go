@@ -87,7 +87,7 @@ func (r *UnorderedListStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		effectiveMarker = ""
 	}
 
-	lists := lint.Lists(ctx.Root)
+	lists := ctx.Lists()
 	var diags []lint.Diagnostic
 
 	for _, list := range lists {
@@ -205,7 +205,7 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 
 	allowRenumbering := ctx.OptionBool("allow_renumbering", true)
 
-	lists := lint.Lists(ctx.Root)
+	lists := ctx.Lists()
 	var diags []lint.Diagnostic
 
 	for _, list := range lists {

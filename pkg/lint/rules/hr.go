@@ -38,7 +38,7 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	configStyle := ctx.OptionString("style", styleConsistent)
 
-	hrs := lint.ThematicBreaks(ctx.Root)
+	hrs := ctx.ThematicBreaks()
 	if len(hrs) == 0 {
 		return nil, nil
 	}

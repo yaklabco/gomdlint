@@ -39,7 +39,7 @@ func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	var diags []lint.Diagnostic
 
 	// Track indentation levels within each list.
-	lists := lint.Lists(ctx.Root)
+	lists := ctx.Lists()
 	for _, list := range lists {
 		if ctx.Cancelled() {
 			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
@@ -285,7 +285,7 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 
 	var diags []lint.Diagnostic
 
-	lists := lint.Lists(ctx.Root)
+	lists := ctx.Lists()
 	for _, list := range lists {
 		if ctx.Cancelled() {
 			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())

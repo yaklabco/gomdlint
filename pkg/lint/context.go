@@ -40,6 +40,10 @@ type RuleContext struct {
 
 	// refCtx is the cached reference context, lazily initialized.
 	refCtx *refs.Context
+
+	// nodeCache is the cached node index, lazily initialized.
+	// See NodeCache documentation for usage and caveats.
+	nodeCache *NodeCache
 }
 
 // NewRuleContext creates a RuleContext for the given file and configuration.
@@ -145,4 +149,119 @@ func (rc *RuleContext) RefContext() *refs.Context {
 		rc.refCtx = refs.Collect(rc.Root, rc.File)
 	}
 	return rc.refCtx
+}
+
+// ensureNodeCache builds the node cache if not already built.
+// This walks the AST once and indexes all nodes by type.
+func (rc *RuleContext) ensureNodeCache() {
+	if rc.nodeCache == nil {
+		rc.nodeCache = newNodeCache()
+		rc.nodeCache.build(rc.Root)
+	}
+}
+
+// Headings returns all heading nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+// See NodeCache documentation for details.
+func (rc *RuleContext) Headings() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Headings()
+}
+
+// Lists returns all list nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) Lists() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Lists()
+}
+
+// ListItems returns all list item nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) ListItems() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.ListItems()
+}
+
+// CodeBlocks returns all code block nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) CodeBlocks() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.CodeBlocks()
+}
+
+// CodeSpans returns all code span nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) CodeSpans() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.CodeSpans()
+}
+
+// Links returns all link nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) Links() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Links()
+}
+
+// Images returns all image nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) Images() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Images()
+}
+
+// Paragraphs returns all paragraph nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) Paragraphs() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Paragraphs()
+}
+
+// Blockquotes returns all blockquote nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) Blockquotes() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Blockquotes()
+}
+
+// Tables returns all table nodes in the document (GFM only).
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) Tables() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Tables()
+}
+
+// ThematicBreaks returns all thematic break nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) ThematicBreaks() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.ThematicBreaks()
+}
+
+// HTMLBlocks returns all HTML block nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) HTMLBlocks() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.HTMLBlocks()
+}
+
+// HTMLInlines returns all inline HTML nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) HTMLInlines() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.HTMLInlines()
+}
+
+// EmphasisNodes returns all emphasis nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) EmphasisNodes() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Emphasis()
+}
+
+// StrongNodes returns all strong nodes in the document.
+// The returned slice is cached and shared - do not mutate it.
+func (rc *RuleContext) StrongNodes() []*mdast.Node {
+	rc.ensureNodeCache()
+	return rc.nodeCache.Strong()
 }

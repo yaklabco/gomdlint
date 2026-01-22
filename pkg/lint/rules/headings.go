@@ -35,7 +35,7 @@ func (r *HeadingIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		return nil, nil
 	}
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	if len(headings) == 0 {
 		return nil, nil
 	}
@@ -95,7 +95,7 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	allowNoH1 := ctx.OptionBool("allow_no_h1", true)
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	var h1Headings []*mdast.Node
 
 	for _, heading := range headings {
@@ -194,7 +194,7 @@ func (r *HeadingStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		}
 	}
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
 	for _, heading := range headings {

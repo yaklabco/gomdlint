@@ -46,7 +46,7 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 	}
 
-	codeBlocks := lint.CodeBlocks(ctx.Root)
+	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
 
 	for _, cb := range codeBlocks {
@@ -219,7 +219,7 @@ func (r *CodeBlockStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		effectiveStyle = "" // Will be set from first code block.
 	}
 
-	codeBlocks := lint.CodeBlocks(ctx.Root)
+	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
 
 	for _, cb := range codeBlocks {
@@ -306,7 +306,7 @@ func (r *CodeFenceStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		// Default values already set.
 	}
 
-	codeBlocks := lint.CodeBlocks(ctx.Root)
+	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
 
 	for _, cb := range codeBlocks {
@@ -384,7 +384,7 @@ func (r *CommandsShowOutputRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		return nil, nil
 	}
 
-	codeBlocks := lint.CodeBlocks(ctx.Root)
+	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
 
 	for _, cb := range codeBlocks {

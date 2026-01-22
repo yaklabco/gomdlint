@@ -39,7 +39,7 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 
 	var diags []lint.Diagnostic
 
-	codeBlocks := lint.CodeBlocks(ctx.Root)
+	codeBlocks := ctx.CodeBlocks()
 	for _, cb := range codeBlocks {
 		if ctx.Cancelled() {
 			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())

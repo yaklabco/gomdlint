@@ -60,7 +60,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	var diags []lint.Diagnostic
 
 	// Check HTML blocks.
-	htmlBlocks := lint.HTMLBlocks(ctx.Root)
+	htmlBlocks := ctx.HTMLBlocks()
 	for _, block := range htmlBlocks {
 		if ctx.Cancelled() {
 			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
@@ -73,7 +73,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	}
 
 	// Check inline HTML.
-	htmlInlines := lint.HTMLInlines(ctx.Root)
+	htmlInlines := ctx.HTMLInlines()
 	for _, inline := range htmlInlines {
 		if ctx.Cancelled() {
 			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())

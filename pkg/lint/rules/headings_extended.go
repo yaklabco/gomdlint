@@ -493,7 +493,7 @@ func (r *NoDuplicateHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 
 	siblingsOnly := ctx.OptionBool("siblings_only", false)
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
 	if siblingsOnly {
@@ -636,7 +636,7 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 		return nil, nil // Empty string disables the rule.
 	}
 
-	headings := lint.Headings(ctx.Root)
+	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
 	for _, heading := range headings {

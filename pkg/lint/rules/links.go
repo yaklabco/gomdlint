@@ -122,7 +122,7 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		return nil, nil
 	}
 
-	links := lint.Links(ctx.Root)
+	links := ctx.Links()
 	var diags []lint.Diagnostic
 
 	for _, link := range links {
@@ -188,7 +188,7 @@ func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) 
 		return nil, nil
 	}
 
-	links := lint.Links(ctx.Root)
+	links := ctx.Links()
 	var diags []lint.Diagnostic
 
 	for _, link := range links {
@@ -250,7 +250,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		return nil, nil
 	}
 
-	images := lint.Images(ctx.Root)
+	images := ctx.Images()
 	var diags []lint.Diagnostic
 
 	for _, img := range images {
@@ -320,7 +320,7 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 		effectiveStyle = "" // Will be set from first link.
 	}
 
-	links := lint.Links(ctx.Root)
+	links := ctx.Links()
 	var diags []lint.Diagnostic
 
 	for _, link := range links {
