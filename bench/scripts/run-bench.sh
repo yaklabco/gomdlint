@@ -223,5 +223,9 @@ echo ""
 echo "Results saved to: $RESULT_FILE"
 echo "Profiles saved to: $PROFILE_DIR"
 
+# Generate profile reports
+echo ""
+"$SCRIPT_DIR/generate-profiles.sh" "$PROFILE_DIR"
+
 # Update latest symlink
 echo "$RESULT_FILE" > "$RESULTS_DIR/latest.txt"
