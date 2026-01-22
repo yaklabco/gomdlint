@@ -1,9 +1,11 @@
 package refs
 
 import (
+	"context"
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 func TestNormalizeLabel(t *testing.T) {
@@ -276,5 +278,54 @@ func TestAnchorMap_Count(t *testing.T) {
 
 	if anchorMap.Count() != 3 { // first, second, first-1
 		t.Errorf("Count() = %d, want 3", anchorMap.Count())
+	}
+}
+
+func TestCollect_IgnoresCodeBlockContent(t *testing.T) {
+	// This test verifies that reference definition patterns inside code blocks
+	// are not mistakenly detected as markdown reference definitions.
+	// This is a regression test for a bug where JavaScript computed property syntax
+	// like [SemanticResourceAttributes.SERVICE_NAME]: 'value' was being detected
+	// as a markdown reference definition.
+
+	// Create content with a code block containing reference-like syntax
+	// The pattern [label]: destination looks like a ref def but is inside a code block
+	content := []byte(`# Test
+
+` + "```javascript" + `
+const resource = {
+  [key]: 'value',
+};
+` + "```" + `
+
+[real-ref]: https://example.com
+`)
+
+	// Parse the content to get a proper AST with token positions
+	parser := goldmark.New("gfm")
+	file, err := parser.Parse(context.Background(), "test.md", content)
+	if err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+
+	// Collect references
+	ctx := Collect(file.Root, file)
+
+	// Should find exactly one definition: [real-ref] on line 10
+	// The [key]: 'value' inside the code block should be ignored
+	if len(ctx.AllDefinitions) != 1 {
+		t.Errorf("Expected 1 definition, got %d", len(ctx.AllDefinitions))
+		for _, def := range ctx.AllDefinitions {
+			t.Errorf("  Found definition at line %d: [%s]", def.LineNumber, def.Label)
+		}
+		return
+	}
+
+	def := ctx.AllDefinitions[0]
+	if def.Label != "real-ref" {
+		t.Errorf("Expected label 'real-ref', got %q", def.Label)
+	}
+	if def.LineNumber != 9 {
+		t.Errorf("Expected line 9, got %d", def.LineNumber)
 	}
 }
