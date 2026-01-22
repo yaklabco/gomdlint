@@ -48,4 +48,5 @@ tmp/
 # Benchmark results (generated)
 bench/results/raw/
 bench/results/plots/
+bench/results/profiles/
 bench/results/latest.txt
