@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-01-22
+
+### Changed
+
+- Repository moved to `yaklabco/gomdlint` organization
+- Corrected auto-fix coverage to 67% (37 of 55 rules)
+
 ## [0.1.2] - 2026-01-22
 
 ### Added
@@ -77,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parallel file processing with deterministic ordering
 - Relative path display in output
 
-[Unreleased]: https://github.com/yaklabco/gomdlint/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/yaklabco/gomdlint/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/yaklabco/gomdlint/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/yaklabco/gomdlint/releases/tag/v0.1.0
