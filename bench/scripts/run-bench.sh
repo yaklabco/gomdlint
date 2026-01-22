@@ -31,7 +31,7 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 RESULT_FILE="$RESULTS_DIR/raw/$(date +%Y%m%d-%H%M%S).json"
 
 # Get versions
-GOMDLINT_VERSION=$(gomdlint --version 2>/dev/null | head -1 || echo "unknown")
+GOMDLINT_VERSION=$(gomdlint version 2>/dev/null | head -1 || echo "unknown")
 MARKDOWNLINT_VERSION=$(markdownlint --version 2>/dev/null || echo "unknown")
 
 echo "gomdlint vs markdownlint comparison"
@@ -46,15 +46,37 @@ run_linter() {
     local cmd="$1"
     local repo_path="$2"
     local tmp_time=$(mktemp)
+    local tmp_out=$(mktemp)
+
+    # Build file list first
+    local files
+    files=$(find "$repo_path" -name "*.md" -type f)
+
+    if [ -z "$files" ]; then
+        echo "0 0"
+        rm -f "$tmp_time" "$tmp_out"
+        return
+    fi
 
     # Run with GNU time, capture memory and time
-    $TIME_CMD -f '%e %M' -o "$tmp_time" $cmd "$repo_path"/**/*.md 2>/dev/null || true
+    # shellcheck disable=SC2086
+    $TIME_CMD -f '%e %M' -o "$tmp_time" $cmd $files >"$tmp_out" 2>&1 || true
 
-    read -r time_sec mem_kb < "$tmp_time"
-    rm -f "$tmp_time"
+    local time_sec mem_kb
+    read -r time_sec mem_kb < "$tmp_time" || { time_sec=0; mem_kb=0; }
+    rm -f "$tmp_time" "$tmp_out"
 
-    # Convert to milliseconds
-    local time_ms=$(echo "$time_sec * 1000" | bc | cut -d. -f1)
+    # Handle empty or invalid values
+    if [ -z "$time_sec" ] || [ "$time_sec" = "" ]; then
+        time_sec=0
+    fi
+    if [ -z "$mem_kb" ] || [ "$mem_kb" = "" ]; then
+        mem_kb=0
+    fi
+
+    # Convert to milliseconds (handle decimal)
+    local time_ms
+    time_ms=$(printf "%.0f" "$(echo "$time_sec * 1000" | bc)" 2>/dev/null || echo "0")
     echo "$time_ms $mem_kb"
 }
 
@@ -62,28 +84,40 @@ run_linter() {
 median_run() {
     local cmd="$1"
     local repo_path="$2"
-    local times=()
-    local mems=()
+    local times_file=$(mktemp)
+    local mems_file=$(mktemp)
 
     for ((i=1; i<=RUNS; i++)); do
         result=$(run_linter "$cmd" "$repo_path")
-        times+=($(echo "$result" | cut -d' ' -f1))
-        mems+=($(echo "$result" | cut -d' ' -f2))
+        echo "$result" | cut -d' ' -f1 >> "$times_file"
+        echo "$result" | cut -d' ' -f2 >> "$mems_file"
     done
 
     # Sort and get median
-    IFS=$'\n' sorted_times=($(sort -n <<<"${times[*]}")); unset IFS
-    IFS=$'\n' sorted_mems=($(sort -n <<<"${mems[*]}")); unset IFS
+    local sorted_time sorted_mem
+    sorted_time=$(sort -n "$times_file" | head -n $((RUNS / 2 + 1)) | tail -1)
+    sorted_mem=$(sort -n "$mems_file" | head -n $((RUNS / 2 + 1)) | tail -1)
 
-    local mid=$((RUNS / 2))
-    echo "${sorted_times[$mid]} ${sorted_mems[$mid]}"
+    rm -f "$times_file" "$mems_file"
+
+    # Default to 0 if empty
+    echo "${sorted_time:-0} ${sorted_mem:-0}"
 }
 
 # Count issues for a linter
 count_issues() {
     local cmd="$1"
     local repo_path="$2"
-    $cmd "$repo_path"/**/*.md 2>/dev/null | wc -l | tr -d ' '
+    local files
+    files=$(find "$repo_path" -name "*.md" -type f)
+
+    if [ -z "$files" ]; then
+        echo "0"
+        return
+    fi
+
+    # shellcheck disable=SC2086
+    $cmd $files 2>/dev/null | wc -l | tr -d ' '
 }
 
 # Initialize JSON
