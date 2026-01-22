@@ -3,6 +3,10 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    - mkdir -p .buildcache/completions
+    - sh -c "go run ./cmd/gomdlint completion bash > .buildcache/completions/gomdlint.bash"
+    - sh -c "go run ./cmd/gomdlint completion zsh > .buildcache/completions/gomdlint.zsh"
+    - sh -c "go run ./cmd/gomdlint completion fish > .buildcache/completions/gomdlint.fish"
 
 builds:
   - id: gomdlint
@@ -46,6 +50,9 @@ archives:
     files:
       - LICENSE
       - README.md
+      - src: .buildcache/completions/*
+        dst: completions
+        strip_parent: true
 
 checksum:
   name_template: 'checksums.txt'
@@ -62,5 +69,25 @@ release:
     ## What's Changed
 
     See [CHANGELOG.md](https://github.com/yaklabco/gomdlint/blob/main/CHANGELOG.md) for full details.
+
+brews:
+  - name: gomdlint
+    repository:
+      owner: yaklabco
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: YakLabs
+      email: official@yaklab.org
+    homepage: "https://github.com/yaklabco/gomdlint"
+    description: "Fast Markdown linter with autofix support"
+    license: "Apache-2.0"
+    install: |
+      bin.install "gomdlint"
+      bash_completion.install "completions/gomdlint.bash" => "gomdlint"
+      zsh_completion.install "completions/gomdlint.zsh" => "_gomdlint"
+      fish_completion.install "completions/gomdlint.fish"
+    test: |
+      system "#{bin}/gomdlint", "version"
 
 
