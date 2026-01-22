@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-01-22
+
+### Added
+
+- CPU, memory, and trace profiling via `--cpuprofile`, `--memprofile`, and `--trace` flags
+- Performance benchmark harness comparing gomdlint vs markdownlint
+- Benchmark scripts for automated comparison on real-world repositories
+- Gnuplot chart generation for benchmark visualization
+- Profile report generation from benchmark runs
+- Detailed performance documentation in `bench/PERFORMANCE.md`
+
+### Changed
+
+- **507x average speedup** over markdownlint on real-world repositories
+- NodeCache optimization reduces AST traversal from O(rules × nodes) to O(nodes)
+- Rules now use cached node accessors for O(1) type lookups
+
+### Fixed
+
+- Benchmark script robustness for bash array and glob handling
+- Clone script continues on individual repository failures
+
 ## [0.1.0] - 2026-01-20
 
 ### Added
@@ -55,5 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parallel file processing with deterministic ordering
 - Relative path display in output
 
-[Unreleased]: https://github.com/jamesainslie/gomdlint/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jamesainslie/gomdlint/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/jamesainslie/gomdlint/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/jamesainslie/gomdlint/releases/tag/v0.1.0
