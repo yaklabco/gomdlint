@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1] - 2026-01-22
+
+### Added
+
+- Homebrew tap distribution: `brew install yaklabco/tap/gomdlint`
+- Shell completions for bash, zsh, and fish bundled in releases
+
 ## [0.1.0] - 2026-01-22
 
 Initial release of gomdlint - a fast Markdown linter written in Go.
@@ -28,4 +35,5 @@ Initial release of gomdlint - a fast Markdown linter written in Go.
 - Environment variable overrides (`GOMDLINT_*`)
 - CommonMark and GFM flavor support
 
+[0.1.1]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yaklabco/gomdlint/releases/tag/v0.1.0
