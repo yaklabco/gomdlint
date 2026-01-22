@@ -31,7 +31,7 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 RESULT_FILE="$RESULTS_DIR/raw/$(date +%Y%m%d-%H%M%S).json"
 
 # Get versions
-GOMDLINT_VERSION=$(gomdlint version 2>/dev/null | head -1 || echo "unknown")
+GOMDLINT_VERSION=$(gomdlint version 2>/dev/null | grep -oE 'version=[^ ]+' | cut -d= -f2 || echo "unknown")
 MARKDOWNLINT_VERSION=$(markdownlint --version 2>/dev/null || echo "unknown")
 
 echo "gomdlint vs markdownlint comparison"
@@ -43,52 +43,48 @@ echo ""
 
 # Function to run and time a linter
 run_linter() {
-    local cmd="$1"
+    local linter="$1"
     local repo_path="$2"
     local tmp_time=$(mktemp)
     local tmp_out=$(mktemp)
 
-    # Build file list first
-    local files
-    files=$(find "$repo_path" -name "*.md" -type f)
-
-    if [ -z "$files" ]; then
-        echo "0 0"
-        rm -f "$tmp_time" "$tmp_out"
-        return
+    # Run with GNU time
+    # Note: gomdlint accepts directories, markdownlint needs file list via find
+    if [ "$linter" = "gomdlint" ]; then
+        $TIME_CMD -f '%e %M' -o "$tmp_time" gomdlint lint "$repo_path" >"$tmp_out" 2>&1 || true
+    else
+        # markdownlint: use find to get recursive file list
+        $TIME_CMD -f '%e %M' -o "$tmp_time" bash -c "find \"$repo_path\" -name '*.md' -type f -print0 | xargs -0 markdownlint" >"$tmp_out" 2>&1 || true
     fi
 
-    # Run with GNU time, capture memory and time
-    # shellcheck disable=SC2086
-    $TIME_CMD -f '%e %M' -o "$tmp_time" $cmd $files >"$tmp_out" 2>&1 || true
-
-    local time_sec mem_kb
-    read -r time_sec mem_kb < "$tmp_time" || { time_sec=0; mem_kb=0; }
-    rm -f "$tmp_time" "$tmp_out"
-
-    # Handle empty or invalid values
-    if [ -z "$time_sec" ] || [ "$time_sec" = "" ]; then
+    local time_sec mem_kb time_ms
+    if [ -s "$tmp_time" ]; then
+        # GNU time writes timing on last line (error message on first line if command failed)
+        read -r time_sec mem_kb < <(tail -1 "$tmp_time") || { time_sec=0; mem_kb=0; }
+    else
         time_sec=0
-    fi
-    if [ -z "$mem_kb" ] || [ "$mem_kb" = "" ]; then
         mem_kb=0
     fi
+    rm -f "$tmp_time" "$tmp_out"
 
-    # Convert to milliseconds (handle decimal)
-    local time_ms
-    time_ms=$(printf "%.0f" "$(echo "$time_sec * 1000" | bc)" 2>/dev/null || echo "0")
+    # Handle empty values
+    : "${time_sec:=0}"
+    : "${mem_kb:=0}"
+
+    # Convert to milliseconds (use awk for robustness)
+    time_ms=$(echo "$time_sec" | awk '{printf "%.0f", $1 * 1000}' 2>/dev/null || echo "0")
     echo "$time_ms $mem_kb"
 }
 
 # Function to get median of runs
 median_run() {
-    local cmd="$1"
+    local linter="$1"
     local repo_path="$2"
     local times_file=$(mktemp)
     local mems_file=$(mktemp)
 
     for ((i=1; i<=RUNS; i++)); do
-        result=$(run_linter "$cmd" "$repo_path")
+        result=$(run_linter "$linter" "$repo_path")
         echo "$result" | cut -d' ' -f1 >> "$times_file"
         echo "$result" | cut -d' ' -f2 >> "$mems_file"
     done
@@ -106,18 +102,15 @@ median_run() {
 
 # Count issues for a linter
 count_issues() {
-    local cmd="$1"
+    local linter="$1"
     local repo_path="$2"
-    local files
-    files=$(find "$repo_path" -name "*.md" -type f)
 
-    if [ -z "$files" ]; then
-        echo "0"
-        return
+    # Use subshell to isolate pipefail (linters exit non-zero when they find issues)
+    if [ "$linter" = "gomdlint" ]; then
+        (gomdlint lint "$repo_path" 2>/dev/null || true) | wc -l | tr -d ' '
+    else
+        (find "$repo_path" -name '*.md' -type f -print0 | xargs -0 markdownlint 2>/dev/null || true) | wc -l | tr -d ' '
     fi
-
-    # shellcheck disable=SC2086
-    $cmd $files 2>/dev/null | wc -l | tr -d ' '
 }
 
 # Initialize JSON
@@ -148,26 +141,32 @@ for repo_path in "$REPOS_DIR"/*/; do
     fi
 
     # Run benchmarks
-    gomdlint_result=$(median_run "gomdlint lint" "$repo_path")
+    gomdlint_result=$(median_run "gomdlint" "$repo_path")
     gomdlint_time=$(echo "$gomdlint_result" | cut -d' ' -f1)
     gomdlint_mem=$(echo "$gomdlint_result" | cut -d' ' -f2)
-    gomdlint_issues=$(count_issues "gomdlint lint" "$repo_path")
+    gomdlint_issues=$(count_issues "gomdlint" "$repo_path")
 
     markdownlint_result=$(median_run "markdownlint" "$repo_path")
     markdownlint_time=$(echo "$markdownlint_result" | cut -d' ' -f1)
     markdownlint_mem=$(echo "$markdownlint_result" | cut -d' ' -f2)
     markdownlint_issues=$(count_issues "markdownlint" "$repo_path")
 
-    # Calculate speedup
-    if [ "$gomdlint_time" -gt 0 ]; then
-        speedup=$(echo "scale=1; $markdownlint_time / $gomdlint_time" | bc)
+    # Ensure numeric values (default to 0)
+    gomdlint_time=${gomdlint_time:-0}
+    gomdlint_mem=${gomdlint_mem:-0}
+    markdownlint_time=${markdownlint_time:-0}
+    markdownlint_mem=${markdownlint_mem:-0}
+
+    # Calculate speedup (use awk for robustness)
+    if [ "${gomdlint_time:-0}" -gt 0 ] 2>/dev/null; then
+        speedup=$(awk "BEGIN {printf \"%.1f\", $markdownlint_time / $gomdlint_time}")
     else
         speedup="N/A"
     fi
 
     # Format times for display
-    gomdlint_display=$(echo "scale=2; $gomdlint_time / 1000" | bc)s
-    markdownlint_display=$(echo "scale=2; $markdownlint_time / 1000" | bc)s
+    gomdlint_display=$(awk "BEGIN {printf \"%.2fs\", ${gomdlint_time:-0} / 1000}")
+    markdownlint_display=$(awk "BEGIN {printf \"%.2fs\", ${markdownlint_time:-0} / 1000}")
 
     printf "%-30s %8d %12s %12s %7sx\n" "$repo_name" "$file_count" "$gomdlint_display" "$markdownlint_display" "$speedup"
 
@@ -178,16 +177,20 @@ for repo_path in "$REPOS_DIR"/*/; do
         echo "," >> "$RESULT_FILE"
     fi
 
+    # Ensure issue counts are numeric
+    gomdlint_issues=${gomdlint_issues:-0}
+    markdownlint_issues=${markdownlint_issues:-0}
+
     cat >> "$RESULT_FILE" <<EOF
     "$repo_name": {
       "file_count": $file_count,
-      "gomdlint": { "time_ms": $gomdlint_time, "memory_kb": $gomdlint_mem, "issues": $gomdlint_issues },
-      "markdownlint": { "time_ms": $markdownlint_time, "memory_kb": $markdownlint_mem, "issues": $markdownlint_issues }
+      "gomdlint": { "time_ms": ${gomdlint_time:-0}, "memory_kb": ${gomdlint_mem:-0}, "issues": ${gomdlint_issues:-0} },
+      "markdownlint": { "time_ms": ${markdownlint_time:-0}, "memory_kb": ${markdownlint_mem:-0}, "issues": ${markdownlint_issues:-0} }
     }
 EOF
 
     if [ "$speedup" != "N/A" ]; then
-        total_speedup=$(echo "$total_speedup + $speedup" | bc)
+        total_speedup=$(awk "BEGIN {print $total_speedup + $speedup}")
         repo_count=$((repo_count + 1))
     fi
 done
@@ -200,7 +203,7 @@ echo "}" >> "$RESULT_FILE"
 # Print summary
 echo ""
 if [ "$repo_count" -gt 0 ]; then
-    avg_speedup=$(echo "scale=1; $total_speedup / $repo_count" | bc)
+    avg_speedup=$(awk "BEGIN {printf \"%.1f\", $total_speedup / $repo_count}")
     echo "Average speedup: ${avg_speedup}x"
 fi
 
