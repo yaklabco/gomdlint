@@ -3,8 +3,8 @@ package lint_test
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 const (

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/fix"
-	"github.com/jamesainslie/gomdlint/pkg/fsutil"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/fsutil"
 )
 
 // DefaultMaxFixPasses is the maximum number of fix passes to prevent infinite loops.

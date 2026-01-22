@@ -3,10 +3,10 @@ package rules
 import (
 	"fmt"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/fix"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // TrailingWhitespaceRule checks for trailing whitespace on lines.

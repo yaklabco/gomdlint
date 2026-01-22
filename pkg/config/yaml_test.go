@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 func TestConfigClone(t *testing.T) {

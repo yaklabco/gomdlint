@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // Severity string constants.

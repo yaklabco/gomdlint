@@ -2,9 +2,9 @@
 package lint
 
 import (
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/fix"
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // Diagnostic represents a single lint issue found in a file.

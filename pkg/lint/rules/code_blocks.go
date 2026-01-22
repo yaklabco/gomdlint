@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/fix"
-	"github.com/jamesainslie/gomdlint/pkg/langdetect"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/langdetect"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // CodeBlockLanguageRule checks that fenced code blocks have a language specified.

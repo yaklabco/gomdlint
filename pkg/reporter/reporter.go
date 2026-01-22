@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jamesainslie/gomdlint/pkg/analysis"
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/pkg/analysis"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // Compile-time interface check for reporterFacade.

@@ -1,6 +1,6 @@
 package cli
 
-import "github.com/jamesainslie/gomdlint/pkg/runner"
+import "github.com/yaklabco/gomdlint/pkg/runner"
 
 // Exit codes for gomdlint.
 const (

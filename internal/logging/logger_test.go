@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/jamesainslie/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/logging"
 )
 
 func TestNew(t *testing.T) {

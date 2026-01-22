@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // ReportVersion is the current report format version.

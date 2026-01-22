@@ -29,7 +29,7 @@ See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for detailed benchmark methodol
 ## Installation
 
 ```bash
-go install github.com/jamesainslie/gomdlint/cmd/gomdlint@latest
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
 ```
 
 ## Quick Start

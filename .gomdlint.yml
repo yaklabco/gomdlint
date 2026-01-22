@@ -1,5 +1,5 @@
 # gomdlint configuration
-# See: https://github.com/jamesainslie/gomdlint
+# See: https://github.com/yaklabco/gomdlint
 
 # Markdown flavor: commonmark or gfm
 flavor: gfm

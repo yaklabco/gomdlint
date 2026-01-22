@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/jamesainslie/gomdlint/pkg/lint"
+import "github.com/yaklabco/gomdlint/pkg/lint"
 
 // RegisterAll registers all built-in rules with the given registry.
 func RegisterAll(registry *lint.Registry) {

@@ -13,8 +13,8 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // configFilePermissions is the file mode for configuration files (world-readable).
@@ -324,7 +324,7 @@ func writeConfig(cfg *config.Config, path string) error {
 
 	// Add header comment
 	header := `# gomdlint configuration
-# See: https://github.com/jamesainslie/gomdlint
+# See: https://github.com/yaklabco/gomdlint
 
 `
 	fullContent := header + string(content)

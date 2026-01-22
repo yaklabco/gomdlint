@@ -61,7 +61,7 @@ func generateMinimalTemplate(opts TemplateOptions) ([]byte, error) {
 	var buf bytes.Buffer
 
 	buf.WriteString(`# gomdlint configuration
-# See: https://github.com/jamesainslie/gomdlint
+# See: https://github.com/yaklabco/gomdlint
 
 # Markdown flavor: commonmark or gfm
 flavor: commonmark
@@ -104,7 +104,7 @@ func generateFullTemplate(opts TemplateOptions) ([]byte, error) {
 	var buf bytes.Buffer
 
 	buf.WriteString(`# gomdlint configuration - Full Template
-# See: https://github.com/jamesainslie/gomdlint
+# See: https://github.com/yaklabco/gomdlint
 #
 # This template includes all available rules with their default settings.
 # Uncomment and modify settings as needed.
@@ -345,5 +345,5 @@ func templateToJSON(yamlContent []byte) ([]byte, error) {
 // DefaultTemplateHeader returns the default header for generated configs.
 func DefaultTemplateHeader() string {
 	return `# gomdlint configuration
-# See: https://github.com/jamesainslie/gomdlint`
+# See: https://github.com/yaklabco/gomdlint`
 }

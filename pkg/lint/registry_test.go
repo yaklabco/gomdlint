@@ -3,7 +3,7 @@ package lint
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/stretchr/testify/assert"
 )
 

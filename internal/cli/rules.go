@@ -3,9 +3,9 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/logging"
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 type rulesFlags struct {

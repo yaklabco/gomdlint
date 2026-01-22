@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 func TestDiscover_SingleFile(t *testing.T) {

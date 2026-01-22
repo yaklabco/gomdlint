@@ -5,11 +5,11 @@ import (
 	"errors"
 	"os"
 
-	"github.com/jamesainslie/gomdlint/internal/cli"
-	"github.com/jamesainslie/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/internal/logging"
 
 	// Import rules package to register built-in rules via init().
-	_ "github.com/jamesainslie/gomdlint/pkg/lint/rules"
+	_ "github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // Build-time variables set by GoReleaser via ldflags.

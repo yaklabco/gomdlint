@@ -3,7 +3,7 @@ package goldmark
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 func TestTokenize_Empty(t *testing.T) {

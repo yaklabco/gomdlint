@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/jamesainslie/gomdlint/pkg/config"
+import "github.com/yaklabco/gomdlint/pkg/config"
 
 // Pack describes a named group of rule defaults for a particular use case.
 // Packs are configuration fragments that can be used as starting points

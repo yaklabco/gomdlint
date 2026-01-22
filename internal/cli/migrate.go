@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/configloader"
-	"github.com/jamesainslie/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/configloader"
+	"github.com/yaklabco/gomdlint/internal/logging"
 )
 
 // migrateFlags holds the flags for the migrate command.

@@ -1,6 +1,6 @@
 package configloader
 
-import "github.com/jamesainslie/gomdlint/pkg/config"
+import "github.com/yaklabco/gomdlint/pkg/config"
 
 // merge combines two configurations, with override taking precedence over base.
 // The merge follows these rules:

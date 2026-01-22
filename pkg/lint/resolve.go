@@ -1,6 +1,6 @@
 package lint
 
-import "github.com/jamesainslie/gomdlint/pkg/config"
+import "github.com/yaklabco/gomdlint/pkg/config"
 
 // ResolvedRule pairs a Rule with its resolved configuration.
 type ResolvedRule struct {

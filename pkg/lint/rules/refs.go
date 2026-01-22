@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	"github.com/jamesainslie/gomdlint/pkg/lint/refs"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 )
 
 // LinkFragmentsRule validates that link fragments reference valid anchors (MD051).

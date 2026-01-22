@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/jamesainslie/gomdlint/internal/ui/pretty"
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 func TestFormatDiagnostic_Basic(t *testing.T) {

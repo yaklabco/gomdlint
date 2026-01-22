@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/logging"
 )
 
 // BuildInfo holds build-time version information.

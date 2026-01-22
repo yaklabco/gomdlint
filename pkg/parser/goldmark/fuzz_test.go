@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // FuzzTokenize fuzzes the tokenizer with random input.

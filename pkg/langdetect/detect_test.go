@@ -3,7 +3,7 @@ package langdetect_test
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/langdetect"
+	"github.com/yaklabco/gomdlint/pkg/langdetect"
 )
 
 func TestDetect(t *testing.T) {

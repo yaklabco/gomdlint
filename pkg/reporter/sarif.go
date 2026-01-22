@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // SARIF version used by this reporter.
@@ -161,7 +161,7 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 				Driver: SARIFDriver{
 					Name:           "gomdlint",
 					Version:        "0.1.0",
-					InformationURI: "https://github.com/jamesainslie/gomdlint",
+					InformationURI: "https://github.com/yaklabco/gomdlint",
 					Rules:          make([]SARIFRule, 0),
 				},
 			},

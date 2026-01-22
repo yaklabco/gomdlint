@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/internal/cli"
 )
 
 func TestNewRootCommand(t *testing.T) {

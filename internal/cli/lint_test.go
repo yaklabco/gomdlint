@@ -3,7 +3,7 @@ package cli_test
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/internal/cli"
 	"github.com/stretchr/testify/assert"
 )
 

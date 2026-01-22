@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 func TestRuleFormat_Values(t *testing.T) {

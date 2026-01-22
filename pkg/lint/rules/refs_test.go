@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	"github.com/jamesainslie/gomdlint/pkg/parser/goldmark"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // testHelper parses markdown and runs a rule.

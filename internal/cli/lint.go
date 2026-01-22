@@ -11,14 +11,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/configloader"
-	"github.com/jamesainslie/gomdlint/internal/logging"
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	_ "github.com/jamesainslie/gomdlint/pkg/lint/rules" // Register built-in rules
-	goldmarkparser "github.com/jamesainslie/gomdlint/pkg/parser/goldmark"
-	"github.com/jamesainslie/gomdlint/pkg/reporter"
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/internal/configloader"
+	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // Register built-in rules
+	goldmarkparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
+	"github.com/yaklabco/gomdlint/pkg/reporter"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // ErrLintIssuesFound is returned when lint issues are found.

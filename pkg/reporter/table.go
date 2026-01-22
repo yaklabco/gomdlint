@@ -7,8 +7,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/jamesainslie/gomdlint/internal/ui/pretty"
-	"github.com/jamesainslie/gomdlint/pkg/runner"
+	"github.com/yaklabco/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // defaultTermWidth is used when terminal width cannot be determined.

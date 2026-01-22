@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesainslie/gomdlint/pkg/fsutil"
+	"github.com/yaklabco/gomdlint/pkg/fsutil"
 )
 
 func TestReadFile(t *testing.T) {

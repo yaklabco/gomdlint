@@ -3,7 +3,7 @@ package fix_test
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 )
 
 func TestApplyEdits(t *testing.T) {

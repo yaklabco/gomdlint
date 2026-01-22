@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // AnchorSource indicates the origin of an anchor.

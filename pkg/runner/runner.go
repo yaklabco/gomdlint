@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	"github.com/jamesainslie/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // Runner orchestrates multi-file linting using a lint.Pipeline.

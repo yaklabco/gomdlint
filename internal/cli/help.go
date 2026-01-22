@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 )
 
 // HelpStyles contains Lipgloss styles for command help formatting.

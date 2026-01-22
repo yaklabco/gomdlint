@@ -3,7 +3,7 @@ package goldmark
 import (
 	"sort"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark/ast"
 )
 

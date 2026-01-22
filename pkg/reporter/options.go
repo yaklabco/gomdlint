@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // Options configures reporter behavior.

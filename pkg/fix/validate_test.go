@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 )
 
 func TestValidateEdits(t *testing.T) {

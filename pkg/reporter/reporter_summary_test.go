@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jamesainslie/gomdlint/pkg/reporter"
+	"github.com/yaklabco/gomdlint/pkg/reporter"
 )
 
 func TestNew_SummaryFormat(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jamesainslie/gomdlint/pkg/analysis"
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/analysis"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 func TestSummaryRenderer_EmptyReport(t *testing.T) {

@@ -1,6 +1,6 @@
 package analysis
 
-import "github.com/jamesainslie/gomdlint/pkg/config"
+import "github.com/yaklabco/gomdlint/pkg/config"
 
 // SortField specifies how to sort analysis results.
 type SortField string

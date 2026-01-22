@@ -1,6 +1,6 @@
 package lint
 
-import "github.com/jamesainslie/gomdlint/pkg/config"
+import "github.com/yaklabco/gomdlint/pkg/config"
 
 // BaseRule provides a default implementation of the Rule interface.
 // Embed this in rule implementations and override methods as needed.

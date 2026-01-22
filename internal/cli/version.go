@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/logging"
 )
 
 func newVersionCommand(info BuildInfo) *cobra.Command {

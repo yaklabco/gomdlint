@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jamesainslie/gomdlint/internal/ui/pretty"
-	"github.com/jamesainslie/gomdlint/pkg/analysis"
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/pkg/analysis"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // Table layout constants for summary output.

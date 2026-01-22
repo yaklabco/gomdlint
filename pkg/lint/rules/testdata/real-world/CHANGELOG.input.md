@@ -83,28 +83,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-* add cigate target to stavefile for CI checks ([610aab2](https://github.com/jamesainslie/gomdlint/commit/610aab2080e157c065166263ea82adb76c1043f1))
-* **cli:** implement CLI skeleton with commands ([4162a74](https://github.com/jamesainslie/gomdlint/commit/4162a74d8285c3155436d963809e748935dfdd6e))
-* **mdast:** implement core Markdown AST types ([46aec5e](https://github.com/jamesainslie/gomdlint/commit/46aec5eeb156276c7b4878c58583e64369828cec))
+* add cigate target to stavefile for CI checks ([610aab2](https://github.com/yaklabco/gomdlint/commit/610aab2080e157c065166263ea82adb76c1043f1))
+* **cli:** implement CLI skeleton with commands ([4162a74](https://github.com/yaklabco/gomdlint/commit/4162a74d8285c3155436d963809e748935dfdd6e))
+* **mdast:** implement core Markdown AST types ([46aec5e](https://github.com/yaklabco/gomdlint/commit/46aec5eeb156276c7b4878c58583e64369828cec))
 
 ### Bug Fixes
 
-* correct gitignore to only ignore binary in root directory ([e2ae378](https://github.com/jamesainslie/gomdlint/commit/e2ae378a91077dccad8f492cfdd0a61ee7734665))
-* handle missing test files in test workflow ([1933689](https://github.com/jamesainslie/gomdlint/commit/193368967e5536d2f69ace5cad8d3695c16fe2a5))
-* resolve all golangci-lint issues ([7f4303d](https://github.com/jamesainslie/gomdlint/commit/7f4303d0c7d750409cb489059b90e212b1f3e53a))
-* resolve forbidigo linter errors in main.go ([1ffba24](https://github.com/jamesainslie/gomdlint/commit/1ffba24bb54e9989bb98353732174cd5acc0c0a6))
-* set initial version to 0.1.0 in release-please config ([c183b57](https://github.com/jamesainslie/gomdlint/commit/c183b57782f5492a159470880300f6f50592a2de))
+* correct gitignore to only ignore binary in root directory ([e2ae378](https://github.com/yaklabco/gomdlint/commit/e2ae378a91077dccad8f492cfdd0a61ee7734665))
+* handle missing test files in test workflow ([1933689](https://github.com/yaklabco/gomdlint/commit/193368967e5536d2f69ace5cad8d3695c16fe2a5))
+* resolve all golangci-lint issues ([7f4303d](https://github.com/yaklabco/gomdlint/commit/7f4303d0c7d750409cb489059b90e212b1f3e53a))
+* resolve forbidigo linter errors in main.go ([1ffba24](https://github.com/yaklabco/gomdlint/commit/1ffba24bb54e9989bb98353732174cd5acc0c0a6))
+* set initial version to 0.1.0 in release-please config ([c183b57](https://github.com/yaklabco/gomdlint/commit/c183b57782f5492a159470880300f6f50592a2de))
 
 ### Tests
 
-* add tests for CLI, logging, and mdast packages ([7512384](https://github.com/jamesainslie/gomdlint/commit/751238471668cdb84090935772d8a7899966551a))
+* add tests for CLI, logging, and mdast packages ([7512384](https://github.com/yaklabco/gomdlint/commit/751238471668cdb84090935772d8a7899966551a))
 
 ### Build System
 
-* add MIT license ([0dfac3d](https://github.com/jamesainslie/gomdlint/commit/0dfac3da2408d8f8f1f96a2f8e0c0ded57db1f2d))
+* add MIT license ([0dfac3d](https://github.com/yaklabco/gomdlint/commit/0dfac3da2408d8f8f1f96a2f8e0c0ded57db1f2d))
 
 ### Continuous Integration
 
-* add goreleaser and release-please configuration ([2bd14b4](https://github.com/jamesainslie/gomdlint/commit/2bd14b46b05048d331afe85836e3393fd513a9f9))
-* add lint and test workflows ([92f074e](https://github.com/jamesainslie/gomdlint/commit/92f074ec531ee69678852bd256226cae22b5f178))
-* update Go version to 1.25 ([351a147](https://github.com/jamesainslie/gomdlint/commit/351a1470adfc9a0b16cb6eed37a62eaf5ff5d958))
+* add goreleaser and release-please configuration ([2bd14b4](https://github.com/yaklabco/gomdlint/commit/2bd14b46b05048d331afe85836e3393fd513a9f9))
+* add lint and test workflows ([92f074e](https://github.com/yaklabco/gomdlint/commit/92f074ec531ee69678852bd256226cae22b5f178))
+* update Go version to 1.25 ([351a147](https://github.com/yaklabco/gomdlint/commit/351a1470adfc9a0b16cb6eed37a62eaf5ff5d958))

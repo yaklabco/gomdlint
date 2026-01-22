@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
-	_ "github.com/jamesainslie/gomdlint/pkg/lint/rules" // Register rules
+	"github.com/yaklabco/gomdlint/pkg/config"
+	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // Register rules
 )
 
 func TestLoad_Defaults(t *testing.T) {

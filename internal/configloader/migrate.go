@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // MigrationResult contains the result of converting a markdownlint config.
@@ -252,7 +252,7 @@ func mapOptionName(name string) string {
 func GenerateMigrationHeader(sourcePath string) string {
 	return fmt.Sprintf(`# gomdlint configuration
 # Migrated from: %s
-# See: https://github.com/jamesainslie/gomdlint
+# See: https://github.com/yaklabco/gomdlint
 `, filepath.Base(sourcePath))
 }
 

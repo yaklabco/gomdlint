@@ -3,7 +3,7 @@ package refs
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 func TestNormalizeLabel(t *testing.T) {

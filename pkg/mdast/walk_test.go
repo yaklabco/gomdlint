@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 func buildTestTree() *mdast.Node {

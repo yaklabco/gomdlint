@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jamesainslie/gomdlint/internal/logging"
-	"github.com/jamesainslie/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // configFilePermissions is the file mode for configuration files (world-readable).

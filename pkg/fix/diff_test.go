@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 )
 
 func TestGenerateDiff(t *testing.T) {

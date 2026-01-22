@@ -1,7 +1,7 @@
 // Package runner provides multi-file linting orchestration.
 package runner
 
-import "github.com/jamesainslie/gomdlint/pkg/config"
+import "github.com/yaklabco/gomdlint/pkg/config"
 
 // Options controls multi-file linting behavior.
 type Options struct {

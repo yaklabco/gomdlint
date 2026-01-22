@@ -1,4 +1,4 @@
-module github.com/jamesainslie/gomdlint
+module github.com/yaklabco/gomdlint
 
 go 1.25.4
 

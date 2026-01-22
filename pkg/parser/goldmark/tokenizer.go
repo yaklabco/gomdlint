@@ -1,7 +1,7 @@
 package goldmark
 
 import (
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // tokenizer performs a single-pass tokenization of Markdown content.

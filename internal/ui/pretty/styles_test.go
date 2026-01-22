@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jamesainslie/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 )
 
 func TestNewStyles_ColorEnabled(t *testing.T) {

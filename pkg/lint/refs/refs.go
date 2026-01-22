@@ -6,7 +6,7 @@ package refs
 import (
 	"strings"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // ReferenceStyle indicates the syntax style of a link or image reference.

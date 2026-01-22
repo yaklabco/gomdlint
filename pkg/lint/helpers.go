@@ -3,7 +3,7 @@ package lint
 import (
 	"bytes"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // Node query helpers.

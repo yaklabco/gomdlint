@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // Collect walks the AST and source to build a reference Context.

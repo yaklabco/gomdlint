@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesainslie/gomdlint/pkg/lint"
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 func TestParser_New(t *testing.T) {

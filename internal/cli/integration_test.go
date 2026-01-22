@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jamesainslie/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/internal/cli"
 )
 
 // testMarkdownWithTrailingSpaces is a test markdown file with trailing spaces on line 1.

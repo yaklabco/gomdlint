@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/fsutil"
+	"github.com/yaklabco/gomdlint/pkg/fsutil"
 )
 
 func FuzzWriteAtomic(f *testing.F) {

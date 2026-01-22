@@ -1,6 +1,6 @@
 package lint
 
-import "github.com/jamesainslie/gomdlint/pkg/mdast"
+import "github.com/yaklabco/gomdlint/pkg/mdast"
 
 // NodeCache provides pre-computed collections of AST nodes by type.
 //

@@ -77,6 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parallel file processing with deterministic ordering
 - Relative path display in output
 
-[Unreleased]: https://github.com/jamesainslie/gomdlint/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/jamesainslie/gomdlint/compare/v0.1.0...v0.1.2
-[0.1.0]: https://github.com/jamesainslie/gomdlint/releases/tag/v0.1.0
+[Unreleased]: https://github.com/yaklabco/gomdlint/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.2
+[0.1.0]: https://github.com/yaklabco/gomdlint/releases/tag/v0.1.0

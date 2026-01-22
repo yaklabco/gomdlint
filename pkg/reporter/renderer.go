@@ -3,7 +3,7 @@ package reporter
 import (
 	"context"
 
-	"github.com/jamesainslie/gomdlint/pkg/analysis"
+	"github.com/yaklabco/gomdlint/pkg/analysis"
 )
 
 // Renderer formats an analysis.Report for output.

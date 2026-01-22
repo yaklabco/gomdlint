@@ -3,7 +3,7 @@ package lint
 import (
 	"context"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // Parser parses Markdown content into a FileSnapshot.

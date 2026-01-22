@@ -3,7 +3,7 @@ package mdast_test
 import (
 	"testing"
 
-	"github.com/jamesainslie/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 func TestNewNode(t *testing.T) {

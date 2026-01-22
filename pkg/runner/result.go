@@ -1,6 +1,6 @@
 package runner
 
-import "github.com/jamesainslie/gomdlint/pkg/lint"
+import "github.com/yaklabco/gomdlint/pkg/lint"
 
 // FileOutcome wraps PipelineResult with resolved path metadata.
 type FileOutcome struct {
