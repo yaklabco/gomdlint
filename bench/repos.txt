@@ -1,0 +1,14 @@
+# Real-world markdown-heavy repositories
+# Format: org/repo
+
+# Large documentation sites
+kubernetes/website
+microsoft/vscode-docs
+golang/website
+
+# Popular projects with docs
+facebook/react
+rust-lang/book
+
+# Small reference (markdownlint itself)
+DavidAnson/markdownlint
