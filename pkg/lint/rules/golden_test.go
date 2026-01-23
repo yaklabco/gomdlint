@@ -342,12 +342,17 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 			{"MD999", true},
 			{"MDL001", true},
 			{"MDL003", true},
+			{"MM001", true}, // mermaid rules
+			{"MM999", true}, // mermaid rules
 			{"real-world", false},
 			{"test", false},
 			{"", false},
 			{"MD", false},
+			{"MM", false},
 			{"MDabc", false},
+			{"MMabc", false},
 			{"md001", false}, // lowercase not valid
+			{"mm001", false}, // lowercase not valid
 		}
 
 		for _, tt := range tests {

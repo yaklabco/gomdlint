@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MM004",
+    "name": "",
+    "line": 6,
+    "column": 1,
+    "message": "Invalid flowchart direction: must be one of TB, TD, BT, RL, or LR",
+    "severity": "error",
+    "fixable": false
+  }
+]

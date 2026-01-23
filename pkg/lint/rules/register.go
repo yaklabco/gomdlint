@@ -1,6 +1,9 @@
 package rules
 
-import "github.com/yaklabco/gomdlint/pkg/lint"
+import (
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules/mermaid"
+)
 
 // RegisterAll registers all built-in rules with the given registry.
 func RegisterAll(registry *lint.Registry) {
@@ -84,6 +87,9 @@ func RegisterAll(registry *lint.Registry) {
 	registry.Register(NewLinkImageRefDefsRule())    // MD053
 	registry.Register(NewLinkImageStyleRule())      // MD054
 	registry.Register(NewDescriptiveLinkTextRule()) // MD059
+
+	// Mermaid diagram rules
+	mermaid.RegisterMermaidRules(registry)
 }
 
 // RegisterLegacyAliases registers legacy markdownlint alias names that differ

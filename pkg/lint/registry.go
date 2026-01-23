@@ -43,7 +43,7 @@ func (r *Registry) RegisterAlias(alias, ruleID string) {
 // Get retrieves a rule by ID or name.
 // It tries ID first, then falls back to name lookup.
 //
-//nolint:ireturn // Registry pattern: returning interface is intentional for polymorphic rule lookup.
+
 func (r *Registry) Get(key string) (Rule, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -61,7 +61,7 @@ func (r *Registry) Get(key string) (Rule, bool) {
 
 // GetByID retrieves a rule by its ID only.
 //
-//nolint:ireturn // Registry pattern.
+
 func (r *Registry) GetByID(id string) (Rule, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -71,7 +71,7 @@ func (r *Registry) GetByID(id string) (Rule, bool) {
 
 // GetByName retrieves a rule by its name only.
 //
-//nolint:ireturn // Registry pattern.
+
 func (r *Registry) GetByName(name string) (Rule, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -83,7 +83,7 @@ func (r *Registry) GetByName(name string) (Rule, bool) {
 // The key can be a rule ID, name, or legacy alias.
 // Returns (id, rule, found).
 //
-//nolint:ireturn // Registry pattern.
+
 func (r *Registry) Resolve(key string) (string, Rule, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

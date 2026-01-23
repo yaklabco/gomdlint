@@ -1,0 +1,1 @@
+duplicate.input.md:8:1: MM003 Duplicate identifier: duplicate participant ID 'A', first defined at line 2

@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/log v0.4.2
 	github.com/go-enry/go-enry/v2 v2.9.3
 	github.com/mattn/go-isatty v0.0.20
+	github.com/sammcj/go-mermaid v0.0.2
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.13
