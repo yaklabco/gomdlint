@@ -410,8 +410,6 @@ func showDiff(t *testing.T, expected, actual []byte) {
 }
 
 // getRuleByID gets a rule by its ID from the default registry.
-//
-//nolint:ireturn // Test helper returns interface for polymorphic rule testing.
 func getRuleByID(t *testing.T, ruleID string) lint.Rule {
 	t.Helper()
 
