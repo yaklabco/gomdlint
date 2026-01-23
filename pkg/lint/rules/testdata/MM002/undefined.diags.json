@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MM002",
+    "name": "",
+    "line": 11,
+    "column": 1,
+    "message": "Undefined reference: checkout references undefined branch \"undefined-branch\"",
+    "severity": "error",
+    "fixable": false
+  }
+]
