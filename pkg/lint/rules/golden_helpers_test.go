@@ -118,7 +118,7 @@ func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 	return cases
 }
 
-// isRuleID checks if a string looks like a rule ID (MD001, MD031, etc.).
+// isRuleID checks if a string looks like a rule ID (MD001, MD031, MM001, etc.).
 func isRuleID(ruleStr string) bool {
 	if len(ruleStr) < 3 {
 		return false
@@ -126,6 +126,16 @@ func isRuleID(ruleStr string) bool {
 	// Check for MD### or MDL### pattern
 	if strings.HasPrefix(ruleStr, "MD") {
 		rest := strings.TrimPrefix(ruleStr[2:], "L")
+		for _, char := range rest {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+		return len(rest) > 0
+	}
+	// Check for MM### pattern (mermaid rules)
+	if strings.HasPrefix(ruleStr, "MM") {
+		rest := ruleStr[2:]
 		for _, char := range rest {
 			if char < '0' || char > '9' {
 				return false

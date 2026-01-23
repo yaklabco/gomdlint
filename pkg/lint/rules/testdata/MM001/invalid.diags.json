@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MM001",
+    "name": "",
+    "line": 13,
+    "column": 1,
+    "message": "Invalid mermaid syntax: unknown or unsupported diagram type \"unknown\": expected one of: flowchart, graph, sequence, class, state, stateDiagram-v2, er, gantt, pie, journey, gitGraph, mindmap, timeline, sankey, quadrantChart, xyChart, c4Context, c4Container, c4Component, c4Dynamic, c4Deployment",
+    "severity": "error",
+    "fixable": false
+  }
+]
