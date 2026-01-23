@@ -8,4 +8,5 @@ func RegisterMermaidRules(registry *lint.Registry) {
 	registry.Register(NewUndefinedReferenceRule()) // MM002
 	registry.Register(NewDuplicateIDRule())        // MM003
 	registry.Register(NewInvalidDirectionRule())   // MM004
+	registry.Register(NewTypeCheckRule())          // MM005
 }
