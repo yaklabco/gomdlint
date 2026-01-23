@@ -47,7 +47,7 @@ func TestSyntaxRule_ValidDiagram(t *testing.T) {
 func TestSyntaxRule_InvalidDiagram(t *testing.T) {
 	t.Parallel()
 
-	md := "# Test\n\n```mermaid\nthis is not valid mermaid\n```\n" //nolint:goconst // test data
+	md := "# Test\n\n```mermaid\nthis is not valid mermaid\n```\n" // unique test input
 
 	parser := goldmark.New(goldmark.FlavorGFM)
 	file, err := parser.Parse(context.Background(), "test.md", []byte(md))

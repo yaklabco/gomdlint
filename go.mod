@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/log v0.4.2
 	github.com/go-enry/go-enry/v2 v2.9.3
 	github.com/mattn/go-isatty v0.0.20
+	github.com/sammcj/go-mermaid v0.0.2
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.13
@@ -35,7 +36,6 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/sammcj/go-mermaid v0.0.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect

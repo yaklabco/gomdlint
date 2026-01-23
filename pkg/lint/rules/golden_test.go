@@ -342,8 +342,8 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 			{"MD999", true},
 			{"MDL001", true},
 			{"MDL003", true},
-			{"MM001", true},  // mermaid rules
-			{"MM999", true},  // mermaid rules
+			{"MM001", true}, // mermaid rules
+			{"MM999", true}, // mermaid rules
 			{"real-world", false},
 			{"test", false},
 			{"", false},
