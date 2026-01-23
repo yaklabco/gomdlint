@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MM003",
+    "name": "",
+    "line": 8,
+    "column": 1,
+    "message": "Duplicate identifier: duplicate participant ID 'A', first defined at line 2",
+    "severity": "error",
+    "fixable": false
+  }
+]

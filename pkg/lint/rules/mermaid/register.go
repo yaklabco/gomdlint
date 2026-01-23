@@ -6,4 +6,5 @@ import "github.com/yaklabco/gomdlint/pkg/lint"
 func RegisterMermaidRules(registry *lint.Registry) {
 	registry.Register(NewSyntaxRule())             // MM001
 	registry.Register(NewUndefinedReferenceRule()) // MM002
+	registry.Register(NewDuplicateIDRule())        // MM003
 }
