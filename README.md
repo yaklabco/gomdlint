@@ -80,6 +80,8 @@ Limit auto-fixing to specific rules with `--fix-rules` when you want targeted co
 
 **Tables** (GFM) - Validate table structure including consistent column counts, pipe alignment, and surrounding blank lines.
 
+**Mermaid** - Validate mermaid diagram syntax embedded in code blocks. Detects parse errors, undefined references (nodes, participants, states), duplicate identifiers, invalid flowchart directions, and type errors (visibility modifiers, relationship types). Powered by go-mermaid for accurate validation across 15+ diagram types including flowcharts, sequence diagrams, class diagrams, state diagrams, and more.
+
 ## Output Formats
 
 Choose the output format that fits your workflow with `--format`:
