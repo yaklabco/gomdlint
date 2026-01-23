@@ -298,8 +298,8 @@ var refDefPattern = regexp.MustCompile(
 
 // buildCodeBlockLines returns a set of line numbers that are inside code blocks.
 // These lines should be skipped when scanning for reference definitions.
-func (c *collector) buildCodeBlockLines() map[int]bool {
-	lines := make(map[int]bool)
+func (c *collector) buildCodeBlockLines() map[int]struct{} {
+	lines := make(map[int]struct{})
 	if c.root == nil {
 		return lines
 	}
@@ -310,7 +310,7 @@ func (c *collector) buildCodeBlockLines() map[int]bool {
 			pos := node.SourcePosition()
 			if pos.IsValid() {
 				for line := pos.StartLine; line <= pos.EndLine; line++ {
-					lines[line] = true
+					lines[line] = struct{}{}
 				}
 			}
 		}
@@ -331,7 +331,7 @@ func (c *collector) collectDefinitionsFromSource() {
 
 	for lineNum, lineInfo := range c.ctx.File.Lines {
 		// Skip lines inside code blocks (lineNum is 0-indexed, positions are 1-indexed)
-		if codeBlockLines[lineNum+1] {
+		if _, inCodeBlock := codeBlockLines[lineNum+1]; inCodeBlock {
 			continue
 		}
 
