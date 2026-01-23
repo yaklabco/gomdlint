@@ -47,7 +47,7 @@ func TestSyntaxRule_ValidDiagram(t *testing.T) {
 func TestSyntaxRule_InvalidDiagram(t *testing.T) {
 	t.Parallel()
 
-	md := "# Test\n\n```mermaid\nthis is not valid mermaid\n```\n"
+	md := "# Test\n\n```mermaid\nthis is not valid mermaid\n```\n" //nolint:goconst // test data
 
 	parser := goldmark.New(goldmark.FlavorGFM)
 	file, err := parser.Parse(context.Background(), "test.md", []byte(md))
@@ -107,4 +107,22 @@ func TestSyntaxRule_NilFile(t *testing.T) {
 	diags, err := rule.Apply(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, diags)
+}
+
+func TestSyntaxRule_DirectionError_NoReport(t *testing.T) {
+	t.Parallel()
+
+	// Direction errors should be reported by MM004, not MM001
+	md := "# Test\n\n```mermaid\nflowchart INVALID\n    A --> B\n```\n"
+
+	parser := goldmark.New(goldmark.FlavorGFM)
+	file, err := parser.Parse(context.Background(), "test.md", []byte(md))
+	require.NoError(t, err)
+
+	rule := mermaid.NewSyntaxRule()
+	ctx := lint.NewRuleContext(context.Background(), file, config.NewConfig(), nil)
+
+	diags, err := rule.Apply(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, diags, "MM001 should not report direction errors - MM004 handles those")
 }

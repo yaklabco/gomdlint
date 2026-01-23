@@ -45,6 +45,11 @@ func (r *SyntaxRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		}
 
 		if block.ParseErr != nil {
+			// Skip direction errors - they are reported by MM004
+			if IsDirectionParseError(block.ParseErr) {
+				continue
+			}
+
 			msg := fmt.Sprintf("Invalid mermaid syntax: %v", block.ParseErr)
 			diag := lint.NewDiagnostic(r.ID(), block.Node, msg).
 				WithSeverity(config.SeverityError).
