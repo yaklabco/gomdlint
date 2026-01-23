@@ -15,7 +15,8 @@ func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
 	}
 
 	coll := &collector{
-		ctx: NewContext(file),
+		ctx:  NewContext(file),
+		root: root,
 	}
 	coll.collect(root)
 	coll.collectDefinitionsFromSource()
@@ -26,7 +27,8 @@ func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
 
 // collector builds a Context by walking the AST and source.
 type collector struct {
-	ctx *Context
+	ctx  *Context
+	root *mdast.Node
 }
 
 // collect walks the AST to collect anchors and usages.
@@ -294,13 +296,45 @@ var refDefPattern = regexp.MustCompile(
 	`^\s{0,3}\[([^\]]+)\]:\s*(\S+)(?:\s+"([^"]*)"|\s+'([^']*)'|\s+\(([^)]*)\))?\s*$`,
 )
 
+// buildCodeBlockLines returns a set of line numbers that are inside code blocks.
+// These lines should be skipped when scanning for reference definitions.
+func (c *collector) buildCodeBlockLines() map[int]struct{} {
+	lines := make(map[int]struct{})
+	if c.root == nil {
+		return lines
+	}
+
+	//nolint:errcheck // Walk visitor never returns error in this usage
+	mdast.Walk(c.root, func(node *mdast.Node) error {
+		if node.Kind == mdast.NodeCodeBlock {
+			pos := node.SourcePosition()
+			if pos.IsValid() {
+				for line := pos.StartLine; line <= pos.EndLine; line++ {
+					lines[line] = struct{}{}
+				}
+			}
+		}
+		return nil
+	})
+
+	return lines
+}
+
 // collectDefinitionsFromSource parses reference definitions from the source.
 func (c *collector) collectDefinitionsFromSource() {
 	if c.ctx.File == nil || len(c.ctx.File.Content) == 0 {
 		return
 	}
 
+	// Build set of lines inside code blocks - these cannot contain reference definitions
+	codeBlockLines := c.buildCodeBlockLines()
+
 	for lineNum, lineInfo := range c.ctx.File.Lines {
+		// Skip lines inside code blocks (lineNum is 0-indexed, positions are 1-indexed)
+		if _, inCodeBlock := codeBlockLines[lineNum+1]; inCodeBlock {
+			continue
+		}
+
 		line := c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
 		matches := refDefPattern.FindSubmatch(line)
 		if matches == nil {
