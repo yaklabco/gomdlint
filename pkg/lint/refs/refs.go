@@ -92,6 +92,28 @@ type ReferenceUsage struct {
 	ResolvedDefinition *ReferenceDefinition
 }
 
+// IsExternalLink returns true if the destination is an external URL.
+// External links have schemes like http://, https://, ftp://, mailto:, or tel:.
+func (u *ReferenceUsage) IsExternalLink() bool {
+	d := u.Destination
+	return strings.HasPrefix(d, "http://") ||
+		strings.HasPrefix(d, "https://") ||
+		strings.HasPrefix(d, "ftp://") ||
+		strings.HasPrefix(d, "mailto:") ||
+		strings.HasPrefix(d, "tel:")
+}
+
+// IsSameFileFragment returns true if this is a same-file anchor reference.
+// Same-file fragments are destinations like "#heading" with no path component.
+// Local file paths (./file.md#anchor) and external URLs are not same-file fragments.
+func (u *ReferenceUsage) IsSameFileFragment() bool {
+	if u.Fragment == "" {
+		return false
+	}
+	// Same-file if destination starts with # (e.g., "#heading")
+	return strings.HasPrefix(u.Destination, "#")
+}
+
 // Context holds all reference-related data for a document.
 // It is built once and shared across all reference-tracking rules.
 type Context struct {

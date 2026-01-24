@@ -62,6 +62,13 @@ func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 			continue
 		}
 
+		// Only validate same-file fragments (e.g., "#heading").
+		// External URLs have fragments pointing to external sites.
+		// Local file paths (./file.md#anchor) would need cross-file validation.
+		if !usage.IsSameFileFragment() {
+			continue
+		}
+
 		fragment := strings.TrimPrefix(usage.Fragment, "#")
 
 		// Skip if matches ignored pattern

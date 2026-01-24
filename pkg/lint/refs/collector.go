@@ -63,6 +63,7 @@ func (c *collector) collectHeadingAnchor(node *mdast.Node) {
 }
 
 // extractHeadingText extracts plain text from a heading node.
+// This includes text from inline code spans, which contribute to anchor generation.
 func extractHeadingText(node *mdast.Node) string {
 	if node == nil || node.Kind != mdast.NodeHeading {
 		return ""
@@ -70,7 +71,8 @@ func extractHeadingText(node *mdast.Node) string {
 
 	var buf bytes.Buffer
 	_ = mdast.Walk(node, func(n *mdast.Node) error { //nolint:errcheck // visitor never returns error
-		if n.Kind == mdast.NodeText && n.Inline != nil {
+		// Both NodeText and NodeCodeSpan store their content in Inline.Text
+		if (n.Kind == mdast.NodeText || n.Kind == mdast.NodeCodeSpan) && n.Inline != nil {
 			buf.Write(n.Inline.Text)
 		}
 		return nil
