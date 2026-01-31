@@ -281,36 +281,6 @@ func TestAnchorMap_Count(t *testing.T) {
 	}
 }
 
-func TestReferenceUsage_IsExternalLink(t *testing.T) {
-	tests := []struct {
-		name        string
-		destination string
-		expected    bool
-	}{
-		{"http", "http://example.com", true},
-		{"https", "https://example.com", true},
-		{"https with fragment", "https://example.com/#section", true},
-		{"ftp", "ftp://example.com", true},
-		{"mailto", "mailto:user@example.com", true},
-		{"tel", "tel:+1234567890", true},
-		{"relative path", "./file.md", false},
-		{"relative path with fragment", "./file.md#section", false},
-		{"absolute path", "/path/to/file.md", false},
-		{"same-file fragment", "#section", false},
-		{"empty", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			usage := &ReferenceUsage{Destination: tt.destination}
-			got := usage.IsExternalLink()
-			if got != tt.expected {
-				t.Errorf("IsExternalLink() = %v, want %v for %q", got, tt.expected, tt.destination)
-			}
-		})
-	}
-}
-
 func TestReferenceUsage_IsSameFileFragment(t *testing.T) {
 	tests := []struct {
 		name        string
