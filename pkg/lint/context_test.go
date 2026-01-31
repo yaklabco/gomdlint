@@ -7,6 +7,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 const defaultTestValue = "default"
@@ -620,5 +621,58 @@ func TestRuleContext_NodeCache_NilRoot(t *testing.T) {
 	}
 	if len(rc.CodeBlocks()) != 0 {
 		t.Error("code blocks should be empty for nil root")
+	}
+}
+
+func TestRuleContext_IsLineInCodeBlock(t *testing.T) {
+	t.Parallel()
+
+	// Parse real markdown to get proper token positions.
+	// Lines:
+	// 1: # Heading
+	// 2: (blank)
+	// 3: ```bash
+	// 4: #!/bin/bash
+	// 5: echo hello
+	// 6: ```
+	// 7: (blank)
+	// 8: Some text.
+	content := []byte("# Heading\n\n```bash\n#!/bin/bash\necho hello\n```\n\nSome text.\n")
+
+	parser := goldmark.New("gfm")
+	file, err := parser.Parse(context.Background(), "test.md", content)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	rc := lint.NewRuleContext(context.Background(), file, nil, nil)
+
+	tests := []struct {
+		line int
+		want bool
+	}{
+		{1, false}, // heading
+		{2, false}, // blank
+		{4, true},  // #!/bin/bash (code block content)
+		{5, true},  // echo hello (code block content)
+		{7, false}, // blank
+		{8, false}, // text
+	}
+
+	for _, tt := range tests {
+		got := rc.IsLineInCodeBlock(tt.line)
+		if got != tt.want {
+			t.Errorf("IsLineInCodeBlock(%d) = %v, want %v", tt.line, got, tt.want)
+		}
+	}
+}
+
+func TestRuleContext_IsLineInCodeBlock_NilRoot(t *testing.T) {
+	t.Parallel()
+
+	rc := lint.NewRuleContext(context.Background(), nil, nil, nil)
+
+	if rc.IsLineInCodeBlock(1) {
+		t.Error("should return false for nil root")
 	}
 }

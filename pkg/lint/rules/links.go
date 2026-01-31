@@ -51,7 +51,7 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		}
 
 		// Skip lines in code blocks.
-		if lint.IsLineInCodeBlock(ctx.File, ctx.Root, lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 

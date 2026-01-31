@@ -44,6 +44,10 @@ type RuleContext struct {
 	// nodeCache is the cached node index, lazily initialized.
 	// See NodeCache documentation for usage and caveats.
 	nodeCache *NodeCache
+
+	// codeBlockLines is the cached set of line numbers inside code blocks.
+	// Lazily initialized on first call to IsLineInCodeBlock.
+	codeBlockLines map[int]bool
 }
 
 // NewRuleContext creates a RuleContext for the given file and configuration.
@@ -264,4 +268,28 @@ func (rc *RuleContext) EmphasisNodes() []*mdast.Node {
 func (rc *RuleContext) StrongNodes() []*mdast.Node {
 	rc.ensureNodeCache()
 	return rc.nodeCache.Strong()
+}
+
+// IsLineInCodeBlock returns true if the given 1-based line number is inside a code block.
+// The result is cached — first call builds the map from the AST, subsequent calls are O(1).
+func (rc *RuleContext) IsLineInCodeBlock(lineNum int) bool {
+	if rc.codeBlockLines == nil {
+		rc.codeBlockLines = buildCodeBlockLineMap(rc.CodeBlocks())
+	}
+	return rc.codeBlockLines[lineNum]
+}
+
+// buildCodeBlockLineMap builds a set of line numbers that fall inside code blocks.
+func buildCodeBlockLineMap(codeBlocks []*mdast.Node) map[int]bool {
+	lines := make(map[int]bool)
+	for _, cb := range codeBlocks {
+		pos := cb.SourcePosition()
+		if !pos.IsValid() {
+			continue
+		}
+		for line := pos.StartLine; line <= pos.EndLine; line++ {
+			lines[line] = true
+		}
+	}
+	return lines
 }

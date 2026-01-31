@@ -41,11 +41,6 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", true)
 	ignoreURLs := ctx.OptionBool("ignore_urls", true)
 
-	var codeBlockLines map[int]bool
-	if ignoreCodeBlocks {
-		codeBlockLines = buildCodeBlockLineSet(ctx.Root)
-	}
-
 	var diags []lint.Diagnostic
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
@@ -54,7 +49,7 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		}
 
 		// Skip lines in code blocks if configured.
-		if ignoreCodeBlocks && codeBlockLines[lineNum] {
+		if ignoreCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 
