@@ -190,28 +190,6 @@ func ListDelimiter(list *mdast.Node) string {
 	return list.Block.List.Delimiter
 }
 
-// Code block helpers.
-
-// IsLineInCodeBlock returns true if the given line number falls within any code block.
-func IsLineInCodeBlock(file *mdast.FileSnapshot, root *mdast.Node, lineNum int) bool {
-	if file == nil || root == nil || lineNum < 1 {
-		return false
-	}
-
-	codeBlocks := CodeBlocks(root)
-	for _, cb := range codeBlocks {
-		pos := cb.SourcePosition()
-		if !pos.IsValid() {
-			continue
-		}
-		if lineNum >= pos.StartLine && lineNum <= pos.EndLine {
-			return true
-		}
-	}
-
-	return false
-}
-
 // LineContainsURL returns true if the line contains a URL (http:// or https://).
 func LineContainsURL(file *mdast.FileSnapshot, lineNum int) bool {
 	content := LineContent(file, lineNum)

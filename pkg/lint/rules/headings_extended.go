@@ -49,6 +49,12 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
+
+		// Skip lines inside code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
+			continue
+		}
+
 		trimmed := bytes.TrimLeft(lineContent, " \t")
 
 		match := atxHeadingNoSpacePattern.FindSubmatch(trimmed)
@@ -124,6 +130,12 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
+
+		// Skip lines inside code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
+			continue
+		}
+
 		trimmed := bytes.TrimLeft(lineContent, " \t")
 
 		match := atxHeadingMultiSpacePattern.FindSubmatch(trimmed)
@@ -201,6 +213,12 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 		}
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
+
+		// Skip lines inside code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
+			continue
+		}
+
 		trimmed := bytes.TrimLeft(lineContent, " \t")
 
 		match := closedATXPattern.FindSubmatch(trimmed)
@@ -307,6 +325,12 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		}
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
+
+		// Skip lines inside code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
+			continue
+		}
+
 		trimmed := bytes.TrimLeft(lineContent, " \t")
 
 		match := closedATXPattern.FindSubmatch(trimmed)
@@ -438,7 +462,7 @@ func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		}
 
 		// Also skip lines inside actual code blocks.
-		if lint.IsLineInCodeBlock(ctx.File, ctx.Root, lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 

@@ -49,7 +49,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		}
 
 		// Skip lines in code blocks.
-		if lint.IsLineInCodeBlock(ctx.File, ctx.Root, lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 

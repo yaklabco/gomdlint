@@ -641,7 +641,7 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 		}
 
 		// Skip code blocks if configured
-		if !includeCodeBlocks && lint.IsLineInCodeBlock(ctx.File, ctx.Root, lineNum) {
+		if !includeCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 

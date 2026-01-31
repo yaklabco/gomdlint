@@ -168,7 +168,7 @@ func (r *NoSpaceInCodeRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		}
 
 		// Skip lines in code blocks.
-		if lint.IsLineInCodeBlock(ctx.File, ctx.Root, lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 

@@ -35,11 +35,6 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 
 	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", false)
 
-	var codeBlockLines map[int]bool
-	if ignoreCodeBlocks {
-		codeBlockLines = buildCodeBlockLineSet(ctx.Root)
-	}
-
 	var diags []lint.Diagnostic
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
@@ -48,7 +43,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 
 		// Skip lines in code blocks if configured.
-		if ignoreCodeBlocks && codeBlockLines[lineNum] {
+		if ignoreCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 
@@ -268,25 +263,4 @@ func (r *MultipleBlankLinesRule) createDiagnostic(
 		WithSuggestion(fmt.Sprintf("Remove %d blank line(s)", excessCount)).
 		WithFix(builder).
 		Build()
-}
-
-// buildCodeBlockLineSet returns a set of line numbers that are inside code blocks.
-func buildCodeBlockLineSet(root *mdast.Node) map[int]bool {
-	lineSet := make(map[int]bool)
-	if root == nil {
-		return lineSet
-	}
-
-	codeBlocks := lint.CodeBlocks(root)
-	for _, codeBlock := range codeBlocks {
-		pos := codeBlock.SourcePosition()
-		if !pos.IsValid() {
-			continue
-		}
-		for line := pos.StartLine; line <= pos.EndLine; line++ {
-			lineSet[line] = true
-		}
-	}
-
-	return lineSet
 }

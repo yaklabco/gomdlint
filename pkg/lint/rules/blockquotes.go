@@ -52,6 +52,11 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
 
+		// Skip lines inside code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
+			continue
+		}
+
 		// Check for multiple spaces after >
 		match := blockquoteMultiSpacePattern.FindSubmatch(lineContent)
 		if match == nil {
@@ -126,6 +131,12 @@ func (r *NoBlanksBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
+
+		// Skip lines inside code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
+			continue
+		}
+
 		isBlockquoteLine := len(lineContent) > 0 && lineContent[0] == '>'
 		isBlankLine := len(bytes.TrimSpace(lineContent)) == 0
 
