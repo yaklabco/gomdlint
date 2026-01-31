@@ -1,5 +1,17 @@
 # Golden Test Methodology
 
+## Introduction
+
+This document describes how we built comprehensive golden test coverage for gomdlint's 55 lint rules — and how we used AI agents to do most of the work.
+
+Golden testing is a well-known technique: you capture the output of your program, commit it, and fail the build if the output ever changes unexpectedly. What makes this project interesting is the scale and the process. We needed ~170 carefully constructed markdown files, each designed to trigger exactly one rule while avoiding false positives from the other 54. Writing those files requires detailed knowledge of every rule's behavior, its edge cases, and the dozen or so ways you can accidentally create a bad test input. That's a lot of domain knowledge to hold in your head across 55 rules.
+
+So we encoded that knowledge into three reusable skills — structured instruction files that Claude Code agents load before doing work. One skill tells the agent how to audit the codebase and figure out what's missing. Another tells it exactly how to construct test inputs for each edge-case category (frontmatter, unicode, code blocks, etc.) and what mistakes to avoid. A third gives it a verification checklist to run after generating golden files. With those skills in place, we could dispatch 5 agents in parallel, each working on a different group of rules, and get consistent results across all of them.
+
+The output speaks for itself: 477 golden tests covering all 55 rules, a round-trip idempotency guarantee on every fixable rule, and three real bugs discovered in rule implementations along the way. The whole thing — from gap analysis to committed PR — ran in a single session.
+
+This document covers the test system itself (how golden files work, what they verify, why the round-trip test matters) and the agent-driven process we used to create them (how the skills work, how we parallelized the effort, what went right and what we learned).
+
 ## The Problem
 
 gomdlint has 55 lint rules, 37 of which can auto-fix violations. When you change a rule's detection logic or fix generation, how do you know you haven't broken something? Unit tests can check individual cases, but they don't scale well — and they don't catch the subtle interaction between detection, fix generation, edit merging, and re-parsing that makes autofix tricky.
