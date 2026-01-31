@@ -1,0 +1,3 @@
+frontmatter.input.md:7:15 warning Link text 'click here' is not descriptive ()
+frontmatter.input.md:9:7 warning Link text 'more' is not descriptive ()
+frontmatter.input.md:11:6 warning Link text 'this link' is not descriptive ()

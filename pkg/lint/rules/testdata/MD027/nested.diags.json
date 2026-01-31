@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD027",
+    "name": "",
+    "line": 3,
+    "column": 2,
+    "message": "Multiple spaces (2) after blockquote symbol",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD027",
+    "name": "",
+    "line": 9,
+    "column": 2,
+    "message": "Multiple spaces (2) after blockquote symbol",
+    "severity": "warning",
+    "fixable": true
+  }
+]

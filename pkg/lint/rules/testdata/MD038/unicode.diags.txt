@@ -1,0 +1,3 @@
+unicode.input.md:3:10 warning Excessive leading space inside code span () [fixable]
+unicode.input.md:5:10 warning Excessive trailing space inside code span () [fixable]
+unicode.input.md:7:10 warning Excessive spaces inside code span () [fixable]

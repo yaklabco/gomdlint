@@ -1,0 +1,2 @@
+frontmatter.input.md:6:1 warning Heading is indented by 1 character(s) () [fixable]
+frontmatter.input.md:10:1 warning Heading is indented by 2 character(s) () [fixable]

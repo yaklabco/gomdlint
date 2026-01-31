@@ -1,0 +1,3 @@
+multiple.input.md:6:1 warning Fenced code block has no language specified () [fixable]
+multiple.input.md:13:1 warning Fenced code block has no language specified () [fixable]
+multiple.input.md:23:1 warning Fenced code block has no language specified ()

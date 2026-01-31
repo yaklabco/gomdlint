@@ -1,0 +1,1 @@
+basic.input.md:6:1 warning Dollar signs used before commands without showing output () [fixable]

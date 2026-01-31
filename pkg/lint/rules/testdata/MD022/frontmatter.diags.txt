@@ -1,0 +1,4 @@
+frontmatter.input.md:2:1 warning Heading needs 1 blank line(s) above, found 0 () [fixable]
+frontmatter.input.md:2:1 warning Heading needs 1 blank line(s) below, found 0 () [fixable]
+frontmatter.input.md:6:3 warning Heading needs 1 blank line(s) below, found 0 () [fixable]
+frontmatter.input.md:9:4 warning Heading needs 1 blank line(s) below, found 0 () [fixable]

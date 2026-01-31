@@ -1,0 +1,4 @@
+adjacent.input.md:3:36 warning Excessive leading space inside code span () [fixable]
+adjacent.input.md:3:48 warning Excessive trailing space inside code span () [fixable]
+adjacent.input.md:5:19 warning Excessive spaces inside code span () [fixable]
+adjacent.input.md:5:33 warning Excessive spaces inside code span () [fixable]

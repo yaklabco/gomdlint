@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MDL001",
+    "name": "",
+    "line": 9,
+    "column": 6,
+    "message": "Link uses absolute URL, but relative URLs are expected",
+    "severity": "warning",
+    "fixable": false
+  }
+]

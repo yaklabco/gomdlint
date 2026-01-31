@@ -1,0 +1,3 @@
+basic.input.md:3:10 warning Link text has leading and trailing spaces ()
+basic.input.md:5:10 warning Link text has leading spaces ()
+basic.input.md:7:10 warning Link text has trailing spaces ()

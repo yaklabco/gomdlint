@@ -1,0 +1,2 @@
+frontmatter.input.md:0:0 warning Link has empty text ()
+frontmatter.input.md:9:22 warning Link has empty destination ()

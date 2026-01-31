@@ -1,0 +1,2 @@
+frontmatter.input.md:0:0 warning Image is missing alt text ()
+frontmatter.input.md:0:0 warning Image is missing alt text ()

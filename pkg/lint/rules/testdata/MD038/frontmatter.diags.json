@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD038",
+    "name": "",
+    "line": 7,
+    "column": 10,
+    "message": "Excessive leading space inside code span",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD038",
+    "name": "",
+    "line": 9,
+    "column": 10,
+    "message": "Excessive trailing space inside code span",
+    "severity": "warning",
+    "fixable": true
+  }
+]

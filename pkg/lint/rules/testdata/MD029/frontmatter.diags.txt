@@ -1,0 +1,2 @@
+frontmatter.input.md:8:4 warning Ordered list item numbered 1 should be 2 () [fixable]
+frontmatter.input.md:9:4 warning Ordered list item numbered 1 should be 3 () [fixable]

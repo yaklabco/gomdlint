@@ -1,0 +1,2 @@
+nested.input.md:5:8 warning Heading level jumped from H2 to H4 ()
+nested.input.md:13:7 warning Heading level jumped from H1 to H3 ()

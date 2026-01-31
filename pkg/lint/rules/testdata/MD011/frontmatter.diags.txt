@@ -1,0 +1,2 @@
+frontmatter.input.md:7:11 warning Reversed link syntax detected () [fixable]
+frontmatter.input.md:11:9 warning Reversed link syntax detected () [fixable]

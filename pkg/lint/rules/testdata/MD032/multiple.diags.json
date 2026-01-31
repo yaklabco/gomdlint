@@ -1,0 +1,47 @@
+[
+  {
+    "rule": "MD032",
+    "name": "",
+    "line": 4,
+    "column": 1,
+    "message": "Missing blank line before list",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD032",
+    "name": "",
+    "line": 9,
+    "column": 1,
+    "message": "Missing blank line after list",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD032",
+    "name": "",
+    "line": 10,
+    "column": 1,
+    "message": "Missing blank line before list",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD032",
+    "name": "",
+    "line": 12,
+    "column": 1,
+    "message": "Missing blank line after list",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD032",
+    "name": "",
+    "line": 13,
+    "column": 1,
+    "message": "Missing blank line before list",
+    "severity": "warning",
+    "fixable": true
+  }
+]

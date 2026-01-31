@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 7,
+    "column": 22,
+    "message": "HTML element 'br' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 9,
+    "column": 5,
+    "message": "HTML element 'em' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 9,
+    "column": 17,
+    "message": "HTML element 'em' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  }
+]

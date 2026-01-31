@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 6,
+    "column": 7,
+    "message": "Ordered list item numbered 1 should be 2",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 7,
+    "column": 7,
+    "message": "Ordered list item numbered 1 should be 3",
+    "severity": "warning",
+    "fixable": true
+  }
+]

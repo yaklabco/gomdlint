@@ -1,0 +1,2 @@
+frontmatter.input.md:7:10 warning Spaces inside emphasis markers () [fixable]
+frontmatter.input.md:9:10 warning Spaces inside emphasis markers () [fixable]

@@ -1,0 +1,3 @@
+multiple.input.md:4:4 warning List item indentation 1 does not match expected 0 () [fixable]
+multiple.input.md:11:6 warning List item indentation 3 does not match expected 2 () [fixable]
+multiple.input.md:16:4 warning List item indentation 1 does not match expected 0 () [fixable]

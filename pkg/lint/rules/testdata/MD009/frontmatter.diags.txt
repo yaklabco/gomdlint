@@ -1,0 +1,2 @@
+frontmatter.input.md:7:30 warning Trailing whitespace () [fixable]
+frontmatter.input.md:8:25 warning Trailing whitespace () [fixable]

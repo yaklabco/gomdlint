@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 7,
+    "column": 3,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 8,
+    "column": 5,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "",
+    "line": 9,
+    "column": 5,
+    "message": "Unordered list bullet '*' does not match expected '-'",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD010",
+    "name": "",
+    "line": 3,
+    "column": 15,
+    "message": "Hard tab character found",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD010",
+    "name": "",
+    "line": 5,
+    "column": 1,
+    "message": "Hard tab character found",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD010",
+    "name": "",
+    "line": 7,
+    "column": 14,
+    "message": "Hard tab character found",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD010",
+    "name": "",
+    "line": 9,
+    "column": 1,
+    "message": "Hard tab character found",
+    "severity": "warning",
+    "fixable": true
+  }
+]

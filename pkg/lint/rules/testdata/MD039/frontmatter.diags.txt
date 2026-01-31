@@ -1,0 +1,2 @@
+frontmatter.input.md:7:10 warning Link text has leading and trailing spaces ()
+frontmatter.input.md:9:10 warning Link text has trailing spaces ()

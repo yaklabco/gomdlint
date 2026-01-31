@@ -1,0 +1,2 @@
+frontmatter.input.md:7:16 warning Hard tab character found () [fixable]
+frontmatter.input.md:8:1 warning Hard tab character found () [fixable]

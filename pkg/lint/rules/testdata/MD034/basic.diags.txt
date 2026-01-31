@@ -1,0 +1,3 @@
+basic.input.md:3:7 warning Bare URL used () [fixable]
+basic.input.md:5:5 warning Bare URL used () [fixable]
+basic.input.md:7:12 warning Bare URL used () [fixable]

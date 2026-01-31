@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD028",
+    "name": "",
+    "line": 4,
+    "column": 1,
+    "message": "Blank line inside blockquote separates it into multiple blockquotes",
+    "severity": "warning",
+    "fixable": false
+  }
+]

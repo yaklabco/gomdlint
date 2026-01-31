@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 3,
+    "column": 20,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 5,
+    "column": 22,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 7,
+    "column": 21,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 9,
+    "column": 22,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  }
+]

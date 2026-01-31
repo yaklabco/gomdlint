@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD041",
+    "name": "",
+    "line": 4,
+    "column": 1,
+    "message": "First line should be a top-level heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

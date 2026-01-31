@@ -1,0 +1,47 @@
+[
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 3,
+    "column": 7,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 5,
+    "column": 5,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 7,
+    "column": 7,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 9,
+    "column": 5,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 11,
+    "column": 6,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  }
+]

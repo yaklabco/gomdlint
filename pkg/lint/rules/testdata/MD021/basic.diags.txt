@@ -1,0 +1,4 @@
+basic.input.md:1:1 warning Multiple spaces inside hashes on closed ATX style heading (both sides) () [fixable]
+basic.input.md:3:1 warning Multiple spaces inside hashes on closed ATX style heading (both sides) () [fixable]
+basic.input.md:5:1 warning Multiple spaces after opening hashes on closed ATX style heading () [fixable]
+basic.input.md:7:1 warning Multiple spaces before closing hashes on closed ATX style heading () [fixable]

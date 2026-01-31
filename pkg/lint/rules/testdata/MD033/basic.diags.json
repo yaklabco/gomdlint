@@ -1,0 +1,47 @@
+[
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 3,
+    "column": 22,
+    "message": "HTML element 'br' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 5,
+    "column": 12,
+    "message": "HTML element 'div' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 5,
+    "column": 30,
+    "message": "HTML element 'div' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 7,
+    "column": 5,
+    "message": "HTML element 'em' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "",
+    "line": 7,
+    "column": 17,
+    "message": "HTML element 'em' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  }
+]

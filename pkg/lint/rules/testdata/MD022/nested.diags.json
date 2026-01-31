@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD022",
+    "name": "",
+    "line": 3,
+    "column": 6,
+    "message": "Heading needs 1 blank line(s) below, found 0",
+    "severity": "warning",
+    "fixable": true
+  }
+]

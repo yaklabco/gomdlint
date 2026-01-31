@@ -1,0 +1,3 @@
+frontmatter.input.md:7:22 warning HTML element 'br' is not allowed ()
+frontmatter.input.md:9:5 warning HTML element 'em' is not allowed ()
+frontmatter.input.md:9:17 warning HTML element 'em' is not allowed ()

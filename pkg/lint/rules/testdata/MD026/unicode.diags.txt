@@ -1,0 +1,3 @@
+unicode.input.md:5:16 warning Heading ends with trailing punctuation "!" () [fixable]
+unicode.input.md:9:18 warning Heading ends with trailing punctuation ":" () [fixable]
+unicode.input.md:13:23 warning Heading ends with trailing punctuation "." () [fixable]

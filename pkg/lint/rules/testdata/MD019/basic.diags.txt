@@ -1,0 +1,4 @@
+basic.input.md:1:2 warning Multiple spaces (2) after hash on ATX style heading () [fixable]
+basic.input.md:3:3 warning Multiple spaces (3) after hash on ATX style heading () [fixable]
+basic.input.md:5:4 warning Multiple spaces (2) after hash on ATX style heading () [fixable]
+basic.input.md:9:3 warning Multiple spaces (2) after hash on ATX style heading () [fixable]

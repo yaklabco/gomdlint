@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 3,
+    "column": 13,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 4,
+    "column": 13,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD009",
+    "name": "",
+    "line": 5,
+    "column": 16,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  }
+]
