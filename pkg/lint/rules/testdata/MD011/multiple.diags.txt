@@ -1,0 +1,5 @@
+multiple.input.md:3:7 warning Reversed link syntax detected () [fixable]
+multiple.input.md:5:8 warning Reversed link syntax detected () [fixable]
+multiple.input.md:7:7 warning Reversed link syntax detected () [fixable]
+multiple.input.md:9:8 warning Reversed link syntax detected () [fixable]
+multiple.input.md:11:7 warning Reversed link syntax detected () [fixable]

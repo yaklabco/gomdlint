@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD048",
+    "name": "",
+    "line": 16,
+    "column": 1,
+    "message": "Code fence style 'tilde' does not match expected 'backtick'",
+    "severity": "warning",
+    "fixable": true
+  }
+]

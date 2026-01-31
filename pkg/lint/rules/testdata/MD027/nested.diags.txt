@@ -1,0 +1,2 @@
+nested.input.md:3:2 warning Multiple spaces (2) after blockquote symbol () [fixable]
+nested.input.md:9:2 warning Multiple spaces (2) after blockquote symbol () [fixable]

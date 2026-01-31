@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD039",
+    "name": "",
+    "line": 7,
+    "column": 10,
+    "message": "Link text has leading and trailing spaces",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD039",
+    "name": "",
+    "line": 9,
+    "column": 10,
+    "message": "Link text has trailing spaces",
+    "severity": "warning",
+    "fixable": false
+  }
+]

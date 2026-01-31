@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD031",
+    "name": "",
+    "line": 4,
+    "column": 1,
+    "message": "Missing blank line before fenced code block",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD031",
+    "name": "",
+    "line": 6,
+    "column": 1,
+    "message": "Missing blank line after fenced code block",
+    "severity": "warning",
+    "fixable": true
+  }
+]

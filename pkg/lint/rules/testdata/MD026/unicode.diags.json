@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD026",
+    "name": "",
+    "line": 5,
+    "column": 16,
+    "message": "Heading ends with trailing punctuation \"!\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD026",
+    "name": "",
+    "line": 9,
+    "column": 18,
+    "message": "Heading ends with trailing punctuation \":\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD026",
+    "name": "",
+    "line": 13,
+    "column": 23,
+    "message": "Heading ends with trailing punctuation \".\"",
+    "severity": "warning",
+    "fixable": true
+  }
+]

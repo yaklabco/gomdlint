@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD038",
+    "name": "",
+    "line": 3,
+    "column": 36,
+    "message": "Excessive leading space inside code span",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD038",
+    "name": "",
+    "line": 3,
+    "column": 48,
+    "message": "Excessive trailing space inside code span",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD038",
+    "name": "",
+    "line": 5,
+    "column": 19,
+    "message": "Excessive spaces inside code span",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD038",
+    "name": "",
+    "line": 5,
+    "column": 33,
+    "message": "Excessive spaces inside code span",
+    "severity": "warning",
+    "fixable": true
+  }
+]

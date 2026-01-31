@@ -1,0 +1,2 @@
+basic.input.md:7:1 warning Unused reference definition [unused-one] ()
+basic.input.md:8:1 warning Unused reference definition [unused-two] ()

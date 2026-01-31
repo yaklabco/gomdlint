@@ -1,0 +1,1 @@
+frontmatter.input.md:11:1 warning Unused reference definition [stale-ref] ()

@@ -1,0 +1,2 @@
+frontmatter.input.md:7:2 warning Multiple spaces (2) after blockquote symbol () [fixable]
+frontmatter.input.md:9:2 warning Multiple spaces (3) after blockquote symbol () [fixable]

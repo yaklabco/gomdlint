@@ -1,0 +1,2 @@
+frontmatter.input.md:10:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
+frontmatter.input.md:11:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]

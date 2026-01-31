@@ -1,0 +1,4 @@
+multiple.input.md:3:15 warning Hard tab character found () [fixable]
+multiple.input.md:5:1 warning Hard tab character found () [fixable]
+multiple.input.md:7:14 warning Hard tab character found () [fixable]
+multiple.input.md:9:1 warning Hard tab character found () [fixable]

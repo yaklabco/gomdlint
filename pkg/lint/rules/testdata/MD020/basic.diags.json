@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD020",
+    "name": "",
+    "line": 1,
+    "column": 1,
+    "message": "No space inside hashes on closed ATX style heading (both sides)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD020",
+    "name": "",
+    "line": 3,
+    "column": 1,
+    "message": "No space after opening hashes on closed ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD020",
+    "name": "",
+    "line": 5,
+    "column": 1,
+    "message": "No space before closing hashes on closed ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD020",
+    "name": "",
+    "line": 9,
+    "column": 1,
+    "message": "No space inside hashes on closed ATX style heading (both sides)",
+    "severity": "warning",
+    "fixable": true
+  }
+]

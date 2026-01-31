@@ -1,0 +1,4 @@
+multiple.input.md:3:20 warning Trailing whitespace () [fixable]
+multiple.input.md:5:22 warning Trailing whitespace () [fixable]
+multiple.input.md:7:21 warning Trailing whitespace () [fixable]
+multiple.input.md:9:22 warning Trailing whitespace () [fixable]

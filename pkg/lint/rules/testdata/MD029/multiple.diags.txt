@@ -1,0 +1,7 @@
+multiple.input.md:4:4 warning Ordered list item numbered 3 should be 2 () [fixable]
+multiple.input.md:5:4 warning Ordered list item numbered 5 should be 3 () [fixable]
+multiple.input.md:10:4 warning Ordered list item numbered 1 should be 2 () [fixable]
+multiple.input.md:11:4 warning Ordered list item numbered 1 should be 3 () [fixable]
+multiple.input.md:12:4 warning Ordered list item numbered 1 should be 4 () [fixable]
+multiple.input.md:17:5 warning Ordered list item numbered 10 should be 2 () [fixable]
+multiple.input.md:18:5 warning Ordered list item numbered 20 should be 3 () [fixable]

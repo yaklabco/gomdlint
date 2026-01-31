@@ -1,0 +1,5 @@
+multiple.input.md:3:2 warning Multiple spaces (2) after blockquote symbol () [fixable]
+multiple.input.md:5:2 warning Multiple spaces (3) after blockquote symbol () [fixable]
+multiple.input.md:7:2 warning Multiple spaces (4) after blockquote symbol () [fixable]
+multiple.input.md:9:2 warning Multiple spaces (2) after blockquote symbol () [fixable]
+multiple.input.md:13:2 warning Multiple spaces (2) after blockquote symbol () [fixable]

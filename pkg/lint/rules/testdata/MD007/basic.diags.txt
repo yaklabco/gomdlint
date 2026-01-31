@@ -1,0 +1,3 @@
+basic.input.md:4:7 warning Unordered list indentation 4 does not match expected 2 () [fixable]
+basic.input.md:5:11 warning Unordered list indentation 8 does not match expected 4 () [fixable]
+basic.input.md:10:6 warning Unordered list indentation 3 does not match expected 2 () [fixable]

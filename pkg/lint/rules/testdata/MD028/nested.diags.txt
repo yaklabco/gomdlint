@@ -1,0 +1,5 @@
+nested.input.md:4:1 warning Blank line inside blockquote separates it into multiple blockquotes ()
+nested.input.md:6:1 warning Blank line inside blockquote separates it into multiple blockquotes ()
+nested.input.md:8:1 warning Blank line inside blockquote separates it into multiple blockquotes ()
+nested.input.md:10:1 warning Blank line inside blockquote separates it into multiple blockquotes ()
+nested.input.md:13:1 warning Blank line inside blockquote separates it into multiple blockquotes ()

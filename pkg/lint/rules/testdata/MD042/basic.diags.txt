@@ -1,0 +1,3 @@
+basic.input.md:0:0 warning Link has empty text ()
+basic.input.md:5:22 warning Link has empty destination ()
+basic.input.md:0:0 warning Link has empty text and destination ()

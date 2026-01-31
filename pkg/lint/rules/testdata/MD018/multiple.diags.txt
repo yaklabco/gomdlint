@@ -1,0 +1,5 @@
+multiple.input.md:5:1 warning No space after hash on ATX style heading () [fixable]
+multiple.input.md:9:1 warning No space after hash on ATX style heading () [fixable]
+multiple.input.md:13:1 warning No space after hash on ATX style heading () [fixable]
+multiple.input.md:17:1 warning No space after hash on ATX style heading () [fixable]
+multiple.input.md:21:1 warning No space after hash on ATX style heading () [fixable]

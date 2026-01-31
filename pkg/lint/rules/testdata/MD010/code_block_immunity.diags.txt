@@ -1,0 +1,2 @@
+code_block_immunity.input.md:6:5 warning Hard tab character found () [fixable]
+code_block_immunity.input.md:7:1 warning Hard tab character found () [fixable]
