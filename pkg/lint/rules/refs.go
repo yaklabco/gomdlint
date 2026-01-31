@@ -62,6 +62,13 @@ func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 			continue
 		}
 
+		// Only validate same-file fragments (e.g., "#heading").
+		// External URLs have fragments pointing to external sites.
+		// Local file paths (./file.md#anchor) would need cross-file validation.
+		if !usage.IsSameFileFragment() {
+			continue
+		}
+
 		fragment := strings.TrimPrefix(usage.Fragment, "#")
 
 		// Skip if matches ignored pattern
@@ -337,16 +344,7 @@ func isURLAsText(usage *refs.ReferenceUsage) bool {
 		return false
 	}
 	// Check if text equals destination (URL as link text)
-	return usage.Text == usage.Destination && isAbsoluteURLForStyle(usage.Destination)
-}
-
-// isAbsoluteURLForStyle returns true if the string looks like an absolute URL.
-func isAbsoluteURLForStyle(url string) bool {
-	return strings.HasPrefix(url, "http://") ||
-		strings.HasPrefix(url, "https://") ||
-		strings.HasPrefix(url, "ftp://") ||
-		strings.HasPrefix(url, "mailto:") ||
-		strings.HasPrefix(url, "tel:")
+	return usage.Text == usage.Destination && isAbsoluteURL(usage.Destination)
 }
 
 // DescriptiveLinkTextRule checks for generic link text (MD059).

@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD051",
+    "name": "",
+    "line": 27,
+    "column": 4,
+    "message": "Link fragment '#nonexistent-heading' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

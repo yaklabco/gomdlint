@@ -281,6 +281,77 @@ func TestAnchorMap_Count(t *testing.T) {
 	}
 }
 
+func TestReferenceUsage_IsSameFileFragment(t *testing.T) {
+	tests := []struct {
+		name        string
+		destination string
+		fragment    string
+		expected    bool
+	}{
+		{"same-file fragment", "#section", "#section", true},
+		{"same-file fragment with hyphen", "#my-heading", "#my-heading", true},
+		{"external URL with fragment", "https://example.com/#section", "#section", false},
+		{"local file with fragment", "./file.md#section", "#section", false},
+		{"absolute path with fragment", "/path/file.md#section", "#section", false},
+		{"no fragment", "https://example.com", "", false},
+		{"empty destination with fragment", "", "#section", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := &ReferenceUsage{Destination: tt.destination, Fragment: tt.fragment}
+			got := usage.IsSameFileFragment()
+			if got != tt.expected {
+				t.Errorf("IsSameFileFragment() = %v, want %v for dest=%q frag=%q", got, tt.expected, tt.destination, tt.fragment)
+			}
+		})
+	}
+}
+
+func TestCollect_HeadingWithCodeSpan(t *testing.T) {
+	// Test that headings with inline code spans are properly extracted for anchor generation
+	content := []byte("### Using `go install`\n\nSome text.\n")
+
+	parser := goldmark.New("gfm")
+	file, err := parser.Parse(context.Background(), "test.md", content)
+	if err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+
+	ctx := Collect(file.Root, file)
+
+	// Should generate anchor "using-go-install" (including code span text)
+	if !ctx.Anchors.Has("using-go-install") {
+		t.Errorf("Expected anchor 'using-go-install' to exist")
+		t.Errorf("Available anchors:")
+		for _, a := range ctx.Anchors.All() {
+			t.Errorf("  %q (from: %q)", a.ID, a.Text)
+		}
+	}
+}
+
+func TestCollect_HeadingWithMultipleCodeSpans(t *testing.T) {
+	// Test heading with multiple inline elements
+	content := []byte("## Using `stave` in your CI\n\nText.\n")
+
+	parser := goldmark.New("gfm")
+	file, err := parser.Parse(context.Background(), "test.md", content)
+	if err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+
+	ctx := Collect(file.Root, file)
+
+	// Should generate anchor including "stave" from code span
+	if !ctx.Anchors.Has("using-stave-in-your-ci") {
+		t.Errorf("Expected anchor 'using-stave-in-your-ci' to exist")
+		t.Errorf("Available anchors:")
+		for _, a := range ctx.Anchors.All() {
+			t.Errorf("  %q (from: %q)", a.ID, a.Text)
+		}
+	}
+}
+
 func TestCollect_IgnoresCodeBlockContent(t *testing.T) {
 	// This test verifies that reference definition patterns inside code blocks
 	// are not mistakenly detected as markdown reference definitions.
