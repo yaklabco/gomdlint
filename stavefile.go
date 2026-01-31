@@ -4,60 +4,131 @@ package main
 
 import (
 	"cmp"
-	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/yaklabco/stave/pkg/sh"
+	"github.com/yaklabco/stave/pkg/st"
+	"github.com/yaklabco/stave/pkg/target"
 )
 
 // Default target runs build.
 var Default = Build
 
 // Aliases for common targets.
-var Aliases = map[string]interface{}{
+var Aliases = map[string]any{
 	"b":    Build,
-	"t":    Test,
-	"l":    Lint,
+	"t":    Test.Default,
+	"l":    Lint.Default,
 	"c":    Check,
 	"i":    Install,
-	"cmp":  Compare,
-	"cmpf": CompareFast,
+	"fmt":  Lint.Fmt,
+	"cmp":  Bench.Compare,
+	"cmpf": Bench.Fast,
 }
 
-// ldflags returns the linker flags for version injection.
-func ldflags() string {
-	version, err := shOutput(context.Background(), "git", "describe", "--tags", "--always", "--dirty")
-	if err != nil || version == "" {
-		version = "dev"
-	}
-	commit, err := shOutput(context.Background(), "git", "rev-parse", "--short", "HEAD")
-	if err != nil {
-		commit = "none"
-	}
-	date := time.Now().UTC().Format(time.RFC3339)
+// Namespace types group related targets.
+type (
+	Test  st.Namespace
+	Lint  st.Namespace
+	CI    st.Namespace
+	Bench st.Namespace
+)
 
-	return fmt.Sprintf(
-		"-X main.version=%s -X main.commit=%s -X main.date=%s",
-		strings.TrimSpace(version),
-		strings.TrimSpace(commit),
-		date,
-	)
-}
+// ---------------------------------------------------------------------------
+// Top-level targets
+// ---------------------------------------------------------------------------
 
 // Build compiles the gomdlint binary with version info.
-func Build(ctx context.Context) error {
+// Skips recompilation when source files have not changed.
+func Build() error {
+	rebuild, err := target.Dir("bin/gomdlint", "cmd/", "pkg/", "internal/", "go.mod", "go.sum")
+	if err != nil {
+		return err
+	}
+	if !rebuild {
+		fmt.Println("bin/gomdlint is up to date")
+		return nil
+	}
 	fmt.Println("Building gomdlint...")
-	return sh(ctx, "go", "build", "-ldflags", ldflags(), "-o", "bin/gomdlint", "./cmd/gomdlint")
+	return sh.RunV("go", "build", "-ldflags", ldflags(), "-o", "bin/gomdlint", "./cmd/gomdlint")
 }
 
-// Test runs all tests using gotestsum with race detection and coverage.
-func Test(ctx context.Context) error {
+// Check runs format, lint, and test sequentially.
+func Check() {
+	st.SerialDeps(Lint.Fmt, Lint.Default, Test.Default)
+}
+
+// Clean removes build artifacts.
+func Clean() error {
+	fmt.Println("Cleaning build artifacts...")
+	if err := sh.Rm("bin"); err != nil {
+		return err
+	}
+	if err := sh.Rm("coverage.out"); err != nil {
+		return err
+	}
+	return sh.Rm("coverage.html")
+}
+
+// Install installs gomdlint to $GOBIN or $GOPATH/bin.
+func Install() error {
+	fmt.Println("Installing gomdlint...")
+	return sh.RunV("go", "install", "-ldflags", ldflags(), "./cmd/gomdlint")
+}
+
+// Uninstall removes gomdlint from $GOBIN or $GOPATH/bin.
+func Uninstall() error {
+	fmt.Println("Uninstalling gomdlint...")
+	binPath, err := findInstalledBinary("gomdlint")
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(binPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			fmt.Println("gomdlint is not installed")
+			return nil
+		}
+		return fmt.Errorf("remove binary: %w", err)
+	}
+	fmt.Printf("Removed %s\n", binPath)
+	return nil
+}
+
+// Deps ensures all dependencies are downloaded.
+func Deps() error {
+	fmt.Println("Downloading dependencies...")
+	if err := sh.RunV("go", "mod", "download"); err != nil {
+		return err
+	}
+	return sh.RunV("go", "mod", "tidy")
+}
+
+// Coverage generates a test coverage report and opens it.
+func Coverage() error {
+	st.Deps(Test.Default)
+	fmt.Println("Generating coverage report...")
+	if err := sh.RunV("go", "tool", "cover", "-html=coverage.out", "-o", "coverage.html"); err != nil {
+		return err
+	}
+	return sh.RunV("open", "coverage.html")
+}
+
+// ---------------------------------------------------------------------------
+// Test namespace
+// ---------------------------------------------------------------------------
+
+// Default runs all tests using gotestsum with race detection and coverage.
+func (Test) Default() error {
 	fmt.Println("Running tests...")
 	nCores := cmp.Or(os.Getenv("STAVE_NUM_PROCESSORS"), "4")
-	args := []string{
+	return sh.RunV("go",
 		"tool", "gotestsum",
 		"-f", "pkgname-and-test-fails",
 		"--",
@@ -67,15 +138,14 @@ func Test(ctx context.Context) error {
 		"./...",
 		"-coverprofile=coverage.out",
 		"-covermode=atomic",
-	}
-	return sh(ctx, "go", args...)
+	)
 }
 
-// TestV runs all tests with verbose output.
-func TestV(ctx context.Context) error {
+// Verbose runs all tests with standard-verbose output.
+func (Test) Verbose() error {
 	fmt.Println("Running tests (verbose)...")
 	nCores := cmp.Or(os.Getenv("STAVE_NUM_PROCESSORS"), "4")
-	args := []string{
+	return sh.RunV("go",
 		"tool", "gotestsum",
 		"-f", "standard-verbose",
 		"--",
@@ -85,214 +155,106 @@ func TestV(ctx context.Context) error {
 		"./...",
 		"-coverprofile=coverage.out",
 		"-covermode=atomic",
-	}
-	return sh(ctx, "go", args...)
+	)
 }
 
-// Lint runs golangci-lint with auto-fix.
-func Lint(ctx context.Context) error {
+// ---------------------------------------------------------------------------
+// Lint namespace
+// ---------------------------------------------------------------------------
+
+// Default runs golangci-lint with auto-fix.
+func (Lint) Default() error {
 	fmt.Println("Running linters...")
-	return sh(ctx, "golangci-lint", "run", "--fix", "./...")
+	return sh.RunV("golangci-lint", "run", "--fix", "./...")
 }
 
-// LintCI runs golangci-lint without auto-fix (for CI).
-func LintCI(ctx context.Context) error {
+// CI runs golangci-lint without auto-fix (for CI pipelines).
+func (Lint) CI() error {
 	fmt.Println("Running linters (CI mode)...")
-	return sh(ctx, "golangci-lint", "run", "./...")
+	return sh.RunV("golangci-lint", "run", "./...")
 }
 
 // Fmt formats all Go code.
-func Fmt(ctx context.Context) error {
+func (Lint) Fmt() error {
 	fmt.Println("Formatting code...")
-	return sh(ctx, "gofmt", "-w", ".")
+	return sh.RunV("gofmt", "-w", ".")
 }
 
-// Format is an alias for Fmt.
-func Format(ctx context.Context) error {
-	return Fmt(ctx)
-}
-
-// Check runs format, lint, and test.
-func Check(ctx context.Context) error {
-	fmt.Println("Running checks...")
-	if err := Fmt(ctx); err != nil {
-		return err
-	}
-	if err := Lint(ctx); err != nil {
-		return err
-	}
-	return Test(ctx)
-}
-
-// Vet runs go vet.
-func Vet(ctx context.Context) error {
-	fmt.Println("Running go vet...")
-	return sh(ctx, "go", "vet", "./...")
-}
-
-// CIGate runs all CI checks in idiomatic Go order.
-func CIGate(ctx context.Context) error {
-	fmt.Println("Running CI gate checks...")
-
-	// 1. Check formatting
-	fmt.Println("\n1. Checking code formatting...")
-	out, err := shOutput(ctx, "gofmt", "-l", ".")
+// FmtCheck verifies code formatting without modifying files.
+func (Lint) FmtCheck() error {
+	out, err := sh.Output("gofmt", "-l", ".")
 	if err != nil {
 		return fmt.Errorf("gofmt check failed: %w", err)
 	}
 	if out != "" {
-		return fmt.Errorf("the following files are not formatted:\n%s\nRun 'gofmt -w .' or 'stave fmt' to fix", out)
+		return fmt.Errorf("unformatted files:\n%s\nRun 'stave lint:fmt' to fix", out)
 	}
 	fmt.Println("✓ Code formatting OK")
+	return nil
+}
 
-	// 2. Run go vet
-	fmt.Println("\n2. Running go vet...")
-	if err := sh(ctx, "go", "vet", "./..."); err != nil {
-		return fmt.Errorf("go vet failed: %w", err)
-	}
-	fmt.Println("✓ go vet passed")
+// Vet runs go vet.
+func (Lint) Vet() error {
+	fmt.Println("Running go vet...")
+	return sh.RunV("go", "vet", "./...")
+}
 
-	// 3. Run golangci-lint
-	fmt.Println("\n3. Running golangci-lint...")
-	if err := sh(ctx, "golangci-lint", "run", "./..."); err != nil {
-		return fmt.Errorf("golangci-lint failed: %w", err)
-	}
-	fmt.Println("✓ golangci-lint passed")
+// ---------------------------------------------------------------------------
+// CI namespace
+// ---------------------------------------------------------------------------
 
-	// 4. Build the project
-	fmt.Println("\n4. Building project...")
-	if err := Build(ctx); err != nil {
-		return fmt.Errorf("build failed: %w", err)
-	}
-	fmt.Println("✓ Build successful")
-
-	// 5. Run tests
-	fmt.Println("\n5. Running tests...")
-	if err := Test(ctx); err != nil {
-		return fmt.Errorf("tests failed: %w", err)
-	}
-	fmt.Println("✓ Tests passed")
-
-	// 6. Check go.mod/go.sum are tidy
-	fmt.Println("\n6. Checking go.mod/go.sum...")
-	if err := ModTidy(ctx); err != nil {
-		return fmt.Errorf("mod tidy check failed: %w", err)
-	}
-
-	// 7. Cross-compile for all platforms
-	fmt.Println("\n7. Cross-compiling for release platforms...")
-	if err := CrossCompile(ctx); err != nil {
-		return fmt.Errorf("cross-compile failed: %w", err)
-	}
-
+// Gate runs all CI checks in idiomatic Go order.
+func (CI) Gate() error {
+	fmt.Println("Running CI gate checks...")
+	st.SerialDeps(
+		Lint.FmtCheck,
+		Lint.Vet,
+		Lint.CI,
+		Build,
+		Test.Default,
+		CI.ModTidy,
+		CI.Cross,
+	)
 	fmt.Println("\n✓ All CI gate checks passed!")
 	return nil
 }
 
-// Clean removes build artifacts.
-func Clean(ctx context.Context) error {
-	fmt.Println("Cleaning build artifacts...")
-	if err := os.RemoveAll("bin"); err != nil {
-		return err
-	}
-	_ = os.Remove("coverage.out")
-	_ = os.Remove("coverage.html")
-	return nil
-}
-
-// Install installs gomdlint to $GOBIN or $GOPATH/bin.
-func Install(ctx context.Context) error {
-	fmt.Println("Installing gomdlint...")
-	return sh(ctx, "go", "install", "-ldflags", ldflags(), "./cmd/gomdlint")
-}
-
-// Uninstall removes gomdlint from $GOBIN or $GOPATH/bin.
-func Uninstall(ctx context.Context) error {
-	fmt.Println("Uninstalling gomdlint...")
-
-	binPath, err := findInstalledBinary("gomdlint")
-	if err != nil {
-		return err
-	}
-
-	if err := os.Remove(binPath); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("gomdlint is not installed")
-			return nil
-		}
-		return fmt.Errorf("remove binary: %w", err)
-	}
-
-	fmt.Printf("Removed %s\n", binPath)
-	return nil
-}
-
-// findInstalledBinary returns the path where go install would place the binary.
-func findInstalledBinary(name string) (string, error) {
-	if gobin := os.Getenv("GOBIN"); gobin != "" {
-		return filepath.Join(gobin, name), nil
-	}
-
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("get home directory: %w", err)
-		}
-		gopath = filepath.Join(home, "go")
-	}
-
-	return filepath.Join(gopath, "bin", name), nil
-}
-
-// Deps ensures all dependencies are downloaded.
-func Deps(ctx context.Context) error {
-	fmt.Println("Downloading dependencies...")
-	if err := sh(ctx, "go", "mod", "download"); err != nil {
-		return err
-	}
-	return sh(ctx, "go", "mod", "tidy")
-}
-
-// Bench runs benchmarks.
-func Bench(ctx context.Context) error {
-	fmt.Println("Running benchmarks...")
-	return sh(ctx, "go", "test", "-bench=.", "-benchmem", "./...")
-}
-
 // ModTidy checks that go.mod and go.sum are tidy.
-func ModTidy(ctx context.Context) error {
+func (CI) ModTidy() error {
 	fmt.Println("Checking go.mod/go.sum are tidy...")
+	modBefore, err := os.ReadFile("go.mod")
+	if err != nil {
+		return fmt.Errorf("read go.mod: %w", err)
+	}
+	sumBefore, err := os.ReadFile("go.sum")
+	if err != nil {
+		return fmt.Errorf("read go.sum: %w", err)
+	}
 
-	// Get current state of go.mod and go.sum
-	modBefore, _ := os.ReadFile("go.mod")
-	sumBefore, _ := os.ReadFile("go.sum")
-
-	// Run go mod tidy
-	if err := sh(ctx, "go", "mod", "tidy"); err != nil {
+	if err := sh.RunV("go", "mod", "tidy"); err != nil {
 		return err
 	}
 
-	// Check if files changed
-	modAfter, _ := os.ReadFile("go.mod")
-	sumAfter, _ := os.ReadFile("go.sum")
+	modAfter, err := os.ReadFile("go.mod")
+	if err != nil {
+		return fmt.Errorf("read go.mod after tidy: %w", err)
+	}
+	sumAfter, err := os.ReadFile("go.sum")
+	if err != nil {
+		return fmt.Errorf("read go.sum after tidy: %w", err)
+	}
 
 	if string(modBefore) != string(modAfter) || string(sumBefore) != string(sumAfter) {
-		return fmt.Errorf("go.mod or go.sum changed after 'go mod tidy' - please commit the changes")
+		return errors.New("go.mod or go.sum changed after 'go mod tidy' - please commit the changes")
 	}
-
 	fmt.Println("✓ go.mod/go.sum are tidy")
 	return nil
 }
 
-// CrossCompile builds for all release platforms to catch platform-specific issues.
-func CrossCompile(ctx context.Context) error {
+// Cross builds for all release platforms to catch platform-specific issues.
+func (CI) Cross() error {
 	fmt.Println("Cross-compiling for all release platforms...")
-
-	platforms := []struct {
-		goos   string
-		goarch string
-	}{
+	platforms := []struct{ goos, goarch string }{
 		{"linux", "amd64"},
 		{"linux", "arm64"},
 		{"darwin", "amd64"},
@@ -304,154 +266,137 @@ func CrossCompile(ctx context.Context) error {
 		{"openbsd", "amd64"},
 		{"netbsd", "amd64"},
 	}
-
 	for _, p := range platforms {
 		fmt.Printf("  Building %s/%s...\n", p.goos, p.goarch)
-		cmd := exec.CommandContext(ctx, "go", "build", "-o", "/dev/null", "./cmd/gomdlint")
-		cmd.Env = append(os.Environ(), "GOOS="+p.goos, "GOARCH="+p.goarch, "CGO_ENABLED=0")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		env := map[string]string{
+			"GOOS":        p.goos,
+			"GOARCH":      p.goarch,
+			"CGO_ENABLED": "0",
+		}
+		if err := sh.RunWith(env, "go", "build", "-o", "/dev/null", "./cmd/gomdlint"); err != nil {
 			return fmt.Errorf("build failed for %s/%s: %w", p.goos, p.goarch, err)
 		}
 	}
-
 	fmt.Println("✓ All platforms build successfully")
 	return nil
 }
 
-// Coverage generates test coverage report.
-func Coverage(ctx context.Context) error {
-	fmt.Println("Generating coverage report...")
-	if err := Test(ctx); err != nil {
-		return err
-	}
-	if err := sh(ctx, "go", "tool", "cover", "-html=coverage.out", "-o", "coverage.html"); err != nil {
-		return err
-	}
-	return sh(ctx, "open", "coverage.html")
+// ---------------------------------------------------------------------------
+// Bench namespace
+// ---------------------------------------------------------------------------
+
+// Default runs Go benchmarks.
+func (Bench) Default() error {
+	fmt.Println("Running benchmarks...")
+	return sh.RunV("go",
+		"tool", "gotestsum",
+		"-f", "pkgname-and-test-fails",
+		"--",
+		"-bench=.", "-benchmem",
+		"./...",
+	)
 }
 
 // Compare benchmarks gomdlint against markdownlint.
-func Compare(ctx context.Context) error {
+func (Bench) Compare() error {
 	fmt.Println("Running gomdlint vs markdownlint comparison...")
-
-	// Ensure gomdlint is built
-	if err := Build(ctx); err != nil {
-		return fmt.Errorf("build gomdlint: %w", err)
-	}
-
-	// Check dependencies
+	st.Deps(Build)
 	if err := checkCompareDepends(); err != nil {
 		return err
 	}
-
-	// Clone repos if needed
-	if err := sh(ctx, "bench/scripts/clone-repos.sh"); err != nil {
+	if err := sh.RunV("bench/scripts/clone-repos.sh"); err != nil {
 		return fmt.Errorf("clone repos: %w", err)
 	}
-
-	// Run benchmarks
-	if err := sh(ctx, "bench/scripts/run-bench.sh"); err != nil {
+	if err := sh.RunV("bench/scripts/run-bench.sh"); err != nil {
 		return fmt.Errorf("run benchmarks: %w", err)
 	}
-
-	// Generate charts
-	if err := sh(ctx, "bench/scripts/generate-plots.sh"); err != nil {
+	if err := sh.RunV("bench/scripts/generate-plots.sh"); err != nil {
 		return fmt.Errorf("generate charts: %w", err)
 	}
-
 	return nil
 }
 
-// CompareFast runs quick comparison on smallest repos only.
-func CompareFast(ctx context.Context) error {
+// Fast runs a quick comparison on smallest repos only.
+func (Bench) Fast() error {
 	fmt.Println("Running quick gomdlint vs markdownlint comparison...")
-
-	// Ensure gomdlint is built
-	if err := Build(ctx); err != nil {
-		return fmt.Errorf("build gomdlint: %w", err)
-	}
-
-	// Check dependencies
+	st.Deps(Build)
 	if err := checkCompareDepends(); err != nil {
 		return err
 	}
-
-	// Clone repos if needed
-	if err := sh(ctx, "bench/scripts/clone-repos.sh"); err != nil {
+	if err := sh.RunV("bench/scripts/clone-repos.sh"); err != nil {
 		return fmt.Errorf("clone repos: %w", err)
 	}
-
-	// Run benchmarks with reduced runs
-	cmd := exec.CommandContext(ctx, "bench/scripts/run-bench.sh")
-	cmd.Env = append(os.Environ(), "BENCH_RUNS=1")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	fmt.Println("-> BENCH_RUNS=1 bench/scripts/run-bench.sh")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("run benchmarks: %w", err)
-	}
-
-	return nil
+	return sh.RunWithV(map[string]string{"BENCH_RUNS": "1"}, "bench/scripts/run-bench.sh")
 }
 
-// checkCompareDepends verifies required tools are installed.
+// ---------------------------------------------------------------------------
+// Helpers (unexported — not targets)
+// ---------------------------------------------------------------------------
+
+// gitOutput runs a git command and returns trimmed stdout, or empty on error.
+func gitOutput(args ...string) string {
+	out, err := sh.Output("git", args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// ldflags returns the linker flags for version injection.
+func ldflags() string {
+	version := cmp.Or(gitOutput("describe", "--tags", "--always", "--dirty"), "dev")
+	commit := cmp.Or(gitOutput("rev-parse", "--short", "HEAD"), "none")
+	date := time.Now().UTC().Format(time.RFC3339)
+	return fmt.Sprintf(
+		"-X main.version=%s -X main.commit=%s -X main.date=%s",
+		version, commit, date,
+	)
+}
+
+// findInstalledBinary returns the path where go install would place the binary.
+func findInstalledBinary(name string) (string, error) {
+	if gobin := os.Getenv("GOBIN"); gobin != "" {
+		return filepath.Join(gobin, name), nil
+	}
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("get home directory: %w", err)
+		}
+		gopath = filepath.Join(home, "go")
+	}
+	return filepath.Join(gopath, "bin", name), nil
+}
+
+// checkCompareDepends verifies required tools are installed for benchmarking.
 func checkCompareDepends() error {
 	tools := []struct {
 		name    string
-		check   string
+		cmd     string
+		args    []string
 		install string
 	}{
-		{"markdownlint", "markdownlint --version", "npm install -g markdownlint-cli"},
-		{"jq", "jq --version", "brew install jq"},
-		{"gnuplot", "gnuplot --version", "brew install gnuplot"},
+		{"markdownlint", "markdownlint", []string{"--version"}, "npm install -g markdownlint-cli"},
+		{"jq", "jq", []string{"--version"}, "brew install jq"},
+		{"gnuplot", "gnuplot", []string{"--version"}, "brew install gnuplot"},
 	}
 
-	// Check for GNU time
-	hasGtime := exec.Command("which", "gtime").Run() == nil
+	hasGtime := exec.Command("which", "gtime").Run() == nil //nolint:gosec // args are constant
 	hasGnuTime := false
 	if !hasGtime {
-		out, _ := exec.Command("/usr/bin/time", "--version").CombinedOutput()
+		// --version may exit non-zero on some implementations; we only inspect output content.
+		out, _ := exec.Command("/usr/bin/time", "--version").CombinedOutput() //nolint:gosec // args are constant
 		hasGnuTime = strings.Contains(string(out), "GNU")
 	}
 	if !hasGtime && !hasGnuTime {
-		return fmt.Errorf("GNU time required. Install with: brew install gnu-time")
+		return errors.New("GNU time required; install with: brew install gnu-time")
 	}
 
 	for _, tool := range tools {
-		if err := exec.Command("sh", "-c", tool.check).Run(); err != nil {
-			return fmt.Errorf("%s not found. Install with: %s", tool.name, tool.install)
+		if err := exec.Command(tool.cmd, tool.args...).Run(); err != nil { //nolint:gosec // args are constant
+			return fmt.Errorf("%s not found; install with: %s", tool.name, tool.install)
 		}
 	}
-
 	return nil
-}
-
-// sh executes a shell command with proper output handling.
-func sh(ctx context.Context, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	fmt.Printf("→ %s %s\n", name, strings.Join(args, " "))
-
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("%s exited with code %d", name, exitErr.ExitCode())
-		}
-		return err
-	}
-	return nil
-}
-
-// shOutput executes a command and returns its output.
-func shOutput(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
