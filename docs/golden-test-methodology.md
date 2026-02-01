@@ -12,6 +12,37 @@ The output speaks for itself: 477 golden tests covering all 55 rules, a round-tr
 
 This document covers the test system itself (how golden files work, what they verify, why the round-trip test matters) and the agent-driven process we used to create them (how the skills work, how we parallelized the effort, what went right and what we learned).
 
+## What is gomdlint?
+
+gomdlint is a Markdown linter written in Go. It checks `.md` files against 55 rules covering whitespace, heading structure, list formatting, link syntax, code blocks, emphasis style, HTML usage, and GFM table layout. 37 of the rules can auto-fix violations — the tool rewrites the file in place with the corrections applied.
+
+### Architecture
+
+The processing pipeline has four stages:
+
+```mermaid
+graph LR
+    A[Parse] --> B[Lint]
+    B --> C[Fix]
+    C --> D[Report]
+```
+
+**Parse.** A [goldmark](https://github.com/yuin/goldmark)-based parser converts markdown into two parallel representations: an AST (`mdast.Node` tree) for structural analysis, and a token stream (`[]mdast.Token`) that classifies every byte in the source by kind — heading markers, list bullets, emphasis markers, code fences, and so on. Rules need both: the AST for understanding document structure (is this heading inside a blockquote?), and the token stream for precise source-level work (what character is at byte offset 47?).
+
+**Lint.** Each enabled rule receives a `RuleContext` containing the parsed file, configuration, and a lazy-initialized cache of typed node queries (`ctx.Headings()`, `ctx.CodeBlocks()`, etc.). The rule inspects the document and returns diagnostics. Fixable rules also populate an `EditBuilder` with `TextEdit` values — byte-range replacements that describe how to correct each violation.
+
+**Fix.** Collected edits go through validation (bounds checking), sorting (by start offset), and conflict resolution (overlapping edits resolved greedily — first by position wins). The accepted edits are applied in memory, and the result is re-parsed and re-linted. This loop repeats up to 10 passes until no new edits are produced — the multi-pass approach handles cases where fixing one violation reveals or resolves another. The final output is written atomically with optional backup.
+
+**Report.** Results are rendered in one of six formats: human-readable text, table, JSON, SARIF (for CI integration), unified diff, or statistical summary.
+
+Files are processed in parallel across a worker pool sized to `runtime.NumCPU()`. Each file goes through the full pipeline independently, with results collected in deterministic order.
+
+### Why the dual representation matters
+
+Most markdown linters work from the AST alone. gomdlint adds the token stream because some rules need information the AST doesn't provide — or provides incorrectly. For example, goldmark's `ThematicBreak` nodes have no source position data (`Lines.Len() == 0`), but the tokenizer correctly emits `TokThematicBreak` tokens with byte offsets. Rules can fall back to the token stream when the AST is incomplete, which is exactly what the MD035 fix (described later) does.
+
+The token stream also matters for fix generation. A rule that wants to change `__text__` to `*text*` needs to know where the underscore markers are in the source bytes, not just that an emphasis node exists in the AST.
+
 ## The Problem
 
 gomdlint has 55 lint rules, 37 of which can auto-fix violations. When you change a rule's detection logic or fix generation, how do you know you haven't broken something? Unit tests can check individual cases, but they don't scale well — and they don't catch the subtle interaction between detection, fix generation, edit merging, and re-parsing that makes autofix tricky.
