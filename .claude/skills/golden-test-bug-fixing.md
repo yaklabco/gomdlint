@@ -61,7 +61,7 @@ Depending on the bug category:
 1. Check what `SourcePosition()` actually returns
 2. Verify whether the position points to the marker or the content
 3. Scan backward or forward from the reported position to find the actual marker
-4. Check if `TokEmphasisMarker` or similar tokens are available in the token stream
+4. Check if relevant marker tokens (e.g., `TokEmphasisMarker`, `TokThematicBreak`) are available in the token stream
 
 **Fix idempotency bugs** (e.g., regex re-matches after fix):
 
@@ -85,26 +85,21 @@ Token-stream bypass (for missing AST positions):
 
 ```go
 for _, tok := range ctx.File.Tokens {
-    if tok.Kind == mdast.TokThematicBreak {
+    if tok.Kind == mdast.TokXxx { // Use the appropriate TokenKind constant
         line, col := ctx.File.LineAt(tok.StartOffset)
-        // ... use line/col directly
+        // ... use line/col directly instead of node.SourcePosition()
     }
 }
 ```
 
-Backward scan (for marker detection):
+Backward/forward scan (for incorrect position offsets):
 
 ```go
-func findMarkerBefore(line []byte, contentStart int) byte {
-    for i := contentStart - 1; i >= 0; i-- {
-        if line[i] == '*' || line[i] == '_' {
-            return line[i]
-        }
-        if line[i] != ' ' && line[i] != '\t' {
-            return 0
-        }
-    }
-    return 0
+// When SourcePosition points to content rather than syntax markers,
+// scan from the reported position to find the actual syntax character.
+idx := pos.StartColumn - 2 // look before the reported content start
+if idx >= 0 && isSyntaxMarker(lineContent[idx]) {
+    // found the marker
 }
 ```
 
@@ -168,7 +163,7 @@ A bug fix is complete when:
 Bug fixes are batched into a dedicated phase between test authoring and golden file generation. The parent agent:
 
 1. Collects bug reports from authoring agents
-2. Groups bugs by shared root cause (e.g., MD049 and MD050 share the same emphasis position bug)
+2. Groups bugs by shared root cause (e.g., two rules that share the same position lookup bug)
 3. Dispatches one fixer agent per bug cluster
 4. After fixes, the authoring agents re-run `-update` on affected rules
 5. The verification agent independently confirms the fix

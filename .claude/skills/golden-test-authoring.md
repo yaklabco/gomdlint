@@ -287,10 +287,10 @@ related_test_files:
 # <RULE_ID>: <Short description>
 
 ## Symptom
-[What you observed — e.g., "Zero diagnostics for input with mixed HR styles"]
+[What you observed — e.g., "Zero diagnostics despite clear violations in input"]
 
 ## Root Cause
-[Brief analysis — e.g., "SourcePosition() returns invalid because goldmark provides no line info for ThematicBreak nodes"]
+[Brief analysis — e.g., "SourcePosition() returns invalid because goldmark provides no line info for this node type"]
 
 ## Evidence
 [Command output or file contents showing the failure]
