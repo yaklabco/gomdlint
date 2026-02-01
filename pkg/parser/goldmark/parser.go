@@ -112,8 +112,6 @@ func flavorOrDefault(flavor string) string {
 }
 
 // newGoldmarkInstance creates a configured goldmark.Markdown instance.
-//
-//nolint:ireturn // goldmark.Markdown is an external interface type
 func newGoldmarkInstance(flavor string) goldmark.Markdown {
 	var opts []goldmark.Option
 

@@ -117,7 +117,9 @@ linters:
         - error
         - empty
         - stdlib
-        - github.com/jamesainslie/mdlint/pkg/lint.Rule
+        - github.com/yaklabco/gomdlint/pkg/lint.Rule
+        - github.com/yaklabco/gomdlint/pkg/reporter.Reporter
+        - github.com/yuin/goldmark.Markdown
     gomodguard:
       blocked:
         modules:
