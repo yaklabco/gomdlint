@@ -31,7 +31,7 @@ graph LR
 
 **Lint.** Each enabled rule receives a `RuleContext` containing the parsed file, configuration, and a lazy-initialized cache of typed node queries (`ctx.Headings()`, `ctx.CodeBlocks()`, etc.). The rule inspects the document and returns diagnostics. Fixable rules also populate an `EditBuilder` with `TextEdit` values — byte-range replacements that describe how to correct each violation.
 
-**Fix.** Collected edits go through validation (bounds checking), sorting (by start offset), and conflict resolution (overlapping edits resolved greedily — first by position wins). The accepted edits are applied in memory, and the result is re-parsed and re-linted. This loop repeats up to 10 passes until no new edits are produced — the multi-pass approach handles cases where fixing one violation reveals or resolves another. The final output is written atomically with optional backup.
+**Fix.** Collected edits go through validation (bounds checking), sorting (by start offset), and conflict resolution (overlapping edits resolved greedily — first by position wins). The accepted edits are applied in memory, and the result is re-parsed and re-linted. This loop repeats until no new edits are produced — the multi-pass approach handles cases where fixing one violation reveals or resolves another. A configurable pass limit (currently [hardcoded at 10](https://github.com/yaklabco/gomdlint/issues/11)) prevents infinite loops from buggy rules. The final output is written atomically with optional backup.
 
 **Report.** Results are rendered in one of six formats: human-readable text, table, JSON, SARIF (for CI integration), unified diff, or statistical summary.
 
