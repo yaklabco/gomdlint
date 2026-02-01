@@ -8,7 +8,7 @@ Golden testing is a well-known technique: you capture the output of your program
 
 So we encoded that knowledge into three reusable [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) skills — structured instruction files that agents load before doing work. The [gap analysis skill](../.claude/skills/golden-test-gap-analysis.md) tells the agent how to audit the codebase and figure out what's missing. The [authoring skill](../.claude/skills/golden-test-authoring.md) tells it exactly how to construct test inputs for each edge-case category (frontmatter, unicode, code blocks, etc.) and what mistakes to avoid. The [verification skill](../.claude/skills/golden-test-verification.md) gives it a checklist to run after generating golden files. With those skills in place, we could dispatch 5 [sub-agents](https://docs.anthropic.com/en/docs/claude-code/sub-agents) in parallel, each working on a different group of rules, and get consistent results across all of them.
 
-The output speaks for itself: 477 golden tests covering all 55 rules, a round-trip idempotency guarantee on every fixable rule, and three real bugs discovered in rule implementations along the way. The whole thing — from gap analysis to committed PR — ran in a single session.
+The output speaks for itself: 477 golden tests covering all 55 rules, a round-trip idempotency guarantee on every fixable rule, and three real bugs discovered and fixed in rule implementations along the way. The process also exposed a gap in the original agent workflow — agents had no protocol for handling broken rules — which led to a second iteration that added inter-agent bug detection, reporting, and repair.
 
 This document covers the test system itself (how golden files work, what they verify, why the round-trip test matters) and the agent-driven process we used to create them (how the skills work, how we parallelized the effort, what went right and what we learned).
 
@@ -120,13 +120,7 @@ The skills encode all of these constraints in one place. Every agent loads the s
 
 The parallel dispatch is the other big win. Five agents creating test files for different rule groups simultaneously, with no file conflicts because each rule has its own directory. The total wall-clock time for creating all the test files was a fraction of what sequential work would have taken.
 
-The agents also caught real bugs during the process:
-
-- **MD034 (bare URLs):** The autofix wraps bare emails in angle brackets (`<user@example.com>`), but the regex still partially matches the `<`, causing an infinite fix loop. The agent discovered this during round-trip testing and worked around it by only testing URL patterns.
-- **MD035 (HR style):** Goldmark doesn't assign source positions to thematic break AST nodes, so the rule produces zero diagnostics despite valid input. The agent documented this and kept the test as a regression baseline.
-- **MD049/MD050 (emphasis style):** `detectEmphasisStyle()` fails because the parser's `SourcePosition` points to emphasis content rather than the marker character. Again, documented and baselined.
-
-These are the kind of things you find when you systematically run every rule against carefully constructed edge cases. The agents did the tedious part; the generated golden files captured the actual behavior for future regression detection.
+The agents also found real bugs in three rule implementations during the process — but the initial approach to handling them was wrong. More on that in the next section.
 
 ### Trust Model
 
@@ -138,6 +132,105 @@ The agents don't decide what's correct — the tool does. The workflow is:
 4. Agent runs `TestGoldenRoundTrip` to verify fix idempotence
 
 The golden files are a snapshot of the tool's real behavior. If that behavior is wrong, the golden test locks it in — and you fix the rule, not the test. The agents verify that the snapshot is internally consistent (diagnostics match what the code produces, fixes are idempotent), but they don't invent expected output.
+
+But this trust model has a gap: it assumes the tool's behavior is correct. What happens when it isn't? That's the problem we ran into next.
+
+## What Went Wrong: Baselining Broken Behavior
+
+The initial five-phase process had a critical flaw. When agents encountered rules that produced wrong results, they had no protocol for handling it. They accepted whatever the tool produced and committed it as the expected output. This locked broken behavior into the test suite.
+
+Three rules were affected:
+
+**MD035 (HR style)** — Goldmark's `ThematicBreak` AST nodes have no source positions (`Lines.Len() == 0`). The rule's position check silently skipped every thematic break, producing zero diagnostics for files with mixed HR styles. The agent generated `basic.diags.json` as `[]` — an empty diagnostic array for a file that clearly contained violations — and committed it.
+
+**MD049/MD050 (emphasis/strong style)** — `detectEmphasisStyle()` reads `lineContent[pos.StartColumn-1]` expecting the marker character (`*` or `_`), but goldmark's `SourcePosition` points to the emphasis *content*, not the marker. The function returned `""` for every emphasis node, producing zero diagnostics. Same root cause for strong emphasis. Both `basic.diags.json` files were committed as `[]`.
+
+**MD034 (bare URLs)** — The autofix regex `(?:^|[^<(\[])(URL|EMAIL)(?:[^>\])]|$)` uses boundary-consuming groups. After wrapping `user@example.com` in angle brackets, the consumed boundary character shifts the capture indices — the regex matches `ser@example.co` inside the already-wrapped email, producing a false positive that corrupts the document. The agent noticed this during round-trip testing and worked around it by avoiding email test patterns entirely.
+
+In all three cases, the agents noticed something was wrong but had no mechanism to fix it. They documented the issues in comments, adjusted expected values to match the broken output, and moved on. The result: golden tests that would *fail* if someone ever fixed these rules, because the tests expected the broken behavior.
+
+This violates the core principle stated in our own trust model: "you fix the rule, not the test." We stated the principle but didn't enforce it.
+
+## How We Fixed It: Inter-Agent Bug Detection and Repair
+
+We added three things: a way for agents to detect anomalies, a way to report them, and a dedicated agent role for fixing them.
+
+### Bug Detection Protocol
+
+The [authoring skill](../.claude/skills/golden-test-authoring.md) now includes an anomaly checklist that agents must run after every `go test -update`:
+
+| Anomaly | How to Detect | What It Means |
+|---------|--------------|---------------|
+| Zero-diagnostic | `.diags.json` is `[]` for a non-clean, non-code_block_immunity scenario | Rule detection is broken |
+| Golden-equals-input | `.golden.md` is byte-identical to `.input.md` for a fixable rule with violations | Rule fix is broken |
+| Round-trip failure | Fixable diagnostics remain after one pass | Fix is non-idempotent or creates new violations |
+| Position anomaly | Diagnostics report line 0 or column 0 | Position calculation bug |
+
+When an anomaly is detected, the agent must **stop** — not work around it. It deletes the generated golden files (keeping only the hand-crafted `.input.md`), writes a structured bug report, and returns to the orchestrator with a blocked status. No broken behavior gets committed.
+
+### Bug Reports
+
+Bug reports live in `.claude/bug-reports/<RULE_ID>-<slug>.md` with YAML frontmatter tracking the lifecycle:
+
+```
+status: open → fixing → fixed → verified
+```
+
+Each report includes the symptom, root cause analysis, evidence (test output), and a proposed fix. This gives the fixer agent everything it needs to reproduce and resolve the issue without re-investigating from scratch.
+
+### Bug Fixing Skill
+
+A new [bug-fixing skill](../.claude/skills/golden-test-bug-fixing.md) guides a dedicated fixer agent through the full repair cycle:
+
+1. **Reproduce** — write a Go test that fails before the fix
+2. **Trace** — identify whether the bug is in source positions, style detection, or fix idempotency
+3. **Fix** — implement the fix in the rule, not the test harness
+4. **Update tests** — change `wantDiags: 0` to the correct value, remove "parser limitation" comments
+5. **Regenerate** — delete old golden files, run `-update`, verify diagnostics are no longer empty
+6. **Verify** — round-trip test, full golden suite, full test suite
+7. **Close** — update the bug report to `status: fixed`
+
+The skill includes common fix patterns (token-stream bypass for missing AST positions, backward/forward scan for incorrect position offsets) that apply across multiple bug categories.
+
+### Verification Gate
+
+The [verification skill](../.claude/skills/golden-test-verification.md) now checks for open bug reports before verifying a rule's golden files. Rules with `status: open` or `status: fixing` are skipped. After a fix lands (`status: fixed`), the verification agent re-checks the regenerated golden files and updates the report to `status: verified`.
+
+The red flags table was also expanded — "`.diags.json` is `[]` for a basic scenario with clear violations" is now an explicit red flag with the instruction: "file a bug report, do not baseline."
+
+### The Fixes
+
+With this process in place, we fixed all three bugs:
+
+**MD035** — Rewrote the Apply method in `hr.go` to iterate `ctx.File.Tokens` instead of using AST node positions. `TokThematicBreak` tokens are correctly emitted by the tokenizer regardless of goldmark's AST limitations. The rule now uses `ctx.File.LineAt(tok.StartOffset)` to convert byte offsets to line/column and `lint.NewDiagnosticAt()` to construct diagnostics with explicit positions.
+
+**MD049/MD050** — Fixed `detectEmphasisStyle()` and `detectStrongStyle()` in `emphasis.go` to scan backward from the content position to find the marker character. For emphasis, one position back (`pos.StartColumn-2`); for strong, two positions back (`pos.StartColumn-2` and `pos.StartColumn-3`). These functions now correctly identify `*` vs `_` markers.
+
+**MD034** — Replaced the boundary-consuming regex with a simpler pattern that matches only the URL/email itself, then validates boundaries in code (checking for `<`, `(`, `[` before the match and `>`, `)`, `]` after). This eliminated the index-shifting bug entirely. Added 8 email-specific edge case tests covering start/end of line, multiple emails, plus addressing, already-wrapped emails, and mixed URL/email content — all passing including idempotency checks.
+
+After the fixes, regenerated golden files for all affected rules. `basic.diags.json` for MD035, MD049, and MD050 now contain actual diagnostics instead of empty arrays. The test count went from 2041 to 2050 (9 new tests from the MD034 email edge cases and bug reproduction tests).
+
+### Process Flow
+
+The full workflow now looks like this:
+
+```mermaid
+graph TD
+    A[Authoring agent creates .input.md] --> B[Run go test -update]
+    B --> C{Anomaly detected?}
+    C -->|No| D[Verify golden files]
+    C -->|Yes| E[Delete generated files]
+    E --> F[Write bug report]
+    F --> G[Return blocked to orchestrator]
+    G --> H[Orchestrator dispatches fixer agent]
+    H --> I[Fixer reproduces and fixes rule]
+    I --> J[Regenerate golden files]
+    J --> K[Verification agent confirms fix]
+    K --> D
+    D --> L[Commit golden files]
+```
+
+The key change is the branch at step 3. Previously, agents had no branch — they always proceeded to commit, even when the output was clearly wrong. Now they halt, report, and wait for a fix before generating golden files for that rule.
 
 ## Edge Case Categories
 
@@ -159,7 +252,7 @@ Not every category applies to every rule. A rule that doesn't skip code blocks d
 
 ## Current Coverage
 
-477 golden tests across all 55 rules. Every rule has at least `basic` and `clean` cases. Fixable rules have edge-case coverage for frontmatter, code block immunity, unicode, and batch fix scenarios. Non-fixable rules have frontmatter and (where applicable) code block immunity cases.
+477 golden tests across all 55 rules (2050 total tests including unit tests). Every rule has at least `basic` and `clean` cases. Fixable rules have edge-case coverage for frontmatter, code block immunity, unicode, and batch fix scenarios. Non-fixable rules have frontmatter and (where applicable) code block immunity cases.
 
 ```bash
 # Run all golden tests
