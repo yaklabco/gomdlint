@@ -28,12 +28,11 @@ func NewNoBareURLsRule() *NoBareURLsRule {
 	}
 }
 
-// bareURLPattern matches bare URLs and emails.
-// It looks for URLs/emails that are not preceded by < or ( (which would indicate autolinks or markdown links).
-var bareURLPattern = regexp.MustCompile(`(?:^|[^<(\[])(https?://[^\s<>\[\]()]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?:[^>\])]|$)`)
+// bareURLPattern matches bare URLs and emails without consuming boundary characters.
+// Boundary validation (angle brackets, parens, brackets) is done in code after matching.
+var bareURLPattern = regexp.MustCompile(`https?://[^\s<>\[\]()]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
 
-// bareURLMatchGroups is the minimum submatch indices for bareURLPattern (full match + capture group).
-const bareURLMatchGroups = 4
+var emailCheckPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // Apply checks for bare URLs without angle brackets.
 func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
@@ -60,15 +59,10 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			continue
 		}
 
-		matches := bareURLPattern.FindAllSubmatchIndex(lineContent, -1)
+		matches := bareURLPattern.FindAllIndex(lineContent, -1)
 
 		for _, match := range matches {
-			if len(match) < bareURLMatchGroups {
-				continue
-			}
-
-			// match[2]:match[3] is the URL/email capture group.
-			urlStart, urlEnd := match[2], match[3]
+			urlStart, urlEnd := match[0], match[1]
 			url := string(lineContent[urlStart:urlEnd])
 
 			// Skip if the URL is inside a code span.
@@ -76,9 +70,20 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 				continue
 			}
 
-			// Skip if already wrapped in angle brackets.
-			if urlStart > 0 && lineContent[urlStart-1] == '<' {
-				continue
+			// Skip if preceded by <, (, or [ (autolink, markdown link, or reference).
+			if urlStart > 0 {
+				prev := lineContent[urlStart-1]
+				if prev == '<' || prev == '(' || prev == '[' {
+					continue
+				}
+			}
+
+			// Skip if followed by >, ), or ] (closing autolink, link, or reference).
+			if urlEnd < len(lineContent) {
+				next := lineContent[urlEnd]
+				if next == '>' || next == ')' || next == ']' {
+					continue
+				}
 			}
 
 			line := ctx.File.Lines[lineNum-1]
@@ -131,5 +136,5 @@ func isAutolinkLine(line []byte) bool {
 }
 
 func isEmail(s string) bool {
-	return regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`).MatchString(s)
+	return emailCheckPattern.MatchString(s)
 }

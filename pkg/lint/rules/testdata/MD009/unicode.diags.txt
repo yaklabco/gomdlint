@@ -1,0 +1,3 @@
+unicode.input.md:3:13 warning Trailing whitespace () [fixable]
+unicode.input.md:4:13 warning Trailing whitespace () [fixable]
+unicode.input.md:5:16 warning Trailing whitespace () [fixable]

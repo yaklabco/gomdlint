@@ -1,0 +1,2 @@
+adjacent.input.md:5:1 warning No space after hash on ATX style heading () [fixable]
+adjacent.input.md:6:1 warning No space after hash on ATX style heading () [fixable]

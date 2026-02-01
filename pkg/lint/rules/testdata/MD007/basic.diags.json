@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD007",
+    "name": "",
+    "line": 4,
+    "column": 7,
+    "message": "Unordered list indentation 4 does not match expected 2",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD007",
+    "name": "",
+    "line": 5,
+    "column": 11,
+    "message": "Unordered list indentation 8 does not match expected 4",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD007",
+    "name": "",
+    "line": 10,
+    "column": 6,
+    "message": "Unordered list indentation 3 does not match expected 2",
+    "severity": "warning",
+    "fixable": true
+  }
+]

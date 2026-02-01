@@ -7,7 +7,7 @@ hash_fast: true
 # Git hooks - run targets on git events
 hooks:
   pre-commit:
-    - target: lint:fmt
-    - target: lint
+    - target: lint:fmtcheck
+    - target: lint:ci
   pre-push:
     - target: test

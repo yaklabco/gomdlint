@@ -1,0 +1,8 @@
+multiple.input.md:3:2 warning List marker space 2 does not match expected 1 () [fixable]
+multiple.input.md:4:2 warning List marker space 2 does not match expected 1 () [fixable]
+multiple.input.md:5:2 warning List marker space 2 does not match expected 1 () [fixable]
+multiple.input.md:9:3 warning List marker space 2 does not match expected 1 () [fixable]
+multiple.input.md:10:3 warning List marker space 2 does not match expected 1 () [fixable]
+multiple.input.md:11:3 warning List marker space 2 does not match expected 1 () [fixable]
+multiple.input.md:15:2 warning List marker space 3 does not match expected 1 () [fixable]
+multiple.input.md:16:2 warning List marker space 3 does not match expected 1 () [fixable]

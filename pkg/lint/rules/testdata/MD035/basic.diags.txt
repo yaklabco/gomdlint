@@ -1,0 +1,1 @@
+basic.input.md:9:1 warning Horizontal rule style "***" does not match expected "---" () [fixable]

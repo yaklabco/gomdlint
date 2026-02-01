@@ -52,8 +52,6 @@ func newRendererFacade(renderer Renderer, opts Options) *reporterFacade {
 }
 
 // New creates a Reporter for the specified options.
-//
-//nolint:ireturn // Returning Reporter interface is intentional for format selection
 func New(opts Options) (Reporter, error) {
 	// Default writer to stdout if not specified
 	if opts.Writer == nil {

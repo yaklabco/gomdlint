@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 7,
+    "column": 7,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "",
+    "line": 9,
+    "column": 7,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -1,0 +1,2 @@
+basic.input.md:3:11 warning Reversed link syntax detected () [fixable]
+basic.input.md:5:9 warning Reversed link syntax detected () [fixable]

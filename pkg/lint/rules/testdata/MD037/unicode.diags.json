@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD037",
+    "name": "",
+    "line": 3,
+    "column": 10,
+    "message": "Spaces inside emphasis markers",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD037",
+    "name": "",
+    "line": 5,
+    "column": 10,
+    "message": "Spaces inside emphasis markers",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -1,0 +1,2 @@
+frontmatter.input.md:7:7 warning Bare URL used () [fixable]
+frontmatter.input.md:9:7 warning Bare URL used () [fixable]

@@ -1,0 +1,2 @@
+frontmatter.input.md:7:10 warning Excessive leading space inside code span () [fixable]
+frontmatter.input.md:9:10 warning Excessive trailing space inside code span () [fixable]

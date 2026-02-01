@@ -1,0 +1,5 @@
+multiple.input.md:5:1 warning Heading is indented by 1 character(s) () [fixable]
+multiple.input.md:9:1 warning Heading is indented by 2 character(s) () [fixable]
+multiple.input.md:13:1 warning Heading is indented by 3 character(s) () [fixable]
+multiple.input.md:17:1 warning Heading is indented by 1 character(s) () [fixable]
+multiple.input.md:21:1 warning Heading is indented by 2 character(s) () [fixable]

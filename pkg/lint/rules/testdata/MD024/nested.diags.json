@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD024",
+    "name": "",
+    "line": 7,
+    "column": 6,
+    "message": "Duplicate heading text \"Overview\" (first occurrence on line 3)",
+    "severity": "warning",
+    "fixable": false
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD051",
+    "name": "",
+    "line": 25,
+    "column": 4,
+    "message": "Link fragment '#setup' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD051",
+    "name": "",
+    "line": 26,
+    "column": 4,
+    "message": "Link fragment '#usage' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD051",
+    "name": "",
+    "line": 27,
+    "column": 4,
+    "message": "Link fragment '#nonexistent-section' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD032",
+    "name": "",
+    "line": 8,
+    "column": 1,
+    "message": "Missing blank line before list",
+    "severity": "warning",
+    "fixable": true
+  }
+]

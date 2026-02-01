@@ -1,0 +1,2 @@
+frontmatter.input.md:6:28 warning Heading ends with trailing punctuation "." () [fixable]
+frontmatter.input.md:10:37 warning Heading ends with trailing punctuation ":" () [fixable]

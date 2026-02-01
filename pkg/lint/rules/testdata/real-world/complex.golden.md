@@ -146,7 +146,7 @@ You can also use [implicit reference links][].
 
 Automatic URL linking: <https://www.example.com>
 
-Email autolink: <u<ser@example.co>m>
+Email autolink: <user@example.com>
 
 ### Images
 
@@ -186,11 +186,11 @@ Below is a horizontal rule:
 
 Another style:
 
-***
+---
 
 And another:
 
-___
+---
 
 ## Tables
 

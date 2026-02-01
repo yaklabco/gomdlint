@@ -1,0 +1,5 @@
+basic.input.md:3:22 warning HTML element 'br' is not allowed ()
+basic.input.md:5:12 warning HTML element 'div' is not allowed ()
+basic.input.md:5:30 warning HTML element 'div' is not allowed ()
+basic.input.md:7:5 warning HTML element 'em' is not allowed ()
+basic.input.md:7:17 warning HTML element 'em' is not allowed ()

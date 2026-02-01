@@ -333,15 +333,6 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 }
 
 func TestEmphasisStyleRule_Fix(t *testing.T) {
-	// NOTE: The EmphasisStyleRule declares CanFix() = true, but has two limitations:
-	// 1. The parser's SourcePosition points to the emphasis CONTENT, not the MARKER.
-	//    detectEmphasisStyle() looks at lineContent[pos.StartColumn-1], which returns
-	//    the first character of the emphasized text (e.g., 't' in *text*), not the marker.
-	// 2. The buildStyleFix() method returns nil (fix not yet implemented).
-	//
-	// As a result, style detection fails and no violations are detected.
-	// These tests document this current behavior. When the parser is fixed to provide
-	// marker positions, update the wantDiags values accordingly.
 	tests := []struct {
 		name      string
 		input     string
@@ -362,26 +353,22 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			wantFix:   "Some _text_ and _more_ here.\n",
 		},
 		{
-			// Parser limitation: SourcePosition points to content, not marker.
-			// Style detection fails, so no violation detected.
-			name:      "style mismatch - consistent mode (parser limitation - no detection)",
+			name:      "style mismatch - consistent mode",
 			input:     "Some *text* and _more_ here.\n",
-			wantDiags: 0, // Should be 1 when parser provides marker positions
+			wantDiags: 1,
 			wantFix:   "Some *text* and _more_ here.\n",
 		},
 		{
-			// Parser limitation: Style detection fails
-			name:      "explicit style config - asterisk required (parser limitation - no detection)",
+			name:      "explicit style config - asterisk required",
 			input:     "Some _text_ here.\n",
-			wantDiags: 0, // Should be 1 when parser provides marker positions
+			wantDiags: 1,
 			wantFix:   "Some _text_ here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
-			// Parser limitation: Style detection fails
-			name:      "explicit style config - underscore required (parser limitation - no detection)",
+			name:      "explicit style config - underscore required",
 			input:     "Some *text* here.\n",
-			wantDiags: 0, // Should be 1 when parser provides marker positions
+			wantDiags: 1,
 			wantFix:   "Some *text* here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
@@ -425,23 +412,11 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
 			assert.Equal(t, tt.wantFix, string(fixed))
-
-			// Note: We cannot verify idempotency here because no fixes are applied,
-			// so the diagnostics will remain on re-run for violation cases.
 		})
 	}
 }
 
 func TestStrongStyleRule_Fix(t *testing.T) {
-	// NOTE: The StrongStyleRule declares CanFix() = true, but has two limitations:
-	// 1. The parser's SourcePosition points to the strong CONTENT, not the MARKER.
-	//    detectStrongStyle() looks at lineContent[pos.StartColumn-1], which returns
-	//    the first character of the strong text (e.g., 't' in **text**), not the marker.
-	// 2. The buildStyleFix() method returns nil (fix not yet implemented).
-	//
-	// As a result, style detection fails and no violations are detected.
-	// These tests document this current behavior. When the parser is fixed to provide
-	// marker positions, update the wantDiags values accordingly.
 	tests := []struct {
 		name      string
 		input     string
@@ -462,26 +437,22 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			wantFix:   "Some __text__ and __more__ here.\n",
 		},
 		{
-			// Parser limitation: SourcePosition points to content, not marker.
-			// Style detection fails, so no violation detected.
-			name:      "style mismatch - consistent mode (parser limitation - no detection)",
+			name:      "style mismatch - consistent mode",
 			input:     "Some **text** and __more__ here.\n",
-			wantDiags: 0, // Should be 1 when parser provides marker positions
+			wantDiags: 1,
 			wantFix:   "Some **text** and __more__ here.\n",
 		},
 		{
-			// Parser limitation: Style detection fails
-			name:      "explicit style config - asterisk required (parser limitation - no detection)",
+			name:      "explicit style config - asterisk required",
 			input:     "Some __text__ here.\n",
-			wantDiags: 0, // Should be 1 when parser provides marker positions
+			wantDiags: 1,
 			wantFix:   "Some __text__ here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
-			// Parser limitation: Style detection fails
-			name:      "explicit style config - underscore required (parser limitation - no detection)",
+			name:      "explicit style config - underscore required",
 			input:     "Some **text** here.\n",
-			wantDiags: 0, // Should be 1 when parser provides marker positions
+			wantDiags: 1,
 			wantFix:   "Some **text** here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
@@ -525,9 +496,6 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
 			assert.Equal(t, tt.wantFix, string(fixed))
-
-			// Note: We cannot verify idempotency here because no fixes are applied,
-			// so the diagnostics will remain on re-run for violation cases.
 		})
 	}
 }

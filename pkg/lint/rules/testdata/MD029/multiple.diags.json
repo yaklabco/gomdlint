@@ -1,0 +1,65 @@
+[
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 4,
+    "column": 4,
+    "message": "Ordered list item numbered 3 should be 2",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 5,
+    "column": 4,
+    "message": "Ordered list item numbered 5 should be 3",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 10,
+    "column": 4,
+    "message": "Ordered list item numbered 1 should be 2",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 11,
+    "column": 4,
+    "message": "Ordered list item numbered 1 should be 3",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 12,
+    "column": 4,
+    "message": "Ordered list item numbered 1 should be 4",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 17,
+    "column": 5,
+    "message": "Ordered list item numbered 10 should be 2",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "",
+    "line": 18,
+    "column": 5,
+    "message": "Ordered list item numbered 20 should be 3",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD046",
+    "name": "",
+    "line": 15,
+    "column": 5,
+    "message": "Code block style 'indented' does not match expected 'fenced'",
+    "severity": "warning",
+    "fixable": false
+  }
+]

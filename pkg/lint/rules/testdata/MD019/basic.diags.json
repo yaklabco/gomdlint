@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD019",
+    "name": "",
+    "line": 1,
+    "column": 2,
+    "message": "Multiple spaces (2) after hash on ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD019",
+    "name": "",
+    "line": 3,
+    "column": 3,
+    "message": "Multiple spaces (3) after hash on ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD019",
+    "name": "",
+    "line": 5,
+    "column": 4,
+    "message": "Multiple spaces (2) after hash on ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD019",
+    "name": "",
+    "line": 9,
+    "column": 3,
+    "message": "Multiple spaces (2) after hash on ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  }
+]

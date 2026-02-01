@@ -1,0 +1,2 @@
+frontmatter.input.md:6:2 warning Multiple spaces (2) after hash on ATX style heading () [fixable]
+frontmatter.input.md:10:3 warning Multiple spaces (3) after hash on ATX style heading () [fixable]

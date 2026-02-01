@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD053",
+    "name": "",
+    "line": 11,
+    "column": 1,
+    "message": "Unused reference definition [stale-ref]",
+    "severity": "warning",
+    "fixable": false
+  }
+]

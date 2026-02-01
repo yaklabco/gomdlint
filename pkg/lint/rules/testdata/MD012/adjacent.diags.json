@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 3,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 3, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 9,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 3, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "",
+    "line": 15,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 3, max 1)",
+    "severity": "warning",
+    "fixable": true
+  }
+]

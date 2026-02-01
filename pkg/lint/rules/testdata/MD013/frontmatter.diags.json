@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD013",
+    "name": "",
+    "line": 9,
+    "column": 121,
+    "message": "Line length 170 exceeds maximum 120",
+    "severity": "warning",
+    "fixable": true
+  }
+]

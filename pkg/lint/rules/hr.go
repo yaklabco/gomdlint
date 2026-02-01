@@ -7,6 +7,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // styleConsistent is the configuration value for consistent style detection.
@@ -31,17 +32,16 @@ func NewHRStyleRule() *HRStyleRule {
 }
 
 // Apply checks for consistent horizontal rule style.
+//
+// This uses the token stream instead of AST node positions because goldmark
+// does not assign source positions to ThematicBreak AST nodes (Lines.Len() == 0).
+// The tokenizer correctly emits TokThematicBreak tokens with accurate byte offsets.
 func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	configStyle := ctx.OptionString("style", styleConsistent)
-
-	hrs := ctx.ThematicBreaks()
-	if len(hrs) == 0 {
-		return nil, nil
-	}
 
 	var diags []lint.Diagnostic
 	var expectedStyle string
@@ -50,18 +50,26 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		expectedStyle = configStyle
 	}
 
-	for _, hr := range hrs {
+	for _, tok := range ctx.File.Tokens {
+		if tok.Kind != mdast.TokThematicBreak {
+			continue
+		}
+
 		if ctx.Cancelled() {
 			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
 		}
 
-		pos := hr.SourcePosition()
-		if !pos.IsValid() {
+		line, col := ctx.File.LineAt(tok.StartOffset)
+		if line == 0 {
 			continue
 		}
 
-		lineContent := lint.LineContent(ctx.File, pos.StartLine)
-		hrStyle := string(bytes.TrimSpace(lineContent))
+		// Skip HRs inside code blocks.
+		if ctx.IsLineInCodeBlock(line) {
+			continue
+		}
+
+		hrStyle := string(bytes.TrimSpace(tok.Text(ctx.File.Content)))
 
 		// Set expected style from first HR if consistent mode.
 		if expectedStyle == "" {
@@ -71,13 +79,20 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 		// Check for style mismatch.
 		if hrStyle != expectedStyle {
-			line := ctx.File.Lines[pos.StartLine-1]
+			lineInfo := ctx.File.Lines[line-1]
+
+			pos := mdast.SourcePosition{
+				StartLine:   line,
+				StartColumn: col,
+				EndLine:     line,
+				EndColumn:   col + len(hrStyle),
+			}
 
 			// Build fix.
 			builder := fix.NewEditBuilder()
-			builder.ReplaceRange(line.StartOffset, line.NewlineStart, expectedStyle)
+			builder.ReplaceRange(lineInfo.StartOffset, lineInfo.NewlineStart, expectedStyle)
 
-			diag := lint.NewDiagnostic(r.ID(), hr,
+			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 				fmt.Sprintf("Horizontal rule style %q does not match expected %q", hrStyle, expectedStyle)).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion(fmt.Sprintf("Use %q for all horizontal rules", expectedStyle)).

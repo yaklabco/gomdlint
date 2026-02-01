@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD042",
+    "name": "",
+    "line": 0,
+    "column": 0,
+    "message": "Link has empty text",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD042",
+    "name": "",
+    "line": 9,
+    "column": 22,
+    "message": "Link has empty destination",
+    "severity": "warning",
+    "fixable": false
+  }
+]
