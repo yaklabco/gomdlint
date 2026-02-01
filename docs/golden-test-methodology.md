@@ -44,11 +44,7 @@ None of this diminishes markdownlint's value. Anson has maintained it since 2015
 | Configuration | YAML (flavors, per-rule options) | JSON/YAML (per-rule options, custom rules) |
 | Ecosystem | CLI, Go library | CLI, VS Code extension, GitHub Action, npm library, custom rule plugins |
 
-## What is gomdlint?
-
-gomdlint is a Markdown linter written in Go. It checks `.md` files against 55 rules covering whitespace, heading structure, list formatting, link syntax, code blocks, emphasis style, HTML usage, and GFM table layout. 37 of the rules can auto-fix violations — the tool rewrites the file in place with the corrections applied.
-
-### Architecture
+## How gomdlint works
 
 The processing pipeline has four stages:
 
