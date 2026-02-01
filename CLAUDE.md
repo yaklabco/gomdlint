@@ -55,8 +55,20 @@ Only create `.input.md` files by hand. The other 3 files are generated with `-up
 | Skill | When to Use |
 |-------|-------------|
 | `golden-test-gap-analysis` | Before creating golden tests — analyze which rules need coverage |
-| `golden-test-authoring` | When creating golden test input files — enforces conventions |
-| `golden-test-verification` | After generating golden files — verify correctness |
+| `golden-test-authoring` | When creating golden test input files — enforces conventions and detects bugs |
+| `golden-test-verification` | After generating golden files — verify correctness and check bug reports |
+| `golden-test-bug-fixing` | When fixing rule bugs discovered during golden test creation |
+
+## Bug Report Convention
+
+When golden test agents discover rule implementation bugs:
+
+- Reports are stored in `.claude/bug-reports/<RULE_ID>-<slug>.md`
+- Reports follow a structured format with YAML frontmatter (rule_id, status, severity, affected_files)
+- Status lifecycle: `open` -> `fixing` -> `fixed` -> `verified`
+- Blocking bugs prevent golden file generation for the affected rule
+- Bug fixes must be completed before golden files can be baselined
+- The authoring skill's Bug Detection Protocol defines when and how to file reports
 
 ## Common Gotchas When Writing Test Input Files
 

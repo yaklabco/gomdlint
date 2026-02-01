@@ -248,3 +248,61 @@ go test ./pkg/lint/rules/... -run "TestGoldenRoundTrip/<RULE_ID>/<scenario>"
 | Starting without H1 | Triggers MD041 unexpectedly | Start with `# Heading` unless testing MD041 |
 | Inconsistent heading style | Triggers MD003 unexpectedly | Use ATX style consistently |
 | Non-incrementing headings | Triggers MD001 unexpectedly | Use proper heading hierarchy |
+
+## Bug Detection Protocol
+
+After every `go test -update` run, you MUST check for anomalies before accepting the generated golden files.
+
+### Anomaly Checklist
+
+| Anomaly | How to Detect | What It Means |
+|---------|--------------|---------------|
+| Zero-diagnostic | `.diags.json` is `[]` for a non-`clean`, non-`code_block_immunity` scenario | Rule detection is broken — the rule failed to find violations that are clearly present in the input |
+| Golden-equals-input | `.golden.md` is byte-identical to `.input.md` for a fixable rule with violations | Rule fix is broken — the rule either didn't detect or didn't generate fixes |
+| Round-trip failure | `TestGoldenRoundTrip` fails with fixable diagnostics remaining | Fix is non-idempotent or creates new violations (potential infinite loop) |
+| Position anomaly | Diagnostics report line 0 or column 0 | Rule has a position calculation bug |
+
+### When an Anomaly is Detected
+
+You MUST NOT work around the bug. Do NOT accept broken output as a baseline.
+
+1. **Stop** generating golden files for that rule
+2. **Delete** the generated `.golden.md`, `.diags.json`, `.diags.txt` (keep only `.input.md`)
+3. **Investigate briefly** — read the rule source, identify whether the issue is in source position lookup, style detection, regex matching, etc.
+4. **Write a bug report** to `.claude/bug-reports/<RULE_ID>-<slug>.md` using this format:
+
+```yaml
+---
+rule_id: <RULE_ID>
+status: open
+severity: blocking
+discovered_by: golden-test-authoring
+discovered_during: <scenario name>
+affected_files:
+  - pkg/lint/rules/<rule_file>.go
+related_test_files:
+  - pkg/lint/rules/testdata/<RULE_ID>/<scenario>.input.md
+---
+
+# <RULE_ID>: <Short description>
+
+## Symptom
+[What you observed — e.g., "Zero diagnostics for input with mixed HR styles"]
+
+## Root Cause
+[Brief analysis — e.g., "SourcePosition() returns invalid because goldmark provides no line info for ThematicBreak nodes"]
+
+## Evidence
+[Command output or file contents showing the failure]
+
+## Proposed Fix
+[Approach if apparent — e.g., "Use token stream instead of AST positions"]
+```
+
+5. **Return** to the orchestrator with blocked status including the rule ID and bug report path
+6. **Do NOT** generate any other scenarios for that rule until the bug is fixed
+
+### What to Keep vs. Delete
+
+- **Keep**: `.input.md` files — these are hand-crafted, correct, and represent what the test should exercise
+- **Delete**: `.golden.md`, `.diags.json`, `.diags.txt` — these are generated from broken behavior and must not be committed

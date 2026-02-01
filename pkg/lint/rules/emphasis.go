@@ -336,11 +336,13 @@ func (r *EmphasisStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 
 func (r *EmphasisStyleRule) detectEmphasisStyle(file *mdast.FileSnapshot, pos mdast.SourcePosition) string {
 	lineContent := lint.LineContent(file, pos.StartLine)
-	if pos.StartColumn < 1 || pos.StartColumn > len(lineContent) {
+	if pos.StartColumn < 2 || pos.StartColumn > len(lineContent) {
 		return ""
 	}
 
-	ch := lineContent[pos.StartColumn-1]
+	// SourcePosition points to the content, not the marker.
+	// The marker is immediately before the content.
+	ch := lineContent[pos.StartColumn-2]
 	switch ch {
 	case '*':
 		return "asterisk"
@@ -436,14 +438,18 @@ func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 
 func (r *StrongStyleRule) detectStrongStyle(file *mdast.FileSnapshot, pos mdast.SourcePosition) string {
 	lineContent := lint.LineContent(file, pos.StartLine)
-	if pos.StartColumn < 1 || pos.StartColumn+1 > len(lineContent) {
+	if pos.StartColumn < 3 || pos.StartColumn > len(lineContent) {
 		return ""
 	}
 
-	ch := lineContent[pos.StartColumn-1]
-	if ch == '*' && lineContent[pos.StartColumn] == '*' {
+	// SourcePosition points to the content, not the marker.
+	// For strong emphasis, two marker chars are before the content.
+	ch1 := lineContent[pos.StartColumn-2]
+	ch2 := lineContent[pos.StartColumn-3]
+	if ch1 == '*' && ch2 == '*' {
 		return "asterisk"
-	} else if ch == '_' && lineContent[pos.StartColumn] == '_' {
+	}
+	if ch1 == '_' && ch2 == '_' {
 		return "underscore"
 	}
 	return ""

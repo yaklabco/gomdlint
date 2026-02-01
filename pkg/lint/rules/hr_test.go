@@ -68,17 +68,6 @@ func TestHRStyleRule_Metadata(t *testing.T) {
 }
 
 func TestHRStyleRule_Fix(t *testing.T) {
-	// NOTE: Currently, the goldmark parser does not provide byte range information
-	// for ThematicBreak nodes (Lines.Len() == 0), which means the TokenRangeAssigner
-	// cannot assign valid token ranges to them. As a result, SourcePosition().IsValid()
-	// returns false, and the HR style rule skips all thematic breaks.
-	//
-	// This is a known parser limitation. Once the parser is enhanced to provide
-	// positions for thematic breaks (e.g., by using the tokenizer's TokThematicBreak
-	// tokens directly), these tests should be updated with the expected fix behavior.
-	//
-	// For now, we test that the rule correctly produces 0 diagnostics because
-	// positions are invalid. The wantFix values reflect no changes applied.
 	tests := []struct {
 		name      string
 		input     string
@@ -93,18 +82,16 @@ func TestHRStyleRule_Fix(t *testing.T) {
 			wantFix:   "---\n\nSome text\n\n---\n",
 		},
 		{
-			// Would be 1 diagnostic if positions were valid
-			name:      "single violation - consistent mode (parser limitation - no positions)",
+			name:      "single violation - consistent mode",
 			input:     "---\n\nSome text\n\n***\n",
-			wantDiags: 0, // Should be 1 when parser is fixed
-			wantFix:   "---\n\nSome text\n\n***\n",
+			wantDiags: 1,
+			wantFix:   "---\n\nSome text\n\n---\n",
 		},
 		{
-			// Would be 2 diagnostics if positions were valid
-			name:      "multiple violations - consistent mode (parser limitation - no positions)",
+			name:      "multiple violations - consistent mode",
 			input:     "---\n\nText\n\n***\n\nMore text\n\n___\n",
-			wantDiags: 0, // Should be 2 when parser is fixed
-			wantFix:   "---\n\nText\n\n***\n\nMore text\n\n___\n",
+			wantDiags: 2,
+			wantFix:   "---\n\nText\n\n---\n\nMore text\n\n---\n",
 		},
 		{
 			name:      "empty file",
@@ -113,19 +100,17 @@ func TestHRStyleRule_Fix(t *testing.T) {
 			wantFix:   "",
 		},
 		{
-			// Would be 2 diagnostics if positions were valid
-			name:      "explicit style config - fix dashes to asterisks (parser limitation - no positions)",
+			name:      "explicit style config - fix dashes to asterisks",
 			input:     "---\n\nSome text\n\n---\n",
-			wantDiags: 0, // Should be 2 when parser is fixed
-			wantFix:   "---\n\nSome text\n\n---\n",
+			wantDiags: 2,
+			wantFix:   "***\n\nSome text\n\n***\n",
 			config:    map[string]any{"style": "***"},
 		},
 		{
-			// Would be 2 diagnostics if positions were valid
-			name:      "explicit style config - mixed styles (parser limitation - no positions)",
+			name:      "explicit style config - mixed styles",
 			input:     "---\n\nText\n\n***\n\nMore\n\n___\n",
-			wantDiags: 0, // Should be 2 when parser is fixed
-			wantFix:   "---\n\nText\n\n***\n\nMore\n\n___\n",
+			wantDiags: 2,
+			wantFix:   "---\n\nText\n\n---\n\nMore\n\n---\n",
 			config:    map[string]any{"style": "---"},
 		},
 	}

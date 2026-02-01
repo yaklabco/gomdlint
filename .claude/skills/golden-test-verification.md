@@ -9,6 +9,21 @@ description: Use when verifying golden test output files after generation. Ensur
 
 Verify that generated golden test files are correct. This is the critical quality gate — the golden files ARE the source of truth for fix behavior, so they must be manually verified before being committed.
 
+## Pre-Verification: Bug Report Check
+
+Before verifying any golden files for a rule:
+
+1. Check if `.claude/bug-reports/<RULE_ID>-*.md` exists with `status: open` or `status: fixing`
+2. If a bug report exists with those statuses, **skip verification for that rule** and flag it in your output
+3. Only verify rules that have no open bug reports
+
+After a bug has been fixed (`status: fixed`):
+
+1. Regenerate all golden files: `go test -update ./pkg/lint/rules/... -run TestGoldenPerRule/<RULE_ID>`
+2. Verify the regenerated files using the standard checklist below
+3. Confirm round-trip passes
+4. Update the bug report status to `verified`
+
 ## Verification Checklist
 
 For each newly generated test case, verify all 4 files:
@@ -86,6 +101,10 @@ go test -v ./pkg/lint/rules/... -run "TestGolden"
 | `.golden.md` has unexpected changes far from violation | Fix has incorrect byte range (too wide) |
 | Multiple violations but only some are fixed | Edit conflict resolution is dropping valid edits |
 | `diags.json` has `"name": ""` | Rule implementation may not set the name field — check if this is the existing convention |
+| `.diags.json` is `[]` for a `basic` scenario with clear violations | **Rule detection is broken** — file a bug report, do not baseline |
+| `.golden.md` identical to `.input.md` for fixable rule with violations | **Rule fix is broken** — file a bug report, do not baseline |
+| Round-trip adds NEW diagnostics on second pass | **Fix creates new violations** (potential infinite loop) — file a bug report |
+| All scenarios for a rule produce `[]` diagnostics | **Rule is completely non-functional** — file a bug report |
 
 ## When a Golden File Looks Wrong
 

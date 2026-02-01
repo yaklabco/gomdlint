@@ -4,7 +4,13 @@ complex.input.md:114:1 warning Fenced code block has no language specified ()
 complex.input.md:123:5 warning Code block style 'indented' does not match expected 'fenced' ()
 complex.input.md:142:12 warning Bare URL used () [fixable]
 complex.input.md:143:29 warning Bare URL used () [fixable]
-complex.input.md:149:19 warning Bare email address used () [fixable]
 complex.input.md:159:11 warning Bare URL used () [fixable]
+complex.input.md:165:47 warning Emphasis style "underscore" does not match expected "asterisk" ()
+complex.input.md:167:48 warning Strong style "underscore" does not match expected "asterisk" ()
+complex.input.md:173:17 warning Emphasis style "underscore" does not match expected "asterisk" ()
+complex.input.md:173:17 warning Strong style "underscore" does not match expected "asterisk" ()
+complex.input.md:175:16 warning Emphasis style "underscore" does not match expected "asterisk" ()
+complex.input.md:189:1 warning Horizontal rule style "***" does not match expected "---" () [fixable]
+complex.input.md:193:1 warning Horizontal rule style "___" does not match expected "---" () [fixable]
 complex.input.md:238:7 warning Heading needs 1 blank line(s) below, found 0 () [fixable]
 complex.input.md:245:1 warning Missing blank line before fenced code block () [fixable]

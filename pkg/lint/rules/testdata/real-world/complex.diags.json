@@ -56,18 +56,72 @@
   {
     "rule": "MD034",
     "name": "",
-    "line": 149,
-    "column": 19,
-    "message": "Bare email address used",
+    "line": 159,
+    "column": 11,
+    "message": "Bare URL used",
     "severity": "warning",
     "fixable": true
   },
   {
-    "rule": "MD034",
+    "rule": "MD049",
     "name": "",
-    "line": 159,
-    "column": 11,
-    "message": "Bare URL used",
+    "line": 165,
+    "column": 47,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD050",
+    "name": "",
+    "line": 167,
+    "column": 48,
+    "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD049",
+    "name": "",
+    "line": 173,
+    "column": 17,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD050",
+    "name": "",
+    "line": 173,
+    "column": 17,
+    "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD049",
+    "name": "",
+    "line": 175,
+    "column": 16,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD035",
+    "name": "",
+    "line": 189,
+    "column": 1,
+    "message": "Horizontal rule style \"***\" does not match expected \"---\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD035",
+    "name": "",
+    "line": 193,
+    "column": 1,
+    "message": "Horizontal rule style \"___\" does not match expected \"---\"",
     "severity": "warning",
     "fixable": true
   },

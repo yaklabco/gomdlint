@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "rule": "MD035",
+    "name": "",
+    "line": 9,
+    "column": 1,
+    "message": "Horizontal rule style \"***\" does not match expected \"---\"",
+    "severity": "warning",
+    "fixable": true
+  }
+]
