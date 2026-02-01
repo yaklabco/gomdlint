@@ -14,7 +14,7 @@ This document covers the test system itself (how golden files work, what they ve
 
 ## Why write another markdown linter?
 
-Linters are deceptively hard to build well. Parsing is the easy part — the real difficulty is in everything that comes after: tracking source positions accurately through an AST that doesn't always preserve them, generating edits that reference the right byte offsets in the original document, applying multiple edits without one fix invalidating the offsets of the next, and doing all of this without corrupting the file when something goes wrong.
+Linters are deceptively hard to build well. Parsing is the easy part — the real difficulty is in everything that comes after: tracking source positions accurately through an abstract syntax tree (AST) that doesn't always preserve them, generating edits that reference the right byte offsets in the original document, applying multiple edits without one fix invalidating the offsets of the next, and doing all of this without corrupting the file when something goes wrong.
 
 Markdown makes this harder than most languages. The CommonMark spec is over 600 pages of edge cases. Inline syntax (emphasis, links, code spans) interacts in ways that surprise even experienced users. Different parsers disagree on ambiguous constructs. And source positions from the parser are sometimes approximate or missing entirely — as we discovered when goldmark's `ThematicBreak` nodes turned out to have no line information at all.
 
