@@ -12,6 +12,38 @@ The output speaks for itself: 477 golden tests covering all 55 rules, a round-tr
 
 This document covers the test system itself (how golden files work, what they verify, why the round-trip test matters) and the agent-driven process we used to create them (how the skills work, how we parallelized the effort, what went right and what we learned).
 
+## Why write another markdown linter?
+
+Linters are deceptively hard to build well. Parsing is the easy part — the real difficulty is in everything that comes after: tracking source positions accurately through an AST that doesn't always preserve them, generating edits that reference the right byte offsets in the original document, applying multiple edits without one fix invalidating the offsets of the next, and doing all of this without corrupting the file when something goes wrong.
+
+Markdown makes this harder than most languages. The CommonMark spec is over 600 pages of edge cases. Inline syntax (emphasis, links, code spans) interacts in ways that surprise even experienced users. Different parsers disagree on ambiguous constructs. And source positions from the parser are sometimes approximate or missing entirely — as we discovered when goldmark's `ThematicBreak` nodes turned out to have no line information at all.
+
+The dominant tool in this space is David Anson's [markdownlint](https://github.com/DavidAnson/markdownlint) — a JavaScript library (with the [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) CLI) that powers the widely-used VS Code extension and countless CI pipelines. It's a well-maintained, battle-tested project with ~53 active rules, a clean plugin API for custom rules, and a large community. If you need a markdown linter today, markdownlint is the safe choice.
+
+gomdlint was motivated by gaps that mattered for our specific use case:
+
+**More auto-fix coverage.** markdownlint supports auto-fix for ~31 of its rules (~58%). Each fix is described by a single `fixInfo` object operating on one line, and fixes are applied in a single pass — conflicting edits on the same line are skipped. gomdlint fixes 37 of 55 rules (67%) using byte-range edits (`TextEdit`) that can span multiple lines, with a multi-pass loop that re-lints after each pass so previously conflicting edits get a second chance.
+
+**Performance on large codebases.** Node.js has unavoidable startup overhead and single-threaded execution. gomdlint compiles to a native binary and processes files in parallel across all CPU cores. For a single file the difference is negligible, but across a monorepo with thousands of markdown files, it adds up.
+
+**Go-native integration.** We wanted something that could be `go install`-ed, embedded as a library, and tested with standard Go tooling — not a Node.js dependency in a Go project's CI pipeline.
+
+None of this diminishes markdownlint's value. Anson has maintained it since 2015, driven a migration from markdown-it to micromark, and built an ecosystem (VS Code extension, GitHub Actions, CLI tools) that gomdlint doesn't attempt to replicate. gomdlint is a narrower tool: a fast, fixable-first linter for teams that want Go-native tooling and aggressive auto-correction.
+
+### By the numbers
+
+| | gomdlint | markdownlint |
+|---|---|---|
+| Language | Go | JavaScript (Node.js) |
+| Rules | 55 | ~53 |
+| Auto-fixable | 37 (67%) | ~31 (58%) |
+| Fix model | Byte-range `TextEdit`, multi-pass with conflict resolution | Line-based `fixInfo`, single-pass |
+| Parser | goldmark (AST + token stream) | micromark |
+| Parallel execution | Worker pool, `NumCPU()` goroutines | Single-threaded |
+| Output formats | text, table, JSON, SARIF, diff, summary | JSON, SARIF (via CLI) |
+| Configuration | YAML (flavors, per-rule options) | JSON/YAML (per-rule options, custom rules) |
+| Ecosystem | CLI, Go library | CLI, VS Code extension, GitHub Action, npm library, custom rule plugins |
+
 ## What is gomdlint?
 
 gomdlint is a Markdown linter written in Go. It checks `.md` files against 55 rules covering whitespace, heading structure, list formatting, link syntax, code blocks, emphasis style, HTML usage, and GFM table layout. 37 of the rules can auto-fix violations — the tool rewrites the file in place with the corrections applied.
