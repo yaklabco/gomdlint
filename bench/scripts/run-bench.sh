@@ -59,10 +59,11 @@ run_linter() {
         local profile_base="$PROFILE_DIR/$repo_name"
         mkdir -p "$profile_base"
         $TIME_CMD -f '%e %M' -o "$tmp_time" gomdlint lint \
+            --quiet \
             --cpuprofile="$profile_base/cpu.pprof" \
             --memprofile="$profile_base/mem.pprof" \
             --trace="$profile_base/trace.out" \
-            "$repo_path" >"$tmp_out" 2>&1 || true
+            "$repo_path" 2>"$tmp_out" || true
     else
         # markdownlint: use find to get recursive file list
         $TIME_CMD -f '%e %M' -o "$tmp_time" bash -c "find \"$repo_path\" -name '*.md' -type f -print0 | xargs -0 markdownlint" >"$tmp_out" 2>&1 || true

@@ -1,10 +1,10 @@
 package reporter
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/runner"
@@ -125,22 +125,28 @@ type SARIFInsertedContent struct {
 // SARIFReporter formats results as SARIF.
 type SARIFReporter struct {
 	opts Options
-	out  io.Writer
+	bw   *bufio.Writer
 }
 
 // NewSARIFReporter creates a new SARIF reporter.
 func NewSARIFReporter(opts Options) *SARIFReporter {
 	return &SARIFReporter{
 		opts: opts,
-		out:  opts.Writer,
+		bw:   bufio.NewWriterSize(opts.Writer, bufWriterSize),
 	}
 }
 
 // Report implements Reporter.
-func (r *SARIFReporter) Report(_ context.Context, result *runner.Result) (int, error) {
+func (r *SARIFReporter) Report(_ context.Context, result *runner.Result) (_ int, err error) {
+	defer func() {
+		if flushErr := r.bw.Flush(); err == nil {
+			err = flushErr
+		}
+	}()
+
 	output := r.buildOutput(result)
 
-	encoder := json.NewEncoder(r.out)
+	encoder := json.NewEncoder(r.bw)
 	if !r.opts.Compact {
 		encoder.SetIndent("", "  ")
 	}

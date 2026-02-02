@@ -4,16 +4,15 @@ This document provides a rigorous analysis of gomdlint's performance characteris
 
 ## Executive Summary
 
-Benchmarks on real-world, open-source repositories demonstrate that gomdlint achieves an **average 507.3x speedup** over markdownlint, with individual repository improvements ranging from 72x to 1100x.
+Results pending re-run after performance fixes. Run `./bench/scripts/run-bench.sh` to generate current numbers.
 
-| Repository | Files | gomdlint | markdownlint | Speedup |
-|------------|-------|----------|--------------|---------|
-| book | 478 | 0.02s | 1.44s | 72.0x |
-| markdownlint | 515 | 0.02s | 3.10s | 155.0x |
-| react | 1917 | 0.02s | 18.60s | 930.0x |
-| vscode-docs | 744 | 0.02s | 5.58s | 279.0x |
-| website | 7340 | 0.02s | 22.01s | 1100.5x |
-| **Average** | | | | **507.3x** |
+## Methodology Correction
+
+Previous versions of this document reported an "average 507.3x speedup" with gomdlint completing in 0.02s for every repository regardless of size. Those results were invalid — gomdlint was likely exiting early (no files found or immediate error) rather than doing real work.
+
+Additionally, the benchmark script was measuring **lint + full report formatting + I/O**, not just lint time. Profiling revealed that 51% of CPU time was spent in write syscalls for diagnostic output, 6% in repeated file content parsing for source line context, and 23% in GC from string allocations — leaving only 9% for actual linting.
+
+The benchmark script now uses `--quiet` to measure pure lint time without reporting overhead. The reporter has also been optimized with buffered I/O and O(1) source line lookup.
 
 ## Test Environment
 
@@ -26,7 +25,7 @@ Benchmarks on real-world, open-source repositories demonstrate that gomdlint ach
 
 - **Go:** 1.25.6
 - **Node.js:** v25.2.1
-- **gomdlint:** development build (post-NodeCache optimization)
+- **gomdlint:** development build
 - **markdownlint-cli:** latest npm version
 
 ## Methodology
@@ -76,13 +75,12 @@ The median was chosen over mean to provide robustness against:
 
 #### Execution Conditions
 
-- **gomdlint:** Direct directory path argument
-- **markdownlint:** `find ... -name '*.md' | xargs markdownlint` (required for recursive processing)
+- **gomdlint:** Runs with `--quiet` to suppress output formatting, measuring pure lint time
+- **markdownlint:** `find ... -name '*.md' | xargs markdownlint` with output captured to temp file
 
 Both tools:
 - Process all Markdown files recursively
 - Run with default rule sets enabled
-- Output to `/dev/null` (timing only, not output formatting)
 
 ### Profiling Integration
 
@@ -99,24 +97,6 @@ These profiles enable post-hoc analysis of performance characteristics.
 
 ## Analysis
 
-### Speedup Characteristics
-
-The observed speedup shows strong correlation with repository size:
-
-| File Count | Speedup Range |
-|------------|---------------|
-| ~500 | 72–155x |
-| ~750 | 279x |
-| ~1900 | 930x |
-| ~7300 | 1100x |
-
-This super-linear scaling advantage stems from:
-
-1. **No interpreter startup:** Go compiles to native code; Node.js requires V8 initialization
-2. **Efficient parallelism:** gomdlint uses Go's goroutines for file-level parallelism
-3. **AST caching:** NodeCache provides O(1) node type lookups vs O(n) walks per rule
-4. **Memory efficiency:** Pre-allocated slices and zero-copy byte operations
-
 ### Architectural Advantages
 
 #### Node.js Overhead
@@ -126,8 +106,6 @@ markdownlint incurs per-file overhead:
 - Garbage collection pauses
 - String-heavy intermediate representations
 
-This overhead becomes dominant as file counts increase.
-
 #### gomdlint Optimizations
 
 Key optimizations contributing to performance:
@@ -136,10 +114,8 @@ Key optimizations contributing to performance:
 2. **Pre-allocation:** Slice capacities tuned to typical document structures
 3. **Parallel file processing:** Bounded goroutine pool processes files concurrently
 4. **Direct byte operations:** Avoids string allocations where possible
-
-### Memory Efficiency
-
-While this report focuses on execution time, profiling data shows gomdlint maintains consistent memory usage regardless of repository size, while markdownlint exhibits linear memory growth proportional to file count.
+5. **Buffered output:** All reporters use 64KB buffered writers to minimize syscalls
+6. **O(1) source line lookup:** Pre-indexed line offsets avoid re-parsing file content
 
 ## Reproducibility
 
@@ -189,7 +165,7 @@ Both tools benefit from OS file cache after the first run. The median-of-3 appro
 
 ### Output Suppression
 
-Benchmarks suppress output to measure pure processing time. Real-world usage with formatted output will have slightly different characteristics, though the relative advantage remains.
+gomdlint benchmarks use the `--quiet` flag to suppress all diagnostic output, measuring pure lint time. markdownlint output is captured to a temp file. Real-world usage with formatted output will have additional overhead from report formatting and I/O.
 
 ## Auto-Fix Coverage
 
@@ -270,11 +246,4 @@ gomdlint's auto-fix system includes safety mechanisms:
 
 ## Conclusion
 
-gomdlint demonstrates substantial performance advantages over markdownlint across diverse real-world repositories. The average 507x speedup makes gomdlint particularly suitable for:
-
-- CI/CD pipelines where lint time impacts developer feedback loops
-- Large documentation projects with thousands of Markdown files
-- Pre-commit hooks where sub-second response time improves developer experience
-- Editor integrations requiring responsive diagnostics
-
-The performance advantage is not merely a constant factor but scales favorably with repository size, making gomdlint increasingly advantageous for larger projects.
+gomdlint's performance advantages come from native compilation, goroutine parallelism, AST caching, and efficient byte operations. Run `./bench/scripts/run-bench.sh` to generate current benchmark numbers for your hardware.

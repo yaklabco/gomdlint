@@ -1,9 +1,9 @@
 package reporter
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -48,7 +48,7 @@ func padLeft(s string, width int) string {
 type SummaryRenderer struct {
 	opts   Options
 	styles *pretty.Styles
-	out    io.Writer
+	bw     *bufio.Writer
 }
 
 // NewSummaryRenderer creates a new summary renderer.
@@ -57,29 +57,31 @@ func NewSummaryRenderer(opts Options) *SummaryRenderer {
 	return &SummaryRenderer{
 		opts:   opts,
 		styles: pretty.NewStyles(colorEnabled),
-		out:    opts.Writer,
+		bw:     bufio.NewWriterSize(opts.Writer, bufWriterSize),
 	}
 }
 
 // Render implements Renderer.
 func (r *SummaryRenderer) Render(_ context.Context, report *analysis.Report) error {
+	defer r.bw.Flush()
+
 	if report.Totals.Issues == 0 {
-		fmt.Fprintln(r.out, r.styles.Success.Render("No issues found"))
+		fmt.Fprintln(r.bw, r.styles.Success.Render("No issues found"))
 		return nil
 	}
 
 	// Determine order
 	if r.opts.SummaryOrder == config.SummaryOrderFiles {
 		r.renderFileTable(report.ByFile)
-		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.bw)
 		r.renderRuleTable(report.ByRule)
 	} else {
 		r.renderRuleTable(report.ByRule)
-		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.bw)
 		r.renderFileTable(report.ByFile)
 	}
 
-	fmt.Fprintln(r.out)
+	fmt.Fprintln(r.bw)
 	r.renderTotals(report.Totals)
 
 	return nil
@@ -90,18 +92,18 @@ func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
 		return
 	}
 
-	fmt.Fprintln(r.out, r.styles.Bold.Render("Rules Summary"))
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.bw, r.styles.Bold.Render("Rules Summary"))
+	fmt.Fprintln(r.bw, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
 
 	// Header - pad first, then style
-	fmt.Fprintf(r.out, "%s %s %s %s %s\n",
+	fmt.Fprintf(r.bw, "%s %s %s %s %s\n",
 		r.styles.TableHeader.Render(padRight("Rule", ruleColWidth)),
 		r.styles.TableHeader.Render(padLeft("Count", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Errors", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Warnings", warnColWidth)),
 		r.styles.TableHeader.Render(padLeft("Fixable", fixableColWidth)),
 	)
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.bw, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
 
 	// Rows
 	for _, rule := range rules {
@@ -130,7 +132,7 @@ func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
 			fixable = r.styles.Success.Render(padLeft("✓", fixableColWidth))
 		}
 
-		fmt.Fprintf(r.out, "%s %s %s %s %s\n",
+		fmt.Fprintf(r.bw, "%s %s %s %s %s\n",
 			styledName,
 			padLeft(strconv.Itoa(rule.Issues), numColWidth),
 			padLeft(strconv.Itoa(rule.Errors), numColWidth),
@@ -145,17 +147,17 @@ func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis) {
 		return
 	}
 
-	fmt.Fprintln(r.out, r.styles.Bold.Render("Files Summary"))
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.bw, r.styles.Bold.Render("Files Summary"))
+	fmt.Fprintln(r.bw, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
 
 	// Header - pad first, then style
-	fmt.Fprintf(r.out, "%s %s %s %s\n",
+	fmt.Fprintf(r.bw, "%s %s %s %s\n",
 		r.styles.TableHeader.Render(padRight("File", fileColWidth)),
 		r.styles.TableHeader.Render(padLeft("Count", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Errors", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Warnings", warnColWidth)),
 	)
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.bw, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
 
 	// Rows
 	for _, file := range files {
@@ -176,7 +178,7 @@ func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis) {
 			styledPath = paddedPath
 		}
 
-		fmt.Fprintf(r.out, "%s %s %s %s\n",
+		fmt.Fprintf(r.bw, "%s %s %s %s\n",
 			styledPath,
 			padLeft(strconv.Itoa(file.Issues), numColWidth),
 			padLeft(strconv.Itoa(file.Errors), numColWidth),
@@ -214,5 +216,5 @@ func (r *SummaryRenderer) renderTotals(totals analysis.Totals) {
 	}
 	parts = append(parts, fmt.Sprintf("in %d %s", totals.FilesWithIssues, fileWord))
 
-	fmt.Fprintln(r.out, r.styles.Bold.Render("Total: ")+strings.Join(parts, " "))
+	fmt.Fprintln(r.bw, r.styles.Bold.Render("Total: ")+strings.Join(parts, " "))
 }

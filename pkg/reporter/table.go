@@ -1,6 +1,7 @@
 package reporter
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -19,7 +20,7 @@ type TableReporter struct {
 	opts      Options
 	styles    *pretty.Styles
 	formatter *pretty.TableFormatter
-	out       io.Writer
+	bw        *bufio.Writer
 }
 
 // NewTableReporter creates a new table reporter.
@@ -34,15 +35,21 @@ func NewTableReporter(opts Options) *TableReporter {
 		opts:      opts,
 		styles:    styles,
 		formatter: pretty.NewTableFormatter(styles, colorEnabled, termWidth),
-		out:       opts.Writer,
+		bw:        bufio.NewWriterSize(opts.Writer, bufWriterSize),
 	}
 }
 
 // Report implements Reporter.
-func (r *TableReporter) Report(_ context.Context, result *runner.Result) (int, error) {
+func (r *TableReporter) Report(_ context.Context, result *runner.Result) (_ int, err error) {
+	defer func() {
+		if flushErr := r.bw.Flush(); err == nil {
+			err = flushErr
+		}
+	}()
+
 	if result == nil || len(result.Files) == 0 {
 		if r.opts.ShowSummary {
-			fmt.Fprintln(r.out, r.styles.Success.Render("No files to check."))
+			fmt.Fprintln(r.bw, r.styles.Success.Render("No files to check."))
 		}
 		return 0, nil
 	}
@@ -52,9 +59,9 @@ func (r *TableReporter) Report(_ context.Context, result *runner.Result) (int, e
 
 	if totalIssues == 0 {
 		if r.opts.ShowSummary {
-			fmt.Fprintln(r.out)
-			fmt.Fprintln(r.out, r.styles.Success.Render("All files passed!"))
-			fmt.Fprintln(r.out, r.styles.Dim.Render(
+			fmt.Fprintln(r.bw)
+			fmt.Fprintln(r.bw, r.styles.Success.Render("All files passed!"))
+			fmt.Fprintln(r.bw, r.styles.Dim.Render(
 				fmt.Sprintf("%d files checked", result.Stats.FilesProcessed),
 			))
 		}
@@ -75,17 +82,17 @@ func (r *TableReporter) Report(_ context.Context, result *runner.Result) (int, e
 func (r *TableReporter) reportCombined(result *runner.Result) {
 	// Format and print the table
 	table := r.formatter.FormatTable(result)
-	fmt.Fprint(r.out, table)
+	fmt.Fprint(r.bw, table)
 
 	// Print summary
 	if r.opts.ShowSummary {
 		summary := r.formatter.FormatTableSummary(result.Stats, "")
-		fmt.Fprintln(r.out, summary)
-		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.bw, summary)
+		fmt.Fprintln(r.bw)
 
 		// Add actionable hint for fixable issues
 		if hasFixableIssues(result) {
-			fmt.Fprintln(r.out, r.styles.Dim.Render("Run with --fix to auto-repair fixable issues"))
+			fmt.Fprintln(r.bw, r.styles.Dim.Render("Run with --fix to auto-repair fixable issues"))
 		}
 	}
 }
@@ -107,26 +114,26 @@ func (r *TableReporter) reportPerFile(result *runner.Result) {
 		filesWithIssues++
 
 		// Print file header
-		fmt.Fprintln(r.out)
-		fmt.Fprintln(r.out, r.styles.Bold.Render(file.Path))
+		fmt.Fprintln(r.bw)
+		fmt.Fprintln(r.bw, r.styles.Bold.Render(file.Path))
 
 		// Format and print this file's table
 		table := r.formatter.FormatFileTable(file)
-		fmt.Fprint(r.out, table)
+		fmt.Fprint(r.bw, table)
 	}
 
 	// Print overall summary
 	if r.opts.ShowSummary && filesWithIssues > 0 {
-		fmt.Fprintln(r.out)
-		fmt.Fprintln(r.out, r.styles.TableSeparator.Render("════════════════════════════════════════════════════════════════════════════════"))
-		fmt.Fprintln(r.out, r.styles.Bold.Render("Overall Summary"))
+		fmt.Fprintln(r.bw)
+		fmt.Fprintln(r.bw, r.styles.TableSeparator.Render("════════════════════════════════════════════════════════════════════════════════"))
+		fmt.Fprintln(r.bw, r.styles.Bold.Render("Overall Summary"))
 		summary := r.formatter.FormatTableSummary(result.Stats, "")
-		fmt.Fprintln(r.out, summary)
+		fmt.Fprintln(r.bw, summary)
 
 		// Add actionable hint for fixable issues
 		if hasFixableIssues(result) {
-			fmt.Fprintln(r.out)
-			fmt.Fprintln(r.out, r.styles.Dim.Render("Run with --fix to auto-repair fixable issues"))
+			fmt.Fprintln(r.bw)
+			fmt.Fprintln(r.bw, r.styles.Dim.Render("Run with --fix to auto-repair fixable issues"))
 		}
 	}
 }

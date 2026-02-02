@@ -1,11 +1,12 @@
 package reporter
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
@@ -13,7 +14,7 @@ import (
 type TextReporter struct {
 	opts   Options
 	styles *pretty.Styles
-	out    io.Writer
+	bw     *bufio.Writer
 }
 
 // NewTextReporter creates a new text reporter.
@@ -22,15 +23,21 @@ func NewTextReporter(opts Options) *TextReporter {
 	return &TextReporter{
 		opts:   opts,
 		styles: pretty.NewStyles(colorEnabled),
-		out:    opts.Writer,
+		bw:     bufio.NewWriterSize(opts.Writer, bufWriterSize),
 	}
 }
 
 // Report implements Reporter.
-func (r *TextReporter) Report(ctx context.Context, result *runner.Result) (int, error) {
+func (r *TextReporter) Report(ctx context.Context, result *runner.Result) (_ int, err error) {
+	defer func() {
+		if flushErr := r.bw.Flush(); err == nil {
+			err = flushErr
+		}
+	}()
+
 	if result == nil || len(result.Files) == 0 {
 		if r.opts.ShowSummary {
-			fmt.Fprintln(r.out, r.styles.Success.Render("No files to check."))
+			fmt.Fprintln(r.bw, r.styles.Success.Render("No files to check."))
 		}
 		return 0, nil
 	}
@@ -44,7 +51,7 @@ func (r *TextReporter) Report(ctx context.Context, result *runner.Result) (int, 
 	}
 
 	if r.opts.ShowSummary {
-		fmt.Fprint(r.out, r.styles.FormatSummaryOneLine(result.Stats))
+		fmt.Fprint(r.bw, r.styles.FormatSummaryOneLine(result.Stats))
 	}
 
 	return totalIssues, nil
@@ -57,7 +64,7 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 	for _, file := range result.Files {
 		// Handle file errors
 		if file.Error != nil {
-			fmt.Fprintf(r.out, "%s: %s\n",
+			fmt.Fprintf(r.bw, "%s: %s\n",
 				r.styles.FilePath.Render(file.Path),
 				r.styles.Error.Render(fmt.Sprintf("error: %v", file.Error)),
 			)
@@ -74,21 +81,21 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 		}
 
 		// File header
-		fmt.Fprintln(r.out, r.styles.FormatFileHeader(file.Path, len(diagnostics)))
+		fmt.Fprintln(r.bw, r.styles.FormatFileHeader(file.Path, len(diagnostics)))
 
 		for _, diag := range diagnostics {
 			// Get source line for context if enabled
 			var sourceLine string
 			if r.opts.ShowContext && file.Result.Snapshot != nil {
-				sourceLine = r.getSourceLine(file.Result.Snapshot.Content, diag.StartLine)
+				sourceLine = getSourceLine(file.Result.Snapshot, diag.StartLine)
 			}
 
-			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, sourceLine, r.opts.RuleFormat))
+			fmt.Fprint(r.bw, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, sourceLine, r.opts.RuleFormat))
 			total++
 		}
 
 		// Blank line between files
-		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.bw)
 	}
 
 	return total
@@ -101,7 +108,7 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 	for _, file := range result.Files {
 		// Handle file errors
 		if file.Error != nil {
-			fmt.Fprintf(r.out, "%s: %s\n",
+			fmt.Fprintf(r.bw, "%s: %s\n",
 				r.styles.FilePath.Render(file.Path),
 				r.styles.Error.Render(fmt.Sprintf("error: %v", file.Error)),
 			)
@@ -116,10 +123,10 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 			// Get source line for context if enabled
 			var sourceLine string
 			if r.opts.ShowContext && file.Result.Snapshot != nil {
-				sourceLine = r.getSourceLine(file.Result.Snapshot.Content, diag.StartLine)
+				sourceLine = getSourceLine(file.Result.Snapshot, diag.StartLine)
 			}
 
-			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, sourceLine, r.opts.RuleFormat))
+			fmt.Fprint(r.bw, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, sourceLine, r.opts.RuleFormat))
 			total++
 		}
 	}
@@ -127,38 +134,16 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 	return total
 }
 
-// getSourceLine extracts a specific line from content (1-based line number).
-func (r *TextReporter) getSourceLine(content []byte, lineNum int) string {
-	if lineNum < 1 || len(content) == 0 {
+// getSourceLine extracts a specific line from a file snapshot using its pre-computed
+// line index. This is O(1) per call, unlike the previous splitLines approach which
+// re-parsed the entire file content for every diagnostic.
+func getSourceLine(snapshot *mdast.FileSnapshot, lineNum int) string {
+	if snapshot == nil {
 		return ""
 	}
-
-	lines := splitLines(content)
-	if lineNum > len(lines) {
+	content := snapshot.LineContent(lineNum)
+	if content == nil {
 		return ""
 	}
-
-	return lines[lineNum-1]
-}
-
-// splitLines splits content into lines.
-func splitLines(content []byte) []string {
-	var lines []string
-	var line []byte
-
-	for _, b := range content {
-		if b == '\n' {
-			lines = append(lines, string(line))
-			line = nil
-		} else {
-			line = append(line, b)
-		}
-	}
-
-	// Handle last line without newline
-	if len(line) > 0 {
-		lines = append(lines, string(line))
-	}
-
-	return lines
+	return string(content)
 }

@@ -1,9 +1,9 @@
 package reporter
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +17,7 @@ import (
 type DiffReporter struct {
 	opts   Options
 	styles *pretty.Styles
-	out    io.Writer
+	bw     *bufio.Writer
 }
 
 // NewDiffReporter creates a new diff reporter.
@@ -26,12 +26,18 @@ func NewDiffReporter(opts Options) *DiffReporter {
 	return &DiffReporter{
 		opts:   opts,
 		styles: pretty.NewStyles(colorEnabled),
-		out:    opts.Writer,
+		bw:     bufio.NewWriterSize(opts.Writer, bufWriterSize),
 	}
 }
 
 // Report implements Reporter.
-func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (int, error) {
+func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (_ int, err error) {
+	defer func() {
+		if flushErr := r.bw.Flush(); err == nil {
+			err = flushErr
+		}
+	}()
+
 	if result == nil {
 		return 0, nil
 	}
@@ -41,7 +47,7 @@ func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (int, er
 
 	for _, file := range result.Files {
 		if file.Error != nil {
-			fmt.Fprintf(r.out, "%s: %s\n",
+			fmt.Fprintf(r.bw, "%s: %s\n",
 				r.styles.FilePath.Render(file.Path),
 				r.styles.Error.Render(fmt.Sprintf("error: %v", file.Error)),
 			)
@@ -73,11 +79,11 @@ func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 
 	// Git-style header: "diff --git a/file b/file"
 	header := fmt.Sprintf("diff --git a/%s b/%s", displayPath, displayPath)
-	fmt.Fprintln(r.out, r.styles.DiffHeader.Render(header))
+	fmt.Fprintln(r.bw, r.styles.DiffHeader.Render(header))
 
 	// Write --- and +++ headers with relative path.
-	fmt.Fprintln(r.out, r.styles.DiffRemove.Render("--- a/"+displayPath))
-	fmt.Fprintln(r.out, r.styles.DiffAdd.Render("+++ b/"+displayPath))
+	fmt.Fprintln(r.bw, r.styles.DiffRemove.Render("--- a/"+displayPath))
+	fmt.Fprintln(r.bw, r.styles.DiffAdd.Render("+++ b/"+displayPath))
 
 	// Parse and colorize the hunk content (skip the --- and +++ lines from String()).
 	lines := strings.Split(diff.String(), "\n")
@@ -88,7 +94,7 @@ func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 		r.writeDiffLine(line)
 	}
 
-	fmt.Fprintln(r.out) // Blank line between files
+	fmt.Fprintln(r.bw) // Blank line between files
 }
 
 // relativePath converts an absolute path to a relative path from the current directory.
@@ -131,7 +137,7 @@ func (r *DiffReporter) writeDiffLine(line string) {
 		styled = r.styles.DiffContext.Render(line)
 	}
 
-	fmt.Fprintln(r.out, styled)
+	fmt.Fprintln(r.bw, styled)
 }
 
 // writeSummary writes a summary line at the end.
@@ -163,5 +169,5 @@ func (r *DiffReporter) writeSummary(files, additions, deletions int) {
 		parts = append(parts, r.styles.DiffRemove.Render(fmt.Sprintf("%d %s(-)", deletions, deletionWord)))
 	}
 
-	fmt.Fprintln(r.out, strings.Join(parts, ", "))
+	fmt.Fprintln(r.bw, strings.Join(parts, ", "))
 }

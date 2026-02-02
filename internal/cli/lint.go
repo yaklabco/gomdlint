@@ -32,6 +32,7 @@ type lintFlags struct {
 	disable      []string
 	fixRules     []string
 	strict       bool
+	quiet        bool
 	noContext    bool
 	compact      bool
 	perFile      bool
@@ -232,41 +233,44 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		return errors.Join(errors.New("lint run failed"), err)
 	}
 
-	// Get color mode from persistent flag.
-	colorMode, err := cmd.Flags().GetString("color")
-	if err != nil {
-		colorMode = "auto" // Default to auto if flag retrieval fails
-	}
+	// Report results (unless quiet mode).
+	if !flags.quiet {
+		// Get color mode from persistent flag.
+		colorMode, err := cmd.Flags().GetString("color")
+		if err != nil {
+			colorMode = "auto" // Default to auto if flag retrieval fails
+		}
 
-	// Parse output format.
-	format, err := reporter.ParseFormat(flags.format)
-	if err != nil {
-		return fmt.Errorf("invalid format: %w", err)
-	}
+		// Parse output format.
+		format, err := reporter.ParseFormat(flags.format)
+		if err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
 
-	// Create reporter.
-	rep, err := reporter.New(reporter.Options{
-		Writer:       cmd.OutOrStdout(),
-		ErrorWriter:  cmd.ErrOrStderr(),
-		Format:       format,
-		Color:        colorMode,
-		ShowContext:  !flags.noContext,
-		ShowSummary:  true,
-		GroupByFile:  true,
-		Compact:      flags.compact,
-		PerFile:      flags.perFile,
-		RuleFormat:   config.RuleFormat(flags.ruleFormat),
-		SummaryOrder: config.SummaryOrder(flags.summaryOrder),
-		WorkingDir:   workDir,
-	})
-	if err != nil {
-		return fmt.Errorf("create reporter: %w", err)
-	}
+		// Create reporter.
+		rep, err := reporter.New(reporter.Options{
+			Writer:       cmd.OutOrStdout(),
+			ErrorWriter:  cmd.ErrOrStderr(),
+			Format:       format,
+			Color:        colorMode,
+			ShowContext:  !flags.noContext,
+			ShowSummary:  true,
+			GroupByFile:  true,
+			Compact:      flags.compact,
+			PerFile:      flags.perFile,
+			RuleFormat:   config.RuleFormat(flags.ruleFormat),
+			SummaryOrder: config.SummaryOrder(flags.summaryOrder),
+			WorkingDir:   workDir,
+		})
+		if err != nil {
+			return fmt.Errorf("create reporter: %w", err)
+		}
 
-	// Report results.
-	if _, err := rep.Report(ctx, result); err != nil {
-		logger.Error("report failed", "error", err)
-		return fmt.Errorf("report results: %w", err)
+		// Report results.
+		if _, err := rep.Report(ctx, result); err != nil {
+			logger.Error("report failed", "error", err)
+			return fmt.Errorf("report results: %w", err)
+		}
 	}
 
 	// Write memory profile if requested.
@@ -303,6 +307,7 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().BoolVar(&cfg.NoBackups, "no-backups", false, "disable backup creation when fixing")
 	cmd.Flags().StringVar(&flags.flavor, "flavor", "commonmark", "Markdown flavor: commonmark, gfm")
 	cmd.Flags().BoolVar(&flags.strict, "strict", false, "treat warnings as errors for exit code")
+	cmd.Flags().BoolVarP(&flags.quiet, "quiet", "q", false, "suppress all output (exit code only)")
 	cmd.Flags().BoolVar(&flags.noContext, "no-context", false, "hide source line context in output")
 	cmd.Flags().BoolVar(&flags.compact, "compact", false, "use compact output format")
 	cmd.Flags().BoolVar(&flags.perFile, "per-file", false, "output separate report for each file (table format)")

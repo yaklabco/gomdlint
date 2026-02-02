@@ -7,6 +7,9 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
+// bufWriterSize is the buffer size for buffered output writers (64 KiB).
+const bufWriterSize = 64 * 1024
+
 // Options configures reporter behavior.
 type Options struct {
 	// Writer is the destination for output (typically os.Stdout).
