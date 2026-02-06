@@ -399,57 +399,161 @@ func (r *BlanksAroundListsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 
 		// Check for blank line before.
-		if pos.StartLine > 1 && !lint.IsBlankLine(ctx.File, pos.StartLine-1) {
-			// Check if previous sibling exists and what it is.
-			if child.Prev != nil {
-				line := ctx.File.Lines[pos.StartLine-1]
-
-				builder := fix.NewEditBuilder()
-				builder.Insert(line.StartOffset, "\n")
-
-				diagPos := mdast.SourcePosition{
-					StartLine:   pos.StartLine,
-					StartColumn: 1,
-					EndLine:     pos.StartLine,
-					EndColumn:   1,
-				}
-
-				diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-					"Missing blank line before list").
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion("Add a blank line before the list").
-					WithFix(builder).
-					Build()
-				diags = append(diags, diag)
-			}
+		if diag := r.checkBlankBefore(ctx, child, pos); diag != nil {
+			diags = append(diags, *diag)
 		}
 
 		// Check for blank line after.
-		if pos.EndLine < len(ctx.File.Lines) && !lint.IsBlankLine(ctx.File, pos.EndLine+1) {
-			// Check if next sibling exists.
-			if child.Next != nil {
-				line := ctx.File.Lines[pos.EndLine-1]
-
-				builder := fix.NewEditBuilder()
-				builder.Insert(line.EndOffset, "\n")
-
-				diagPos := mdast.SourcePosition{
-					StartLine:   pos.EndLine,
-					StartColumn: 1,
-					EndLine:     pos.EndLine,
-					EndColumn:   1,
-				}
-
-				diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-					"Missing blank line after list").
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion("Add a blank line after the list").
-					WithFix(builder).
-					Build()
-				diags = append(diags, diag)
-			}
+		if diag := r.checkBlankAfter(ctx, child, pos); diag != nil {
+			diags = append(diags, *diag)
 		}
 	}
 
 	return diags, nil
+}
+
+// checkBlankBefore checks if there's a missing blank line before the list.
+func (r *BlanksAroundListsRule) checkBlankBefore(
+	ctx *lint.RuleContext,
+	list *mdast.Node,
+	pos mdast.SourcePosition,
+) *lint.Diagnostic {
+	if pos.StartLine <= 1 || lint.IsBlankLine(ctx.File, pos.StartLine-1) {
+		return nil
+	}
+
+	// Check if previous sibling exists.
+	if list.Prev == nil {
+		return nil
+	}
+
+	line := ctx.File.Lines[pos.StartLine-1]
+	builder := fix.NewEditBuilder()
+	builder.Insert(line.StartOffset, "\n")
+
+	diagPos := mdast.SourcePosition{
+		StartLine:   pos.StartLine,
+		StartColumn: 1,
+		EndLine:     pos.StartLine,
+		EndColumn:   1,
+	}
+
+	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
+		"Missing blank line before list").
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Add a blank line before the list").
+		WithFix(builder).
+		Build()
+	return &diag
+}
+
+// checkBlankAfter checks if there's a missing blank line after the list.
+// This handles both normal cases and lazy continuation where text following
+// a list item without a blank line gets absorbed into the list.
+func (r *BlanksAroundListsRule) checkBlankAfter(
+	ctx *lint.RuleContext,
+	list *mdast.Node,
+	pos mdast.SourcePosition,
+) *lint.Diagnostic {
+	// First, check for lazy continuation: if the list's EndLine extends beyond
+	// the last list item's marker StartLine, content was absorbed.
+	if diag := r.checkLazyContinuation(ctx, list, pos); diag != nil {
+		return diag
+	}
+
+	// If no lazy continuation, check normally based on next sibling.
+	return r.checkBlankAfterNormal(ctx, list, pos)
+}
+
+// checkLazyContinuation detects when text was absorbed into the list via lazy continuation.
+func (r *BlanksAroundListsRule) checkLazyContinuation(
+	ctx *lint.RuleContext,
+	list *mdast.Node,
+	pos mdast.SourcePosition,
+) *lint.Diagnostic {
+	lastItem := list.LastChild
+	if lastItem == nil {
+		return nil
+	}
+
+	itemPos := lastItem.SourcePosition()
+	if !itemPos.IsValid() || itemPos.StartLine >= pos.EndLine {
+		return nil
+	}
+
+	// List absorbed content after the last marker - check if there's a blank line after the marker.
+	checkLine := itemPos.StartLine + 1
+	if checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
+		return nil
+	}
+
+	return r.createAfterDiagnostic(ctx, itemPos.StartLine)
+}
+
+// checkBlankAfterNormal checks for missing blank line after list using next sibling position.
+func (r *BlanksAroundListsRule) checkBlankAfterNormal(
+	ctx *lint.RuleContext,
+	list *mdast.Node,
+	pos mdast.SourcePosition,
+) *lint.Diagnostic {
+	if list.Next == nil {
+		return nil
+	}
+
+	// Find the line we need to check for blankness.
+	checkLine := r.findCheckLineForAfter(ctx, list)
+	if checkLine <= 0 || checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
+		return nil
+	}
+
+	// Find the diagnostic line - use the last list item's start line (the actual marker).
+	diagLine := pos.EndLine
+	if lastItem := list.LastChild; lastItem != nil {
+		if itemPos := lastItem.SourcePosition(); itemPos.IsValid() {
+			diagLine = itemPos.StartLine
+		}
+	}
+
+	return r.createAfterDiagnostic(ctx, diagLine)
+}
+
+// findCheckLineForAfter determines which line to check for blankness after the list.
+func (r *BlanksAroundListsRule) findCheckLineForAfter(ctx *lint.RuleContext, list *mdast.Node) int {
+	nextPos := list.Next.SourcePosition()
+	if nextPos.IsValid() && nextPos.StartLine > 1 {
+		// Next sibling has valid position - check line before it.
+		return nextPos.StartLine - 1
+	}
+
+	// Next sibling has invalid position (e.g., ThematicBreak with L0-L0).
+	// Fall back to checking the line after the last list item's marker.
+	if lastItem := list.LastChild; lastItem != nil {
+		if itemPos := lastItem.SourcePosition(); itemPos.IsValid() && itemPos.StartLine < len(ctx.File.Lines) {
+			return itemPos.StartLine + 1
+		}
+	}
+
+	return 0
+}
+
+// createAfterDiagnostic creates a diagnostic for missing blank line after list.
+func (r *BlanksAroundListsRule) createAfterDiagnostic(ctx *lint.RuleContext, diagLine int) *lint.Diagnostic {
+	line := ctx.File.Lines[diagLine-1]
+	builder := fix.NewEditBuilder()
+	builder.Insert(line.EndOffset, "\n")
+
+	diagPos := mdast.SourcePosition{
+		StartLine:   diagLine,
+		StartColumn: 1,
+		EndLine:     diagLine,
+		EndColumn:   1,
+	}
+
+	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
+		"Missing blank line after list").
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Add a blank line after the list").
+		WithFix(builder).
+		Build()
+	return &diag
 }

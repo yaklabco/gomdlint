@@ -18,6 +18,15 @@
     "fixable": true
   },
   {
+    "rule": "MD032",
+    "name": "",
+    "line": 62,
+    "column": 1,
+    "message": "Missing blank line after list",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
     "rule": "MD040",
     "name": "",
     "line": 114,

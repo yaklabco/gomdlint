@@ -1,5 +1,6 @@
 complex.input.md:46:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
 complex.input.md:47:3 warning Unordered list bullet '*' does not match expected '-' () [fixable]
+complex.input.md:62:1 warning Missing blank line after list () [fixable]
 complex.input.md:114:1 warning Fenced code block has no language specified ()
 complex.input.md:123:5 warning Code block style 'indented' does not match expected 'fenced' ()
 complex.input.md:142:12 warning Bare URL used () [fixable]

@@ -7,14 +7,15 @@ First paragraph.
 Second paragraph.
 - Gamma
 - Delta
-Third paragraph.
 
+Third paragraph.
 
 1. One
 2. Two
-Fourth paragraph.
 
+Fourth paragraph.
 
 - Epsilon
 - Zeta
+
 Fifth paragraph.

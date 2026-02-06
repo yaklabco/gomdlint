@@ -1,2 +1,4 @@
 nested.input.md:6:1 warning Missing blank line before list () [fixable]
+nested.input.md:7:1 warning Missing blank line after list () [fixable]
 nested.input.md:13:1 warning Missing blank line before list () [fixable]
+nested.input.md:14:1 warning Missing blank line after list () [fixable]
