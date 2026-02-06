@@ -397,6 +397,9 @@ linters:
       check-receiver: false
       ignore-decls:
         - g *goldie.Goldie
+    wrapcheck:
+      ignore-package-globs:
+        - context
     wsl:
       allow-assign-and-anything: true
       allow-multiline-assign: true

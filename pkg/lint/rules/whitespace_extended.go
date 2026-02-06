@@ -59,7 +59,7 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		lineContent := lint.LineContent(ctx.File, lineNum)

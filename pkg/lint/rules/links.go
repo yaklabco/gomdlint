@@ -47,7 +47,7 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip lines in code blocks.
@@ -127,7 +127,7 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 
 	for _, link := range links {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		text := lint.LinkText(link)
@@ -193,7 +193,7 @@ func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) 
 
 	for _, link := range links {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		dest := lint.LinkDestination(link)
@@ -255,7 +255,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	for _, img := range images {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		alt := lint.ImageAlt(img)
@@ -325,7 +325,7 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 
 	for _, link := range links {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		dest := lint.LinkDestination(link)

@@ -54,7 +54,7 @@ func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip if no fragment
@@ -134,7 +134,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip inline/autolink styles - they don't use references
@@ -213,7 +213,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 
 	for _, def := range refCtx.AllDefinitions {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip ignored definitions
@@ -289,7 +289,7 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		allowed := true
@@ -406,7 +406,7 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip images - they have alt text, not link text

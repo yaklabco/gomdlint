@@ -45,7 +45,7 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip lines in code blocks if configured.

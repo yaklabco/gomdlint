@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"fmt"
 	"regexp"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -44,7 +43,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip lines in code blocks.

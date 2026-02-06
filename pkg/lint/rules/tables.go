@@ -69,7 +69,7 @@ func (r *TablePipeStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 	lineNum := 1
 	for lineNum <= len(ctx.File.Lines) {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
@@ -184,7 +184,7 @@ func (r *TableColumnCountRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	// Find table-like structures by looking for delimiter rows.
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
@@ -285,7 +285,7 @@ func (r *TableAlignmentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
@@ -431,7 +431,7 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	lineNum := 1
 	for lineNum <= len(ctx.File.Lines) {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
@@ -627,7 +627,7 @@ func (r *TableColumnStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	lineNum := 1
 	for lineNum <= len(ctx.File.Lines) {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)

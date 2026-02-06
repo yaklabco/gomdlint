@@ -45,7 +45,7 @@ func (r *HeadingIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		level := lint.HeadingLevel(heading)
@@ -100,7 +100,7 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return nil, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return nil, ctx.Ctx.Err()
 		}
 
 		if lint.HeadingLevel(heading) == 1 {
@@ -199,7 +199,7 @@ func (r *HeadingStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		detectedStyle := detectHeadingStyle(ctx.File, heading)

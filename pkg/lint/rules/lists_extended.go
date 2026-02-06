@@ -42,7 +42,7 @@ func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	lists := ctx.Lists()
 	for _, list := range lists {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		listDiags := r.checkList(ctx, list)
@@ -150,7 +150,7 @@ func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	// Only process top-level lists (direct children of document).
 	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		if child.Kind != mdast.NodeList {
@@ -288,7 +288,7 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	lists := ctx.Lists()
 	for _, list := range lists {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		isOrdered := lint.IsOrderedList(list)
@@ -386,7 +386,7 @@ func (r *BlanksAroundListsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	// Find top-level lists only (not nested).
 	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		if child.Kind != mdast.NodeList {

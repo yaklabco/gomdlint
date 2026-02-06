@@ -219,7 +219,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		pos := heading.SourcePosition()
@@ -637,7 +637,7 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 	// Check each line
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, fmt.Errorf("rule cancelled: %w", ctx.Ctx.Err())
+			return diags, ctx.Ctx.Err()
 		}
 
 		// Skip code blocks if configured
