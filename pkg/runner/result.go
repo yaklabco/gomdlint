@@ -13,6 +13,15 @@ type FileOutcome struct {
 
 	// Error is set if the file could not be processed.
 	Error error
+
+	// Exhausted is true if the fix loop exhausted MaxFixPasses with edits remaining.
+	Exhausted bool
+
+	// RemainingEdits is the count of edits not applied due to exhaustion.
+	RemainingEdits int
+
+	// FixPasses is the number of fix passes performed.
+	FixPasses int
 }
 
 // Stats captures aggregate information about a run.

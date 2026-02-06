@@ -137,6 +137,9 @@ func (r *Runner) worker(
 			outcome.Error = err
 		} else {
 			outcome.Result = pr
+			outcome.Exhausted = pr.Exhausted
+			outcome.RemainingEdits = pr.RemainingEdits
+			outcome.FixPasses = pr.FixPasses
 		}
 
 		select {

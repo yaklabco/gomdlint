@@ -69,6 +69,12 @@ type PipelineResult struct {
 
 	// TotalEditsApplied is the total number of edits applied across all passes.
 	TotalEditsApplied int
+
+	// Exhausted is true if the fix loop hit MaxFixPasses with edits remaining.
+	Exhausted bool
+
+	// RemainingEdits is the count of edits that could not be applied due to exhaustion.
+	RemainingEdits int
 }
 
 // Summary returns a human-readable summary of the pipeline result.
@@ -206,6 +212,12 @@ func (p *Pipeline) ProcessFile(
 		result.Modified = true
 	}
 
+	// Check if we exhausted passes with edits remaining.
+	if result.FixPasses >= maxPasses && len(fileResult.Edits) > 0 {
+		result.Exhausted = true
+		result.RemainingEdits = len(fileResult.Edits)
+	}
+
 	// Store the final lint result.
 	result.FileResult = fileResult
 	result.ModifiedContent = content
@@ -314,6 +326,12 @@ func (p *Pipeline) ProcessContent(
 		result.FixPasses++
 		result.TotalEditsApplied += len(fileResult.Edits)
 		result.Modified = true
+	}
+
+	// Check if we exhausted passes with edits remaining.
+	if result.FixPasses >= maxPasses && len(fileResult.Edits) > 0 {
+		result.Exhausted = true
+		result.RemainingEdits = len(fileResult.Edits)
 	}
 
 	// Store the final lint result.
