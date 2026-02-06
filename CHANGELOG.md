@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0] - 2026-02-06
+
+### Added
+
+- Warn when the multi-pass fix loop exhausts its pass limit without converging. Previously, gomdlint would silently stop fixing after 10 passes — now you'll see a warning if there were still edits pending.
+
+### Fixed
+
+- **MD032**: Now detects missing blank lines *after* lists, not just before. This was tricky because CommonMark's "lazy continuation" feature can absorb text into list items, but the rule now handles that correctly.
+- **MD051**: No longer flags external URLs or code spans as broken internal links. The fragment validation was being too aggressive.
+- **MD053 and others**: Fixed false positives where content inside fenced code blocks was incorrectly matched by line-scanning rules. Code block detection is now centralized and consistent across all rules.
+
 ## [0.1.1] - 2026-01-22
 
 ### Added
@@ -35,5 +47,6 @@ Initial release of gomdlint - a fast Markdown linter written in Go.
 - Environment variable overrides (`GOMDLINT_*`)
 - CommonMark and GFM flavor support
 
+[0.2.0]: https://github.com/yaklabco/gomdlint/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yaklabco/gomdlint/releases/tag/v0.1.0
