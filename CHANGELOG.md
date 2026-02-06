@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.1] - 2026-02-06
+
+No functional changes. Release process verification.
+
 ## [0.2.0] - 2026-02-06
 
 ### Added
@@ -47,6 +51,7 @@ Initial release of gomdlint - a fast Markdown linter written in Go.
 - Environment variable overrides (`GOMDLINT_*`)
 - CommonMark and GFM flavor support
 
+[0.2.1]: https://github.com/yaklabco/gomdlint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yaklabco/gomdlint/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yaklabco/gomdlint/releases/tag/v0.1.0
