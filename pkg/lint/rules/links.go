@@ -123,7 +123,7 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	}
 
 	links := ctx.Links()
-	var diags []lint.Diagnostic
+	diags := make([]lint.Diagnostic, 0, len(links))
 
 	for _, link := range links {
 		if ctx.Cancelled() {
@@ -189,7 +189,7 @@ func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) 
 	}
 
 	links := ctx.Links()
-	var diags []lint.Diagnostic
+	diags := make([]lint.Diagnostic, 0, len(links))
 
 	for _, link := range links {
 		if ctx.Cancelled() {
@@ -251,7 +251,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	}
 
 	images := ctx.Images()
-	var diags []lint.Diagnostic
+	diags := make([]lint.Diagnostic, 0, len(images))
 
 	for _, img := range images {
 		if ctx.Cancelled() {
