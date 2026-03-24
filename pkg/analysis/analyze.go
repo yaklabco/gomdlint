@@ -148,7 +148,7 @@ func (ctx *analysisContext) buildByRule(opts Options) []RuleAnalysis {
 
 // buildByFile constructs the ByFile slice from accumulated data.
 func (ctx *analysisContext) buildByFile(opts Options) []FileAnalysis {
-	var result []FileAnalysis
+	result := make([]FileAnalysis, 0, len(ctx.fileMap))
 	for path, fa := range ctx.fileMap {
 		if fa.Issues == 0 {
 			continue

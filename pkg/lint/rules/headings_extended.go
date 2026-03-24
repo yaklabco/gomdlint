@@ -569,8 +569,8 @@ func (r *NoDuplicateHeadingRule) checkSiblings(ctx *lint.RuleContext, headings [
 		text  string
 	}
 
-	var diags []lint.Diagnostic
-	var parentStack []parentInfo
+	diags := make([]lint.Diagnostic, 0, len(headings))
+	parentStack := make([]parentInfo, 0, len(headings))
 
 	// Map from (level, parent_path) -> (text -> first_heading)
 	seen := make(map[string]map[string]*mdast.Node)
@@ -661,7 +661,7 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 	}
 
 	headings := ctx.Headings()
-	var diags []lint.Diagnostic
+	diags := make([]lint.Diagnostic, 0, len(headings))
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {

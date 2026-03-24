@@ -490,7 +490,11 @@ func (r *BlanksAroundListsRule) checkLazyContinuation(
 	return r.createAfterDiagnostic(ctx, itemPos.StartLine)
 }
 
-// checkBlankAfterNormal checks for missing blank line after list using next sibling position.
+// checkBlankAfterNormal checks for missing blank line after list using the list's end position.
+// We check the line immediately after the list ends (pos.EndLine + 1), mirroring
+// how checkBlankBefore checks pos.StartLine - 1. This avoids false positives when
+// the next sibling's SourcePosition excludes structural markers (e.g., fenced code
+// blocks report content start, not the opening fence line).
 func (r *BlanksAroundListsRule) checkBlankAfterNormal(
 	ctx *lint.RuleContext,
 	list *mdast.Node,
@@ -500,9 +504,9 @@ func (r *BlanksAroundListsRule) checkBlankAfterNormal(
 		return nil
 	}
 
-	// Find the line we need to check for blankness.
-	checkLine := r.findCheckLineForAfter(ctx, list)
-	if checkLine <= 0 || checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
+	// Check the line immediately after the list ends.
+	checkLine := pos.EndLine + 1
+	if checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
 		return nil
 	}
 
@@ -515,25 +519,6 @@ func (r *BlanksAroundListsRule) checkBlankAfterNormal(
 	}
 
 	return r.createAfterDiagnostic(ctx, diagLine)
-}
-
-// findCheckLineForAfter determines which line to check for blankness after the list.
-func (r *BlanksAroundListsRule) findCheckLineForAfter(ctx *lint.RuleContext, list *mdast.Node) int {
-	nextPos := list.Next.SourcePosition()
-	if nextPos.IsValid() && nextPos.StartLine > 1 {
-		// Next sibling has valid position - check line before it.
-		return nextPos.StartLine - 1
-	}
-
-	// Next sibling has invalid position (e.g., ThematicBreak with L0-L0).
-	// Fall back to checking the line after the last list item's marker.
-	if lastItem := list.LastChild; lastItem != nil {
-		if itemPos := lastItem.SourcePosition(); itemPos.IsValid() && itemPos.StartLine < len(ctx.File.Lines) {
-			return itemPos.StartLine + 1
-		}
-	}
-
-	return 0
 }
 
 // createAfterDiagnostic creates a diagnostic for missing blank line after list.

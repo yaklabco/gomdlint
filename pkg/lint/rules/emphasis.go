@@ -45,7 +45,7 @@ func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	punctuation := ctx.OptionString("punctuation", defaultEmphasisPunctuation)
 
 	paragraphs := ctx.Paragraphs()
-	var diags []lint.Diagnostic
+	diags := make([]lint.Diagnostic, 0, len(paragraphs))
 
 	for _, para := range paragraphs {
 		if ctx.Cancelled() {

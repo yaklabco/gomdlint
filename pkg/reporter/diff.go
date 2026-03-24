@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -69,7 +68,7 @@ func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (int, er
 // writeDiff outputs a single file's diff with formatting.
 func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 	// Use relative path for display if possible.
-	displayPath := relativePath(diff.Path)
+	displayPath := r.displayPath(diff.Path)
 
 	// Git-style header: "diff --git a/file b/file"
 	header := fmt.Sprintf("diff --git a/%s b/%s", displayPath, displayPath)
@@ -91,24 +90,39 @@ func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 	fmt.Fprintln(r.out) // Blank line between files
 }
 
-// relativePath converts an absolute path to a relative path from the current directory.
-// If the relative path would require too many "../" traversals, use the basename instead.
-func relativePath(path string) string {
+// displayPath converts an absolute path to a relative path from the configured
+// working directory. It resolves symlinks on both sides to handle mount points
+// and volume aliases (e.g., /Volumes/Code vs /Users/.../Code on macOS).
+// Falls back to the original path (not just the basename) to preserve
+// directory context needed for unambiguous patch application.
+func (r *DiffReporter) displayPath(path string) string {
 	if !filepath.IsAbs(path) {
 		return path
 	}
-	cwd, err := os.Getwd()
+
+	workDir := r.opts.WorkingDir
+	if workDir == "" {
+		// Strip leading slash so diff prefix (a/, b/) doesn't produce a//path.
+		return strings.TrimPrefix(path, "/")
+	}
+
+	// Resolve symlinks on both sides so paths through mount points
+	// or symlinks compare correctly.
+	resolvedDir, err := filepath.EvalSymlinks(workDir)
 	if err != nil {
-		return filepath.Base(path)
+		resolvedDir = workDir
 	}
-	rel, err := filepath.Rel(cwd, path)
+	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return filepath.Base(path)
+		resolvedPath = path
 	}
-	// If relative path has too many parent traversals, just use basename.
-	if strings.Count(rel, "..") > 2 {
-		return filepath.Base(path)
+
+	rel, err := filepath.Rel(resolvedDir, resolvedPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		// File is outside working directory — keep the full path.
+		return strings.TrimPrefix(path, "/")
 	}
+
 	return rel
 }
 
