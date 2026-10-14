@@ -73,7 +73,7 @@ func (r *TablePipeStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
-		if !isTableDelimiterRow(content) {
+		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
 			lineNum++
 			continue
 		}
@@ -188,7 +188,7 @@ func (r *TableColumnCountRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
-		if !isTableDelimiterRow(content) {
+		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
 			continue
 		}
 
@@ -289,7 +289,7 @@ func (r *TableAlignmentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
-		if !isTableDelimiterRow(content) {
+		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
 			continue
 		}
 
@@ -435,7 +435,7 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
-		if !isTableDelimiterRow(content) {
+		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
 			lineNum++
 			continue
 		}
@@ -456,7 +456,7 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		}
 
 		// Check blank line before.
-		if tableStart > 1 && !lint.IsBlankLine(ctx.File, tableStart-1) {
+		if tableStart > 1 && !lint.IsBlankLine(ctx.File, tableStart-1) && !lint.IsCommentLine(ctx.File, tableStart-1) {
 			pos := mdast.SourcePosition{
 				StartLine:   tableStart,
 				StartColumn: 1,
@@ -478,7 +478,7 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		}
 
 		// Check blank line after.
-		if tableEnd < len(ctx.File.Lines) && !lint.IsBlankLine(ctx.File, tableEnd+1) {
+		if tableEnd < len(ctx.File.Lines) && !lint.IsBlankLine(ctx.File, tableEnd+1) && !lint.IsCommentLine(ctx.File, tableEnd+1) {
 			pos := mdast.SourcePosition{
 				StartLine:   tableEnd,
 				StartColumn: 1,
@@ -565,7 +565,19 @@ func splitTableCells(content []byte) [][]byte {
 		return nil
 	}
 
-	return bytes.Split(trimmed, []byte("|"))
+	var cells [][]byte
+	start := 0
+	for idx := 0; idx < len(trimmed); idx++ {
+		if trimmed[idx] == '\\' && idx+1 < len(trimmed) {
+			idx++
+			continue
+		}
+		if trimmed[idx] == '|' {
+			cells = append(cells, trimmed[start:idx])
+			start = idx + 1
+		}
+	}
+	return append(cells, trimmed[start:])
 }
 
 // TableColumnStyleRule checks for consistent column spacing style in tables.
@@ -631,7 +643,7 @@ func (r *TableColumnStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		}
 
 		content := lint.LineContent(ctx.File, lineNum)
-		if !isTableDelimiterRow(content) {
+		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
 			lineNum++
 			continue
 		}

@@ -207,7 +207,7 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	streakStart := 0
 	streakCount := 0
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for lineNum := ctx.File.FrontMatterLines + 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}

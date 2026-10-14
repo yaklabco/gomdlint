@@ -22,6 +22,10 @@ type FileSnapshot struct {
 
 	// Root is the AST root node (Document).
 	Root *Node
+
+	// FrontMatterLines is the number of leading metadata lines, including delimiters.
+	// Content and Tokens retain these bytes, but they are excluded from Markdown parsing.
+	FrontMatterLines int
 }
 
 // LineInfo holds metadata for a single line in a file.

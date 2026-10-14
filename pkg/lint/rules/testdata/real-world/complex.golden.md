@@ -60,7 +60,6 @@ Alternative markers:
    - Then unordered nested
    - Another bullet
 2. Back to numbered
-
    1. Nested ordered
       - Mixed with bullets
 
@@ -140,8 +139,8 @@ This is a [reference link][reflink] that points elsewhere.
 
 You can also use [implicit reference links][].
 
-[reflink]: <https://example.com> "Reference Link"
-[implicit reference links]: <https://example.org>
+[reflink]: https://example.com "Reference Link"
+[implicit reference links]: https://example.org
 
 ### Autolinks
 
@@ -157,7 +156,7 @@ Reference style image:
 
 ![Reference image][imgref]
 
-[imgref]: <https://via.placeholder.com/200> "Reference Image"
+[imgref]: https://via.placeholder.com/200 "Reference Image"
 
 ## Emphasis and Formatting
 

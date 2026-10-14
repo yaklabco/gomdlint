@@ -95,6 +95,9 @@ func RegisterAll(registry *lint.Registry) {
 //   - "single-title" -> MD025 (canonical: "single-h1")
 //   - "first-line-h1" -> MD041 (canonical: "first-line-heading").
 func RegisterLegacyAliases(registry *lint.Registry) {
+	registry.RegisterAlias("blanks-around-headings", "MD022")
+	registry.RegisterAlias("ul-style", "MD004")
+	registry.RegisterAlias("no-multiple-blanks", "MD012")
 	// MD025: single-h1 (canonical) also known as single-title
 	registry.RegisterAlias("single-title", "MD025")
 

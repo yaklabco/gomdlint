@@ -67,6 +67,9 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 		if !includeListItems && blockquoteListPattern.Match(lineContent) {
 			continue
 		}
+		if nestedBlockquoteListLine(ctx, lineNum) {
+			continue
+		}
 
 		prefix := match[1]
 		spaces := match[2]
@@ -95,6 +98,16 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 	}
 
 	return diags, nil
+}
+
+func nestedBlockquoteListLine(ctx *lint.RuleContext, lineNum int) bool {
+	for _, item := range ctx.ListItems() {
+		if item.SourcePosition().StartLine == lineNum && item.Parent != nil &&
+			item.Parent.Parent != nil && item.Parent.Parent.Kind == mdast.NodeListItem {
+			return true
+		}
+	}
+	return false
 }
 
 // NoBlanksBlockquoteRule checks for blank lines inside blockquotes.

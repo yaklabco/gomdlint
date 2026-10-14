@@ -2,8 +2,8 @@
   {
     "rule": "MD045",
     "name": "",
-    "line": 0,
-    "column": 0,
+    "line": 7,
+    "column": 36,
     "message": "Image is missing alt text",
     "severity": "warning",
     "fixable": false
@@ -11,8 +11,8 @@
   {
     "rule": "MD045",
     "name": "",
-    "line": 0,
-    "column": 0,
+    "line": 9,
+    "column": 33,
     "message": "Image is missing alt text",
     "severity": "warning",
     "fixable": false

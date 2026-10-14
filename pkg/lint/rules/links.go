@@ -72,6 +72,16 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			line := ctx.File.Lines[lineNum-1]
 			startOffset := line.StartOffset + match[0]
 			endOffset := line.StartOffset + match[1]
+			inCode := false
+			for _, span := range ctx.CodeSpans() {
+				if span.SourceRange().Contains(startOffset) {
+					inCode = true
+					break
+				}
+			}
+			if inCode {
+				continue
+			}
 
 			// Build fix: convert (text)[url] to [text](url)
 			builder := fix.NewEditBuilder()

@@ -83,8 +83,17 @@ func LinkDestination(n *mdast.Node) string {
 // Line-based helpers.
 
 // LineContent returns the content of the specified 1-based line number.
-// Returns nil if the line number is out of range.
+// Metadata lines are treated as blank. Use RawLineContent to inspect metadata.
 func LineContent(file *mdast.FileSnapshot, lineNum int) []byte {
+	if file != nil && lineNum <= file.FrontMatterLines {
+		return nil
+	}
+	return RawLineContent(file, lineNum)
+}
+
+// RawLineContent returns the original bytes of a 1-based line, excluding its newline.
+// Returns nil if the line number is out of range.
+func RawLineContent(file *mdast.FileSnapshot, lineNum int) []byte {
 	if file == nil || lineNum < 1 || lineNum > len(file.Lines) {
 		return nil
 	}
@@ -230,8 +239,14 @@ func extractTextContent(n *mdast.Node) string {
 	}
 	var buf bytes.Buffer
 	_ = mdast.Walk(n, func(node *mdast.Node) error { //nolint:errcheck // Walk visitor never returns error
-		if node.Kind == mdast.NodeText && node.Inline != nil {
-			buf.Write(node.Inline.Text)
+		switch node.Kind {
+		case mdast.NodeText, mdast.NodeCodeSpan, mdast.NodeSoftBreak, mdast.NodeHardBreak:
+			if node.Inline != nil {
+				buf.Write(node.Inline.Text)
+			}
+			if node.Kind == mdast.NodeSoftBreak || node.Kind == mdast.NodeHardBreak {
+				buf.WriteByte('\n')
+			}
 		}
 		return nil
 	})
@@ -290,6 +305,45 @@ func CodeFenceLength(n *mdast.Node) int {
 }
 
 // HTML helpers.
+
+// IsHTMLComment reports whether a node consists entirely of HTML comments.
+func IsHTMLComment(node *mdast.Node) bool {
+	if node == nil {
+		return false
+	}
+	content := bytes.TrimSpace(node.Text())
+	if len(content) == 0 {
+		return false
+	}
+	for len(content) > 0 {
+		if !bytes.HasPrefix(content, []byte("<!--")) {
+			return false
+		}
+		end := bytes.Index(content, []byte("-->"))
+		if end < 0 {
+			return false
+		}
+		content = bytes.TrimSpace(content[end+3:])
+	}
+	return true
+}
+
+// IsCommentLine reports whether the source line is occupied by a comment block.
+func IsCommentLine(file *mdast.FileSnapshot, lineNum int) bool {
+	if file == nil {
+		return false
+	}
+	for _, node := range HTMLBlocks(file.Root) {
+		pos := node.SourcePosition()
+		if pos.StartLine <= lineNum && lineNum < pos.EndLine && IsHTMLComment(node) {
+			return true
+		}
+		if pos.StartLine == lineNum && pos.EndLine == lineNum && IsHTMLComment(node) {
+			return true
+		}
+	}
+	return false
+}
 
 // HTMLBlocks returns all HTML block nodes in the document.
 func HTMLBlocks(root *mdast.Node) []*mdast.Node {

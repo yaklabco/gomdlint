@@ -119,6 +119,10 @@ func (r *InlineHTMLRule) checkHTMLNode(
 		return nil
 	}
 
+	if lint.IsHTMLComment(node) {
+		return nil
+	}
+
 	// Extract the HTML content.
 	pos := node.SourcePosition()
 	if !pos.IsValid() {

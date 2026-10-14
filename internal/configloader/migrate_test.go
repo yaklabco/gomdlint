@@ -4,7 +4,41 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
+
+func TestMigrationPreservesEnabledRules(t *testing.T) {
+	for _, input := range []string{
+		`{}`, `{"default": false, "MD009": true}`, `{"headings": false, "MD025": true}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".markdownlint.json")
+			require.NoError(t, os.WriteFile(path, []byte(input), 0o600))
+			result, err := ConvertMarkdownlintConfig(path)
+			require.NoError(t, err)
+			registry := lint.NewRegistry()
+			rules.RegisterAll(registry)
+			enabled := make(map[string]bool)
+			for _, rule := range lint.ResolveRules(registry, result.Config) {
+				enabled[rule.Rule.ID()] = true
+			}
+			require.False(t, enabled["MDL003"], "migration must not enable extra rules")
+			switch input {
+			case `{}`:
+				require.True(t, enabled["MD041"], "markdownlint enables MD041 by default")
+				require.True(t, enabled["MD033"])
+			case `{"default": false, "MD009": true}`:
+				require.Equal(t, map[string]bool{"MD009": true}, enabled)
+			default:
+				require.False(t, enabled["MD041"])
+				require.True(t, enabled["MD025"], "specific rule overrides tag regardless of map order")
+			}
+		})
+	}
+}
 
 func TestConvertMarkdownlintConfig_JSON(t *testing.T) {
 	t.Parallel()

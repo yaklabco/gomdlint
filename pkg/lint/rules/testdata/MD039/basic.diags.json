@@ -3,7 +3,7 @@
     "rule": "MD039",
     "name": "",
     "line": 3,
-    "column": 10,
+    "column": 9,
     "message": "Link text has leading and trailing spaces",
     "severity": "warning",
     "fixable": false
@@ -12,7 +12,7 @@
     "rule": "MD039",
     "name": "",
     "line": 5,
-    "column": 10,
+    "column": 9,
     "message": "Link text has leading spaces",
     "severity": "warning",
     "fixable": false
@@ -21,7 +21,7 @@
     "rule": "MD039",
     "name": "",
     "line": 7,
-    "column": 10,
+    "column": 9,
     "message": "Link text has trailing spaces",
     "severity": "warning",
     "fixable": false

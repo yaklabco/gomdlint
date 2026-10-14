@@ -48,6 +48,9 @@ func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	diags := make([]lint.Diagnostic, 0, len(paragraphs))
 
 	for _, para := range paragraphs {
+		if para.Parent != nil && para.Parent.Kind == mdast.NodeListItem {
+			continue
+		}
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
@@ -216,6 +219,9 @@ func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 
 			// Extract the matched groups.
 			start, end := match[0], match[1]
+			if lint.IsLineInTable(ctx.File, ctx.Root, lineNum) && crossesTableCell(lineContent[start:end]) {
+				continue
+			}
 			openMarker := string(lineContent[match[2]:match[3]])
 			content := string(lineContent[match[4]:match[5]])
 			closeMarker := string(lineContent[match[6]:match[7]])
@@ -226,6 +232,9 @@ func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			}
 
 			line := ctx.File.Lines[lineNum-1]
+			if emphasisMatchIsParsed(ctx, line.StartOffset+start, line.StartOffset+end) {
+				continue
+			}
 
 			// Build fix.
 			builder := fix.NewEditBuilder()
@@ -250,6 +259,45 @@ func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	return diags, nil
+}
+
+func crossesTableCell(content []byte) bool {
+	for idx := 0; idx < len(content); idx++ {
+		if content[idx] == '\\' && idx+1 < len(content) {
+			idx++
+			continue
+		}
+		if content[idx] == '|' {
+			return true
+		}
+	}
+	return false
+}
+
+// emphasisMatchIsParsed excludes code and delimiters already used by valid emphasis.
+func emphasisMatchIsParsed(ctx *lint.RuleContext, start, end int) bool {
+	for _, nodes := range [][]*mdast.Node{ctx.EmphasisNodes(), ctx.StrongNodes()} {
+		for _, node := range nodes {
+			rng := node.SourceRange()
+			if rng.Len() == 0 {
+				continue
+			}
+			markerLength := 1
+			if node.Kind == mdast.NodeStrong {
+				markerLength = 2
+			}
+			if start < rng.EndOffset+markerLength && end > rng.StartOffset-markerLength {
+				return true
+			}
+		}
+	}
+	for _, node := range ctx.CodeSpans() {
+		rng := node.SourceRange()
+		if start < rng.EndOffset && end > rng.StartOffset {
+			return true
+		}
+	}
+	return false
 }
 
 // EmphasisStyleRule checks for consistent emphasis style.

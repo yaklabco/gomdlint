@@ -54,6 +54,9 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		if ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
+		if isListContinuationLine(ctx, lineNum) {
+			continue
+		}
 
 		trimmed := bytes.TrimLeft(lineContent, " \t")
 
@@ -93,6 +96,24 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	return diags, nil
+}
+
+func isListContinuationLine(ctx *lint.RuleContext, lineNum int) bool {
+	if lineNum <= 1 || lint.IsBlankLine(ctx.File, lineNum-1) {
+		return false
+	}
+	for _, item := range ctx.ListItems() {
+		pos := item.SourcePosition()
+		if pos.StartLine < lineNum && lineNum <= pos.EndLine {
+			marker := listMarkerPattern.FindIndex(lint.LineContent(ctx.File, pos.StartLine))
+			content := lint.LineContent(ctx.File, lineNum)
+			indent := len(content) - len(bytes.TrimLeft(content, " \t"))
+			if marker != nil && indent >= marker[1] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // NoMultipleSpaceATXRule checks for multiple spaces after hash on ATX headings.

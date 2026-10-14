@@ -3,6 +3,7 @@ package lint
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -89,7 +90,7 @@ func (e *Engine) LintFile(
 	}
 
 	// Resolve which rules to run.
-	resolved := ResolveRules(e.Registry, cfg)
+	states := directiveStates(snapshot, e.Registry, cfg)
 
 	result := &FileResult{
 		Snapshot:    snapshot,
@@ -102,7 +103,11 @@ func (e *Engine) LintFile(
 	var allEdits []fix.TextEdit
 
 	// Run each rule.
-	for _, rr := range resolved {
+	for _, rule := range e.Registry.Rules() {
+		rr := resolveRule(rule, cfg)
+		if !slices.Contains(states[rule.ID()], true) {
+			continue
+		}
 		// Check for cancellation.
 		select {
 		case <-ctx.Done():
@@ -123,6 +128,10 @@ func (e *Engine) LintFile(
 
 		// Process diagnostics.
 		for diagIdx := range diags {
+			line := diags[diagIdx].StartLine
+			if line > 0 && line < len(states[rule.ID()]) && !states[rule.ID()][line] {
+				continue
+			}
 			// Apply resolved severity.
 			diags[diagIdx].Severity = rr.Severity
 
@@ -140,9 +149,8 @@ func (e *Engine) LintFile(
 			if rr.AutoFix && len(diags[diagIdx].FixEdits) > 0 {
 				allEdits = append(allEdits, diags[diagIdx].FixEdits...)
 			}
+			result.Diagnostics = append(result.Diagnostics, diags[diagIdx])
 		}
-
-		result.Diagnostics = append(result.Diagnostics, diags...)
 	}
 
 	// Validate and prepare edits, merging deletions and filtering conflicts.

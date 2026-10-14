@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // MigrationResult contains the result of converting a markdownlint config.
@@ -54,13 +57,36 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	}
 
 	cfg := config.NewConfig()
+	defaultEnabled := true
+	if value, ok := raw["default"].(bool); ok {
+		defaultEnabled = value
+	}
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	standardIDs := GetAllRuleIDs()
+	for _, id := range registry.IDs() {
+		enabled := defaultEnabled && slices.Contains(standardIDs, id)
+		cfg.Rules[id] = config.RuleConfig{Enabled: &enabled}
+	}
 
 	// Handle special keys
 	processSpecialKeys(raw, result)
 
-	// Process remaining keys as rules
-	for key, value := range raw {
-		processRuleKey(cfg, key, value, result)
+	// Apply tags before explicit rules, deterministically.
+	keys := make([]string, 0, len(raw))
+	for key := range raw {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		if IsTag(key) {
+			processRuleKey(cfg, key, raw[key], result)
+		}
+	}
+	for _, key := range keys {
+		if !IsTag(key) {
+			processRuleKey(cfg, key, raw[key], result)
+		}
 	}
 
 	result.Config = cfg
@@ -150,14 +176,7 @@ func stripJSONComments(content []byte) []byte {
 // processSpecialKeys handles markdownlint special configuration keys.
 func processSpecialKeys(raw map[string]any, result *MigrationResult) {
 	// Handle "default" key
-	if defaultVal, ok := raw["default"].(bool); ok {
-		if !defaultVal {
-			result.Warnings = append(result.Warnings,
-				"'default: false' means all rules are disabled by default; "+
-					"in gomdlint, rules are enabled by default and must be explicitly disabled")
-		}
-		delete(raw, "default")
-	}
+	delete(raw, "default")
 
 	// Handle "extends" key
 	if extends, ok := raw["extends"].(string); ok {
