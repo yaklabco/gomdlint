@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -90,6 +91,10 @@ func (e *Engine) LintFile(
 	}
 
 	// Resolve which rules to run.
+	cfg, err = configureFile(collectDirectives(snapshot, e.Registry), e.Registry, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("file configuration: %w", err)
+	}
 	states := directiveStates(snapshot, e.Registry, cfg)
 
 	result := &FileResult{
@@ -155,6 +160,7 @@ func (e *Engine) LintFile(
 
 	// Validate and prepare edits, merging deletions and filtering conflicts.
 	if len(allEdits) > 0 {
+		allEdits = mergeBlankLineInsertions(allEdits)
 		accepted, skipped, _, err := fix.PrepareEditsFiltered(allEdits, len(content))
 		if err != nil {
 			// Validation error (not conflicts - those are filtered).
@@ -170,4 +176,24 @@ func (e *Engine) LintFile(
 	}
 
 	return result, nil
+}
+
+// mergeBlankLineInsertions combines formatting requirements at the same boundary.
+// It runs after suppression so disabled findings cannot increase an enabled fix.
+func mergeBlankLineInsertions(edits []fix.TextEdit) []fix.TextEdit {
+	result := make([]fix.TextEdit, 0, len(edits))
+	boundaries := make(map[int]int)
+	for _, edit := range edits {
+		if edit.StartOffset == edit.EndOffset && edit.NewText != "" && strings.Trim(edit.NewText, "\n") == "" {
+			if idx, ok := boundaries[edit.StartOffset]; ok {
+				if len(edit.NewText) > len(result[idx].NewText) {
+					result[idx] = edit
+				}
+				continue
+			}
+			boundaries[edit.StartOffset] = len(result)
+		}
+		result = append(result, edit)
+	}
+	return result
 }

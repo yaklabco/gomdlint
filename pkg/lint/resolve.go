@@ -1,6 +1,10 @@
 package lint
 
-import "github.com/yaklabco/gomdlint/pkg/config"
+import (
+	"maps"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+)
 
 // ResolvedRule pairs a Rule with its resolved configuration.
 type ResolvedRule struct {
@@ -48,6 +52,18 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 	if cfg == nil {
 		return rr
 	}
+	if baseline, ok := cfg.RuleDefaults[rule.ID()]; ok {
+		rr.Config = &baseline
+		if baseline.Enabled != nil {
+			rr.Enabled = *baseline.Enabled
+		}
+		if baseline.Severity != nil {
+			rr.Severity = config.Severity(*baseline.Severity)
+		}
+		if baseline.AutoFix != nil {
+			rr.AutoFix = *baseline.AutoFix && rule.CanFix()
+		}
+	}
 
 	// Check for explicit enable/disable from CLI.
 	for _, id := range cfg.EnableRules {
@@ -65,6 +81,11 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 
 	// Apply rule-specific config.
 	if ruleCfg, ok := cfg.Rules[rule.ID()]; ok {
+		if rr.Config != nil && rr.Config.Options != nil {
+			options := maps.Clone(rr.Config.Options)
+			maps.Copy(options, ruleCfg.Options)
+			ruleCfg.Options = options
+		}
 		rr.Config = &ruleCfg
 
 		if ruleCfg.Enabled != nil {

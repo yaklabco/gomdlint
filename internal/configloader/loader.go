@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
@@ -312,7 +313,11 @@ func promptMigration(markdownlintPath string) (bool, error) {
 
 // isInteractive returns true if stdin is a terminal.
 func isInteractive() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	descriptor := os.Stdin.Fd()
+	if descriptor > math.MaxInt {
+		return false
+	}
+	return term.IsTerminal(int(descriptor))
 }
 
 // writeConfig writes a configuration to a YAML file.
@@ -340,17 +345,22 @@ func writeConfig(cfg *config.Config, path string) error {
 // This allows users to use human-readable names like "no-trailing-spaces" in config files.
 // If a rule is specified by both ID and name, warns and uses the last value encountered.
 func normalizeRuleKeys(cfg *config.Config, registry *lint.Registry, result *LoadResult) {
-	if len(cfg.Rules) == 0 {
-		return
+	cfg.Rules = normalizeRuleMap(cfg.Rules, registry, result)
+	cfg.RuleDefaults = normalizeRuleMap(cfg.RuleDefaults, registry, result)
+}
+
+func normalizeRuleMap(rules map[string]config.RuleConfig, registry *lint.Registry, result *LoadResult) map[string]config.RuleConfig {
+	if len(rules) == 0 {
+		return rules
 	}
 
 	// Build a new map with normalized keys
-	normalized := make(map[string]config.RuleConfig, len(cfg.Rules))
+	normalized := make(map[string]config.RuleConfig, len(rules))
 
 	// Track which canonical IDs we've seen to detect duplicates
 	seenIDs := make(map[string]string) // canonical ID -> original key
 
-	for key, ruleCfg := range cfg.Rules {
+	for key, ruleCfg := range rules {
 		// Try to resolve the key to a canonical ID
 		canonicalID, _, found := registry.Resolve(key)
 		if !found {
@@ -373,5 +383,5 @@ func normalizeRuleKeys(cfg *config.Config, registry *lint.Registry, result *Load
 	}
 
 	// Replace the rules map with normalized version
-	cfg.Rules = normalized
+	return normalized
 }

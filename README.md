@@ -12,7 +12,7 @@ Inspired by [markdownlint](https://github.com/DavidAnson/markdownlint) by David 
 | **Auto-fixable**   | 67% (37 of 55 rules) | Limited      |
 | **Language**       | Go       | Node.js      |
 
-gomdlint is **dramatically faster** than markdownlint—benchmarks on real-world repositories show an average **507x speedup**, with improvements ranging from 72x to over 1100x depending on repository size. 37 of 55 rules support automatic fixing. Built in Go with no runtime dependencies.
+gomdlint is **dramatically faster** than markdownlint. Benchmarks on real-world repositories show an average **507x speedup**, with improvements ranging from 72x to over 1100x depending on repository size. 37 of 55 rules support automatic fixing. Built in Go with no runtime dependencies.
 
 See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for detailed benchmark methodology and results.
 
@@ -145,8 +145,8 @@ rules:
     enabled: true
     severity: warning
     options:
-      line_length: 120
-      code_blocks: false
+      max: 120
+      ignore_code_blocks: true
 
 ignore:
   - "vendor/**"
@@ -156,6 +156,20 @@ ignore:
 Generate a starter configuration with `gomdlint init` or a comprehensive template with `gomdlint init --full`.
 
 Migrate existing markdownlint configurations with `gomdlint migrate`.
+
+Migration writes markdownlint's rule defaults and translated options into
+`rule_defaults`, with source overrides under `rules`. It keeps gomdlint-only rules
+disabled. Native configurations retain gomdlint's defaults. For example, migrated
+MD025 checks document titles, while native MD025 checks all H1 headings.
+
+Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
+`disable-next-line`, `disable-file`, `enable-file`, `capture`, and `restore`, with
+rule IDs, aliases, or tags. Suppressed findings produce no fixes. Comments inside
+code or frontmatter do not change lint settings.
+
+`markdownlint-configure-file` accepts a JSON object of markdownlint settings and
+applies it to the whole file. Invalid JSON and unknown rule keys fail that file.
+Migration does not evaluate JavaScript configuration or resolve `extends`.
 
 Override configuration via command line (`--enable`, `--disable`) or environment variables (`GOMDLINT_*`).
 

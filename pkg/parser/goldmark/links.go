@@ -25,7 +25,6 @@ type positionedLinkParser struct {
 	parser.InlineParser
 }
 
-//nolint:ireturn // Implements goldmark's InlineParser interface.
 func (p *positionedLinkParser) Parse(parent ast.Node, reader text.Reader, ctx parser.Context) ast.Node {
 	line, segment := reader.PeekLine()
 	start := segment.Start

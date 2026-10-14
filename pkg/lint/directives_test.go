@@ -111,3 +111,91 @@ func TestEngineAdditionalMarkdownlintAliases(t *testing.T) {
 		})
 	}
 }
+
+func TestEngineConfigureFileIsFileScoped(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	input := "bad  \n<!-- markdownlint-configure-file {\"MD009\": {\"br_spaces\": 2}} -->\n"
+	result, err := engine.LintFile(context.Background(), "configured.md", []byte(input), cfg)
+	require.NoError(t, err)
+	require.Empty(t, result.Diagnostics)
+	require.Empty(t, result.Edits)
+	result, err = engine.LintFile(context.Background(), "ordinary.md", []byte("bad  \n"), cfg)
+	require.NoError(t, err)
+	require.Len(t, result.Diagnostics, 1)
+	require.Len(t, result.Edits, 1)
+	require.Empty(t, cfg.Rules, "file directives must not mutate the shared configuration")
+}
+
+func TestEngineConfigureFileDefaultPreservesExplicitRules(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		registry := lint.NewRegistry()
+		registry.Register(rules.NewTrailingWhitespaceRule())
+		cfg := config.NewConfig()
+		if explicit {
+			enabled := true
+			cfg.Rules["MD009"] = config.RuleConfig{Enabled: &enabled}
+		}
+		input := "bad \n<!-- markdownlint-configure-file {\"default\": false} -->\n"
+		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), cfg)
+		require.NoError(t, err)
+		if explicit {
+			require.Len(t, result.Diagnostics, 1)
+		} else {
+			require.Empty(t, result.Diagnostics)
+		}
+	}
+}
+
+func TestEngineConfigureFileRejectsInvalidConfiguration(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	for _, value := range []string{`{"MD009":`, `null`, `{"unknown-rule": false}`} {
+		input := "<!-- markdownlint-configure-file " + value + " -->\nbad \n"
+		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
+		require.ErrorContains(t, err, "line 1")
+		require.Nil(t, result)
+	}
+}
+
+func TestEngineConfigureFileRuleOverridesTag(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	input := "bad \n<!-- markdownlint-configure-file {\"MD009\": true, \"whitespace\": false} -->\n"
+	for range 20 {
+		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
+		require.NoError(t, err)
+		require.Len(t, result.Diagnostics, 1)
+	}
+}
+
+func TestEngineAdjacentHeadingFix(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewHeadingBlankLinesRule())
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.Rules["MD022"] = config.RuleConfig{Options: map[string]any{"markdownlint_compatible": true}}
+	input := "# Title\n## Section\n"
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	require.Len(t, result.Diagnostics, 2)
+	require.Equal(t, "# Title\n\n## Section\n", string(fix.ApplyEdits([]byte(input), result.Edits)))
+}
+
+func TestEngineHeadingFixHonorsSuppressedBoundaryRequirement(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewHeadingBlankLinesRule())
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.Rules["MD022"] = config.RuleConfig{Options: map[string]any{
+		"markdownlint_compatible": true, "lines_above": 1, "lines_below": 2,
+	}}
+	input := "<!-- markdownlint-disable-next-line MD022 -->\n# Title\n## Section\n"
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	require.Len(t, result.Diagnostics, 1)
+	require.Equal(t, "<!-- markdownlint-disable-next-line MD022 -->\n# Title\n\n## Section\n", string(fix.ApplyEdits([]byte(input), result.Edits)))
+}

@@ -147,6 +147,14 @@ func (c *Config) deepCopy() *Config {
 		}
 	}
 
+	// Deep copy rule defaults.
+	if c.RuleDefaults != nil {
+		clone.RuleDefaults = make(map[string]RuleConfig, len(c.RuleDefaults))
+		for key, value := range c.RuleDefaults {
+			clone.RuleDefaults[key] = value.clone()
+		}
+	}
+
 	// Deep copy EnableRules slice
 	if c.EnableRules != nil {
 		clone.EnableRules = make([]string, len(c.EnableRules))

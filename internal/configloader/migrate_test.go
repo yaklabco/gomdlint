@@ -1,14 +1,325 @@
 package configloader
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/rules"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
+
+func lintMigratedMarkdown(t *testing.T, settings, input string) []lint.Diagnostic {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".markdownlint.json")
+	require.NoError(t, os.WriteFile(path, []byte(settings), 0o600))
+	converted, err := ConvertMarkdownlintConfig(path)
+	require.NoError(t, err)
+	converted.Config.Flavor = config.FlavorGFM
+	yamlConfig, err := converted.Config.ToYAML()
+	require.NoError(t, err)
+	migratedPath := filepath.Join(filepath.Dir(path), ".gomdlint.yml")
+	require.NoError(t, os.WriteFile(migratedPath, yamlConfig, 0o600))
+	loaded, err := Load(context.Background(), LoadOptions{
+		WorkingDir: filepath.Dir(path), ExplicitPath: migratedPath, IgnoreEnv: true,
+		IgnoreUserConfig: true, IgnoreSystemConfig: true, IgnoreMarkdownlint: true, NonInteractive: true,
+	})
+	require.NoError(t, err)
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	rules.RegisterLegacyAliases(registry)
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+		context.Background(), "test.md", []byte(input), loaded.Config)
+	require.NoError(t, err)
+	require.Empty(t, result.RuleErrors)
+	return result.Diagnostics
+}
+
+func TestMigratedWhitespacePolicy(t *testing.T) {
+	input := "```text\ncode  \n```\n\nline  \ncontinued\n\nbad   \n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD009": true}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 8, diags[0].StartLine)
+}
+
+func TestMigratedWhitespaceOptions(t *testing.T) {
+	input := "```text\ncode \n```\n\nline   \ncontinued\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD009": {"code_blocks": true, "br_spaces": 3}}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 2, diags[0].StartLine)
+}
+
+func TestMigratedWhitespaceStrictHardBreaks(t *testing.T) {
+	input := "paragraph  \ncontinued\n\nlast  \n\n# Heading  \n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD009": {"strict": true}}`, input)
+	require.Len(t, diags, 2)
+	require.Equal(t, 4, diags[0].StartLine)
+	require.Equal(t, 6, diags[1].StartLine)
+}
+
+func TestMigratedWhitespaceListEmptyLines(t *testing.T) {
+	input := "- item\n  \n  continuation\n\n  \noutside\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD009": {"list_item_empty_lines": true, "br_spaces": 0}}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 5, diags[0].StartLine)
+}
+
+func TestMigratedLineLengthPolicy(t *testing.T) {
+	input := strings.Repeat("word ", 20) + "end\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD013": true}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 81, diags[0].StartColumn)
+}
+
+func TestMigratedLineLengthOptions(t *testing.T) {
+	input := "short\n\nbird tree rain snow end\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD013": {"line_length": 20}}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 21, diags[0].StartColumn)
+}
+
+func TestMigratedLineLengthContextOptions(t *testing.T) {
+	input := "# bird tree rain snow end\n\nbird tree rain snow end\n\n```text\nbird tree rain end\n```\n\n" +
+		"| Column | Description |\n| --- | --- |\n| value | bird tree rain snow end |\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD013": {"line_length": 20, "heading_line_length": 30, "code_block_line_length": 10, "tables": false}}`, input)
+	require.Len(t, diags, 2)
+	require.Equal(t, 3, diags[0].StartLine)
+	require.Equal(t, 6, diags[1].StartLine)
+}
+
+func TestMigratedLineLengthSoftLimit(t *testing.T) {
+	input := strings.Repeat("x", 100) + "\n\nshort " + strings.Repeat("x", 100) + "\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD013": true}`, input))
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD013": {"strict": true}}`, input), 2)
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD013": {"stern": true}}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 3, diags[0].StartLine)
+}
+
+func TestMigratedLineLengthLinkTable(t *testing.T) {
+	input := "| Item | Link |\n| --- | --- |\n| " + strings.Repeat("word ", 20) + "| [runbook](runbook.md) |\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD013": true}`, input))
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD013": {"strict": true}}`, input), 1)
+}
+
+func TestMigratedLineLengthCodeIsNotRewritten(t *testing.T) {
+	input := "```text\nbird tree rain snow end\n```\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD013": {"line_length": 10, "strict": true}}`, input)
+	require.Len(t, diags, 1)
+	require.Empty(t, diags[0].FixEdits)
+}
+
+func TestMigratedLineLengthCodeFenceOptions(t *testing.T) {
+	input := "```" + strings.Repeat("x", 100) + "\nword\n```\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD013": {"code_blocks": false, "strict": true}}`, input))
+}
+
+func TestMigratedLineLengthUnicodeUnits(t *testing.T) {
+	settings := `{"default": false, "MD013": {"line_length": 10, "strict": true}}`
+	require.Empty(t, lintMigratedMarkdown(t, settings, "😀😀😀\n"))
+	diags := lintMigratedMarkdown(t, settings, "😀😀😀😀😀😀\n")
+	require.Len(t, diags, 1)
+	require.Contains(t, diags[0].Message, "length 12")
+	require.Equal(t, 21, diags[0].StartColumn, "source columns retain UTF-8 byte offsets")
+}
+
+func TestMigratedTitlePolicy(t *testing.T) {
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD025": true}`, "Preamble.\n\n# Section\n\n# Another section\n"))
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD025": true}`, "# Title\n\n# Second title\n")
+	require.Len(t, diags, 1)
+	require.Equal(t, 3, diags[0].StartLine)
+	diags = lintMigratedMarkdown(t, `{"default": false, "MD025": true}`, "---\ntitle: Document\n---\n\n# Duplicate title\n")
+	require.Len(t, diags, 1)
+	require.Equal(t, 5, diags[0].StartLine)
+}
+
+func TestMigratedRuleObjectControls(t *testing.T) {
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD009": {"enabled": false}}`, "bad \n"))
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD009": {"severity": "error"}}`, "bad \n")
+	require.Len(t, diags, 1)
+	require.Equal(t, config.SeverityError, diags[0].Severity)
+}
+
+func TestMigratedHTMLDefaultIsExplicit(t *testing.T) {
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD033": true}`, "<sup>text</sup>\n"), 1)
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD033": {"allowed_elements": ["sup"]}}`, "<sup>text</sup>\n"))
+}
+
+func TestMigratedDefaultsRemainConfigurable(t *testing.T) {
+	input := "bad \n<!-- markdownlint-configure-file {\"default\": false} -->\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{}`, input))
+	diags := lintMigratedMarkdown(t, `{"MD009": true}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, "MD009", diags[0].RuleID)
+}
+
+func TestFileDefaultsPreserveMigratedRuleSet(t *testing.T) {
+	input := "<!-- markdownlint-configure-file {\"default\": true} -->\n# Title\n\n| A | B |\n| - | - |\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false}`, input))
+}
+
+func TestMigratedStyleDefaults(t *testing.T) {
+	for _, tt := range []struct{ rule, input string }{
+		{"MD004", "* first\n* second\n"},
+		{"MD046", "    code\n"},
+		{"MD048", "~~~text\ncode\n~~~\n"},
+	} {
+		t.Run(tt.rule, func(t *testing.T) {
+			require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "`+tt.rule+`": true}`, tt.input))
+		})
+	}
+}
+
+func TestMigratedBlankLineMaximum(t *testing.T) {
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD012": {"maximum": 2}}`, "Text.\n\n\nMore.\n"))
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD012": {"maximum": 1}}`, "Text.\n\n\nMore.\n"), 1)
+}
+
+func TestMigratedTagRuleObjects(t *testing.T) {
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "whitespace": {"br_spaces": 3}}`, "text   \n"))
+	require.Empty(t, lintMigratedMarkdown(t, `{"whitespace": {"enabled": false}}`, "# Title\n\ntext \n"))
+}
+
+func TestMigratedFirstHeadingPreamble(t *testing.T) {
+	settings := `{"default": false, "MD041": {"allow_preamble": true}}`
+	require.Empty(t, lintMigratedMarkdown(t, settings, "Preamble.\n\n# Title\n"))
+	require.Empty(t, lintMigratedMarkdown(t, settings, "Preamble without a heading.\n"))
+	require.Len(t, lintMigratedMarkdown(t, settings, "Preamble.\n\n## Wrong level\n"), 1)
+}
+
+func TestMigratedSeverityDefaults(t *testing.T) {
+	input := "# Title\n\ntext \n"
+	diags := lintMigratedMarkdown(t, `{"default": "warning"}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, config.SeverityWarning, diags[0].Severity)
+	diags = lintMigratedMarkdown(t, `{"default": false, "MD009": true}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, config.SeverityError, diags[0].Severity)
+	diags = lintMigratedMarkdown(t, `{"default": false, "MD009": "warning"}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, config.SeverityWarning, diags[0].Severity)
+}
+
+func TestMigratedOrderedListStyles(t *testing.T) {
+	input := "1. first\n1. second\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD029": true}`, input))
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD029": {"style": "one"}}`, input))
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD029": {"style": "ordered"}}`, input), 1)
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD029": {"style": "zero"}}`, "0. first\n0. second\n"))
+}
+
+func TestMigratedFenceLanguageOnly(t *testing.T) {
+	settings := `{"default": false, "MD040": {"language_only": true}}`
+	require.Len(t, lintMigratedMarkdown(t, settings, "```go title=example\ncode\n```\n"), 1)
+	require.Empty(t, lintMigratedMarkdown(t, settings, "```go\ncode\n```\n"))
+}
+
+func TestMigratedProhibitedLinkText(t *testing.T) {
+	settings := `{"default": false, "MD059": {"prohibited_texts": ["details"]}}`
+	require.Len(t, lintMigratedMarkdown(t, settings, "[details](target)\n"), 1)
+	require.Empty(t, lintMigratedMarkdown(t, settings, "[here](target)\n"))
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD059": {"prohibited_texts": []}}`, "[here](target)\n"))
+}
+
+func TestMigratedLinkTextNormalization(t *testing.T) {
+	settings := `{"default": false, "MD059": true}`
+	require.Len(t, lintMigratedMarkdown(t, settings, "[Here!](target)\n"), 1)
+	require.Empty(t, lintMigratedMarkdown(t, settings, "[read more](target)\n"))
+	require.Empty(t, lintMigratedMarkdown(t, settings, "[<b>here</b>](target)\n"))
+}
+
+func TestMigratedTableHTMLAllowlist(t *testing.T) {
+	input := "| A | B |\n| --- | --- |\n| value | <br> |\n\n<br>\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD033": {"table_allowed_elements": ["br"]}}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 5, diags[0].StartLine)
+}
+
+func TestMigratedTableDelimiterAlignment(t *testing.T) {
+	input := "| A | B |\n| --- | --- |\n| x | y |\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD060": {"style": "compact"}}`, input))
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD060": {"style": "compact", "aligned_delimiter": true}}`, input)
+	require.Len(t, diags, 2)
+	require.Equal(t, 2, diags[0].StartLine)
+	require.Equal(t, 7, diags[0].StartColumn)
+	require.Equal(t, 13, diags[1].StartColumn)
+}
+
+func TestMigratedTableColumnStyles(t *testing.T) {
+	for _, tt := range []struct {
+		name, options, input string
+		valid                bool
+	}{
+		{"aligned unequal padding", `{"style":"aligned"}`, "| A   | B |\n| --- | - |\n| x   | y |\n", true},
+		{"unaligned rows", `{"style":"aligned"}`, "| A   | B |\n| --- | - |\n| x | y |\n", false},
+		{"any requires one style", `{}`, "| A  | B |\n| --- | --- |\n|x|y|\n", false},
+		{"compact extra padding", `{"style":"compact"}`, "| A  | B |\n| --- | --- |\n| x | y |\n", false},
+		{"tight space", `{"style":"tight"}`, "|A|B|\n|---|---|\n|x |y|\n", false},
+		{"display width", `{"style":"aligned"}`, "| 猫 | B |\n|----|---|\n| xx | y |\n", true},
+		{"escaped pipe", `{"style":"tight"}`, "|a\\|b|c|\n|---|---|\n|x|y|\n", true},
+		{"quoted tight table", `{"style":"tight"}`, "> |A|B|\n> |---|---|\n> |x|y|\n", true},
+		{"ignore malformed block", `{"style":"compact"}`, "| A | B |\n| --- | --- | --- |\n", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := lintMigratedMarkdown(t, `{"default":false,"MD060":`+tt.options+`}`, tt.input)
+			if tt.valid {
+				require.Empty(t, diags)
+			} else {
+				require.NotEmpty(t, diags)
+			}
+		})
+	}
+}
+
+func TestMigratedHeadingIncrementMetadataTitle(t *testing.T) {
+	input := "---\ntitle: Document\n---\n\n### Skipped level\n"
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD001": true}`, input), 1)
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD001": {"front_matter_title": false}}`, input))
+}
+
+func TestMigratedHeadingBlankLineOptions(t *testing.T) {
+	input := "# Title\ntext\n\n## Section\nbody\n"
+	diags := lintMigratedMarkdown(t, `{"default": false, "MD022": {"lines_above": [0, 2], "lines_below": [0, 0]}}`, input)
+	require.Len(t, diags, 1)
+	require.Equal(t, 4, diags[0].StartLine)
+	input = "---\nname: Document\n---\n# Title\n\nText.\n"
+	require.Empty(t, lintMigratedMarkdown(t, `{"default": false, "MD022": true}`, input))
+	require.Len(t, lintMigratedMarkdown(t, `{"default": false, "MD022": {"include_front_matter": true}}`, input), 1)
+}
+
+func TestRuleDefaultsCascadeAndValidation(t *testing.T) {
+	base, err := config.FromYAML([]byte("rule_defaults:\n  MD009:\n    enabled: true\n    options:\n      br_spaces: 2\n"))
+	require.NoError(t, err)
+	override, err := config.FromYAML([]byte("rule_defaults:\n  MD009:\n    options:\n      br_spaces: 3\n"))
+	require.NoError(t, err)
+	merged := MergeAll(config.NewConfig(), base, override)
+	require.Equal(t, 3, merged.RuleDefaults["MD009"].Options["br_spaces"])
+	require.Equal(t, 2, base.RuleDefaults["MD009"].Options["br_spaces"], "merging must not mutate a reusable baseline")
+	invalid := "invalid"
+	merged.RuleDefaults["MD009"] = config.RuleConfig{Severity: &invalid}
+	require.False(t, Validate(merged).Valid())
+}
+
+func TestRuleDefaultsLoadAndRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".gomdlint.yml")
+	require.NoError(t, os.WriteFile(path, []byte("rule_defaults:\n  no-trailing-spaces:\n    enabled: false\n"), 0o600))
+	loaded, err := Load(context.Background(), LoadOptions{
+		ExplicitPath: path, IgnoreEnv: true, IgnoreUserConfig: true, IgnoreSystemConfig: true,
+		IgnoreMarkdownlint: true, NonInteractive: true,
+	})
+	require.NoError(t, err)
+	require.Contains(t, loaded.Config.RuleDefaults, "MD009")
+	require.False(t, *loaded.Config.RuleDefaults["MD009"].Enabled)
+	clone := loaded.Config.Clone()
+	enabled := true
+	clone.RuleDefaults["MD009"] = config.RuleConfig{Enabled: &enabled}
+	require.False(t, *loaded.Config.RuleDefaults["MD009"].Enabled)
+}
 
 func TestMigrationPreservesEnabledRules(t *testing.T) {
 	for _, input := range []string{
@@ -95,8 +406,8 @@ func TestConvertMarkdownlintConfig_JSON(t *testing.T) {
 	if md013.Options == nil {
 		t.Fatal("MD013 options is nil")
 	}
-	if lineLen, ok := md013.Options["line_length"].(float64); !ok || lineLen != 120 {
-		t.Errorf("expected line_length 120, got %v", md013.Options["line_length"])
+	if lineLen, ok := md013.Options["max"].(float64); !ok || lineLen != 120 {
+		t.Errorf("expected mapped maximum 120, got %v", md013.Options["max"])
 	}
 }
 

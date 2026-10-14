@@ -28,6 +28,9 @@ func assignTokenRangesRecursive(node *mdast.Node, gmNode ast.Node, tokens []mdas
 	start, end := getNodeByteRange(gmNode, content)
 
 	if start >= 0 && end >= 0 && start <= end {
+		if node.Kind == mdast.NodeHTMLInline {
+			node.SourceSpan = &mdast.SourceRange{StartOffset: start, EndOffset: end}
+		}
 		// Find token indices for this byte range.
 		firstToken := findTokenAtOffset(tokens, start)
 		lastToken := findLastTokenAtOffset(tokens, end)

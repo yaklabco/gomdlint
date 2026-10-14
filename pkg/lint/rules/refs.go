@@ -10,6 +10,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/refs"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // LinkFragmentsRule validates that link fragments reference valid anchors (MD051).
@@ -395,10 +396,14 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	// Get patterns from config, or use defaults
 	patterns := ctx.OptionStringSlice("patterns", getDefaultGenericPatterns())
+	compatible := ctx.OptionBool("markdownlint_compatible", false)
 
 	// Build pattern set (lowercase for case-insensitive matching)
 	patternSet := make(map[string]bool)
 	for _, p := range patterns {
+		if compatible {
+			p = normalizeMarkdownlintLinkText(p)
+		}
 		patternSet[strings.ToLower(strings.TrimSpace(p))] = true
 	}
 
@@ -413,9 +418,16 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		if usage.IsImage {
 			continue
 		}
+		if compatible && (len(mdast.FindByKind(usage.Node, mdast.NodeCodeSpan)) > 0 ||
+			len(mdast.FindByKind(usage.Node, mdast.NodeHTMLInline)) > 0) {
+			continue
+		}
 
 		// Check if text is generic
 		text := strings.ToLower(strings.TrimSpace(usage.Text))
+		if compatible {
+			text = normalizeMarkdownlintLinkText(text)
+		}
 		if text == "" {
 			continue
 		}
@@ -431,4 +443,14 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	return diags, nil
+}
+
+func normalizeMarkdownlintLinkText(text string) string {
+	text = strings.Map(func(char rune) rune {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' {
+			return char
+		}
+		return ' '
+	}, text)
+	return strings.ToLower(strings.Join(strings.Fields(text), " "))
 }

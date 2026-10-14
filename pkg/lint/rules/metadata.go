@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -41,7 +42,7 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	requiredLevel := ctx.OptionInt("level", 1)
-	frontMatterTitlePattern := ctx.OptionString("front_matter_title", `^\s*"?title"?\s*[:=]`)
+	frontMatterTitlePattern := ctx.OptionString("front_matter_title", config.MarkdownlintFrontMatterTitlePattern)
 	if value, ok := ctx.Option("front_matter_title", nil).(bool); ok && !value {
 		frontMatterTitlePattern = ""
 	}
@@ -65,6 +66,9 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	// Find the first block at or after the first content line.
 	// This skips any front matter that goldmark may parse as blocks.
 	firstBlock := r.findFirstBlockAfterLine(ctx.Root, firstContentLine)
+	if ctx.OptionBool("allow_preamble", false) {
+		firstBlock = lint.FirstHeading(ctx.Root)
+	}
 	if firstBlock == nil {
 		return nil, nil
 	}
@@ -187,9 +191,6 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		return nil, nil
 	}
 
-	linesAbove := ctx.OptionInt("lines_above", 1)
-	linesBelow := ctx.OptionInt("lines_below", 1)
-
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
@@ -202,14 +203,23 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		if !pos.IsValid() {
 			continue
 		}
+		linesAbove := headingBlankLineOption(ctx, "lines_above", lint.HeadingLevel(heading))
+		linesBelow := headingBlankLineOption(ctx, "lines_below", lint.HeadingLevel(heading))
+		includeMetadata := ctx.OptionBool("include_front_matter", false)
 
 		// Check blank lines above (unless it's the first line or follows front matter).
-		if pos.StartLine > 1 && linesAbove > 0 && !headingIsFirstContent(ctx, heading) {
+		if pos.StartLine > 1 && linesAbove > 0 && (!headingIsFirstContent(ctx, heading) || includeMetadata) {
 			blanksBefore := lint.CountBlankLinesBefore(ctx.File, pos.StartLine)
+			if includeMetadata {
+				blanksBefore = 0
+				for line := pos.StartLine - 1; line > 0 && len(bytes.TrimSpace(lint.RawLineContent(ctx.File, line))) == 0; line-- {
+					blanksBefore++
+				}
+			}
 			if blanksBefore < linesAbove {
 				// Check if previous line is also a heading (allow no blank between headings).
 				prevIsHeading := r.isPreviousLineHeading(ctx.File, ctx.Root, pos.StartLine)
-				if !prevIsHeading {
+				if !prevIsHeading || ctx.OptionBool("markdownlint_compatible", false) {
 					diag := r.createBlankBeforeDiagnostic(ctx, heading, pos, blanksBefore, linesAbove)
 					diags = append(diags, diag)
 				}
@@ -219,10 +229,13 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		// Check blank lines below (unless it's the last line).
 		if pos.EndLine < len(ctx.File.Lines) && linesBelow > 0 {
 			blanksAfter := lint.CountBlankLinesAfter(ctx.File, pos.EndLine)
+			if ctx.OptionBool("markdownlint_compatible", false) && pos.EndLine+blanksAfter >= len(ctx.File.Lines) {
+				blanksAfter = linesBelow
+			}
 			if blanksAfter < linesBelow {
 				// Check if next non-blank line is also a heading.
 				nextIsHeading := r.isNextLineHeading(ctx.File, ctx.Root, pos.EndLine)
-				if !nextIsHeading {
+				if !nextIsHeading || ctx.OptionBool("markdownlint_compatible", false) {
 					diag := r.createBlankAfterDiagnostic(ctx, heading, pos, blanksAfter, linesBelow)
 					diags = append(diags, diag)
 				}
@@ -231,6 +244,21 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	return diags, nil
+}
+
+func headingBlankLineOption(ctx *lint.RuleContext, key string, level int) int {
+	values, ok := ctx.Option(key, nil).([]any)
+	if !ok || level < 1 || level > len(values) {
+		return ctx.OptionInt(key, 1)
+	}
+	switch value := values[level-1].(type) {
+	case int:
+		return value
+	case float64:
+		return int(value)
+	default:
+		return 1
+	}
 }
 
 func headingIsFirstContent(ctx *lint.RuleContext, heading *mdast.Node) bool {

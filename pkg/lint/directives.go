@@ -1,6 +1,8 @@
 package lint
 
 import (
+	"encoding/json"
+	"fmt"
 	"maps"
 	"regexp"
 	"slices"
@@ -11,33 +13,106 @@ import (
 )
 
 type inlineDirective struct {
-	line   int
-	offset int
-	action string
-	rules  []string
+	line      int
+	offset    int
+	action    string
+	rules     []string
+	parameter string
 }
 
-var directivePattern = regexp.MustCompile(`(?i)<!--\s*markdownlint-(disable-next-line|disable-line|disable-file|enable-file|disable|enable|capture|restore)\b([^<>]*?)-->`)
+var directivePattern = regexp.MustCompile(`(?is)<!--\s*markdownlint-` +
+	`(configure-file|disable-next-line|disable-line|disable-file|enable-file|disable|enable|capture|restore)\b(.*?)-->`)
 
 func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDirective {
-	var directives []inlineDirective
-	for _, kind := range []mdast.NodeKind{mdast.NodeHTMLBlock, mdast.NodeHTMLInline} {
-		for _, node := range mdast.FindByKind(file.Root, kind) {
-			rng := node.SourceRange()
-			for _, match := range directivePattern.FindAllSubmatchIndex(node.Text(), -1) {
-				content := node.Text()
-				offset := rng.StartOffset + match[0]
-				line, _ := file.LineAt(offset)
-				directives = append(directives, inlineDirective{
-					line: line, offset: offset,
-					action: strings.ToLower(string(content[match[2]:match[3]])),
-					rules:  directiveRuleIDs(string(content[match[4]:match[5]]), registry),
-				})
-			}
+	nodes := mdast.FindByKind(file.Root, mdast.NodeHTMLBlock)
+	nodes = append(nodes, mdast.FindByKind(file.Root, mdast.NodeHTMLInline)...)
+	directives := make([]inlineDirective, 0, len(nodes))
+	for _, node := range nodes {
+		rng := node.SourceRange()
+		for _, match := range directivePattern.FindAllSubmatchIndex(node.Text(), -1) {
+			content := node.Text()
+			offset := rng.StartOffset + match[0]
+			line, _ := file.LineAt(offset)
+			directives = append(directives, inlineDirective{
+				line: line, offset: offset,
+				action:    strings.ToLower(string(content[match[2]:match[3]])),
+				rules:     directiveRuleIDs(string(content[match[4]:match[5]]), registry),
+				parameter: string(content[match[4]:match[5]]),
+			})
 		}
 	}
 	slices.SortFunc(directives, func(a, b inlineDirective) int { return a.offset - b.offset })
 	return directives
+}
+
+func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
+	var result *config.Config
+	for _, directive := range directives {
+		if directive.action != "configure-file" {
+			continue
+		}
+		if result == nil {
+			result = cfg.Clone()
+			if result == nil {
+				result = config.NewConfig()
+			}
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(directive.parameter), &raw); err != nil {
+			return nil, fmt.Errorf("markdownlint-configure-file at line %d: %w", directive.line, err)
+		}
+		if raw == nil {
+			return nil, fmt.Errorf("markdownlint-configure-file at line %d must contain a JSON object", directive.line)
+		}
+		keys := slices.Sorted(maps.Keys(raw))
+		slices.SortStableFunc(keys, func(a, b string) int {
+			_, _, aRule := registry.Resolve(normalizedDirectiveKey(a))
+			_, _, bRule := registry.Resolve(normalizedDirectiveKey(b))
+			if aRule == bRule {
+				return 0
+			}
+			if aRule {
+				return 1
+			}
+			return -1
+		})
+		for _, key := range keys {
+			value := raw[key]
+			if strings.EqualFold(key, "default") {
+				if result.RuleDefaults == nil {
+					result.RuleDefaults = make(map[string]config.RuleConfig)
+				}
+				for _, id := range registry.IDs() {
+					baseline := value
+					if strings.HasPrefix(id, "MDL") {
+						baseline = false
+					}
+					result.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, baseline)
+				}
+				continue
+			}
+			ids := directiveRuleIDs(key, registry)
+			if len(ids) == 0 {
+				return nil, fmt.Errorf("markdownlint-configure-file at line %d has unknown key %q", directive.line, key)
+			}
+			for _, id := range ids {
+				converted := config.MarkdownlintRuleConfig(id, value)
+				converted.AutoFix = result.Rules[id].AutoFix
+				result.Rules[id] = converted
+			}
+		}
+	}
+	if result == nil {
+		return cfg, nil
+	}
+	return result, nil
+}
+
+func normalizedDirectiveKey(key string) string {
+	if strings.HasPrefix(strings.ToLower(key), "md") {
+		return strings.ToUpper(key)
+	}
+	return strings.ToLower(key)
 }
 
 func directiveRuleIDs(parameter string, registry *Registry) []string {

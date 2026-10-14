@@ -3,6 +3,8 @@ package rules
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -37,9 +39,20 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		return nil, nil
 	}
 
-	maxLength := ctx.OptionInt("max", defaultMaxLineLength)
+	defaultLength := ctx.OptionInt("max", defaultMaxLineLength)
 	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", true)
 	ignoreURLs := ctx.OptionBool("ignore_urls", true)
+	compatible := ctx.OptionBool("markdownlint_compatible", false)
+	linkOnlyLines := make(map[int]bool)
+	definitionLines := make(map[int]bool)
+	codeLines := make(map[int]bool)
+	if compatible {
+		codeLines = markdownlintCodeLines(ctx)
+		linkOnlyLines = markdownlintLinkOnlyLines(ctx)
+		for _, definition := range ctx.RefContext().AllDefinitions {
+			definitionLines[definition.LineNumber] = true
+		}
+	}
 
 	var diags []lint.Diagnostic
 
@@ -49,12 +62,41 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		}
 
 		// Skip lines in code blocks if configured.
-		if ignoreCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
+		inCode := ctx.IsLineInCodeBlock(lineNum) || codeLines[lineNum]
+		if ignoreCodeBlocks && inCode {
 			continue
+		}
+		if ctx.OptionBool("ignore_tables", false) && lint.IsLineInTable(ctx.File, ctx.Root, lineNum) {
+			continue
+		}
+		maxLength := defaultLength
+		if inCode {
+			maxLength = ctx.OptionInt("code_block_max", maxLength)
+		} else if isHeading(string(lint.LineContent(ctx.File, lineNum))) {
+			if ctx.OptionBool("ignore_headings", false) {
+				continue
+			}
+			maxLength = ctx.OptionInt("heading_max", maxLength)
 		}
 
 		length := lint.LineLength(ctx.File, lineNum)
-		if length <= maxLength {
+		endColumn := length
+		byteLimit := maxLength
+		measured := length
+		if compatible {
+			if definitionLines[lineNum] {
+				continue
+			}
+			line := string(lint.LineContent(ctx.File, lineNum))
+			length = markdownlintTextLength(line)
+			byteLimit = markdownlintByteLimit(line, maxLength)
+			value, exempt := markdownlintMeasuredLength(ctx, line, linkOnlyLines[lineNum])
+			if exempt {
+				continue
+			}
+			measured = value
+		}
+		if maxLength <= 0 || measured <= maxLength {
 			continue
 		}
 
@@ -65,9 +107,9 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: maxLength + 1,
+			StartColumn: byteLimit + 1,
 			EndLine:     lineNum,
-			EndColumn:   length,
+			EndColumn:   endColumn,
 		}
 
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
@@ -76,14 +118,103 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 			WithSuggestion(fmt.Sprintf("Shorten the line to at most %d characters", maxLength))
 
 		// Add autofix if possible.
-		if fixer := r.buildWrapFix(ctx.File, lineNum, maxLength); fixer != nil {
-			diagBuilder = diagBuilder.WithFix(fixer)
+		if !compatible || !inCode {
+			if fixer := r.buildWrapFix(ctx.File, lineNum, byteLimit); fixer != nil {
+				diagBuilder = diagBuilder.WithFix(fixer)
+			}
 		}
 
 		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
+}
+
+func markdownlintMeasuredLength(ctx *lint.RuleContext, line string, linkOnly bool) (int, bool) {
+	if ctx.OptionBool("strict", false) {
+		return markdownlintTextLength(line), false
+	}
+	if linkOnly {
+		return 0, true
+	}
+	if ctx.OptionBool("stern", false) {
+		return markdownlintTextLength(line), isUnwrappableMarkdownlintLine(line)
+	}
+	prefix := strings.TrimRightFunc(line, func(char rune) bool { return !unicode.IsSpace(char) })
+	return markdownlintTextLength(prefix) + 1, false
+}
+
+func markdownlintTextLength(text string) int {
+	length := 0
+	for _, char := range text {
+		length += utf16.RuneLen(char)
+	}
+	return length
+}
+
+func markdownlintByteLimit(text string, limit int) int {
+	length := 0
+	for offset, char := range text {
+		length += utf16.RuneLen(char)
+		if length > limit {
+			return offset
+		}
+	}
+	return len(text)
+}
+
+func markdownlintCodeLines(ctx *lint.RuleContext) map[int]bool {
+	lines := make(map[int]bool)
+	for _, block := range ctx.CodeBlocks() {
+		pos := block.SourcePosition()
+		if !pos.IsValid() {
+			continue
+		}
+		for line := pos.StartLine; line <= pos.EndLine; line++ {
+			lines[line] = true
+		}
+		if lint.IsFencedCodeBlock(block) {
+			fence := strings.Repeat(string(lint.CodeFenceChar(block)), lint.CodeFenceLength(block))
+			for _, line := range []int{pos.StartLine - 1, pos.EndLine + 1} {
+				if strings.HasPrefix(strings.TrimSpace(string(lint.LineContent(ctx.File, line))), fence) {
+					lines[line] = true
+				}
+			}
+		}
+	}
+	return lines
+}
+
+func markdownlintLinkOnlyLines(ctx *lint.RuleContext) map[int]bool {
+	lines := make(map[int]bool)
+	for _, link := range ctx.Links() {
+		pos := link.SourcePosition()
+		for line := pos.StartLine; line <= pos.EndLine; line++ {
+			lines[line] = true
+		}
+	}
+	for _, paragraph := range ctx.Paragraphs() {
+		_ = mdast.Walk(paragraph, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+			if node.Inline == nil || len(node.Inline.Text) == 0 || node.Kind == mdast.NodeCodeSpan {
+				return nil
+			}
+			for parent := node.Parent; parent != nil && parent != paragraph; parent = parent.Parent {
+				if parent.Kind == mdast.NodeLink || parent.Kind == mdast.NodeImage {
+					return nil
+				}
+			}
+			if strings.TrimSpace(string(node.Inline.Text)) != "" {
+				delete(lines, node.SourcePosition().StartLine)
+			}
+			return nil
+		})
+	}
+	return lines
+}
+
+func isUnwrappableMarkdownlintLine(line string) bool {
+	line = strings.TrimLeft(line, "#> \t")
+	return !strings.ContainsFunc(line, unicode.IsSpace)
 }
 
 // buildWrapFix creates a fix to wrap a long line at word boundary.

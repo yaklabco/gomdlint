@@ -53,6 +53,10 @@ type Node struct {
 	FirstToken int
 	LastToken  int
 
+	// SourceSpan preserves exact offsets when several nodes share one token.
+	// Nil uses the complete token range as the source span.
+	SourceSpan *SourceRange
+
 	// File is a back-reference to the containing FileSnapshot.
 	File *FileSnapshot
 

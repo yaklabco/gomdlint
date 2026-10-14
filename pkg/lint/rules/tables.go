@@ -629,6 +629,9 @@ func (r *TableColumnStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	configStyle := ColumnStyle(ctx.OptionString("style", string(ColumnStyleAny)))
+	if ctx.OptionBool("markdownlint_compatible", false) {
+		return r.applyMarkdownlintStyle(ctx, configStyle)
+	}
 	if configStyle == ColumnStyleAny {
 		return nil, nil // Any style is allowed
 	}

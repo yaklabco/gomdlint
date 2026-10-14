@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -181,17 +182,17 @@ rules:
 
 	// Write each rule
 	for _, rule := range rules {
-		buf.WriteString(fmt.Sprintf("\n  # %s: %s\n", rule.ID, rule.Name))
-		buf.WriteString(fmt.Sprintf("  # %s\n", wrapComment(rule.Description, commentWrapWidth)))
+		buf.WriteString("\n  # " + rule.ID + ": " + rule.Name + "\n")
+		buf.WriteString("  # " + wrapComment(rule.Description, commentWrapWidth) + "\n")
 		if len(rule.Tags) > 0 {
-			buf.WriteString(fmt.Sprintf("  # Tags: %s\n", strings.Join(rule.Tags, ", ")))
+			buf.WriteString("  # Tags: " + strings.Join(rule.Tags, ", ") + "\n")
 		}
 		if rule.CanFix {
 			buf.WriteString("  # Auto-fix: yes\n")
 		}
-		buf.WriteString(fmt.Sprintf("  %s:\n", rule.ID))
-		buf.WriteString(fmt.Sprintf("    enabled: %t\n", rule.Enabled))
-		buf.WriteString(fmt.Sprintf("    severity: %s\n", rule.Severity))
+		buf.WriteString("  " + rule.ID + ":\n")
+		buf.WriteString("    enabled: " + strconv.FormatBool(rule.Enabled) + "\n")
+		buf.WriteString("    severity: " + string(rule.Severity) + "\n")
 		buf.WriteString("    # options:\n")
 		buf.WriteString("    #   key: value\n")
 	}

@@ -180,13 +180,18 @@ func Validate(cfg *config.Config) *ValidationResult {
 
 // validateRules checks rule configurations for errors and warnings.
 func validateRules(cfg *config.Config, result *ValidationResult) {
+	validateRuleMap("rules", cfg.Rules, result)
+	validateRuleMap("rule_defaults", cfg.RuleDefaults, result)
+}
+
+func validateRuleMap(section string, rules map[string]config.RuleConfig, result *ValidationResult) {
 	registry := lint.DefaultRegistry
 
-	for ruleID, ruleCfg := range cfg.Rules {
+	for ruleID, ruleCfg := range rules {
 		// Check if rule exists in registry
 		if _, exists := registry.Get(ruleID); !exists {
 			result.Warnings = append(result.Warnings, ValidationError{
-				Field:   "rules." + ruleID,
+				Field:   section + "." + ruleID,
 				Value:   ruleID,
 				Message: fmt.Sprintf("unknown rule %q; it will be ignored", ruleID),
 			})
@@ -195,7 +200,7 @@ func validateRules(cfg *config.Config, result *ValidationResult) {
 		// Validate rule severity
 		if ruleCfg.Severity != nil && !knownSeverities[*ruleCfg.Severity] {
 			result.Errors = append(result.Errors, ValidationError{
-				Field:   "rules." + ruleID + ".severity",
+				Field:   section + "." + ruleID + ".severity",
 				Value:   *ruleCfg.Severity,
 				Message: fmt.Sprintf("invalid severity %q; must be one of: error, warning, info", *ruleCfg.Severity),
 			})

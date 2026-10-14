@@ -71,3 +71,13 @@ func TestLinkRangesWithImagesAndReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestInlineHTMLPositionsWithinSharedToken(t *testing.T) {
+	file, err := New(FlavorGFM).Parse(context.Background(), "test.md", []byte("<sup>text</sup>\n"))
+	require.NoError(t, err)
+	nodes := mdast.FindByKind(file.Root, mdast.NodeHTMLInline)
+	require.Len(t, nodes, 2)
+	require.Equal(t, "<sup>", string(nodes[0].Text()))
+	require.Equal(t, "</sup>", string(nodes[1].Text()))
+	require.Equal(t, 10, nodes[1].SourcePosition().StartColumn)
+}
