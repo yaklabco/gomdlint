@@ -33,12 +33,7 @@ func (s *Styles) FormatDiagnosticWithFormat(diag *lint.Diagnostic, showContext b
 	ruleDisplay := s.RuleID.Render("(" + ruleIdentifier + ")")
 
 	// Main line: location  severity  message  (rule-id)
-	builder.WriteString(fmt.Sprintf("  %s  %s  %s  %s\n",
-		location,
-		severity,
-		s.Message.Render(diag.Message),
-		ruleDisplay,
-	))
+	builder.WriteString("  " + location + "  " + severity + "  " + s.Message.Render(diag.Message) + "  " + ruleDisplay + "\n")
 
 	// Source context
 	if showContext && sourceLine != "" {

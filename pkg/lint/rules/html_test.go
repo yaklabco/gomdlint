@@ -32,7 +32,7 @@ func TestInlineHTMLRule(t *testing.T) {
 			name:    "inline html not allowed",
 			input:   "Text with <span>inline</span> html.",
 			allowed: nil,
-			wantN:   2, // Opening and closing tags.
+			wantN:   1, // Report the opening tag once.
 		},
 		{
 			name:    "allowed element",
@@ -44,7 +44,7 @@ func TestInlineHTMLRule(t *testing.T) {
 			name:    "mixed allowed and not allowed",
 			input:   "Text<br>with<span>mixed</span>.",
 			allowed: []any{"br"},
-			wantN:   2, // span opening and closing.
+			wantN:   1, // Report the disallowed opening span once.
 		},
 		{
 			name:    "self closing tag allowed",

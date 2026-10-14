@@ -273,10 +273,14 @@ func (m *mapper) mapIndentedCodeBlock(_ *ast.CodeBlock) *mdast.Node {
 func (m *mapper) mapText(textNode *ast.Text) *mdast.Node {
 	// Check for soft/hard breaks.
 	if textNode.SoftLineBreak() {
-		return mdast.NewNode(mdast.NodeSoftBreak)
+		node := mdast.NewNode(mdast.NodeSoftBreak)
+		node.Inline = mdast.NewInlineAttrs().WithText(textNode.Value(m.content))
+		return node
 	}
 	if textNode.HardLineBreak() {
-		return mdast.NewNode(mdast.NodeHardBreak)
+		node := mdast.NewNode(mdast.NodeHardBreak)
+		node.Inline = mdast.NewInlineAttrs().WithText(textNode.Value(m.content))
+		return node
 	}
 
 	node := mdast.NewNode(mdast.NodeText)
@@ -437,6 +441,11 @@ func (m *mapper) mapTableCell(tc *east.TableCell) *mdast.Node {
 
 // getNodeByteRange extracts the byte range for a goldmark node.
 func getNodeByteRange(gmNode ast.Node, content []byte) (int, int) {
+	if value, ok := gmNode.AttributeString(linkSourceAttribute); ok {
+		if rng, valid := value.(mdast.SourceRange); valid {
+			return rng.StartOffset, rng.EndOffset
+		}
+	}
 	// Inline nodes don't have Lines() and will panic if called.
 	if gmNode.Type() == ast.TypeInline {
 		return getInlineNodeByteRange(gmNode, content)

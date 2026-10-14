@@ -426,6 +426,10 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	if list.Prev == nil {
 		return nil
 	}
+	// A preceding list reports this same boundary from its trailing edge.
+	if list.Prev.Kind == mdast.NodeList {
+		return nil
+	}
 
 	line := ctx.File.Lines[pos.StartLine-1]
 	builder := fix.NewEditBuilder()
@@ -447,47 +451,13 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	return &diag
 }
 
-// checkBlankAfter checks if there's a missing blank line after the list.
-// This handles both normal cases and lazy continuation where text following
-// a list item without a blank line gets absorbed into the list.
+// checkBlankAfter checks the boundary after the complete list, including continuations.
 func (r *BlanksAroundListsRule) checkBlankAfter(
 	ctx *lint.RuleContext,
 	list *mdast.Node,
 	pos mdast.SourcePosition,
 ) *lint.Diagnostic {
-	// First, check for lazy continuation: if the list's EndLine extends beyond
-	// the last list item's marker StartLine, content was absorbed.
-	if diag := r.checkLazyContinuation(ctx, list, pos); diag != nil {
-		return diag
-	}
-
-	// If no lazy continuation, check normally based on next sibling.
 	return r.checkBlankAfterNormal(ctx, list, pos)
-}
-
-// checkLazyContinuation detects when text was absorbed into the list via lazy continuation.
-func (r *BlanksAroundListsRule) checkLazyContinuation(
-	ctx *lint.RuleContext,
-	list *mdast.Node,
-	pos mdast.SourcePosition,
-) *lint.Diagnostic {
-	lastItem := list.LastChild
-	if lastItem == nil {
-		return nil
-	}
-
-	itemPos := lastItem.SourcePosition()
-	if !itemPos.IsValid() || itemPos.StartLine >= pos.EndLine {
-		return nil
-	}
-
-	// List absorbed content after the last marker - check if there's a blank line after the marker.
-	checkLine := itemPos.StartLine + 1
-	if checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
-		return nil
-	}
-
-	return r.createAfterDiagnostic(ctx, itemPos.StartLine)
 }
 
 // checkBlankAfterNormal checks for missing blank line after list using the list's end position.
@@ -518,12 +488,12 @@ func (r *BlanksAroundListsRule) checkBlankAfterNormal(
 		}
 	}
 
-	return r.createAfterDiagnostic(ctx, diagLine)
+	return r.createAfterDiagnostic(ctx, diagLine, pos.EndLine)
 }
 
 // createAfterDiagnostic creates a diagnostic for missing blank line after list.
-func (r *BlanksAroundListsRule) createAfterDiagnostic(ctx *lint.RuleContext, diagLine int) *lint.Diagnostic {
-	line := ctx.File.Lines[diagLine-1]
+func (r *BlanksAroundListsRule) createAfterDiagnostic(ctx *lint.RuleContext, diagLine, insertionLine int) *lint.Diagnostic {
+	line := ctx.File.Lines[insertionLine-1]
 	builder := fix.NewEditBuilder()
 	builder.Insert(line.EndOffset, "\n")
 

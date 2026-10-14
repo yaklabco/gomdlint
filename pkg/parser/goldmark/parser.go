@@ -2,6 +2,7 @@
 package goldmark
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -68,7 +69,18 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	}
 
 	// Parse with goldmark.
-	reader := text.NewReader(snapshot.Content)
+	snapshot.FrontMatterLines = frontMatterLines(snapshot)
+	parseContent := snapshot.Content
+	if snapshot.FrontMatterLines > 0 {
+		parseContent = copyContent(snapshot.Content)
+		end := snapshot.Lines[snapshot.FrontMatterLines-1].EndOffset
+		for idx := range end {
+			if parseContent[idx] != '\n' && parseContent[idx] != '\r' {
+				parseContent[idx] = ' '
+			}
+		}
+	}
+	reader := text.NewReader(parseContent)
 	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(parser.NewContext()))
 
 	// Check for cancellation after parsing.
@@ -98,6 +110,33 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	return snapshot, nil
 }
 
+// frontMatterLines recognizes a complete leading YAML or TOML metadata block.
+func frontMatterLines(file *FileSnapshot) int {
+	if len(file.Lines) < 2 {
+		return 0
+	}
+	lineText := func(idx int) []byte {
+		line := file.Lines[idx]
+		return bytes.TrimRight(file.Content[line.StartOffset:line.NewlineStart], " \t\r")
+	}
+	opening := lineText(0)
+	closingMarker := opening
+	switch string(opening) {
+	case "---", "+++":
+	case "{":
+		closingMarker = []byte("}")
+	default:
+		return 0
+	}
+	for idx := 1; idx < len(file.Lines); idx++ {
+		closing := lineText(idx)
+		if bytes.Equal(closing, closingMarker) || (!bytes.Equal(opening, []byte("{")) && bytes.Equal(closing, []byte("..."))) {
+			return idx + 1
+		}
+	}
+	return 0
+}
+
 // FileSnapshot is a type alias for mdast.FileSnapshot for convenience.
 type FileSnapshot = mdast.FileSnapshot
 
@@ -113,7 +152,7 @@ func flavorOrDefault(flavor string) string {
 
 // newGoldmarkInstance creates a configured goldmark.Markdown instance.
 func newGoldmarkInstance(flavor string) goldmark.Markdown {
-	var opts []goldmark.Option
+	opts := []goldmark.Option{goldmark.WithParserOptions(positionedLinks{})}
 
 	// Configure extensions based on flavor.
 	switch flavor {

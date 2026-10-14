@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 
 	"golang.org/x/term"
 
@@ -160,7 +161,11 @@ func hasFixableIssues(result *runner.Result) bool {
 // getTerminalWidth attempts to get the terminal width from the writer.
 func getTerminalWidth(writer io.Writer) int {
 	if f, ok := writer.(interface{ Fd() uintptr }); ok {
-		width, _, err := term.GetSize(int(f.Fd()))
+		descriptor := f.Fd()
+		if descriptor > math.MaxInt {
+			return defaultTermWidth
+		}
+		width, _, err := term.GetSize(int(descriptor))
 		if err == nil && width > 0 {
 			return width
 		}

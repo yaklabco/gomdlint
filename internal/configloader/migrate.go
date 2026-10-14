@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // MigrationResult contains the result of converting a markdownlint config.
@@ -54,13 +57,40 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	}
 
 	cfg := config.NewConfig()
+	var defaultValue any = true
+	if value, ok := raw["default"]; ok {
+		defaultValue = value
+	}
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	standardIDs := GetAllRuleIDs()
+	cfg.RuleDefaults = make(map[string]config.RuleConfig)
+	for _, id := range registry.IDs() {
+		value := defaultValue
+		if !slices.Contains(standardIDs, id) {
+			value = false
+		}
+		cfg.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, value)
+	}
 
 	// Handle special keys
 	processSpecialKeys(raw, result)
 
-	// Process remaining keys as rules
-	for key, value := range raw {
-		processRuleKey(cfg, key, value, result)
+	// Apply tags before explicit rules, deterministically.
+	keys := make([]string, 0, len(raw))
+	for key := range raw {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		if IsTag(key) {
+			processRuleKey(cfg, key, raw[key], result)
+		}
+	}
+	for _, key := range keys {
+		if !IsTag(key) {
+			processRuleKey(cfg, key, raw[key], result)
+		}
 	}
 
 	result.Config = cfg
@@ -150,14 +180,7 @@ func stripJSONComments(content []byte) []byte {
 // processSpecialKeys handles markdownlint special configuration keys.
 func processSpecialKeys(raw map[string]any, result *MigrationResult) {
 	// Handle "default" key
-	if defaultVal, ok := raw["default"].(bool); ok {
-		if !defaultVal {
-			result.Warnings = append(result.Warnings,
-				"'default: false' means all rules are disabled by default; "+
-					"in gomdlint, rules are enabled by default and must be explicitly disabled")
-		}
-		delete(raw, "default")
-	}
+	delete(raw, "default")
 
 	// Handle "extends" key
 	if extends, ok := raw["extends"].(string); ok {
@@ -175,7 +198,7 @@ func processRuleKey(cfg *config.Config, key string, value any, result *Migration
 	// Try to normalize as a rule ID
 	ruleID := NormalizeRuleID(key)
 	if ruleID != "" {
-		ruleCfg := convertRuleValue(value)
+		ruleCfg := config.MarkdownlintRuleConfig(ruleID, value)
 		cfg.Rules[ruleID] = ruleCfg
 		return
 	}
@@ -183,11 +206,8 @@ func processRuleKey(cfg *config.Config, key string, value any, result *Migration
 	// Check if it's a tag
 	if IsTag(key) {
 		ruleIDs := GetTagRules(key)
-		enabled := valueToBool(value)
 		for _, rid := range ruleIDs {
-			cfg.Rules[rid] = config.RuleConfig{
-				Enabled: &enabled,
-			}
+			cfg.Rules[rid] = config.MarkdownlintRuleConfig(rid, value)
 		}
 		return
 	}
@@ -195,57 +215,6 @@ func processRuleKey(cfg *config.Config, key string, value any, result *Migration
 	// Unknown key
 	result.Warnings = append(result.Warnings,
 		fmt.Sprintf("unknown key %q; skipping", key))
-}
-
-// convertRuleValue converts a markdownlint rule value to our RuleConfig.
-func convertRuleValue(value any) config.RuleConfig {
-	cfg := config.RuleConfig{}
-
-	switch typedVal := value.(type) {
-	case bool:
-		cfg.Enabled = &typedVal
-	case map[string]any:
-		enabled := true
-		cfg.Enabled = &enabled
-		cfg.Options = make(map[string]any)
-		for key, optVal := range typedVal {
-			// Apply option mappings if needed
-			mappedKey := mapOptionName(key)
-			cfg.Options[mappedKey] = optVal
-		}
-	case nil:
-		// Explicitly null means disabled
-		enabled := false
-		cfg.Enabled = &enabled
-	default:
-		// For other types (numbers, strings), enable with default options
-		enabled := true
-		cfg.Enabled = &enabled
-	}
-
-	return cfg
-}
-
-// valueToBool converts various value types to a boolean.
-func valueToBool(value any) bool {
-	switch v := value.(type) {
-	case bool:
-		return v
-	case nil:
-		return false
-	case map[string]any:
-		return true // Object means enabled with options
-	default:
-		return true
-	}
-}
-
-// mapOptionName maps markdownlint option names to gomdlint option names.
-// Most options have the same name, but some may differ.
-func mapOptionName(name string) string {
-	// Currently, we keep the same names for compatibility
-	// Add mappings here if we diverge from markdownlint option names
-	return name
 }
 
 // GenerateMigrationHeader returns a header comment for migrated configs.

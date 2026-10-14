@@ -3,7 +3,7 @@
     "rule": "MDL001",
     "name": "",
     "line": 5,
-    "column": 6,
+    "column": 5,
     "message": "Link uses absolute URL, but relative URLs are expected",
     "severity": "warning",
     "fixable": false

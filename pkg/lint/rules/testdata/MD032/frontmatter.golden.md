@@ -8,5 +8,4 @@ Some text before list.
 
 - First item
 - Second item
-
 More text after list.

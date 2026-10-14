@@ -3,6 +3,8 @@ package lint
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -89,7 +91,11 @@ func (e *Engine) LintFile(
 	}
 
 	// Resolve which rules to run.
-	resolved := ResolveRules(e.Registry, cfg)
+	cfg, err = configureFile(collectDirectives(snapshot, e.Registry), e.Registry, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("file configuration: %w", err)
+	}
+	states := directiveStates(snapshot, e.Registry, cfg)
 
 	result := &FileResult{
 		Snapshot:    snapshot,
@@ -102,7 +108,11 @@ func (e *Engine) LintFile(
 	var allEdits []fix.TextEdit
 
 	// Run each rule.
-	for _, rr := range resolved {
+	for _, rule := range e.Registry.Rules() {
+		rr := resolveRule(rule, cfg)
+		if !slices.Contains(states[rule.ID()], true) {
+			continue
+		}
 		// Check for cancellation.
 		select {
 		case <-ctx.Done():
@@ -123,6 +133,10 @@ func (e *Engine) LintFile(
 
 		// Process diagnostics.
 		for diagIdx := range diags {
+			line := diags[diagIdx].StartLine
+			if line > 0 && line < len(states[rule.ID()]) && !states[rule.ID()][line] {
+				continue
+			}
 			// Apply resolved severity.
 			diags[diagIdx].Severity = rr.Severity
 
@@ -140,13 +154,13 @@ func (e *Engine) LintFile(
 			if rr.AutoFix && len(diags[diagIdx].FixEdits) > 0 {
 				allEdits = append(allEdits, diags[diagIdx].FixEdits...)
 			}
+			result.Diagnostics = append(result.Diagnostics, diags[diagIdx])
 		}
-
-		result.Diagnostics = append(result.Diagnostics, diags...)
 	}
 
 	// Validate and prepare edits, merging deletions and filtering conflicts.
 	if len(allEdits) > 0 {
+		allEdits = mergeBlankLineInsertions(allEdits)
 		accepted, skipped, _, err := fix.PrepareEditsFiltered(allEdits, len(content))
 		if err != nil {
 			// Validation error (not conflicts - those are filtered).
@@ -162,4 +176,24 @@ func (e *Engine) LintFile(
 	}
 
 	return result, nil
+}
+
+// mergeBlankLineInsertions combines formatting requirements at the same boundary.
+// It runs after suppression so disabled findings cannot increase an enabled fix.
+func mergeBlankLineInsertions(edits []fix.TextEdit) []fix.TextEdit {
+	result := make([]fix.TextEdit, 0, len(edits))
+	boundaries := make(map[int]int)
+	for _, edit := range edits {
+		if edit.StartOffset == edit.EndOffset && edit.NewText != "" && strings.Trim(edit.NewText, "\n") == "" {
+			if idx, ok := boundaries[edit.StartOffset]; ok {
+				if len(edit.NewText) > len(result[idx].NewText) {
+					result[idx] = edit
+				}
+				continue
+			}
+			boundaries[edit.StartOffset] = len(result)
+		}
+		result = append(result, edit)
+	}
+	return result
 }

@@ -18,15 +18,6 @@
     "fixable": true
   },
   {
-    "rule": "MD032",
-    "name": "",
-    "line": 62,
-    "column": 1,
-    "message": "Missing blank line after list",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD040",
     "name": "",
     "line": 114,
@@ -43,33 +34,6 @@
     "message": "Code block style 'indented' does not match expected 'fenced'",
     "severity": "warning",
     "fixable": false
-  },
-  {
-    "rule": "MD034",
-    "name": "",
-    "line": 142,
-    "column": 12,
-    "message": "Bare URL used",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD034",
-    "name": "",
-    "line": 143,
-    "column": 29,
-    "message": "Bare URL used",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD034",
-    "name": "",
-    "line": 159,
-    "column": 11,
-    "message": "Bare URL used",
-    "severity": "warning",
-    "fixable": true
   },
   {
     "rule": "MD049",

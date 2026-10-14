@@ -120,6 +120,8 @@ linters:
         - github.com/yaklabco/gomdlint/pkg/lint.Rule
         - github.com/yaklabco/gomdlint/pkg/reporter.Reporter
         - github.com/yuin/goldmark.Markdown
+        # Goldmark's InlineParser interface requires this return type.
+        - github.com/yuin/goldmark/ast.Node
     gomodguard:
       blocked:
         modules:
@@ -413,6 +415,12 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # Config discovery intentionally reads metadata for caller-selected paths.
+      - linters:
+          - gosec
+        path: ^internal/configloader/discovery\.go$
+        text: '^G703:'
+        source: 'info, err := os.Stat\(path\)'
       - linters:
           - govet
         text: 'shadow: declaration of "(err|ctx)" shadows declaration at'

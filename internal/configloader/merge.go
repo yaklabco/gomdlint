@@ -1,6 +1,10 @@
 package configloader
 
-import "github.com/yaklabco/gomdlint/pkg/config"
+import (
+	"maps"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+)
 
 // merge combines two configurations, with override taking precedence over base.
 // The merge follows these rules:
@@ -59,6 +63,7 @@ func merge(base, override *config.Config) *config.Config {
 
 	// Maps: deep merge
 	result.Rules = mergeRules(base.Rules, override.Rules)
+	result.RuleDefaults = mergeRules(base.RuleDefaults, override.RuleDefaults)
 
 	// Slices: override replaces base entirely if non-nil
 	if override.Ignore != nil {
@@ -139,6 +144,8 @@ func mergeRuleConfig(base, override config.RuleConfig) config.RuleConfig {
 	if override.Options != nil {
 		if result.Options == nil {
 			result.Options = make(map[string]any)
+		} else {
+			result.Options = maps.Clone(result.Options)
 		}
 		for key, val := range override.Options {
 			result.Options[key] = val

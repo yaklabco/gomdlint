@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -41,7 +42,10 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	requiredLevel := ctx.OptionInt("level", 1)
-	frontMatterTitlePattern := ctx.OptionString("front_matter_title", "")
+	frontMatterTitlePattern := ctx.OptionString("front_matter_title", config.MarkdownlintFrontMatterTitlePattern)
+	if value, ok := ctx.Option("front_matter_title", nil).(bool); ok && !value {
+		frontMatterTitlePattern = ""
+	}
 
 	// Skip front matter to find first content.
 	firstContentLine := r.findFirstContentLine(ctx.File)
@@ -62,9 +66,13 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	// Find the first block at or after the first content line.
 	// This skips any front matter that goldmark may parse as blocks.
 	firstBlock := r.findFirstBlockAfterLine(ctx.Root, firstContentLine)
+	if ctx.OptionBool("allow_preamble", false) {
+		firstBlock = lint.FirstHeading(ctx.Root)
+	}
 	if firstBlock == nil {
 		return nil, nil
 	}
+	firstContentLine = firstBlock.SourcePosition().StartLine
 
 	// If first block is not a heading.
 	if firstBlock.Kind != mdast.NodeHeading {
@@ -111,6 +119,9 @@ func (r *FirstLineHeadingRule) findFirstBlockAfterLine(root *mdast.Node, lineNum
 	}
 
 	for child := root.FirstChild; child != nil; child = child.Next {
+		if child.Kind == mdast.NodeHTMLBlock && lint.IsHTMLComment(child) {
+			continue
+		}
 		pos := child.SourcePosition()
 		if pos.IsValid() && pos.StartLine >= lineNum {
 			return child
@@ -125,22 +136,7 @@ func (r *FirstLineHeadingRule) findFirstContentLine(file *mdast.FileSnapshot) in
 		return 0
 	}
 
-	// Check for YAML front matter (---).
-	firstLine := lint.LineContent(file, 1)
-	if bytes.Equal(bytes.TrimSpace(firstLine), []byte("---")) {
-		// Find closing ---.
-		for lineNum := 2; lineNum <= len(file.Lines); lineNum++ {
-			content := lint.LineContent(file, lineNum)
-			if bytes.Equal(bytes.TrimSpace(content), []byte("---")) {
-				// Return line after front matter.
-				return lineNum + 1
-			}
-		}
-	}
-
-	// No front matter, first line is first content.
-	// Skip leading blank lines.
-	for lineNum := 1; lineNum <= len(file.Lines); lineNum++ {
+	for lineNum := file.FrontMatterLines + 1; lineNum <= len(file.Lines); lineNum++ {
 		if !lint.IsBlankLine(file, lineNum) {
 			return lineNum
 		}
@@ -162,24 +158,8 @@ func (r *FirstLineHeadingRule) checkFrontMatterTitle(
 		return false, fmt.Errorf("invalid front matter title pattern: %w", err)
 	}
 
-	// Check for YAML front matter.
-	firstLine := lint.LineContent(file, 1)
-	if !bytes.Equal(bytes.TrimSpace(firstLine), []byte("---")) {
-		return false, nil
-	}
-
-	// Search within front matter.
-	for lineNum := 2; lineNum <= len(file.Lines); lineNum++ {
-		content := lint.LineContent(file, lineNum)
-		trimmed := bytes.TrimSpace(content)
-
-		// End of front matter.
-		if bytes.Equal(trimmed, []byte("---")) {
-			break
-		}
-
-		// Check if line matches title pattern.
-		if re.Match(content) {
+	for lineNum := 2; lineNum < file.FrontMatterLines; lineNum++ {
+		if re.Match(lint.RawLineContent(file, lineNum)) {
 			return true, nil
 		}
 	}
@@ -199,7 +179,7 @@ func NewHeadingBlankLinesRule() *HeadingBlankLinesRule {
 			"MD022",
 			"heading-blank-lines",
 			"Headings should be surrounded by blank lines",
-			[]string{"headings", "whitespace"},
+			[]string{"headings", "whitespace", "blank_lines"},
 			true, // Auto-fixable.
 		),
 	}
@@ -210,9 +190,6 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
-
-	linesAbove := ctx.OptionInt("lines_above", 1)
-	linesBelow := ctx.OptionInt("lines_below", 1)
 
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
@@ -226,14 +203,23 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		if !pos.IsValid() {
 			continue
 		}
+		linesAbove := headingBlankLineOption(ctx, "lines_above", lint.HeadingLevel(heading))
+		linesBelow := headingBlankLineOption(ctx, "lines_below", lint.HeadingLevel(heading))
+		includeMetadata := ctx.OptionBool("include_front_matter", false)
 
 		// Check blank lines above (unless it's the first line or follows front matter).
-		if pos.StartLine > 1 && linesAbove > 0 {
+		if pos.StartLine > 1 && linesAbove > 0 && (!headingIsFirstContent(ctx, heading) || includeMetadata) {
 			blanksBefore := lint.CountBlankLinesBefore(ctx.File, pos.StartLine)
+			if includeMetadata {
+				blanksBefore = 0
+				for line := pos.StartLine - 1; line > 0 && len(bytes.TrimSpace(lint.RawLineContent(ctx.File, line))) == 0; line-- {
+					blanksBefore++
+				}
+			}
 			if blanksBefore < linesAbove {
 				// Check if previous line is also a heading (allow no blank between headings).
 				prevIsHeading := r.isPreviousLineHeading(ctx.File, ctx.Root, pos.StartLine)
-				if !prevIsHeading {
+				if !prevIsHeading || ctx.OptionBool("markdownlint_compatible", false) {
 					diag := r.createBlankBeforeDiagnostic(ctx, heading, pos, blanksBefore, linesAbove)
 					diags = append(diags, diag)
 				}
@@ -243,10 +229,13 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		// Check blank lines below (unless it's the last line).
 		if pos.EndLine < len(ctx.File.Lines) && linesBelow > 0 {
 			blanksAfter := lint.CountBlankLinesAfter(ctx.File, pos.EndLine)
+			if ctx.OptionBool("markdownlint_compatible", false) && pos.EndLine+blanksAfter >= len(ctx.File.Lines) {
+				blanksAfter = linesBelow
+			}
 			if blanksAfter < linesBelow {
 				// Check if next non-blank line is also a heading.
 				nextIsHeading := r.isNextLineHeading(ctx.File, ctx.Root, pos.EndLine)
-				if !nextIsHeading {
+				if !nextIsHeading || ctx.OptionBool("markdownlint_compatible", false) {
 					diag := r.createBlankAfterDiagnostic(ctx, heading, pos, blanksAfter, linesBelow)
 					diags = append(diags, diag)
 				}
@@ -255,6 +244,33 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	return diags, nil
+}
+
+func headingBlankLineOption(ctx *lint.RuleContext, key string, level int) int {
+	values, ok := ctx.Option(key, nil).([]any)
+	if !ok || level < 1 || level > len(values) {
+		return ctx.OptionInt(key, 1)
+	}
+	switch value := values[level-1].(type) {
+	case int:
+		return value
+	case float64:
+		return int(value)
+	default:
+		return 1
+	}
+}
+
+func headingIsFirstContent(ctx *lint.RuleContext, heading *mdast.Node) bool {
+	for node := ctx.Root.FirstChild; node != nil; node = node.Next {
+		if node == heading {
+			return true
+		}
+		if node.Kind != mdast.NodeHTMLBlock || !lint.IsHTMLComment(node) {
+			return false
+		}
+	}
+	return false
 }
 
 func (r *HeadingBlankLinesRule) isPreviousLineHeading(
@@ -328,7 +344,7 @@ func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
 	insertion := strings.Repeat("\n", blanksNeeded)
 
 	line := ctx.File.Lines[pos.StartLine-1]
-	builder := ctx.Builder
+	builder := fix.NewEditBuilder()
 	builder.Insert(line.StartOffset, insertion)
 
 	return lint.NewDiagnostic(r.ID(), heading, msg).
@@ -351,7 +367,7 @@ func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
 	insertion := strings.Repeat("\n", blanksNeeded)
 
 	line := ctx.File.Lines[pos.EndLine-1]
-	builder := ctx.Builder
+	builder := fix.NewEditBuilder()
 	builder.Insert(line.EndOffset, insertion)
 
 	return lint.NewDiagnostic(r.ID(), heading, msg).
@@ -672,7 +688,7 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 				line := ctx.File.Lines[lineNum-1]
 
 				// Build fix
-				builder := ctx.Builder
+				builder := fix.NewEditBuilder()
 				builder.ReplaceRange(
 					line.StartOffset+match[0],
 					line.StartOffset+match[1],

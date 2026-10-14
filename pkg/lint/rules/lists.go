@@ -228,9 +228,12 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 		}
 
 		items := lint.ListItems(list)
-		expectedNum := startNumber
+		expectedNum, incrementing := orderedListPolicy(ctx, items, startNumber)
 
 		for _, item := range items {
+			if ctx.OptionString("style", "") != "" && item.Parent != list {
+				continue
+			}
 			actualNum := extractListItemNumber(ctx.File, item)
 
 			if actualNum != expectedNum {
@@ -238,11 +241,34 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 				diags = append(diags, diag)
 			}
 
-			expectedNum++
+			if incrementing {
+				expectedNum++
+			}
 		}
 	}
 
 	return diags, nil
+}
+
+func orderedListPolicy(ctx *lint.RuleContext, items []*mdast.Node, startNumber int) (int, bool) {
+	style := ctx.OptionString("style", "")
+	switch style {
+	case "":
+		return startNumber, true
+	case "one":
+		return 1, false
+	case "zero":
+		return 0, false
+	}
+	start := 1
+	if len(items) > 1 && extractListItemNumber(ctx.File, items[0]) == 0 {
+		start = 0
+	}
+	if style == "ordered" {
+		return start, true
+	}
+	incrementing := len(items) > 1 && (start == 0 || extractListItemNumber(ctx.File, items[1]) != 1)
+	return start, incrementing
 }
 
 func (r *OrderedListIncrementRule) createNumberDiagnostic(

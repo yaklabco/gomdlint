@@ -40,6 +40,10 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	}
 
 	var diags []lint.Diagnostic
+	definitionLines := make(map[int]bool)
+	for _, definition := range ctx.RefContext().AllDefinitions {
+		definitionLines[definition.LineNumber] = true
+	}
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
@@ -47,7 +51,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		}
 
 		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) || definitionLines[lineNum] {
 			continue
 		}
 

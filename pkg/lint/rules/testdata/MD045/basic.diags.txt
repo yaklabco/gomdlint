@@ -1,2 +1,2 @@
-basic.input.md:0:0 warning Image is missing alt text ()
-basic.input.md:0:0 warning Image is missing alt text ()
+basic.input.md:3:36 warning Image is missing alt text ()
+basic.input.md:5:33 warning Image is missing alt text ()

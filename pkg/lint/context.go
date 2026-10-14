@@ -138,7 +138,7 @@ func (rc *RuleContext) OptionStringSlice(key string, defaultValue []string) []st
 				result = append(result, s)
 			}
 		}
-		if len(result) > 0 {
+		if len(iface) == 0 || len(result) > 0 {
 			return result
 		}
 	}
@@ -271,7 +271,7 @@ func (rc *RuleContext) StrongNodes() []*mdast.Node {
 }
 
 // IsLineInCodeBlock returns true if the given 1-based line number is inside a code block.
-// The result is cached — first call builds the map from the AST, subsequent calls are O(1).
+// The result is cached. The first call builds the map from the AST, subsequent calls are O(1).
 func (rc *RuleContext) IsLineInCodeBlock(lineNum int) bool {
 	if rc.codeBlockLines == nil {
 		rc.codeBlockLines = buildCodeBlockLineMap(rc.CodeBlocks())

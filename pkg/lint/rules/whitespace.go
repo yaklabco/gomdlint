@@ -46,6 +46,9 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		if ignoreCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
+		if ctx.OptionBool("list_item_empty_lines", false) && isListBlankLine(ctx, lineNum) {
+			continue
+		}
 
 		if !lint.HasTrailingWhitespace(ctx.File, lineNum) {
 			continue
@@ -53,6 +56,10 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 
 		start, end := lint.TrailingWhitespaceRange(ctx.File, lineNum)
 		if start < 0 || end <= start {
+			continue
+		}
+		breakSpaces := ctx.OptionInt("br_spaces", 0)
+		if breakSpaces >= 2 && end-start == breakSpaces && (!ctx.OptionBool("strict", false) || isHardBreakLine(ctx, lineNum)) {
 			continue
 		}
 
@@ -80,6 +87,38 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	}
 
 	return diags, nil
+}
+
+func isHardBreakLine(ctx *lint.RuleContext, lineNum int) bool {
+	if ctx.IsLineInCodeBlock(lineNum) {
+		return false
+	}
+	for _, span := range ctx.CodeSpans() {
+		pos := span.SourcePosition()
+		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
+			return false
+		}
+	}
+	for _, paragraph := range ctx.Paragraphs() {
+		pos := paragraph.SourcePosition()
+		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
+			return true
+		}
+	}
+	return false
+}
+
+func isListBlankLine(ctx *lint.RuleContext, lineNum int) bool {
+	if !lint.IsBlankLine(ctx.File, lineNum) {
+		return false
+	}
+	for _, item := range ctx.ListItems() {
+		pos := item.SourcePosition()
+		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
+			return true
+		}
+	}
+	return false
 }
 
 // FinalNewlineRule ensures files end with a single newline.
@@ -207,7 +246,7 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	streakStart := 0
 	streakCount := 0
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for lineNum := ctx.File.FrontMatterLines + 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}

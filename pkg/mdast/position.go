@@ -67,6 +67,9 @@ func (sp SourcePosition) IsSingleLine() bool {
 // SourceRange returns the byte range for this node.
 // Returns an empty range if the node has no associated file or tokens.
 func (n *Node) SourceRange() SourceRange {
+	if n.SourceSpan != nil {
+		return *n.SourceSpan
+	}
 	if n.File == nil || n.FirstToken < 0 || n.LastToken < 0 {
 		return SourceRange{}
 	}

@@ -42,6 +42,13 @@ func (r *HeadingIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 
 	var diags []lint.Diagnostic
 	var prevLevel int
+	pattern := ctx.OptionString("front_matter_title", "")
+	if pattern != "" {
+		hasTitle, err := NewFirstLineHeadingRule().checkFrontMatterTitle(ctx.File, pattern)
+		if err == nil && hasTitle {
+			prevLevel = 1
+		}
+	}
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
@@ -94,6 +101,7 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	}
 
 	allowNoH1 := ctx.OptionBool("allow_no_h1", true)
+	level := ctx.OptionInt("level", 1)
 
 	headings := ctx.Headings()
 	var h1Headings []*mdast.Node
@@ -103,12 +111,28 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			return nil, ctx.Ctx.Err()
 		}
 
-		if lint.HeadingLevel(heading) == 1 {
+		if lint.HeadingLevel(heading) == level {
 			h1Headings = append(h1Headings, heading)
 		}
 	}
 
 	var diags []lint.Diagnostic
+	firstDuplicate := 1
+	if ctx.OptionBool("title_only", false) && len(h1Headings) > 0 {
+		pattern := ctx.OptionString("front_matter_title", config.MarkdownlintFrontMatterTitlePattern)
+		if value, ok := ctx.Option("front_matter_title", nil).(bool); ok && !value {
+			pattern = ""
+		}
+		hasTitle, err := NewFirstLineHeadingRule().checkFrontMatterTitle(ctx.File, pattern)
+		if pattern == "" || err != nil {
+			hasTitle = false
+		}
+		if hasTitle {
+			firstDuplicate = 0
+		} else if !headingIsFirstContent(ctx, h1Headings[0]) {
+			return nil, nil
+		}
+	}
 
 	// Check for missing H1.
 	if !allowNoH1 && len(h1Headings) == 0 {
@@ -127,10 +151,10 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	}
 
 	// Flag all H1s after the first.
-	for i := 1; i < len(h1Headings); i++ {
+	for i := firstDuplicate; i < len(h1Headings); i++ {
 		heading := h1Headings[i]
 		diag := lint.NewDiagnostic(r.ID(), heading,
-			fmt.Sprintf("Multiple H1 headings found (this is H1 #%d)", i+1)).
+			fmt.Sprintf("Multiple H%d headings found (this is H%d #%d)", level, level, i+1)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use H2 or lower for subsequent headings").
 			Build()

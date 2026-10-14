@@ -85,6 +85,10 @@ type Config struct {
 	// Rules contains per-rule configuration keyed by rule ID.
 	Rules map[string]RuleConfig `mapstructure:"rules" yaml:"rules"`
 
+	// RuleDefaults defines an explicit baseline before per-rule overrides.
+	// Migration uses it to preserve markdownlint defaults and file directives.
+	RuleDefaults map[string]RuleConfig `mapstructure:"rule_defaults" yaml:"rule_defaults,omitempty"`
+
 	// Ignore contains glob patterns for files to ignore.
 	Ignore []string `mapstructure:"ignore" yaml:"ignore"`
 

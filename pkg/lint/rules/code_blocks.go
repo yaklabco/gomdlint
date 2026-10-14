@@ -60,6 +60,11 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 
 		info := lint.CodeBlockInfo(cb)
+		if ctx.OptionBool("language_only", false) && len(strings.Fields(info)) > 1 {
+			diags = append(diags, lint.NewDiagnostic(r.ID(), cb, "Code fence info must contain only a language identifier").
+				WithSeverity(config.SeverityWarning).Build())
+			continue
+		}
 		// Extract just the language part (first word).
 		lang := strings.Fields(info)
 		langName := ""

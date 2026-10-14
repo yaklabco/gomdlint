@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -56,6 +57,10 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	for _, el := range allowedElements {
 		allowedSet[strings.ToLower(el)] = true
 	}
+	tableAllowedSet := make(map[string]bool)
+	for _, element := range ctx.OptionStringSlice("table_allowed_elements", allowedElements) {
+		tableAllowedSet[strings.ToLower(element)] = true
+	}
 
 	var diags []lint.Diagnostic
 
@@ -79,7 +84,11 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			return diags, ctx.Ctx.Err()
 		}
 
-		diag := r.checkHTMLNode(inline, allowedSet, "Inline HTML")
+		allowed := allowedSet
+		if lint.IsLineInTable(ctx.File, ctx.Root, inline.SourcePosition().StartLine) {
+			allowed = tableAllowedSet
+		}
+		diag := r.checkHTMLNode(inline, allowed, "Inline HTML")
 		if diag != nil {
 			diags = append(diags, *diag)
 		}
@@ -91,6 +100,9 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 func (r *InlineHTMLRule) getAllowedElements(ctx *lint.RuleContext) []string {
 	// Check for explicit configuration.
 	if allowed := ctx.Option("allowed_elements", nil); allowed != nil {
+		if list, ok := allowed.([]string); ok {
+			return list
+		}
 		if list, ok := allowed.([]any); ok {
 			result := make([]string, 0, len(list))
 			for _, v := range list {
@@ -116,6 +128,13 @@ func (r *InlineHTMLRule) checkHTMLNode(
 	nodeType string,
 ) *lint.Diagnostic {
 	if node == nil || node.File == nil {
+		return nil
+	}
+
+	if lint.IsHTMLComment(node) {
+		return nil
+	}
+	if node.Kind == mdast.NodeHTMLInline && bytes.HasPrefix(bytes.TrimSpace(node.Text()), []byte("</")) {
 		return nil
 	}
 

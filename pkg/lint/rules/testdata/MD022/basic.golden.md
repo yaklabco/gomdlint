@@ -1,9 +1,6 @@
 # Heading Without Blank Before
 
-
-
 Some text right after.
-
 
 ## Another Heading
 
