@@ -422,40 +422,56 @@ func NewBlanksAroundListsRule() *BlanksAroundListsRule {
 }
 
 // Apply checks that lists are surrounded by blank lines.
+//
+// Like markdownlint, every list that is not nested in another list is
+// checked, including lists inside blockquotes. A line counts as blank when
+// it is blank within the list's containers (a line holding only '>' inside
+// a blockquote) or holds nothing but blockquote markers and HTML comments.
+// The fix inserts a blank line that keeps the list's containers, such as
+// ">" inside a blockquote.
 func (r *BlanksAroundListsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
-
-	// Find top-level lists only (not nested).
-	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		if child.Kind != mdast.NodeList {
+		if hasListAncestor(list) {
 			continue
 		}
 
-		pos := child.SourcePosition()
+		pos := list.SourcePosition()
 		if !pos.IsValid() {
 			continue
 		}
 
-		// Check for blank line before.
-		if diag := r.checkBlankBefore(ctx, child, pos); diag != nil {
+		if diag := r.checkBlankBefore(ctx, list, pos); diag != nil {
 			diags = append(diags, *diag)
 		}
-
-		// Check for blank line after.
-		if diag := r.checkBlankAfter(ctx, child, pos); diag != nil {
+		if diag := r.checkBlankAfter(ctx, list); diag != nil {
 			diags = append(diags, *diag)
 		}
 	}
 
 	return diags, nil
+}
+
+// hasListAncestor reports whether a node is nested inside a list.
+func hasListAncestor(node *mdast.Node) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeList {
+			return true
+		}
+	}
+	return false
+}
+
+// isBlankAroundList reports whether a line counts as blank next to a list.
+func isBlankAroundList(file *mdast.FileSnapshot, list *mdast.Node, lineNum int) bool {
+	return lint.IsBlankLineInContainer(file, list, lineNum) || isMarkdownlintBlankLine(lint.LineContent(file, lineNum))
 }
 
 // checkBlankBefore checks if there's a missing blank line before the list.
@@ -464,22 +480,17 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	list *mdast.Node,
 	pos mdast.SourcePosition,
 ) *lint.Diagnostic {
-	if pos.StartLine <= 1 || lint.IsBlankLine(ctx.File, pos.StartLine-1) {
-		return nil
-	}
-
-	// Check if previous sibling exists.
-	if list.Prev == nil {
+	if pos.StartLine <= 1 || isBlankAroundList(ctx.File, list, pos.StartLine-1) {
 		return nil
 	}
 	// A preceding list reports this same boundary from its trailing edge.
-	if list.Prev.Kind == mdast.NodeList {
+	if list.Prev != nil && list.Prev.Kind == mdast.NodeList {
 		return nil
 	}
 
 	line := ctx.File.Lines[pos.StartLine-1]
 	builder := fix.NewEditBuilder()
-	builder.Insert(line.StartOffset, "\n")
+	builder.Insert(line.StartOffset, lint.BlankLineText(ctx.File, list))
 
 	diagPos := mdast.SourcePosition{
 		StartLine:   pos.StartLine,
@@ -497,51 +508,26 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	return &diag
 }
 
-// checkBlankAfter checks the boundary after the complete list, including continuations.
-func (r *BlanksAroundListsRule) checkBlankAfter(
-	ctx *lint.RuleContext,
-	list *mdast.Node,
-	pos mdast.SourcePosition,
-) *lint.Diagnostic {
-	return r.checkBlankAfterNormal(ctx, list, pos)
-}
-
-// checkBlankAfterNormal checks for missing blank line after list using the list's end position.
-// We check the line immediately after the list ends (pos.EndLine + 1), mirroring
-// how checkBlankBefore checks pos.StartLine - 1. This avoids false positives when
-// the next sibling's SourcePosition excludes structural markers (e.g., fenced code
-// blocks report content start, not the opening fence line).
-func (r *BlanksAroundListsRule) checkBlankAfterNormal(
-	ctx *lint.RuleContext,
-	list *mdast.Node,
-	pos mdast.SourcePosition,
-) *lint.Diagnostic {
-	if list.Next == nil {
+// checkBlankAfter checks for a missing blank line after the list. The list
+// span ends at the end of its last line, so the line after it is the first
+// line that follows the list, whether or not the list is the last block of
+// its container.
+func (r *BlanksAroundListsRule) checkBlankAfter(ctx *lint.RuleContext, list *mdast.Node) *lint.Diagnostic {
+	lastLine := nodeLastLine(list)
+	if lastLine >= len(ctx.File.Lines) || isBlankAroundList(ctx.File, list, lastLine+1) {
 		return nil
 	}
 
-	// Check the line immediately after the list ends.
-	checkLine := pos.EndLine + 1
-	if checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
-		return nil
-	}
-
-	// Find the diagnostic line - use the last list item's start line (the actual marker).
-	diagLine := pos.EndLine
+	// Report on the last list item's marker line.
+	diagLine := lastLine
 	if lastItem := list.LastChild; lastItem != nil {
 		if itemPos := lastItem.SourcePosition(); itemPos.IsValid() {
 			diagLine = itemPos.StartLine
 		}
 	}
 
-	return r.createAfterDiagnostic(ctx, diagLine, pos.EndLine)
-}
-
-// createAfterDiagnostic creates a diagnostic for missing blank line after list.
-func (r *BlanksAroundListsRule) createAfterDiagnostic(ctx *lint.RuleContext, diagLine, insertionLine int) *lint.Diagnostic {
-	line := ctx.File.Lines[insertionLine-1]
 	builder := fix.NewEditBuilder()
-	builder.Insert(line.EndOffset, "\n")
+	builder.Insert(ctx.File.Lines[lastLine-1].EndOffset, lint.BlankLineText(ctx.File, list))
 
 	diagPos := mdast.SourcePosition{
 		StartLine:   diagLine,

@@ -895,6 +895,60 @@ func TestBlanksAroundListsRule_Fix(t *testing.T) {
 			wantDiags: 2,
 			wantFix:   "Text\n\n* List 1\n\nMore text\n\n* List 2\n\nEnd\n",
 		},
+		{
+			name:      "missing blank before a list in a blockquote",
+			input:     "> Text\n> - Item\n",
+			wantDiags: 1,
+			wantFix:   "> Text\n>\n> - Item\n",
+		},
+		{
+			name:      "missing blank after a list in a blockquote",
+			input:     "> - Item\n> # Heading\n",
+			wantDiags: 1,
+			wantFix:   "> - Item\n>\n> # Heading\n",
+		},
+		{
+			name:      "quote marker line counts as blank",
+			input:     "> Text\n>\n> - Item\n>\n> More\n",
+			wantDiags: 0,
+			wantFix:   "> Text\n>\n> - Item\n>\n> More\n",
+		},
+		{
+			name:      "list in a nested blockquote",
+			input:     "> > Text\n> > - Item\n",
+			wantDiags: 1,
+			wantFix:   "> > Text\n> >\n> > - Item\n",
+		},
+		{
+			name:      "list opening a blockquote after a paragraph",
+			input:     "Para\n> - Item\n",
+			wantDiags: 1,
+			wantFix:   "Para\n>\n> - Item\n",
+		},
+		{
+			name:      "list closing a blockquote before a heading",
+			input:     "> - Item\n# Heading\n",
+			wantDiags: 1,
+			wantFix:   "> - Item\n>\n# Heading\n",
+		},
+		{
+			name:      "comment lines count as blank",
+			input:     "<!-- note -->\n- Item\n<!-- end -->\n",
+			wantDiags: 0,
+			wantFix:   "<!-- note -->\n- Item\n<!-- end -->\n",
+		},
+		{
+			name:      "list nested in a list item is not checked",
+			input:     "- a\n  text\n  - b\n",
+			wantDiags: 0,
+			wantFix:   "- a\n  text\n  - b\n",
+		},
+		{
+			name:      "list in a blockquote inside a list item is not checked",
+			input:     "- a\n\n  > text\n  > - b\n",
+			wantDiags: 0,
+			wantFix:   "- a\n\n  > text\n  > - b\n",
+		},
 	}
 
 	for _, tt := range tests {
