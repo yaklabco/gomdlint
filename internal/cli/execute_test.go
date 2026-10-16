@@ -107,6 +107,7 @@ func TestExecuteUsageErrors(t *testing.T) {
 		{name: "invalid rule format", args: []string{"lint", "--rule-format", "bogus"}, wantStderr: `invalid rule format "bogus"`},
 		{name: "invalid summary order", args: []string{"lint", "--summary-order", "bogus"}, wantStderr: `invalid summary order "bogus"`},
 		{name: "negative jobs", args: []string{"lint", "--jobs", "-1"}, wantStderr: "invalid jobs value -1"},
+		{name: "malformed ignore pattern", args: []string{"lint", "--ignore", "docs/[a-"}, wantStderr: `"docs/[a-"`},
 		{name: "invalid color", args: []string{"lint", "--color", "bogus"}, wantStderr: `invalid color mode "bogus"`},
 		{name: "rules with invalid rule format", args: []string{"rules", "--rule-format", "bogus"}, wantStderr: `invalid rule format "bogus"`},
 		{name: "migrate with two inputs", args: []string{"migrate", "a.json", "b.json"}, wantStderr: "accepts at most 1 arg"},

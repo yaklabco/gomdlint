@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yaklabco/gomdlint/internal/configloader"
+	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -384,6 +385,11 @@ func validateLintFlags(flags *lintFlags, jobs int) error {
 	}
 	if jobs < 0 {
 		return usageError("invalid jobs value %d; use 0 for one worker per CPU", jobs)
+	}
+	for _, pattern := range flags.ignore {
+		if err := ignore.ValidatePattern(pattern); err != nil {
+			return withExitCode(ExitInvalidUsage, fmt.Errorf("--ignore: %w", err))
+		}
 	}
 	return nil
 }
