@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -519,6 +520,80 @@ func TestRequiredHeadingsRule(t *testing.T) {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
 				for _, d := range diags {
 					t.Logf("  - %s", d.Message)
+				}
+			}
+		})
+	}
+}
+
+// TestRequiredHeadingsRule_MarkdownlintParity verifies MD043 matches
+// headings like markdownlint 0.41.
+func TestRequiredHeadingsRule_MarkdownlintParity(t *testing.T) {
+	projectList := []any{"# Project", "## Overview", "## Usage"}
+	tests := []struct {
+		name      string
+		input     string
+		headings  []any
+		wantLines []int
+		wantMsg   string
+	}{
+		{
+			name:      "heading after the required list",
+			input:     "# Project\n\n## Overview\n\n## Usage\n\n## Extra Section\n",
+			headings:  projectList,
+			wantLines: []int{7},
+			wantMsg:   "## Extra Section",
+		},
+		{
+			name:      "headings are compared as written",
+			input:     "# Project\n\n## Use `tool`\n",
+			headings:  []any{"# Project", "## Use `tool`"},
+			wantLines: []int{},
+		},
+		{
+			name:      "markup is part of the heading text",
+			input:     "# Project\n\n## Use `tool`\n",
+			headings:  []any{"# Project", "## Use tool"},
+			wantLines: []int{3},
+		},
+		{
+			name:      "trailing zero-or-more wildcard allows extra headings",
+			input:     "# Project\n\n## Extra\n",
+			headings:  []any{"# Project", "*"},
+			wantLines: []int{},
+		},
+		{
+			name:      "trailing one-or-more wildcard needs a heading",
+			input:     "# Project\n",
+			headings:  []any{"# Project", "+"},
+			wantLines: []int{2},
+		},
+		{
+			name:      "only wildcards and no headings",
+			input:     "Text\n",
+			headings:  []any{"*"},
+			wantLines: []int{},
+		},
+		{
+			name:      "setext headings",
+			input:     "Project\n=======\n\nOverview\n--------\n",
+			headings:  []any{"# Project", "## Overview"},
+			wantLines: []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewRequiredHeadingsRule(), tt.input, map[string]any{"headings": tt.headings})
+			if got := diagLines(diags); !reflect.DeepEqual(got, tt.wantLines) {
+				t.Errorf("diagnostic lines = %v, want %v", got, tt.wantLines)
+			}
+			for _, diag := range diags {
+				if diag.StartColumn != 1 {
+					t.Errorf("column = %d, want 1", diag.StartColumn)
+				}
+				if tt.wantMsg != "" && !strings.Contains(diag.Message, tt.wantMsg) {
+					t.Errorf("message %q does not mention %q", diag.Message, tt.wantMsg)
 				}
 			}
 		})

@@ -437,181 +437,126 @@ func (r *RequiredHeadingsRule) DefaultEnabled() bool {
 	return false
 }
 
+// noMoreHeadings is markdownlint's placeholder for "past the end of the list".
+const noMoreHeadings = "[None]"
+
 // Apply checks document heading structure against required pattern.
+//
+// It follows markdownlint: each heading is written as "## Text" (any heading
+// style) with its text as it appears in the source, and is compared, in order
+// and case-insensitively unless match_case is set, with the headings list.
+// "*" matches zero or more headings, "+" one or more and "?" exactly one. A
+// heading after the end of the list is reported, as is a list that is not
+// used up. Only the first mismatch is reported. Unlike markdownlint, an
+// empty list checks nothing.
 func (r *RequiredHeadingsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	requiredHeadings := r.getRequiredHeadings(ctx)
-	if len(requiredHeadings) == 0 {
+	required := ctx.OptionStringSlice("headings", nil)
+	if len(required) == 0 {
 		return nil, nil
 	}
-
 	matchCase := ctx.OptionBool("match_case", false)
-	headings := ctx.Headings()
-	actualHeadings := r.buildActualHeadings(headings)
-
-	return r.matchHeadings(ctx, headings, actualHeadings, requiredHeadings, matchCase)
-}
-
-func (r *RequiredHeadingsRule) getRequiredHeadings(ctx *lint.RuleContext) []string {
-	headingsOption := ctx.Option("headings", nil)
-	if headingsOption == nil {
-		return nil
-	}
-
-	switch h := headingsOption.(type) {
-	case []string:
-		return h
-	case []interface{}:
-		var result []string
-		for _, item := range h {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
+	fold := func(text string) string {
+		if matchCase {
+			return text
 		}
-		return result
+		return strings.ToLower(text)
 	}
-	return nil
-}
 
-func (r *RequiredHeadingsRule) buildActualHeadings(headings []*mdast.Node) []string {
-	result := make([]string, 0, len(headings))
-	for _, h := range headings {
-		level := lint.HeadingLevel(h)
-		text := lint.HeadingText(h)
-		result = append(result, fmt.Sprintf("%s %s", strings.Repeat("#", level), text))
+	idx := 0
+	nextExpected := func() string {
+		idx++
+		if idx-1 < len(required) {
+			return required[idx-1]
+		}
+		return noMoreHeadings
 	}
-	return result
-}
+	matchAny, anyHeadings := false, false
 
-func (r *RequiredHeadingsRule) matchHeadings(
-	ctx *lint.RuleContext,
-	headings []*mdast.Node,
-	actualHeadings, requiredHeadings []string,
-	matchCase bool,
-) ([]lint.Diagnostic, error) {
-	reqIdx, actIdx := 0, 0
-
-	for reqIdx < len(requiredHeadings) && actIdx < len(actualHeadings) {
-		required := requiredHeadings[reqIdx]
-
-		switch required {
-		case "*", "+":
-			reqIdx, actIdx = r.handleWildcard(required, reqIdx, actIdx, actualHeadings, requiredHeadings, matchCase)
-		case "?":
-			actIdx++
-			reqIdx++
+	for _, heading := range ctx.Headings() {
+		if ctx.Cancelled() {
+			return nil, ctx.Ctx.Err()
+		}
+		anyHeadings = true
+		actual := strings.Repeat("#", lint.HeadingLevel(heading)) + " " + headingSourceText(ctx.File, heading)
+		expected := nextExpected()
+		switch {
+		case expected == "*":
+			if fold(nextExpected()) != fold(actual) {
+				matchAny = true
+				idx--
+			}
+		case expected == "+":
+			matchAny = true
+		case expected == "?":
+			// Any single heading matches.
+		case fold(expected) == fold(actual):
+			matchAny = false
+		case matchAny:
+			idx--
 		default:
-			if r.headingMatches(actualHeadings[actIdx], required, matchCase) {
-				actIdx++
-				reqIdx++
-				continue
+			msg := fmt.Sprintf("Expected heading %q, found %q", expected, actual)
+			if expected == noMoreHeadings {
+				msg = fmt.Sprintf("Expected no more headings, found %q", actual)
 			}
-			return r.createMismatchDiagnostic(ctx, headings, actualHeadings, required, actIdx), nil
-		}
-	}
-
-	return r.checkRemainingRequired(ctx, requiredHeadings, reqIdx)
-}
-
-func (r *RequiredHeadingsRule) handleWildcard(
-	pattern string,
-	reqIdx, actIdx int,
-	actualHeadings, requiredHeadings []string,
-	matchCase bool,
-) (int, int) {
-	if pattern == "+" {
-		actIdx++ // Must match at least one
-	}
-	reqIdx++
-
-	if reqIdx >= len(requiredHeadings) {
-		return reqIdx, len(actualHeadings)
-	}
-
-	nextRequired := requiredHeadings[reqIdx]
-	for actIdx < len(actualHeadings) {
-		if r.headingMatches(actualHeadings[actIdx], nextRequired, matchCase) {
-			break
-		}
-		actIdx++
-	}
-	return reqIdx, actIdx
-}
-
-func (r *RequiredHeadingsRule) createMismatchDiagnostic(
-	ctx *lint.RuleContext,
-	headings []*mdast.Node,
-	actualHeadings []string,
-	required string,
-	actIdx int,
-) []lint.Diagnostic {
-	pos := r.getPositionForIndex(ctx, headings, actIdx)
-	msg := r.getMismatchMessage(actualHeadings, required, actIdx)
-
-	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
-		WithSeverity(config.SeverityWarning).
-		WithSuggestion("Update heading to match required structure").
-		Build()
-	return []lint.Diagnostic{diag}
-}
-
-func (r *RequiredHeadingsRule) getPositionForIndex(
-	ctx *lint.RuleContext,
-	headings []*mdast.Node,
-	actIdx int,
-) mdast.SourcePosition {
-	if actIdx < len(headings) {
-		return headings[actIdx].SourcePosition()
-	}
-	return mdast.SourcePosition{
-		StartLine:   len(ctx.File.Lines),
-		StartColumn: 1,
-		EndLine:     len(ctx.File.Lines),
-		EndColumn:   1,
-	}
-}
-
-func (r *RequiredHeadingsRule) getMismatchMessage(actualHeadings []string, required string, actIdx int) string {
-	if actIdx < len(actualHeadings) {
-		return fmt.Sprintf("Expected heading %q, found %q", required, actualHeadings[actIdx])
-	}
-	return fmt.Sprintf("Missing required heading %q", required)
-}
-
-func (r *RequiredHeadingsRule) checkRemainingRequired(
-	ctx *lint.RuleContext,
-	requiredHeadings []string,
-	reqIdx int,
-) ([]lint.Diagnostic, error) {
-	for reqIdx < len(requiredHeadings) {
-		required := requiredHeadings[reqIdx]
-		if required != "*" && required != "+" && required != "?" {
-			pos := mdast.SourcePosition{
-				StartLine:   len(ctx.File.Lines),
-				StartColumn: 1,
-				EndLine:     len(ctx.File.Lines),
-				EndColumn:   1,
-			}
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-				fmt.Sprintf("Missing required heading %q", required)).
+			diag := lint.NewDiagnostic(r.ID(), heading, msg).
 				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Add required heading").
+				WithSuggestion("Update heading to match required structure").
 				Build()
 			return []lint.Diagnostic{diag}, nil
 		}
-		reqIdx++
+	}
+
+	remaining := len(required) - idx
+	if (remaining > 1 || (remaining == 1 && required[idx] != "*")) && (anyHeadings || !allWildcards(required)) {
+		lastLine := len(ctx.File.Lines)
+		pos := mdast.SourcePosition{StartLine: lastLine, StartColumn: 1, EndLine: lastLine, EndColumn: 1}
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+			fmt.Sprintf("Missing required heading %q", required[idx])).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Add required heading").
+			Build()
+		return []lint.Diagnostic{diag}, nil
 	}
 	return nil, nil
 }
 
-func (r *RequiredHeadingsRule) headingMatches(actual, required string, matchCase bool) bool {
-	if matchCase {
-		return actual == required
+// allWildcards reports whether every required heading is "*".
+func allWildcards(required []string) bool {
+	for _, heading := range required {
+		if heading != "*" {
+			return false
+		}
 	}
-	return strings.EqualFold(actual, required)
+	return true
+}
+
+// headingSourceText returns a heading's text as written, like markdownlint's
+// heading text: the raw content without its inline HTML, with line breaks
+// read as spaces.
+func headingSourceText(file *mdast.FileSnapshot, heading *mdast.Node) string {
+	content, ok := headingContentRange(file, heading)
+	if !ok {
+		return ""
+	}
+	var text strings.Builder
+	pos := content.StartOffset
+	for child := heading.FirstChild; child != nil; child = child.Next {
+		if child.Kind != mdast.NodeHTMLInline {
+			continue
+		}
+		rng := child.SourceRange()
+		if rng.StartOffset < pos || rng.EndOffset > content.EndOffset {
+			continue
+		}
+		text.Write(file.Content[pos:rng.StartOffset])
+		pos = rng.EndOffset
+	}
+	text.Write(file.Content[pos:content.EndOffset])
+	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(text.String())
 }
 
 // ProperNamesRule checks for correct capitalization of proper names.
