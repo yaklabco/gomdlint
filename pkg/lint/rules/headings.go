@@ -190,31 +190,31 @@ const (
 	StyleATXClosed HeadingStyle = "atx_closed"
 	// StyleSetext is the setext style (underlined).
 	StyleSetext HeadingStyle = "setext"
+	// StyleSetextWithATX uses setext for levels 1 and 2 and ATX for deeper levels.
+	StyleSetextWithATX HeadingStyle = "setext_with_atx"
+	// StyleSetextWithATXClosed uses setext for levels 1 and 2 and closed ATX for deeper levels.
+	StyleSetextWithATXClosed HeadingStyle = "setext_with_atx_closed"
 	// StyleConsistent means use whatever style is first encountered.
 	StyleConsistent HeadingStyle = "consistent"
 )
 
-// Apply checks that all headings use a consistent style.
+// maxSetextLevel is the deepest heading level setext syntax can express.
+const maxSetextLevel = 2
+
+// Apply checks that all headings use the configured style.
+//
+// The style option follows markdownlint: consistent (the default) takes the
+// style of the first heading, and setext_with_atx / setext_with_atx_closed
+// expect setext for levels 1 and 2 and (closed) ATX for deeper levels. The
+// gomdlint-only require_closing_atx option turns every expected open ATX
+// heading into a closed one.
 func (r *HeadingStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	configStyle := HeadingStyle(ctx.OptionString("style", string(StyleATX)))
+	style := HeadingStyle(ctx.OptionString("style", string(StyleConsistent)))
 	requireClosingATX := ctx.OptionBool("require_closing_atx", false)
-
-	// Determine effective style.
-	effectiveStyle := configStyle
-	if configStyle == StyleConsistent {
-		effectiveStyle = "" // Will be set from first heading.
-	}
-
-	// If requiring closing ATX, the effective style is atx_closed.
-	if requireClosingATX && (configStyle == StyleATX || configStyle == StyleConsistent) {
-		if configStyle != StyleConsistent {
-			effectiveStyle = StyleATXClosed
-		}
-	}
 
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
@@ -229,30 +229,45 @@ func (r *HeadingStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			continue
 		}
 
-		// Set consistent style from first heading.
-		if effectiveStyle == "" {
-			effectiveStyle = detectedStyle
-			if requireClosingATX && effectiveStyle == StyleATX {
-				effectiveStyle = StyleATXClosed
-			}
-			continue
+		// The first heading decides the style in consistent mode.
+		if style == StyleConsistent {
+			style = detectedStyle
 		}
 
-		// Check for style mismatch.
-		if !stylesMatch(detectedStyle, effectiveStyle, requireClosingATX) {
-			diag := r.createStyleDiagnostic(ctx, heading, detectedStyle, effectiveStyle, requireClosingATX)
-			diags = append(diags, diag)
+		expected := expectedHeadingStyle(style, lint.HeadingLevel(heading), requireClosingATX)
+		if detectedStyle != expected {
+			diags = append(diags, r.createStyleDiagnostic(ctx, heading, detectedStyle, expected))
 		}
 	}
 
 	return diags, nil
 }
 
+// expectedHeadingStyle returns the style a heading of the given level must use.
+func expectedHeadingStyle(style HeadingStyle, level int, requireClosingATX bool) HeadingStyle {
+	expected := style
+	switch style {
+	case StyleSetextWithATX:
+		expected = StyleATX
+		if level <= maxSetextLevel {
+			expected = StyleSetext
+		}
+	case StyleSetextWithATXClosed:
+		expected = StyleATXClosed
+		if level <= maxSetextLevel {
+			expected = StyleSetext
+		}
+	}
+	if requireClosingATX && expected == StyleATX {
+		expected = StyleATXClosed
+	}
+	return expected
+}
+
 func (r *HeadingStyleRule) createStyleDiagnostic(
 	ctx *lint.RuleContext,
 	heading *mdast.Node,
 	detected, expected HeadingStyle,
-	requireClosingATX bool,
 ) lint.Diagnostic {
 	msg := fmt.Sprintf("Heading style '%s' does not match expected style '%s'", detected, expected)
 
@@ -262,7 +277,7 @@ func (r *HeadingStyleRule) createStyleDiagnostic(
 
 	// Only auto-fix ATX style changes (not setext conversions).
 	if canAutoFix(detected, expected) {
-		fixBuilder := buildHeadingStyleFix(ctx.File, heading, detected, expected, requireClosingATX)
+		fixBuilder := buildHeadingStyleFix(ctx.File, heading, detected, expected)
 		if fixBuilder != nil {
 			builder = builder.WithFix(fixBuilder)
 		}
@@ -271,55 +286,80 @@ func (r *HeadingStyleRule) createStyleDiagnostic(
 	return builder.Build()
 }
 
+// headingContentRange returns the byte range of a heading's inline content
+// with trailing whitespace removed: for ATX headings the text between the
+// opening sequence and the optional closing sequence, for setext headings the
+// text lines without the underline. ok is false for empty headings and for
+// headings without a usable source range.
+func headingContentRange(file *mdast.FileSnapshot, heading *mdast.Node) (mdast.SourceRange, bool) {
+	if file == nil || heading == nil {
+		return mdast.SourceRange{}, false
+	}
+	rng := heading.ContentRange()
+	if rng.StartOffset < 0 || rng.EndOffset > len(file.Content) || rng.StartOffset >= rng.EndOffset {
+		return mdast.SourceRange{}, false
+	}
+	end := rng.EndOffset
+	for end > rng.StartOffset && (file.Content[end-1] == ' ' || file.Content[end-1] == '\t') {
+		end--
+	}
+	if end == rng.StartOffset {
+		return mdast.SourceRange{}, false
+	}
+	return mdast.SourceRange{StartOffset: rng.StartOffset, EndOffset: end}, true
+}
+
+// lineOf returns the line that contains offset, or nil when it is out of range.
+func lineOf(file *mdast.FileSnapshot, offset int) *mdast.LineInfo {
+	lineNum, _ := file.LineAt(offset)
+	if lineNum < 1 || lineNum > len(file.Lines) {
+		return nil
+	}
+	return &file.Lines[lineNum-1]
+}
+
+// atxClosingSequenceEnd returns the offset just past the closing hash sequence
+// that follows an ATX heading's content, or -1 when the heading is not closed.
+func atxClosingSequenceEnd(file *mdast.FileSnapshot, content mdast.SourceRange) int {
+	line := lineOf(file, content.EndOffset-1)
+	if line == nil {
+		return -1
+	}
+	rest := file.Content[content.EndOffset:line.NewlineStart]
+	trimmed := bytes.TrimLeft(rest, " \t")
+	if len(trimmed) == len(rest) {
+		// The closing sequence must be preceded by whitespace.
+		return -1
+	}
+	hashes := len(trimmed) - len(bytes.TrimLeft(trimmed, "#"))
+	if hashes == 0 || len(bytes.TrimSpace(trimmed[hashes:])) > 0 {
+		return -1
+	}
+	return line.NewlineStart - len(trimmed) + hashes
+}
+
 // detectHeadingStyle determines the style of a heading from its source.
+//
+// An ATX heading's content is preceded on its line by the opening hash
+// sequence; a setext heading's content is preceded only by indentation and
+// container markers. Closed ATX headings have a closing hash sequence after
+// the content, which an escaped hash (\#) is not.
 func detectHeadingStyle(file *mdast.FileSnapshot, heading *mdast.Node) HeadingStyle {
-	if heading == nil || file == nil {
+	content, ok := headingContentRange(file, heading)
+	if !ok {
 		return ""
 	}
-
-	pos := heading.SourcePosition()
-	if pos.StartLine < 1 || pos.StartLine > len(file.Lines) {
+	line := lineOf(file, content.StartOffset)
+	if line == nil {
 		return ""
 	}
-
-	lineContent := lint.LineText(file, pos.StartLine)
-	if len(lineContent) == 0 {
-		return ""
+	before := bytes.TrimRight(file.Content[line.StartOffset:content.StartOffset], " \t")
+	if !bytes.HasSuffix(before, []byte("#")) {
+		return StyleSetext
 	}
-
-	// Check if it starts with # (ATX style).
-	trimmed := bytes.TrimLeft(lineContent, " \t")
-	if len(trimmed) > 0 && trimmed[0] == '#' {
-		// Check if it ends with # (closed ATX).
-		trimmedLine := bytes.TrimSpace(lineContent)
-		if len(trimmedLine) > 1 && trimmedLine[len(trimmedLine)-1] == '#' {
-			// Find the content between opening and closing #s.
-			// Remove leading #s and spaces.
-			afterOpen := bytes.TrimLeft(trimmedLine, "#")
-			afterOpen = bytes.TrimLeft(afterOpen, " \t")
-			// Remove trailing #s and spaces.
-			beforeClose := bytes.TrimRight(afterOpen, "#")
-			beforeClose = bytes.TrimRight(beforeClose, " \t")
-			// If there's content between, it's closed style.
-			if len(beforeClose) > 0 {
-				return StyleATXClosed
-			}
-		}
-		return StyleATX
+	if atxClosingSequenceEnd(file, content) >= 0 {
+		return StyleATXClosed
 	}
-
-	// Check for setext style (heading followed by === or ---).
-	if pos.EndLine > pos.StartLine && pos.EndLine <= len(file.Lines) {
-		underline := lint.LineContent(file, pos.EndLine)
-		trimmedUnderline := bytes.TrimSpace(underline)
-		if len(trimmedUnderline) > 0 {
-			if allSameChar(trimmedUnderline, '=') || allSameChar(trimmedUnderline, '-') {
-				return StyleSetext
-			}
-		}
-	}
-
-	// Default to ATX if we can't determine.
 	return StyleATX
 }
 
@@ -336,85 +376,41 @@ func allSameChar(b []byte, c byte) bool {
 	return true
 }
 
-// stylesMatch checks if two styles are compatible.
-func stylesMatch(detected, expected HeadingStyle, requireClosingATX bool) bool {
-	if detected == expected {
-		return true
-	}
-
-	// ATX and ATX_closed are compatible unless requireClosingATX is set.
-	if !requireClosingATX {
-		if (detected == StyleATX || detected == StyleATXClosed) &&
-			(expected == StyleATX || expected == StyleATXClosed) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // canAutoFix returns true if we can auto-fix between these styles.
 func canAutoFix(from, to HeadingStyle) bool {
 	// Only fix ATX <-> ATX_closed, not setext conversions.
-	if from == StyleSetext || to == StyleSetext {
-		return false
-	}
-	return true
+	return (from == StyleATX && to == StyleATXClosed) || (from == StyleATXClosed && to == StyleATX)
 }
 
-// buildHeadingStyleFix creates an edit to fix heading style.
+// buildHeadingStyleFix converts between open and closed ATX headings. It edits
+// only the text after the heading content, so indentation and container
+// prefixes such as blockquote markers are preserved.
 func buildHeadingStyleFix(
 	file *mdast.FileSnapshot,
 	heading *mdast.Node,
 	from, to HeadingStyle,
-	requireClosingATX bool,
 ) *fix.EditBuilder {
-	if file == nil || heading == nil {
-		return nil
-	}
-
-	pos := heading.SourcePosition()
-	if pos.StartLine < 1 || pos.StartLine > len(file.Lines) {
-		return nil
-	}
-
-	lineContent := lint.LineText(file, pos.StartLine)
+	content, ok := headingContentRange(file, heading)
 	level := lint.HeadingLevel(heading)
-	if level == 0 {
+	if !ok || level == 0 {
+		return nil
+	}
+	line := lineOf(file, content.EndOffset-1)
+	if line == nil {
 		return nil
 	}
 
-	// Extract heading text (content without markers).
-	headingText := extractHeadingText(lineContent, from)
-
-	// Build new heading.
-	var newHeading string
-	if to == StyleATXClosed || (to == StyleATX && requireClosingATX) {
-		newHeading = fmt.Sprintf("%s %s %s", strings.Repeat("#", level), headingText, strings.Repeat("#", level))
-	} else {
-		newHeading = fmt.Sprintf("%s %s", strings.Repeat("#", level), headingText)
-	}
-
-	line := file.Lines[pos.StartLine-1]
 	builder := fix.NewEditBuilder()
-	builder.ReplaceRange(line.StartOffset+lint.LineTextOffset(file, pos.StartLine), line.NewlineStart, newHeading)
-
-	return builder
-}
-
-// extractHeadingText extracts the text content from a heading line.
-func extractHeadingText(lineContent []byte, style HeadingStyle) string {
-	content := string(bytes.TrimSpace(lineContent))
-
-	// Remove leading #s.
-	content = strings.TrimLeft(content, "#")
-	content = strings.TrimLeft(content, " \t")
-
-	// Remove trailing #s if present.
-	if style == StyleATXClosed {
-		content = strings.TrimRight(content, "#")
-		content = strings.TrimRight(content, " \t")
+	switch {
+	case from == StyleATX && to == StyleATXClosed:
+		builder.ReplaceRange(content.EndOffset, line.NewlineStart, " "+strings.Repeat("#", level))
+	case from == StyleATXClosed && to == StyleATX:
+		if atxClosingSequenceEnd(file, content) < 0 {
+			return nil
+		}
+		builder.Delete(content.EndOffset, line.NewlineStart)
+	default:
+		return nil
 	}
-
-	return content
+	return builder
 }

@@ -1,0 +1,2 @@
+containers.input.md:3:3 warning Heading style 'atx_closed' does not match expected style 'atx' (MD003/heading-style) [fixable]
+containers.input.md:7:3 warning Heading style 'atx_closed' does not match expected style 'atx' (MD003/heading-style) [fixable]

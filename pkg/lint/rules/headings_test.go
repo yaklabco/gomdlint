@@ -184,9 +184,12 @@ func TestHeadingStyleRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
+			// The default style is markdownlint's consistent, where ATX and
+			// closed ATX are different styles.
 			name:      "mixed ATX styles default",
 			input:     "# H1\n\n## H2 ##\n",
-			wantDiags: 0, // By default, ATX and ATX_closed are compatible.
+			wantDiags: 1,
+			wantFix:   "# H1\n\n## H2\n",
 		},
 		{
 			name:      "require closing ATX",
@@ -396,6 +399,151 @@ func TestSingleH1Rule_MarkdownlintDefaults(t *testing.T) {
 				if i < len(diags) {
 					assert.Contains(t, diags[i].Message, msg)
 				}
+			}
+		})
+	}
+}
+
+// TestHeadingStyleRule_MarkdownlintStyles verifies MD003 against markdownlint
+// 0.41 for every style value, including the default (consistent).
+func TestHeadingStyleRule_MarkdownlintStyles(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantMsgs  []string
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "default consistent flags closed after open",
+			input:     "# H1\n\n## H2 ##\n",
+			wantLines: []int{3},
+			wantMsgs:  []string{"'atx_closed' does not match expected style 'atx'"},
+			wantFixed: "# H1\n\n## H2\n",
+		},
+		{
+			name:      "default consistent flags open after closed",
+			input:     "# H1 #\n\n## H2\n",
+			wantLines: []int{3},
+			wantFixed: "# H1 #\n\n## H2 ##\n",
+		},
+		{
+			name:      "atx_closed flags plain ATX",
+			input:     "## Plain ATX\n",
+			options:   map[string]any{"style": "atx_closed"},
+			wantLines: []int{1},
+			wantFixed: "## Plain ATX ##\n",
+		},
+		{
+			name:      "atx flags closed ATX",
+			input:     "## Closed ##\n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+			wantFixed: "## Closed\n",
+		},
+		{
+			name:      "atx removes trailing whitespace after closing sequence",
+			input:     "## Closed ##  \n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+			wantFixed: "## Closed\n",
+		},
+		{
+			name:      "setext_with_atx flags ATX H1 without a fix",
+			input:     "# H1\n\n### H3\n",
+			options:   map[string]any{"style": "setext_with_atx"},
+			wantLines: []int{1},
+			wantMsgs:  []string{"expected style 'setext'"},
+		},
+		{
+			name:      "setext_with_atx accepts setext H1 and H2 with ATX H3",
+			input:     "Title\n=====\n\nSub\n---\n\n### H3\n",
+			options:   map[string]any{"style": "setext_with_atx"},
+			wantLines: []int{},
+		},
+		{
+			name:      "setext_with_atx expects open ATX for H3",
+			input:     "### H3 ###\n",
+			options:   map[string]any{"style": "setext_with_atx"},
+			wantLines: []int{1},
+			wantFixed: "### H3\n",
+		},
+		{
+			name:      "setext_with_atx_closed expects closed ATX for H3",
+			input:     "### H3\n",
+			options:   map[string]any{"style": "setext_with_atx_closed"},
+			wantLines: []int{1},
+			wantFixed: "### H3 ###\n",
+		},
+		{
+			name:      "escaped trailing hash is not a closing sequence",
+			input:     "# Learn C\\#\n\n## Plain\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "closed heading in blockquote sets the style",
+			input:     "> ## Quoted ##\n\n## Plain\n",
+			wantLines: []int{3},
+			wantFixed: "> ## Quoted ##\n\n## Plain ##\n",
+		},
+		{
+			name:      "fix keeps the blockquote prefix",
+			input:     "> ## Quoted ##\n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+			wantFixed: "> ## Quoted\n",
+		},
+		{
+			name:      "setext first heading sets the style",
+			input:     "Title\n=====\n\n## Section\n",
+			wantLines: []int{4},
+			wantMsgs:  []string{"'atx' does not match expected style 'setext'"},
+		},
+		{
+			name:      "setext heading starting with a hash",
+			input:     "#hashtag\n===\n\n# ATX\n",
+			wantLines: []int{4},
+		},
+		{
+			name:      "setext heading in a list item",
+			input:     "- Title\n  ===\n\n- # ATX\n",
+			wantLines: []int{4},
+		},
+		{
+			name:      "setext style flags ATX without a fix",
+			input:     "Title\n=====\n\n# ATX\n",
+			options:   map[string]any{"style": "setext"},
+			wantLines: []int{4},
+		},
+		{
+			name:      "require_closing_atx with the default style",
+			input:     "# H1\n\n## H2\n",
+			options:   map[string]any{"require_closing_atx": true},
+			wantLines: []int{1, 3},
+			wantFixed: "# H1 #\n\n## H2 ##\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingStyleRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for i, msg := range tt.wantMsgs {
+				if i < len(diags) {
+					assert.Contains(t, diags[i].Message, msg)
+				}
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			fixed := applyAllEdits(t, tt.input, diags)
+			assert.Equal(t, want, fixed)
+
+			// Fixes converge: nothing fixable remains after one pass.
+			for _, diag := range applyRuleWithOptions(t, NewHeadingStyleRule(), fixed, tt.options) {
+				assert.False(t, diag.HasFix(), "fixable diagnostic remains: %s", diag.Message)
 			}
 		})
 	}
