@@ -94,6 +94,53 @@ func TestNoMissingSpaceATXRule(t *testing.T) {
 	}
 }
 
+// TestNoMissingSpaceATXRule_MarkdownlintParity verifies MD018 matches
+// markdownlint 0.41: the hash must start the line, code and HTML blocks are
+// skipped, and closed headings are left to MD020.
+func TestNoMissingSpaceATXRule_MarkdownlintParity(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "closed heading is left to MD020", input: "#Heading#\n", wantLines: []int{}},
+		{name: "closing hash with trailing space", input: "#Heading #  \n", wantLines: []int{}},
+		{name: "inside an HTML comment", input: "<!--\n#notaheading\n-->\n", wantLines: []int{}},
+		{name: "inside an HTML block", input: "<div>\n#inside\n</div>\n", wantLines: []int{}},
+		{name: "inside a fenced code block", input: "```\n#comment\n```\n", wantLines: []int{}},
+		{name: "indented line", input: "  #Indented\n", wantLines: []int{}},
+		{name: "list item continuation", input: "- item\n\n  #Heading\n", wantLines: []int{}},
+		{name: "blockquote", input: "> #Quoted\n", wantLines: []int{}},
+		{name: "keycap emoji", input: "#️⃣ keycap\n", wantLines: []int{}},
+		{name: "seven hashes are never a heading", input: "#######seven\n", wantLines: []int{}},
+		{
+			name:      "heading after a one-line comment",
+			input:     "<!-- c -->\n#Heading\n",
+			wantLines: []int{2},
+			wantFixed: "<!-- c -->\n# Heading\n",
+		},
+		{
+			name:      "paragraph continuation line",
+			input:     "Para\n#tag\n",
+			wantLines: []int{2},
+			wantFixed: "Para\n# tag\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoMissingSpaceATXRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoMultipleSpaceATXRule(t *testing.T) {
 	tests := []struct {
 		name      string

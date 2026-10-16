@@ -137,7 +137,8 @@ func TestHashInWrappedListText(t *testing.T) {
 	input := "- Changes for #123 and\n  #456 are ready.\n"
 	require.Empty(t, applyCompatibilityRule(t, NewNoMissingSpaceATXRule(), input))
 	require.Len(t, applyCompatibilityRule(t, NewNoMissingSpaceATXRule(), "#Heading\n"), 1)
-	require.Len(t, applyCompatibilityRule(t, NewNoMissingSpaceATXRule(), "- item\n\n  #Heading\n"), 1)
+	// markdownlint only checks hashes at the start of the line.
+	require.Empty(t, applyCompatibilityRule(t, NewNoMissingSpaceATXRule(), "- item\n\n  #Heading\n"))
 }
 
 func TestTableAdjacentDirectiveComments(t *testing.T) {

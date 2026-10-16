@@ -31,59 +31,57 @@ func NewNoMissingSpaceATXRule() *NoMissingSpaceATXRule {
 	}
 }
 
-// atxHeadingNoSpacePattern matches ATX headings without space after hashes.
-// Matches: #Heading, ##Heading, etc. (no space after #).
-var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#{1,6})([^#\s])`)
+// atxHeadingNoSpacePattern matches a line that starts with an ATX opening
+// sequence followed directly by text: #Heading, ##Heading, etc.
+var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#{1,6})[^#\s]`)
+
+// closingHashPattern matches a line that ends with a hash and optional
+// whitespace; such lines look like closed headings, which MD020 handles.
+var closingHashPattern = regexp.MustCompile(`#\s*$`)
+
+// keycapHash is the "#️⃣" emoji, which starts with a hash but is not a heading.
+const keycapHash = "#️⃣"
 
 // Apply checks for missing space after hash on ATX headings.
+//
+// Like markdownlint, the check is line based: the hash must start the line,
+// lines in code and HTML blocks are skipped, and lines ending in a hash are
+// left to MD020 (no-missing-space-closed-atx).
 func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	htmlLines := htmlBlockLines(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
+		if ctx.IsLineInCodeBlock(lineNum) || htmlLines[lineNum] {
+			continue
+		}
+
 		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
-		}
-		if isListContinuationLine(ctx, lineNum) {
+		match := atxHeadingNoSpacePattern.FindSubmatch(lineContent)
+		if match == nil || closingHashPattern.Match(lineContent) || bytes.HasPrefix(lineContent, []byte(keycapHash)) {
 			continue
 		}
 
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := atxHeadingNoSpacePattern.FindSubmatch(trimmed)
-		if match == nil {
-			continue
-		}
-
-		hashes := string(match[1])
+		hashes := match[1]
 		line := ctx.File.Lines[lineNum-1]
-
-		// Find the position of the hashes in the original line.
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
-			continue
-		}
 
 		// Build fix: insert space after hashes.
 		builder := fix.NewEditBuilder()
-		insertPos := line.StartOffset + hashStart + len(hashes)
-		builder.Insert(insertPos, " ")
+		builder.Insert(line.StartOffset+len(hashes), " ")
 
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: hashStart + 1,
+			StartColumn: 1,
 			EndLine:     lineNum,
-			EndColumn:   hashStart + len(hashes) + 2,
+			EndColumn:   len(hashes) + 2,
 		}
 
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
@@ -98,22 +96,23 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	return diags, nil
 }
 
-func isListContinuationLine(ctx *lint.RuleContext, lineNum int) bool {
-	if lineNum <= 1 || lint.IsBlankLine(ctx.File, lineNum-1) {
-		return false
-	}
-	for _, item := range ctx.ListItems() {
-		pos := item.SourcePosition()
-		if pos.StartLine < lineNum && lineNum <= pos.EndLine {
-			marker := listMarkerPattern.FindIndex(lint.LineContent(ctx.File, pos.StartLine))
-			content := lint.LineContent(ctx.File, lineNum)
-			indent := len(content) - len(bytes.TrimLeft(content, " \t"))
-			if marker != nil && indent >= marker[1] {
-				return true
-			}
+// htmlBlockLines returns the set of lines occupied by HTML blocks.
+func htmlBlockLines(ctx *lint.RuleContext) map[int]bool {
+	lines := make(map[int]bool)
+	for _, block := range ctx.HTMLBlocks() {
+		rng := block.SourceRange()
+		if rng.StartOffset < 0 || rng.EndOffset <= rng.StartOffset {
+			continue
+		}
+		// The block ends on the line holding its last byte, not on the line
+		// its exclusive end offset may touch.
+		first, _ := ctx.File.LineAt(rng.StartOffset)
+		last, _ := ctx.File.LineAt(rng.EndOffset - 1)
+		for line := first; first > 0 && line <= last; line++ {
+			lines[line] = true
 		}
 	}
-	return false
+	return lines
 }
 
 // NoMultipleSpaceATXRule checks for multiple spaces after hash on ATX headings.
