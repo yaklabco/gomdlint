@@ -162,6 +162,42 @@ func TestPipeline_RecoversFromPanicWhileProcessingAFile(t *testing.T) {
 	require.ErrorIs(t, err, lint.ErrInternal)
 }
 
+func TestPipeline_NeverWritesFixedContentThatCannotBeParsed(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+	require.NoError(t, os.WriteFile(path, []byte("x and y"), 0o644))
+
+	errUnparsable := errors.New("unparsable")
+	parser := &mockParser{}
+	strict := &mockParser{parseFunc: func(ctx context.Context, path string, content []byte) (*mdast.FileSnapshot, error) {
+		if bytes.Contains(content, []byte("BAD")) {
+			return nil, errUnparsable
+		}
+		return parser.Parse(ctx, path, content)
+	}}
+	registry := lint.NewRegistry()
+	registry.Register(replaceFirstRule("TEST001", "y", "z"))
+	registry.Register(replaceFirstRule("TEST002", "z", "BAD"))
+	pipeline := lint.NewPipeline(lint.NewEngine(strict, registry))
+
+	result, err := pipeline.ProcessFile(context.Background(), path, fixConfig(), lint.PipelineOptions{Fix: true})
+	require.NoError(t, err)
+
+	assert.True(t, result.Skipped)
+	assert.Contains(t, result.SkipReason, "unparsable")
+	assert.False(t, result.Modified)
+	assert.False(t, result.Written)
+	assert.Zero(t, result.FixPasses, "nothing was applied to the file")
+	require.Len(t, result.Diagnostics, 1, "diagnostics describe the unchanged file")
+	assert.Equal(t, "TEST001", result.Diagnostics[0].RuleID)
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "x and y", string(got))
+}
+
 func TestPipeline_KeepsCRLFLineEndings(t *testing.T) {
 	t.Parallel()
 

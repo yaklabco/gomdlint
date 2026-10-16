@@ -355,6 +355,7 @@ func (p *Pipeline) lintAndFix(
 	if err != nil {
 		return nil, err
 	}
+	originalResult := fileResult
 
 	seen := map[[sha256.Size]byte]struct{}{sha256.Sum256(content): {}}
 	for opts.Fix && len(fileResult.Edits) > 0 {
@@ -376,9 +377,13 @@ func (p *Pipeline) lintAndFix(
 			if ctx.Err() != nil {
 				return nil, err
 			}
-			// Never write content that cannot be linted.
+			// Never write content that cannot be linted: keep the file as
+			// it is and report on it.
 			result.Skipped = true
 			result.SkipReason = fmt.Sprintf("re-parse failed: %v", err)
+			result.FixPasses = 0
+			result.TotalEditsApplied = 0
+			fileResult = originalResult
 			break
 		}
 
