@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD004",
+    "name": "unordered-list-style",
+    "line": 8,
+    "column": 3,
+    "message": "Unordered list bullet '-' does not match expected '*'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "unordered-list-style",
+    "line": 9,
+    "column": 3,
+    "message": "Unordered list bullet '-' does not match expected '*'",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD004",
+    "name": "unordered-list-style",
+    "line": 14,
+    "column": 3,
+    "message": "Unordered list bullet '-' does not match expected '*'",
+    "severity": "warning",
+    "fixable": true
+  }
+]

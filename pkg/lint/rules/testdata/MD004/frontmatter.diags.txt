@@ -1,2 +1,2 @@
-frontmatter.input.md:10:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
-frontmatter.input.md:11:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
+frontmatter.input.md:10:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style)
+frontmatter.input.md:11:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style)

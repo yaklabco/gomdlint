@@ -3,11 +3,11 @@
 - Alpha
 - Beta
 
-- Gamma
-- Delta
+* Gamma
+* Delta
 
-- Epsilon
-- Zeta
++ Epsilon
++ Zeta
 
-- Eta
-- Theta
+* Eta
+* Theta

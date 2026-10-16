@@ -39,16 +39,87 @@ func TestUnorderedListStyleRule(t *testing.T) {
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
-			name:      "mixed styles default dash",
-			input:     "- Item 1\n* Item 2\n+ Item 3\n",
+			name:      "mixed styles default to the first style",
+			input:     "- Item 1\n\nText.\n\n* Item 2\n\nMore.\n\n+ Item 3\n",
 			wantDiags: 2,
-			wantFix:   "- Item 1\n- Item 2\n- Item 3\n",
+			wantFix:   "- Item 1\n\nText.\n\n- Item 2\n\nMore.\n\n- Item 3\n",
+		},
+		{
+			name:      "default style is consistent",
+			input:     "* Item 1\n* Item 2\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "default style follows the first list",
+			input:     "+ Item 1\n\nText.\n\n- Item 2\n",
+			wantDiags: 1,
+			wantFix:   "+ Item 1\n\nText.\n\n+ Item 2\n",
+		},
+		{
+			// The bullet change is what keeps the two lists apart, so fixing
+			// it would merge them into one list.
+			name:      "no fix when the change would merge adjacent lists",
+			input:     "+ Item 1\n\n- Item 2\n",
+			wantDiags: 1,
+			wantFix:   "+ Item 1\n\n- Item 2\n",
+		},
+		{
+			name:      "explicit dash style",
+			input:     "* Item 1\n",
+			wantDiags: 1,
+			wantFix:   "- Item 1\n",
+			config:    map[string]any{"style": "dash"},
+		},
+		{
+			name:      "unknown style falls back to dash",
+			input:     "* Item 1\n",
+			wantDiags: 1,
+			wantFix:   "- Item 1\n",
+			config:    map[string]any{"style": "bogus"},
+		},
+		{
+			name:      "sublist style accepts alternating markers",
+			input:     "* Item 1\n  + Item 2\n    - Item 3\n  + Item 4\n* Item 5\n",
+			wantDiags: 0,
+			config:    map[string]any{"style": "sublist"},
+		},
+		{
+			name:      "sublist style requires a marker that differs from the parent",
+			input:     "* Item 1\n  * Item 2\n",
+			wantDiags: 1,
+			wantFix:   "* Item 1\n  - Item 2\n",
+			config:    map[string]any{"style": "sublist"},
+		},
+		{
+			name:      "sublist style keeps each level consistent",
+			input:     "* Item 1\n  + Item 2\n\nText.\n\n- Item 3\n",
+			wantDiags: 1,
+			wantFix:   "* Item 1\n  + Item 2\n\nText.\n\n* Item 3\n",
+			config:    map[string]any{"style": "sublist"},
+		},
+		{
+			name:      "sublist style counts ordered parents",
+			input:     "1. Item 1\n   * Item 2\n",
+			wantDiags: 0,
+			config:    map[string]any{"style": "sublist"},
+		},
+		{
+			name:      "fix replaces the marker inside a blockquote",
+			input:     "> * Item 1\n>\n> Text.\n>\n> - Item 2\n",
+			wantDiags: 1,
+			wantFix:   "> * Item 1\n>\n> Text.\n>\n> * Item 2\n",
+		},
+		{
+			name:      "fix replaces the nested marker on a shared line",
+			input:     "- Item\n\nText.\n\n- * Nested\n",
+			wantDiags: 1,
+			wantFix:   "- Item\n\nText.\n\n- - Nested\n",
 		},
 		{
 			name:      "consistent style from first",
-			input:     "* Item 1\n- Item 2\n",
+			input:     "* Item 1\n\nText.\n\n- Item 2\n",
 			wantDiags: 1,
-			wantFix:   "* Item 1\n* Item 2\n",
+			wantFix:   "* Item 1\n\nText.\n\n* Item 2\n",
 			config:    map[string]any{"style": "consistent"},
 		},
 		{
@@ -97,21 +168,34 @@ func TestUnorderedListStyleRule(t *testing.T) {
 				for _, d := range diags {
 					allEdits = append(allEdits, d.FixEdits...)
 				}
-				if len(allEdits) > 0 {
-					prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-					require.NoError(t, err)
-					fixed := fix.ApplyEdits([]byte(tt.input), prepared)
-					assert.Equal(t, tt.wantFix, string(fixed))
+				prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
+				require.NoError(t, err)
+				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+				assert.Equal(t, tt.wantFix, string(fixed))
 
-					// Verify idempotency.
-					snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
-					require.NoError(t, err)
-					ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
-					diags2, err := rule.Apply(ruleCtx2)
-					require.NoError(t, err)
-					assert.Empty(t, diags2, "fix should be idempotent")
-				}
+				// Verify idempotency: no fixable diagnostics remain.
+				snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
+				require.NoError(t, err)
+				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
+				diags2, err := rule.Apply(ruleCtx2)
+				require.NoError(t, err)
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
+		})
+	}
+}
+
+// TestUnorderedListStyleRuleKeepsThematicBreaksOut checks that the fix never
+// rewrites a line of nested empty items into a thematic break.
+func TestUnorderedListStyleRuleKeepsThematicBreaksOut(t *testing.T) {
+	for _, input := range []string{"* + *\n", "- + -\n"} {
+		t.Run(input, func(t *testing.T) {
+			snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			ruleCtx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+			diags, err := NewUnorderedListStyleRule().Apply(ruleCtx)
+			require.NoError(t, err)
+			assert.Empty(t, filterFixableDiags(diags))
 		})
 	}
 }

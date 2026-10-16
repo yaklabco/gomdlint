@@ -9,236 +9,11 @@
     "fixable": true
   },
   {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 13,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 14,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD012",
     "name": "no-multiple-blank-lines",
     "line": 18,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 21,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 22,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 23,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 24,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 25,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 26,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 27,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 28,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 29,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 30,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 31,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 32,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 33,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 34,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 35,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 36,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 37,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 38,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 39,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 40,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 41,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 42,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 43,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
     "severity": "warning",
     "fixable": true
   },
@@ -252,110 +27,11 @@
     "fixable": true
   },
   {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 48,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 49,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 50,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 51,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 52,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 53,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 54,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 55,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 56,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 57,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD012",
     "name": "no-multiple-blank-lines",
     "line": 59,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 62,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
     "severity": "warning",
     "fixable": true
   },
@@ -369,29 +45,11 @@
     "fixable": true
   },
   {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 67,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD012",
     "name": "no-multiple-blank-lines",
     "line": 69,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 72,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
     "severity": "warning",
     "fixable": true
   },
@@ -414,42 +72,6 @@
     "fixable": false
   },
   {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 77,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 78,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 79,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 80,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD024",
     "name": "no-duplicate-heading",
     "line": 84,
@@ -457,33 +79,6 @@
     "message": "Duplicate heading text \"Features\" (first occurrence on line 19)",
     "severity": "warning",
     "fixable": false
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 86,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 87,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 88,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
   },
   {
     "rule": "MD024",
@@ -495,51 +90,6 @@
     "fixable": false
   },
   {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 92,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 93,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 94,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 95,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 96,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD024",
     "name": "no-duplicate-heading",
     "line": 98,
@@ -547,15 +97,6 @@
     "message": "Duplicate heading text \"Tests\" (first occurrence on line 65)",
     "severity": "warning",
     "fixable": false
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 100,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
   },
   {
     "rule": "MD024",
@@ -567,15 +108,6 @@
     "fixable": false
   },
   {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 104,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD024",
     "name": "no-duplicate-heading",
     "line": 106,
@@ -583,32 +115,5 @@
     "message": "Duplicate heading text \"Continuous Integration\" (first occurrence on line 11)",
     "severity": "warning",
     "fixable": false
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 108,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 109,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD004",
-    "name": "unordered-list-style",
-    "line": 110,
-    "column": 1,
-    "message": "Unordered list bullet '*' does not match expected '-'",
-    "severity": "warning",
-    "fixable": true
   }
 ]

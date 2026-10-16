@@ -22,7 +22,23 @@ const (
 	BulletAsterisk BulletStyle = "asterisk"
 	// BulletConsistent uses whatever style is first encountered.
 	BulletConsistent BulletStyle = "consistent"
+	// BulletSublist requires each nesting level to use one style that differs
+	// from the style of its parent level.
+	BulletSublist BulletStyle = "sublist"
 )
+
+// differentBulletStyle returns the style markdownlint picks for a sublist whose
+// first marker repeats its parent's style.
+func differentBulletStyle(style BulletStyle) BulletStyle {
+	switch style {
+	case BulletDash:
+		return BulletPlus
+	case BulletPlus:
+		return BulletAsterisk
+	default:
+		return BulletDash
+	}
+}
 
 // getBulletMarker returns the character representation for a bullet style.
 func getBulletMarker(style BulletStyle) string {
@@ -70,113 +86,219 @@ func NewUnorderedListStyleRule() *UnorderedListStyleRule {
 	}
 }
 
+// bulletMismatch is an unordered list item whose bullet differs from the
+// expected one.
+type bulletMismatch struct {
+	list     *mdast.Node
+	item     *mdast.Node
+	marker   listItemMarker
+	found    bool
+	actual   string
+	expected string
+}
+
 // Apply checks that all unordered lists use consistent bullet markers.
+//
+// The default style is consistent: every list uses the bullet of the first
+// list in the document. Like markdownlint, an unknown style falls back to dash
+// and the sublist style gives each nesting level one bullet that differs from
+// its parent level's.
 func (r *UnorderedListStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	configStyle := BulletStyle(ctx.OptionString("style", string(BulletDash)))
-
-	// Determine effective style.
-	effectiveStyle := configStyle
-	effectiveMarker := getBulletMarker(effectiveStyle)
-
-	if configStyle == BulletConsistent {
-		effectiveStyle = "" // Will be set from first list.
-		effectiveMarker = ""
+	style := BulletStyle(ctx.OptionString("style", string(BulletConsistent)))
+	switch style {
+	case BulletDash, BulletPlus, BulletAsterisk, BulletConsistent, BulletSublist:
+	default:
+		style = BulletDash
 	}
+	expected := style
+	var nestingStyles []BulletStyle
 
-	lists := ctx.Lists()
-	var diags []lint.Diagnostic
-
-	for _, list := range lists {
+	var mismatches []bulletMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-
-		// Skip ordered lists.
 		if lint.IsOrderedList(list) {
 			continue
 		}
-
-		marker := lint.ListBulletMarker(list)
-		if marker == "" {
+		listStyle, ok := getBulletStyle(lint.ListBulletMarker(list))
+		if !ok {
 			continue
 		}
-
-		// Set consistent style from first list.
-		if effectiveStyle == "" {
-			if style, ok := getBulletStyle(marker); ok {
-				effectiveStyle = style
-				effectiveMarker = marker
+		nesting := listNesting(list)
+		for _, item := range lint.ListItems(list) {
+			marker, found := findListItemMarker(ctx.File, item)
+			itemStyle := listStyle
+			if found {
+				if markerStyle, known := getBulletStyle(string(marker.Bullet)); known {
+					itemStyle = markerStyle
+				}
 			}
+			if expected == BulletConsistent {
+				expected = itemStyle
+			}
+			want := expected
+			if style == BulletSublist {
+				want = sublistStyle(&nestingStyles, nesting, itemStyle)
+			}
+			if itemStyle == want {
+				continue
+			}
+			mismatches = append(mismatches, bulletMismatch{
+				list:     list,
+				item:     item,
+				marker:   marker,
+				found:    found,
+				actual:   getBulletMarker(itemStyle),
+				expected: getBulletMarker(want),
+			})
+		}
+	}
+
+	return r.bulletDiagnostics(ctx, mismatches), nil
+}
+
+// sublistStyle returns the style expected at a nesting level, fixing the
+// level's style from its first item the first time the level is seen.
+func sublistStyle(nestingStyles *[]BulletStyle, nesting int, itemStyle BulletStyle) BulletStyle {
+	for len(*nestingStyles) <= nesting {
+		*nestingStyles = append(*nestingStyles, "")
+	}
+	styles := *nestingStyles
+	if styles[nesting] == "" {
+		styles[nesting] = itemStyle
+		if nesting > 0 && styles[nesting-1] == itemStyle {
+			styles[nesting] = differentBulletStyle(itemStyle)
+		}
+	}
+	return styles[nesting]
+}
+
+// adjacentToBulletList reports whether a list directly follows or precedes
+// another bullet list, with nothing but blank lines between them.
+func adjacentToBulletList(list *mdast.Node) bool {
+	for _, sibling := range []*mdast.Node{list.Prev, list.Next} {
+		if sibling != nil && sibling.Kind == mdast.NodeList && !lint.IsOrderedList(sibling) {
+			return true
+		}
+	}
+	return false
+}
+
+// listNesting counts the lists, ordered or unordered, that contain a list.
+func listNesting(list *mdast.Node) int {
+	nesting := 0
+	for parent := list.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeList {
+			nesting++
+		}
+	}
+	return nesting
+}
+
+// bulletDiagnostics reports each mismatch. A mismatch is fixed by replacing
+// its bullet, unless that would change the document structure: when the list
+// sits next to another bullet list, the differing bullet is what keeps the two
+// lists apart, and when the replacements would turn the line into a thematic
+// break, the list items would disappear.
+func (r *UnorderedListStyleRule) bulletDiagnostics(ctx *lint.RuleContext, mismatches []bulletMismatch) []lint.Diagnostic {
+	replacements := make(map[int]map[int]byte)
+	for _, mismatch := range mismatches {
+		if !mismatch.found || adjacentToBulletList(mismatch.list) {
 			continue
 		}
+		if replacements[mismatch.marker.Line] == nil {
+			replacements[mismatch.marker.Line] = make(map[int]byte)
+		}
+		replacements[mismatch.marker.Line][mismatch.marker.Start] = mismatch.expected[0]
+	}
+	unsafeLines := make(map[int]bool)
+	for lineNum, lineReplacements := range replacements {
+		unsafeLines[lineNum] = replacementMakesThematicBreak(ctx.File, lineNum, lineReplacements)
+	}
 
-		// Check for style mismatch.
-		if marker != effectiveMarker {
-			items := lint.ListItems(list)
-			for _, item := range items {
-				diag := r.createBulletDiagnostic(ctx, item, marker, effectiveMarker)
-				diags = append(diags, diag)
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		msg := fmt.Sprintf("Unordered list bullet '%s' does not match expected '%s'", mismatch.actual, mismatch.expected)
+		var diagBuilder *lint.DiagnosticBuilder
+		switch {
+		case mismatch.found:
+			column := mismatch.marker.Column() + 1
+			pos := mdast.SourcePosition{
+				StartLine: mismatch.marker.Line, StartColumn: column,
+				EndLine: mismatch.marker.Line, EndColumn: column + 1,
 			}
+			diagBuilder = lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg)
+			if !unsafeLines[mismatch.marker.Line] && !adjacentToBulletList(mismatch.list) {
+				builder := fix.NewEditBuilder()
+				builder.ReplaceRange(mismatch.marker.Start, mismatch.marker.End, mismatch.expected)
+				diagBuilder = diagBuilder.WithFix(builder)
+			}
+		case mismatch.item.SourcePosition().IsValid():
+			diagBuilder = lint.NewDiagnostic(r.ID(), mismatch.item, msg)
+		default:
+			continue
 		}
+		diags = append(diags, diagBuilder.
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(fmt.Sprintf("Use '%s' as the bullet marker", mismatch.expected)).
+			Build())
 	}
-
-	return diags, nil
+	return diags
 }
 
-func (r *UnorderedListStyleRule) createBulletDiagnostic(
-	ctx *lint.RuleContext,
-	item *mdast.Node,
-	actual, expected string,
-) lint.Diagnostic {
-	msg := fmt.Sprintf("Unordered list bullet '%s' does not match expected '%s'", actual, expected)
-
-	// Find the bullet marker position and create a fix.
-	builder := r.buildBulletFix(ctx.File, item, expected)
-
-	diagBuilder := lint.NewDiagnostic(r.ID(), item, msg).
-		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Use '%s' as the bullet marker", expected))
-
-	if builder != nil {
-		diagBuilder = diagBuilder.WithFix(builder)
+// replacementMakesThematicBreak reports whether replacing bullets on a line
+// would leave a run of three or more identical bullets and nothing else after
+// the first list marker, which CommonMark parses as a thematic break.
+func replacementMakesThematicBreak(file *mdast.FileSnapshot, lineNum int, replacements map[int]byte) bool {
+	line := file.Lines[lineNum-1]
+	first := line.NewlineStart
+	for offset := range replacements {
+		first = min(first, offset)
 	}
-
-	return diagBuilder.Build()
+	text := make([]byte, 0, line.NewlineStart-first)
+	for offset := first; offset < line.NewlineStart; offset++ {
+		char := file.Content[offset]
+		if replacement, ok := replacements[offset]; ok {
+			char = replacement
+		}
+		text = append(text, char)
+	}
+	// Bullets before the first replaced one on the same line belong to the
+	// same run of markers, so include them.
+	for offset := first - 1; offset >= line.StartOffset; offset-- {
+		char := file.Content[offset]
+		if char != ' ' && char != '\t' && char != '-' && char != '*' && char != '+' {
+			break
+		}
+		text = append([]byte{char}, text...)
+	}
+	return isThematicBreakText(text)
 }
 
-func (r *UnorderedListStyleRule) buildBulletFix(
-	file *mdast.FileSnapshot,
-	item *mdast.Node,
-	expectedMarker string,
-) *fix.EditBuilder {
-	if file == nil || item == nil {
-		return nil
-	}
-
-	pos := item.SourcePosition()
-	if pos.StartLine < 1 || pos.StartLine > len(file.Lines) {
-		return nil
-	}
-
-	// Get the line content and find the bullet marker.
-	lineContent := lint.LineContent(file, pos.StartLine)
-	line := file.Lines[pos.StartLine-1]
-
-	// Find the first bullet character (-, +, or *).
-	for i, ch := range lineContent {
-		if ch == '-' || ch == '+' || ch == '*' {
-			builder := fix.NewEditBuilder()
-			offset := line.StartOffset + i
-			builder.ReplaceRange(offset, offset+1, expectedMarker)
-			return builder
+// isThematicBreakText reports whether text holds three or more of the same
+// thematic break character and otherwise only spaces and tabs.
+func isThematicBreakText(text []byte) bool {
+	var breakChar byte
+	count := 0
+	for _, char := range text {
+		switch char {
+		case ' ', '\t':
+		case '-', '*', '_':
+			if breakChar != 0 && char != breakChar {
+				return false
+			}
+			breakChar = char
+			count++
+		default:
+			return false
 		}
 	}
-
-	return nil
+	return count >= 3
 }
 
 // OrderedListIncrementRule enforces sequential numbering in ordered lists.

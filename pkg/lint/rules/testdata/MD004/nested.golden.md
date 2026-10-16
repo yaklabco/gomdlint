@@ -4,6 +4,6 @@
   - Nested dash
   - Another nested dash
 
-- Top level asterisk
+* Top level asterisk
   - Nested asterisk
   - Another nested asterisk
