@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD044",
+    "name": "proper-names",
+    "line": 3,
+    "column": 5,
+    "message": "Proper name \"javascript\" should be \"JavaScript\"",
+    "severity": "warning",
+    "fixable": true
+  }
+]

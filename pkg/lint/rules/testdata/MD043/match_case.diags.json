@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD043",
+    "name": "required-headings",
+    "line": 4,
+    "column": 1,
+    "message": "Expected heading \"## Overview\", found \"## overview\"",
+    "severity": "warning",
+    "fixable": false
+  }
+]

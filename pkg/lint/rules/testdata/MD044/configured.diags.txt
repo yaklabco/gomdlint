@@ -1,0 +1,5 @@
+configured.input.md:3:7 warning Proper name "javascript" should be "JavaScript" (MD044/proper-names) [fixable]
+configured.input.md:3:22 warning Proper name "Javascript" should be "JavaScript" (MD044/proper-names) [fixable]
+configured.input.md:5:26 warning Proper name "github" should be "GitHub" (MD044/proper-names) [fixable]
+configured.input.md:6:12 warning Proper name "JAVASCRIPT" should be "JavaScript" (MD044/proper-names) [fixable]
+configured.input.md:10:18 warning Proper name "github" should be "GitHub" (MD044/proper-names) [fixable]

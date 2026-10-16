@@ -1,0 +1,1 @@
+missing_heading.input.md:6:1 warning Missing required heading "## Usage" (MD043/required-headings)
