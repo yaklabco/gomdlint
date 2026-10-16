@@ -483,9 +483,15 @@ func TestDescriptiveLinkTextRule(t *testing.T) {
 			want:     1,
 		},
 		{
+			// markdownlint's default prohibited_texts are "click here", "here", "link", and "more".
 			name:     "read more",
 			markdown: `[Read More](url)`,
-			want:     1, // case insensitive
+			want:     0,
+		},
+		{
+			name:     "case insensitive",
+			markdown: `[Click Here](url)`,
+			want:     1,
 		},
 		{
 			name:     "link text",
@@ -500,7 +506,7 @@ func TestDescriptiveLinkTextRule(t *testing.T) {
 		{
 			name:     "multiple generic links",
 			markdown: `[here](url1) and [click](url2) and [more](url3)`,
-			want:     3,
+			want:     2,
 		},
 	}
 
@@ -534,6 +540,22 @@ func TestDescriptiveLinkTextRule_CustomPatterns(t *testing.T) {
 	})
 	if len(diags) != 2 {
 		t.Errorf("custom patterns: got %d diagnostics, want 2", len(diags))
+	}
+}
+
+// TestDescriptiveLinkTextRule_MarkdownlintDefaults checks the markdownlint
+// defaults: punctuation is ignored when comparing link text, and the
+// markdownlint option name prohibited_texts is accepted.
+func TestDescriptiveLinkTextRule_MarkdownlintDefaults(t *testing.T) {
+	rule := NewDescriptiveLinkTextRule()
+	if diags := testHelper(t, rule, "[Click here!](url)\n"); len(diags) != 1 {
+		t.Errorf("punctuation: got %d diagnostics, want 1", len(diags))
+	}
+	diags := testHelperWithOptions(t, rule, "[info](url) and [here](url)\n", map[string]interface{}{
+		"prohibited_texts": []interface{}{"info"},
+	})
+	if len(diags) != 1 || diags[0].Message != "Link text 'info' is not descriptive" {
+		t.Errorf("prohibited_texts: got %+v, want one diagnostic for 'info'", diags)
 	}
 }
 

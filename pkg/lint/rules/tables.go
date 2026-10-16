@@ -628,8 +628,10 @@ func (r *TableColumnStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		return nil, nil
 	}
 
+	// markdownlint_compatible defaults to markdownlint's behaviour, where style
+	// "any" still requires each table to follow one of the styles.
 	configStyle := ColumnStyle(ctx.OptionString("style", string(ColumnStyleAny)))
-	if ctx.OptionBool("markdownlint_compatible", false) {
+	if ctx.OptionBool("markdownlint_compatible", true) {
 		return r.applyMarkdownlintStyle(ctx, configStyle)
 	}
 	if configStyle == ColumnStyleAny {

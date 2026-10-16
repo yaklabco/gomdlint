@@ -403,6 +403,32 @@ func TestTablePipeStyleRule(t *testing.T) {
 	}
 }
 
+// TestTableColumnStyleRule_DefaultMarkdownlintCompatible checks that with no
+// options MD060 behaves like markdownlint's style "any": each table must
+// follow one of the aligned, compact, or tight styles.
+func TestTableColumnStyleRule_DefaultMarkdownlintCompatible(t *testing.T) {
+	apply := func(input string) []lint.Diagnostic {
+		t.Helper()
+		snapshot, err := goldmark.New(string(config.FlavorGFM)).Parse(context.Background(), "test.md", []byte(input))
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		cfg := config.NewConfig()
+		cfg.Flavor = config.FlavorGFM
+		diags, err := NewTableColumnStyleRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+		if err != nil {
+			t.Fatalf("Apply error: %v", err)
+		}
+		return diags
+	}
+	if diags := apply("| A | B |\n| --- | --- |\n| x | y |\n"); len(diags) != 0 {
+		t.Errorf("compact table: got %d diagnostics, want 0", len(diags))
+	}
+	if diags := apply("| A  | B |\n| --- | --- |\n|x|y|\n"); len(diags) == 0 {
+		t.Error("table mixing styles: got 0 diagnostics, want at least 1")
+	}
+}
+
 func TestTableColumnStyleRule(t *testing.T) {
 	tests := []struct {
 		name   string
