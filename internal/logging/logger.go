@@ -59,7 +59,10 @@ func NewInteractive() *log.Logger {
 // color profile then comes from termenv's environment checks, which honour
 // NO_COLOR, CLICOLOR_FORCE and TERM without talking to the terminal.
 func newLogger(writer io.Writer) *log.Logger {
-	logger := log.NewWithOptions(&opaqueWriter{Writer: writer}, log.Options{
+	// A value, not a pointer: charm keeps a renderer per writer in a global
+	// registry, and equal values reuse one entry instead of adding another
+	// for every logger.
+	logger := log.NewWithOptions(opaqueWriter{Writer: writer}, log.Options{
 		ReportTimestamp: false,
 		ReportCaller:    false,
 	})
