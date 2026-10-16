@@ -361,6 +361,38 @@ func TestSpansSurviveContainers(t *testing.T) {
 	})
 }
 
+func TestLeadingByteOrderMark(t *testing.T) {
+	t.Run("heading", func(t *testing.T) {
+		file := parseForSpans(t, FlavorGFM, utf8BOM+"# Title\n\nText\n")
+		require.Equal(t, mdast.NodeHeading, file.Root.FirstChild.Kind)
+		require.Equal(t, 3, file.Root.FirstChild.SourceRange().StartOffset, "offsets keep counting the BOM")
+		assertSpans(t, file, []spanExpectation{
+			{mdast.NodeHeading, 0, "# Title", "Title"},
+			{mdast.NodeParagraph, 0, "Text", "Text"},
+		})
+	})
+	t.Run("front matter", func(t *testing.T) {
+		file := parseForSpans(t, FlavorGFM, utf8BOM+"---\ntitle: Example\n---\n# Document\n")
+		require.Equal(t, 3, file.FrontMatterLines)
+		require.Equal(t, mdast.NodeHeading, file.Root.FirstChild.Kind)
+		require.Equal(t, 4, file.Root.FirstChild.SourcePosition().StartLine)
+		require.Len(t, mdast.FindByKind(file.Root, mdast.NodeHeading), 1)
+	})
+	t.Run("indented heading", func(t *testing.T) {
+		file := parseForSpans(t, FlavorGFM, utf8BOM+"   # Title\n")
+		require.Equal(t, mdast.NodeHeading, file.Root.FirstChild.Kind)
+	})
+	t.Run("tab indented code", func(t *testing.T) {
+		file := parseForSpans(t, FlavorGFM, utf8BOM+"\tcode\n")
+		require.Equal(t, mdast.NodeCodeBlock, file.Root.FirstChild.Kind)
+		require.Equal(t, "code", string(file.Root.FirstChild.ContentText()))
+	})
+	t.Run("only a BOM", func(t *testing.T) {
+		file := parseForSpans(t, FlavorGFM, utf8BOM)
+		require.Nil(t, file.Root.FirstChild)
+	})
+}
+
 func TestOrderedListDelimiter(t *testing.T) {
 	tests := []struct {
 		input     string

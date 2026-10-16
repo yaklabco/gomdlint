@@ -88,6 +88,13 @@ func TestFirstLineHeadingSeesLeadingThematicBreak(t *testing.T) {
 	require.Equal(t, 1, diags[0].StartLine)
 }
 
+func TestByteOrderMarkBeforeFrontMatterAndHeading(t *testing.T) {
+	const bom = "\xEF\xBB\xBF"
+	input := bom + "---\ntitle: Example\n---\n# Document\n\nText.\n"
+	require.Empty(t, applyCompatibilityRule(t, NewHeadingBlankLinesRule(), input))
+	require.Empty(t, applyCompatibilityRule(t, NewFirstLineHeadingRule(), bom+"# Document\n\nText.\n"))
+}
+
 func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
 	input := "# Title\n\n1) one\n1) two\n3) three\n"
 	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)

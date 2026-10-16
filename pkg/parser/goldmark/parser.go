@@ -73,8 +73,12 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 		Lines:   mdast.BuildLines(content),
 	}
 
+	// A byte order mark is not Markdown. goldmark parses the content after
+	// it, and spans keep counting from the start of the file.
+	base := bomLength(snapshot.Content)
+
 	// Parse with goldmark.
-	snapshot.FrontMatterLines = frontMatterLines(snapshot)
+	snapshot.FrontMatterLines = frontMatterLines(snapshot, base)
 	parseContent := snapshot.Content
 	if snapshot.FrontMatterLines > 0 {
 		parseContent = copyContent(snapshot.Content)
@@ -85,7 +89,8 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 			}
 		}
 	}
-	reader := text.NewReader(parseContent)
+	source := parseContent[base:]
+	reader := text.NewReader(source)
 	recorder := newSpanRecorder()
 	pc := parser.NewContext()
 	pc.Set(p.spans.key, recorder)
@@ -97,7 +102,7 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	}
 
 	// Build mdast.Node tree from goldmark AST.
-	mapper := newSourceMapper(snapshot.Content, parseContent, 0, snapshot.Lines, recorder)
+	mapper := newSourceMapper(snapshot.Content, source, base, snapshot.Lines, recorder)
 	snapshot.Root = mapper.mapDocument(gmDoc)
 
 	// Tokenize content.
@@ -117,14 +122,30 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	return snapshot, nil
 }
 
+// utf8BOM is the UTF-8 encoding of the byte order mark U+FEFF.
+const utf8BOM = "\xEF\xBB\xBF"
+
+// bomLength returns the length of a leading UTF-8 byte order mark.
+func bomLength(content []byte) int {
+	if bytes.HasPrefix(content, []byte(utf8BOM)) {
+		return len(utf8BOM)
+	}
+	return 0
+}
+
 // frontMatterLines recognizes a complete leading YAML or TOML metadata block.
-func frontMatterLines(file *FileSnapshot) int {
+// skip is the number of leading bytes to ignore, such as a byte order mark.
+func frontMatterLines(file *FileSnapshot, skip int) int {
 	if len(file.Lines) < 2 {
 		return 0
 	}
 	lineText := func(idx int) []byte {
 		line := file.Lines[idx]
-		return bytes.TrimRight(file.Content[line.StartOffset:line.NewlineStart], " \t\r")
+		start := line.StartOffset
+		if idx == 0 {
+			start = min(start+skip, line.NewlineStart)
+		}
+		return bytes.TrimRight(file.Content[start:line.NewlineStart], " \t\r")
 	}
 	opening := lineText(0)
 	closingMarker := opening
