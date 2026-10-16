@@ -276,4 +276,5 @@ And another with a different note[^note].
 
 ## Conclusion
 
-This document demonstrates a wide variety of markdown features for comprehensive linting coverage.
+This document demonstrates a wide variety of markdown features for comprehensive
+linting coverage.

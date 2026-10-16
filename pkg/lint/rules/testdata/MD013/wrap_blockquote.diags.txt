@@ -1,1 +1,1 @@
-wrap_blockquote.input.md:3:121 warning Line length 138 exceeds maximum 120 (MD013/line-length) [fixable]
+wrap_blockquote.input.md:3:81 warning Line length 138 exceeds maximum 80 (MD013/line-length) [fixable]

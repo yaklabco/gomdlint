@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 6,
+    "column": 81,
+    "message": "Line length 173 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 10,
+    "column": 81,
+    "message": "Line length 169 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": false
+  }
+]

@@ -1,5 +1,14 @@
 [
   {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 27,
+    "column": 81,
+    "message": "Line length 119 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
     "rule": "MD040",
     "name": "fenced-code-language",
     "line": 69,
@@ -16,5 +25,14 @@
     "message": "Fenced code block has no language specified",
     "severity": "warning",
     "fixable": false
+  },
+  {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 227,
+    "column": 81,
+    "message": "Line length 88 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": true
   }
 ]

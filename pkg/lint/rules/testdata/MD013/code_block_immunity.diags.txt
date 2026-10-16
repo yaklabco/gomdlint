@@ -1,0 +1,2 @@
+code_block_immunity.input.md:6:81 warning Line length 173 exceeds maximum 80 (MD013/line-length)
+code_block_immunity.input.md:10:81 warning Line length 169 exceeds maximum 80 (MD013/line-length)

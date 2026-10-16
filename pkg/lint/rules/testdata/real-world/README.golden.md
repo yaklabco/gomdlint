@@ -24,7 +24,8 @@ gomdlint lint --fix              # Lint and auto-fix issues
 
 ### Rule Identifier Format
 
-gomdlint uses human-readable rule names by default for clearer output. You can control the format with `--rule-format`:
+gomdlint uses human-readable rule names by default for clearer output. You can
+control the format with `--rule-format`:
 
 ```bash
 # Human-readable names (default)
@@ -224,7 +225,8 @@ gomdlint/
 
 See [design-docs.md](design-docs.md) for the complete architectural design.
 
-See [implementation-plan.md](implementation-plan.md) for the phased implementation plan.
+See [implementation-plan.md](implementation-plan.md) for the phased
+implementation plan.
 
 ## Status
 

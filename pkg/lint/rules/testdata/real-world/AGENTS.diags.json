@@ -1,5 +1,14 @@
 [
   {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 17,
+    "column": 81,
+    "message": "Line length 114 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
     "rule": "MD031",
     "name": "blanks-around-fences",
     "line": 25,

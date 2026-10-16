@@ -106,5 +106,14 @@
     "message": "Missing blank line before fenced code block",
     "severity": "warning",
     "fixable": true
+  },
+  {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 278,
+    "column": 81,
+    "message": "Line length 98 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": true
   }
 ]
