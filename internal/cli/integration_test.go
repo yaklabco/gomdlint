@@ -393,8 +393,7 @@ func TestIntegration_JSONOutputIncludesBothIDAndName(t *testing.T) {
 }
 
 // TestIntegration_EnableDisableByID tests --enable and --disable flags with rule IDs.
-// Note: The --enable/--disable flags currently only support rule IDs, not names.
-// Rule name support would require updating pkg/lint/resolve.go's ResolveRules function.
+// Rule names are covered by TestLintRuleListFlags.
 func TestIntegration_EnableDisableByID(t *testing.T) {
 	t.Parallel()
 

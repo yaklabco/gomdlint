@@ -76,6 +76,49 @@ func TestLintAppliesSeverityDefault(t *testing.T) {
 	assert.NotContains(t, got.stdout, "warning")
 }
 
+func TestLintRuleListFlags(t *testing.T) {
+	t.Run("enable overrides a config disable", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":        trailingDoc,
+			".gomdlint.yml": "rules:\n  MD009:\n    enabled: false\n",
+		})
+
+		got := execute(t, "lint", "--color", "never", "--enable", "MD009", "doc.md")
+
+		assert.Contains(t, got.stdout, "no-trailing-spaces")
+	})
+
+	t.Run("disable by name", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--color", "never", "--disable", "no-trailing-spaces", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code)
+		assert.NotContains(t, got.stdout, "no-trailing-spaces")
+	})
+
+	t.Run("fix-rules by name", func(t *testing.T) {
+		dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--fix", "--no-backups", "--fix-rules", "no-trailing-spaces", "doc.md")
+
+		require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Equal(t, fixedDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	})
+
+	for _, flag := range []string{"--enable", "--disable", "--fix-rules"} {
+		t.Run(flag+" rejects unknown rules", func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": trailingDoc})
+
+			got := execute(t, "lint", flag, "MD009,MD999", "doc.md")
+
+			assert.Equal(t, cli.ExitInvalidUsage, got.code)
+			assert.Contains(t, got.stderr, `"MD999"`)
+			assert.Empty(t, got.stdout)
+		})
+	}
+}
+
 func TestLintFixCreatesBackupsByDefault(t *testing.T) {
 	dir := inProject(t, map[string]string{"doc.md": trailingDoc})
 

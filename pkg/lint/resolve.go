@@ -2,6 +2,7 @@ package lint
 
 import (
 	"maps"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
@@ -39,7 +40,38 @@ func ResolveRules(registry *Registry, cfg *config.Config) []ResolvedRule {
 	return resolved
 }
 
+// LookupRuleID resolves a rule ID, name, or alias to the canonical rule ID.
+// Matching ignores case and surrounding whitespace, so "md009" and
+// "No-Trailing-Spaces" both resolve to "MD009".
+func LookupRuleID(registry *Registry, key string) (string, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", false
+	}
+	for _, candidate := range []string{key, strings.ToUpper(key), strings.ToLower(key)} {
+		if id, _, ok := registry.Resolve(candidate); ok {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// ruleListed reports whether list names rule by ID or name, ignoring case.
+func ruleListed(list []string, rule Rule) bool {
+	for _, key := range list {
+		key = strings.TrimSpace(key)
+		if strings.EqualFold(key, rule.ID()) || strings.EqualFold(key, rule.Name()) {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveRule resolves the configuration for a single rule.
+//
+// Settings apply in increasing precedence: the rule's built-in defaults,
+// severity_default, rule_defaults, rules, then the command-line lists
+// (EnableRules, DisableRules and FixRules), which name rules by ID or name.
 func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 	rr := ResolvedRule{
 		Rule:     rule,
@@ -72,20 +104,6 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 		}
 	}
 
-	// Check for explicit enable/disable from CLI.
-	for _, id := range cfg.EnableRules {
-		if id == rule.ID() {
-			rr.Enabled = true
-			break
-		}
-	}
-	for _, id := range cfg.DisableRules {
-		if id == rule.ID() {
-			rr.Enabled = false
-			break
-		}
-	}
-
 	// Apply rule-specific config.
 	if ruleCfg, ok := cfg.Rules[rule.ID()]; ok {
 		if rr.Config != nil && rr.Config.Options != nil {
@@ -106,15 +124,18 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 		}
 	}
 
+	// Explicit enable/disable from the command line override configuration.
+	// A rule in both lists stays disabled.
+	if ruleListed(cfg.EnableRules, rule) {
+		rr.Enabled = true
+	}
+	if ruleListed(cfg.DisableRules, rule) {
+		rr.Enabled = false
+	}
+
 	// Apply fix-rules filter from CLI.
 	if len(cfg.FixRules) > 0 {
-		rr.AutoFix = false
-		for _, id := range cfg.FixRules {
-			if id == rule.ID() && rule.CanFix() {
-				rr.AutoFix = true
-				break
-			}
-		}
+		rr.AutoFix = rule.CanFix() && ruleListed(cfg.FixRules, rule)
 	}
 
 	// Disable auto-fix if --fix is not set.

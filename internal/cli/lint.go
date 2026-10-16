@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -133,6 +135,10 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	if err := validateLintFlags(flags, cfg.Jobs); err != nil {
 		return err
 	}
+	ruleLists, err := resolveRuleListFlags(flags)
+	if err != nil {
+		return err
+	}
 
 	// Setup profiling.
 	profCleanup, err := setupProfiling(flags)
@@ -148,9 +154,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		cfg.Flavor = config.Flavor(flags.flavor)
 	}
 	cfg.Ignore = flags.ignore
-	cfg.EnableRules = flags.enable
-	cfg.DisableRules = flags.disable
-	cfg.FixRules = flags.fixRules
+	cfg.EnableRules = ruleLists.enable
+	cfg.DisableRules = ruleLists.disable
+	cfg.FixRules = ruleLists.fix
 
 	// Load and merge configuration. Cobra always provides a context.
 	ctx := cmd.Context()
@@ -352,6 +358,58 @@ func validateLintFlags(flags *lintFlags, jobs int) error {
 	return nil
 }
 
+// ruleLists holds the canonical rule IDs from --enable, --disable and
+// --fix-rules. A nil list means the flag was not given.
+type ruleLists struct {
+	enable  []string
+	disable []string
+	fix     []string
+}
+
+// resolveRuleListFlags resolves the rule IDs, names and aliases given to
+// --enable, --disable and --fix-rules, rejecting rules that do not exist.
+func resolveRuleListFlags(flags *lintFlags) (ruleLists, error) {
+	var lists ruleLists
+	var err error
+	if lists.enable, err = canonicalRuleIDs("--enable", flags.enable); err != nil {
+		return lists, err
+	}
+	if lists.disable, err = canonicalRuleIDs("--disable", flags.disable); err != nil {
+		return lists, err
+	}
+	if lists.fix, err = canonicalRuleIDs("--fix-rules", flags.fixRules); err != nil {
+		return lists, err
+	}
+	return lists, nil
+}
+
+// canonicalRuleIDs resolves keys given to flag through the rule registry.
+func canonicalRuleIDs(flag string, keys []string) ([]string, error) {
+	if keys == nil {
+		return nil, nil
+	}
+
+	ids := make([]string, 0, len(keys))
+	var unknown []string
+	for _, key := range keys {
+		id, ok := lint.LookupRuleID(lint.DefaultRegistry, key)
+		if !ok {
+			unknown = append(unknown, strconv.Quote(key))
+			continue
+		}
+		ids = append(ids, id)
+	}
+
+	switch len(unknown) {
+	case 0:
+		return ids, nil
+	case 1:
+		return nil, usageError("%s: unknown rule %s; run 'gomdlint rules' to list rules", flag, unknown[0])
+	default:
+		return nil, usageError("%s: unknown rules %s; run 'gomdlint rules' to list rules", flag, strings.Join(unknown, ", "))
+	}
+}
+
 // writeMemProfile writes a heap profile to path.
 func writeMemProfile(path string) error {
 	memFile, err := os.Create(path)
@@ -372,9 +430,11 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().StringVar(&flags.format, "format", "text", "output format: text, table, json, sarif, diff, summary")
 	cmd.Flags().IntVar(&cfg.Jobs, "jobs", 0, "number of parallel workers (0 = auto)")
 	cmd.Flags().StringSliceVar(&flags.ignore, "ignore", nil, "glob patterns to ignore")
-	cmd.Flags().StringSliceVar(&flags.enable, "enable", nil, "rule IDs to enable")
-	cmd.Flags().StringSliceVar(&flags.disable, "disable", nil, "rule IDs to disable")
-	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to specific rule IDs")
+	cmd.Flags().StringSliceVar(&flags.enable, "enable", nil,
+		"rules to enable, by ID or name (overrides config files)")
+	cmd.Flags().StringSliceVar(&flags.disable, "disable", nil,
+		"rules to disable, by ID or name (overrides config files and --enable)")
+	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to these rules, by ID or name")
 	cmd.Flags().BoolVar(&cfg.NoBackups, "no-backups", false, "disable backup creation when fixing")
 	cmd.Flags().StringVar(&flags.flavor, "flavor", "commonmark", "Markdown flavor: commonmark, gfm")
 	cmd.Flags().BoolVar(&flags.strict, "strict", false, "treat warnings as errors for exit code")
