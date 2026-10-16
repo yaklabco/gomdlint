@@ -120,6 +120,9 @@ type InlineAttrs struct {
 
 	// EmphasisLevel indicates emphasis strength (1 for emphasis, 2 for strong).
 	EmphasisLevel int
+
+	// Checked is true for a checked NodeTaskCheckbox ("[x]" or "[X]").
+	Checked bool
 }
 
 // ReferenceStyle indicates the syntax style of a link or image reference.

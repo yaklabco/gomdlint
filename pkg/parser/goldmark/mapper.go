@@ -458,11 +458,10 @@ func (m *mapper) mapStrikethrough(s *east.Strikethrough) *mdast.Node {
 
 // mapTaskCheckBox converts a GFM TaskCheckBox to an mdast node.
 func (m *mapper) mapTaskCheckBox(cb *east.TaskCheckBox) *mdast.Node {
-	node := mdast.NewNode(mdast.NodeText)
-	node.Ext = map[string]any{
-		"taskCheckbox": true,
-		"checked":      cb.IsChecked,
-	}
+	node := mdast.NewNode(mdast.NodeTaskCheckbox)
+	node.Inline = mdast.NewInlineAttrs()
+	node.Inline.Checked = cb.IsChecked
+	// The parser also consumes the spaces after the closing bracket.
 	if extent, ok := m.inline(cb); ok {
 		full := m.extentSpan(extent)
 		full.EndOffset = m.trimRight(full.StartOffset, full.EndOffset)

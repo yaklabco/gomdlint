@@ -479,6 +479,23 @@ func TestTableNodes(t *testing.T) {
 	require.Empty(t, mdast.FindByKind(file.Root, mdast.NodeRaw))
 }
 
+func TestTaskCheckboxNodes(t *testing.T) {
+	file := parseForSpans(t, FlavorGFM, "- [ ] todo\n- [x] done\n- [X] also\n")
+	assertSpans(t, file, []spanExpectation{
+		{mdast.NodeTaskCheckbox, 0, "[ ]", "[ ]"},
+		{mdast.NodeTaskCheckbox, 1, "[x]", "[x]"},
+		{mdast.NodeTaskCheckbox, 2, "[X]", "[X]"},
+		{mdast.NodeText, 0, "todo", "todo"},
+	})
+	for idx, want := range []bool{false, true, true} {
+		box := nthNode(file.Root, mdast.NodeTaskCheckbox, idx)
+		require.True(t, box.IsInline())
+		require.Nil(t, box.Ext)
+		require.Equal(t, want, box.Inline.Checked)
+		require.Equal(t, mdast.NodeParagraph, box.Parent.Kind)
+	}
+}
+
 func TestStrikethroughNode(t *testing.T) {
 	file := parseForSpans(t, FlavorGFM, "~~Struck~~ and *em* and ~one~\n")
 	assertSpans(t, file, []spanExpectation{

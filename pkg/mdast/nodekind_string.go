@@ -51,6 +51,8 @@ func (i NodeKind) String() string {
 		return "TableRow"
 	case NodeTableCell:
 		return "TableCell"
+	case NodeTaskCheckbox:
+		return "TaskCheckbox"
 	default:
 		return "NodeKind(" + uitoa(uint(i)) + ")"
 	}

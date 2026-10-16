@@ -96,6 +96,8 @@
 //     brackets; content is the address. An extended (GFM) autolink covers
 //     the address only.
 //   - HTMLInline: the raw HTML, such as "<b>" or "</b>".
+//   - TaskCheckbox (GFM): the "[ ]", "[x]" or "[X]" that starts a task list
+//     item, without the spaces after it.
 //
 // Positions on a line are byte columns. Converting them to character
 // columns is the job of the reporting layer.

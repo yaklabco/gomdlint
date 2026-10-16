@@ -48,6 +48,10 @@ const (
 	// NodeTableCell is a cell of a GFM table row (block). Its children are
 	// inline nodes.
 	NodeTableCell
+
+	// NodeTaskCheckbox is the "[ ]" or "[x]" that starts a GFM task list
+	// item (inline). InlineAttrs.Checked tells which.
+	NodeTaskCheckbox
 )
 
 // Node represents a single node in the Markdown AST.
@@ -109,7 +113,8 @@ func (n *Node) IsBlock() bool {
 func (n *Node) IsInline() bool {
 	switch n.Kind {
 	case NodeText, NodeEmphasis, NodeStrong, NodeCodeSpan, NodeLink,
-		NodeImage, NodeSoftBreak, NodeHardBreak, NodeHTMLInline, NodeStrikethrough:
+		NodeImage, NodeSoftBreak, NodeHardBreak, NodeHTMLInline, NodeStrikethrough,
+		NodeTaskCheckbox:
 		return true
 	default:
 		return false

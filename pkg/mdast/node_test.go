@@ -19,6 +19,9 @@ func TestNode_IsBlock(t *testing.T) {
 		mdast.NodeCodeBlock,
 		mdast.NodeThematicBreak,
 		mdast.NodeHTMLBlock,
+		mdast.NodeTable,
+		mdast.NodeTableRow,
+		mdast.NodeTableCell,
 	}
 
 	for _, kind := range blockKinds {
@@ -58,6 +61,7 @@ func TestNode_IsInline(t *testing.T) {
 		mdast.NodeHardBreak,
 		mdast.NodeHTMLInline,
 		mdast.NodeStrikethrough,
+		mdast.NodeTaskCheckbox,
 	}
 
 	for _, kind := range inlineKinds {
