@@ -318,24 +318,40 @@ func lineOf(file *mdast.FileSnapshot, offset int) *mdast.LineInfo {
 	return &file.Lines[lineNum-1]
 }
 
-// atxClosingSequenceEnd returns the offset just past the closing hash sequence
-// that follows an ATX heading's content, or -1 when the heading is not closed.
-func atxClosingSequenceEnd(file *mdast.FileSnapshot, content mdast.SourceRange) int {
+// atxClosingSequence returns the range of the closing hash sequence that
+// follows an ATX heading's content; ok is false when the heading is not closed.
+func atxClosingSequence(file *mdast.FileSnapshot, content mdast.SourceRange) (mdast.SourceRange, bool) {
 	line := lineOf(file, content.EndOffset-1)
 	if line == nil {
-		return -1
+		return mdast.SourceRange{}, false
 	}
 	rest := file.Content[content.EndOffset:line.NewlineStart]
 	trimmed := bytes.TrimLeft(rest, " \t")
 	if len(trimmed) == len(rest) {
 		// The closing sequence must be preceded by whitespace.
-		return -1
+		return mdast.SourceRange{}, false
 	}
 	hashes := len(trimmed) - len(bytes.TrimLeft(trimmed, "#"))
 	if hashes == 0 || len(bytes.TrimSpace(trimmed[hashes:])) > 0 {
-		return -1
+		return mdast.SourceRange{}, false
 	}
-	return line.NewlineStart - len(trimmed) + hashes
+	start := line.NewlineStart - len(trimmed)
+	return mdast.SourceRange{StartOffset: start, EndOffset: start + hashes}, true
+}
+
+// atxOpeningWhitespace returns the whitespace between an ATX heading's
+// opening hash sequence and its content, and the offset where the opening
+// sequence starts.
+func atxOpeningWhitespace(file *mdast.FileSnapshot, content mdast.SourceRange) (mdast.SourceRange, int) {
+	wsStart := content.StartOffset
+	for wsStart > 0 && (file.Content[wsStart-1] == ' ' || file.Content[wsStart-1] == '\t') {
+		wsStart--
+	}
+	seqStart := wsStart
+	for seqStart > 0 && file.Content[seqStart-1] == '#' {
+		seqStart--
+	}
+	return mdast.SourceRange{StartOffset: wsStart, EndOffset: content.StartOffset}, seqStart
 }
 
 // detectHeadingStyle determines the style of a heading from its source.
@@ -357,7 +373,7 @@ func detectHeadingStyle(file *mdast.FileSnapshot, heading *mdast.Node) HeadingSt
 	if !bytes.HasSuffix(before, []byte("#")) {
 		return StyleSetext
 	}
-	if atxClosingSequenceEnd(file, content) >= 0 {
+	if _, closed := atxClosingSequence(file, content); closed {
 		return StyleATXClosed
 	}
 	return StyleATX
@@ -405,7 +421,7 @@ func buildHeadingStyleFix(
 	case from == StyleATX && to == StyleATXClosed:
 		builder.ReplaceRange(content.EndOffset, line.NewlineStart, " "+strings.Repeat("#", level))
 	case from == StyleATXClosed && to == StyleATX:
-		if atxClosingSequenceEnd(file, content) < 0 {
+		if _, closed := atxClosingSequence(file, content); !closed {
 			return nil
 		}
 		builder.Delete(content.EndOffset, line.NewlineStart)

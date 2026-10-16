@@ -133,61 +133,39 @@ func NewNoMultipleSpaceATXRule() *NoMultipleSpaceATXRule {
 	}
 }
 
-// atxHeadingMultiSpacePattern matches ATX headings with multiple spaces after hashes.
-var atxHeadingMultiSpacePattern = regexp.MustCompile(`^(#{1,6})([ \t]{2,})(\S)`)
-
 // Apply checks for multiple spaces after hash on ATX headings.
+//
+// Like markdownlint, it checks parsed open ATX headings, including headings
+// in blockquotes and lists; closed headings are left to MD021.
 func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		if detectHeadingStyle(ctx.File, heading) != StyleATX {
 			continue
 		}
-
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := atxHeadingMultiSpacePattern.FindSubmatch(trimmed)
-		if match == nil {
+		content, ok := headingContentRange(ctx.File, heading)
+		if !ok {
 			continue
 		}
-
-		hashes := string(match[1])
-		spaces := string(match[2])
-		line := ctx.File.Lines[lineNum-1]
-
-		// Find the position of the hashes in the original line.
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
+		spaces, _ := atxOpeningWhitespace(ctx.File, content)
+		if spaces.Len() < 2 {
 			continue
 		}
 
 		// Build fix: replace multiple spaces with single space.
 		builder := fix.NewEditBuilder()
-		spaceStart := line.StartOffset + hashStart + len(hashes)
-		spaceEnd := spaceStart + len(spaces)
-		builder.ReplaceRange(spaceStart, spaceEnd, " ")
+		builder.ReplaceRange(spaces.StartOffset, spaces.EndOffset, " ")
 
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: hashStart + len(hashes) + 1,
-			EndLine:     lineNum,
-			EndColumn:   hashStart + len(hashes) + len(spaces) + 1,
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", len(spaces))).
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, spaces),
+			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", spaces.Len())).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the hash characters").
 			WithFix(builder).
@@ -196,6 +174,18 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	}
 
 	return diags, nil
+}
+
+// rangePosition converts a byte range to a line and column position.
+func rangePosition(file *mdast.FileSnapshot, rng mdast.SourceRange) mdast.SourcePosition {
+	startLine, startColumn := file.LineAt(rng.StartOffset)
+	endLine, endColumn := file.LineAt(rng.EndOffset)
+	return mdast.SourcePosition{
+		StartLine:   startLine,
+		StartColumn: startColumn,
+		EndLine:     endLine,
+		EndColumn:   endColumn,
+	}
 }
 
 // NoMissingSpaceClosedATXRule checks for missing space inside hashes on closed ATX headings.
@@ -332,72 +322,47 @@ func NewNoMultipleSpaceClosedATXRule() *NoMultipleSpaceClosedATXRule {
 }
 
 // Apply checks for multiple spaces inside hashes on closed ATX headings.
+//
+// Like markdownlint, it checks parsed closed ATX headings, including headings
+// in blockquotes and lists.
 func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		content, ok := headingContentRange(ctx.File, heading)
+		if !ok || detectHeadingStyle(ctx.File, heading) != StyleATXClosed {
 			continue
 		}
-
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := closedATXPattern.FindSubmatch(trimmed)
-		if match == nil {
+		closing, closed := atxClosingSequence(ctx.File, content)
+		if !closed {
 			continue
 		}
+		openSpaces, openStart := atxOpeningWhitespace(ctx.File, content)
+		closeSpaces := mdast.SourceRange{StartOffset: content.EndOffset, EndOffset: closing.StartOffset}
 
-		openHashes := string(match[1])
-		content := match[2]
-		closeHashes := string(match[3])
-
-		// Check for multiple spaces at the beginning.
-		multipleOpenSpaces := len(content) >= 2 &&
-			(content[0] == ' ' || content[0] == '\t') &&
-			(content[1] == ' ' || content[1] == '\t')
-
-		// Check for multiple spaces at the end.
-		multipleCloseSpaces := len(content) >= 2 &&
-			(content[len(content)-1] == ' ' || content[len(content)-1] == '\t') &&
-			(content[len(content)-2] == ' ' || content[len(content)-2] == '\t')
-
+		multipleOpenSpaces := openSpaces.Len() > 1
+		multipleCloseSpaces := closeSpaces.Len() > 1
 		if !multipleOpenSpaces && !multipleCloseSpaces {
-			continue
-		}
-
-		line := ctx.File.Lines[lineNum-1]
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
 			continue
 		}
 
 		// Build fix: normalize to single space on each side.
 		builder := fix.NewEditBuilder()
-		contentStr := strings.TrimSpace(string(content))
-
-		contentStart := line.StartOffset + hashStart + len(openHashes)
-		contentEnd := contentStart + len(content)
-
-		newContent := " " + contentStr + " "
-		builder.ReplaceRange(contentStart, contentEnd, newContent)
-
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: hashStart + 1,
-			EndLine:     lineNum,
-			EndColumn:   hashStart + len(openHashes) + len(content) + len(closeHashes) + 1,
+		if multipleOpenSpaces {
+			builder.ReplaceRange(openSpaces.StartOffset, openSpaces.EndOffset, " ")
 		}
+		if multipleCloseSpaces {
+			builder.ReplaceRange(closeSpaces.StartOffset, closeSpaces.EndOffset, " ")
+		}
+
+		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: openStart, EndOffset: closing.EndOffset})
 
 		var msg string
 		switch {

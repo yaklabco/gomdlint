@@ -374,6 +374,85 @@ func TestNoMultipleSpaceClosedATXRule(t *testing.T) {
 	}
 }
 
+// TestMultipleSpaceATXRules_MarkdownlintParity verifies MD019 and MD021
+// match markdownlint 0.41: both check parsed headings (so containers are
+// included and HTML is not), and MD019 leaves closed headings to MD021.
+func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
+	tests := []struct {
+		name      string
+		rule      lint.Rule
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "MD019 skips closed headings", rule: NewNoMultipleSpaceATXRule(), input: "##  Spaced heading  ##\n", wantLines: []int{}},
+		{
+			name:      "MD021 reports closed headings",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "##  Spaced heading  ##\n",
+			wantLines: []int{1},
+			wantFixed: "## Spaced heading ##\n",
+		},
+		{
+			name:      "MD019 in a blockquote",
+			rule:      NewNoMultipleSpaceATXRule(),
+			input:     "> ##  Quoted\n",
+			wantLines: []int{1},
+			wantFixed: "> ## Quoted\n",
+		},
+		{
+			name:      "MD019 in a list item",
+			rule:      NewNoMultipleSpaceATXRule(),
+			input:     "- ##  Listed\n",
+			wantLines: []int{1},
+			wantFixed: "- ## Listed\n",
+		},
+		{
+			name:      "MD021 in a blockquote",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "> #  Quoted  #\n",
+			wantLines: []int{1},
+			wantFixed: "> # Quoted #\n",
+		},
+		{name: "MD019 skips HTML comments", rule: NewNoMultipleSpaceATXRule(), input: "<!--\n##  x\n-->\n", wantLines: []int{}},
+		{name: "MD021 skips HTML comments", rule: NewNoMultipleSpaceClosedATXRule(), input: "<!--\n##  x  ##\n-->\n", wantLines: []int{}},
+		{
+			name:      "MD019 keeps an escaped trailing hash",
+			rule:      NewNoMultipleSpaceATXRule(),
+			input:     "##  Learn C\\#\n",
+			wantLines: []int{1},
+			wantFixed: "## Learn C\\#\n",
+		},
+		{
+			name:      "MD019 with tabs",
+			rule:      NewNoMultipleSpaceATXRule(),
+			input:     "#\t\tTabbed\n",
+			wantLines: []int{1},
+			wantFixed: "# Tabbed\n",
+		},
+		{
+			name:      "MD021 only right side",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "# Right   #\n",
+			wantLines: []int{1},
+			wantFixed: "# Right #\n",
+		},
+		{name: "MD021 skips escaped hash headings", rule: NewNoMultipleSpaceClosedATXRule(), input: "##  Learn C\\#\n", wantLines: []int{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, tt.rule, tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoMissingSpaceATXRule_Metadata(t *testing.T) {
 	rule := NewNoMissingSpaceATXRule()
 

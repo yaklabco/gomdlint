@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD021",
+    "name": "no-multiple-space-closed-atx",
+    "line": 3,
+    "column": 3,
+    "message": "Multiple spaces inside hashes on closed ATX style heading (both sides)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD021",
+    "name": "no-multiple-space-closed-atx",
+    "line": 5,
+    "column": 3,
+    "message": "Multiple spaces after opening hashes on closed ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  }
+]
