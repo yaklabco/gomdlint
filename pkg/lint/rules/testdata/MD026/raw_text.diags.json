@@ -1,0 +1,47 @@
+[
+  {
+    "rule": "MD026",
+    "name": "no-trailing-punctuation",
+    "line": 10,
+    "column": 10,
+    "message": "Heading ends with trailing punctuation \".\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD026",
+    "name": "no-trailing-punctuation",
+    "line": 13,
+    "column": 14,
+    "message": "Heading ends with trailing punctuation \"!!!\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD026",
+    "name": "no-trailing-punctuation",
+    "line": 15,
+    "column": 16,
+    "message": "Heading ends with trailing punctuation \".\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD026",
+    "name": "no-trailing-punctuation",
+    "line": 17,
+    "column": 19,
+    "message": "Heading ends with trailing punctuation \"。\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD026",
+    "name": "no-trailing-punctuation",
+    "line": 21,
+    "column": 20,
+    "message": "Heading ends with trailing punctuation \".\"",
+    "severity": "warning",
+    "fixable": true
+  }
+]

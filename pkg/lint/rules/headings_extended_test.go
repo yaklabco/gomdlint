@@ -784,6 +784,96 @@ func TestNoTrailingPunctuationRule(t *testing.T) {
 	}
 }
 
+// TestNoTrailingPunctuationRule_RawText verifies MD026 checks the raw
+// trailing characters of the heading content like markdownlint 0.41, and
+// that its fix deletes only the trailing punctuation.
+func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "code span ends the heading", input: "## Run `make.`\n", wantLines: []int{}},
+		{name: "link ends the heading", input: "## See [docs.](https://x.y)\n", wantLines: []int{}},
+		{name: "emphasis ends the heading", input: "## Use *this.*\n", wantLines: []int{}},
+		{
+			name:      "multi-line setext heading",
+			input:     "Heading one\nline two.\n-----\n",
+			wantLines: []int{2},
+			wantFix:   true,
+			wantFixed: "Heading one\nline two\n-----\n",
+		},
+		{
+			name:      "run of punctuation",
+			input:     "# Heading!!!\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Heading\n",
+		},
+		{
+			name:      "whitespace before punctuation",
+			input:     "# Heading .\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Heading\n",
+		},
+		{name: "HTML entity", input: "# Copyright &copy;\n", wantLines: []int{}},
+		{name: "numeric HTML entity", input: "# Copyright &#169;\n", wantLines: []int{}},
+		{name: "GitHub emoji code", input: "# Smile :smile:\n", wantLines: []int{}},
+		{
+			name:      "full-width punctuation by default",
+			input:     "# Full width。\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Full width\n",
+		},
+		{name: "question mark allowed", input: "# FAQ?\n", wantLines: []int{}},
+		{
+			name:      "closed heading",
+			input:     "## Closed. ##\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "## Closed ##\n",
+		},
+		{
+			name:      "heading in a blockquote",
+			input:     "> ## Quoted.\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "> ## Quoted\n",
+		},
+		{
+			// Deleting the only character would leave "===" as a paragraph.
+			name:      "setext heading of only punctuation is not fixed",
+			input:     ".\n===\n",
+			wantLines: []int{1},
+		},
+		{
+			// Deleting the line's only character would split the heading.
+			name:      "setext line of only punctuation is not fixed",
+			input:     "Heading\n.\n---\n",
+			wantLines: []int{2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestHeadingStartLeftRule_Metadata(t *testing.T) {
 	rule := NewHeadingStartLeftRule()
 

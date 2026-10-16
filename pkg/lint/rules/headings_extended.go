@@ -628,13 +628,27 @@ func NewNoTrailingPunctuationRule() *NoTrailingPunctuationRule {
 	}
 }
 
-// defaultPunctuation is the default set of trailing punctuation characters.
-const defaultPunctuation = ".,;:!"
+// defaultPunctuation is markdownlint's default set of trailing punctuation
+// characters: normal and full-width, without the question mark.
+const defaultPunctuation = ".,;:!。，；：！"
 
-// htmlEntityPattern matches HTML entity references at the end of text.
-var htmlEntityPattern = regexp.MustCompile(`&[a-zA-Z]+;$|&#[0-9]+;$|&#x[0-9a-fA-F]+;$`)
+// htmlEntityPattern matches an HTML entity reference at the end of text
+// (markdownlint's endOfLineHtmlEntityRe).
+var htmlEntityPattern = regexp.MustCompile(
+	`&(?:#\d+|#[xX][\da-fA-F]+|[a-zA-Z]{2,31}|blk\d{2}|emsp1[34]|frac\d{2}|sup\d|there4);$`)
+
+// gemojiCodePattern matches a GitHub emoji code such as :smile: at the end of
+// text (markdownlint's endOfLineGemojiCodeRe).
+var gemojiCodePattern = regexp.MustCompile(
+	`:(?:[abmovx]|[-+]1|100|1234|(?:1st|2nd|3rd)_place_medal|8ball|clock\d{1,4}|e-mail|non-potable_water|o2|` +
+		`t-rex|u5272|u5408|u55b6|u6307|u6708|u6709|u6e80|u7121|u7533|u7981|u7a7a|[a-z]{2,15}2?|` +
+		`[a-z]{1,14}(?:_[a-z\d]{1,16})+):$`)
 
 // Apply checks for trailing punctuation in headings.
+//
+// Like markdownlint, it checks the raw source of the heading content, so a
+// heading that ends with a code span, link or emphasis is not reported. The
+// fix deletes the trailing punctuation run and any whitespace before it.
 func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -653,59 +667,70 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 			return diags, ctx.Ctx.Err()
 		}
 
-		text := lint.HeadingText(heading)
-		if text == "" {
+		content, ok := headingContentRange(ctx.File, heading)
+		if !ok {
+			continue
+		}
+		text := ctx.File.Content[content.StartOffset:content.EndOffset]
+		if htmlEntityPattern.Match(text) || gemojiCodePattern.Match(text) {
 			continue
 		}
 
-		// Check for HTML entity at the end - ignore if present.
-		if htmlEntityPattern.MatchString(text) {
+		punctStart := len(text)
+		for punctStart > 0 {
+			lastRune, size := utf8.DecodeLastRune(text[:punctStart])
+			if lastRune == utf8.RuneError || !strings.ContainsRune(punctuation, lastRune) {
+				break
+			}
+			punctStart -= size
+		}
+		if punctStart == len(text) {
 			continue
 		}
+		run := text[punctStart:]
+		start := content.StartOffset + punctStart
 
-		// Get the last rune.
-		lastRune, _ := utf8.DecodeLastRuneInString(text)
-		if lastRune == utf8.RuneError {
-			continue
-		}
-
-		// Check if it's in the punctuation set.
-		if !strings.ContainsRune(punctuation, lastRune) {
-			continue
-		}
-
-		pos := heading.SourcePosition()
-		line := ctx.File.Lines[pos.StartLine-1]
-		lineContent := lint.LineContent(ctx.File, pos.StartLine)
-
-		// Find the position of the trailing punctuation.
-		// We need to find where the heading text ends in the line.
-		trimmedLine := bytes.TrimRight(lineContent, " \t#\n\r")
-		if len(trimmedLine) == 0 {
-			continue
-		}
-
-		punctPos := len(trimmedLine) - utf8.RuneLen(lastRune)
-
-		// Build fix: remove trailing punctuation.
-		builder := fix.NewEditBuilder()
-		builder.Delete(line.StartOffset+punctPos, line.StartOffset+punctPos+utf8.RuneLen(lastRune))
-
-		diagPos := mdast.SourcePosition{
-			StartLine:   pos.StartLine,
-			StartColumn: punctPos + 1,
-			EndLine:     pos.StartLine,
-			EndColumn:   punctPos + 2,
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-			fmt.Sprintf("Heading ends with trailing punctuation %q", string(lastRune))).
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File,
+			mdast.SourceRange{StartOffset: start, EndOffset: content.EndOffset}),
+			fmt.Sprintf("Heading ends with trailing punctuation %q", run)).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove trailing punctuation from the heading").
-			WithFix(builder).
-			Build()
-		diags = append(diags, diag)
+			WithSuggestion("Remove trailing punctuation from the heading")
+		if builder := trailingPunctuationFix(ctx.File, heading, content, start); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
+}
+
+// trailingPunctuationFix deletes the punctuation starting at start, together
+// with the whitespace before it on the same line. It returns nil when the
+// deletion would empty a line of a setext heading, which would turn the
+// heading into a paragraph or split it.
+func trailingPunctuationFix(
+	file *mdast.FileSnapshot,
+	heading *mdast.Node,
+	content mdast.SourceRange,
+	start int,
+) *fix.EditBuilder {
+	line := lineOf(file, start)
+	if line == nil {
+		return nil
+	}
+	lineStart := max(line.StartOffset, content.StartOffset)
+	deleteStart := start
+	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
+		deleteStart--
+	}
+	if detectHeadingStyle(file, heading) == StyleSetext {
+		// Only indentation and blockquote markers may precede the content
+		// of a setext continuation line.
+		if len(bytes.TrimLeft(file.Content[line.StartOffset:deleteStart], " \t>")) == 0 {
+			return nil
+		}
+	}
+	builder := fix.NewEditBuilder()
+	builder.Delete(deleteStart, content.EndOffset)
+	return builder
 }
