@@ -1,6 +1,7 @@
 package fix
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 )
@@ -29,12 +30,14 @@ type Diff struct {
 // DiffHunk represents a single hunk in a unified diff.
 type DiffHunk struct {
 	// OriginalStart is the 1-based line number where the hunk starts in the original.
+	// For a hunk with no original lines it is the line the hunk would start at.
 	OriginalStart int
 
 	// OriginalCount is the number of lines from the original in this hunk.
 	OriginalCount int
 
 	// ModifiedStart is the 1-based line number where the hunk starts in the modified.
+	// For a hunk with no modified lines it is the line the hunk would start at.
 	ModifiedStart int
 
 	// ModifiedCount is the number of lines from the modified in this hunk.
@@ -49,8 +52,14 @@ type DiffLine struct {
 	// Kind indicates whether this is a context, add, or remove line.
 	Kind DiffLineKind
 
-	// Content is the line content (without the diff prefix).
+	// Content is the line content without the diff prefix and without the
+	// trailing newline. A carriage return before the newline is kept.
 	Content string
+
+	// NoNewline is true when this is the last line of its file and the file
+	// does not end with a newline. In unified diff output such a line is
+	// followed by the "\ No newline at end of file" marker.
+	NoNewline bool
 }
 
 // DiffLineKind indicates the type of diff line.
@@ -70,24 +79,25 @@ const (
 // contextLines is the number of context lines to show around changes.
 const contextLines = 3
 
+// NoNewlineMarker is the unified diff line that follows a line which ends
+// its file without a trailing newline.
+const NoNewlineMarker = `\ No newline at end of file`
+
 // GenerateDiff creates a unified diff between original and modified content.
 // Returns nil if there are no changes.
+//
+// Lines are compared together with their line terminators, so a change that
+// only adds or removes the final newline still produces a hunk. The edit
+// script is a shortest one, computed with Myers' algorithm in linear space;
+// very large rewrites may fall back to replacing whole regions to bound the
+// running time.
 func GenerateDiff(path string, original, modified []byte) *Diff {
-	if len(original) == 0 && len(modified) == 0 {
+	if bytes.Equal(original, modified) {
 		return nil
 	}
 
-	// Split into lines.
-	origLines := splitLines(original)
-	modLines := splitLines(modified)
-
-	// Check if content is identical.
-	if linesEqual(origLines, modLines) {
-		return nil
-	}
-
-	// Compute diff hunks.
-	hunks := computeHunks(origLines, modLines)
+	ops := diffLines(splitLines(original), splitLines(modified))
+	hunks := groupIntoHunks(ops)
 	if len(hunks) == 0 {
 		return nil
 	}
@@ -101,6 +111,7 @@ func GenerateDiff(path string, original, modified []byte) *Diff {
 				additions++
 			case DiffLineRemove:
 				deletions++
+			case DiffLineContext:
 			}
 		}
 	}
@@ -137,23 +148,38 @@ func (d *Diff) String() string {
 	fmt.Fprintf(&builder, "+++ b/%s\n", path)
 
 	for _, hunk := range d.Hunks {
-		fmt.Fprintf(&builder, "@@ -%d,%d +%d,%d @@\n",
-			hunk.OriginalStart, hunk.OriginalCount,
-			hunk.ModifiedStart, hunk.ModifiedCount)
+		fmt.Fprintf(&builder, "@@ -%s +%s @@\n",
+			hunkRange(hunk.OriginalStart, hunk.OriginalCount),
+			hunkRange(hunk.ModifiedStart, hunk.ModifiedCount))
 
 		for _, line := range hunk.Lines {
 			switch line.Kind {
 			case DiffLineContext:
-				fmt.Fprintf(&builder, " %s\n", line.Content)
+				builder.WriteByte(' ')
 			case DiffLineAdd:
-				fmt.Fprintf(&builder, "+%s\n", line.Content)
+				builder.WriteByte('+')
 			case DiffLineRemove:
-				fmt.Fprintf(&builder, "-%s\n", line.Content)
+				builder.WriteByte('-')
+			}
+			builder.WriteString(line.Content)
+			builder.WriteByte('\n')
+			if line.NoNewline {
+				builder.WriteString(NoNewlineMarker)
+				builder.WriteByte('\n')
 			}
 		}
 	}
 
 	return builder.String()
+}
+
+// hunkRange formats one side of a hunk header. An empty range names the line
+// before it (0 at the start of the file), as GNU diff and git do.
+func hunkRange(start, count int) string {
+	if count == 0 {
+		return fmt.Sprintf("%d,0", start-1)
+	}
+	return fmt.Sprintf("%d,%d", start, count)
 }
 
 // FullString returns the complete diff including the git header.
@@ -169,113 +195,80 @@ func (d *Diff) HasChanges() bool {
 	return d != nil && len(d.Hunks) > 0
 }
 
-// splitLines splits content into lines, removing the trailing newline if present.
+// splitLines splits content into lines that keep their trailing newline.
+// The last line has no newline when content does not end with one.
 func splitLines(content []byte) []string {
 	if len(content) == 0 {
 		return nil
 	}
 
-	s := string(content)
-	lines := strings.Split(s, "\n")
-
-	// Remove trailing empty string if content ends with newline.
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	return lines
-}
-
-// linesEqual compares two string slices for equality.
-func linesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+	text := string(content)
+	lines := make([]string, 0, strings.Count(text, "\n")+1)
+	for text != "" {
+		idx := strings.IndexByte(text, '\n')
+		if idx < 0 {
+			lines = append(lines, text)
+			break
 		}
+		lines = append(lines, text[:idx+1])
+		text = text[idx+1:]
 	}
-	return true
-}
-
-// computeHunks computes diff hunks using LCS-based algorithm.
-func computeHunks(orig, mod []string) []DiffHunk {
-	// Compute longest common subsequence.
-	lcs := longestCommonSubsequence(orig, mod)
-
-	// Build raw diff operations.
-	ops := buildDiffOps(orig, mod, lcs)
-	if len(ops) == 0 {
-		return nil
-	}
-
-	// Group operations into hunks with context.
-	return groupIntoHunks(ops, len(orig), len(mod))
+	return lines
 }
 
 // diffOp represents a single diff operation.
 type diffOp struct {
-	kind    DiffLineKind
-	content string
-	origIdx int // Original line index (-1 for adds).
-	modIdx  int // Modified line index (-1 for removes).
+	kind DiffLineKind
+	// line is the full line, including its newline if it has one.
+	line string
 }
 
-// buildDiffOps builds a sequence of diff operations from original, modified, and LCS.
-func buildDiffOps(orig, mod []string, lcs []string) []diffOp {
-	var ops []diffOp
-	origIdx, modIdx, lcsIdx := 0, 0, 0
+// diffLines returns the operations that turn orig into mod. Within each
+// changed region, removals come before additions.
+func diffLines(orig, mod []string) []diffOp {
+	origIDs, modIDs := internLines(orig, mod)
+	removed, added := diffLineIDs(origIDs, modIDs)
 
+	ops := make([]diffOp, 0, max(len(orig), len(mod)))
+	origIdx, modIdx := 0, 0
 	for origIdx < len(orig) || modIdx < len(mod) {
-		// If both match the LCS, it's a context line.
-		if lcsIdx < len(lcs) &&
-			origIdx < len(orig) && mod != nil && modIdx < len(mod) &&
-			orig[origIdx] == lcs[lcsIdx] && mod[modIdx] == lcs[lcsIdx] {
-			ops = append(ops, diffOp{
-				kind:    DiffLineContext,
-				content: orig[origIdx],
-				origIdx: origIdx,
-				modIdx:  modIdx,
-			})
+		switch {
+		case origIdx < len(orig) && (removed[origIdx] || modIdx == len(mod)):
+			ops = append(ops, diffOp{kind: DiffLineRemove, line: orig[origIdx]})
 			origIdx++
+		case modIdx < len(mod) && (added[modIdx] || origIdx == len(orig)):
+			ops = append(ops, diffOp{kind: DiffLineAdd, line: mod[modIdx]})
 			modIdx++
-			lcsIdx++
-			continue
-		}
-
-		// Remove lines from original that aren't in LCS.
-		for origIdx < len(orig) && (lcsIdx >= len(lcs) || orig[origIdx] != lcs[lcsIdx]) {
-			ops = append(ops, diffOp{
-				kind:    DiffLineRemove,
-				content: orig[origIdx],
-				origIdx: origIdx,
-				modIdx:  -1,
-			})
+		default:
+			ops = append(ops, diffOp{kind: DiffLineContext, line: orig[origIdx]})
 			origIdx++
-		}
-
-		// Add lines from modified that aren't in LCS.
-		for modIdx < len(mod) && (lcsIdx >= len(lcs) || mod[modIdx] != lcs[lcsIdx]) {
-			ops = append(ops, diffOp{
-				kind:    DiffLineAdd,
-				content: mod[modIdx],
-				origIdx: -1,
-				modIdx:  modIdx,
-			})
 			modIdx++
 		}
 	}
-
 	return ops
 }
 
-// groupIntoHunks groups diff operations into hunks with context lines.
-func groupIntoHunks(ops []diffOp, _, _ int) []DiffHunk {
-	if len(ops) == 0 {
-		return nil
+// internLines maps each distinct line to a small integer so the diff
+// algorithm compares integers instead of strings.
+func internLines(orig, mod []string) ([]int, []int) {
+	ids := make(map[string]int, len(orig)+len(mod))
+	toIDs := func(lines []string) []int {
+		out := make([]int, len(lines))
+		for idx, line := range lines {
+			id, ok := ids[line]
+			if !ok {
+				id = len(ids)
+				ids[line] = id
+			}
+			out[idx] = id
+		}
+		return out
 	}
+	return toIDs(orig), toIDs(mod)
+}
 
+// groupIntoHunks groups diff operations into hunks with context lines.
+func groupIntoHunks(ops []diffOp) []DiffHunk {
 	// Find ranges of changes (non-context lines).
 	type changeRange struct {
 		start, end int // Indices into ops.
@@ -299,13 +292,8 @@ func groupIntoHunks(ops []diffOp, _, _ int) []DiffHunk {
 		ranges = append(ranges, changeRange{rangeStart, len(ops)})
 	}
 
-	if len(ranges) == 0 {
-		return nil
-	}
-
 	// Merge ranges that are close together and build hunks.
 	var hunks []DiffHunk
-
 	for rangeIdx := 0; rangeIdx < len(ranges); {
 		// Find contiguous ranges to merge.
 		mergeEnd := rangeIdx + 1
@@ -318,11 +306,7 @@ func groupIntoHunks(ops []diffOp, _, _ int) []DiffHunk {
 		}
 
 		// Build hunk from ranges[rangeIdx] to ranges[mergeEnd-1].
-		hunk := buildHunk(ops, ranges[rangeIdx].start, ranges[mergeEnd-1].end, len(ops))
-		if len(hunk.Lines) > 0 {
-			hunks = append(hunks, hunk)
-		}
-
+		hunks = append(hunks, buildHunk(ops, ranges[rangeIdx].start, ranges[mergeEnd-1].end))
 		rangeIdx = mergeEnd
 	}
 
@@ -330,39 +314,30 @@ func groupIntoHunks(ops []diffOp, _, _ int) []DiffHunk {
 }
 
 // buildHunk builds a single hunk from a range of operations.
-func buildHunk(ops []diffOp, changeStart, changeEnd, opsLen int) DiffHunk {
+func buildHunk(ops []diffOp, changeStart, changeEnd int) DiffHunk {
 	// Expand to include context lines.
-	start := changeStart - contextLines
-	if start < 0 {
-		start = 0
-	}
-	end := changeEnd + contextLines
-	if end > opsLen {
-		end = opsLen
-	}
-
-	hunk := DiffHunk{}
+	start := max(changeStart-contextLines, 0)
+	end := min(changeEnd+contextLines, len(ops))
 
 	// Find original and modified start positions.
-	origStart := 1
-	modStart := 1
-	for opIdx := range start {
-		if ops[opIdx].kind != DiffLineAdd {
-			origStart++
+	hunk := DiffHunk{OriginalStart: 1, ModifiedStart: 1}
+	for _, op := range ops[:start] {
+		if op.kind != DiffLineAdd {
+			hunk.OriginalStart++
 		}
-		if ops[opIdx].kind != DiffLineRemove {
-			modStart++
+		if op.kind != DiffLineRemove {
+			hunk.ModifiedStart++
 		}
 	}
-	hunk.OriginalStart = origStart
-	hunk.ModifiedStart = modStart
 
 	// Build lines and count.
-	for i := start; i < end; i++ {
-		op := ops[i]
+	hunk.Lines = make([]DiffLine, 0, end-start)
+	for _, op := range ops[start:end] {
+		content, hasNewline := strings.CutSuffix(op.line, "\n")
 		hunk.Lines = append(hunk.Lines, DiffLine{
-			Kind:    op.kind,
-			Content: op.content,
+			Kind:      op.kind,
+			Content:   content,
+			NoNewline: !hasNewline,
 		})
 
 		switch op.kind {
@@ -377,52 +352,4 @@ func buildHunk(ops []diffOp, changeStart, changeEnd, opsLen int) DiffHunk {
 	}
 
 	return hunk
-}
-
-// longestCommonSubsequence computes the LCS of two string slices.
-func longestCommonSubsequence(orig, mod []string) []string {
-	origLen, modLen := len(orig), len(mod)
-	if origLen == 0 || modLen == 0 {
-		return nil
-	}
-
-	// Build DP table.
-	dp := make([][]int, origLen+1)
-	for idx := range dp {
-		dp[idx] = make([]int, modLen+1)
-	}
-
-	for row := 1; row <= origLen; row++ {
-		for col := 1; col <= modLen; col++ {
-			if orig[row-1] == mod[col-1] {
-				dp[row][col] = dp[row-1][col-1] + 1
-			} else {
-				dp[row][col] = max(dp[row-1][col], dp[row][col-1])
-			}
-		}
-	}
-
-	// Backtrack to find LCS.
-	lcsLen := dp[origLen][modLen]
-	if lcsLen == 0 {
-		return nil
-	}
-
-	lcs := make([]string, lcsLen)
-	row, col, idx := origLen, modLen, lcsLen-1
-	for row > 0 && col > 0 {
-		switch {
-		case orig[row-1] == mod[col-1]:
-			lcs[idx] = orig[row-1]
-			row--
-			col--
-			idx--
-		case dp[row-1][col] > dp[row][col-1]:
-			row--
-		default:
-			col--
-		}
-	}
-
-	return lcs
 }
