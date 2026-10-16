@@ -37,6 +37,17 @@ const (
 
 	// NodeStrikethrough is GFM strikethrough text (inline).
 	NodeStrikethrough
+
+	// NodeTable is a GFM table (block). Its children are NodeTableRow.
+	NodeTable
+
+	// NodeTableRow is a row of a GFM table, the header row included (block).
+	// Its children are NodeTableCell.
+	NodeTableRow
+
+	// NodeTableCell is a cell of a GFM table row (block). Its children are
+	// inline nodes.
+	NodeTableCell
 )
 
 // Node represents a single node in the Markdown AST.
@@ -86,7 +97,8 @@ type Node struct {
 func (n *Node) IsBlock() bool {
 	switch n.Kind {
 	case NodeDocument, NodeParagraph, NodeHeading, NodeList, NodeListItem,
-		NodeBlockquote, NodeCodeBlock, NodeThematicBreak, NodeHTMLBlock:
+		NodeBlockquote, NodeCodeBlock, NodeThematicBreak, NodeHTMLBlock,
+		NodeTable, NodeTableRow, NodeTableCell:
 		return true
 	default:
 		return false

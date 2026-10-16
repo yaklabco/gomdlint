@@ -45,6 +45,12 @@ func (i NodeKind) String() string {
 		return "Raw"
 	case NodeStrikethrough:
 		return "Strikethrough"
+	case NodeTable:
+		return "Table"
+	case NodeTableRow:
+		return "TableRow"
+	case NodeTableCell:
+		return "TableCell"
 	default:
 		return "NodeKind(" + uitoa(uint(i)) + ")"
 	}

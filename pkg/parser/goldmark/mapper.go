@@ -75,7 +75,13 @@ func (m *mapper) mapNode(gmNode ast.Node) *mdast.Node {
 	case *ast.Heading:
 		node = m.mapHeading(gmn)
 
-	case *ast.Paragraph:
+	case *ast.Paragraph, *ast.TextBlock:
+		// A tight list item holds its text in a TextBlock: a paragraph
+		// rendered without <p>. A TextBlock with no lines stands for link
+		// reference definitions that goldmark removed; it has no source.
+		if gmNode.Lines().Len() == 0 && !gmNode.HasChildren() {
+			return nil
+		}
 		node = mdast.NewNode(mdast.NodeParagraph)
 		m.mapChildren(gmNode, node)
 		m.setParagraphSpans(node, gmNode)
@@ -142,7 +148,7 @@ func (m *mapper) mapNode(gmNode ast.Node) *mdast.Node {
 		node = m.mapTable(gmn)
 
 	default:
-		// Fallback for unknown node types, including tight-list text blocks.
+		// Fallback for node types from extensions gomdlint does not enable.
 		node = mdast.NewNode(mdast.NodeRaw)
 		m.mapChildren(gmNode, node)
 		if gmNode.Type() == ast.TypeBlock && gmNode.Lines().Len() > 0 {
@@ -467,11 +473,12 @@ func (m *mapper) mapTaskCheckBox(cb *east.TaskCheckBox) *mdast.Node {
 
 // mapTable converts a GFM Table to an mdast node.
 func (m *mapper) mapTable(table *east.Table) *mdast.Node {
-	node := mdast.NewNode(mdast.NodeRaw)
-	node.Ext = map[string]any{
-		"table":      true,
-		"alignments": table.Alignments,
+	node := mdast.NewNode(mdast.NodeTable)
+	alignments := make([]mdast.Alignment, len(table.Alignments))
+	for idx, alignment := range table.Alignments {
+		alignments[idx] = mapAlignment(alignment)
 	}
+	node.Block = mdast.NewBlockAttrs().WithTable(&mdast.TableAttrs{Alignments: alignments})
 
 	var rows []mdast.SourceRange
 	if recorded, ok := m.tableRows(table); ok {
@@ -486,9 +493,9 @@ func (m *mapper) mapTable(table *east.Table) *mdast.Node {
 		rowIndex++
 		switch row := child.(type) {
 		case *east.TableHeader:
-			mdast.AppendChild(node, m.mapTableRow(row, map[string]any{"tableHeader": true}, rowSpan))
+			mdast.AppendChild(node, m.mapTableRow(row, true, rowSpan))
 		case *east.TableRow:
-			mdast.AppendChild(node, m.mapTableRow(row, map[string]any{"tableRow": true}, rowSpan))
+			mdast.AppendChild(node, m.mapTableRow(row, false, rowSpan))
 		default:
 			if mdNode := m.mapNode(child); mdNode != nil {
 				mdast.AppendChild(node, mdNode)
@@ -541,12 +548,12 @@ func (m *mapper) tableDelimiter(table *east.Table) (mdast.SourceRange, bool) {
 }
 
 // mapTableRow converts a GFM table header or row to an mdast node.
-func (m *mapper) mapTableRow(row ast.Node, ext map[string]any, span *mdast.SourceRange) *mdast.Node {
-	node := mdast.NewNode(mdast.NodeRaw)
-	node.Ext = ext
+func (m *mapper) mapTableRow(row ast.Node, header bool, span *mdast.SourceRange) *mdast.Node {
+	node := mdast.NewNode(mdast.NodeTableRow)
+	node.Block = mdast.NewBlockAttrs().WithTable(&mdast.TableAttrs{Header: header})
 	for child := row.FirstChild(); child != nil; child = child.NextSibling() {
 		if cell, ok := child.(*east.TableCell); ok {
-			mdast.AppendChild(node, m.mapTableCell(cell))
+			mdast.AppendChild(node, m.mapTableCell(cell, header))
 		}
 	}
 	if span != nil {
@@ -564,13 +571,26 @@ func (m *mapper) mapTableRow(row ast.Node, ext map[string]any, span *mdast.Sourc
 	return node
 }
 
-// mapTableCell converts a GFM TableCell to an mdast node.
-func (m *mapper) mapTableCell(tc *east.TableCell) *mdast.Node {
-	node := mdast.NewNode(mdast.NodeRaw)
-	node.Ext = map[string]any{
-		"tableCell": true,
-		"alignment": tc.Alignment,
+// mapAlignment converts a goldmark table alignment.
+func mapAlignment(alignment east.Alignment) mdast.Alignment {
+	switch alignment {
+	case east.AlignLeft:
+		return mdast.AlignLeft
+	case east.AlignCenter:
+		return mdast.AlignCenter
+	case east.AlignRight:
+		return mdast.AlignRight
+	case east.AlignNone:
+		return mdast.AlignNone
+	default:
+		return mdast.AlignNone
 	}
+}
+
+// mapTableCell converts a GFM TableCell to an mdast node.
+func (m *mapper) mapTableCell(tc *east.TableCell, header bool) *mdast.Node {
+	node := mdast.NewNode(mdast.NodeTableCell)
+	node.Block = mdast.NewBlockAttrs().WithTable(&mdast.TableAttrs{Header: header, Alignment: mapAlignment(tc.Alignment)})
 	m.mapChildren(tc, node)
 	if lines := tc.Lines(); lines.Len() > 0 {
 		segment := lines.At(0)

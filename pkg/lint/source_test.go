@@ -164,6 +164,22 @@ func TestBlankLineTextKeepsBlockquoteIntact(t *testing.T) {
 	require.Len(t, mdast.FindByKind(refile.Root, mdast.NodeBlockquote), 1, "the blockquote must not split")
 }
 
+func TestTableHelpersFindTableNodes(t *testing.T) {
+	t.Parallel()
+
+	file := parseSource(t, "# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> | q |\n> |---|\n")
+	tables := lint.Tables(file.Root)
+	require.Len(t, tables, 2)
+	assert.True(t, lint.IsTableNode(tables[0]))
+	assert.False(t, lint.IsTableNode(tables[0].FirstChild), "a row is not a table")
+	assert.True(t, lint.IsLineInTable(file, file.Root, 4))
+	assert.True(t, lint.IsLineInTable(file, file.Root, 8))
+	assert.False(t, lint.IsLineInTable(file, file.Root, 1))
+
+	ctx := lint.NewRuleContext(context.Background(), file, config.NewConfig(), nil)
+	assert.Equal(t, tables, ctx.Tables())
+}
+
 func TestMultilineHTMLCommentSpansItsClosingLine(t *testing.T) {
 	t.Parallel()
 

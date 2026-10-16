@@ -192,13 +192,10 @@ func (nc *NodeCache) build(root *mdast.Node) {
 			nc.emphasis = append(nc.emphasis, node)
 		case mdast.NodeStrong:
 			nc.strong = append(nc.strong, node)
+		case mdast.NodeTable:
+			nc.tables = append(nc.tables, node)
 		default:
-			// Tables are GFM extensions stored in Ext map
-			if node.Ext != nil {
-				if _, ok := node.Ext["table"]; ok {
-					nc.tables = append(nc.tables, node)
-				}
-			}
+			// Other node kinds are not cached.
 		}
 		return nil
 	})

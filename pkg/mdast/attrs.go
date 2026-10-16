@@ -13,6 +13,53 @@ type BlockAttrs struct {
 
 	// CodeBlock holds code block attributes for NodeCodeBlock.
 	CodeBlock *CodeBlockAttrs
+
+	// Table holds GFM table attributes for NodeTable, NodeTableRow and
+	// NodeTableCell.
+	Table *TableAttrs
+}
+
+// Alignment is the alignment of a GFM table column.
+type Alignment uint8
+
+// Column alignments, set by the colons of a table's delimiter row.
+const (
+	// AlignNone has no colon: "---".
+	AlignNone Alignment = iota
+	// AlignLeft has a leading colon: ":--".
+	AlignLeft
+	// AlignCenter has colons on both sides: ":-:".
+	AlignCenter
+	// AlignRight has a trailing colon: "--:".
+	AlignRight
+)
+
+// String returns the name of the alignment.
+func (a Alignment) String() string {
+	switch a {
+	case AlignLeft:
+		return "left"
+	case AlignCenter:
+		return "center"
+	case AlignRight:
+		return "right"
+	default:
+		return "none"
+	}
+}
+
+// TableAttrs holds attributes for GFM table nodes. A NodeTable sets
+// Alignments; a header NodeTableRow and its cells set Header; a
+// NodeTableCell sets Alignment.
+type TableAttrs struct {
+	// Alignments holds the alignment of each column, from the delimiter row.
+	Alignments []Alignment
+
+	// Header is true for the header row and its cells.
+	Header bool
+
+	// Alignment is the alignment of a cell's column.
+	Alignment Alignment
 }
 
 // ListItemAttrs holds attributes for list item nodes.
@@ -156,6 +203,12 @@ func (a *BlockAttrs) WithList(attrs *ListAttrs) *BlockAttrs {
 // WithListItem sets list item attributes and returns the BlockAttrs for chaining.
 func (a *BlockAttrs) WithListItem(attrs *ListItemAttrs) *BlockAttrs {
 	a.ListItem = attrs
+	return a
+}
+
+// WithTable sets table attributes and returns the BlockAttrs for chaining.
+func (a *BlockAttrs) WithTable(attrs *TableAttrs) *BlockAttrs {
+	a.Table = attrs
 	return a
 }
 

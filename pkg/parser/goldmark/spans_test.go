@@ -416,6 +416,69 @@ func TestLinkReferenceStyles(t *testing.T) {
 	}
 }
 
+func TestTightListItemsHoldParagraphs(t *testing.T) {
+	file := parseForSpans(t, FlavorCommonMark, "- a\n- b\n")
+	assertSpans(t, file, []spanExpectation{
+		{mdast.NodeParagraph, 0, "a", "a"},
+		{mdast.NodeParagraph, 1, "b", "b"},
+	})
+	require.Empty(t, mdast.FindByKind(file.Root, mdast.NodeRaw))
+
+	var blocks []mdast.NodeKind
+	//nolint:errcheck // The visitor never returns an error.
+	mdast.WalkBlocks(file.Root, func(node *mdast.Node) error {
+		blocks = append(blocks, node.Kind)
+		return nil
+	})
+	require.Equal(t, []mdast.NodeKind{
+		mdast.NodeDocument, mdast.NodeList,
+		mdast.NodeListItem, mdast.NodeParagraph,
+		mdast.NodeListItem, mdast.NodeParagraph,
+	}, blocks)
+}
+
+func TestReferenceDefinitionsLeaveNoEmptyNodes(t *testing.T) {
+	file := parseForSpans(t, FlavorCommonMark, "- [a]: https://example.com\n- b\n\n[x]: https://x.y\n\nText\n")
+	require.Empty(t, mdast.FindByKind(file.Root, mdast.NodeRaw))
+	item := nthNode(file.Root, mdast.NodeListItem, 0)
+	require.Nil(t, item.FirstChild, "a list item holding only a definition has no children")
+	require.Equal(t, "- [a]: https://example.com", string(item.Text()))
+	kinds := make([]mdast.NodeKind, 0, 2)
+	for child := file.Root.FirstChild; child != nil; child = child.Next {
+		kinds = append(kinds, child.Kind)
+	}
+	require.Equal(t, []mdast.NodeKind{mdast.NodeList, mdast.NodeParagraph}, kinds)
+}
+
+func TestTableNodes(t *testing.T) {
+	input := "Lead\n\n| a | b | c |\n| :- | :-: | -: |\n| 1 | 2 |\n\n> | q |\n> |---|\n> | r |\n"
+	file := parseForSpans(t, FlavorGFM, input)
+	table := "| a | b | c |\n| :- | :-: | -: |\n| 1 | 2 |"
+	quoted := "| q |\n> |---|\n> | r |"
+	assertSpans(t, file, []spanExpectation{
+		{mdast.NodeTable, 0, table, table},
+		{mdast.NodeTableRow, 0, "| a | b | c |", "| a | b | c |"},
+		{mdast.NodeTableRow, 1, "| 1 | 2 |", "| 1 | 2 |"},
+		{mdast.NodeTableCell, 0, "a", "a"},
+		{mdast.NodeTableCell, 1, "b", "b"},
+		{mdast.NodeTableCell, 3, "1", "1"},
+		{mdast.NodeTableCell, 5, "", ""},
+		{mdast.NodeTable, 1, quoted, quoted},
+	})
+
+	first := nthNode(file.Root, mdast.NodeTable, 0)
+	require.True(t, first.IsBlock())
+	require.NotNil(t, first.Block.Table)
+	require.Equal(t, []mdast.Alignment{mdast.AlignLeft, mdast.AlignCenter, mdast.AlignRight}, first.Block.Table.Alignments)
+
+	header := nthNode(file.Root, mdast.NodeTableRow, 0)
+	require.True(t, header.Block.Table.Header)
+	require.False(t, nthNode(file.Root, mdast.NodeTableRow, 1).Block.Table.Header)
+	require.Equal(t, mdast.AlignRight, nthNode(file.Root, mdast.NodeTableCell, 2).Block.Table.Alignment)
+	require.True(t, nthNode(file.Root, mdast.NodeTableCell, 0).Block.Table.Header)
+	require.Empty(t, mdast.FindByKind(file.Root, mdast.NodeRaw))
+}
+
 func TestStrikethroughNode(t *testing.T) {
 	file := parseForSpans(t, FlavorGFM, "~~Struck~~ and *em* and ~one~\n")
 	assertSpans(t, file, []spanExpectation{

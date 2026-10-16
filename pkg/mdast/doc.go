@@ -48,6 +48,7 @@
 //     Content: the text lines, without trailing whitespace.
 //   - Paragraph: from the first non-blank byte to the end of its last line.
 //     Content: the same range without trailing whitespace on the last line.
+//     The text of a tight list item is a Paragraph too.
 //   - List: from the first item's marker to the end of the last item. Blank
 //     lines after the last item are not included.
 //   - ListItem: from the marker to the end of the item's last line.
@@ -69,6 +70,12 @@
 //   - ThematicBreak: from the first marker character to the end of the line.
 //   - HTMLBlock: from '<' to the end of the last line of the block,
 //     including a closing line such as "-->".
+//   - Table (GFM): from the start of the header row to the end of the last
+//     row, including the delimiter row.
+//   - TableRow (GFM): one row, from its first non-blank byte to its last,
+//     including leading and trailing pipes. The delimiter row has no node.
+//   - TableCell (GFM): the cell text without its padding and pipes. A cell
+//     that goldmark adds for a missing column is empty, at the end of its row.
 //   - Text: the literal text. Text before a line break excludes its trailing
 //     whitespace and the backslash of a hard break.
 //   - SoftBreak and HardBreak: from the end of the preceding text through

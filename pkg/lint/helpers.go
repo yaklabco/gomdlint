@@ -392,26 +392,12 @@ func Tables(root *mdast.Node) []*mdast.Node {
 	if root == nil {
 		return nil
 	}
-	// Tables are stored in Ext map with key "table"
-	var tables []*mdast.Node
-	_ = mdast.Walk(root, func(n *mdast.Node) error { //nolint:errcheck // Walk visitor never returns error
-		if n.Ext != nil {
-			if _, ok := n.Ext["table"]; ok {
-				tables = append(tables, n)
-			}
-		}
-		return nil
-	})
-	return tables
+	return mdast.FindByKind(root, mdast.NodeTable)
 }
 
 // IsTableNode returns true if the node is a GFM table.
 func IsTableNode(n *mdast.Node) bool {
-	if n == nil || n.Ext == nil {
-		return false
-	}
-	_, ok := n.Ext["table"]
-	return ok
+	return n != nil && n.Kind == mdast.NodeTable
 }
 
 // IsLineInTable returns true if the given line number falls within any table.
