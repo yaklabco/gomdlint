@@ -34,7 +34,7 @@ type Parser struct {
 // Invalid flavors default to "commonmark".
 func New(flavor string) *Parser {
 	f := flavorOrDefault(flavor)
-	spans := spanKey{key: parser.NewContextKey()}
+	spans := spanKey{key: spanContextKey}
 	return &Parser{
 		flavor: f,
 		md:     newGoldmarkInstance(f, spans),

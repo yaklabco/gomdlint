@@ -11,7 +11,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -202,7 +201,7 @@ func checkTextSegmentsAgree(t *testing.T, flavor string, file *mdast.FileSnapsho
 
 	base := bomLength(file.Content)
 	source := blankedSource(file)[base:]
-	md := newGoldmarkInstance(flavor, spanKey{key: parser.NewContextKey()})
+	md := newGoldmarkInstance(flavor, spanKey{key: spanContextKey})
 	doc := md.Parser().Parse(text.NewReader(source))
 	//nolint:errcheck // The visitor never returns an error.
 	ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {

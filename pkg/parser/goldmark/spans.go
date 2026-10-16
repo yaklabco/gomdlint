@@ -60,8 +60,14 @@ func newSpanRecorder() *spanRecorder {
 	}
 }
 
-// spanKey locates the per-parse spanRecorder in a parser.Context. Each
-// Parser has its own key, set by Parse and read by the wrapped parsers.
+// spanContextKey stores the per-parse spanRecorder in a parser.Context.
+// goldmark's NewContextKey increments a package counter that NewContext
+// reads without synchronization, so the key is allocated once, while the
+// package initializes and before any parse can start.
+var spanContextKey = parser.NewContextKey() //nolint:gochecknoglobals // goldmark context keys must exist before any parse starts.
+
+// spanKey locates the per-parse spanRecorder in a parser.Context. Parse sets
+// it and the wrapped parsers read it.
 type spanKey struct {
 	key parser.ContextKey
 }
