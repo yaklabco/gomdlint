@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
@@ -101,67 +104,139 @@ func TestInlineHTMLRule(t *testing.T) {
 	}
 }
 
-func TestInlineHTMLRule_FlavorDefaults(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		flavor config.Flavor
-		wantN  int
-	}{
-		{
-			name:   "commonmark no defaults",
-			input:  "Text<br>here.",
-			flavor: config.FlavorCommonMark,
-			wantN:  1,
-		},
-		{
-			name:   "gfm br allowed",
-			input:  "Text<br>here.",
-			flavor: config.FlavorGFM,
-			wantN:  0,
-		},
-		{
-			name:   "gfm sup allowed",
-			input:  "Text<sup>a</sup>here.",
-			flavor: config.FlavorGFM,
-			wantN:  0,
-		},
-		{
-			name:   "gfm div not allowed",
-			input:  "<div>content</div>",
-			flavor: config.FlavorGFM,
-			wantN:  1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := goldmark.New(string(tt.flavor))
-			snapshot, err := parser.Parse(context.Background(), "test.md", []byte(tt.input))
-			if err != nil {
-				t.Fatalf("parse error: %v", err)
-			}
-
-			rule := NewInlineHTMLRule()
-			cfg := config.NewConfig()
-			cfg.Flavor = tt.flavor
-
-			ctx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-			diags, err := rule.Apply(ctx)
-			if err != nil {
-				t.Fatalf("Apply error: %v", err)
-			}
-
-			if len(diags) != tt.wantN {
-				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
-			}
-		})
-	}
-}
-
 func TestInlineHTMLRule_DefaultDisabled(t *testing.T) {
 	rule := NewInlineHTMLRule()
 	if rule.DefaultEnabled() {
 		t.Error("InlineHTMLRule should be disabled by default")
 	}
+}
+
+// applyHTMLRule runs MD033 on input parsed with the given flavor and options.
+func applyHTMLRule(t *testing.T, flavor config.Flavor, input string, options map[string]any) []lint.Diagnostic {
+	t.Helper()
+	snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	cfg := config.NewConfig()
+	cfg.Flavor = flavor
+	var ruleCfg *config.RuleConfig
+	if options != nil {
+		ruleCfg = &config.RuleConfig{Options: options}
+	}
+	diags, err := NewInlineHTMLRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, ruleCfg))
+	require.NoError(t, err)
+	return diags
+}
+
+type htmlDiagWant struct {
+	line, column int
+	element      string
+}
+
+func requireHTMLDiags(t *testing.T, diags []lint.Diagnostic, want []htmlDiagWant) {
+	t.Helper()
+	require.Len(t, diags, len(want))
+	for idx, expected := range want {
+		assert.Equal(t, expected.line, diags[idx].StartLine, "diagnostic %d line", idx)
+		assert.Equal(t, expected.column, diags[idx].StartColumn, "diagnostic %d column", idx)
+		assert.Equal(t, "HTML element '"+expected.element+"' is not allowed", diags[idx].Message,
+			"diagnostic %d message", idx)
+	}
+}
+
+// TestInlineHTMLRule_EachElement reports every disallowed opening tag, including
+// tags after the first one in an HTML block (markdownlint re-parses HTML blocks).
+func TestInlineHTMLRule_EachElement(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		allowed []any
+		want    []htmlDiagWant
+	}{
+		{
+			name:    "disallowed tag after allowed tags in one block",
+			input:   "<details>\n<summary>More</summary>\n<script>alert(1)</script>\n</details>\n",
+			allowed: []any{"details", "summary"},
+			want:    []htmlDiagWant{{3, 1, "script"}},
+		},
+		{
+			name:  "every opening tag in a block",
+			input: "<div><span>x</span></div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {1, 6, "span"}},
+		},
+		{
+			name:    "comment content is not markup",
+			input:   "<div>\n<!-- <b>hidden</b> -->\n</div>\n",
+			allowed: []any{"div"},
+		},
+		{
+			name:  "declaration is not an element",
+			input: "<!DOCTYPE html>\n",
+		},
+		{
+			name:  "CDATA content is not markup",
+			input: "<![CDATA[\n<b>not a tag</b>\n]]>\n",
+		},
+		{
+			name:  "processing instruction reported like markdownlint",
+			input: "<?xml version=\"1.0\"?>\n",
+			want:  []htmlDiagWant{{1, 1, "?xml"}},
+		},
+		{
+			name:  "multi-line opening tag",
+			input: "<div\n  class=\"note\">\ntext\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}},
+		},
+		{
+			name:  "block inside blockquote",
+			input: "> <div>\n> <span>x</span>\n> </div>\n",
+			want:  []htmlDiagWant{{1, 3, "div"}, {2, 3, "span"}},
+		},
+		{
+			name:  "inline element position",
+			input: "Text with <span>inline</span> html.\n",
+			want:  []htmlDiagWant{{1, 11, "span"}},
+		},
+		{
+			name:  "invalid tag syntax is text",
+			input: "<div>a < b and c<d</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var options map[string]any
+			if tt.allowed != nil {
+				options = map[string]any{"allowed_elements": tt.allowed}
+			}
+			requireHTMLDiags(t, applyHTMLRule(t, config.FlavorCommonMark, tt.input, options), tt.want)
+		})
+	}
+}
+
+// TestInlineHTMLRule_DefaultAllowsNothing checks the markdownlint default
+// allowed_elements of [] for every flavor.
+func TestInlineHTMLRule_DefaultAllowsNothing(t *testing.T) {
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run(string(flavor), func(t *testing.T) {
+			requireHTMLDiags(t, applyHTMLRule(t, flavor, "Text<br>here.\n", nil), []htmlDiagWant{{1, 5, "br"}})
+			requireHTMLDiags(t, applyHTMLRule(t, flavor, "Text<sup>a</sup>here.\n", nil), []htmlDiagWant{{1, 5, "sup"}})
+		})
+	}
+}
+
+// TestInlineHTMLRule_TableAllowedElements uses table_allowed_elements inside tables
+// and falls back to allowed_elements when it is not set.
+func TestInlineHTMLRule_TableAllowedElements(t *testing.T) {
+	input := "Para<br>text.\n\n| A | B |\n| --- | --- |\n| x<br>y | z |\n"
+	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
+		"allowed_elements": []any{"br"},
+	}), nil)
+	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
+		"allowed_elements":       []any{"br"},
+		"table_allowed_elements": []any{},
+	}), []htmlDiagWant{{5, 4, "br"}})
+	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
+		"table_allowed_elements": []any{"br"},
+	}), []htmlDiagWant{{1, 5, "br"}})
 }

@@ -1,0 +1,4 @@
+html_block_elements.input.md:3:1 warning HTML element 'details' is not allowed (MD033/no-inline-html)
+html_block_elements.input.md:4:1 warning HTML element 'summary' is not allowed (MD033/no-inline-html)
+html_block_elements.input.md:10:1 warning HTML element 'div' is not allowed (MD033/no-inline-html)
+html_block_elements.input.md:10:6 warning HTML element 'span' is not allowed (MD033/no-inline-html)

@@ -1,8 +1,8 @@
 package rules
 
 import (
-	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -28,185 +28,105 @@ func NewInlineHTMLRule() *InlineHTMLRule {
 	}
 }
 
-// commonmarkAllowedHTMLElements returns the default allowed elements for CommonMark.
-// CommonMark is strict - no HTML allowed by default.
-func commonmarkAllowedHTMLElements() []string {
-	return nil
-}
-
-// gfmAllowedHTMLElements returns the default allowed elements for GFM.
-// Includes common formatting elements used in GitHub.
-func gfmAllowedHTMLElements() []string {
-	return []string{"br", "sup", "sub", "details", "summary", "kbd", "abbr"}
-}
-
 // DefaultEnabled returns false - this rule is opt-in.
 func (r *InlineHTMLRule) DefaultEnabled() bool {
 	return false
 }
 
-// Apply checks for inline HTML usage.
+// Apply reports every opening HTML element that is not allowed. HTML blocks
+// are scanned for each element they contain, like markdownlint, which
+// re-parses HTML blocks as inline content. Closing tags, comments,
+// declarations, and CDATA sections are never reported.
 func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.Root == nil {
+	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Get allowed elements from config.
-	allowedElements := r.getAllowedElements(ctx)
-	allowedSet := make(map[string]bool)
-	for _, el := range allowedElements {
-		allowedSet[strings.ToLower(el)] = true
-	}
-	tableAllowedSet := make(map[string]bool)
-	for _, element := range ctx.OptionStringSlice("table_allowed_elements", allowedElements) {
-		tableAllowedSet[strings.ToLower(element)] = true
-	}
+	// markdownlint defaults allowed_elements to [], and table_allowed_elements
+	// falls back to allowed_elements when it is not set.
+	allowedElements := ctx.OptionStringSlice("allowed_elements", nil)
+	allowed := lowercaseSet(allowedElements)
+	tableAllowed := lowercaseSet(ctx.OptionStringSlice("table_allowed_elements", allowedElements))
 
 	var diags []lint.Diagnostic
+	report := func(construct htmlConstruct, allowedSet map[string]bool) {
+		if !construct.isOpeningElement() || allowedSet[strings.ToLower(construct.Name)] {
+			return
+		}
+		diags = append(diags, r.elementDiagnostic(ctx, construct, allowedSet))
+	}
 
-	// Check HTML blocks.
-	htmlBlocks := ctx.HTMLBlocks()
-	for _, block := range htmlBlocks {
+	for _, block := range ctx.HTMLBlocks() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		diag := r.checkHTMLNode(block, allowedSet, "HTML block")
-		if diag != nil {
-			diags = append(diags, *diag)
+		span := block.SourceRange()
+		for _, construct := range scanHTMLConstructs(ctx.File.Content, span.StartOffset, span.EndOffset) {
+			report(construct, allowed)
 		}
 	}
 
-	// Check inline HTML.
-	htmlInlines := ctx.HTMLInlines()
-	for _, inline := range htmlInlines {
+	for _, inline := range ctx.HTMLInlines() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		allowed := allowedSet
+		construct, ok := htmlNodeConstruct(inline)
+		if !ok {
+			continue
+		}
+		allowedSet := allowed
 		if lint.IsLineInTable(ctx.File, ctx.Root, inline.SourcePosition().StartLine) {
-			allowed = tableAllowedSet
+			allowedSet = tableAllowed
 		}
-		diag := r.checkHTMLNode(inline, allowed, "Inline HTML")
-		if diag != nil {
-			diags = append(diags, *diag)
-		}
+		report(construct, allowedSet)
 	}
 
+	sort.SliceStable(diags, func(i, j int) bool {
+		if diags[i].StartLine != diags[j].StartLine {
+			return diags[i].StartLine < diags[j].StartLine
+		}
+		return diags[i].StartColumn < diags[j].StartColumn
+	})
 	return diags, nil
 }
 
-func (r *InlineHTMLRule) getAllowedElements(ctx *lint.RuleContext) []string {
-	// Check for explicit configuration.
-	if allowed := ctx.Option("allowed_elements", nil); allowed != nil {
-		if list, ok := allowed.([]string); ok {
-			return list
-		}
-		if list, ok := allowed.([]any); ok {
-			result := make([]string, 0, len(list))
-			for _, v := range list {
-				if s, ok := v.(string); ok {
-					result = append(result, s)
-				}
-			}
-			return result
-		}
-	}
-
-	// Use flavor-based defaults.
-	if ctx.Config != nil && ctx.Config.Flavor == config.FlavorGFM {
-		return gfmAllowedHTMLElements()
-	}
-
-	return commonmarkAllowedHTMLElements()
-}
-
-func (r *InlineHTMLRule) checkHTMLNode(
-	node *mdast.Node,
+// elementDiagnostic builds the diagnostic for a disallowed element. The range
+// covers the element's opening tag up to the end of its first line.
+func (r *InlineHTMLRule) elementDiagnostic(
+	ctx *lint.RuleContext,
+	construct htmlConstruct,
 	allowedSet map[string]bool,
-	nodeType string,
-) *lint.Diagnostic {
-	if node == nil || node.File == nil {
-		return nil
+) lint.Diagnostic {
+	end := construct.End
+	if newline := strings.IndexAny(string(construct.text(ctx.File.Content)), "\r\n"); newline >= 0 {
+		end = construct.Start + newline
 	}
+	startLine, startColumn := ctx.File.LineAt(construct.Start)
+	endLine, endColumn := ctx.File.LineAt(end)
+	pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
 
-	if lint.IsHTMLComment(node) {
-		return nil
-	}
-	if node.Kind == mdast.NodeHTMLInline && bytes.HasPrefix(bytes.TrimSpace(node.Text()), []byte("</")) {
-		return nil
-	}
-
-	// Extract the HTML content.
-	pos := node.SourcePosition()
-	if !pos.IsValid() {
-		return nil
-	}
-
-	// Get content from the source.
-	var content []byte
-	if pos.StartLine > 0 && pos.StartLine <= len(node.File.Lines) {
-		line := node.File.Lines[pos.StartLine-1]
-		startOffset := line.StartOffset + pos.StartColumn - 1
-		endOffset := line.NewlineStart
-
-		// For single-line nodes, use the end column if available.
-		if pos.EndLine == pos.StartLine && pos.EndColumn > 0 {
-			endOffset = line.StartOffset + pos.EndColumn
-		}
-
-		// Clamp offsets to valid range.
-		if startOffset < 0 {
-			startOffset = 0
-		}
-		if startOffset > len(node.File.Content) {
-			startOffset = len(node.File.Content)
-		}
-		if endOffset > len(node.File.Content) {
-			endOffset = len(node.File.Content)
-		}
-
-		if startOffset < endOffset {
-			content = node.File.Content[startOffset:endOffset]
-		}
-	}
-
-	if len(content) == 0 {
-		return nil
-	}
-
-	tagName := lint.ExtractHTMLTagName(content)
-	if tagName == "" {
-		// Could be a comment or other HTML construct.
-		diag := lint.NewDiagnostic(r.ID(), node,
-			nodeType+" is not allowed").
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove or replace with Markdown syntax").
-			Build()
-		return &diag
-	}
-
-	// Check if allowed.
-	if allowedSet[tagName] {
-		return nil
-	}
-
-	var suggestion string
+	suggestion := "Remove HTML or use Markdown syntax"
 	if len(allowedSet) > 0 {
-		allowed := make([]string, 0, len(allowedSet))
-		for k := range allowedSet {
-			allowed = append(allowed, k)
+		names := make([]string, 0, len(allowedSet))
+		for name := range allowedSet {
+			names = append(names, name)
 		}
-		suggestion = "Allowed elements: " + strings.Join(allowed, ", ")
-	} else {
-		suggestion = "Remove HTML or use Markdown syntax"
+		sort.Strings(names)
+		suggestion = "Allowed elements: " + strings.Join(names, ", ")
 	}
 
-	diag := lint.NewDiagnostic(r.ID(), node,
-		fmt.Sprintf("HTML element '%s' is not allowed", tagName)).
+	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+		fmt.Sprintf("HTML element '%s' is not allowed", construct.Name)).
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(suggestion).
 		Build()
-	return &diag
+}
+
+// lowercaseSet returns the set of lowercased values.
+func lowercaseSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[strings.ToLower(value)] = true
+	}
+	return set
 }
