@@ -511,9 +511,12 @@ func TestSARIFReporter_SuccessfulRun(t *testing.T) {
 	t.Parallel()
 
 	root := newGitWorkTree(t, false)
-	result := &runner.Result{Files: []runner.FileOutcome{
-		sarifFile(filepath.Join(root, "ok.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
-	}}
+	result := &runner.Result{
+		Files: []runner.FileOutcome{
+			sarifFile(filepath.Join(root, "ok.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+		},
+		Errors: []error{nil},
+	}
 
 	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
 

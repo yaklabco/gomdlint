@@ -276,7 +276,9 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 			}
 		}
 		for _, err := range result.Errors {
-			builder.addFailure(err, "")
+			if err != nil {
+				builder.addFailure(err, "")
+			}
 		}
 
 		invocation := builder.invocation
