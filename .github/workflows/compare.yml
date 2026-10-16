@@ -5,11 +5,16 @@ on:
   schedule:
     - cron: '0 3 * * 0'  # Weekly on Sunday at 3am UTC
 
+permissions:
+  contents: read
+
 jobs:
   compare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v7
         with:
