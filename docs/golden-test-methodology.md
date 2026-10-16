@@ -118,7 +118,7 @@ From that point on, the golden files are locked. Any future change that produces
 1. The diagnostics match `diags.json` exactly: the same rule ID and name, line, column, message, severity, and fixability. The `diags.txt` file must match the same diagnostics.
 2. After applying all fixes, the output matches `golden.md` byte-for-byte.
 
-Each scenario is linted through `lint.Engine.LintFile`, the same entry point the CLI pipeline calls on every pass, with fixes on and only the scenario's rules enabled. Inline directives, severities, rule names and the preparation of fix edits therefore match the product. The harness applies one pass of fixes, while the CLI repeats passes until nothing changes. A rule error, or a diagnostic that carries another rule's ID or name, fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
+Each scenario is linted through `lint.Engine.LintFile`, the same entry point the CLI pipeline calls on every pass, with fixes on and only the scenario's rules enabled. Every other rule is replaced by an inert stand-in with the same ID, name, tags and aliases, so inline directives resolve as in the product but cannot make another rule report, not even a bare `markdownlint-enable`. Severities, rule names and the preparation of fix edits match the product as well. The harness applies one pass of fixes, while the CLI repeats passes until nothing changes. A rule error, or a diagnostic that carries another rule's ID or name, fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
 
 ```text
 basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
@@ -134,7 +134,7 @@ The round-trip guarantee means: **if the tool says it can fix something, applyin
 
 ### Test Discovery
 
-The test harness discovers cases automatically. Drop an `.input.md` file, with an optional `.config.yml` sidecar, into `testdata/MD009/` and it gets picked up on the next test run. No registration, no test function to write. The directory name determines which rule runs. `testdata/MD009/` runs MD009, and `testdata/real-world/` runs all enabled rules.
+The test harness discovers cases automatically. Drop an `.input.md` file, with an optional `.config.yml` sidecar, into `testdata/MD009/` and it gets picked up on the next test run. No registration, no test function to write. The directory name determines which rule runs. `testdata/MD009/` runs MD009, and `testdata/real-world/` runs all enabled rules. A directory with any other name has no runner, so `TestGoldenTestdataFiles` fails for its files.
 
 ### Per-Scenario Configuration
 
@@ -158,7 +158,7 @@ rules:
 
 A scenario that depends on a flavor sets it explicitly, even when it matches the current default. The GFM table scenarios set `flavor: gfm` for this reason.
 
-A per-rule scenario runs its directory's rule even when that rule is disabled by default, such as MD043 or MD044, and runs no other rule. To reproduce one with the CLI, pass the sidecar with `--config` and enable the rule with `--enable`. The CLI also runs the other default-enabled rules, so expect their findings too.
+A per-rule scenario runs its directory's rule even when that rule is disabled by default, such as MD043 or MD044, and no other rule can report in it. A real-world scenario runs the default-enabled rules, and rules that are disabled by default stay inert there even if a directive enables them. To reproduce a per-rule scenario with the CLI, pass the sidecar with `--config` and enable the rule with `--enable`. The CLI also runs the other default-enabled rules, so expect their findings too.
 
 The harness fails a scenario rather than ignore part of its sidecar. These sidecars are rejected:
 
@@ -167,7 +167,7 @@ The harness fails a scenario rather than ignore part of its sidecar. These sidec
 - An empty sidecar, a sidecar with more than one YAML document, or a rule entry without options.
 - A sidecar that configures a rule the scenario does not run. A per-rule scenario runs only its directory's rule, and a real-world scenario runs the default-enabled rules.
 
-`TestGoldenTestdataFiles` also fails for any file under `testdata` that belongs to no scenario, because the harness would never read it. Examples are a sidecar with a `.config.yaml` suffix, a sidecar or golden file without a matching `.input.md`, and a file in a nested directory.
+`TestGoldenTestdataFiles` also fails for any file under `testdata` that belongs to no scenario, because the harness would never read it. Examples are a sidecar with a `.config.yaml` suffix, a sidecar or golden file without a matching `.input.md`, a file in a nested directory, and a file in a directory that is neither a rule ID nor `real-world`.
 
 Option names are not checked. A rule reads the options it knows by name and ignores the rest, as it does in the product, so a misspelled option name leaves the default in place without any error. When you add a sidecar, check that each option changes the generated diagnostics or fixed output.
 
