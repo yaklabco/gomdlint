@@ -172,6 +172,48 @@ func TestGitignoreRules(t *testing.T) {
 	}
 }
 
+// TestGitignoreMoreRules holds more patterns to `git check-ignore`'s
+// answers (with the global excludes file disabled).
+func TestGitignoreMoreRules(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+	writeTree(t, repo, map[string]string{
+		".gitignore": "foo/**/bar\n**/deep\n*.md\n!keep*.md\n\\!bang.md\na\\ b.md\ntrail\\ \n/only/**\n",
+	})
+	rules, err := ignore.GitignoreFor(repo)
+	require.NoError(t, err)
+
+	tests := []struct {
+		path  string
+		isDir bool
+		want  bool
+	}{
+		{path: "foo/bar", want: true},
+		{path: "foo/x/bar", want: true},
+		{path: "foo/x/y/bar", want: true},
+		{path: "foo/barx", want: false},
+		{path: "deep", want: true},
+		{path: "x/deep", want: true},
+		{path: "a.md", want: true},
+		{path: "keep1.md", want: false},
+		{path: "!bang.md", want: true},
+		{path: "a b.md", want: true},
+		{path: "trail ", want: true},
+		{path: "only", isDir: true, want: false},
+		{path: "only/z", isDir: true, want: true},
+		{path: "only/z/q.md", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, rules.Ignored(filepath.Join(repo, filepath.FromSlash(tt.path)), tt.isDir))
+		})
+	}
+}
+
 // TestGitignoreForSubdirectory covers walks that start below the repository
 // root, where the .gitignore files of parent directories still apply.
 func TestGitignoreForSubdirectory(t *testing.T) {
