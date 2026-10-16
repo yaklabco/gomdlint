@@ -162,6 +162,50 @@ func TestListMarkerSpaceRule(t *testing.T) {
 			input:     "Just some text\n",
 			wantDiags: 0,
 		},
+		{
+			name:      "list inside a blockquote",
+			input:     "> -  item\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "list inside a nested blockquote",
+			input:     "> > -  item\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "ordered list nested on a bullet line",
+			input:     "- 1.  alpha\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "correct spacing inside blockquotes",
+			input:     "> - item\n> > 1. item\n",
+			wantDiags: 0,
+		},
+		{
+			// markdownlint uses the multi-line setting when any item spans
+			// more than one line, even in a tight list.
+			name:      "tight list with a wrapped item uses ul_multi",
+			input:     "- a\n  b\n- c\n",
+			wantDiags: 2,
+			config:    map[string]any{"ul_multi": 2},
+		},
+		{
+			name:      "single-line items use ul_single",
+			input:     "- a\n- c\n",
+			wantDiags: 0,
+			config:    map[string]any{"ul_multi": 2},
+		},
+		{
+			name:      "indented code after the marker counts as one space",
+			input:     "-     code\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "empty item is skipped",
+			input:     "-\n- a\n",
+			wantDiags: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -357,7 +401,7 @@ func TestListIndentRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -471,7 +515,7 @@ func TestULIndentRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -548,6 +592,45 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 			wantDiags: 3,
 			wantFix:   "- Item 1\n+ Item 2\n* Item 3\n",
 		},
+		{
+			name:      "wrapped item is fixed with its continuation",
+			input:     "-  Item one\n   continues\n-  Item two\n",
+			wantDiags: 2,
+			wantFix:   "- Item one\n   continues\n- Item two\n",
+		},
+		{
+			name:      "nested list stays nested when the parent spacing shrinks",
+			input:     "-   Parent\n    - Child\n",
+			wantDiags: 1,
+			wantFix:   "- Parent\n    - Child\n",
+		},
+		{
+			// Narrowing the first item would pull the indented sibling into it.
+			name:      "no fix when a sibling would become nested",
+			input:     "-  Top\n  -  Next\n",
+			wantDiags: 2,
+			wantFix:   "-  Top\n  - Next\n",
+		},
+		{
+			// The paragraph after the list would join the item.
+			name:      "no fix when a following paragraph would join the item",
+			input:     "-  item\n\n  after\n",
+			wantDiags: 1,
+			wantFix:   "-  item\n\n  after\n",
+		},
+		{
+			name:      "no fix when the item holds more than a paragraph and lists",
+			input:     "-  item\n\n   ```\n   code\n   ```\n",
+			wantDiags: 1,
+			wantFix:   "-  item\n\n   ```\n   code\n   ```\n",
+		},
+		{
+			name:      "no fix when the expected spacing would make code",
+			input:     "* Item 1\n",
+			wantDiags: 1,
+			wantFix:   "* Item 1\n",
+			config:    map[string]any{"ul_single": 5},
+		},
 	}
 
 	for _, tt := range tests {
@@ -584,7 +667,7 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -691,7 +774,7 @@ func TestBlanksAroundListsRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}

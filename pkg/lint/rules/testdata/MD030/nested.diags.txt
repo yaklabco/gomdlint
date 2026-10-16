@@ -1,4 +1,4 @@
-nested.input.md:3:2 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]
+nested.input.md:3:2 warning List marker space 2 does not match expected 1 (MD030/list-marker-space)
 nested.input.md:4:4 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]
 nested.input.md:5:4 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]
 nested.input.md:7:3 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]

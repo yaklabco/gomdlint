@@ -3,7 +3,6 @@ package rules
 import (
 	"bytes"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -269,10 +268,22 @@ func NewListMarkerSpaceRule() *ListMarkerSpaceRule {
 	}
 }
 
-// listMarkerPattern matches list markers and captures the spaces after.
-var listMarkerPattern = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])(\s+)`)
+// spacingMismatch is a list item whose marker is followed by the wrong
+// number of spaces.
+type spacingMismatch struct {
+	item     *mdast.Node
+	marker   listItemMarker
+	actual   int
+	expected int
+}
 
 // Apply checks for correct spaces after list markers.
+//
+// Like markdownlint, a list uses the single-line setting when every item
+// occupies exactly one line, and the multi-line setting otherwise. Markers are
+// located through the AST, so lists inside blockquotes and lists nested on a
+// shared line are checked too. The fix changes the item's content column, so
+// it is only offered where that keeps the list structure.
 func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -283,78 +294,92 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	olSingle := ctx.OptionInt("ol_single", 1)
 	olMulti := ctx.OptionInt("ol_multi", 1)
 
-	var diags []lint.Diagnostic
-
-	lists := ctx.Lists()
-	for _, list := range lists {
+	plan := newListShiftPlan(ctx.File)
+	var mismatches []spacingMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
-		}
-
-		isOrdered := lint.IsOrderedList(list)
-		isTight := lint.IsTightList(list)
-
-		var expectedSpaces int
-		if isOrdered {
-			if isTight {
-				expectedSpaces = olSingle
-			} else {
-				expectedSpaces = olMulti
-			}
-		} else {
-			if isTight {
-				expectedSpaces = ulSingle
-			} else {
-				expectedSpaces = ulMulti
-			}
+			return nil, ctx.Ctx.Err()
 		}
 
 		items := lint.ListItems(list)
-		for _, item := range items {
-			pos := item.SourcePosition()
-			if !pos.IsValid() {
-				continue
-			}
-
-			lineContent := lint.LineContent(ctx.File, pos.StartLine)
-			match := listMarkerPattern.FindSubmatch(lineContent)
-			if match == nil {
-				continue
-			}
-
-			actualSpaces := len(match[3])
-			if actualSpaces == expectedSpaces {
-				continue
-			}
-
-			line := ctx.File.Lines[pos.StartLine-1]
-			indent := match[1]
-			marker := match[2]
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			markerEnd := line.StartOffset + len(indent) + len(marker)
-			spacesEnd := markerEnd + actualSpaces
-			builder.ReplaceRange(markerEnd, spacesEnd, strings.Repeat(" ", expectedSpaces))
-
-			diagPos := mdast.SourcePosition{
-				StartLine:   pos.StartLine,
-				StartColumn: len(indent) + len(marker) + 1,
-				EndLine:     pos.StartLine,
-				EndColumn:   len(indent) + len(marker) + actualSpaces + 1,
-			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				fmt.Sprintf("List marker space %d does not match expected %d", actualSpaces, expectedSpaces)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Use %d space(s) after the list marker", expectedSpaces)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+		single := listItemsAreSingleLines(ctx.File, list, items)
+		expected := ulMulti
+		switch {
+		case lint.IsOrderedList(list) && single:
+			expected = olSingle
+		case lint.IsOrderedList(list):
+			expected = olMulti
+		case single:
+			expected = ulSingle
 		}
+
+		for _, item := range items {
+			marker, found := findListItemMarker(ctx.File, item)
+			if !found || !marker.HasContent() {
+				continue
+			}
+			actual := marker.Spacing()
+			if actual > maxListItemSpacing {
+				// The content is indented code that starts one space after
+				// the marker.
+				actual = 1
+			}
+			if actual == expected {
+				continue
+			}
+			mismatches = append(mismatches, spacingMismatch{item: item, marker: marker, actual: actual, expected: expected})
+			if expected < 1 || expected > maxListItemSpacing || marker.Spacing() > maxListItemSpacing {
+				continue
+			}
+			if layout, ok := plan.layout(item); ok {
+				plan.propose(item, listShift{
+					markerCol:  layout.markerCol,
+					contentCol: layout.markerCol + marker.Width() + expected,
+				})
+			}
+		}
+	}
+	safeShifts := plan.resolve()
+
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		marker := mismatch.marker
+		pos := mdast.SourcePosition{
+			StartLine:   marker.Line,
+			StartColumn: marker.End - marker.LineStart + 1,
+			EndLine:     marker.Line,
+			EndColumn:   marker.ContentStart - marker.LineStart + 1,
+		}
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+			fmt.Sprintf("List marker space %d does not match expected %d", mismatch.actual, mismatch.expected)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(fmt.Sprintf("Use %d space(s) after the list marker", mismatch.expected))
+		if _, safe := safeShifts[mismatch.item]; safe {
+			// The edit covers the marker too, so that no other list rule
+			// changes this marker in the same pass.
+			builder := fix.NewEditBuilder()
+			builder.ReplaceRange(marker.Start, marker.ContentStart,
+				string(ctx.File.Content[marker.Start:marker.End])+strings.Repeat(" ", mismatch.expected))
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
+}
+
+// listItemsAreSingleLines reports whether every item of a list occupies one
+// line, which markdownlint checks by comparing the list's line count with its
+// number of items.
+func listItemsAreSingleLines(file *mdast.FileSnapshot, list *mdast.Node, items []*mdast.Node) bool {
+	if len(items) == 0 {
+		return true
+	}
+	firstLine := list.SourcePosition().StartLine
+	if marker, found := findListItemMarker(file, items[0]); found {
+		firstLine = marker.Line
+	}
+	return nodeLastLine(list)-firstLine+1 == len(items)
 }
 
 // BlanksAroundListsRule checks that lists are surrounded by blank lines.

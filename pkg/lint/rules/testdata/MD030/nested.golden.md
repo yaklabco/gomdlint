@@ -1,6 +1,6 @@
 # Nested Wrong Marker Spacing
 
-- Top level with two spaces
+-  Top level with two spaces
   - Nested with two spaces
   - Another nested with two spaces
 
