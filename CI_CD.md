@@ -1,287 +1,210 @@
-# CI/CD Setup
+# CI/CD
 
-This document describes the continuous integration and deployment setup for
-gomdlint.
+This document describes the continuous integration checks and the release
+process for gomdlint. Three GitHub Actions workflows live in
+`.github/workflows`. GoReleaser builds and publishes each release from
+`.goreleaser.yml`. A release starts when a maintainer pushes a version tag.
+No bot opens release pull requests or creates tags.
 
 ## Overview
 
-The project uses a modern, automated release workflow based on:
-
-- **Release Please**: Automated changelog generation and version bumping
-- **GoReleaser**: Cross-platform binary building and GitHub release publishing
-- **GitHub Actions**: Orchestration of the entire workflow
-
-## Workflow Architecture
-
 ```mermaid
-graph TD
-    A[Developer commits with conventional commits] --> B[Push to main]
-    B --> C[Release Please Action]
-    C --> D{Changes since last release?}
-    D -->|Yes| E[Create/Update Release PR]
-    D -->|No| F[No action]
-    E --> G[Maintainer reviews and merges PR]
-    G --> H[Release Please creates Git tag]
-    H --> I[Release workflow triggered]
-    I --> J[GoReleaser builds binaries]
-    J --> K[Publish GitHub Release with artifacts]
-
-    B --> L[Lint workflow]
-    B --> M[Test workflow]
+flowchart TD
+    PR[Pull request to main] --> Checks[checks.yml]
+    Main[Push to main] --> Checks
+    Tag[Push of a v* tag] --> Release[release.yml]
+    Release --> Gate[checks.yml through workflow_call]
+    Gate -->|both jobs pass| GR[GoReleaser v2.18.3]
+    GR --> GH[GitHub release with archives and checksums.txt]
+    GR --> Tap[gomdlint.rb in yaklabco/homebrew-tap]
+    Weekly[Weekly schedule or manual run] --> Compare[compare.yml]
 ```
 
 ## Workflows
 
-### 1. Lint Workflow (.github/workflows/lint.yml)
+### checks.yml
 
-Runs on every push and PR to main when Go files change.
+`checks.yml` runs on every push to `main`, on every pull request that
+targets `main`, and when `release.yml` calls it. A newer run for the same
+ref cancels an older one. The workflow token is read-only.
 
-- Executes `golangci-lint` with strict settings
-- Uses golangci-lint action v7 for optimal performance
-- Caches Go modules for faster runs
+The `test` job runs these steps in order:
 
-### 2. Test Workflow (.github/workflows/test.yml)
+1. `gofmt -l .` lists unformatted files, and the step fails if it finds any.
+2. `go vet ./...` runs the standard vet analyzers.
+3. golangci-lint v2.11.4 runs with the settings in `.golangci.yml`.
+4. `go build` compiles `./cmd/gomdlint`.
+5. `go test -race` runs every test with the race detector and writes
+   `coverage.out`.
+6. `go mod tidy` runs, and the step fails if `go.mod` or `go.sum` changes.
+7. The cross-compile step builds `./cmd/gomdlint` with `CGO_ENABLED=0` for
+   the ten release platforms.
 
-Runs on every push and PR to main when Go files change.
+The `govulncheck` job runs govulncheck v1.9.0 on `./...`. It fails when code
+in this module can reach a known vulnerability in a dependency or in the
+standard library of the Go toolchain from `go.mod`. govulncheck also lists
+vulnerabilities in imported packages whose affected functions gomdlint never
+calls. Those do not fail the job.
 
-- Executes all tests with race detection
-- Generates coverage reports
-- Uploads coverage to Codecov (optional)
+### release.yml
 
-### 3. Release Please Workflow (.github/workflows/release-please.yml)
+`release.yml` runs when a maintainer pushes a tag that matches `v*`. Its
+`checks` job calls `checks.yml`, so a release runs the same `test` and
+`govulncheck` jobs as a pull request. The `release` job needs the `checks`
+job and runs only when both of its jobs pass. A tag on a commit that fails
+the checks publishes nothing.
 
-Runs on every push to main.
+The `release` job is the only job with `contents: write`. It checks out the
+full history so that GoReleaser can read the tags. It installs Go from
+`go.mod` without restoring a cache. It then runs GoReleaser v2.18.3 with
+`release --clean`.
 
-**What it does:**
+### compare.yml
 
-- Analyzes commit messages since last release
-- Determines next version using semantic versioning
-- Creates or updates a release PR with:
-  - Version bump in relevant files
-  - Updated CHANGELOG.md with categorized changes
-  - Release notes
+`compare.yml` benchmarks gomdlint against markdownlint-cli every Sunday at
+03:00 UTC and when it is started by hand. It builds gomdlint, installs
+markdownlint-cli from npm, and clones the repositories listed in
+`bench/repos.txt` into a cached directory. It then runs
+`bench/scripts/run-bench.sh` and `bench/scripts/generate-plots.sh`. The
+workflow uploads `bench/results/` as the artifact
+`comparison-results-<run number>` and keeps it for 90 days.
+`stave bench:compare` runs the same comparison locally.
 
-**Configuration:**
+GitHub disables a scheduled workflow after 60 days without activity in the
+repository. When that happens, the weekly runs stop until someone enables
+the workflow again, for example with `gh workflow enable compare.yml`.
 
-- `.release-please-config.json`: Release Please settings
-- `.release-please-manifest.json`: Current version tracking
+## GoReleaser
 
-### 4. Release Workflow (.github/workflows/release.yml)
+`.goreleaser.yml` defines what a release contains.
 
-Triggers when a version tag (v*.*.*) is pushed.
+- Before the build, hooks generate bash, zsh and fish completions into
+  `.buildcache/completions`.
+- GoReleaser builds with `CGO_ENABLED=0` for Linux, macOS, Windows and
+  FreeBSD on amd64 and arm64, and for OpenBSD and NetBSD on amd64.
+- The linker flags strip debug information and set `main.version`,
+  `main.commit` and `main.date`. `gomdlint version` prints these values. A
+  plain `go build` reports `dev`, `none` and `unknown`.
+- Archives are named `gomdlint_<version>_<Os>_<arch>`, with `x86_64` in
+  place of amd64. Windows archives are zip files and the others are tar.gz
+  files. Each archive holds the binary, `LICENSE`, `README.md` and a
+  `completions` directory.
+- `checksums.txt` lists the SHA-256 sum of every archive.
+- The GitHub release is named `v<version>`. A tag with a prerelease suffix,
+  such as `v1.0.0-rc.1`, produces a prerelease. GoReleaser's own changelog
+  is disabled, and the release notes point to `CHANGELOG.md`.
+- GoReleaser writes the Homebrew formula `gomdlint.rb` to the root of
+  `yaklabco/homebrew-tap`. `brew install yaklabco/tap/gomdlint` installs it.
 
-**What it does:**
+The formula comes from the `brews` section, which GoReleaser deprecates in
+favour of `homebrew_casks`. `goreleaser check` therefore reports the
+deprecation and exits with status 2. A move to a cask also needs a
+`tap_migrations.json` entry and the removal of `gomdlint.rb` in the tap,
+released together with the configuration change. Without both, users who
+installed the formula stay on its last version.
 
-- Builds binaries for multiple platforms:
-  - Linux (amd64, arm64)
-  - macOS (amd64, arm64)
-  - Windows (amd64, arm64)
-- Generates checksums
-- Creates GitHub release with artifacts
-- Injects version info via ldflags
+## Go toolchain
 
-**Configuration:**
+`go.mod` sets two Go versions.
 
-- `.goreleaser.yml`: GoReleaser build settings
+- `go 1.25.4` is the minimum Go version for anyone who imports the packages
+  or runs `go install`. Raising it affects those users.
+- `toolchain go1.26.9` selects the Go release that builds and tests
+  gomdlint in this repository. setup-go installs that release and sets
+  `GOTOOLCHAIN=local`. A local `go` command with the default
+  `GOTOOLCHAIN=auto` downloads it on first use. Go ignores this line when
+  gomdlint is a dependency of another module.
 
-## Conventional Commits
+To move to a newer patch release, run `go get toolchain@<release>`, for
+example `go get toolchain@go1.26.10`, and commit `go.mod`. golangci-lint
+refuses to lint a module whose toolchain is newer than the Go release that
+golangci-lint was built with. Before you move to a new minor release such as
+go1.27, raise the golangci-lint version in `checks.yml` to a release built
+with that Go version or a later one.
 
-Release Please requires conventional commit messages to work correctly.
+## Pinned tool versions
 
-### Format
+| Tool | Version | Where it is set |
+| --- | --- | --- |
+| Go toolchain | go1.26.9 | `toolchain` line in `go.mod` |
+| golangci-lint | v2.11.4 | `version` input in `checks.yml` |
+| govulncheck | v1.9.0 | `checks.yml` and `CI.Vuln` in `stavefile.go` |
+| GoReleaser | v2.18.3 | `version` input in `release.yml` |
 
-```text
-<type>(<scope>): <description>
+The workflows pin third-party actions to major version tags.
 
-[optional body]
+## Secrets and permissions
 
-[optional footer]
-```
+GitHub Actions provides `GITHUB_TOKEN`. Every workflow sets the default
+token permissions to `contents: read`. The GoReleaser job raises them to
+`contents: write` so that it can create the release and upload its assets.
+Every checkout sets `persist-credentials: false`, so the token is not
+written to `.git/config`.
 
-### Types
+`HOMEBREW_TAP_TOKEN` is a repository secret. It must hold a token that can
+write the contents of `yaklabco/homebrew-tap`. GoReleaser publishes the
+GitHub release before it updates the formula. If the token has expired or
+cannot write to the tap, the formula step fails after the release is
+already public, and the tap keeps the previous version. The v0.2.2 release
+failed this way with `401 Bad credentials`. Rotate the secret before the
+next tag. For a release that already failed at that step, edit
+`gomdlint.rb` in the tap by hand with the new version and the sums from the
+release's `checksums.txt`.
 
-- `feat`: New feature (triggers minor version bump)
-- `fix`: Bug fix (triggers patch version bump)
-- `perf`: Performance improvement
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `build`: Build system changes
-- `ci`: CI configuration changes
-- `docs`: Documentation only changes
-- `chore`: Maintenance tasks
+## Releasing a version
 
-### Breaking Changes
+1. Add a section for the version to `CHANGELOG.md` in a pull request and
+   merge it. The changelog follows the Keep a Changelog layout and is
+   written by hand.
+2. Tag the resulting commit on `main` with an annotated tag and push the
+   tag.
 
-Add `BREAKING CHANGE:` in the footer or `!` after type to trigger major version
-bump:
+   ```bash
+   git tag -a v0.3.0 -m "Release v0.3.0"
+   git push origin v0.3.0
+   ```
 
-```yaml
-feat!: redesign API interface
+3. Watch the Release workflow. The checks run first, and GoReleaser runs
+   only after they pass.
+4. Check the assets on the GitHub release and the version in `gomdlint.rb`
+   in `yaklabco/homebrew-tap`.
 
-BREAKING CHANGE: The API interface has been completely redesigned
-```
+If the checks fail, GoReleaser publishes nothing. Do not move or reuse a
+pushed tag. The Go module proxy may already have recorded the tagged commit,
+and a moved tag makes `go install` fail its checksum verification. Fix the
+problem on `main` and tag the next patch version.
 
-### Examples
+## Running the checks locally
 
-```bash
-feat: add markdown table linting
-fix: correct heading level calculation
-perf: optimize file reading with bufio
-refactor: simplify parser logic
-test: add comprehensive link validation tests
-ci: update golangci-lint to v2
-```
+`stave ci:gate` runs the checks from the `test` and `govulncheck` jobs in
+sequence. It uses the golangci-lint binary on your `PATH`, which should be
+v2.11.4 or another release built with Go 1.26 or later.
 
-## Release Process
-
-### Automated Flow
-
-1. **Develop**: Create commits using conventional commit messages
-2. **Push**: Push to main branch
-3. **Review**: Release Please creates/updates a release PR
-4. **Merge**: Merge the release PR when ready
-5. **Release**: Tag is created automatically, triggering binary builds
-
-### Manual Release (if needed)
-
-```bash
-# Tag a release manually
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
-```
-
-## Version Variables
-
-The application embeds version information at build time:
-
-```go
-// Set via ldflags during GoReleaser build
-var (
-    version = "dev"     // Semantic version
-    commit  = "none"    // Git commit SHA
-    date    = "unknown" // Build timestamp
-)
-```
-
-Development builds show:
-
-```yaml
-Version: dev
-Commit: none
-Built: unknown
-```
-
-Release builds show actual values:
-
-```yaml
-Version: v0.1.0
-Commit: abc123def456
-Built: 2025-11-30T12:34:56Z
-```
-
-## Configuration Files
-
-### .release-please-config.json
-
-Configures Release Please behavior:
-
-- `release-type`: Set to "go"
-- `package-name`: Project name
-- `bump-minor-pre-major`: Bump minor version before 1.0.0
-- `changelog-sections`: How to categorize commits
-
-### .release-please-manifest.json
-
-Tracks current version:
-
-```json
-{
-  ".": "0.0.0"
-}
-```
-
-Updated automatically by Release Please.
-
-### .goreleaser.yml
-
-Configures binary builds:
-
-- Build matrix (OS/arch combinations)
-- Binary name and location
-- Archive formats
-- Ldflags for version injection
-- Files to include in release
-
-## GitHub Permissions
-
-Workflows require these permissions:
-
-- `contents: write` - Create releases and tags
-- `pull-requests: write` - Create release PRs
-- `packages: write` - Publish packages (if needed)
-
-These are configured in the workflow files and work with `GITHUB_TOKEN`.
-
-## Testing Locally
-
-### Test GoReleaser build
+To test the release configuration without publishing anything, run:
 
 ```bash
-# Install GoReleaser
-brew install goreleaser
-
-# Test build without publishing
+goreleaser check
 goreleaser release --snapshot --clean --skip=publish
-
-# Check dist/ directory for built binaries
-ls -lah dist/
 ```
 
-### Test linting
-
-```bash
-golangci-lint run ./...
-```
-
-### Test version injection
-
-```bash
-go build -ldflags "-X main.version=test -X main.commit=abc123" ./cmd/gomdlint
-./gomdlint
-```
-
-## Best Practices
-
-1. **Commit Often**: Make small, focused commits with clear messages
-2. **Use Types**: Always prefix commits with the correct type
-3. **Test Before Push**: Run lints and tests locally
-4. **Review Release PRs**: Check changelog before merging
-5. **Don't Skip CI**: Never use `--no-verify` or bypass checks
-6. **Version Carefully**: Pre-1.0.0 versions can break freely
+`goreleaser check` exits with status 2 while the `brews` deprecation
+remains. The snapshot release writes every archive, `checksums.txt` and the
+formula to `dist/`. It also leaves the generated completions in
+`.buildcache/`.
 
 ## Troubleshooting
 
-### Release PR not created
+### golangci-lint says its Go version is lower than the targeted version
 
-- Check commit messages follow conventional format
-- Ensure there are commits since last release
-- Check GitHub Actions logs
+The golangci-lint binary was built with an older Go release than the
+toolchain in `go.mod`. Install a newer golangci-lint locally. If CI reports
+the error, raise the version in `checks.yml`.
 
-### Build fails on release
+### The tidy check fails
 
-- Test locally with `goreleaser --snapshot`
-- Check `.goreleaser.yml` syntax
-- Verify ldflags variable names match code
+Run `go mod tidy` and commit the changes to `go.mod` and `go.sum`.
 
-### Linter fails
+### The Homebrew formula step fails with 401 Bad credentials
 
-- Run `golangci-lint run` locally
-- Check `.golangci.yml` configuration
-- Use `//nolint:linter` with explanation if needed
-
-## References
-
-- [Release Please](https://github.com/googleapis/release-please)
-- [GoReleaser](https://goreleaser.com/)
-- [Conventional Commits](https://www.conventionalcommits.org/)
-- [Semantic Versioning](https://semver.org/)
+The token in the `HOMEBREW_TAP_TOKEN` secret has expired or cannot write to
+the tap. See [Secrets and permissions](#secrets-and-permissions).
