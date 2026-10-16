@@ -374,6 +374,56 @@ func TestNoMultipleSpaceClosedATXRule(t *testing.T) {
 	}
 }
 
+// TestNoMissingSpaceClosedATXRule_MarkdownlintParity verifies MD020 matches
+// markdownlint 0.41, including escaped trailing hashes.
+func TestNoMissingSpaceClosedATXRule_MarkdownlintParity(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "escaped trailing hash is content", input: "## Learn C\\#\n", wantLines: []int{}},
+		{
+			// markdownlint inserts the space before the escaped hash
+			// ("Learn C \# #"); keeping "C\#" intact preserves the text.
+			name:      "escaped hash before a closing hash",
+			input:     "## Learn C\\##\n",
+			wantLines: []int{1},
+			wantFixed: "## Learn C\\# #\n",
+		},
+		{name: "hash inside closed heading content", input: "## C# ##\n", wantLines: []int{}},
+		{name: "inside an HTML comment", input: "<!--\n#x#\n-->\n", wantLines: []int{}},
+		{name: "inside a fenced code block", input: "```\n#x#\n```\n", wantLines: []int{}},
+		{name: "indented line", input: "  #Heading#\n", wantLines: []int{}},
+		{name: "blockquote", input: "> #Heading#\n", wantLines: []int{}},
+		{
+			name:      "missing space before closing hash with trailing whitespace",
+			input:     "# Heading#   \n",
+			wantLines: []int{1},
+			wantFixed: "# Heading #\n",
+		},
+		{
+			name:      "missing space after opening hash",
+			input:     "#Heading #\n",
+			wantLines: []int{1},
+			wantFixed: "# Heading #\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 // TestMultipleSpaceATXRules_MarkdownlintParity verifies MD019 and MD021
 // match markdownlint 0.41: both check parsed headings (so containers are
 // included and HTML is not), and MD019 leaves closed headings to MD021.

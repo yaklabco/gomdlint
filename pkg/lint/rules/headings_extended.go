@@ -206,80 +206,80 @@ func NewNoMissingSpaceClosedATXRule() *NoMissingSpaceClosedATXRule {
 	}
 }
 
-// closedATXPattern matches closed ATX headings.
-var closedATXPattern = regexp.MustCompile(`^(#{1,6})(.+?)(#{1,6})\s*$`)
+// closedATXPattern is markdownlint's MD020 grammar for a closed ATX heading
+// line: opening hashes, optional space, content that neither starts nor ends
+// with a hash, space or backslash, optional space, an optional escaped hash
+// that belongs to the content, closing hashes and trailing whitespace.
+var closedATXPattern = regexp.MustCompile(
+	`^(#+)([ \t]*)([^# \t\\]|[^# \t][^#]*?[^# \t\\])([ \t]*)((?:\\#)?)(#+)(\s*)$`)
+
+// Submatch indexes for closedATXPattern.
+const (
+	closedATXOpen = iota + 1
+	closedATXOpenSpace
+	closedATXContent
+	closedATXCloseSpace
+	closedATXEscape
+	closedATXClose
+	closedATXTrail
+)
 
 // Apply checks for missing space inside hashes on closed ATX headings.
+//
+// Like markdownlint, the check is line based: the hash must start the line
+// and lines in code and HTML blocks are skipped. An escaped hash (\#) is
+// content, so "## Learn C\#" is not a closed heading.
 func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	htmlLines := htmlBlockLines(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) || htmlLines[lineNum] {
 			continue
 		}
 
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := closedATXPattern.FindSubmatch(trimmed)
+		lineContent := lint.LineContent(ctx.File, lineNum)
+		match := closedATXPattern.FindSubmatch(lineContent)
 		if match == nil {
 			continue
 		}
 
-		openHashes := string(match[1])
-		content := match[2]
-		closeHashes := string(match[3])
+		openHashes := match[closedATXOpen]
+		content := match[closedATXContent]
+		escape := match[closedATXEscape]
+		closeHashes := match[closedATXClose]
 
-		// Check if there's no space at the beginning of content.
-		missingOpenSpace := len(content) > 0 && content[0] != ' ' && content[0] != '\t'
-		// Check if there's no space at the end of content.
-		missingCloseSpace := len(content) > 0 && content[len(content)-1] != ' ' && content[len(content)-1] != '\t'
-
+		missingOpenSpace := len(match[closedATXOpenSpace]) == 0
+		missingCloseSpace := len(match[closedATXCloseSpace]) == 0 || len(escape) > 0
 		if !missingOpenSpace && !missingCloseSpace {
 			continue
 		}
 
+		// Build fix. An escaped hash stays attached to the content (markdownlint
+		// moves it after the inserted space, which changes the heading text).
 		line := ctx.File.Lines[lineNum-1]
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
-			continue
+		replacement := string(openHashes) + " " + string(content)
+		if len(escape) > 0 {
+			replacement += string(match[closedATXCloseSpace]) + string(escape)
 		}
-
-		// Build fix.
+		replacement += " " + string(closeHashes)
 		builder := fix.NewEditBuilder()
-		contentStr := strings.TrimSpace(string(content))
+		builder.ReplaceRange(line.StartOffset, line.NewlineStart, replacement)
 
-		// Calculate positions and build replacement.
-		contentStart := line.StartOffset + hashStart + len(openHashes)
-		contentEnd := contentStart + len(content)
-
-		var newContent string
-		switch {
-		case missingOpenSpace && missingCloseSpace:
-			newContent = " " + contentStr + " "
-		case missingOpenSpace:
-			newContent = " " + string(content)
-		default:
-			newContent = string(content) + " "
-		}
-
-		builder.ReplaceRange(contentStart, contentEnd, newContent)
-
+		closeEnd := len(lineContent) - len(match[closedATXTrail])
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: hashStart + 1,
+			StartColumn: 1,
 			EndLine:     lineNum,
-			EndColumn:   hashStart + len(openHashes) + len(content) + len(closeHashes) + 1,
+			EndColumn:   closeEnd + 1,
 		}
 
 		var msg string
