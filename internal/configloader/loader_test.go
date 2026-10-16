@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // Register rules
 )
 
@@ -289,6 +290,102 @@ rules:
 		if md010.Severity == nil || *md010.Severity != "error" {
 			t.Error("expected MD010 severity to be error")
 		}
+	}
+}
+
+// loadProject writes content as the project config in a fresh directory and
+// loads it without machine-level configuration.
+func loadProject(t *testing.T, content string) (*LoadResult, error) {
+	t.Helper()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	return Load(context.Background(), LoadOptions{
+		WorkingDir:         dir,
+		IgnoreSystemConfig: true,
+		IgnoreUserConfig:   true,
+		IgnoreMarkdownlint: true,
+		IgnoreEnv:          true,
+		NonInteractive:     true,
+	})
+}
+
+func TestLoad_ConfigFileDisablesBackups(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "backups:\n  enabled: false\n")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if lint.BackupConfigFromConfig(result.Config).Enabled {
+		t.Error("backups.enabled: false in a config file must disable backups")
+	}
+}
+
+func TestLoad_BackupsDefaultToEnabled(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "backups:\n  mode: sidecar\n")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !lint.BackupConfigFromConfig(result.Config).Enabled {
+		t.Error("backups must stay enabled when no layer disables them")
+	}
+}
+
+func TestLoad_LaterLayerReenablesBackups(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	explicit := filepath.Join(dir, "explicit.yml")
+	if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte("backups:\n  enabled: false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(explicit, []byte("backups:\n  enabled: true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := Load(context.Background(), LoadOptions{
+		WorkingDir:         dir,
+		ExplicitPath:       explicit,
+		IgnoreSystemConfig: true,
+		IgnoreUserConfig:   true,
+		IgnoreMarkdownlint: true,
+		IgnoreEnv:          true,
+		NonInteractive:     true,
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !lint.BackupConfigFromConfig(result.Config).Enabled {
+		t.Error("an explicit config must be able to re-enable backups")
+	}
+}
+
+func TestLoad_EnvDisablesBackups(t *testing.T) {
+	t.Setenv("GOMDLINT_BACKUPS_ENABLED", "false")
+
+	dir := t.TempDir()
+	result, err := Load(context.Background(), LoadOptions{
+		WorkingDir:         dir,
+		IgnoreSystemConfig: true,
+		IgnoreUserConfig:   true,
+		IgnoreMarkdownlint: true,
+		NonInteractive:     true,
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if lint.BackupConfigFromConfig(result.Config).Enabled {
+		t.Error("GOMDLINT_BACKUPS_ENABLED=false must disable backups")
 	}
 }
 

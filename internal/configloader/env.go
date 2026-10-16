@@ -134,7 +134,7 @@ func setBoolField(cfg *config.Config, field string, value bool) error {
 	case "dry_run":
 		cfg.DryRun = value
 	case "backups.enabled":
-		cfg.Backups.Enabled = value
+		cfg.Backups.Enabled = config.Bool(value)
 	case "no_backups":
 		cfg.NoBackups = value
 	default:

@@ -180,6 +180,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 
 	finalCfg := loadResult.Config
+	applyExplicitFlags(cmd, cfg, finalCfg)
 
 	// Log warnings from config loading.
 	for _, warning := range loadResult.Warnings {
@@ -281,6 +282,26 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 
 	return resultError(result, flags.strict)
+}
+
+// applyExplicitFlags gives flags the user set explicitly the last word over
+// the loaded configuration. The configuration merge only sees non-zero
+// values, so without this --fix=false or --jobs 0 could not override the
+// environment.
+func applyExplicitFlags(cmd *cobra.Command, flagCfg, finalCfg *config.Config) {
+	changed := cmd.Flags().Changed
+	if changed("fix") {
+		finalCfg.Fix = flagCfg.Fix
+	}
+	if changed("dry-run") {
+		finalCfg.DryRun = flagCfg.DryRun
+	}
+	if changed("no-backups") {
+		finalCfg.NoBackups = flagCfg.NoBackups
+	}
+	if changed("jobs") {
+		finalCfg.Jobs = flagCfg.Jobs
+	}
 }
 
 // resultError turns the outcome of a completed run into the command error

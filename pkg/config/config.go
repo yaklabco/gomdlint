@@ -21,8 +21,22 @@ type RuleConfig struct {
 
 // BackupsConfig controls backup behavior when fixing files.
 type BackupsConfig struct {
-	Enabled bool   `mapstructure:"enabled" yaml:"enabled"`
+	// Enabled turns backups on. Nil means the setting was not given, so a
+	// configuration layer can turn backups off without the zero value of a
+	// plain bool being mistaken for "not set". Use IsEnabled to read it.
+	Enabled *bool  `mapstructure:"enabled" yaml:"enabled,omitempty"`
 	Mode    string `mapstructure:"mode" yaml:"mode"` // "sidecar", "xdg", etc.
+}
+
+// IsEnabled reports whether backups are enabled. An unset value counts as
+// disabled; NewConfig enables backups explicitly.
+func (b BackupsConfig) IsEnabled() bool {
+	return b.Enabled != nil && *b.Enabled
+}
+
+// Bool returns a pointer to value, for optional boolean settings.
+func Bool(value bool) *bool {
+	return &value
 }
 
 // OutputFormat specifies the output format for diagnostics.
@@ -143,7 +157,7 @@ func NewConfig() *Config {
 		Rules:           make(map[string]RuleConfig),
 		Ignore:          nil,
 		Backups: BackupsConfig{
-			Enabled: true,
+			Enabled: Bool(true),
 			Mode:    "sidecar",
 		},
 		Format:     FormatText,

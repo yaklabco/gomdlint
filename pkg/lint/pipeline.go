@@ -415,7 +415,7 @@ func BackupConfigFromConfig(cfg *config.Config) fsutil.BackupConfig {
 		return fsutil.DefaultBackupConfig()
 	}
 	return fsutil.BackupConfig{
-		Enabled: cfg.Backups.Enabled && !cfg.NoBackups,
+		Enabled: cfg.Backups.IsEnabled() && !cfg.NoBackups,
 		Mode:    fsutil.BackupMode(cfg.Backups.Mode),
 	}
 }
