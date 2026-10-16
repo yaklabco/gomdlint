@@ -27,7 +27,7 @@ import (
 var engineFixtures = map[string]string{
 	"umlaut.md":   umlautContent,
 	"emoji.md":    "# Title\n\n\U0001F600 trailing   \nSecond\n## Next\nBody\n",
-	"bom.md":      "\xef\xbb\xbf# Title\n\nText   \n",
+	"bom.md":      "\xef\xbb\xbf# Tïtle   \n\nText   \n",
 	"crlf.md":     "# Title\r\n\r\nÄÖÜ text   \r\n* item\r\n",
 	"noeol.md":    "# Title\n\nNo final newline",
 	"trailing.md": "# Title\n\nText\n\n\n\n",
@@ -124,6 +124,7 @@ func TestSARIFReporter_EngineFixesRoundTrip(t *testing.T) {
 	sarifResults := log.Runs[0].Results
 
 	checked := make(map[string]int, len(engineFixtures))
+	bomFirstLine := false
 	next := 0
 	for _, file := range result.Files {
 		name := filepath.Base(file.Path)
@@ -144,6 +145,9 @@ func TestSARIFReporter_EngineFixesRoundTrip(t *testing.T) {
 			got := applySARIFFix(t, content, sarifResult.Fixes[0].ArtifactChanges[0])
 			assert.Equal(t, string(want), string(got), "%s %s at %d:%d", name, diag.RuleID, diag.StartLine, diag.StartColumn)
 			checked[name]++
+			if name == "bom.md" && diag.StartLine == 1 {
+				bomFirstLine = true
+			}
 		}
 	}
 
@@ -151,4 +155,5 @@ func TestSARIFReporter_EngineFixesRoundTrip(t *testing.T) {
 	for _, name := range names {
 		assert.Positive(t, checked[name], "%s has at least one fix to check", name)
 	}
+	assert.True(t, bomFirstLine, "a fix on the line that starts with the byte order mark is checked")
 }

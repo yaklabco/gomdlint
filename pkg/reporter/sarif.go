@@ -514,15 +514,18 @@ func isTrailingEmptyLine(snapshot *mdast.FileSnapshot, line int) bool {
 // change in a fix to name a distinct file, so every edit becomes a
 // replacement in one change, in the order the rule produced them. Edits that
 // change nothing are dropped. There is no fix without a snapshot to locate
-// the edits in, or when any edit falls outside the file.
+// the edits in, when any edit falls outside the file, or when any edit starts
+// in or before a byte order mark: text regions ignore the mark, so a consumer
+// would apply a different change.
 func buildFix(location SARIFArtifactLocation, snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) (SARIFFix, bool) {
 	if snapshot == nil || len(diag.FixEdits) == 0 {
 		return SARIFFix{}, false
 	}
 
+	firstTextOffset := display.BOMLength(snapshot.Content)
 	replacements := make([]SARIFReplacement, 0, len(diag.FixEdits))
 	for _, edit := range diag.FixEdits {
-		if edit.StartOffset < 0 || edit.EndOffset < edit.StartOffset || edit.EndOffset > len(snapshot.Content) {
+		if edit.StartOffset < firstTextOffset || edit.EndOffset < edit.StartOffset || edit.EndOffset > len(snapshot.Content) {
 			return SARIFFix{}, false
 		}
 		if edit.StartOffset == edit.EndOffset && edit.NewText == "" {

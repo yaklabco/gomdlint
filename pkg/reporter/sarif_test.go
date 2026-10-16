@@ -509,6 +509,41 @@ func TestSARIFReporter_OmitsFixesThatCannotBeLocated(t *testing.T) {
 	}
 }
 
+func TestSARIFReporter_OmitsFixesThatTouchTheByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	edits := [][]fix.TextEdit{
+		{{StartOffset: 0, EndOffset: 3}},                // removes the byte order mark
+		{{StartOffset: 1, EndOffset: 5}},                // starts inside it
+		{{StartOffset: 0, EndOffset: 0, NewText: "x"}},  // inserts before it
+		{{StartOffset: 3, EndOffset: 3, NewText: "x"}},  // inserts after it: representable
+		{{StartOffset: 3, EndOffset: 5, NewText: "##"}}, // replaces text after it: representable
+	}
+
+	diags := make([]lint.Diagnostic, 0, len(edits))
+	for _, edit := range edits {
+		diags = append(diags, lint.Diagnostic{RuleID: "MD018", StartLine: 1, FixEdits: edit})
+	}
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "bom.md"), "\xef\xbb\xbf# Title\n", diags...),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
+	require.Len(t, run.Results, len(edits))
+
+	// SARIF text regions ignore the byte order mark, so an edit of its bytes
+	// cannot be expressed and a consumer would apply a different change.
+	for idx := range 3 {
+		assert.Empty(t, run.Results[idx].Fixes, "edit %d touches the byte order mark", idx)
+	}
+	for idx := 3; idx < len(edits); idx++ {
+		require.Len(t, run.Results[idx].Fixes, 1, "edit %d", idx)
+	}
+	assert.Equal(t, reporter.SARIFRegion{StartLine: 1, StartColumn: 1, EndLine: 1, EndColumn: 3},
+		run.Results[4].Fixes[0].ArtifactChanges[0].Replacements[0].DeletedRegion)
+}
+
 func TestSARIFReporter_DescribesRulesFromRegistry(t *testing.T) {
 	t.Parallel()
 
