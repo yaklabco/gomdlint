@@ -84,6 +84,7 @@ func (m *mapper) mapNode(gmNode ast.Node) *mdast.Node {
 
 	case *ast.ListItem:
 		node = mdast.NewNode(mdast.NodeListItem)
+		node.Block = mdast.NewBlockAttrs().WithListItem(&mdast.ListItemAttrs{ContentIndent: gmn.Offset})
 		m.mapChildren(gmNode, node)
 		m.setContainerSpans(node, gmNode, true)
 

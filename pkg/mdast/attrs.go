@@ -8,8 +8,20 @@ type BlockAttrs struct {
 	// List holds list-specific attributes for NodeList.
 	List *ListAttrs
 
+	// ListItem holds list item attributes for NodeListItem.
+	ListItem *ListItemAttrs
+
 	// CodeBlock holds code block attributes for NodeCodeBlock.
 	CodeBlock *CodeBlockAttrs
+}
+
+// ListItemAttrs holds attributes for list item nodes.
+type ListItemAttrs struct {
+	// ContentIndent is the width, in columns, from the start of the
+	// enclosing container's content to the start of the item's content: the
+	// marker's own indentation, the marker and the spaces after it. Lines
+	// that continue the item are indented by at least this much.
+	ContentIndent int
 }
 
 // ListAttrs holds attributes for list nodes.
@@ -136,6 +148,12 @@ func (a *BlockAttrs) WithHeadingLevel(level int) *BlockAttrs {
 // WithList sets list attributes and returns the BlockAttrs for chaining.
 func (a *BlockAttrs) WithList(attrs *ListAttrs) *BlockAttrs {
 	a.List = attrs
+	return a
+}
+
+// WithListItem sets list item attributes and returns the BlockAttrs for chaining.
+func (a *BlockAttrs) WithListItem(attrs *ListItemAttrs) *BlockAttrs {
+	a.ListItem = attrs
 	return a
 }
 

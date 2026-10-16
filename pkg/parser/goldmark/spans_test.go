@@ -361,6 +361,30 @@ func TestSpansSurviveContainers(t *testing.T) {
 	})
 }
 
+func TestListItemContentIndent(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		indent int
+	}{
+		{"bullet", "- a\n", 2},
+		{"ordered with two spaces", "1.  b\n", 4},
+		{"indented marker", "   - c\n", 5},
+		{"content that is indented code", "-     code\n", 2},
+		{"empty item", "-\n", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			item := nthNode(file.Root, mdast.NodeListItem, 0)
+			require.NotNil(t, item)
+			require.NotNil(t, item.Block)
+			require.NotNil(t, item.Block.ListItem)
+			require.Equal(t, tt.indent, item.Block.ListItem.ContentIndent)
+		})
+	}
+}
+
 func TestCodeBlockFenceAttributes(t *testing.T) {
 	tests := []struct {
 		name   string
