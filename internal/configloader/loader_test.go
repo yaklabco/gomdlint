@@ -313,6 +313,103 @@ func loadProject(t *testing.T, content string) (*LoadResult, error) {
 	})
 }
 
+func TestLoad_WarnsAboutUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	content := `flavour: gfm
+ignor:
+  - "docs/**"
+format: json
+backups:
+  enable: false
+rules:
+  MD013:
+    line_length: 120
+    enabled: true
+  MD009:
+    severity: error
+unknown_section: 1
+`
+	result, err := loadProject(t, content)
+	if err != nil {
+		t.Fatalf("unknown keys must not fail loading: %v", err)
+	}
+
+	want := []string{
+		`:1: unknown key "flavour" (did you mean "flavor"?)`,
+		`:2: unknown key "ignor" (did you mean "ignore"?)`,
+		`:4: "format" cannot be set in a config file; use the --format flag`,
+		`:6: unknown key "backups.enable" (did you mean "backups.enabled"?)`,
+		`:9: unknown key "rules.MD013.line_length"; rule options belong under "rules.MD013.options"`,
+		`:13: unknown key "unknown_section"`,
+	}
+	joined := strings.Join(result.Warnings, "\n")
+	for _, fragment := range want {
+		if !strings.Contains(joined, fragment) {
+			t.Errorf("warnings do not contain %q:\n%s", fragment, joined)
+		}
+	}
+	if len(result.Warnings) != len(want) {
+		t.Errorf("expected %d warnings, got %d:\n%s", len(want), len(result.Warnings), joined)
+	}
+}
+
+func TestLoad_KnownKeysDoNotWarn(t *testing.T) {
+	t.Parallel()
+
+	content := `flavor: gfm
+severity_default: warning
+ignore:
+  - "docs/**"
+backups:
+  enabled: false
+  mode: sidecar
+rules:
+  MD013:
+    enabled: true
+    severity: error
+    auto_fix: false
+    options:
+      max: 120
+rule_defaults:
+  MD009:
+    enabled: true
+`
+	result, err := loadProject(t, content)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", result.Warnings)
+	}
+}
+
+// TestGeneratedTemplatesLoadCleanly keeps `gomdlint init` output free of
+// settings the loader ignores.
+func TestGeneratedTemplatesLoadCleanly(t *testing.T) {
+	t.Parallel()
+
+	for _, opts := range []config.TemplateOptions{
+		{Format: "yaml"},
+		{Format: "yaml", Full: true},
+		{Format: "json"},
+		{Format: "json", Full: true},
+	} {
+		content, err := config.GenerateTemplate(opts)
+		if err != nil {
+			t.Fatalf("GenerateTemplate(%+v) error = %v", opts, err)
+		}
+
+		result, err := loadProject(t, string(content))
+		if err != nil {
+			t.Fatalf("template %+v does not load: %v", opts, err)
+		}
+		if len(result.Warnings) != 0 {
+			t.Errorf("template %+v loads with warnings: %v", opts, result.Warnings)
+		}
+	}
+}
+
 func TestLoad_ConfigFileDisablesBackups(t *testing.T) {
 	t.Parallel()
 

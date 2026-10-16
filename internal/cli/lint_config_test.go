@@ -64,6 +64,19 @@ func backupFiles(t *testing.T, dir string) []string {
 	return backups
 }
 
+func TestLintWarnsAboutUnknownConfigKeys(t *testing.T) {
+	inProject(t, map[string]string{
+		"doc.md":        fixedDoc,
+		".gomdlint.yml": "flavour: gfm\n",
+	})
+
+	got := execute(t, "lint", "doc.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code)
+	assert.Contains(t, got.stderr, `unknown key "flavour" (did you mean "flavor"?)`)
+	assert.NotContains(t, got.stdout, "flavour")
+}
+
 func TestLintAppliesSeverityDefault(t *testing.T) {
 	inProject(t, map[string]string{
 		"doc.md":        trailingDoc,

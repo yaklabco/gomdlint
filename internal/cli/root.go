@@ -31,13 +31,17 @@ It targets CommonMark and GitHub Flavored Markdown (GFM), providing a rich
 rule system for both syntax and style checks. gomdlint can automatically fix
 many issues while ensuring safety through conflict detection, dry-run mode,
 and optional backups.`,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if err := validateColorMode(color); err != nil {
 				return err
 			}
+			level := "info"
 			if debug {
-				logging.SetLevel("debug")
+				level = "debug"
 			}
+			// Commands log diagnostics to their own error stream.
+			logger := logging.NewWithWriter(cmd.ErrOrStderr(), level)
+			cmd.SetContext(logging.WithLogger(cmd.Context(), logger))
 			return nil
 		},
 		SilenceUsage:  true,

@@ -134,44 +134,44 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 
 	// Load and merge in order (lowest to highest precedence)
 
+	// loadFile merges one configuration file into cfg.
+	loadFile := func(kind, path string) error {
+		fileCfg, warnings, err := loadConfigFile(path)
+		if err != nil {
+			return fmt.Errorf("load %s config: %w", kind, err)
+		}
+		cfg = merge(cfg, fileCfg)
+		result.LoadedFrom = append(result.LoadedFrom, path)
+		result.Warnings = append(result.Warnings, warnings...)
+		return nil
+	}
+
 	// 1. System config
 	if !opts.IgnoreSystemConfig && paths.System != "" {
-		systemCfg, err := loadConfigFile(paths.System)
-		if err != nil {
-			return nil, fmt.Errorf("load system config: %w", err)
+		if err := loadFile("system", paths.System); err != nil {
+			return nil, err
 		}
-		cfg = merge(cfg, systemCfg)
-		result.LoadedFrom = append(result.LoadedFrom, paths.System)
 	}
 
 	// 2. User config
 	if !opts.IgnoreUserConfig && paths.User != "" {
-		userCfg, err := loadConfigFile(paths.User)
-		if err != nil {
-			return nil, fmt.Errorf("load user config: %w", err)
+		if err := loadFile("user", paths.User); err != nil {
+			return nil, err
 		}
-		cfg = merge(cfg, userCfg)
-		result.LoadedFrom = append(result.LoadedFrom, paths.User)
 	}
 
 	// 3. Project config
 	if !opts.IgnoreProjectConfig && paths.Project != "" {
-		projectCfg, err := loadConfigFile(paths.Project)
-		if err != nil {
-			return nil, fmt.Errorf("load project config: %w", err)
+		if err := loadFile("project", paths.Project); err != nil {
+			return nil, err
 		}
-		cfg = merge(cfg, projectCfg)
-		result.LoadedFrom = append(result.LoadedFrom, paths.Project)
 	}
 
 	// 4. Explicit config (--config flag)
 	if opts.ExplicitPath != "" {
-		explicitCfg, err := loadConfigFile(opts.ExplicitPath)
-		if err != nil {
-			return nil, fmt.Errorf("load explicit config: %w", err)
+		if err := loadFile("explicit", opts.ExplicitPath); err != nil {
+			return nil, err
 		}
-		cfg = merge(cfg, explicitCfg)
-		result.LoadedFrom = append(result.LoadedFrom, opts.ExplicitPath)
 	}
 
 	// 5. Environment variables
@@ -207,16 +207,17 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 	return result, nil
 }
 
-// loadConfigFile loads a configuration from a YAML file.
-func loadConfigFile(path string) (*config.Config, error) {
+// loadConfigFile loads a configuration from a YAML file. The warnings name
+// keys in the file that gomdlint does not read.
+func loadConfigFile(path string) (*config.Config, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, nil, fmt.Errorf("read file: %w", err)
 	}
 
 	cfg := &config.Config{}
 	if err := yaml.Unmarshal(content, cfg); err != nil {
-		return nil, fmt.Errorf("parse YAML: %w", err)
+		return nil, nil, fmt.Errorf("%s: parse YAML: %w", path, err)
 	}
 
 	// Ensure Rules map is initialized
@@ -226,10 +227,10 @@ func loadConfigFile(path string) (*config.Config, error) {
 
 	// Rule keys may be IDs, names or aliases in any case.
 	if err := normalizeRuleKeys(cfg, lint.DefaultRegistry); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
 
-	return cfg, nil
+	return cfg, unknownKeyWarnings(path, content), nil
 }
 
 // handleMarkdownlintMigration checks for markdownlint config and offers migration.

@@ -2,6 +2,7 @@
 package logging
 
 import (
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -27,7 +28,13 @@ func getDefaultLogger() *log.Logger {
 // New creates a new logger with the specified level.
 // Valid levels: "debug", "info", "warn", "error".
 func New(level string) *log.Logger {
-	logger := log.NewWithOptions(os.Stderr, log.Options{
+	return NewWithWriter(os.Stderr, level)
+}
+
+// NewWithWriter creates a logger with the specified level that writes to
+// writer.
+func NewWithWriter(writer io.Writer, level string) *log.Logger {
+	logger := log.NewWithOptions(writer, log.Options{
 		ReportTimestamp: false,
 		ReportCaller:    false,
 	})

@@ -130,7 +130,7 @@ func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
 }
 
 func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags) error {
-	logger := logging.Default()
+	logger := logging.FromContext(cmd.Context())
 
 	if err := validateLintFlags(flags, cfg.Jobs); err != nil {
 		return err
