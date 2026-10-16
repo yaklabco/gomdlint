@@ -1,8 +1,11 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -634,130 +637,230 @@ func (r *ProperNamesRule) DefaultEnabled() bool {
 	return false
 }
 
+// literalLinkPattern matches the addresses GFM turns into links (http(s)
+// URLs, www. addresses and e-mail addresses); names inside them are not
+// checked, as in markdownlint.
+var literalLinkPattern = regexp.MustCompile(
+	`(?i)(?:https?://|www\.)[^\s<>]*|[\w.+-]+@[\w-]+(?:\.[\w-]+)+`)
+
+// htmlTagPattern matches an HTML tag or comment.
+var htmlTagPattern = regexp.MustCompile(`(?s)<!--.*?-->|<[^>]*>`)
+
+// properNameRegion is a range of source text that MD044 checks.
+type properNameRegion struct {
+	rng mdast.SourceRange
+	// links is true when addresses in the region are links whose names are
+	// not checked (prose and code, but not raw HTML).
+	links bool
+}
+
 // Apply checks for incorrect capitalization of proper names.
+//
+// Like markdownlint, it checks the text of the document: prose, code spans
+// and code block content (code_blocks, default true) and HTML (html_elements,
+// default true). Link destinations, reference definitions, fence info
+// strings, URLs and e-mail addresses are never checked. Text between the tags
+// of an HTML block is prose, so it is checked even without html_elements.
+// Longer names are matched first, and text matching one configured name is
+// not checked against the names it contains, so "github.com" stays as written
+// when both "GitHub" and "github.com" are listed.
 func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Get proper names configuration
-	namesOption := ctx.Option("names", nil)
-	if namesOption == nil {
-		return nil, nil // No names configured
-	}
-
-	var properNames []string
-	switch n := namesOption.(type) {
-	case []string:
-		properNames = n
-	case []interface{}:
-		for _, item := range n {
-			if s, ok := item.(string); ok {
-				properNames = append(properNames, s)
-			}
-		}
-	}
-
+	properNames := ctx.OptionStringSlice("names", nil)
 	if len(properNames) == 0 {
 		return nil, nil
 	}
+	names := slices.Clone(properNames)
+	sort.SliceStable(names, func(i, j int) bool {
+		if len(names[i]) != len(names[j]) {
+			return len(names[i]) > len(names[j])
+		}
+		return names[i] < names[j]
+	})
 
-	includeCodeBlocks := ctx.OptionBool("code_blocks", true)
-	includeHTMLElements := ctx.OptionBool("html_elements", true)
+	regions := r.regions(ctx, ctx.OptionBool("code_blocks", true), ctx.OptionBool("html_elements", true))
+	content := ctx.File.Content
 
-	var diags []lint.Diagnostic
-
-	// Build patterns for each proper name
-	type namePattern struct {
-		correct string
-		pattern *regexp.Regexp
-	}
-	patterns := make([]namePattern, 0, len(properNames))
-
-	for _, name := range properNames {
-		// Create case-insensitive pattern that matches whole words
-		escaped := regexp.QuoteMeta(name)
-		pattern, err := regexp.Compile(`(?i)\b` + escaped + `\b`)
-		if err != nil {
+	// Addresses are excluded like matches of earlier (longer) names.
+	var exclusions []mdast.SourceRange
+	for _, region := range regions {
+		if !region.links {
 			continue
 		}
-		patterns = append(patterns, namePattern{correct: name, pattern: pattern})
+		for _, match := range literalLinkPattern.FindAllIndex(content[region.rng.StartOffset:region.rng.EndOffset], -1) {
+			exclusions = append(exclusions, mdast.SourceRange{
+				StartOffset: region.rng.StartOffset + match[0],
+				EndOffset:   region.rng.StartOffset + match[1],
+			})
+		}
 	}
 
-	// Check each line
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	var diags []lint.Diagnostic
+	for _, name := range names {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		// Skip code blocks if configured
-		if !includeCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
+		pattern := properNamePattern(name)
+		if pattern == nil {
 			continue
 		}
-
-		// Skip HTML if configured
-		if !includeHTMLElements && r.isLineInHTML(ctx.File, ctx.Root, lineNum) {
-			continue
-		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		for _, np := range patterns {
-			matches := np.pattern.FindAllIndex(lineContent, -1)
-			for _, match := range matches {
-				found := string(lineContent[match[0]:match[1]])
-
-				// Skip if already correct
-				if found == np.correct {
-					continue
+		for _, region := range regions {
+			text := content[region.rng.StartOffset:region.rng.EndOffset]
+			for _, match := range pattern.FindAllSubmatchIndex(text, -1) {
+				found := mdast.SourceRange{
+					StartOffset: region.rng.StartOffset + match[2],
+					EndOffset:   region.rng.StartOffset + match[3],
 				}
-
-				pos := mdast.SourcePosition{
-					StartLine:   lineNum,
-					StartColumn: match[0] + 1,
-					EndLine:     lineNum,
-					EndColumn:   match[1] + 1,
+				foundText := string(content[found.StartOffset:found.EndOffset])
+				if !slices.Contains(properNames, foundText) && !overlapsAny(exclusions, found) {
+					diags = append(diags, r.nameDiagnostic(ctx, found, foundText, name))
 				}
-
-				line := ctx.File.Lines[lineNum-1]
-
-				// Build fix
-				builder := fix.NewEditBuilder()
-				builder.ReplaceRange(
-					line.StartOffset+match[0],
-					line.StartOffset+match[1],
-					np.correct,
-				)
-
-				diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-					fmt.Sprintf("Proper name %q should be %q", found, np.correct)).
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion(fmt.Sprintf("Use %q", np.correct)).
-					WithFix(builder).
-					Build()
-				diags = append(diags, diag)
+				exclusions = append(exclusions, found)
 			}
 		}
 	}
 
+	sort.SliceStable(diags, func(i, j int) bool {
+		if diags[i].StartLine != diags[j].StartLine {
+			return diags[i].StartLine < diags[j].StartLine
+		}
+		return diags[i].StartColumn < diags[j].StartColumn
+	})
 	return diags, nil
 }
 
-func (r *ProperNamesRule) isLineInHTML(file *mdast.FileSnapshot, root *mdast.Node, lineNum int) bool {
-	if file == nil || root == nil || lineNum < 1 {
-		return false
+// properNamePattern matches name case-insensitively as a whole word, allowing
+// surrounding underscores, like markdownlint. The name is the first submatch.
+func properNamePattern(name string) *regexp.Regexp {
+	if name == "" {
+		return nil
 	}
+	start, end := `\b_*`, `_*\b`
+	if !isASCIIWordChar(name[0]) {
+		start = ""
+	}
+	if !isASCIIWordChar(name[len(name)-1]) {
+		end = ""
+	}
+	pattern, err := regexp.Compile(`(?i)` + start + `(` + regexp.QuoteMeta(name) + `)` + end)
+	if err != nil {
+		return nil
+	}
+	return pattern
+}
 
-	htmlBlocks := lint.HTMLBlocks(root)
-	for _, block := range htmlBlocks {
-		pos := block.SourcePosition()
-		if !pos.IsValid() {
-			continue
-		}
-		if lineNum >= pos.StartLine && lineNum <= pos.EndLine {
+// overlapsAny reports whether rng overlaps any of ranges.
+func overlapsAny(ranges []mdast.SourceRange, rng mdast.SourceRange) bool {
+	for _, other := range ranges {
+		if rng.StartOffset < other.EndOffset && other.StartOffset < rng.EndOffset {
 			return true
 		}
 	}
-
 	return false
+}
+
+func (r *ProperNamesRule) nameDiagnostic(
+	ctx *lint.RuleContext,
+	found mdast.SourceRange,
+	foundText, name string,
+) lint.Diagnostic {
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(found.StartOffset, found.EndOffset, name)
+	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, found),
+		fmt.Sprintf("Proper name %q should be %q", foundText, name)).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion(fmt.Sprintf("Use %q", name)).
+		WithFix(builder).
+		Build()
+}
+
+// regions returns the source text MD044 checks, in document order.
+func (r *ProperNamesRule) regions(ctx *lint.RuleContext, includeCode, includeHTML bool) []properNameRegion {
+	var regions []properNameRegion
+	add := func(rng mdast.SourceRange, links bool) {
+		if rng.StartOffset >= 0 && rng.StartOffset < rng.EndOffset && rng.EndOffset <= len(ctx.File.Content) {
+			regions = append(regions, properNameRegion{rng: rng, links: links})
+		}
+	}
+	//nolint:errcheck // Walk visitor never returns error.
+	_ = mdast.Walk(ctx.Root, func(node *mdast.Node) error {
+		switch node.Kind {
+		case mdast.NodeText, mdast.NodeSoftBreak, mdast.NodeHardBreak:
+			if insideAutolink(node) {
+				return nil
+			}
+			if start, ok := textPrefixStart(ctx.File, node); ok {
+				add(mdast.SourceRange{StartOffset: start, EndOffset: start + len(node.Inline.Text)}, true)
+			}
+		case mdast.NodeCodeSpan, mdast.NodeCodeBlock:
+			if includeCode {
+				add(node.ContentRange(), true)
+			}
+		case mdast.NodeHTMLInline:
+			if includeHTML {
+				add(node.SourceRange(), false)
+			}
+		case mdast.NodeHTMLBlock:
+			r.addHTMLBlockRegions(node, includeHTML, add)
+		}
+		return nil
+	})
+	return regions
+}
+
+// addHTMLBlockRegions adds an HTML block's text. markdownlint reads the
+// block as Markdown: text between the tags is prose and is always checked,
+// while the tags (and comment blocks) are checked only with html_elements.
+func (r *ProperNamesRule) addHTMLBlockRegions(
+	block *mdast.Node,
+	includeHTML bool,
+	add func(mdast.SourceRange, bool),
+) {
+	rng := block.SourceRange()
+	if lint.IsHTMLComment(block) {
+		if includeHTML {
+			add(rng, false)
+		}
+		return
+	}
+	text := block.Text()
+	prev := 0
+	for _, tag := range htmlTagPattern.FindAllIndex(text, -1) {
+		add(mdast.SourceRange{StartOffset: rng.StartOffset + prev, EndOffset: rng.StartOffset + tag[0]}, true)
+		if includeHTML {
+			add(mdast.SourceRange{StartOffset: rng.StartOffset + tag[0], EndOffset: rng.StartOffset + tag[1]}, false)
+		}
+		prev = tag[1]
+	}
+	add(mdast.SourceRange{StartOffset: rng.StartOffset + prev, EndOffset: rng.EndOffset}, true)
+}
+
+// insideAutolink reports whether node is inside an autolink.
+func insideAutolink(node *mdast.Node) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeLink && parent.Inline != nil && parent.Inline.Link != nil &&
+			parent.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink {
+			return true
+		}
+	}
+	return false
+}
+
+// textPrefixStart returns where a node's raw inline text starts in the
+// source: text nodes span exactly their text, and line breaks start with the
+// text that ends the line.
+func textPrefixStart(file *mdast.FileSnapshot, node *mdast.Node) (int, bool) {
+	if node.Inline == nil || len(node.Inline.Text) == 0 {
+		return 0, false
+	}
+	rng := node.SourceRange()
+	end := rng.StartOffset + len(node.Inline.Text)
+	if rng.StartOffset < 0 || end > rng.EndOffset || end > len(file.Content) ||
+		!bytes.Equal(file.Content[rng.StartOffset:end], node.Inline.Text) {
+		return 0, false
+	}
+	return rng.StartOffset, true
 }

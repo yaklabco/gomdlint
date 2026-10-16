@@ -620,6 +620,128 @@ func TestProperNamesRule(t *testing.T) {
 	}
 }
 
+// TestProperNamesRule_MarkdownlintParity verifies MD044 scans the same text
+// as markdownlint 0.41: prose, code (code_blocks) and HTML (html_elements),
+// but never link destinations, URLs, e-mail addresses or fence info strings,
+// and that a longer configured name shields the names inside it.
+func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
+	github := []any{"GitHub"}
+	javascript := []any{"JavaScript"}
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "link destination and bare URL",
+			input:     "See [docs](https://github.com/org/repo) and https://github.com/org/repo here.\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{},
+		},
+		{name: "autolink", input: "<https://github.com/x>\n", options: map[string]any{"names": github}, wantLines: []int{}},
+		{name: "www address", input: "See www.github.com now.\n", options: map[string]any{"names": github}, wantLines: []int{}},
+		{name: "e-mail address", input: "Mail me@github.com now.\n", options: map[string]any{"names": github}, wantLines: []int{}},
+		{
+			name:      "name after a URL",
+			input:     "Visit https://github.com/x and github too.\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{1},
+			wantFixed: "Visit https://github.com/x and GitHub too.\n",
+		},
+		{
+			name:      "fence info string is not checked",
+			input:     "```javascript\nconst javascript = 1;\n```\n",
+			options:   map[string]any{"names": javascript},
+			wantLines: []int{2},
+			wantFixed: "```javascript\nconst JavaScript = 1;\n```\n",
+		},
+		{
+			name:      "code spans skipped without code_blocks",
+			input:     "Use `javascript` now.\n",
+			options:   map[string]any{"names": javascript, "code_blocks": false},
+			wantLines: []int{},
+		},
+		{
+			name:      "URL in a code span",
+			input:     "Run `curl https://github.com/x`\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{},
+		},
+		{
+			name:      "longer name shields the shorter one",
+			input:     "Visit github.com today, and github too.\n",
+			options:   map[string]any{"names": []any{"GitHub", "github.com"}},
+			wantLines: []int{1},
+			wantFixed: "Visit github.com today, and GitHub too.\n",
+		},
+		{
+			name:      "inline HTML skipped without html_elements",
+			input:     "An <img src=\"javascript.png\"> image.\n",
+			options:   map[string]any{"names": javascript, "html_elements": false},
+			wantLines: []int{},
+		},
+		{
+			name:      "text in an HTML block is checked without html_elements",
+			input:     "<div>\njavascript text\n</div>\n",
+			options:   map[string]any{"names": javascript, "html_elements": false},
+			wantLines: []int{2},
+			wantFixed: "<div>\nJavaScript text\n</div>\n",
+		},
+		{
+			name:      "HTML attributes are checked with html_elements",
+			input:     "<a href=\"https://github.com/x\">github</a>\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{1, 1},
+			wantFixed: "<a href=\"https://GitHub.com/x\">GitHub</a>\n",
+		},
+		{
+			name:      "HTML attributes are skipped without html_elements",
+			input:     "<a href=\"https://github.com/x\">github</a>\n",
+			options:   map[string]any{"names": github, "html_elements": false},
+			wantLines: []int{1},
+			wantFixed: "<a href=\"https://github.com/x\">GitHub</a>\n",
+		},
+		{
+			name:      "HTML comment skipped without html_elements",
+			input:     "<!-- github note -->\n",
+			options:   map[string]any{"names": github, "html_elements": false},
+			wantLines: []int{},
+		},
+		{
+			name:      "HTML comment checked with html_elements",
+			input:     "<!-- github note -->\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{1},
+			wantFixed: "<!-- GitHub note -->\n",
+		},
+		{
+			name:      "image description",
+			input:     "![github logo](https://github.com/logo.png)\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{1},
+			wantFixed: "![GitHub logo](https://github.com/logo.png)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewProperNamesRule(), tt.input, tt.options)
+			if got := diagLines(diags); !reflect.DeepEqual(got, tt.wantLines) {
+				t.Errorf("diagnostic lines = %v, want %v", got, tt.wantLines)
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			if fixed := applyAllEdits(t, tt.input, diags); fixed != want {
+				t.Errorf("fixed = %q, want %q", fixed, want)
+			}
+		})
+	}
+}
+
 func TestProperNamesRule_DefaultDisabled(t *testing.T) {
 	rule := NewProperNamesRule()
 	if rule.DefaultEnabled() {
