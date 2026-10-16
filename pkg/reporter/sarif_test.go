@@ -548,6 +548,42 @@ func TestSARIFReporter_RecordsFilesThatFailed(t *testing.T) {
 	assert.Len(t, run.Results, 1, "findings in other files are still reported")
 }
 
+func TestSARIFReporter_RecordsRuleFailures(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	file := sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1})
+	file.Result.RuleErrors = map[string]error{
+		"MD013": errors.New("line length exploded"),
+		"MD009": errors.New("whitespace exploded"),
+		"MD010": nil,
+	}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, &runner.Result{Files: []runner.FileOutcome{file}}).Runs[0]
+
+	require.Len(t, run.Invocations, 1)
+	assert.False(t, run.Invocations[0].ExecutionSuccessful, "a rule that failed did not analyze the file")
+
+	location := []reporter.SARIFLocation{{PhysicalLocation: reporter.SARIFPhysicalLocation{
+		ArtifactLocation: reporter.SARIFArtifactLocation{URI: "a.md", URIBaseID: "%SRCROOT%"},
+	}}}
+	assert.Equal(t, []reporter.SARIFNotification{
+		{
+			Level:          "error",
+			Message:        reporter.SARIFMessage{Text: "rule MD009 failed: whitespace exploded"},
+			Locations:      location,
+			AssociatedRule: &reporter.SARIFRuleReference{ID: "MD009"},
+		},
+		{
+			Level:          "error",
+			Message:        reporter.SARIFMessage{Text: "rule MD013 failed: line length exploded"},
+			Locations:      location,
+			AssociatedRule: &reporter.SARIFRuleReference{ID: "MD013"},
+		},
+	}, run.Invocations[0].ToolExecutionNotifications, "one notification per failed rule, in rule order")
+	assert.Len(t, run.Results, 1, "findings of the rules that ran are still reported")
+}
+
 func TestSARIFReporter_SuccessfulRun(t *testing.T) {
 	t.Parallel()
 

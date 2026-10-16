@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/internal/display"
@@ -79,11 +81,20 @@ type SARIFInvocation struct {
 }
 
 // SARIFNotification reports a problem the tool met while running, such as a
-// file it could not read, as opposed to a finding in a file.
+// file it could not read or a rule that failed, as opposed to a finding in a
+// file.
 type SARIFNotification struct {
 	Level     string          `json:"level"`
 	Message   SARIFMessage    `json:"message"`
 	Locations []SARIFLocation `json:"locations,omitempty"`
+
+	// AssociatedRule names the rule that failed, for a rule failure.
+	AssociatedRule *SARIFRuleReference `json:"associatedRule,omitempty"`
+}
+
+// SARIFRuleReference refers to a rule by its ID.
+type SARIFRuleReference struct {
+	ID string `json:"id"`
 }
 
 // SARIFTool describes the analysis tool.
@@ -274,6 +285,7 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 			for idx := range file.Result.Diagnostics {
 				builder.addResult(file, &file.Result.Diagnostics[idx])
 			}
+			builder.addRuleFailures(file.Path, file.Result.RuleErrors)
 		}
 		for _, err := range result.Errors {
 			if err != nil {
@@ -322,13 +334,39 @@ type sarifRunBuilder struct {
 // addFailure records an error the run met as an error notification, located
 // at path when it concerns a file.
 func (b *sarifRunBuilder) addFailure(err error, path string) {
-	notification := SARIFNotification{Level: "error", Message: SARIFMessage{Text: err.Error()}}
+	b.notify(b.failure(err.Error(), path))
+}
+
+// addRuleFailures records each rule that failed on the file at path as an
+// error notification naming the rule, in rule ID order.
+func (b *sarifRunBuilder) addRuleFailures(path string, ruleErrors map[string]error) {
+	for _, ruleID := range slices.Sorted(maps.Keys(ruleErrors)) {
+		err := ruleErrors[ruleID]
+		if err == nil {
+			continue
+		}
+
+		notification := b.failure(fmt.Sprintf("rule %s failed: %v", ruleID, err), path)
+		notification.AssociatedRule = &SARIFRuleReference{ID: ruleID}
+		b.notify(notification)
+	}
+}
+
+// failure returns an error notification with message, located at path when
+// path is not empty.
+func (b *sarifRunBuilder) failure(message, path string) SARIFNotification {
+	notification := SARIFNotification{Level: "error", Message: SARIFMessage{Text: message}}
 	if path != "" {
 		notification.Locations = []SARIFLocation{{
 			PhysicalLocation: SARIFPhysicalLocation{ArtifactLocation: b.locator.locate(path)},
 		}}
 	}
 
+	return notification
+}
+
+// notify appends a notification to the run's invocation.
+func (b *sarifRunBuilder) notify(notification SARIFNotification) {
 	b.invocation.ToolExecutionNotifications = append(b.invocation.ToolExecutionNotifications, notification)
 }
 
