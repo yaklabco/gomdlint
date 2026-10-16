@@ -7,6 +7,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -49,8 +50,8 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	tableAllowed := lowercaseSet(ctx.OptionStringSlice("table_allowed_elements", allowedElements))
 
 	var diags []lint.Diagnostic
-	report := func(construct htmlConstruct, allowedSet map[string]bool) {
-		if !construct.isOpeningElement() || allowedSet[strings.ToLower(construct.Name)] {
+	report := func(construct mdscan.HTMLConstruct, allowedSet map[string]bool) {
+		if !construct.IsOpeningElement() || allowedSet[strings.ToLower(construct.Name)] {
 			return
 		}
 		diags = append(diags, r.elementDiagnostic(ctx, construct, allowedSet))
@@ -61,7 +62,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			return diags, ctx.Ctx.Err()
 		}
 		span := block.SourceRange()
-		for _, construct := range scanHTMLConstructs(ctx.File.Content, span.StartOffset, span.EndOffset) {
+		for _, construct := range mdscan.ScanHTML(ctx.File.Content, span.StartOffset, span.EndOffset) {
 			report(construct, allowed)
 		}
 	}
@@ -89,11 +90,11 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 // covers the element's opening tag up to the end of its first line.
 func (r *InlineHTMLRule) elementDiagnostic(
 	ctx *lint.RuleContext,
-	construct htmlConstruct,
+	construct mdscan.HTMLConstruct,
 	allowedSet map[string]bool,
 ) lint.Diagnostic {
 	end := construct.End
-	if newline := strings.IndexAny(string(construct.text(ctx.File.Content)), "\r\n"); newline >= 0 {
+	if newline := strings.IndexAny(string(construct.Text(ctx.File.Content)), "\r\n"); newline >= 0 {
 		end = construct.Start + newline
 	}
 	startLine, startColumn := ctx.File.LineAt(construct.Start)
@@ -115,6 +116,18 @@ func (r *InlineHTMLRule) elementDiagnostic(
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(suggestion).
 		Build()
+}
+
+// htmlNodeConstruct returns the single raw HTML construct of an inline HTML node.
+func htmlNodeConstruct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
+	if node == nil || node.File == nil {
+		return mdscan.HTMLConstruct{}, false
+	}
+	span := node.SourceRange()
+	if span.StartOffset < 0 || span.EndOffset > len(node.File.Content) || span.IsEmpty() {
+		return mdscan.HTMLConstruct{}, false
+	}
+	return mdscan.MatchHTML(node.File.Content[:span.EndOffset], span.StartOffset)
 }
 
 // lowercaseSet returns the set of lowercased values.

@@ -10,6 +10,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -253,8 +254,8 @@ func NewImageAltTextRule() *ImageAltTextRule {
 
 // Attribute patterns markdownlint uses to decide whether an HTML image has alt text.
 var (
-	imgAltAttributePattern        = htmlAttributePattern("alt")
-	imgAriaHiddenAttributePattern = htmlAttributePattern("aria-hidden")
+	imgAltAttributePattern        = mdscan.AttributePattern("alt")
+	imgAriaHiddenAttributePattern = mdscan.AttributePattern("aria-hidden")
 )
 
 // Apply checks that Markdown images have non-empty alt text and that HTML img
@@ -291,7 +292,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		tag := construct.text(ctx.File.Content)
+		tag := construct.Text(ctx.File.Content)
 		if imgAltAttributePattern.Match(tag) {
 			continue
 		}
@@ -323,16 +324,16 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 }
 
 // htmlImages returns the opening img tags in HTML blocks and inline HTML.
-func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlConstruct {
-	var images []htmlConstruct
-	keep := func(construct htmlConstruct) {
-		if construct.isOpeningElement() && strings.EqualFold(construct.Name, "img") {
+func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []mdscan.HTMLConstruct {
+	var images []mdscan.HTMLConstruct
+	keep := func(construct mdscan.HTMLConstruct) {
+		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
 			images = append(images, construct)
 		}
 	}
 	for _, block := range ctx.HTMLBlocks() {
 		span := block.SourceRange()
-		for _, construct := range scanHTMLConstructs(ctx.File.Content, span.StartOffset, span.EndOffset) {
+		for _, construct := range mdscan.ScanHTML(ctx.File.Content, span.StartOffset, span.EndOffset) {
 			keep(construct)
 		}
 	}

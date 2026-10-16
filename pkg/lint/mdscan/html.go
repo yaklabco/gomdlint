@@ -1,17 +1,15 @@
-package rules
+package mdscan
 
 import (
 	"bytes"
 	"regexp"
 	"strings"
-
-	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
-// htmlConstruct is a CommonMark raw HTML construct (open tag, closing tag,
+// HTMLConstruct is a CommonMark raw HTML construct (open tag, closing tag,
 // comment, processing instruction, declaration, or CDATA section) located in
 // source text.
-type htmlConstruct struct {
+type HTMLConstruct struct {
 	// Start and End are absolute byte offsets of the construct.
 	Start, End int
 
@@ -24,26 +22,26 @@ type htmlConstruct struct {
 	Closing bool
 }
 
-// isOpeningElement reports whether the construct opens an element.
-func (c htmlConstruct) isOpeningElement() bool {
+// IsOpeningElement reports whether the construct opens an element.
+func (c HTMLConstruct) IsOpeningElement() bool {
 	return c.Name != "" && !c.Closing
 }
 
-// text returns the construct's source bytes.
-func (c htmlConstruct) text(content []byte) []byte {
+// Text returns the construct's source bytes.
+func (c HTMLConstruct) Text(content []byte) []byte {
 	return content[c.Start:c.End]
 }
 
-// scanHTMLConstructs finds the raw HTML constructs in content[start:end].
-// Text between constructs, including a '<' that does not begin a valid
-// construct, is skipped. A comment, processing instruction, declaration, or
-// CDATA section that begins at start may end beyond end: the parser reports
-// the closing line of such HTML blocks separately from the block's lines.
-func scanHTMLConstructs(content []byte, start, end int) []htmlConstruct {
+// ScanHTML finds the raw HTML constructs in content[start:end]. Text between
+// constructs, including a '<' that does not begin a valid construct, is
+// skipped. A comment, processing instruction, declaration, or CDATA section
+// that begins at start may end beyond end, because the parser reports the
+// closing line of such HTML blocks separately from the block's lines.
+func ScanHTML(content []byte, start, end int) []HTMLConstruct {
 	if start < 0 || end > len(content) || start >= end {
 		return nil
 	}
-	var constructs []htmlConstruct
+	var constructs []HTMLConstruct
 	for idx := start; idx < end; idx++ {
 		if content[idx] != '<' {
 			continue
@@ -52,7 +50,7 @@ func scanHTMLConstructs(content []byte, start, end int) []htmlConstruct {
 		if idx == start {
 			limit = len(content)
 		}
-		construct, ok := matchHTMLConstruct(content[:limit], idx)
+		construct, ok := MatchHTML(content[:limit], idx)
 		if !ok {
 			continue
 		}
@@ -62,23 +60,11 @@ func scanHTMLConstructs(content []byte, start, end int) []htmlConstruct {
 	return constructs
 }
 
-// htmlNodeConstruct returns the single raw HTML construct of an inline HTML node.
-func htmlNodeConstruct(node *mdast.Node) (htmlConstruct, bool) {
-	if node == nil || node.File == nil {
-		return htmlConstruct{}, false
-	}
-	span := node.SourceRange()
-	if span.StartOffset < 0 || span.EndOffset > len(node.File.Content) || span.IsEmpty() {
-		return htmlConstruct{}, false
-	}
-	return matchHTMLConstruct(node.File.Content[:span.EndOffset], span.StartOffset)
-}
-
-// matchHTMLConstruct matches one raw HTML construct starting at src[pos],
-// following the CommonMark raw HTML grammar.
-func matchHTMLConstruct(src []byte, pos int) (htmlConstruct, bool) {
-	if pos+1 >= len(src) || src[pos] != '<' {
-		return htmlConstruct{}, false
+// MatchHTML matches one raw HTML construct starting at src[pos], following
+// the CommonMark raw HTML grammar. The construct must end within src.
+func MatchHTML(src []byte, pos int) (HTMLConstruct, bool) {
+	if pos < 0 || pos+1 >= len(src) || src[pos] != '<' {
+		return HTMLConstruct{}, false
 	}
 	rest := src[pos+1:]
 	switch {
@@ -97,30 +83,37 @@ func matchHTMLConstruct(src []byte, pos int) (htmlConstruct, bool) {
 	}
 }
 
+// AttributePattern returns markdownlint's getHtmlAttributeRe pattern for an
+// attribute: whitespace, the name, optional whitespace, '=', and a value
+// captured up to a quote, whitespace, or '>'.
+func AttributePattern(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?i)\s` + regexp.QuoteMeta(name) + `\s*=\s*['"]?([^'"\s>]*)`)
+}
+
 // matchHTMLComment matches "<!-->", "<!--->", or "<!--" ... "-->".
-func matchHTMLComment(rest []byte, pos int) (htmlConstruct, bool) {
+func matchHTMLComment(rest []byte, pos int) (HTMLConstruct, bool) {
 	body := rest[len("!--"):]
 	switch {
 	case bytes.HasPrefix(body, []byte(">")):
-		return htmlConstruct{Start: pos, End: pos + len("<!-->")}, true
+		return HTMLConstruct{Start: pos, End: pos + len("<!-->")}, true
 	case bytes.HasPrefix(body, []byte("->")):
-		return htmlConstruct{Start: pos, End: pos + len("<!--->")}, true
+		return HTMLConstruct{Start: pos, End: pos + len("<!--->")}, true
 	}
 	idx := bytes.Index(body, []byte("-->"))
 	if idx < 0 {
-		return htmlConstruct{}, false
+		return HTMLConstruct{}, false
 	}
-	return htmlConstruct{Start: pos, End: pos + 1 + len("!--") + idx + len("-->")}, true
+	return HTMLConstruct{Start: pos, End: pos + 1 + len("!--") + idx + len("-->")}, true
 }
 
 // matchHTMLTerminated matches a construct that runs from its opener to the
 // first occurrence of terminator.
-func matchHTMLTerminated(rest []byte, pos, openerLen int, terminator, name string) (htmlConstruct, bool) {
+func matchHTMLTerminated(rest []byte, pos, openerLen int, terminator, name string) (HTMLConstruct, bool) {
 	idx := bytes.Index(rest[openerLen:], []byte(terminator))
 	if idx < 0 {
-		return htmlConstruct{}, false
+		return HTMLConstruct{}, false
 	}
-	return htmlConstruct{Start: pos, End: pos + 1 + openerLen + idx + len(terminator), Name: name}, true
+	return HTMLConstruct{Start: pos, End: pos + 1 + openerLen + idx + len(terminator), Name: name}, true
 }
 
 // processingInstructionName returns the name markdownlint derives from a
@@ -134,24 +127,23 @@ func processingInstructionName(rest []byte) string {
 }
 
 // matchHTMLClosingTag matches "</" tagname optional-whitespace ">".
-func matchHTMLClosingTag(rest []byte, pos int) (htmlConstruct, bool) {
-	idx := 1
-	nameEnd, ok := scanHTMLTagName(rest, idx)
+func matchHTMLClosingTag(rest []byte, pos int) (HTMLConstruct, bool) {
+	nameEnd, ok := scanHTMLTagName(rest, 1)
 	if !ok {
-		return htmlConstruct{}, false
+		return HTMLConstruct{}, false
 	}
-	idx = skipHTMLSpace(rest, nameEnd)
+	idx := skipHTMLSpace(rest, nameEnd)
 	if idx >= len(rest) || rest[idx] != '>' {
-		return htmlConstruct{}, false
+		return HTMLConstruct{}, false
 	}
-	return htmlConstruct{Start: pos, End: pos + 1 + idx + 1, Name: string(rest[1:nameEnd]), Closing: true}, true
+	return HTMLConstruct{Start: pos, End: pos + 1 + idx + 1, Name: string(rest[1:nameEnd]), Closing: true}, true
 }
 
 // matchHTMLOpenTag matches "<" tagname attribute* optional-whitespace "/"? ">".
-func matchHTMLOpenTag(rest []byte, pos int) (htmlConstruct, bool) {
+func matchHTMLOpenTag(rest []byte, pos int) (HTMLConstruct, bool) {
 	nameEnd, ok := scanHTMLTagName(rest, 0)
 	if !ok {
-		return htmlConstruct{}, false
+		return HTMLConstruct{}, false
 	}
 	idx := nameEnd
 	for {
@@ -166,9 +158,9 @@ func matchHTMLOpenTag(rest []byte, pos int) (htmlConstruct, bool) {
 		idx++
 	}
 	if idx >= len(rest) || rest[idx] != '>' {
-		return htmlConstruct{}, false
+		return HTMLConstruct{}, false
 	}
-	return htmlConstruct{Start: pos, End: pos + 1 + idx + 1, Name: string(rest[:nameEnd])}, true
+	return HTMLConstruct{Start: pos, End: pos + 1 + idx + 1, Name: string(rest[:nameEnd])}, true
 }
 
 // scanHTMLTagName scans an ASCII letter followed by letters, digits, or hyphens.
@@ -232,7 +224,13 @@ func isHTMLAttributeNameChar(ch byte) bool {
 	return isASCIILetter(ch) || isASCIIDigit(ch) || ch == '_' || ch == '.' || ch == ':' || ch == '-'
 }
 
-// htmlAttributePattern returns markdownlint's getHtmlAttributeRe pattern for an attribute.
-func htmlAttributePattern(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(?i)\s` + regexp.QuoteMeta(name) + `\s*=\s*['"]?([^'"\s>]*)`)
+func skipHTMLSpace(src []byte, idx int) int {
+	for idx < len(src) && isHTMLSpace(src[idx]) {
+		idx++
+	}
+	return idx
+}
+
+func isHTMLSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v'
 }
