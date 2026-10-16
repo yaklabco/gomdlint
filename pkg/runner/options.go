@@ -23,7 +23,27 @@ type Options struct {
 
 	// ExcludeGlobs are glob patterns used to skip files or directories.
 	// These merge ignore rules from config and CLI (e.g. --ignore).
+	// They apply to paths named in Paths as well as to walked entries.
+	//
+	// Patterns use forward slashes and match whole path segments: "*" stays
+	// within a segment and a "**" segment matches any number of segments.
+	// A pattern without a slash matches a name at any depth, and a trailing
+	// slash matches directories only.
 	ExcludeGlobs []string
+
+	// IgnoreBaseDir is the directory relative ExcludeGlobs are resolved
+	// against, such as the directory of the config file that set them.
+	// Empty means WorkingDir.
+	IgnoreBaseDir string
+
+	// Gitignore skips entries that .gitignore files ignore while walking
+	// directories. The .gitignore files of the enclosing Git working tree
+	// apply from its root down. Paths named in Paths are always processed.
+	Gitignore bool
+
+	// SkipDirs names directories that walks never enter, such as
+	// "node_modules". Directories named in Paths are still walked.
+	SkipDirs []string
 
 	// FollowSymlinks controls whether directory symlinks are traversed.
 	FollowSymlinks bool
@@ -39,6 +59,12 @@ type Options struct {
 // DefaultExtensions returns the default set of Markdown file extensions.
 func DefaultExtensions() []string {
 	return []string{".md", ".markdown"}
+}
+
+// DefaultSkipDirs returns the directories that hold third-party code, which
+// walks skip by default.
+func DefaultSkipDirs() []string {
+	return []string{"node_modules", "vendor"}
 }
 
 // effectiveExtensions returns the extensions to use, defaulting if empty.

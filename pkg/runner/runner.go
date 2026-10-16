@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -31,18 +32,22 @@ func New(pipeline *lint.Pipeline) *Runner {
 //   - Respects context cancellation
 func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	// Discover files.
-	files, err := Discover(ctx, opts)
+	found, err := discover(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	files := found.files
 
 	result := &Result{
-		Files: make([]FileOutcome, 0, len(files)),
+		Files: make([]FileOutcome, 0, len(files)+len(found.unreadable)),
 		Stats: newStats(),
 	}
 	result.Stats.FilesDiscovered = len(files)
 
 	if len(files) == 0 {
+		for _, outcome := range found.unreadable {
+			result.accumulate(outcome)
+		}
 		return result, nil
 	}
 
@@ -100,11 +105,19 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		outcomes[outcome.Path] = outcome
 	}
 
+	// Directories that could not be read fail the run like unreadable files.
+	for _, outcome := range found.unreadable {
+		outcomes[outcome.Path] = outcome
+	}
+
 	// Build result in deterministic order.
-	for _, path := range files {
-		if outcome, ok := outcomes[path]; ok {
-			result.accumulate(outcome)
-		}
+	paths := make([]string, 0, len(outcomes))
+	for path := range outcomes {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	for _, path := range paths {
+		result.accumulate(outcomes[path])
 	}
 
 	// Check for context error.
