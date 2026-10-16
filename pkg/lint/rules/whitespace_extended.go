@@ -55,6 +55,14 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	// Build map of code block lines and their languages.
 	codeBlockInfo := buildCodeBlockInfo(ctx.Root)
 
+	// Like markdownlint, excluding code blocks also excludes code spans.
+	var codeSpans []mdast.SourceRange
+	if !includeCodeBlocks {
+		for _, span := range ctx.CodeSpans() {
+			codeSpans = append(codeSpans, span.SourceRange())
+		}
+	}
+
 	var diags []lint.Diagnostic
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
@@ -76,13 +84,13 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			}
 		}
 
-		// Find all tabs in the line.
-		tabPositions := findTabPositions(lineContent)
+		line := ctx.File.Lines[lineNum-1]
+
+		// Find all tabs in the line, outside excluded code spans.
+		tabPositions := findTabPositions(lineContent, line.StartOffset, codeSpans)
 		if len(tabPositions) == 0 {
 			continue
 		}
-
-		line := ctx.File.Lines[lineNum-1]
 
 		// Build fix: replace all tabs with spaces.
 		builder := fix.NewEditBuilder()
@@ -116,8 +124,9 @@ type codeBlockLineInfo struct {
 	language string
 }
 
-// buildCodeBlockInfo returns a map of line numbers that are inside code blocks,
-// along with the language of each code block.
+// buildCodeBlockInfo returns a map of the code lines of code blocks, along
+// with the language of each code block. The fence lines of fenced code blocks
+// are not code, so they are not included.
 func buildCodeBlockInfo(root *mdast.Node) map[int]codeBlockLineInfo {
 	info := make(map[int]codeBlockLineInfo)
 	if root == nil {
@@ -139,7 +148,7 @@ func buildCodeBlockInfo(root *mdast.Node) map[int]codeBlockLineInfo {
 			langName = langParts[0]
 		}
 
-		for lineNum := pos.StartLine; lineNum <= pos.EndLine; lineNum++ {
+		for lineNum := range lint.CodeContentLines([]*mdast.Node{codeBlock}) {
 			info[lineNum] = codeBlockLineInfo{language: langName}
 		}
 	}
@@ -147,12 +156,24 @@ func buildCodeBlockInfo(root *mdast.Node) map[int]codeBlockLineInfo {
 	return info
 }
 
-// findTabPositions returns the positions (0-indexed) of all tab characters in the content.
-func findTabPositions(content []byte) []int {
+// findTabPositions returns the positions (0-indexed) of the tab characters in
+// a line that starts at lineStart, skipping tabs inside the excluded ranges.
+func findTabPositions(content []byte, lineStart int, excluded []mdast.SourceRange) []int {
 	var positions []int
-	for i, ch := range content {
-		if ch == '\t' {
-			positions = append(positions, i)
+	for idx, ch := range content {
+		if ch != '\t' {
+			continue
+		}
+		offset := lineStart + idx
+		inside := false
+		for _, rng := range excluded {
+			if rng.StartOffset <= offset && offset < rng.EndOffset {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			positions = append(positions, idx)
 		}
 	}
 	return positions

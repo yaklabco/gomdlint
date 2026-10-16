@@ -163,6 +163,36 @@ func TestHardTabsRule_IgnoreCodeLanguages(t *testing.T) {
 			wantDiags: 0,
 			config:    map[string]any{"ignore_code_languages": []any{"makefile"}},
 		},
+		{
+			// Like markdownlint, only the code between the fences is ignored.
+			name:      "fence lines of an ignored language are checked",
+			input:     "```makefile\t\n\ttarget:\n```\t\n",
+			wantDiags: 2,
+			config:    map[string]any{"ignore_code_languages": []any{"makefile"}},
+		},
+		{
+			name:      "fence lines are checked when code blocks are excluded",
+			input:     "```go\t\n\tcode\n```\n",
+			wantDiags: 1,
+			config:    map[string]any{"code_blocks": false},
+		},
+		{
+			name:      "code spans are excluded with code blocks",
+			input:     "Text `a\tb` more\n",
+			wantDiags: 0,
+			config:    map[string]any{"code_blocks": false},
+		},
+		{
+			name:      "code spans are checked by default",
+			input:     "Text `a\tb` more\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "text next to an excluded code span is checked",
+			input:     "Text\t`a\tb` more\n",
+			wantDiags: 1,
+			config:    map[string]any{"code_blocks": false},
+		},
 	}
 
 	for _, tt := range tests {
