@@ -142,6 +142,33 @@ func TestRegistry_RegisterAlias(t *testing.T) {
 	assert.Equal(t, "MD041", id2)
 }
 
+func TestRegistry_ReRegisterUnderNewNameDropsOldName(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD009", name: "old-name"})
+	reg.Register(&mockRule{id: "MD009", name: "new-name"})
+
+	_, ok := reg.GetByName("old-name")
+	assert.False(t, ok, "the old name must no longer resolve")
+	_, _, ok = reg.Resolve("old-name")
+	assert.False(t, ok)
+
+	got, ok := reg.GetByName("new-name")
+	assert.True(t, ok)
+	assert.Equal(t, "MD009", got.ID())
+	assert.Len(t, reg.Rules(), 1)
+}
+
+func TestRegistry_ReRegisterKeepsANameNowOwnedByAnotherRule(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD001", name: "shared"})
+	reg.Register(&mockRule{id: "MD002", name: "shared"})
+	reg.Register(&mockRule{id: "MD001", name: "renamed"})
+
+	got, ok := reg.GetByName("shared")
+	assert.True(t, ok, "renaming MD001 must not remove the name MD002 now has")
+	assert.Equal(t, "MD002", got.ID())
+}
+
 func TestRegistry_RegisterAlias_UnknownRule(t *testing.T) {
 	reg := NewRegistry()
 	// Registering alias for unknown rule should not panic
