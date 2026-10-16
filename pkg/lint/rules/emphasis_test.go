@@ -234,6 +234,168 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 	}
 }
 
+// TestEmphasisAndStrongStyle_Fix verifies MD049 and MD050 against
+// markdownlint 0.41, including the fix and the underscore intraword rule.
+func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
+	tests := []struct {
+		name      string
+		rule      lint.Rule
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "MD049 consistent",
+			rule:      NewEmphasisStyleRule(),
+			input:     "Some *text* and _more_ here.\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some *text* and *more* here.\n",
+		},
+		{
+			name:      "MD049 asterisk",
+			rule:      NewEmphasisStyleRule(),
+			input:     "Some _text_ here.\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some *text* here.\n",
+		},
+		{
+			name:      "MD049 underscore",
+			rule:      NewEmphasisStyleRule(),
+			input:     "Some *text* here.\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some _text_ here.\n",
+		},
+		{
+			name:      "MD049 underscore ignores intraword emphasis",
+			rule:      NewEmphasisStyleRule(),
+			input:     "foo*bar*baz and *bar*baz\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{},
+		},
+		{
+			name:      "MD049 intraword emphasis still sets the consistent style",
+			rule:      NewEmphasisStyleRule(),
+			input:     "foo*bar*baz and _x_\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "foo*bar*baz and *x*\n",
+		},
+		{
+			// "*a*b*" would end the emphasis at the literal asterisk.
+			name:      "MD049 no fix when the text holds the target marker",
+			rule:      NewEmphasisStyleRule(),
+			input:     "_a*b_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+		},
+		{
+			// "*foo**bar*" would merge the markers into one run.
+			name:      "MD049 no fix next to the target marker",
+			rule:      NewEmphasisStyleRule(),
+			input:     "*foo*_bar_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+		},
+		{
+			// "é_foo_" is not emphasis: underscores cannot open inside a word.
+			name:      "MD049 no fix to underscore after a non-ASCII letter",
+			rule:      NewEmphasisStyleRule(),
+			input:     "é*foo*\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD049 ignores strikethrough",
+			rule:      NewEmphasisStyleRule(),
+			input:     "~~struck~~ and *x*\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "~~struck~~ and _x_\n",
+		},
+		{
+			name:      "MD049 inner emphasis of strong",
+			rule:      NewEmphasisStyleRule(),
+			input:     "**bold _it_ text**\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "**bold *it* text**\n",
+		},
+		{
+			name:      "MD049 emphasis ending with a code span",
+			rule:      NewEmphasisStyleRule(),
+			input:     "_x `c`_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "*x `c`*\n",
+		},
+		{
+			name:      "MD049 emphasis starting with a link",
+			rule:      NewEmphasisStyleRule(),
+			input:     "_[docs](https://example.com) here_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "*[docs](https://example.com) here*\n",
+		},
+		{
+			name:      "MD050 consistent",
+			rule:      NewStrongStyleRule(),
+			input:     "Some **text** and __more__ here.\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some **text** and **more** here.\n",
+		},
+		{
+			name:      "MD050 underscore",
+			rule:      NewStrongStyleRule(),
+			input:     "**text**\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "__text__\n",
+		},
+		{
+			name:      "MD050 underscore ignores intraword strong",
+			rule:      NewStrongStyleRule(),
+			input:     "foo**bar**baz\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{},
+		},
+		{
+			name:      "MD050 no fix when the text holds the target marker",
+			rule:      NewStrongStyleRule(),
+			input:     "__a*b__\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyGFMRule(t, tt.rule, tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoSpaceInEmphasisRule(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -537,20 +699,20 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			name:      "style mismatch - consistent mode",
 			input:     "Some *text* and _more_ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some *text* and _more_ here.\n",
+			wantFix:   "Some *text* and *more* here.\n",
 		},
 		{
 			name:      "explicit style config - asterisk required",
 			input:     "Some _text_ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some _text_ here.\n",
+			wantFix:   "Some *text* here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
 			name:      "explicit style config - underscore required",
 			input:     "Some *text* here.\n",
 			wantDiags: 1,
-			wantFix:   "Some *text* here.\n",
+			wantFix:   "Some _text_ here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
 		{
@@ -584,7 +746,7 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes (will be empty since buildStyleFix returns nil)
+			// Collect and apply fixes.
 			var allEdits []fix.TextEdit
 			for _, d := range diags {
 				allEdits = append(allEdits, d.FixEdits...)
@@ -621,20 +783,20 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			name:      "style mismatch - consistent mode",
 			input:     "Some **text** and __more__ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some **text** and __more__ here.\n",
+			wantFix:   "Some **text** and **more** here.\n",
 		},
 		{
 			name:      "explicit style config - asterisk required",
 			input:     "Some __text__ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some __text__ here.\n",
+			wantFix:   "Some **text** here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
 			name:      "explicit style config - underscore required",
 			input:     "Some **text** here.\n",
 			wantDiags: 1,
-			wantFix:   "Some **text** here.\n",
+			wantFix:   "Some __text__ here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
 		{
@@ -668,7 +830,7 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes (will be empty since buildStyleFix returns nil)
+			// Collect and apply fixes.
 			var allEdits []fix.TextEdit
 			for _, d := range diags {
 				allEdits = append(allEdits, d.FixEdits...)

@@ -459,92 +459,15 @@ func NewEmphasisStyleRule() *EmphasisStyleRule {
 	}
 }
 
+// Emphasis marker styles for MD049 and MD050.
+const (
+	emphasisStyleAsterisk   = "asterisk"
+	emphasisStyleUnderscore = "underscore"
+)
+
 // Apply checks for consistent emphasis style.
 func (r *EmphasisStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.Root == nil || ctx.File == nil {
-		return nil, nil
-	}
-
-	configStyle := ctx.OptionString("style", "consistent")
-
-	emphases := ctx.EmphasisNodes()
-	if len(emphases) == 0 {
-		return nil, nil
-	}
-
-	var diags []lint.Diagnostic
-	var expectedStyle string
-
-	if configStyle != "consistent" {
-		expectedStyle = configStyle
-	}
-
-	for _, em := range emphases {
-		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
-		}
-
-		// Skip strong emphasis.
-		if em.Inline != nil && em.Inline.EmphasisLevel > 1 {
-			continue
-		}
-
-		pos := em.SourcePosition()
-		if !pos.IsValid() {
-			continue
-		}
-
-		// Detect style from the source.
-		style := r.detectEmphasisStyle(ctx.File, em)
-		if style == "" {
-			continue
-		}
-
-		// Set expected style from first emphasis.
-		if expectedStyle == "" {
-			expectedStyle = style
-			continue
-		}
-
-		// Check for style mismatch.
-		if style != expectedStyle {
-			builder := r.buildStyleFix(ctx.File, pos, style, expectedStyle)
-
-			diag := lint.NewDiagnostic(r.ID(), em,
-				fmt.Sprintf("Emphasis style %q does not match expected %q", style, expectedStyle)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Use %q for all emphasis", expectedStyle)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
-	}
-
-	return diags, nil
-}
-
-func (r *EmphasisStyleRule) detectEmphasisStyle(file *mdast.FileSnapshot, em *mdast.Node) string {
-	// The full span of emphasis starts with its opening marker.
-	rng := em.SourceRange()
-	if rng.Len() == 0 || rng.StartOffset >= len(file.Content) {
-		return ""
-	}
-
-	ch := file.Content[rng.StartOffset]
-	switch ch {
-	case '*':
-		return "asterisk"
-	case '_':
-		return "underscore"
-	default:
-		return ""
-	}
-}
-
-func (r *EmphasisStyleRule) buildStyleFix(_ *mdast.FileSnapshot, _ mdast.SourcePosition, _, _ string) *fix.EditBuilder {
-	// This is complex because we need to find the actual markers.
-	// For now, return nil - auto-fix would need more work.
-	return nil
+	return checkEmphasisStyle(ctx, r.ID(), ctx.EmphasisNodes(), 1, "Emphasis", "emphasis")
 }
 
 // StrongStyleRule checks for consistent strong (bold) style.
@@ -567,82 +490,163 @@ func NewStrongStyleRule() *StrongStyleRule {
 
 // Apply checks for consistent strong style.
 func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+	return checkEmphasisStyle(ctx, r.ID(), ctx.StrongNodes(), 2, "Strong", "strong emphasis")
+}
+
+// checkEmphasisStyle implements MD049 (markerLength 1) and MD050
+// (markerLength 2) like markdownlint: the style option is asterisk,
+// underscore or consistent (the style of the first emphasis), and emphasis
+// inside a word is never reported for the underscore style, because
+// underscores cannot mark emphasis there.
+//
+// The fix replaces both delimiter runs. It is withheld when the new markers
+// could pair differently: when the emphasized text holds the target marker,
+// when a target marker is adjacent outside, or when an underscore would sit
+// next to a letter or digit.
+func checkEmphasisStyle(
+	ctx *lint.RuleContext,
+	ruleID string,
+	nodes []*mdast.Node,
+	markerLength int,
+	label, suggestionNoun string,
+) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	configStyle := ctx.OptionString("style", "consistent")
-
-	strongs := ctx.StrongNodes()
-	if len(strongs) == 0 {
-		return nil, nil
-	}
-
+	style := ctx.OptionString("style", styleConsistent)
 	var diags []lint.Diagnostic
-	var expectedStyle string
 
-	if configStyle != "consistent" {
-		expectedStyle = configStyle
-	}
-
-	for _, st := range strongs {
+	for _, node := range nodes {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		pos := st.SourcePosition()
-		if !pos.IsValid() {
+		if isStrikethrough(node) {
+			continue
+		}
+		open, closing, ok := emphasisDelimiters(ctx.File, node, markerLength)
+		if !ok {
 			continue
 		}
 
-		// Detect style from the source.
-		style := r.detectStrongStyle(ctx.File, st)
-		if style == "" {
+		actual := emphasisStyleUnderscore
+		if ctx.File.Content[open.StartOffset] == '*' {
+			actual = emphasisStyleAsterisk
+		}
+		if style == styleConsistent {
+			style = actual
+		}
+		if actual == style {
+			continue
+		}
+		if style == emphasisStyleUnderscore && isIntraword(ctx.File.Content, open, closing) {
 			continue
 		}
 
-		// Set expected style from first strong.
-		if expectedStyle == "" {
-			expectedStyle = style
-			continue
+		diagBuilder := lint.NewDiagnostic(ruleID, node,
+			fmt.Sprintf("%s style %q does not match expected %q", label, actual, style)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(fmt.Sprintf("Use %q for all %s", style, suggestionNoun))
+		if builder := emphasisStyleFix(ctx.File, node, open, closing, style); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
 		}
-
-		// Check for style mismatch.
-		if style != expectedStyle {
-			builder := r.buildStyleFix(ctx.File, pos, style, expectedStyle)
-
-			diag := lint.NewDiagnostic(r.ID(), st,
-				fmt.Sprintf("Strong style %q does not match expected %q", style, expectedStyle)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Use %q for all strong emphasis", expectedStyle)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
 }
 
-func (r *StrongStyleRule) detectStrongStyle(file *mdast.FileSnapshot, st *mdast.Node) string {
-	// The full span of strong emphasis starts with its two marker characters.
-	rng := st.SourceRange()
-	if rng.Len() < 2 || rng.StartOffset+2 > len(file.Content) {
-		return ""
+// emphasisDelimiters returns the opening and closing delimiter runs of an
+// emphasis node: the parts of its full span outside its content span. ok is
+// false unless both runs have markerLength copies of the same marker.
+func emphasisDelimiters(
+	file *mdast.FileSnapshot,
+	node *mdast.Node,
+	markerLength int,
+) (mdast.SourceRange, mdast.SourceRange, bool) {
+	full, content := node.SourceRange(), node.ContentRange()
+	open := mdast.SourceRange{StartOffset: full.StartOffset, EndOffset: content.StartOffset}
+	closing := mdast.SourceRange{StartOffset: content.EndOffset, EndOffset: full.EndOffset}
+	if open.StartOffset < 0 || closing.EndOffset > len(file.Content) || open.EndOffset > closing.StartOffset ||
+		open.Len() != markerLength || closing.Len() != markerLength {
+		return mdast.SourceRange{}, mdast.SourceRange{}, false
 	}
-
-	ch1 := file.Content[rng.StartOffset]
-	ch2 := file.Content[rng.StartOffset+1]
-	if ch1 == '*' && ch2 == '*' {
-		return "asterisk"
+	marker := file.Content[open.StartOffset]
+	if marker != '*' && marker != '_' {
+		return mdast.SourceRange{}, mdast.SourceRange{}, false
 	}
-	if ch1 == '_' && ch2 == '_' {
-		return "underscore"
+	for _, rng := range []mdast.SourceRange{open, closing} {
+		for _, char := range file.Content[rng.StartOffset:rng.EndOffset] {
+			if char != marker {
+				return mdast.SourceRange{}, mdast.SourceRange{}, false
+			}
+		}
 	}
-	return ""
+	return open, closing, true
 }
 
-func (r *StrongStyleRule) buildStyleFix(_ *mdast.FileSnapshot, _ mdast.SourcePosition, _, _ string) *fix.EditBuilder {
-	// For now, return nil - auto-fix would need more work.
-	return nil
+// isIntraword reports whether emphasis sits inside a word, judged like
+// markdownlint by an ASCII word character just outside either delimiter.
+func isIntraword(content []byte, open, closing mdast.SourceRange) bool {
+	return (open.StartOffset > 0 && isASCIIWordChar(content[open.StartOffset-1])) ||
+		(closing.EndOffset < len(content) && isASCIIWordChar(content[closing.EndOffset]))
+}
+
+// isASCIIWordChar matches the JavaScript \w class.
+func isASCIIWordChar(b byte) bool {
+	return b == '_' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// emphasisStyleFix replaces both delimiter runs with the style's marker. It
+// returns nil when the new markers could be parsed differently.
+func emphasisStyleFix(
+	file *mdast.FileSnapshot,
+	node *mdast.Node,
+	open, closing mdast.SourceRange,
+	style string,
+) *fix.EditBuilder {
+	marker := byte('_')
+	if style == emphasisStyleAsterisk {
+		marker = '*'
+	} else if style != emphasisStyleUnderscore {
+		return nil
+	}
+	content := file.Content
+	inner := content[open.EndOffset:closing.StartOffset]
+	if len(inner) == 0 || inner[0] == marker || inner[len(inner)-1] == marker {
+		return nil
+	}
+	if (open.StartOffset > 0 && content[open.StartOffset-1] == marker) ||
+		(closing.EndOffset < len(content) && content[closing.EndOffset] == marker) {
+		return nil
+	}
+	if marker == '_' {
+		before, _ := utf8.DecodeLastRune(content[:open.StartOffset])
+		after, _ := utf8.DecodeRune(content[closing.EndOffset:])
+		if isLetterOrDigit(before) || isLetterOrDigit(after) {
+			return nil
+		}
+	}
+	literal := false
+	//nolint:errcheck // Walk visitor never returns error.
+	_ = mdast.Walk(node, func(child *mdast.Node) error {
+		if child.Kind == mdast.NodeText && child.Inline != nil && bytes.IndexByte(child.Inline.Text, marker) >= 0 {
+			literal = true
+		}
+		return nil
+	})
+	if literal {
+		return nil
+	}
+
+	replacement := strings.Repeat(string(marker), open.Len())
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(open.StartOffset, open.EndOffset, replacement)
+	builder.ReplaceRange(closing.StartOffset, closing.EndOffset, replacement)
+	return builder
+}
+
+// isLetterOrDigit reports whether r is a Unicode letter or digit.
+func isLetterOrDigit(r rune) bool {
+	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
 }

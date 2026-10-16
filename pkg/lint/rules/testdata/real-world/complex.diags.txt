@@ -2,10 +2,10 @@ complex.input.md:46:1 warning Unordered list bullet '*' does not match expected 
 complex.input.md:47:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
 complex.input.md:113:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
 complex.input.md:123:1 warning Code block style 'indented' does not match expected 'fenced' (MD046/code-block-style)
-complex.input.md:165:46 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
-complex.input.md:167:46 warning Strong style "underscore" does not match expected "asterisk" (MD050/strong-style)
-complex.input.md:173:14 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
-complex.input.md:173:15 warning Strong style "underscore" does not match expected "asterisk" (MD050/strong-style)
+complex.input.md:165:46 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style) [fixable]
+complex.input.md:167:46 warning Strong style "underscore" does not match expected "asterisk" (MD050/strong-style) [fixable]
+complex.input.md:173:14 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style) [fixable]
+complex.input.md:173:15 warning Strong style "underscore" does not match expected "asterisk" (MD050/strong-style) [fixable]
 complex.input.md:175:15 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
 complex.input.md:189:1 warning Horizontal rule style "***" does not match expected "---" (MD035/hr-style) [fixable]
 complex.input.md:193:1 warning Horizontal rule style "___" does not match expected "---" (MD035/hr-style) [fixable]

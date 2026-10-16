@@ -2,4 +2,4 @@
 
 This has *asterisk emphasis* in the text.
 
-This has _underscore emphasis_ in the text.
+This has *underscore emphasis* in the text.

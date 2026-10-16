@@ -42,7 +42,7 @@
     "column": 46,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD050",
@@ -51,7 +51,7 @@
     "column": 46,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD049",
@@ -60,7 +60,7 @@
     "column": 14,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD050",
@@ -69,7 +69,7 @@
     "column": 15,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD049",
