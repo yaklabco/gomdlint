@@ -184,6 +184,31 @@ func TestFirstLineHeadingRule_FrontMatterTitleDefaults(t *testing.T) {
 	}
 }
 
+// TestFirstLineHeadingRule_HTMLHeading verifies that, like markdownlint, an
+// HTML heading of the required level may start the document.
+func TestFirstLineHeadingRule_HTMLHeading(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		wantN   int
+	}{
+		{name: "centered h1", input: "<h1 align=\"center\">Logo</h1>\n\nText.\n", wantN: 0},
+		{name: "h2 when h1 is required", input: "<h2>Sub</h2>\n\nText.\n", wantN: 1},
+		{name: "h2 when h2 is required", input: "<h2>Sub</h2>\n\nText.\n", options: map[string]any{"level": 2}, wantN: 0},
+		{name: "other HTML", input: "<p align=\"center\">Logo</p>\n\n# Title\n", wantN: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewFirstLineHeadingRule(), tt.input, tt.options)
+			if len(diags) != tt.wantN {
+				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
+			}
+		})
+	}
+}
+
 func TestFirstLineHeadingRule_DefaultDisabled(t *testing.T) {
 	rule := NewFirstLineHeadingRule()
 	if rule.DefaultEnabled() {

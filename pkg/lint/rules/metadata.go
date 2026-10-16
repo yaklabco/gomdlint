@@ -65,6 +65,20 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 	firstContentLine = firstBlock.SourcePosition().StartLine
 
+	// Like markdownlint, an HTML heading (<h1> to <h6>) may start the document.
+	if level, ok := htmlHeadingLevel(firstBlock); ok {
+		if level == requiredLevel {
+			return nil, nil
+		}
+		pos := firstBlock.SourcePosition()
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+			fmt.Sprintf("First heading should be H%d, found H%d", requiredLevel, level)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(fmt.Sprintf("Change to an H%d heading", requiredLevel)).
+			Build()
+		return []lint.Diagnostic{diag}, nil
+	}
+
 	// If first block is not a heading.
 	if firstBlock.Kind != mdast.NodeHeading {
 		pos := mdast.SourcePosition{
@@ -101,6 +115,19 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	return nil, nil
+}
+
+// htmlHeadingLevel returns the level of an HTML block whose first tag is an
+// HTML heading (<h1> to <h6>).
+func htmlHeadingLevel(block *mdast.Node) (int, bool) {
+	if block.Kind != mdast.NodeHTMLBlock {
+		return 0, false
+	}
+	tag := lint.ExtractHTMLTagName(block.Text())
+	if len(tag) != len("h1") || tag[0] != 'h' || tag[1] < '1' || tag[1] > '6' {
+		return 0, false
+	}
+	return int(tag[1] - '0'), true
 }
 
 // findFirstBlockAfterLine finds the first block-level node that starts at or after the given line.
