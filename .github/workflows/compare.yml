@@ -37,7 +37,7 @@ jobs:
         run: go build -o gomdlint ./cmd/gomdlint
 
       - name: Add gomdlint to PATH
-        run: echo "$PWD" >> $GITHUB_PATH
+        run: echo "$PWD" >> "$GITHUB_PATH"
 
       - name: Clone benchmark repos
         run: ./bench/scripts/clone-repos.sh
