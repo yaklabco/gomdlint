@@ -118,6 +118,24 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 			wantFix:       false,
 			wantFixedLang: "",
 		},
+		{
+			name:          "es module import is javascript",
+			input:         "```\nimport React from 'react';\n```",
+			wantFix:       true,
+			wantFixedLang: "javascript",
+		},
+		{
+			name:          "shell test expression gets no guess",
+			input:         "```\n[ \"$HOME\" = /root ] && echo root\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "prose gets no guess",
+			input:         "```\nLet the constant settle before you continue.\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
 	}
 
 	for _, tt := range tests {

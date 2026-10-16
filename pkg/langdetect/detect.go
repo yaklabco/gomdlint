@@ -1,222 +1,335 @@
-// Package langdetect provides language detection for code content.
-// It uses go-enry to detect programming languages from code snippets,
-// primarily for auto-detecting language identifiers in code blocks.
+// Package langdetect detects the language of code content for MD040, which
+// inserts the detected language into fenced code blocks that lack one.
+//
+// Detection is deliberately conservative: inserting a wrong language is worse
+// than inserting none, so Detect only names a language when a strong,
+// language-specific signal identifies it (a shebang, a parse as JSON or
+// nested YAML, or a statement that only one language uses). Everything else
+// is reported as "text", and MD040 then reports the block without a fix.
 package langdetect
 
 import (
 	"bytes"
+	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/go-enry/go-enry/v2"
+	"gopkg.in/yaml.v3"
 )
 
-// Language constants for common detected languages.
+// Language identifiers returned by Detect.
 const (
+	langBash       = "bash"
+	langC          = "c"
+	langCPP        = "cpp"
+	langDiff       = "diff"
+	langDockerfile = "dockerfile"
 	langGo         = "go"
-	langPython     = "python"
+	langHTML       = "html"
 	langJavaScript = "javascript"
 	langJSON       = "json"
-	langYAML       = "yaml"
-	langHTML       = "html"
-	langSQL        = "sql"
+	langPHP        = "php"
+	langPython     = "python"
 	langRust       = "rust"
-	langDockerfile = "dockerfile"
+	langSQL        = "sql"
 	langText       = "text"
-	langBash       = "bash"
+	langTypeScript = "typescript"
+	langXML        = "xml"
+	langYAML       = "yaml"
 )
 
-// Detect returns the detected language for code content.
-// Returns "text" if detection fails or confidence is low.
+// minYAMLKeys is the number of top-level keys a YAML mapping needs before it
+// counts as YAML rather than a few "Label: value" lines of prose.
+const minYAMLKeys = 2
+
+// minDockerInstructions is the number of instruction lines a Dockerfile needs.
+const minDockerInstructions = 2
+
+// detector returns a language, or "" when its signals are absent.
+type detector func(content []byte, lines []string) string
+
+// detectors run in order; the first confident answer wins. YAML runs last
+// because many other formats also parse as YAML.
+var detectors = []detector{
+	detectMarkupProlog,
+	detectDiff,
+	detectJSON,
+	detectGo,
+	detectDockerfile,
+	detectSQL,
+	detectRust,
+	detectCFamily,
+	detectScript,
+	detectPython,
+	detectYAML,
+}
+
+// Detect returns the detected language for code content, or "text" when no
+// strong signal identifies one.
 func Detect(content []byte) string {
-	if len(content) == 0 {
+	if len(bytes.TrimSpace(content)) == 0 {
 		return langText
 	}
 
-	// Strategy 1: Check shebang first (most reliable).
 	if lang, safe := enry.GetLanguageByShebang(content); safe {
 		return normalize(lang)
 	}
 
-	// Strategy 2: Check for language-specific patterns before using classifier.
-	if lang := detectByPattern(content); lang != "" {
-		return lang
+	lines := strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
+	for _, detect := range detectors {
+		if lang := detect(content, lines); lang != "" {
+			return lang
+		}
 	}
-
-	// Strategy 3: Use classifier with common language candidates.
-	candidates := []string{
-		"Go", "Python", "Shell", "JavaScript", "TypeScript",
-		"Ruby", "Rust", "Java", "C", "C++", "SQL", "JSON",
-		"YAML", "HTML", "CSS", "Markdown", "Dockerfile",
-	}
-
-	// Use classifier - it returns the most probable language.
-	// Only use the result if confidence is high (safe == true).
-	if lang, safe := enry.GetLanguageByClassifier(content, candidates); safe && lang != "" {
-		return normalize(lang)
-	}
-
 	return langText
 }
 
-// detectByPattern checks for language-specific patterns that are highly indicative.
-func detectByPattern(content []byte) string {
-	contentStr := string(content)
-	trimmed := bytes.TrimSpace(content)
-
-	// Check patterns in order of specificity.
-	if lang := detectGo(trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectPython(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectHTML(trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectJSON(trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectDockerfile(content, trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectSQL(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectRust(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectJavaScript(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectYAML(content); lang != "" {
-		return lang
-	}
-
-	return ""
-}
-
-// detectGo checks for Go language patterns.
-func detectGo(trimmed []byte) string {
-	if bytes.HasPrefix(trimmed, []byte("package ")) {
-		return langGo
-	}
-	return ""
-}
-
-// detectPython checks for Python language patterns.
-func detectPython(contentStr string) string {
-	// def/class definitions with colon.
-	if strings.Contains(contentStr, "def ") && strings.Contains(contentStr, "):") {
-		return langPython
-	}
-	// Python import statements (not Go which uses "import (").
-	if strings.Contains(contentStr, "import ") && !strings.Contains(contentStr, "import (") {
-		if strings.Contains(contentStr, "from ") || strings.HasPrefix(strings.TrimSpace(contentStr), "import ") {
-			return langPython
-		}
-	}
-	// Python dunder variables.
-	if strings.Contains(contentStr, "__name__") || strings.Contains(contentStr, "__main__") {
-		return langPython
-	}
-	return ""
-}
-
-// detectHTML checks for HTML language patterns.
-func detectHTML(trimmed []byte) string {
-	lowerTrimmed := bytes.ToLower(trimmed)
-	if bytes.Contains(lowerTrimmed, []byte("<!doctype html")) ||
-		bytes.Contains(lowerTrimmed, []byte("<html")) ||
-		bytes.Contains(lowerTrimmed, []byte("<head>")) ||
-		bytes.Contains(lowerTrimmed, []byte("<body>")) {
+// detectMarkupProlog recognizes documents that open with a PHP tag, an XML
+// declaration, or an HTML doctype or root element.
+func detectMarkupProlog(content []byte, _ []string) string {
+	lower := bytes.ToLower(bytes.TrimSpace(content))
+	switch {
+	case bytes.HasPrefix(lower, []byte("<?php")):
+		return langPHP
+	case bytes.HasPrefix(lower, []byte("<?xml")):
+		return langXML
+	case bytes.HasPrefix(lower, []byte("<!doctype html")), bytes.HasPrefix(lower, []byte("<html")):
 		return langHTML
 	}
 	return ""
 }
 
-// detectJSON checks for JSON patterns.
-func detectJSON(trimmed []byte) string {
-	if (bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))) &&
-		bytes.Contains(trimmed, []byte(`"`)) {
+var diffHunkPattern = regexp.MustCompile(`^@@ -\d+(,\d+)? \+\d+(,\d+)? @@`)
+
+// detectDiff recognizes unified diffs by their git header, file headers, or first hunk.
+func detectDiff(_ []byte, lines []string) string {
+	first := firstSignificantLine(lines, nil)
+	switch {
+	case strings.HasPrefix(first, "diff --git "), diffHunkPattern.MatchString(first):
+		return langDiff
+	}
+	for idx := 0; idx+1 < len(lines); idx++ {
+		if strings.HasPrefix(lines[idx], "--- ") && strings.HasPrefix(lines[idx+1], "+++ ") {
+			return langDiff
+		}
+	}
+	return ""
+}
+
+// detectJSON recognizes content that parses as a JSON object or array.
+func detectJSON(content []byte, _ []string) string {
+	trimmed := bytes.TrimSpace(content)
+	if (trimmed[0] == '{' || trimmed[0] == '[') && json.Valid(trimmed) {
 		return langJSON
 	}
 	return ""
 }
 
-// detectDockerfile checks for Dockerfile patterns.
-func detectDockerfile(content, trimmed []byte) string {
-	if bytes.HasPrefix(trimmed, []byte("FROM ")) ||
-		(bytes.Contains(content, []byte("\nFROM ")) && bytes.Contains(content, []byte("\nRUN "))) ||
-		(bytes.Contains(content, []byte("WORKDIR ")) && bytes.Contains(content, []byte("COPY "))) {
+var goPackagePattern = regexp.MustCompile(`^package [A-Za-z_][A-Za-z0-9_]*\s*$`)
+
+// detectGo recognizes a Go package clause as the first statement. Java package
+// declarations use dotted names and a semicolon, so they do not match.
+func detectGo(_ []byte, lines []string) string {
+	if goPackagePattern.MatchString(firstSignificantLine(lines, []string{"//"})) {
+		return langGo
+	}
+	return ""
+}
+
+var dockerInstructionPattern = regexp.MustCompile(
+	`^(FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)\s+\S`)
+
+// detectDockerfile recognizes instruction lines that start with FROM (or ARG
+// before FROM) and contain at least one more instruction.
+func detectDockerfile(_ []byte, lines []string) string {
+	first := firstSignificantLine(lines, []string{"#"})
+	if !strings.HasPrefix(first, "FROM ") && !strings.HasPrefix(first, "ARG ") {
+		return ""
+	}
+	instructions := 0
+	hasFrom := false
+	for _, line := range lines {
+		if dockerInstructionPattern.MatchString(line) {
+			instructions++
+			hasFrom = hasFrom || strings.HasPrefix(line, "FROM ")
+		}
+	}
+	if hasFrom && instructions >= minDockerInstructions {
 		return langDockerfile
 	}
 	return ""
 }
 
-// detectSQL checks for SQL patterns.
-func detectSQL(contentStr string) string {
-	upper := strings.ToUpper(contentStr)
-	trimmedUpper := strings.TrimSpace(upper)
-	if strings.HasPrefix(trimmedUpper, "SELECT ") ||
-		strings.HasPrefix(trimmedUpper, "INSERT ") ||
-		strings.HasPrefix(trimmedUpper, "UPDATE ") ||
-		strings.HasPrefix(trimmedUpper, "DELETE ") ||
-		strings.HasPrefix(trimmedUpper, "CREATE ") {
-		return langSQL
+// sqlStatementPatterns match SQL statements written with uppercase keywords,
+// which keeps sentences such as "Select the files from the list" out.
+var sqlStatementPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?s)^SELECT\s.+?\sFROM\s+\S`),
+	regexp.MustCompile(`^SELECT\s[^\n]*;\s*$`),
+	regexp.MustCompile(`^INSERT\s+INTO\s+\S`),
+	regexp.MustCompile(`^UPDATE\s+\S+\s+SET\s`),
+	regexp.MustCompile(`^DELETE\s+FROM\s+\S`),
+	regexp.MustCompile(`^(CREATE|ALTER|DROP)\s+(TABLE|INDEX|VIEW|DATABASE|SCHEMA)\s`),
+	regexp.MustCompile(`^WITH\s+\w+\s+AS\s*\(`),
+}
+
+// detectSQL recognizes content whose first statement is an uppercase SQL statement.
+func detectSQL(content []byte, lines []string) string {
+	first := firstSignificantLine(lines, []string{"--"})
+	start := strings.Index(string(content), first)
+	if first == "" || start < 0 {
+		return ""
+	}
+	statement := string(content[start:])
+	for _, pattern := range sqlStatementPatterns {
+		if pattern.MatchString(statement) {
+			return langSQL
+		}
 	}
 	return ""
 }
 
-// detectRust checks for Rust language patterns.
-func detectRust(contentStr string) string {
-	if strings.Contains(contentStr, "fn main()") ||
-		strings.Contains(contentStr, "println!") ||
-		strings.Contains(contentStr, "let mut ") {
+// rustPatterns match syntax that only Rust uses.
+var rustPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)^\s*(pub(\([^)]*\))?\s+)?(async\s+)?(unsafe\s+)?fn\s+\w+\s*(<[^>]*>)?\s*\(`),
+	regexp.MustCompile(`\b(println|eprintln|format|vec|panic)!\s*[(\[]`),
+	regexp.MustCompile(`(?m)^\s*let\s+mut\s+\w+`),
+	regexp.MustCompile(`(?m)^\s*use\s+(std|crate|super|self)::`),
+}
+
+// detectRust recognizes Rust function items, macros, mutable bindings, and paths.
+func detectRust(content []byte, _ []string) string {
+	if matchesAny(content, rustPatterns) {
 		return langRust
 	}
 	return ""
 }
 
-// detectJavaScript checks for JavaScript patterns.
-func detectJavaScript(contentStr string) string {
-	if strings.Contains(contentStr, "=>") ||
-		strings.Contains(contentStr, "const ") ||
-		strings.Contains(contentStr, "let ") ||
-		strings.Contains(contentStr, "console.log") {
+var (
+	cIncludePattern = regexp.MustCompile(`(?m)^\s*#\s*include\s*[<"][^>"]+[>"]`)
+	cppPattern      = regexp.MustCompile(
+		`std::|#\s*include\s*<(iostream|vector|string|map|memory|algorithm)>|(?m)^\s*(class|namespace|template\s*<)\b`)
+)
+
+// detectCFamily recognizes C and C++ by their #include directives.
+func detectCFamily(content []byte, _ []string) string {
+	if !cIncludePattern.Match(content) {
+		return ""
+	}
+	if cppPattern.Match(content) {
+		return langCPP
+	}
+	return langC
+}
+
+// javaScriptPatterns match ECMAScript module syntax, CommonJS, console calls,
+// arrow functions bound with const or let, and function declarations.
+var javaScriptPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)^\s*import\s+[^'"\n]+\s+from\s+['"][^'"\n]+['"]\s*;?\s*$`),
+	regexp.MustCompile(`(?m)^\s*import\s+['"][^'"\n]+['"]\s*;?\s*$`),
+	regexp.MustCompile(`(?m)^\s*export\s+(default|const|let|function|class|async)\s`),
+	regexp.MustCompile(`\brequire\(\s*['"][^'"\n]+['"]\s*\)`),
+	regexp.MustCompile(`\bconsole\.(log|error|warn|info|debug)\([^)\n]*\)`),
+	regexp.MustCompile(`(?m)^\s*(const|let)\s+\w+\s*=\s*(async\s*)?(\([^)]*\)|\w+)\s*=>`),
+	regexp.MustCompile(`(?m)^\s*(async\s+)?function\*?\s+\w+\s*\([^)$]*\)\s*\{`),
+}
+
+// typeScriptPatterns match TypeScript-only declarations and annotations.
+var typeScriptPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)^\s*(export\s+)?(declare\s+)?(interface|enum)\s+\w+[^\n]*\{`),
+	regexp.MustCompile(`(?m)^\s*(export\s+)?type\s+\w+(<[^>]*>)?\s*=`),
+	regexp.MustCompile(`\b(const|let|var)\s+\w+\s*:\s*(string|number|boolean|any|unknown|void|never|object|bigint|symbol)\b`),
+	regexp.MustCompile(`\)\s*:\s*(string|number|boolean|void|Promise<)`),
+	regexp.MustCompile(`[({]\s*\w+\??\s*:\s*(string|number|boolean)\s*[;,)}]`),
+}
+
+// detectScript recognizes TypeScript by its type syntax, and JavaScript otherwise.
+func detectScript(content []byte, _ []string) string {
+	switch {
+	case matchesAny(content, typeScriptPatterns):
+		return langTypeScript
+	case matchesAny(content, javaScriptPatterns):
 		return langJavaScript
 	}
 	return ""
 }
 
-// detectYAML checks for YAML patterns by counting key: value pairs.
-func detectYAML(content []byte) string {
-	lines := bytes.Split(content, []byte("\n"))
-	yamlKeyCount := 0
+// pythonPatterns match Python definitions, imports, and the main guard.
+var pythonPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)^\s*(async\s+)?def\s+\w+\s*\(.*\)\s*(->\s*[^:\n]+)?:\s*(#.*)?$`),
+	regexp.MustCompile(`(?m)^\s*class\s+\w+\s*(\([^)\n]*\))?\s*:\s*(#.*)?$`),
+	regexp.MustCompile(`(?m)^from\s+[\w.]+\s+import\s+[\w*, ()]+\s*$`),
+	regexp.MustCompile(`(?m)^import\s+[\w.]+(\s+as\s+\w+)?(\s*,\s*[\w.]+(\s+as\s+\w+)?)*\s*$`),
+	regexp.MustCompile(`(?m)^if\s+__name__\s*==\s*['"]__main__['"]\s*:`),
+}
 
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || bytes.HasPrefix(line, []byte("#")) {
-			continue
+// detectPython recognizes Python statements that no other common language shares.
+func detectPython(content []byte, _ []string) string {
+	if matchesAny(content, pythonPatterns) {
+		return langPython
+	}
+	return ""
+}
+
+var yamlKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
+
+// detectYAML recognizes a block-style YAML mapping with identifier keys and
+// at least one nested mapping or sequence. Flat "Label: value" lines are left
+// alone because prose often looks like that.
+func detectYAML(content []byte, _ []string) string {
+	var root yaml.Node
+	if err := yaml.Unmarshal(content, &root); err != nil || len(root.Content) == 0 {
+		return ""
+	}
+	mapping := root.Content[0]
+	if mapping.Kind != yaml.MappingNode || mapping.Style&yaml.FlowStyle != 0 || len(mapping.Content) < 2*minYAMLKeys {
+		return ""
+	}
+	nested := false
+	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
+		key, value := mapping.Content[idx], mapping.Content[idx+1]
+		if key.Kind != yaml.ScalarNode || !yamlKeyPattern.MatchString(key.Value) {
+			return ""
 		}
-		// Simple key: value (identifier followed by colon and space).
-		// Exclude lines that look like code (contain parentheses, brackets).
-		if bytes.Contains(line, []byte(": ")) {
-			if !bytes.Contains(line, []byte("(")) &&
-				!bytes.Contains(line, []byte("{")) &&
-				!bytes.HasPrefix(line, []byte(`"`)) {
-				yamlKeyCount++
-			}
-		}
-		// YAML list item at root level.
-		if bytes.HasPrefix(line, []byte("- ")) {
-			yamlKeyCount++
+		if value.Kind == yaml.MappingNode || value.Kind == yaml.SequenceNode {
+			nested = true
 		}
 	}
-
-	if yamlKeyCount >= 2 {
+	if nested {
 		return langYAML
 	}
 	return ""
+}
+
+// firstSignificantLine returns the first line that is not blank and does not
+// start with one of the comment prefixes.
+func firstSignificantLine(lines, commentPrefixes []string) string {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || hasAnyPrefix(trimmed, commentPrefixes) {
+			continue
+		}
+		return trimmed
+	}
+	return ""
+}
+
+func hasAnyPrefix(text string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesAny(content []byte, patterns []*regexp.Regexp) bool {
+	for _, pattern := range patterns {
+		if pattern.Match(content) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalize converts go-enry language names to fence tags.
