@@ -55,6 +55,13 @@ func TestFindListItemMarker(t *testing.T) {
 			},
 		},
 		{
+			name:  "indented ordered",
+			input: "  5. item\n",
+			want: []markerExpectation{
+				{line: 1, column: 2, text: "5.", spacing: 1, ordered: true, number: 5, delimiter: '.'},
+			},
+		},
+		{
 			name:  "leading zeros",
 			input: "007. item\n",
 			want: []markerExpectation{

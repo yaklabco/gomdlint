@@ -214,10 +214,21 @@ func TestOrderedListIncrementRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
-			name:      "all ones",
+			name:      "all ones with ordered style",
 			input:     "1. Item 1\n1. Item 2\n1. Item 3\n",
 			wantDiags: 2,
 			wantFix:   "1. Item 1\n2. Item 2\n3. Item 3\n",
+			config:    map[string]any{"style": "ordered"},
+		},
+		{
+			name:      "default accepts all ones",
+			input:     "1. Item 1\n1. Item 2\n1. Item 3\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "default accepts zero-based numbering",
+			input:     "0. Item 1\n1. Item 2\n2. Item 3\n",
+			wantDiags: 0,
 		},
 		{
 			name:      "wrong sequence",
@@ -226,9 +237,90 @@ func TestOrderedListIncrementRule(t *testing.T) {
 			wantFix:   "1. Item 1\n2. Item 2\n3. Item 3\n",
 		},
 		{
-			name:      "start from 5",
+			// markdownlint expects an incrementing list to start at 0 or 1.
+			name:      "list starting above one is renumbered",
 			input:     "5. Item 1\n6. Item 2\n7. Item 3\n",
+			wantDiags: 3,
+			wantFix:   "1. Item 1\n2. Item 2\n3. Item 3\n",
+		},
+		{
+			name:      "single item must be one",
+			input:     "2. Item\n",
+			wantDiags: 1,
+			wantFix:   "1. Item\n",
+		},
+		{
+			name:      "incrementing list with a repeated number",
+			input:     "1. Item\n2. Item\n1. Item\n4. Item\n",
+			wantDiags: 1,
+			wantFix:   "1. Item\n2. Item\n3. Item\n4. Item\n",
+		},
+		{
+			name:      "ones list with a stray number",
+			input:     "1. Item\n1. Item\n3. Item\n1. Item\n",
+			wantDiags: 1,
+			wantFix:   "1. Item\n1. Item\n1. Item\n1. Item\n",
+		},
+		{
+			name:      "zero style",
+			input:     "1. Item\n",
+			wantDiags: 1,
+			wantFix:   "0. Item\n",
+			config:    map[string]any{"style": "zero"},
+		},
+		{
+			name:      "numbers inside a blockquote",
+			input:     "> 1. one\n> 2. two\n",
 			wantDiags: 0,
+		},
+		{
+			name:      "wrong number inside a blockquote",
+			input:     "> 1. one\n> 3. two\n",
+			wantDiags: 1,
+			wantFix:   "> 1. one\n> 2. two\n",
+		},
+		{
+			name:      "ordered list nested on a bullet line",
+			input:     "- 1. alpha\n  2. beta\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "wrong number in a list nested on a bullet line",
+			input:     "- 1. alpha\n  3. beta\n",
+			wantDiags: 1,
+			wantFix:   "- 1. alpha\n  2. beta\n",
+		},
+		{
+			name:      "fix keeps the parenthesis delimiter",
+			input:     "1) Item\n1) Item\n3) Item\n",
+			wantDiags: 1,
+			wantFix:   "1) Item\n1) Item\n1) Item\n",
+		},
+		{
+			name:      "fix keeps right-aligned numbers aligned",
+			input:     " 9. Item\n10. Item\n11. Item\n",
+			wantDiags: 3,
+			wantFix:   " 1. Item\n 2. Item\n 3. Item\n",
+		},
+		{
+			name:      "fix keeps zero-padded numbers padded",
+			input:     "08. Item\n09. Item\n10. Item\n",
+			wantDiags: 3,
+			wantFix:   "01. Item\n02. Item\n03. Item\n",
+		},
+		{
+			name:      "wider number is fixed when nothing depends on the content column",
+			input:     "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n9. j\n",
+			wantDiags: 1,
+			wantFix:   "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j\n",
+		},
+		{
+			// Widening "9." to "10." moves the content column past the
+			// nested list, which would then leave the item.
+			name:      "wider number is not fixed when it would move nested content",
+			input:     "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n9. j\n   - nested\n",
+			wantDiags: 1,
+			wantFix:   "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n9. j\n   - nested\n",
 		},
 		{
 			name:      "unordered list ignored",
@@ -249,8 +341,8 @@ func TestOrderedListIncrementRule(t *testing.T) {
 			name:      "allow renumbering false",
 			input:     "1. Item 1\n1. Item 2\n",
 			wantDiags: 1,
-			wantFix:   "", // No fix when renumbering disabled.
-			config:    map[string]any{"allow_renumbering": false},
+			wantFix:   "1. Item 1\n1. Item 2\n", // No fix when renumbering disabled.
+			config:    map[string]any{"allow_renumbering": false, "style": "ordered"},
 		},
 	}
 
@@ -278,20 +370,18 @@ func TestOrderedListIncrementRule(t *testing.T) {
 				for _, d := range diags {
 					allEdits = append(allEdits, d.FixEdits...)
 				}
-				if len(allEdits) > 0 {
-					prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-					require.NoError(t, err)
-					fixed := fix.ApplyEdits([]byte(tt.input), prepared)
-					assert.Equal(t, tt.wantFix, string(fixed))
+				prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
+				require.NoError(t, err)
+				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+				assert.Equal(t, tt.wantFix, string(fixed))
 
-					// Verify idempotency.
-					snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
-					require.NoError(t, err)
-					ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
-					diags2, err := rule.Apply(ruleCtx2)
-					require.NoError(t, err)
-					assert.Empty(t, diags2, "fix should be idempotent")
-				}
+				// Verify idempotency: no fixable diagnostics remain.
+				snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
+				require.NoError(t, err)
+				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
+				diags2, err := rule.Apply(ruleCtx2)
+				require.NoError(t, err)
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -318,45 +408,4 @@ func TestOrderedListIncrementRule_Metadata(t *testing.T) {
 	assert.True(t, rule.CanFix())
 	assert.True(t, rule.DefaultEnabled())
 	assert.Equal(t, config.SeverityWarning, rule.DefaultSeverity())
-}
-
-func TestExtractListItemNumber(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  int
-	}{
-		{
-			name:  "simple number",
-			input: "1. Item\n",
-			want:  1,
-		},
-		{
-			name:  "double digit",
-			input: "12. Item\n",
-			want:  12,
-		},
-		{
-			name:  "with leading space",
-			input: "  5. Item\n",
-			want:  5,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := goldmark.New(string(config.FlavorCommonMark))
-			snapshot, err := parser.Parse(context.Background(), "test.md", []byte(tt.input))
-			require.NoError(t, err)
-
-			lists := lint.Lists(snapshot.Root)
-			require.Len(t, lists, 1)
-
-			items := lint.ListItems(lists[0])
-			require.Len(t, items, 1)
-
-			got := extractListItemNumber(snapshot, items[0])
-			assert.Equal(t, tt.want, got)
-		})
-	}
 }

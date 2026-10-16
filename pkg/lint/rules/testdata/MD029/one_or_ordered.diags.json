@@ -1,0 +1,65 @@
+[
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 9,
+    "column": 1,
+    "message": "Ordered list item numbered 2 should be 1",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 21,
+    "column": 1,
+    "message": "Ordered list item numbered 1 should be 3",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 28,
+    "column": 1,
+    "message": "Ordered list item numbered 3 should be 1",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 33,
+    "column": 1,
+    "message": "Ordered list item numbered 4 should be 1",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 34,
+    "column": 1,
+    "message": "Ordered list item numbered 5 should be 2",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 41,
+    "column": 3,
+    "message": "Ordered list item numbered 4 should be 3",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 48,
+    "column": 1,
+    "message": "Ordered list item numbered 3 should be 2",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -7,9 +7,9 @@
 ## Second Section
 
 1. One
-2. Two should be 2
-3. Three should be 3
-4. Four should be 4
+1. Two should be 2
+1. Three should be 3
+1. Four should be 4
 
 ## Third Section
 

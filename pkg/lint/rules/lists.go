@@ -3,6 +3,7 @@ package rules
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -319,215 +320,212 @@ func NewOrderedListIncrementRule() *OrderedListIncrementRule {
 	}
 }
 
-// Apply checks that ordered lists have sequential numbering.
+// orderedListStyles maps the MD029 styles to markdownlint's example text.
+var orderedListStyles = map[string]string{
+	"one":     "1/1/1",
+	"ordered": "1/2/3",
+	"zero":    "0/0/0",
+}
+
+// orderedItem is an ordered list item and its located marker.
+type orderedItem struct {
+	item   *mdast.Node
+	marker listItemMarker
+	found  bool
+}
+
+// numberMismatch is an ordered list item whose number differs from the
+// expected one, with the text that would replace its number.
+type numberMismatch struct {
+	orderedItem
+	expected int
+	text     string
+}
+
+// Apply checks ordered list item prefixes.
+//
+// The default style is markdownlint's one_or_ordered: a list is valid when all
+// its items are numbered 1, or when it counts up from 0 or 1. The styles one,
+// ordered and zero force one pattern. Fixes replace only the digits, keep the
+// delimiter, and keep right-aligned or zero-padded numbers aligned.
 func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
+	style := ctx.OptionString("style", "one_or_ordered")
 	allowRenumbering := ctx.OptionBool("allow_renumbering", true)
 
-	lists := ctx.Lists()
-	var diags []lint.Diagnostic
-
-	for _, list := range lists {
+	var mismatches []numberMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-
-		// Skip unordered lists.
 		if !lint.IsOrderedList(list) {
 			continue
 		}
+		mismatches = append(mismatches, orderedListMismatches(ctx.File, list, style)...)
+	}
 
-		startNumber := lint.ListStartNumber(list)
-		if startNumber == 0 {
-			startNumber = 1
-		}
-		delimiter := lint.ListDelimiter(list)
-		if delimiter == "" {
-			delimiter = "."
-		}
-
-		items := lint.ListItems(list)
-		expectedNum, incrementing := orderedListPolicy(ctx, items, startNumber)
-
-		for _, item := range items {
-			if ctx.OptionString("style", "") != "" && item.Parent != list {
-				continue
-			}
-			actualNum := extractListItemNumber(ctx.File, item)
-
-			if actualNum != expectedNum {
-				diag := r.createNumberDiagnostic(ctx, item, actualNum, expectedNum, delimiter, allowRenumbering)
-				diags = append(diags, diag)
-			}
-
-			if incrementing {
-				expectedNum++
+	plan := newListShiftPlan(ctx.File)
+	if allowRenumbering {
+		for _, mismatch := range mismatches {
+			if shift, moves := numberShift(plan, mismatch); moves {
+				plan.propose(mismatch.item, shift)
 			}
 		}
 	}
+	safeShifts := plan.resolve()
 
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		fixable := allowRenumbering
+		if shift, moves := numberShift(plan, mismatch); moves {
+			accepted, ok := safeShifts[mismatch.item]
+			fixable = fixable && ok && accepted == shift
+		}
+		diags = append(diags, r.numberDiagnostic(ctx, mismatch, fixable))
+	}
 	return diags, nil
 }
 
-func orderedListPolicy(ctx *lint.RuleContext, items []*mdast.Node, startNumber int) (int, bool) {
-	style := ctx.OptionString("style", "")
-	switch style {
-	case "":
-		return startNumber, true
-	case "one":
-		return 1, false
+// orderedListMismatches applies markdownlint's numbering policy to one list.
+func orderedListMismatches(file *mdast.FileSnapshot, list *mdast.Node, style string) []numberMismatch {
+	listItems := lint.ListItems(list)
+	items := make([]orderedItem, 0, len(listItems))
+	for _, item := range listItems {
+		marker, found := findListItemMarker(file, item)
+		items = append(items, orderedItem{item: item, marker: marker, found: found && marker.Ordered})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	expected := 1
+	incrementing := false
+	zeroPrefixed := false
+	if len(items) > 1 {
+		first, second := items[0], items[1]
+		if !first.found || !second.found {
+			// The numbering pattern cannot be determined.
+			return nil
+		}
+		if second.marker.Number != 1 || first.marker.Number == 0 {
+			incrementing = true
+			if first.marker.Number == 0 {
+				expected = 0
+			}
+		}
+		zeroPrefixed = strings.HasPrefix(first.marker.NumberText, "0")
+	}
+	rightAligned := orderedPrefixesAligned(items)
+
+	listStyle := style
+	if _, known := orderedListStyles[listStyle]; !known {
+		listStyle = "one"
+		if incrementing {
+			listStyle = "ordered"
+		}
+	}
+	switch listStyle {
 	case "zero":
-		return 0, false
+		expected = 0
+	case "one":
+		expected = 1
 	}
-	start := 1
-	if len(items) > 1 && extractListItemNumber(ctx.File, items[0]) == 0 {
-		start = 0
+
+	var mismatches []numberMismatch
+	for _, item := range items {
+		if item.found && item.marker.Number != expected {
+			mismatches = append(mismatches, numberMismatch{
+				orderedItem: item,
+				expected:    expected,
+				text:        orderedNumberText(expected, item.marker.NumberText, rightAligned, zeroPrefixed),
+			})
+		}
+		if listStyle == "ordered" {
+			expected++
+		}
 	}
-	if style == "ordered" {
-		return start, true
-	}
-	incrementing := len(items) > 1 && (start == 0 || extractListItemNumber(ctx.File, items[1]) != 1)
-	return start, incrementing
+	return mismatches
 }
 
-func (r *OrderedListIncrementRule) createNumberDiagnostic(
-	ctx *lint.RuleContext,
-	item *mdast.Node,
-	actual, expected int,
-	delimiter string,
-	allowRenumbering bool,
-) lint.Diagnostic {
-	msg := fmt.Sprintf("Ordered list item numbered %d should be %d", actual, expected)
+// orderedNumberText formats the replacement number. In a right-aligned list
+// it is padded to the width of the number it replaces, with zeros when the
+// list is zero-padded.
+func orderedNumberText(expected int, actual string, rightAligned, zeroPrefixed bool) string {
+	text := strconv.Itoa(expected)
+	if !rightAligned || len(text) >= len(actual) {
+		return text
+	}
+	padding := " "
+	if zeroPrefixed {
+		padding = "0"
+	}
+	return strings.Repeat(padding, len(actual)-len(text)) + text
+}
 
-	diagBuilder := lint.NewDiagnostic(r.ID(), item, msg).
+// orderedPrefixesAligned reports whether every item prefix (the marker and the
+// whitespace after it) ends in the same column, the way markdownlint detects
+// right-aligned numbers.
+func orderedPrefixesAligned(items []orderedItem) bool {
+	end := -1
+	for _, item := range items {
+		if !item.found {
+			continue
+		}
+		spacing := 0
+		if item.marker.HasContent() {
+			spacing = item.marker.Spacing()
+			if spacing > maxListItemSpacing {
+				spacing = 1
+			}
+		}
+		itemEnd := item.marker.Column() + item.marker.Width() + spacing
+		if end >= 0 && itemEnd != end {
+			return false
+		}
+		end = itemEnd
+	}
+	return true
+}
+
+// numberShift returns the column change a renumbering fix makes: a wider or
+// narrower number moves the content, and padding moves the marker start.
+func numberShift(plan *listShiftPlan, mismatch numberMismatch) (listShift, bool) {
+	padding := len(mismatch.text) - len(strings.TrimLeft(mismatch.text, " "))
+	widthChange := len(mismatch.text) - len(mismatch.marker.NumberText)
+	if padding == 0 && widthChange == 0 {
+		return listShift{}, false
+	}
+	layout, ok := plan.layout(mismatch.item)
+	if !ok {
+		// Without a layout the shift cannot be checked; propose an impossible
+		// one so that the fix is withheld.
+		return listShift{markerCol: -1, contentCol: -1}, true
+	}
+	return listShift{
+		markerCol:  layout.markerCol + padding,
+		contentCol: layout.contentCol + widthChange,
+	}, true
+}
+
+func (r *OrderedListIncrementRule) numberDiagnostic(ctx *lint.RuleContext, mismatch numberMismatch, fixable bool) lint.Diagnostic {
+	marker := mismatch.marker
+	pos := mdast.SourcePosition{
+		StartLine:   marker.Line,
+		StartColumn: marker.Column() + 1,
+		EndLine:     marker.Line,
+		EndColumn:   marker.Column() + 1 + marker.Width(),
+	}
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+		fmt.Sprintf("Ordered list item numbered %d should be %d", marker.Number, mismatch.expected)).
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Use %d%s instead", expected, delimiter))
-
-	if allowRenumbering {
-		builder := r.buildNumberFix(ctx.File, item, expected, delimiter)
-		if builder != nil {
-			diagBuilder = diagBuilder.WithFix(builder)
-		}
+		WithSuggestion(fmt.Sprintf("Use %d%c instead", mismatch.expected, marker.Delimiter))
+	if fixable {
+		builder := fix.NewEditBuilder()
+		builder.ReplaceRange(marker.Start, marker.Start+len(marker.NumberText), mismatch.text)
+		diagBuilder = diagBuilder.WithFix(builder)
 	}
-
 	return diagBuilder.Build()
-}
-
-func (r *OrderedListIncrementRule) buildNumberFix(
-	file *mdast.FileSnapshot,
-	item *mdast.Node,
-	expectedNum int,
-	delimiter string,
-) *fix.EditBuilder {
-	if file == nil || item == nil {
-		return nil
-	}
-
-	pos := item.SourcePosition()
-	if pos.StartLine < 1 || pos.StartLine > len(file.Lines) {
-		return nil
-	}
-
-	lineContent := lint.LineContent(file, pos.StartLine)
-	line := file.Lines[pos.StartLine-1]
-
-	// Find the number and delimiter in the line.
-	numStart := -1
-	numEnd := -1
-	delimEnd := -1
-
-	for idx, ch := range lineContent {
-		// Skip leading whitespace.
-		if ch == ' ' || ch == '\t' {
-			continue
-		}
-
-		// Look for digits.
-		switch {
-		case ch >= '0' && ch <= '9':
-			if numStart < 0 {
-				numStart = idx
-			}
-			numEnd = idx + 1
-		case numEnd > 0:
-			// After digits, expect delimiter.
-			if ch == '.' || ch == ')' {
-				delimEnd = idx + 1
-			}
-		}
-
-		// Determine if we should stop parsing.
-		foundDelimiter := delimEnd > 0
-		isWhitespace := ch == ' ' || ch == '\t'
-		isDigit := ch >= '0' && ch <= '9'
-		isDelimiterChar := ch == '.' || ch == ')'
-		hitNonDigitBeforeNumber := numEnd == 0 && !isWhitespace
-		hitInvalidCharAfterNumber := numEnd > 0 && !isDelimiterChar && !isDigit
-
-		if foundDelimiter || hitNonDigitBeforeNumber || hitInvalidCharAfterNumber {
-			break
-		}
-	}
-
-	if numStart < 0 || delimEnd < 0 {
-		return nil
-	}
-
-	builder := fix.NewEditBuilder()
-	offset := line.StartOffset + numStart
-	endOffset := line.StartOffset + delimEnd
-	newText := fmt.Sprintf("%d%s", expectedNum, delimiter)
-	builder.ReplaceRange(offset, endOffset, newText)
-
-	return builder
-}
-
-// extractListItemNumber extracts the number from an ordered list item.
-func extractListItemNumber(file *mdast.FileSnapshot, item *mdast.Node) int {
-	if file == nil || item == nil {
-		return 0
-	}
-
-	pos := item.SourcePosition()
-	if pos.StartLine < 1 || pos.StartLine > len(file.Lines) {
-		return 0
-	}
-
-	lineContent := lint.LineText(file, pos.StartLine)
-
-	// Parse the number from the beginning of the line (after whitespace).
-	foundDigit := false
-	const typicalListNumberLen = 8
-	numBuilder := make([]byte, 0, typicalListNumberLen)
-
-	for _, ch := range lineContent {
-		if ch == ' ' || ch == '\t' {
-			if foundDigit {
-				break
-			}
-			continue
-		}
-
-		if ch < '0' || ch > '9' {
-			break
-		}
-
-		numBuilder = append(numBuilder, ch)
-		foundDigit = true
-	}
-	numStr := string(numBuilder)
-
-	if numStr == "" {
-		return 0
-	}
-
-	num, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0
-	}
-
-	return num
 }

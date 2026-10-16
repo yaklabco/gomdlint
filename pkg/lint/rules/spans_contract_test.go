@@ -224,10 +224,10 @@ func TestQuotedMultilineReferencesUseTheirDefinitions(t *testing.T) {
 }
 
 func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
-	input := "# Title\n\n1) one\n1) two\n3) three\n"
+	input := "# Title\n\n1) one\n2) two\n4) three\n"
 	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)
 	require.Len(t, diags, 1)
-	require.Equal(t, "Use 2) instead", diags[0].Suggestion)
+	require.Equal(t, "Use 3) instead", diags[0].Suggestion)
 	require.Equal(t, "# Title\n\n1) one\n2) two\n3) three\n", applyAllFixEdits(t, input, diags))
 }
 
