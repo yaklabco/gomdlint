@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -144,22 +145,25 @@ func NewFinalNewlineRule() *FinalNewlineRule {
 	}
 }
 
-// Apply checks that the file ends with exactly one newline.
+// Apply checks that the file ends with a newline.
+//
+// Like markdownlint, the rule only requires the last line to be blank, where a
+// line holding only whitespace, blockquote markers, or HTML comments counts as
+// blank. Extra blank lines at the end of the file are reported by MD012, unless
+// the gomdlint-specific max_trailing_blank_lines option is set.
 func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil || len(ctx.File.Content) == 0 {
 		return nil, nil
 	}
 
-	content := ctx.File.Content
-	contentLen := len(content)
+	contentLen := len(ctx.File.Content)
+	lastLine := len(ctx.File.Lines)
 
-	// Check if file ends with a newline.
-	if content[contentLen-1] != '\n' {
+	if !isMarkdownlintBlankLine(lint.RawLineContent(ctx.File, lastLine)) {
 		// Missing final newline.
 		builder := fix.NewEditBuilder()
 		builder.Insert(contentLen, "\n")
 
-		lastLine := len(ctx.File.Lines)
 		pos := mdast.SourcePosition{
 			StartLine:   lastLine,
 			StartColumn: lint.LineLength(ctx.File, lastLine) + 1,
@@ -175,7 +179,11 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		return []lint.Diagnostic{diag}, nil
 	}
 
-	// Check for excessive trailing blank lines.
+	// The trailing blank line limit is a gomdlint extension that markdownlint
+	// does not have, so it only applies when configured explicitly.
+	if ctx.Option("max_trailing_blank_lines", nil) == nil {
+		return nil, nil
+	}
 	maxTrailingBlankLines := ctx.OptionInt("max_trailing_blank_lines", 1)
 
 	// Count trailing blank lines (excluding the final newline on the last non-blank line).
@@ -218,6 +226,41 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	return nil, nil
 }
 
+// isMarkdownlintBlankLine reports whether a line is blank the way markdownlint's
+// isBlankLine helper defines it: empty, whitespace only, or holding nothing but
+// blockquote markers and HTML comments (including unterminated comment parts).
+func isMarkdownlintBlankLine(line []byte) bool {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return true
+	}
+	rest := bytes.ReplaceAll(removeHTMLCommentText(line), []byte(">"), nil)
+	return len(bytes.TrimSpace(rest)) == 0
+}
+
+// removeHTMLCommentText strips HTML comment text from a single line, treating a
+// leading unmatched "-->" or a trailing unmatched "<!--" as part of a comment.
+func removeHTMLCommentText(line []byte) []byte {
+	const (
+		startComment = "<!--"
+		endComment   = "-->"
+	)
+	text := append([]byte(nil), line...)
+	for {
+		start := bytes.Index(text, []byte(startComment))
+		end := bytes.Index(text, []byte(endComment))
+		switch {
+		case end != -1 && (start == -1 || end < start):
+			text = text[end+len(endComment):]
+		case start != -1 && end != -1:
+			text = append(text[:start], text[end+len(endComment):]...)
+		case start != -1:
+			text = text[:start]
+		default:
+			return text
+		}
+	}
+}
+
 // MultipleBlankLinesRule checks for consecutive blank lines.
 type MultipleBlankLinesRule struct {
 	lint.BaseRule
@@ -256,7 +299,9 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			return diags, ctx.Ctx.Err()
 		}
 
-		if lint.IsBlankLine(ctx.File, lineNum) {
+		// Like markdownlint, blank lines inside code blocks are content and
+		// end any streak in progress.
+		if !ctx.IsLineInCodeBlock(lineNum) && lint.IsBlankLine(ctx.File, lineNum) {
 			if streakCount == 0 {
 				streakStart = lineNum
 			}
@@ -290,6 +335,12 @@ func (r *MultipleBlankLinesRule) createDiagnostic(
 
 	startOffset := ctx.File.Lines[firstExcessLine-1].StartOffset
 	endOffset := ctx.File.Lines[lastExcessLine-1].EndOffset
+	if last := ctx.File.Lines[lastExcessLine-1]; last.EndOffset == last.NewlineStart && firstExcessLine > 1 {
+		// The final line has no line ending of its own (it may be the empty
+		// line after a trailing newline), so deleting it means deleting the
+		// line ending in front of the excess lines instead.
+		startOffset = ctx.File.Lines[firstExcessLine-2].NewlineStart
+	}
 
 	builder := fix.NewEditBuilder()
 	builder.Delete(startOffset, endOffset)

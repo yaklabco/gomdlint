@@ -144,6 +144,46 @@ func TestFinalNewlineRule(t *testing.T) {
 			wantDiags: 0,
 			wantFix:   "",
 		},
+		{
+			// markdownlint MD047 only requires a final newline; extra blank
+			// lines at the end of the file are MD012's concern.
+			name:      "trailing blank line is not reported",
+			input:     "Hello world\n\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "several trailing blank lines are not reported",
+			input:     "Hello world\n\n\n\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "whitespace-only last line counts as blank",
+			input:     "Hello world\n   ",
+			wantDiags: 0,
+		},
+		{
+			name:      "blockquote marker on last line counts as blank",
+			input:     "> Quote\n>",
+			wantDiags: 0,
+		},
+		{
+			name:      "comment-only last line counts as blank",
+			input:     "Text\n<!-- note -->",
+			wantDiags: 0,
+		},
+		{
+			name:      "text after comment on last line is not blank",
+			input:     "Text\n<!-- note --> more",
+			wantDiags: 1,
+			wantFix:   "Text\n<!-- note --> more\n",
+		},
+		{
+			name:      "explicit max_trailing_blank_lines still limits blank lines",
+			input:     "Hello world\n\n\n",
+			wantDiags: 1,
+			wantFix:   "Hello world\n",
+			config:    map[string]any{"max_trailing_blank_lines": 1},
+		},
 	}
 
 	for _, tt := range tests {
@@ -231,6 +271,51 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 			input:     "",
 			wantDiags: 0,
 			wantFix:   "",
+		},
+		{
+			name:      "blank lines inside fenced code are ignored",
+			input:     "# Title\n\n```\na\n\n\nb\n```\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "blank lines inside indented code are ignored",
+			input:     "Para\n\n    a\n\n\n    b\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "blank lines inside fenced code in a list item are ignored",
+			input:     "- item\n\n  ```\n  a\n\n\n  b\n  ```\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "blank lines before a fence are still reported",
+			input:     "a\n\n\n```\nx\n```\n",
+			wantDiags: 1,
+			wantFix:   "a\n\n```\nx\n```\n",
+		},
+		{
+			name:      "blank line before end of file",
+			input:     "Line one\n\n",
+			wantDiags: 1,
+			wantFix:   "Line one\n",
+		},
+		{
+			name:      "several blank lines before end of file",
+			input:     "Line one\n\n\n",
+			wantDiags: 1,
+			wantFix:   "Line one\n",
+		},
+		{
+			name:      "whitespace-only final line",
+			input:     "Line one\n\n   ",
+			wantDiags: 1,
+			wantFix:   "Line one\n",
+		},
+		{
+			name:      "blank lines before end of CRLF file",
+			input:     "Line one\r\n\r\n",
+			wantDiags: 1,
+			wantFix:   "Line one\r\n",
 		},
 	}
 

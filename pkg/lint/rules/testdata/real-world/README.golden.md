@@ -133,6 +133,7 @@ Install prerequisites:
 
 ```bash
 
+
 # Install Go (if not already installed)
 # See https://go.dev/doc/install
 
@@ -151,12 +152,14 @@ List all available tasks:
 
 ```bash
 
+
 stave -l
 ```
 
 Common tasks:
 
 ```bash
+
 
 # Build the project
 stave build
@@ -195,6 +198,7 @@ stave bench
 ### Project Structure
 
 ```
+
 
 gomdlint/
   cmd/
