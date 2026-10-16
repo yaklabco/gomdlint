@@ -551,13 +551,33 @@ func (l *artifactLocator) computeLocation(path string) SARIFArtifactLocation {
 		absPath = filepath.Join(l.workDir, path)
 	}
 
-	if l.root != "" {
-		if rel := analysis.DisplayPath(absPath, l.root); !filepath.IsAbs(rel) {
-			return SARIFArtifactLocation{URI: relativeURI(rel), URIBaseID: sarifSourceRootID}
-		}
+	if rel, ok := l.relativeToRoot(absPath); ok {
+		return SARIFArtifactLocation{URI: relativeURI(rel), URIBaseID: sarifSourceRootID}
 	}
 
 	return SARIFArtifactLocation{URI: fileURI(absPath)}
+}
+
+// relativeToRoot returns absPath relative to the source root when the file
+// lies inside it. GitHub code scanning cannot display a result whose path
+// goes through a symbolic link, so a file reached through one is located by
+// its real path when that path is inside the root too.
+func (l *artifactLocator) relativeToRoot(absPath string) (string, bool) {
+	if l.root == "" {
+		return "", false
+	}
+
+	if realPath, err := filepath.EvalSymlinks(absPath); err == nil && realPath != absPath {
+		if rel := analysis.DisplayPath(realPath, l.root); !filepath.IsAbs(rel) {
+			return rel, true
+		}
+	}
+
+	if rel := analysis.DisplayPath(absPath, l.root); !filepath.IsAbs(rel) {
+		return rel, true
+	}
+
+	return "", false
 }
 
 // sourceRoot returns the directory that artifact URIs are relative to: the

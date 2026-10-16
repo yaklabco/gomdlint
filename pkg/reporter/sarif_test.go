@@ -175,6 +175,45 @@ func TestSARIFReporter_ArtifactURIsRelativeToRepositoryRoot(t *testing.T) {
 	}, resultLocations(run))
 }
 
+func TestSARIFReporter_SymlinkedFilesUseTheirTargetInsideTheRoot(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "docs", "real"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "guide.md"), []byte("x\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "real", "page.md"), []byte("x\n"), 0o644))
+	outsideTarget := filepath.Join(t.TempDir(), "external.md")
+	require.NoError(t, os.WriteFile(outsideTarget, []byte("x\n"), 0o644))
+
+	links := map[string]string{
+		filepath.Join(root, "README.md"):          filepath.Join("docs", "guide.md"),
+		filepath.Join(root, "linked"):             filepath.Join("docs", "real"),
+		filepath.Join(root, "docs", "outside.md"): outsideTarget,
+	}
+	for link, target := range links {
+		if err := os.Symlink(target, link); err != nil {
+			t.Skip("cannot create symlinks:", err)
+		}
+	}
+
+	diag := lint.Diagnostic{RuleID: "MD041", StartLine: 1}
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "README.md"), "x\n", diag),
+		sarifFile(filepath.Join(root, "linked", "page.md"), "x\n", diag),
+		sarifFile(filepath.Join(root, "docs", "outside.md"), "x\n", diag),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
+
+	// GitHub code scanning cannot display a result through a symlink, so a
+	// link resolves to its target when the target is in the source tree.
+	assert.Equal(t, []reporter.SARIFArtifactLocation{
+		{URI: "docs/guide.md", URIBaseID: "%SRCROOT%"},
+		{URI: "docs/real/page.md", URIBaseID: "%SRCROOT%"},
+		{URI: "docs/outside.md", URIBaseID: "%SRCROOT%"},
+	}, resultLocations(run))
+}
+
 func TestSARIFReporter_GitFileMarksSourceRoot(t *testing.T) {
 	t.Parallel()
 
