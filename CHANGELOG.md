@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-03-25
+
+### Fixed
+
+- **MD032**: False positive when a list precedes a fenced code block without a blank line. The rule was relying on the next sibling's `SourcePosition`, but Goldmark reports fenced code blocks starting at the content line, not the opening fence. This caused an infinite fix loop when combined with `no-multiple-blank-lines` (MD012). ([#15](https://github.com/yaklabco/gomdlint/issues/15))
+- **Diff reporter**: `--format diff` output now preserves subdirectory paths instead of stripping them to the basename. Fixes path resolution on macOS where mount-point symlinks (`/Volumes/Code` vs `/Users/.../Code`) caused `filepath.Rel` to fail silently.
+
 ## [0.2.1] - 2026-02-06
 
 No functional changes. Release process verification.
@@ -51,6 +58,7 @@ Initial release of gomdlint - a fast Markdown linter written in Go.
 - Environment variable overrides (`GOMDLINT_*`)
 - CommonMark and GFM flavor support
 
+[0.3.0]: https://github.com/yaklabco/gomdlint/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/yaklabco/gomdlint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yaklabco/gomdlint/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.1
