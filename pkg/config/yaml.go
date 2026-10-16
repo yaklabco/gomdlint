@@ -136,6 +136,12 @@ func (c *Config) deepCopy() *Config {
 	if c.Backups.Enabled != nil {
 		clone.Backups.Enabled = Bool(*c.Backups.Enabled)
 	}
+	if c.Gitignore != nil {
+		clone.Gitignore = Bool(*c.Gitignore)
+	}
+	if c.DefaultIgnores != nil {
+		clone.DefaultIgnores = Bool(*c.DefaultIgnores)
+	}
 
 	// Deep copy Ignore slice
 	if c.Ignore != nil {

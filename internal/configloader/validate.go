@@ -2,9 +2,9 @@ package configloader
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -211,9 +211,7 @@ func validateRuleMap(section string, rules map[string]config.RuleConfig, result 
 // validateIgnorePatterns checks that ignore patterns are valid globs.
 func validateIgnorePatterns(cfg *config.Config, result *ValidationResult) {
 	for i, pattern := range cfg.Ignore {
-		// filepath.Match returns an error only for malformed patterns
-		_, err := filepath.Match(pattern, "")
-		if err != nil {
+		if err := ignore.ValidatePattern(pattern); err != nil {
 			result.Errors = append(result.Errors, ValidationError{
 				Field:   fmt.Sprintf("ignore[%d]", i),
 				Value:   pattern,

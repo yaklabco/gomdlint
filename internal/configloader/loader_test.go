@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -407,6 +408,187 @@ func TestGeneratedTemplatesLoadCleanly(t *testing.T) {
 		if len(result.Warnings) != 0 {
 			t.Errorf("template %+v loads with warnings: %v", opts, result.Warnings)
 		}
+	}
+}
+
+// TestLoad_IgnoreBaseDir covers the directory ignore patterns are relative
+// to: the config file's own directory for project and explicit configs, and
+// the working directory otherwise.
+func TestLoad_IgnoreBaseDir(t *testing.T) {
+	t.Parallel()
+
+	t.Run("project config", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		sub := filepath.Join(dir, "docs", "guide")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte("ignore:\n  - \"drafts/**\"\n"), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+
+		result, err := Load(context.Background(), isolatedOptions(sub))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.IgnoreBaseDir != dir {
+			t.Errorf("IgnoreBaseDir = %q, want the config's directory %q", result.IgnoreBaseDir, dir)
+		}
+	})
+
+	t.Run("explicit config", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		cfgDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		explicit := filepath.Join(cfgDir, "lint.yml")
+		if err := os.WriteFile(explicit, []byte("ignore:\n  - \"drafts/**\"\n"), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+
+		opts := isolatedOptions(dir)
+		opts.ExplicitPath = explicit
+		result, err := Load(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.IgnoreBaseDir != cfgDir {
+			t.Errorf("IgnoreBaseDir = %q, want %q", result.IgnoreBaseDir, cfgDir)
+		}
+	})
+
+	t.Run("command line", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte("ignore:\n  - \"drafts/**\"\n"), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		sub := filepath.Join(dir, "sub")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+
+		opts := isolatedOptions(sub)
+		opts.CLIConfig = &config.Config{Ignore: []string{"tmp/**"}}
+		result, err := Load(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.IgnoreBaseDir != sub {
+			t.Errorf("IgnoreBaseDir = %q, want the working directory %q", result.IgnoreBaseDir, sub)
+		}
+	})
+
+	t.Run("no patterns", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		result, err := Load(context.Background(), isolatedOptions(dir))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.IgnoreBaseDir != dir {
+			t.Errorf("IgnoreBaseDir = %q, want %q", result.IgnoreBaseDir, dir)
+		}
+	})
+}
+
+func TestLoad_EnvIgnoreIsRelativeToWorkingDir(t *testing.T) {
+	t.Setenv("GOMDLINT_IGNORE", "tmp/**")
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte("ignore:\n  - \"drafts/**\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	opts := isolatedOptions(sub)
+	opts.IgnoreEnv = false
+	result, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if result.IgnoreBaseDir != sub {
+		t.Errorf("IgnoreBaseDir = %q, want %q", result.IgnoreBaseDir, sub)
+	}
+}
+
+// TestLoad_ExplicitConfigSkipsProjectDiscovery holds Load to its documented
+// contract: --config replaces the project config instead of layering on it.
+func TestLoad_ExplicitConfigSkipsProjectDiscovery(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte("flavor: commonmark\nrules:\n  MD013:\n    enabled: false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	explicit := filepath.Join(dir, "other.yml")
+	if err := os.WriteFile(explicit, []byte("severity_default: error\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := isolatedOptions(dir)
+	opts.ExplicitPath = explicit
+	result, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if _, ok := result.Config.Rules["MD013"]; ok {
+		t.Error("the project config must not load alongside --config")
+	}
+	if !slices.Equal(result.LoadedFrom, []string{explicit}) {
+		t.Errorf("LoadedFrom = %v, want only %s", result.LoadedFrom, explicit)
+	}
+}
+
+func TestLoad_FileDiscoverySettings(t *testing.T) {
+	t.Parallel()
+
+	defaults, err := loadProject(t, "flavor: gfm\n")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !defaults.Config.GitignoreEnabled() || !defaults.Config.DefaultIgnoresEnabled() {
+		t.Error("gitignore and default_ignores must default to enabled")
+	}
+
+	disabled, err := loadProject(t, "gitignore: false\ndefault_ignores: false\n")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if disabled.Config.GitignoreEnabled() || disabled.Config.DefaultIgnoresEnabled() {
+		t.Error("a config file must be able to disable gitignore and default_ignores")
+	}
+}
+
+func TestLoad_RejectsMalformedIgnorePatterns(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadProject(t, "ignore:\n  - \"docs/[a-\"\n")
+	if err == nil || !strings.Contains(err.Error(), "docs/[a-") {
+		t.Errorf("expected an error naming the malformed pattern, got %v", err)
+	}
+}
+
+// isolatedOptions loads from dir with no machine-level configuration.
+func isolatedOptions(dir string) LoadOptions {
+	return LoadOptions{
+		WorkingDir:         dir,
+		IgnoreSystemConfig: true,
+		IgnoreUserConfig:   true,
+		IgnoreMarkdownlint: true,
+		IgnoreEnv:          true,
+		NonInteractive:     true,
 	}
 }
 

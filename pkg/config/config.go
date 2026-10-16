@@ -114,8 +114,19 @@ type Config struct {
 	// Migration uses it to preserve markdownlint defaults and file directives.
 	RuleDefaults map[string]RuleConfig `mapstructure:"rule_defaults" yaml:"rule_defaults,omitempty"`
 
-	// Ignore contains glob patterns for files to ignore.
+	// Ignore contains glob patterns for files to ignore. Patterns from a
+	// project or explicit config file are relative to that file's directory.
 	Ignore []string `mapstructure:"ignore" yaml:"ignore"`
+
+	// Gitignore skips files ignored by .gitignore files when walking
+	// directories. Nil means unset; GitignoreEnabled treats it as disabled
+	// and NewConfig enables it.
+	Gitignore *bool `mapstructure:"gitignore" yaml:"gitignore,omitempty"`
+
+	// DefaultIgnores skips node_modules and vendor directories when walking
+	// directories. Nil means unset; DefaultIgnoresEnabled treats it as
+	// disabled and NewConfig enables it.
+	DefaultIgnores *bool `mapstructure:"default_ignores" yaml:"default_ignores,omitempty"`
 
 	// Backups configures backup behavior when fixing.
 	Backups BackupsConfig `mapstructure:"backups" yaml:"backups"`
@@ -155,8 +166,10 @@ func NewConfig() *Config {
 	return &Config{
 		Flavor: FlavorCommonMark,
 		// No SeverityDefault: rules keep their built-in severities.
-		Rules:  make(map[string]RuleConfig),
-		Ignore: nil,
+		Rules:          make(map[string]RuleConfig),
+		Ignore:         nil,
+		Gitignore:      Bool(true),
+		DefaultIgnores: Bool(true),
 		Backups: BackupsConfig{
 			Enabled: Bool(true),
 			Mode:    "sidecar",
@@ -165,4 +178,16 @@ func NewConfig() *Config {
 		RuleFormat: RuleFormatName,
 		Jobs:       0, // 0 means use GOMAXPROCS
 	}
+}
+
+// GitignoreEnabled reports whether directory walks skip files that
+// .gitignore files ignore.
+func (c *Config) GitignoreEnabled() bool {
+	return c.Gitignore != nil && *c.Gitignore
+}
+
+// DefaultIgnoresEnabled reports whether directory walks skip node_modules
+// and vendor directories.
+func (c *Config) DefaultIgnoresEnabled() bool {
+	return c.DefaultIgnores != nil && *c.DefaultIgnores
 }

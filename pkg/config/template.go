@@ -74,10 +74,12 @@ flavor: commonmark
 # Leave it unset to keep each rule's built-in severity.
 # severity_default: error
 
-# File patterns to ignore (glob patterns)
+# File patterns to ignore (glob patterns, relative to this file). Files that
+# .gitignore ignores and node_modules and vendor directories are skipped by
+# default; see the gitignore and default_ignores settings.
 # ignore:
-#   - "vendor/**"
-#   - "node_modules/**"
+#   - "docs/drafts/**"
+#   - "CHANGELOG.md"
 
 # Rule-specific configuration
 # rules:
@@ -123,11 +125,16 @@ backups:
   enabled: true
   mode: sidecar
 
-# File patterns to ignore (glob patterns)
-ignore:
-  - "vendor/**"
-  - "node_modules/**"
-  - ".git/**"
+# Skip files that .gitignore files ignore when walking directories
+gitignore: true
+
+# Skip node_modules and vendor directories when walking directories
+default_ignores: true
+
+# File patterns to ignore (glob patterns, relative to this file)
+# ignore:
+#   - "docs/drafts/**"
+#   - "CHANGELOG.md"
 
 # Rule-specific configuration
 rules:
@@ -288,8 +295,10 @@ func templateToJSON(yamlContent []byte) ([]byte, error) {
 			"enabled": true,
 			"mode":    "sidecar",
 		},
-		"ignore": []string{"vendor/**", "node_modules/**", ".git/**"},
-		"rules":  map[string]any{},
+		"gitignore":       true,
+		"default_ignores": true,
+		"ignore":          []string{},
+		"rules":           map[string]any{},
 	}
 
 	// Parse rules from YAML content (simplified)

@@ -207,12 +207,12 @@ func FindMarkdownlintConfig(dir string) string {
 	return findMarkdownlintConfig(dir)
 }
 
-// isVCSRoot returns true if the directory contains a VCS root marker.
+// isVCSRoot returns true if the directory contains a VCS root marker. Git
+// worktrees and submodules mark their root with a .git file instead of a
+// directory, so any entry counts.
 func isVCSRoot(dir string) bool {
 	for _, marker := range vcsRootMarkers {
-		path := filepath.Join(dir, marker)
-		info, err := os.Stat(path)
-		if err == nil && info.IsDir() {
+		if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
 			return true
 		}
 	}

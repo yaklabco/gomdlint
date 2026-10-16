@@ -10,6 +10,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -75,13 +76,19 @@ type LoadResult struct {
 
 	// MigrationPerformed is true if a markdownlint config was converted.
 	MigrationPerformed bool
+
+	// IgnoreBaseDir is the absolute directory that relative patterns in
+	// Config.Ignore are resolved against: the directory of the project or
+	// explicit config file that set them, or the working directory when
+	// they come from a user or system config, the environment, or flags.
+	IgnoreBaseDir string
 }
 
 // Load resolves the final configuration by merging all sources.
 // Precedence (highest to lowest):
 //  1. CLI flags (opts.CLIConfig)
 //  2. Environment variables (GOMDLINT_*)
-//  3. Explicit config file (opts.ExplicitPath)
+//  3. Explicit config file (opts.ExplicitPath), which replaces the project config
 //  4. Project config (.gomdlint.yml upward search)
 //  5. User config ($XDG_CONFIG_HOME/gomdlint/config.yaml)
 //  6. System config (/etc/gomdlint/config.yaml)
@@ -100,6 +107,11 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 			return nil, fmt.Errorf("get working directory: %w", err)
 		}
 	}
+	workDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve working directory: %w", err)
+	}
+	result.IgnoreBaseDir = workDir
 
 	// Start with defaults
 	cfg := config.NewConfig()
@@ -111,13 +123,19 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 	}
 	result.Paths = paths
 
-	// Handle explicit config path
-	if opts.ExplicitPath != "" {
-		result.Paths.Explicit = opts.ExplicitPath
+	// An explicit config file replaces project discovery.
+	explicitPath := opts.ExplicitPath
+	if explicitPath != "" {
+		if explicitPath, err = filepath.Abs(explicitPath); err != nil {
+			return nil, fmt.Errorf("resolve config path: %w", err)
+		}
+		paths.Explicit = explicitPath
+		paths.Project = ""
+		paths.Markdownlint = ""
 	}
 
 	// Check for markdownlint config migration
-	if !opts.IgnoreMarkdownlint {
+	if !opts.IgnoreMarkdownlint && explicitPath == "" {
 		migrated, err := handleMarkdownlintMigration(ctx, paths, result, opts, workDir)
 		if err != nil {
 			return nil, err
@@ -134,42 +152,46 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 
 	// Load and merge in order (lowest to highest precedence)
 
-	// loadFile merges one configuration file into cfg.
-	loadFile := func(kind, path string) error {
+	// loadFile merges one configuration file into cfg. ignoreBase is the
+	// directory the file's ignore patterns are relative to.
+	loadFile := func(kind, path, ignoreBase string) error {
 		fileCfg, warnings, err := loadConfigFile(path)
 		if err != nil {
 			return fmt.Errorf("load %s config: %w", kind, err)
 		}
 		cfg = merge(cfg, fileCfg)
+		if fileCfg.Ignore != nil {
+			result.IgnoreBaseDir = ignoreBase
+		}
 		result.LoadedFrom = append(result.LoadedFrom, path)
 		result.Warnings = append(result.Warnings, warnings...)
 		return nil
 	}
 
-	// 1. System config
+	// 1. System config. Machine-wide patterns follow the working directory.
 	if !opts.IgnoreSystemConfig && paths.System != "" {
-		if err := loadFile("system", paths.System); err != nil {
+		if err := loadFile("system", paths.System, workDir); err != nil {
 			return nil, err
 		}
 	}
 
-	// 2. User config
+	// 2. User config. Personal patterns follow the working directory.
 	if !opts.IgnoreUserConfig && paths.User != "" {
-		if err := loadFile("user", paths.User); err != nil {
+		if err := loadFile("user", paths.User, workDir); err != nil {
 			return nil, err
 		}
 	}
 
-	// 3. Project config
+	// 3. Project config. Its patterns are relative to its own directory.
 	if !opts.IgnoreProjectConfig && paths.Project != "" {
-		if err := loadFile("project", paths.Project); err != nil {
+		if err := loadFile("project", paths.Project, filepath.Dir(paths.Project)); err != nil {
 			return nil, err
 		}
 	}
 
 	// 4. Explicit config (--config flag)
-	if opts.ExplicitPath != "" {
-		if err := loadFile("explicit", opts.ExplicitPath); err != nil {
+	if explicitPath != "" {
+		if err := loadFile("explicit", explicitPath, filepath.Dir(explicitPath)); err != nil {
 			return nil, err
 		}
 	}
@@ -178,6 +200,9 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 	if !opts.IgnoreEnv {
 		if err := LoadFromEnv(cfg); err != nil {
 			return nil, fmt.Errorf("load environment: %w", err)
+		}
+		if os.Getenv(envVarPrefix+"IGNORE") != "" {
+			result.IgnoreBaseDir = workDir
 		}
 	}
 
@@ -189,6 +214,9 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 			return nil, fmt.Errorf("command-line configuration: %w", err)
 		}
 		cfg = merge(cfg, &cliCfg)
+		if cliCfg.Ignore != nil {
+			result.IgnoreBaseDir = workDir
+		}
 	}
 
 	// Validate final configuration

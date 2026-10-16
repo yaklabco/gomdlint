@@ -42,6 +42,8 @@ var envMappings = map[string]envMapping{
 	"BACKUPS_MODE":     {field: "backups.mode", typ: envTypeString},
 	"IGNORE":           {field: "ignore", typ: envTypeSlice},
 	"NO_BACKUPS":       {field: "no_backups", typ: envTypeBool},
+	"GITIGNORE":        {field: "gitignore", typ: envTypeBool},
+	"DEFAULT_IGNORES":  {field: "default_ignores", typ: envTypeBool},
 }
 
 // LoadFromEnv applies environment variable overrides to the configuration.
@@ -137,6 +139,10 @@ func setBoolField(cfg *config.Config, field string, value bool) error {
 		cfg.Backups.Enabled = config.Bool(value)
 	case "no_backups":
 		cfg.NoBackups = value
+	case "gitignore":
+		cfg.Gitignore = config.Bool(value)
+	case "default_ignores":
+		cfg.DefaultIgnores = config.Bool(value)
 	default:
 		return fmt.Errorf("unknown boolean field: %s", field)
 	}
@@ -188,5 +194,7 @@ func ListEnvVars() map[string]string {
 		"GOMDLINT_BACKUPS_MODE":     "Backup mode: sidecar or none",
 		"GOMDLINT_IGNORE":           "Comma-separated list of ignore patterns",
 		"GOMDLINT_NO_BACKUPS":       "Disable backups: true or false",
+		"GOMDLINT_GITIGNORE":        "Skip files ignored by .gitignore: true or false",
+		"GOMDLINT_DEFAULT_IGNORES":  "Skip node_modules and vendor directories: true or false",
 	}
 }

@@ -59,6 +59,12 @@ func merge(base, override *config.Config) *config.Config {
 	if override.Backups.Enabled != nil {
 		result.Backups.Enabled = config.Bool(*override.Backups.Enabled)
 	}
+	if override.Gitignore != nil {
+		result.Gitignore = config.Bool(*override.Gitignore)
+	}
+	if override.DefaultIgnores != nil {
+		result.DefaultIgnores = config.Bool(*override.DefaultIgnores)
+	}
 
 	// Maps: deep merge
 	result.Rules = mergeRules(base.Rules, override.Rules)
