@@ -121,11 +121,13 @@ type LinkAttrs struct {
 	// Title is the optional link title.
 	Title string
 
-	// ReferenceLabel is the label for reference-style links.
+	// ReferenceLabel is the label of a reference-style link as written in
+	// the source, before normalization: the second bracket pair of a full
+	// reference, or the link text of a collapsed or shortcut one.
 	// Empty for inline links and autolinks.
 	ReferenceLabel string
 
-	// ReferenceStyle indicates the syntax style used.
+	// ReferenceStyle indicates the syntax style used, as read from the source.
 	ReferenceStyle ReferenceStyle
 }
 

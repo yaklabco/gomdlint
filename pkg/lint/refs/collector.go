@@ -107,12 +107,16 @@ func (c *collector) collectLinkUsage(node *mdast.Node, isImage bool) {
 	c.ctx.Usages = append(c.ctx.Usages, usage)
 }
 
-// extractLinkText extracts plain text from a link/image node.
+// extractLinkText extracts plain text from a link/image node. A line break
+// inside the text separates words, as whitespace in a label does.
 func extractLinkText(node *mdast.Node) string {
 	var buf bytes.Buffer
 	_ = mdast.Walk(node, func(n *mdast.Node) error { //nolint:errcheck // visitor never returns error
-		if n.Kind == mdast.NodeText && n.Inline != nil {
+		switch {
+		case n.Kind == mdast.NodeText && n.Inline != nil:
 			buf.Write(n.Inline.Text)
+		case n.Kind == mdast.NodeSoftBreak || n.Kind == mdast.NodeHardBreak:
+			buf.WriteByte(' ')
 		}
 		return nil
 	})

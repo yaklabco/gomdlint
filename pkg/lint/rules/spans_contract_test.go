@@ -95,6 +95,25 @@ func TestByteOrderMarkBeforeFrontMatterAndHeading(t *testing.T) {
 	require.Empty(t, applyCompatibilityRule(t, NewFirstLineHeadingRule(), bom+"# Document\n\nText.\n"))
 }
 
+func TestMultilineSetextHeadingFragment(t *testing.T) {
+	// GitHub and markdownlint join the lines of a heading without a
+	// separator when they build its fragment.
+	input := "# Title\n\nFirst\nsecond line\n-----------\n\n[link](#firstsecond-line)\n"
+	require.Empty(t, applyCompatibilityRule(t, NewLinkFragmentsRule(), input))
+}
+
+func TestEmphasisAsHeadingKeepsWordsAcrossLines(t *testing.T) {
+	input := "# Title\n\n**Bold\ntext**\n\nMore.\n"
+	diags := applyCompatibilityRule(t, NewNoEmphasisAsHeadingRule(), input)
+	require.Len(t, diags, 1)
+	require.Equal(t, "# Title\n\n## Bold text\n\nMore.\n", applyAllFixEdits(t, input, diags))
+}
+
+func TestMultilineCollapsedReferenceUsesDefinition(t *testing.T) {
+	input := "# Title\n\nSee [multi\nline][].\n\n[multi line]: https://example.com\n"
+	require.Empty(t, applyCompatibilityRule(t, NewLinkImageRefDefsRule(), input))
+}
+
 func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
 	input := "# Title\n\n1) one\n1) two\n3) three\n"
 	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)

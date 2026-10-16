@@ -341,6 +341,81 @@ func TestInlineSpans(t *testing.T) {
 	}
 }
 
+func TestLineBreaksFollowTheirText(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		kind  mdast.NodeKind
+		brk   string
+	}{
+		{"soft break", "multi\nline\n", mdast.NodeSoftBreak, "\n"},
+		{"soft break after trailing space", "multi \nline\n", mdast.NodeSoftBreak, " \n"},
+		{"hard break with spaces", "multi  \nline\n", mdast.NodeHardBreak, "  \n"},
+		{"hard break with backslash", "multi\\\nline\n", mdast.NodeHardBreak, "\\\n"},
+		{"soft break with CRLF", "multi\r\nline\r\n", mdast.NodeSoftBreak, "\r\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			para := nthNode(file.Root, mdast.NodeParagraph, 0)
+			require.NotNil(t, para)
+			children := para.Children()
+			require.Len(t, children, 3)
+			require.Equal(t, mdast.NodeText, children[0].Kind)
+			require.Equal(t, "multi", string(children[0].Inline.Text))
+			require.Equal(t, "multi", string(children[0].Text()))
+			require.Equal(t, tt.kind, children[1].Kind)
+			require.Equal(t, tt.brk, string(children[1].Text()))
+			require.Empty(t, children[1].Inline.Text, "a break holds no text")
+			require.Equal(t, mdast.NodeText, children[2].Kind)
+			require.Equal(t, "line", string(children[2].Inline.Text))
+		})
+	}
+}
+
+func TestLineBreakAfterInlineNode(t *testing.T) {
+	file := parseForSpans(t, FlavorCommonMark, "*a*\nb\n")
+	para := nthNode(file.Root, mdast.NodeParagraph, 0)
+	require.NotNil(t, para)
+	kinds := make([]mdast.NodeKind, 0, 3)
+	for _, child := range para.Children() {
+		kinds = append(kinds, child.Kind)
+	}
+	require.Equal(t, []mdast.NodeKind{mdast.NodeEmphasis, mdast.NodeSoftBreak, mdast.NodeText}, kinds)
+	require.Equal(t, "\n", string(para.Children()[1].Text()))
+}
+
+func TestLinkReferenceStyles(t *testing.T) {
+	input := "[inline](https://x.y) [full][Ref] [ref][] [ref] [multi\nline][] ![img][ref] <https://a.b>\n\n" +
+		"[ref]: https://x.y\n[multi line]: https://x.y\n"
+	file := parseForSpans(t, FlavorCommonMark, input)
+	var links []*mdast.Node
+	//nolint:errcheck // The visitor never returns an error.
+	mdast.Walk(file.Root, func(node *mdast.Node) error {
+		if node.Kind == mdast.NodeLink || node.Kind == mdast.NodeImage {
+			links = append(links, node)
+		}
+		return nil
+	})
+	want := []struct {
+		style mdast.ReferenceStyle
+		label string
+	}{
+		{mdast.RefStyleInline, ""},
+		{mdast.RefStyleFull, "Ref"},
+		{mdast.RefStyleCollapsed, "ref"},
+		{mdast.RefStyleShortcut, "ref"},
+		{mdast.RefStyleCollapsed, "multi\nline"},
+		{mdast.RefStyleFull, "ref"},
+		{mdast.RefStyleAutolink, ""},
+	}
+	require.Len(t, links, len(want))
+	for idx, link := range links {
+		require.Equal(t, want[idx].style, link.Inline.Link.ReferenceStyle, "link %d %q", idx, link.Text())
+		require.Equal(t, want[idx].label, link.Inline.Link.ReferenceLabel, "link %d %q", idx, link.Text())
+	}
+}
+
 func TestExtendedAutolinkSpans(t *testing.T) {
 	input := "Visit www.example.com, (https://example.org/path) or me@example.com.\n"
 	assertSpans(t, parseForSpans(t, FlavorGFM, input), []spanExpectation{

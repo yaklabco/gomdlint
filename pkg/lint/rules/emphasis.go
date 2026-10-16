@@ -504,6 +504,7 @@ func (r *StrongStyleRule) buildStyleFix(_ *mdast.FileSnapshot, _ mdast.SourcePos
 }
 
 // extractTextFromNode extracts all text content from a node's descendants.
+// A line break separates the words on either side of it.
 func extractTextFromNode(node *mdast.Node) string {
 	if node == nil {
 		return ""
@@ -511,8 +512,11 @@ func extractTextFromNode(node *mdast.Node) string {
 	var buf bytes.Buffer
 	//nolint:errcheck // Walk visitor never returns error.
 	_ = mdast.Walk(node, func(n *mdast.Node) error {
-		if n.Kind == mdast.NodeText && n.Inline != nil {
+		switch {
+		case n.Kind == mdast.NodeText && n.Inline != nil:
 			buf.Write(n.Inline.Text)
+		case n.Kind == mdast.NodeSoftBreak || n.Kind == mdast.NodeHardBreak:
+			buf.WriteByte(' ')
 		}
 		return nil
 	})

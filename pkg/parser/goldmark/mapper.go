@@ -285,8 +285,9 @@ func (m *mapper) codeContent(codeBlock ast.Node) (mdast.SourceRange, bool) {
 	return mdast.SourceRange{StartOffset: start, EndOffset: max(start, m.lineEnd(m.abs(last.Start)))}, true
 }
 
-// appendText appends a goldmark Text node, followed by a break node when
-// the text ends a line with a soft or hard line break.
+// appendText appends a goldmark Text node. Goldmark marks the text that
+// ends a line with the line break that follows it; the mapper appends the
+// text and then a separate break node, so the text stays a Text node.
 func (m *mapper) appendText(parent *mdast.Node, textNode *ast.Text) {
 	segment := textNode.Segment
 	span := mdast.SourceRange{StartOffset: m.abs(segment.Start), EndOffset: m.abs(segment.Stop)}
@@ -299,19 +300,23 @@ func (m *mapper) appendText(parent *mdast.Node, textNode *ast.Text) {
 		breakKind = mdast.NodeSoftBreak
 	}
 
-	if breakKind == mdast.NodeText {
+	if breakKind == mdast.NodeText || !span.IsEmpty() {
 		node := mdast.NewNode(mdast.NodeText)
 		node.Inline = mdast.NewInlineAttrs().WithText(textNode.Value(m.source))
 		setSpans(node, span, span)
 		mdast.AppendChild(parent, node)
+	}
+	if breakKind == mdast.NodeText {
 		return
 	}
 
-	node := mdast.NewNode(breakKind)
-	node.Inline = mdast.NewInlineAttrs().WithText(textNode.Value(m.source))
-	full := mdast.SourceRange{StartOffset: span.StartOffset, EndOffset: m.lineEndingEnd(span.EndOffset)}
-	setSpans(node, full, full)
-	mdast.AppendChild(parent, node)
+	// The break runs from the end of the text, over any trailing spaces or
+	// backslash, through the line ending.
+	brk := mdast.NewNode(breakKind)
+	brk.Inline = mdast.NewInlineAttrs()
+	full := mdast.SourceRange{StartOffset: span.EndOffset, EndOffset: m.lineEndingEnd(span.EndOffset)}
+	setSpans(brk, full, full)
+	mdast.AppendChild(parent, brk)
 }
 
 // mapEmphasis converts a goldmark Emphasis node to an mdast node.
@@ -358,16 +363,15 @@ func (m *mapper) mapCodeSpan(codeSpan *ast.CodeSpan) *mdast.Node {
 }
 
 // mapLink converts a goldmark Link to an mdast node.
-// Note: goldmark normalizes all reference-style links during parsing, so we cannot
-// directly detect the original syntax. Reference style detection is handled by the
-// refs package which analyzes source content directly.
+// goldmark resolves reference links during parsing, so the reference style
+// and label are read back from the link's recorded source span.
 func (m *mapper) mapLink(link *ast.Link) *mdast.Node {
 	node := mdast.NewNode(mdast.NodeLink)
 
 	linkAttrs := &mdast.LinkAttrs{
 		Destination:    string(link.Destination),
 		Title:          string(link.Title),
-		ReferenceStyle: mdast.RefStyleInline, // Default; refs package will detect actual style
+		ReferenceStyle: mdast.RefStyleInline, // Replaced from the source span when recorded.
 	}
 
 	node.Inline = mdast.NewInlineAttrs().WithLink(linkAttrs)
@@ -376,17 +380,15 @@ func (m *mapper) mapLink(link *ast.Link) *mdast.Node {
 	return node
 }
 
-// mapImage converts a goldmark Image to an mdast node.
-// Note: goldmark normalizes all reference-style images during parsing, so we cannot
-// directly detect the original syntax. Reference style detection is handled by the
-// refs package which analyzes source content directly.
+// mapImage converts a goldmark Image to an mdast node, reading its reference
+// style the same way as mapLink.
 func (m *mapper) mapImage(img *ast.Image) *mdast.Node {
 	node := mdast.NewNode(mdast.NodeImage)
 
 	linkAttrs := &mdast.LinkAttrs{
 		Destination:    string(img.Destination),
 		Title:          string(img.Title),
-		ReferenceStyle: mdast.RefStyleInline, // Default; refs package will detect actual style
+		ReferenceStyle: mdast.RefStyleInline, // Replaced from the source span when recorded.
 	}
 
 	node.Inline = mdast.NewInlineAttrs().WithLink(linkAttrs)
@@ -777,15 +779,42 @@ func (m *mapper) allIn(start, end int, set string) bool {
 	return true
 }
 
-// setLinkSpans gives links and images their recorded spans.
+// setLinkSpans gives links and images their recorded spans, and records
+// which reference syntax they use.
 func (m *mapper) setLinkSpans(node *mdast.Node, gmNode ast.Node) {
 	if extent, ok := m.inline(gmNode); ok {
 		full := m.extentSpan(extent)
-		content := mdast.SourceRange{StartOffset: m.abs(extent.contentStart), EndOffset: m.abs(max(extent.contentStart, extent.contentEnd))}
-		setSpans(node, full, clampTo(content, full))
+		content := clampTo(mdast.SourceRange{StartOffset: m.abs(extent.contentStart), EndOffset: m.abs(max(extent.contentStart, extent.contentEnd))}, full)
+		setSpans(node, full, content)
+		if node.Inline != nil && node.Inline.Link != nil {
+			node.Inline.Link.ReferenceStyle, node.Inline.Link.ReferenceLabel = m.referenceStyle(full, content)
+		}
 		return
 	}
 	m.setChildrenSpans(node)
+}
+
+// referenceStyle reads the syntax of a link or image from what follows the
+// closing bracket of its text: "(" for an inline link, "[label]" for a full
+// reference, "[]" for a collapsed one and nothing for a shortcut. Goldmark
+// only builds reference links whose label is defined.
+func (m *mapper) referenceStyle(full, content mdast.SourceRange) (mdast.ReferenceStyle, string) {
+	closing := content.EndOffset
+	if closing >= full.EndOffset || m.content[closing] != ']' {
+		return mdast.RefStyleInline, ""
+	}
+	rest := m.content[closing+1 : full.EndOffset]
+	label := string(m.content[content.StartOffset:content.EndOffset])
+	switch {
+	case len(rest) == 0:
+		return mdast.RefStyleShortcut, label
+	case string(rest) == "[]":
+		return mdast.RefStyleCollapsed, label
+	case rest[0] == '[' && rest[len(rest)-1] == ']':
+		return mdast.RefStyleFull, string(rest[1 : len(rest)-1])
+	default:
+		return mdast.RefStyleInline, ""
+	}
 }
 
 // setRawHTMLSpans gives inline HTML its span from its segments.

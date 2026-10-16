@@ -67,9 +67,12 @@
 //   - ThematicBreak: from the first marker character to the end of the line.
 //   - HTMLBlock: from '<' to the end of the last line of the block,
 //     including a closing line such as "-->".
-//   - Text: the literal text.
-//   - SoftBreak and HardBreak: the text that ends the line, followed by the
-//     line ending, so they end at the start of the next line.
+//   - Text: the literal text. Text before a line break excludes its trailing
+//     whitespace and the backslash of a hard break.
+//   - SoftBreak and HardBreak: from the end of the preceding text through
+//     the line ending, so they include the spaces or backslash of a hard
+//     break and end at the start of the next line. They hold no text: the
+//     text before them is a separate Text node.
 //   - Emphasis and Strong: including their delimiters. Content: the text
 //     between the delimiters.
 //   - CodeSpan: including the backtick runs. Content: everything between
