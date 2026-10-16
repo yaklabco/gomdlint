@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,9 +207,9 @@ rules:
 		"disabled rule should not appear in output")
 }
 
-// TestIntegration_DuplicateRuleWarning tests that duplicate rule configs emit a warning.
-// The warning is emitted via the logging system when debug is enabled.
-func TestIntegration_DuplicateRuleWarning(t *testing.T) {
+// TestIntegration_DuplicateRuleConfig tests that a config file configuring
+// one rule under two keys is rejected as a configuration error naming both.
+func TestIntegration_DuplicateRuleConfig(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -229,34 +230,19 @@ rules:
 	configFile := filepath.Join(tmpDir, ".gomdlint.yml")
 	require.NoError(t, os.WriteFile(configFile, []byte(configContent), 0644))
 
-	info := cli.BuildInfo{
-		Version: "test",
-		Commit:  "test",
-		Date:    "test",
-	}
-
-	cmd := cli.NewRootCommand(info)
-
 	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{
+	code := cli.Execute(context.Background(), cli.BuildInfo{Version: "test"}, []string{
 		"lint",
 		"--config", configFile,
 		"--no-context",
 		"--color", "never",
 		mdFile,
-	})
+	}, &stdout, &stderr)
 
-	_ = cmd.Execute() //nolint:errcheck // Ignore error - we expect lint issues
-
-	// The duplicate warning is already tested in configloader/loader_test.go
-	// Here we just verify the config is loaded and last value wins (enabled: true)
-	// Since no-trailing-spaces is enabled (last value), we should see it in output
-	// if there were trailing spaces. Our test file has no trailing spaces, so no output.
-	// This test primarily verifies that the duplicate config doesn't cause an error.
-	output := stdout.String() + stderr.String()
-	assert.NotContains(t, output, "error loading", "config with duplicate rules should load without error")
+	assert.Equal(t, cli.ExitConfigError, code)
+	assert.Contains(t, stderr.String(), `"MD009"`)
+	assert.Contains(t, stderr.String(), `"no-trailing-spaces"`)
+	assert.Empty(t, stdout.String(), "no files are linted with an invalid configuration")
 }
 
 // TestIntegration_RulesCommandWithFormat tests that the rules command accepts --rule-format flag.

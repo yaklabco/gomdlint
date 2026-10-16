@@ -389,57 +389,113 @@ func TestLoad_EnvDisablesBackups(t *testing.T) {
 	}
 }
 
-func TestLoader_WarnsDuplicateRules(t *testing.T) {
+// TestLoader_RejectsDuplicateRules covers one file configuring a rule under
+// two keys. Map order would pick a winner at random, so loading fails and
+// names both keys.
+func TestLoader_RejectsDuplicateRules(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
-
-	// Create config with both ID and name for same rule
-	content := `
-rules:
-  MD009:
-    enabled: false
-  no-trailing-spaces:
-    enabled: true
-`
-	configPath := filepath.Join(tmpDir, ".gomdlint.yml")
-	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
+	tests := []struct {
+		name    string
+		content string
+		keys    []string
+	}{
+		{
+			name:    "ID and name",
+			content: "rules:\n  MD009:\n    enabled: false\n  no-trailing-spaces:\n    enabled: true\n",
+			keys:    []string{`"MD009"`, `"no-trailing-spaces"`},
+		},
+		{
+			name:    "ID and alias",
+			content: "rules:\n  MD004:\n    enabled: false\n  ul-style:\n    enabled: true\n",
+			keys:    []string{`"MD004"`, `"ul-style"`},
+		},
+		{
+			name:    "ID in two cases",
+			content: "rules:\n  MD009:\n    enabled: false\n  md009:\n    enabled: true\n",
+			keys:    []string{`"MD009"`, `"md009"`},
+		},
+		{
+			name:    "rule_defaults",
+			content: "rule_defaults:\n  MD009:\n    enabled: false\n  no-trailing-spaces:\n    enabled: true\n",
+			keys:    []string{`"MD009"`, `"no-trailing-spaces"`, "rule_defaults"},
+		},
 	}
 
-	ctx := context.Background()
-	opts := LoadOptions{
-		WorkingDir:         tmpDir,
-		IgnoreSystemConfig: true,
-		IgnoreUserConfig:   true,
-		IgnoreMarkdownlint: true,
-		NonInteractive:     true,
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	result, err := Load(ctx, opts)
+			for range 5 { // Map order varies between runs; the outcome must not.
+				_, err := loadProject(t, tt.content)
+				if err == nil {
+					t.Fatal("expected an error for a rule configured under two keys")
+				}
+				for _, key := range tt.keys {
+					if !strings.Contains(err.Error(), key) {
+						t.Errorf("error %q does not name %s", err, key)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestLoader_NormalizesRuleKeyCase(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "rules:\n  md009:\n    enabled: false\n")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	// Should have a warning about duplicate rule
-	foundWarning := false
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "duplicate") && strings.Contains(w, "MD009") {
-			foundWarning = true
-			break
+	md009, ok := result.Config.Rules["MD009"]
+	if !ok || md009.Enabled == nil || *md009.Enabled {
+		t.Errorf("expected md009 to configure MD009, got rules %v", result.Config.Rules)
+	}
+	for _, warning := range result.Warnings {
+		if strings.Contains(warning, "md009") {
+			t.Errorf("unexpected warning: %s", warning)
 		}
 	}
-	if !foundWarning {
-		t.Errorf("expected warning about duplicate rule, got warnings: %v", result.Warnings)
-	}
+}
 
-	// Verify the rule is normalized to canonical ID and has a value
-	// Note: which value "wins" is undefined since Go map iteration order is non-deterministic
-	md009, ok := result.Config.Rules["MD009"]
-	if !ok {
-		t.Fatal("expected MD009 in config")
+// TestLoader_LayersMergeAcrossRuleKeys covers different files naming the
+// same rule differently: the later layer wins like any other setting.
+func TestLoader_LayersMergeAcrossRuleKeys(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte("rules:\n  MD009:\n    enabled: false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
-	if md009.Enabled == nil {
-		t.Error("expected MD009.Enabled to be set")
+	severity := string(config.SeverityError)
+
+	for range 5 {
+		result, err := Load(context.Background(), LoadOptions{
+			WorkingDir:         dir,
+			IgnoreSystemConfig: true,
+			IgnoreUserConfig:   true,
+			IgnoreMarkdownlint: true,
+			IgnoreEnv:          true,
+			NonInteractive:     true,
+			CLIConfig: &config.Config{Rules: map[string]config.RuleConfig{
+				"no-trailing-spaces": {Severity: &severity},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if len(result.Config.Rules) != 1 {
+			t.Fatalf("expected one normalized rule, got %v", result.Config.Rules)
+		}
+		md009 := result.Config.Rules["MD009"]
+		if md009.Enabled == nil || *md009.Enabled {
+			t.Error("the project layer's enabled: false must survive the merge")
+		}
+		if md009.Severity == nil || *md009.Severity != severity {
+			t.Error("the CLI layer's severity must apply to MD009")
+		}
 	}
 }

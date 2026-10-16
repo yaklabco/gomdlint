@@ -7,8 +7,10 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"os"
+	"slices"
 	"strings"
 
 	"golang.org/x/term"
@@ -181,12 +183,13 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 
 	// 6. CLI config (highest precedence)
 	if opts.CLIConfig != nil {
-		cfg = merge(cfg, opts.CLIConfig)
+		// Normalize a copy so the caller's configuration stays untouched.
+		cliCfg := *opts.CLIConfig
+		if err := normalizeRuleKeys(&cliCfg, lint.DefaultRegistry); err != nil {
+			return nil, fmt.Errorf("command-line configuration: %w", err)
+		}
+		cfg = merge(cfg, &cliCfg)
 	}
-
-	// Normalize rule keys to canonical IDs
-	// This allows users to use rule names like "no-trailing-spaces" in config
-	normalizeRuleKeys(cfg, lint.DefaultRegistry, result)
 
 	// Validate final configuration
 	validation := Validate(cfg)
@@ -219,6 +222,11 @@ func loadConfigFile(path string) (*config.Config, error) {
 	// Ensure Rules map is initialized
 	if cfg.Rules == nil {
 		cfg.Rules = make(map[string]config.RuleConfig)
+	}
+
+	// Rule keys may be IDs, names or aliases in any case.
+	if err := normalizeRuleKeys(cfg, lint.DefaultRegistry); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 
 	return cfg, nil
@@ -341,47 +349,52 @@ func writeConfig(cfg *config.Config, path string) error {
 	return nil
 }
 
-// normalizeRuleKeys converts rule names/aliases to canonical IDs in the config.
-// This allows users to use human-readable names like "no-trailing-spaces" in config files.
-// If a rule is specified by both ID and name, warns and uses the last value encountered.
-func normalizeRuleKeys(cfg *config.Config, registry *lint.Registry, result *LoadResult) {
-	cfg.Rules = normalizeRuleMap(cfg.Rules, registry, result)
-	cfg.RuleDefaults = normalizeRuleMap(cfg.RuleDefaults, registry, result)
+// normalizeRuleKeys converts the rule names, aliases and differently cased
+// IDs of one configuration layer to canonical IDs, so layers merge by rule
+// whatever key each uses. A rule configured under two keys in one layer is
+// an error: either key could win, depending on map order.
+func normalizeRuleKeys(cfg *config.Config, registry *lint.Registry) error {
+	rules, err := normalizeRuleMap("rules", cfg.Rules, registry)
+	if err != nil {
+		return err
+	}
+	defaults, err := normalizeRuleMap("rule_defaults", cfg.RuleDefaults, registry)
+	if err != nil {
+		return err
+	}
+	cfg.Rules, cfg.RuleDefaults = rules, defaults
+	return nil
 }
 
-func normalizeRuleMap(rules map[string]config.RuleConfig, registry *lint.Registry, result *LoadResult) map[string]config.RuleConfig {
+func normalizeRuleMap(
+	section string,
+	rules map[string]config.RuleConfig,
+	registry *lint.Registry,
+) (map[string]config.RuleConfig, error) {
 	if len(rules) == 0 {
-		return rules
+		return rules, nil
 	}
 
-	// Build a new map with normalized keys
 	normalized := make(map[string]config.RuleConfig, len(rules))
+	seen := make(map[string]string, len(rules)) // canonical ID -> original key
 
-	// Track which canonical IDs we've seen to detect duplicates
-	seenIDs := make(map[string]string) // canonical ID -> original key
-
-	for key, ruleCfg := range rules {
-		// Try to resolve the key to a canonical ID
-		canonicalID, _, found := registry.Resolve(key)
+	// Sorted keys keep the error message stable.
+	for _, key := range slices.Sorted(maps.Keys(rules)) {
+		canonicalID, found := lint.LookupRuleID(registry, key)
 		if !found {
-			// Unknown rule - keep it as-is, validation will warn about it later
-			normalized[key] = ruleCfg
+			// Unknown rule: keep it as-is; validation warns about it.
+			normalized[key] = rules[key]
 			continue
 		}
 
-		// Check for duplicates (same rule specified multiple times with different keys)
-		if originalKey, exists := seenIDs[canonicalID]; exists {
-			// Duplicate detected - warn and use last value (overwrite)
-			result.Warnings = append(result.Warnings,
-				fmt.Sprintf("duplicate rule configuration: %q and %q both refer to %s; using last value",
-					originalKey, key, canonicalID))
+		if previous, duplicate := seen[canonicalID]; duplicate {
+			return nil, fmt.Errorf("%s: %q and %q both configure %s; keep one of them",
+				section, previous, key, canonicalID)
 		}
 
-		// Store with canonical ID
-		seenIDs[canonicalID] = key
-		normalized[canonicalID] = ruleCfg
+		seen[canonicalID] = key
+		normalized[canonicalID] = rules[key]
 	}
 
-	// Replace the rules map with normalized version
-	return normalized
+	return normalized, nil
 }
