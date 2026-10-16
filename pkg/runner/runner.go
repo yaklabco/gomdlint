@@ -189,6 +189,11 @@ func (r *Runner) processFile(
 		outcome.Exhausted = pr.Exhausted
 		outcome.RemainingEdits = pr.RemainingEdits
 		outcome.FixPasses = pr.FixPasses
+		outcome.Oscillated = pr.Oscillated
+		if pr.FileResult != nil {
+			outcome.RuleErrors = pr.RuleErrorList()
+			outcome.SkippedEdits = pr.SkippedEdits
+		}
 	}()
 
 	return outcome
