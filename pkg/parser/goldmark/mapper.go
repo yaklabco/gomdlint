@@ -2,6 +2,7 @@ package goldmark
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark/ast"
@@ -173,7 +174,8 @@ func (m *mapper) mapHeading(heading *ast.Heading) *mdast.Node {
 
 	first, last := lines.At(0), lines.At(lines.Len()-1)
 	content := mdast.SourceRange{StartOffset: m.abs(first.Start), EndOffset: m.abs(last.Stop)}
-	content.EndOffset = m.trimRight(content.StartOffset, content.EndOffset)
+	// goldmark keeps the spaces before a closing sequence in the text segment.
+	content.EndOffset = m.trimLineEnding(content.StartOffset, content.EndOffset)
 	if extent == nil {
 		setSpans(node, content, content)
 		return node
@@ -643,14 +645,19 @@ func (m *mapper) lineEndingEnd(offset int) int {
 
 // trimRight moves end back over trailing whitespace, never before start.
 func (m *mapper) trimRight(start, end int) int {
+	return m.trimRightSet(start, end, " \t\r\n")
+}
+
+// trimLineEnding moves end back over a trailing line ending, never before
+// start.
+func (m *mapper) trimLineEnding(start, end int) int {
+	return m.trimRightSet(start, end, "\r\n")
+}
+
+func (m *mapper) trimRightSet(start, end int, set string) int {
 	end = min(end, len(m.content))
-	for end > start {
-		switch m.content[end-1] {
-		case ' ', '\t', '\r', '\n':
-			end--
-			continue
-		}
-		break
+	for end > start && strings.IndexByte(set, m.content[end-1]) >= 0 {
+		end--
 	}
 	return end
 }

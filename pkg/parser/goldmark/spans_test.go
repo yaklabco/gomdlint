@@ -61,7 +61,7 @@ func TestBlockSpans(t *testing.T) {
 			name:  "closed atx heading with trailing spaces",
 			input: "## Title ##  \n",
 			expect: []spanExpectation{
-				{mdast.NodeHeading, 0, "## Title ##  ", "Title"},
+				{mdast.NodeHeading, 0, "## Title ##  ", "Title "},
 			},
 		},
 		{

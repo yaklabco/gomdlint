@@ -40,8 +40,10 @@
 //
 //   - Document: the whole content. The content span equals it.
 //   - Heading (ATX): from the first '#' to the end of the line, including
-//     any closing sequence. Content: the heading text without the opening
-//     and closing sequences; empty when there is no text.
+//     any closing sequence. Content: the heading text after the opening
+//     sequence and its spaces, up to the closing sequence; the spaces before
+//     a closing sequence are included, as in goldmark's segment. Empty when
+//     there is no text.
 //   - Heading (setext): from the first text line through the underline.
 //     Content: the text lines, without trailing whitespace.
 //   - Paragraph: from the first non-blank byte to the end of its last line.
