@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD007",
-    "name": "",
+    "name": "ul-indent",
     "line": 4,
     "column": 6,
     "message": "Unordered list indentation 3 does not match expected 2",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD007",
-    "name": "",
+    "name": "ul-indent",
     "line": 7,
     "column": 7,
     "message": "Unordered list indentation 4 does not match expected 2",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD007",
-    "name": "",
+    "name": "ul-indent",
     "line": 12,
     "column": 8,
     "message": "Unordered list indentation 5 does not match expected 2",

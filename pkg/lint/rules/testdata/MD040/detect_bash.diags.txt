@@ -1,1 +1,1 @@
-detect_bash.input.md:4:1 warning Fenced code block has no language specified () [fixable]
+detect_bash.input.md:4:1 warning Fenced code block has no language specified (MD040/fenced-code-language) [fixable]

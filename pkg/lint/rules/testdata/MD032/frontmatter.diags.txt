@@ -1,1 +1,1 @@
-frontmatter.input.md:8:1 warning Missing blank line before list () [fixable]
+frontmatter.input.md:8:1 warning Missing blank line before list (MD032/blanks-around-lists) [fixable]

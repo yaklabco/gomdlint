@@ -1,2 +1,2 @@
-frontmatter.input.md:7:22 warning HTML element 'br' is not allowed ()
-frontmatter.input.md:9:5 warning HTML element 'em' is not allowed ()
+frontmatter.input.md:7:22 warning HTML element 'br' is not allowed (MD033/no-inline-html)
+frontmatter.input.md:9:5 warning HTML element 'em' is not allowed (MD033/no-inline-html)

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD013",
-    "name": "",
+    "name": "line-length",
     "line": 3,
     "column": 121,
     "message": "Line length 144 exceeds maximum 120",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD013",
-    "name": "",
+    "name": "line-length",
     "line": 5,
     "column": 121,
     "message": "Line length 144 exceeds maximum 120",

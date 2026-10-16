@@ -1,1 +1,1 @@
-nested.input.md:7:6 warning Duplicate heading text "Overview" (first occurrence on line 3) ()
+nested.input.md:7:6 warning Duplicate heading text "Overview" (first occurrence on line 3) (MD024/no-duplicate-heading)

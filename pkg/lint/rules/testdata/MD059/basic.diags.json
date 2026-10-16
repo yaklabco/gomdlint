@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD059",
-    "name": "",
+    "name": "descriptive-link-text",
     "line": 5,
     "column": 14,
     "message": "Link text 'click here' is not descriptive",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD059",
-    "name": "",
+    "name": "descriptive-link-text",
     "line": 7,
     "column": 6,
     "message": "Link text 'more' is not descriptive",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD059",
-    "name": "",
+    "name": "descriptive-link-text",
     "line": 9,
     "column": 5,
     "message": "Link text 'this link' is not descriptive",

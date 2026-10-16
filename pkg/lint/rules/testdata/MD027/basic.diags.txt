@@ -1,2 +1,2 @@
-basic.input.md:3:2 warning Multiple spaces (2) after blockquote symbol () [fixable]
-basic.input.md:5:2 warning Multiple spaces (3) after blockquote symbol () [fixable]
+basic.input.md:3:2 warning Multiple spaces (2) after blockquote symbol (MD027/no-multiple-space-blockquote) [fixable]
+basic.input.md:5:2 warning Multiple spaces (3) after blockquote symbol (MD027/no-multiple-space-blockquote) [fixable]

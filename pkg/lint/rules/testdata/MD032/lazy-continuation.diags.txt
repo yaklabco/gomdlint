@@ -1,1 +1,1 @@
-lazy-continuation.input.md:4:1 warning Missing blank line before list () [fixable]
+lazy-continuation.input.md:4:1 warning Missing blank line before list (MD032/blanks-around-lists) [fixable]

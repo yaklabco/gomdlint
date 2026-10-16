@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD020",
-    "name": "",
+    "name": "no-missing-space-closed-atx",
     "line": 1,
     "column": 1,
     "message": "No space inside hashes on closed ATX style heading (both sides)",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD020",
-    "name": "",
+    "name": "no-missing-space-closed-atx",
     "line": 3,
     "column": 1,
     "message": "No space after opening hashes on closed ATX style heading",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD020",
-    "name": "",
+    "name": "no-missing-space-closed-atx",
     "line": 5,
     "column": 1,
     "message": "No space before closing hashes on closed ATX style heading",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD020",
-    "name": "",
+    "name": "no-missing-space-closed-atx",
     "line": 9,
     "column": 1,
     "message": "No space inside hashes on closed ATX style heading (both sides)",

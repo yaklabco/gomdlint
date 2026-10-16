@@ -1,2 +1,2 @@
-basic.input.md:4:1 warning Missing blank line before list () [fixable]
-basic.input.md:10:1 warning Missing blank line before list () [fixable]
+basic.input.md:4:1 warning Missing blank line before list (MD032/blanks-around-lists) [fixable]
+basic.input.md:10:1 warning Missing blank line before list (MD032/blanks-around-lists) [fixable]

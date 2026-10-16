@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 3,
     "column": 13,
     "message": "Trailing whitespace",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 4,
     "column": 13,
     "message": "Trailing whitespace",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 5,
     "column": 16,
     "message": "Trailing whitespace",

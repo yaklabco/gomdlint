@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD027",
-    "name": "",
+    "name": "no-multiple-space-blockquote",
     "line": 3,
     "column": 2,
     "message": "Multiple spaces (2) after blockquote symbol",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD027",
-    "name": "",
+    "name": "no-multiple-space-blockquote",
     "line": 9,
     "column": 2,
     "message": "Multiple spaces (2) after blockquote symbol",

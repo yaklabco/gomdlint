@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD038",
-    "name": "",
+    "name": "no-space-in-code",
     "line": 7,
     "column": 10,
     "message": "Excessive leading space inside code span",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD038",
-    "name": "",
+    "name": "no-space-in-code",
     "line": 9,
     "column": 10,
     "message": "Excessive trailing space inside code span",

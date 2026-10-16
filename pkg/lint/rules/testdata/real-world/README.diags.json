@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD040",
-    "name": "",
+    "name": "fenced-code-language",
     "line": 70,
     "column": 1,
     "message": "Fenced code block has no language specified",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 136,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 155,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 163,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD040",
-    "name": "",
+    "name": "fenced-code-language",
     "line": 201,
     "column": 1,
     "message": "Fenced code block has no language specified",
@@ -46,7 +46,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 202,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD037",
-    "name": "",
+    "name": "no-space-in-emphasis",
     "line": 3,
     "column": 9,
     "message": "Spaces inside emphasis markers",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD037",
-    "name": "",
+    "name": "no-space-in-emphasis",
     "line": 5,
     "column": 9,
     "message": "Spaces inside emphasis markers",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD037",
-    "name": "",
+    "name": "no-space-in-emphasis",
     "line": 11,
     "column": 9,
     "message": "Spaces inside emphasis markers",

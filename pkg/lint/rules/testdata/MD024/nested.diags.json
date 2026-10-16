@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD024",
-    "name": "",
+    "name": "no-duplicate-heading",
     "line": 7,
     "column": 6,
     "message": "Duplicate heading text \"Overview\" (first occurrence on line 3)",

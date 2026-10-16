@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD036",
-    "name": "",
+    "name": "no-emphasis-as-heading",
     "line": 11,
     "column": 1,
     "message": "Emphasis used instead of a heading",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD036",
-    "name": "",
+    "name": "no-emphasis-as-heading",
     "line": 15,
     "column": 1,
     "message": "Emphasis used instead of a heading",

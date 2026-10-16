@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD035",
-    "name": "",
+    "name": "hr-style",
     "line": 9,
     "column": 1,
     "message": "Horizontal rule style \"***\" does not match expected \"---\"",

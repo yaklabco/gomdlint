@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD041",
-    "name": "",
+    "name": "first-line-heading",
     "line": 1,
     "column": 1,
     "message": "First line should be a top-level heading",

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD010",
-    "name": "",
+    "name": "no-hard-tabs",
     "line": 3,
     "column": 16,
     "message": "Hard tab character found",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD010",
-    "name": "",
+    "name": "no-hard-tabs",
     "line": 4,
     "column": 1,
     "message": "Hard tab character found",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD010",
-    "name": "",
+    "name": "no-hard-tabs",
     "line": 6,
     "column": 8,
     "message": "Hard tab character found",

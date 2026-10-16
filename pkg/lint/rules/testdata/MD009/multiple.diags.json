@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 3,
     "column": 20,
     "message": "Trailing whitespace",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 5,
     "column": 22,
     "message": "Trailing whitespace",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 7,
     "column": 21,
     "message": "Trailing whitespace",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD009",
-    "name": "",
+    "name": "no-trailing-spaces",
     "line": 9,
     "column": 22,
     "message": "Trailing whitespace",

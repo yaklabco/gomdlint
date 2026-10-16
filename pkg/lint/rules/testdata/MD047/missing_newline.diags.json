@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD047",
-    "name": "",
+    "name": "single-trailing-newline",
     "line": 3,
     "column": 39,
     "message": "File should end with a newline",

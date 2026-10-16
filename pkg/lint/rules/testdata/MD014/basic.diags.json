@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD014",
-    "name": "",
+    "name": "commands-show-output",
     "line": 6,
     "column": 1,
     "message": "Dollar signs used before commands without showing output",

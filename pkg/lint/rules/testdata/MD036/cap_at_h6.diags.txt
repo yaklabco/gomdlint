@@ -1,1 +1,1 @@
-cap_at_h6.input.md:13:1 warning Emphasis used instead of a heading () [fixable]
+cap_at_h6.input.md:13:1 warning Emphasis used instead of a heading (MD036/no-emphasis-as-heading) [fixable]

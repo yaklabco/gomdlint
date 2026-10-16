@@ -1,1 +1,1 @@
-italic_ignored.input.md:5:1 warning Emphasis used instead of a heading ()
+italic_ignored.input.md:5:1 warning Emphasis used instead of a heading (MD036/no-emphasis-as-heading)
