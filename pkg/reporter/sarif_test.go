@@ -214,6 +214,49 @@ func TestSARIFReporter_SymlinkedFilesUseTheirTargetInsideTheRoot(t *testing.T) {
 	}, resultLocations(run))
 }
 
+func TestSARIFReporter_SourceRootThroughSymlinkedWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "docs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "a.md"), []byte("x\n"), 0o644))
+
+	shortcutParent := t.TempDir()
+	skipInsideGitWorkTree(t, shortcutParent)
+	shortcut := filepath.Join(shortcutParent, "shortcut")
+	if err := os.Symlink(filepath.Join(root, "docs"), shortcut); err != nil {
+		t.Skip("cannot create symlinks:", err)
+	}
+
+	realRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(shortcut, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: shortcut}, result).Runs[0]
+
+	assert.Equal(t, fileURIPrefix(realRoot)+"/", run.OriginalURIBaseIDs["%SRCROOT%"].URI,
+		"a working directory reached through a symlink still finds its repository")
+	assert.Equal(t, []reporter.SARIFArtifactLocation{{URI: "docs/a.md", URIBaseID: "%SRCROOT%"}}, resultLocations(run))
+}
+
+// skipInsideGitWorkTree skips the test when dir already lies inside a git work
+// tree, where the source root would be that tree instead.
+func skipInsideGitWorkTree(t *testing.T, dir string) {
+	t.Helper()
+
+	for current := dir; ; current = filepath.Dir(current) {
+		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
+			t.Skipf("temporary directory %s is inside a git work tree", dir)
+		}
+		if filepath.Dir(current) == current {
+			return
+		}
+	}
+}
+
 func TestSARIFReporter_GitFileMarksSourceRoot(t *testing.T) {
 	t.Parallel()
 
@@ -235,14 +278,7 @@ func TestSARIFReporter_SourceRootDefaultsToWorkingDir(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	for dir := workDir; ; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			t.Skipf("temporary directory %s is inside a git work tree", workDir)
-		}
-		if filepath.Dir(dir) == dir {
-			break
-		}
-	}
+	skipInsideGitWorkTree(t, workDir)
 
 	result := &runner.Result{Files: []runner.FileOutcome{
 		sarifFile(filepath.Join(workDir, "docs", "a.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),

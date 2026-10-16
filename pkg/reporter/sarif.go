@@ -669,17 +669,33 @@ func (l *artifactLocator) relativeToRoot(absPath string) (string, bool) {
 // root of the git work tree containing dir, or dir itself outside one. GitHub
 // code scanning resolves relative URIs against the repository root, so this
 // keeps results attached to the right files when gomdlint runs in a
-// subdirectory. A work tree root holds a .git directory, or a .git file for a
-// linked worktree or submodule.
+// subdirectory. When dir is reached through a symbolic link from outside the
+// work tree, the search continues from its resolved path.
 func sourceRoot(dir string) string {
+	if root, ok := gitWorkTreeRoot(dir); ok {
+		return root
+	}
+
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != dir {
+		if root, ok := gitWorkTreeRoot(resolved); ok {
+			return root
+		}
+	}
+
+	return dir
+}
+
+// gitWorkTreeRoot returns the nearest directory at or above dir that holds a
+// .git directory, or a .git file as a linked worktree or submodule does.
+func gitWorkTreeRoot(dir string) (string, bool) {
 	for candidate := dir; ; {
 		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
-			return candidate
+			return candidate, true
 		}
 
 		parent := filepath.Dir(candidate)
 		if parent == candidate {
-			return dir
+			return "", false
 		}
 		candidate = parent
 	}
