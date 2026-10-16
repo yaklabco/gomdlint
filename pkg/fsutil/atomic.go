@@ -3,7 +3,9 @@ package fsutil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -11,17 +13,29 @@ import (
 // DefaultFileMode is the default permission mode for newly created files.
 const DefaultFileMode os.FileMode = 0644
 
-// WriteAtomic writes content to path atomically using a temp file and rename.
-// The original file's mode is preserved. If mode is 0, DefaultFileMode (0644) is used.
+// chmodBits are the mode bits that os.Chmod applies.
+const chmodBits = fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
+
+// WriteAtomic replaces the content of the file at path, or creates it.
+// If mode is 0, DefaultFileMode (0644) is used.
 //
-// The atomic write pattern:
-//  1. Create a temp file in the same directory as the target.
-//  2. Write all content to the temp file.
-//  3. Sync the temp file to ensure durability.
-//  4. Set the file mode.
-//  5. Rename the temp file to the target path (atomic on POSIX).
+// The write keeps the identity of an existing file:
+//   - If path is a symbolic link, the link is resolved and its target is
+//     written. The link itself is left alone. A dangling link is an error.
+//   - If the file has more than one hard link, it is rewritten in place so
+//     every link sees the new content. See below for what that costs.
+//   - Otherwise the content goes to a temp file in the target's directory,
+//     which is synced, given the original owner (where the platform has
+//     owners) and mode, and renamed over the target; then the directory is
+//     synced so the rename is durable. The rename is atomic on POSIX: on
+//     error the original file is untouched.
+//   - If the original owner cannot be restored on the temp file (a
+//     non-root user fixing another user's group-writable file), the file is
+//     rewritten in place instead, so its owner does not change.
 //
-// On error, the temp file is cleaned up and the original file remains untouched.
+// An in-place rewrite is not atomic. If it fails part way, the original
+// content is written back on a best-effort basis and the error says whether
+// that worked.
 func WriteAtomic(ctx context.Context, path string, content []byte, mode os.FileMode) error {
 	select {
 	case <-ctx.Done():
@@ -33,11 +47,56 @@ func WriteAtomic(ctx context.Context, path string, content []byte, mode os.FileM
 		mode = DefaultFileMode
 	}
 
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
+	target, err := resolveWriteTarget(path)
+	if err != nil {
+		return err
+	}
+
+	existing, err := os.Stat(target)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		existing = nil
+	case err != nil:
+		return fmt.Errorf("stat %s: %w", target, err)
+	case existing.IsDir():
+		return fmt.Errorf("%w: %s", ErrIsDirectory, target)
+	}
+
+	if existing != nil && hasMultipleLinks(target, existing) {
+		return rewriteInPlace(target, content, mode)
+	}
+	return replaceFile(target, content, mode, existing)
+}
+
+// resolveWriteTarget returns the file that a write to path must change:
+// path itself, or the final target when path is a symbolic link.
+func resolveWriteTarget(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		return "", fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return path, nil
+	}
+
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlink %s: %w", path, err)
+	}
+	return target, nil
+}
+
+// replaceFile writes content to a temp file next to target and renames it
+// over target. existing describes the current target, or is nil when the
+// target does not exist yet.
+func replaceFile(target string, content []byte, mode os.FileMode, existing os.FileInfo) error {
+	dir := filepath.Dir(target)
 
 	// Create temp file in same directory for atomic rename.
-	tmp, err := os.CreateTemp(dir, base+".tmp.*")
+	tmp, err := os.CreateTemp(dir, filepath.Base(target)+".tmp.*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -52,7 +111,6 @@ func WriteAtomic(ctx context.Context, path string, content []byte, mode os.FileM
 		}
 	}()
 
-	// Write content.
 	if _, err := tmp.Write(content); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
@@ -62,21 +120,94 @@ func WriteAtomic(ctx context.Context, path string, content []byte, mode os.FileM
 		return fmt.Errorf("sync temp file: %w", err)
 	}
 
+	// Restore the owner before the mode: changing the owner can clear the
+	// set-user-ID and set-group-ID bits.
+	if existing != nil {
+		restored, err := restoreOwner(tmp, existing)
+		if err != nil {
+			return err
+		}
+		if !restored {
+			// Keep the owner by rewriting the original file in place. The
+			// deferred cleanup removes the temp file.
+			return rewriteInPlace(target, content, mode)
+		}
+	}
+
+	if err := tmp.Chmod(mode); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	// Set mode before rename.
-	if err := os.Chmod(tmpPath, mode); err != nil {
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-
 	// Atomic rename.
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, target); err != nil {
 		return fmt.Errorf("rename temp file: %w", err)
 	}
-
 	success = true
+
+	// Make the rename itself durable.
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("%s was written but its directory could not be synced: %w", target, err)
+	}
+	return nil
+}
+
+// rewriteInPlace overwrites the existing file at target without replacing
+// it, which keeps its inode, hard links and owner. On failure it tries to
+// put the original content back.
+func rewriteInPlace(target string, content []byte, mode os.FileMode) error {
+	original, err := os.ReadFile(target)
+	if err != nil {
+		return fmt.Errorf("read %s before rewriting it in place: %w", target, err)
+	}
+
+	file, err := os.OpenFile(target, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open %s for an in-place rewrite: %w", target, err)
+	}
+
+	if err := overwriteFile(file, content); err != nil {
+		if restoreErr := overwriteFile(file, original); restoreErr != nil {
+			_ = file.Close()
+			return fmt.Errorf("rewrite %s in place: %w",
+				target, errors.Join(err, fmt.Errorf("restore original content: %w", restoreErr)))
+		}
+		_ = file.Close()
+		return fmt.Errorf("rewrite %s in place (original content restored): %w", target, err)
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return fmt.Errorf("stat %s: %w", target, err)
+	}
+	if info.Mode()&chmodBits != mode&chmodBits {
+		if err := file.Chmod(mode); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("chmod %s: %w", target, err)
+		}
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", target, err)
+	}
+	return nil
+}
+
+// overwriteFile replaces the whole content of an open file and syncs it.
+func overwriteFile(file *os.File, content []byte) error {
+	if _, err := file.WriteAt(content, 0); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := file.Truncate(int64(len(content))); err != nil {
+		return fmt.Errorf("truncate: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync: %w", err)
+	}
 	return nil
 }
 
