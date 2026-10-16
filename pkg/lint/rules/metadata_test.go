@@ -153,6 +153,36 @@ Content`,
 	}
 }
 
+// TestFirstLineHeadingRule_FrontMatterTitleDefaults verifies markdownlint's
+// case-insensitive default front_matter_title handling.
+func TestFirstLineHeadingRule_FrontMatterTitleDefaults(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		wantN   int
+	}{
+		{name: "lowercase title", input: "---\ntitle: Doc\n---\n\nText.\n", wantN: 0},
+		{name: "capitalised title", input: "---\nTitle: Doc\n---\n\nText.\n", wantN: 0},
+		{name: "no title", input: "---\nauthor: Someone\n---\n\nText.\n", wantN: 1},
+		{
+			name:    "empty pattern disables front matter titles",
+			input:   "---\ntitle: Doc\n---\n\nText.\n",
+			options: map[string]any{"front_matter_title": ""},
+			wantN:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewFirstLineHeadingRule(), tt.input, tt.options)
+			if len(diags) != tt.wantN {
+				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
+			}
+		})
+	}
+}
+
 func TestFirstLineHeadingRule_DefaultDisabled(t *testing.T) {
 	rule := NewFirstLineHeadingRule()
 	if rule.DefaultEnabled() {

@@ -42,10 +42,6 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	requiredLevel := ctx.OptionInt("level", 1)
-	frontMatterTitlePattern := ctx.OptionString("front_matter_title", config.MarkdownlintFrontMatterTitlePattern)
-	if value, ok := ctx.Option("front_matter_title", nil).(bool); ok && !value {
-		frontMatterTitlePattern = ""
-	}
 
 	// Skip front matter to find first content.
 	firstContentLine := r.findFirstContentLine(ctx.File)
@@ -53,14 +49,9 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		return nil, nil
 	}
 
-	// Check for front matter title if configured.
-	if frontMatterTitlePattern != "" {
-		hasFrontMatterTitle, err := r.checkFrontMatterTitle(ctx.File, frontMatterTitlePattern)
-		// If error or front matter has title, skip first heading check.
-		if err == nil && hasFrontMatterTitle {
-			return nil, nil
-		}
-		// Invalid regex is ignored - continue with default heading check behavior.
+	// A front matter title serves as the document title.
+	if hasFrontMatterTitle(ctx) {
+		return nil, nil
 	}
 
 	// Find the first block at or after the first content line.
@@ -145,26 +136,44 @@ func (r *FirstLineHeadingRule) findFirstContentLine(file *mdast.FileSnapshot) in
 	return 1
 }
 
-func (r *FirstLineHeadingRule) checkFrontMatterTitle(
-	file *mdast.FileSnapshot,
-	pattern string,
-) (bool, error) {
-	if file == nil || len(file.Lines) == 0 {
-		return false, nil
-	}
-
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return false, fmt.Errorf("invalid front matter title pattern: %w", err)
-	}
-
-	for lineNum := 2; lineNum < file.FrontMatterLines; lineNum++ {
-		if re.Match(lint.RawLineContent(file, lineNum)) {
-			return true, nil
+// frontMatterTitleRegexp returns the rule's front_matter_title pattern compiled
+// the way markdownlint uses it: the default pattern applies when the option is
+// unset, "" or false disables front matter titles, and matching ignores case.
+// It returns nil when front matter titles are disabled or the pattern is invalid.
+func frontMatterTitleRegexp(ctx *lint.RuleContext) *regexp.Regexp {
+	pattern := config.MarkdownlintFrontMatterTitlePattern
+	switch value := ctx.Option("front_matter_title", nil).(type) {
+	case string:
+		pattern = value
+	case bool:
+		if !value {
+			return nil
 		}
 	}
+	if pattern == "" {
+		return nil
+	}
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		return nil
+	}
+	return re
+}
 
-	return false, nil
+// hasFrontMatterTitle reports whether the file's front matter contains a title
+// matching the rule's front_matter_title pattern.
+func hasFrontMatterTitle(ctx *lint.RuleContext) bool {
+	re := frontMatterTitleRegexp(ctx)
+	if re == nil || ctx.File == nil {
+		return false
+	}
+	// Front matter lines include the opening and closing delimiters.
+	for lineNum := 2; lineNum < ctx.File.FrontMatterLines; lineNum++ {
+		if re.Match(lint.RawLineContent(ctx.File, lineNum)) {
+			return true
+		}
+	}
+	return false
 }
 
 // HeadingBlankLinesRule ensures headings are surrounded by blank lines.

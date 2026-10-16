@@ -248,6 +248,159 @@ func TestHeadingStyleRule(t *testing.T) {
 	}
 }
 
+// applyAllEdits applies every fix edit from diags to input.
+func applyAllEdits(t *testing.T, input string, diags []lint.Diagnostic) string {
+	t.Helper()
+	var edits []fix.TextEdit
+	for _, diag := range diags {
+		edits = append(edits, diag.FixEdits...)
+	}
+	prepared, err := fix.PrepareEdits(edits, len(input))
+	require.NoError(t, err)
+	return string(fix.ApplyEdits([]byte(input), prepared))
+}
+
+// diagLines returns the start line of each diagnostic.
+func diagLines(diags []lint.Diagnostic) []int {
+	lines := make([]int, 0, len(diags))
+	for _, diag := range diags {
+		lines = append(lines, diag.StartLine)
+	}
+	return lines
+}
+
+// TestHeadingIncrementRule_FrontMatterTitle verifies the markdownlint default
+// front_matter_title pattern treats a front matter title as the H1.
+func TestHeadingIncrementRule_FrontMatterTitle(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+	}{
+		{
+			name:      "default pattern treats title as H1",
+			input:     "---\ntitle: Test\n---\n\n### Deep\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "default pattern ignores case",
+			input:     "---\nTitle: Test\n---\n\n### Deep\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "quoted JSON title",
+			input:     "{\n\"title\": \"Test\"\n}\n\n### Deep\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "title then H2 is fine",
+			input:     "---\ntitle: Test\n---\n\n## Section\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "no title key",
+			input:     "---\nauthor: Someone\n---\n\n### Deep\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "empty pattern disables",
+			input:     "---\ntitle: Test\n---\n\n### Deep\n",
+			options:   map[string]any{"front_matter_title": ""},
+			wantLines: []int{},
+		},
+		{
+			name:      "false disables",
+			input:     "---\ntitle: Test\n---\n\n### Deep\n",
+			options:   map[string]any{"front_matter_title": false},
+			wantLines: []int{},
+		},
+		{
+			name:      "custom pattern",
+			input:     "---\nname: Test\n---\n\n### Deep\n",
+			options:   map[string]any{"front_matter_title": `^\s*name\s*:`},
+			wantLines: []int{5},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingIncrementRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+		})
+	}
+}
+
+// TestSingleH1Rule_MarkdownlintDefaults verifies markdownlint's MD025
+// semantics: only a title (first content H1 or front matter title) makes
+// later H1 headings violations.
+func TestSingleH1Rule_MarkdownlintDefaults(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantMsgs  []string
+	}{
+		{
+			name:      "front matter title counts as the first H1",
+			input:     "---\ntitle: Test\n---\n\n# First H1\n\nText.\n\n# Second H1\n",
+			wantLines: []int{5, 9},
+			wantMsgs:  []string{"this is H1 #2", "this is H1 #3"},
+		},
+		{
+			name:      "front matter title with a single H1",
+			input:     "---\nTitle: Test\n---\n\n# Only H1\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "front matter title disabled",
+			input:     "---\ntitle: Test\n---\n\n# First\n\n# Second\n",
+			options:   map[string]any{"front_matter_title": ""},
+			wantLines: []int{7},
+		},
+		{
+			name:      "front matter without title",
+			input:     "---\nauthor: Someone\n---\n\n# First\n\n# Second\n",
+			wantLines: []int{7},
+		},
+		{
+			name:      "preamble before the first H1 means no title",
+			input:     "Intro.\n\n# A\n\n# B\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "leading comment does not count as content",
+			input:     "<!-- comment -->\n# A\n\n# B\n",
+			wantLines: []int{4},
+		},
+		{
+			name:      "title_only false flags every later H1",
+			input:     "Intro.\n\n# A\n\n# B\n",
+			options:   map[string]any{"title_only": false},
+			wantLines: []int{5},
+		},
+		{
+			name:      "front matter title satisfies allow_no_h1",
+			input:     "---\ntitle: Test\n---\n\n## Section\n",
+			options:   map[string]any{"allow_no_h1": false},
+			wantLines: []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewSingleH1Rule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for i, msg := range tt.wantMsgs {
+				if i < len(diags) {
+					assert.Contains(t, diags[i].Message, msg)
+				}
+			}
+		})
+	}
+}
+
 func TestHeadingIncrementRule_Metadata(t *testing.T) {
 	rule := NewHeadingIncrementRule()
 

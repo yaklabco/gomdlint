@@ -42,12 +42,9 @@ func (r *HeadingIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 
 	var diags []lint.Diagnostic
 	var prevLevel int
-	pattern := ctx.OptionString("front_matter_title", "")
-	if pattern != "" {
-		hasTitle, err := NewFirstLineHeadingRule().checkFrontMatterTitle(ctx.File, pattern)
-		if err == nil && hasTitle {
-			prevLevel = 1
-		}
+	// A front matter title acts as the H1, so the first heading must be H1 or H2.
+	if hasFrontMatterTitle(ctx) {
+		prevLevel = 1
 	}
 
 	for _, heading := range headings {
@@ -95,6 +92,11 @@ func NewSingleH1Rule() *SingleH1Rule {
 }
 
 // Apply checks that there is at most one H1 heading.
+//
+// Like markdownlint, a later H1 is only a violation when the document has a
+// title: either a front matter title or an H1 that is the first content. The
+// title_only option (default true) can be disabled to flag every H1 after the
+// first regardless of where the first one appears.
 func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -102,6 +104,7 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	allowNoH1 := ctx.OptionBool("allow_no_h1", true)
 	level := ctx.OptionInt("level", 1)
+	titleOnly := ctx.OptionBool("title_only", true)
 
 	headings := ctx.Headings()
 	var h1Headings []*mdast.Node
@@ -117,25 +120,19 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	}
 
 	var diags []lint.Diagnostic
+	frontMatterTitle := hasFrontMatterTitle(ctx)
+	// Headings before firstDuplicate are allowed; a front matter title counts
+	// as the first top-level heading, so then every matching heading is flagged.
 	firstDuplicate := 1
-	if ctx.OptionBool("title_only", false) && len(h1Headings) > 0 {
-		pattern := ctx.OptionString("front_matter_title", config.MarkdownlintFrontMatterTitlePattern)
-		if value, ok := ctx.Option("front_matter_title", nil).(bool); ok && !value {
-			pattern = ""
-		}
-		hasTitle, err := NewFirstLineHeadingRule().checkFrontMatterTitle(ctx.File, pattern)
-		if pattern == "" || err != nil {
-			hasTitle = false
-		}
-		if hasTitle {
-			firstDuplicate = 0
-		} else if !headingIsFirstContent(ctx, h1Headings[0]) {
-			return nil, nil
-		}
+	switch {
+	case frontMatterTitle:
+		firstDuplicate = 0
+	case titleOnly && len(h1Headings) > 0 && !headingIsFirstContent(ctx, h1Headings[0]):
+		return nil, nil
 	}
 
 	// Check for missing H1.
-	if !allowNoH1 && len(h1Headings) == 0 {
+	if !allowNoH1 && len(h1Headings) == 0 && !frontMatterTitle {
 		pos := mdast.SourcePosition{
 			StartLine:   1,
 			StartColumn: 1,
@@ -153,8 +150,9 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	// Flag all H1s after the first.
 	for i := firstDuplicate; i < len(h1Headings); i++ {
 		heading := h1Headings[i]
+		number := i + 2 - firstDuplicate
 		diag := lint.NewDiagnostic(r.ID(), heading,
-			fmt.Sprintf("Multiple H%d headings found (this is H%d #%d)", level, level, i+1)).
+			fmt.Sprintf("Multiple H%d headings found (this is H%d #%d)", level, level, number)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use H2 or lower for subsequent headings").
 			Build()

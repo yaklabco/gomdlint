@@ -53,12 +53,19 @@ func TestEmphasisIndependentSpans(t *testing.T) {
 func TestFrontmatterIsNotMarkdown(t *testing.T) {
 	input := "---\ntitle: Example\n  # Metadata\n#Broken\n---\n\n# Document\n\nText.\n"
 	for _, rule := range []lint.Rule{
-		NewHeadingBlankLinesRule(), NewHeadingStartLeftRule(), NewSingleH1Rule(), NewNoMissingSpaceATXRule(),
+		NewHeadingBlankLinesRule(), NewHeadingStartLeftRule(), NewNoMissingSpaceATXRule(),
 	} {
 		t.Run(rule.ID(), func(t *testing.T) {
 			require.Empty(t, applyCompatibilityRule(t, rule, input))
 		})
 	}
+	t.Run("MD025", func(t *testing.T) {
+		// The metadata title counts as the first H1 (markdownlint front_matter_title),
+		// so only the real H1 is reported; the metadata lines are not headings.
+		diags := applyCompatibilityRule(t, NewSingleH1Rule(), input)
+		require.Len(t, diags, 1)
+		require.Equal(t, 7, diags[0].StartLine)
+	})
 }
 
 func TestCommentsAreNotHTMLViolations(t *testing.T) {
