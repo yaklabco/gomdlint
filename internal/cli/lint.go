@@ -182,6 +182,8 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		WorkingDir:   workDir,
 		ExplicitPath: configPath,
 		CLIConfig:    cfg,
+		Stdin:        cmd.InOrStdin(),
+		Stderr:       cmd.ErrOrStderr(),
 	}
 
 	loadResult, err := configloader.Load(ctx, loadOpts)
@@ -192,7 +194,10 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	finalCfg := loadResult.Config
 	applyExplicitFlags(cmd, flags, cfg, finalCfg)
 
-	// Log warnings from config loading.
+	// Log notices and warnings from config loading.
+	for _, notice := range loadResult.Notices {
+		logger.Info(notice)
+	}
 	for _, warning := range loadResult.Warnings {
 		logger.Warn(warning)
 	}

@@ -133,6 +133,25 @@ func TestLintIgnoreRelativeToConfigFile(t *testing.T) {
 	assert.NotContains(t, got.stdout, "wip.md")
 }
 
+// TestLintAppliesLoneMarkdownlintConfig covers a project configured only
+// for markdownlint: its settings apply, with a notice on stderr, and
+// nothing prompts or writes when the streams are not terminals.
+func TestLintAppliesLoneMarkdownlintConfig(t *testing.T) {
+	dir := inProject(t, map[string]string{
+		"doc.md":             trailingDoc,
+		".markdownlint.json": `{"no-trailing-spaces": false}`,
+	})
+
+	got := execute(t, "lint", "--format", "json", "doc.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.NotContains(t, got.stdout, "MD009")
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got.stdout), "{"), "stdout must stay pure JSON:\n%s", got.stdout)
+	assert.Contains(t, got.stderr, ".markdownlint.json")
+	assert.Contains(t, got.stderr, "gomdlint migrate")
+	assert.NoFileExists(t, filepath.Join(dir, ".gomdlint.yml"))
+}
+
 func TestLintFormatFromEnvironment(t *testing.T) {
 	t.Run("selects the format", func(t *testing.T) {
 		inProject(t, map[string]string{"doc.md": trailingDoc})
