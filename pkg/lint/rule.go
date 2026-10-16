@@ -85,7 +85,7 @@ type Rule interface {
 	//
 	// Rules must:
 	//   - Return diagnostics for each violation found.
-	//   - Use Builder to propose fix edits (if CanFix() is true).
+	//   - Attach fix edits to Diagnostic.FixEdits (if CanFix() is true).
 	//   - Respect context cancellation.
 	//   - Return error only for internal failures, not violations.
 	Apply(ctx *RuleContext) ([]Diagnostic, error)

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -31,9 +30,6 @@ type RuleContext struct {
 
 	// RuleConfig is the rule-specific configuration (may be nil).
 	RuleConfig *config.RuleConfig
-
-	// Builder accumulates text edits for auto-fix.
-	Builder *fix.EditBuilder
 
 	// Registry provides access to the rule registry for name lookups.
 	Registry *Registry
@@ -68,7 +64,6 @@ func NewRuleContext(
 		Root:       root,
 		Config:     cfg,
 		RuleConfig: ruleCfg,
-		Builder:    fix.NewEditBuilder(),
 	}
 }
 
