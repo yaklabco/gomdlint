@@ -356,8 +356,8 @@ func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
 }
 
 // mergeBlankLineInsertions combines formatting requirements at the same
-// boundary: of several single-edit fixes that insert only newlines at one
-// offset, the longest is kept. It runs after suppression so disabled
+// boundary: of several single-edit fixes that insert only blank lines at
+// one offset, the longest is kept. It runs after suppression so disabled
 // findings cannot increase an enabled fix.
 func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
 	result := make([]pendingFix, 0, len(fixes))
@@ -378,7 +378,18 @@ func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
 	return result
 }
 
-// isBlankLineInsertion reports whether edit only inserts line breaks.
+// isBlankLineInsertion reports whether edit only inserts blank lines: text
+// that ends with a line break and whose lines hold nothing but container
+// markers (spaces, tabs and '>'), such as "\n", ">\n" or "  > >\r\n". Rules
+// insert such lines to add a blank line inside a blockquote or list item.
 func isBlankLineInsertion(edit fix.TextEdit) bool {
-	return edit.StartOffset == edit.EndOffset && edit.NewText != "" && strings.Trim(edit.NewText, "\r\n") == ""
+	if edit.StartOffset != edit.EndOffset || !strings.HasSuffix(edit.NewText, "\n") {
+		return false
+	}
+	for _, line := range strings.SplitAfter(edit.NewText, "\n") {
+		if strings.Trim(line, " \t>\r\n") != "" {
+			return false
+		}
+	}
+	return true
 }

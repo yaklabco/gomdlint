@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/log"
@@ -264,6 +265,90 @@ func TestEngine_MergesBlankLineInsertionsInCRLFFiles(t *testing.T) {
 
 	assert.Equal(t, []fix.TextEdit{{StartOffset: 9, EndOffset: 9, NewText: "\r\n"}}, result.Edits,
 		"two blank-line requirements at one boundary insert one blank line")
+}
+
+// insertRule returns a rule that inserts text at offset, the way a
+// blank-line rule fixes a missing blank line.
+func insertRule(id string, offset int, text string) *funcRule {
+	return newFuncRule(id, func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{fixDiag(id, fix.TextEdit{StartOffset: offset, EndOffset: offset, NewText: text})}, nil
+	})
+}
+
+func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
+	t.Parallel()
+
+	// Offset 6 is the boundary between the two quoted headings.
+	const quoted = "> # A\n> ## B\n"
+
+	tests := []struct {
+		name    string
+		content string
+		offset  int
+		texts   []string
+		want    string
+	}{
+		{
+			name:    "the same quoted blank line from two rules",
+			content: quoted, offset: 6,
+			texts: []string{">\n", ">\n"},
+			want:  ">\n",
+		},
+		{
+			name:    "the longest requirement wins",
+			content: quoted, offset: 6,
+			texts: []string{">\n", ">\n>\n"},
+			want:  ">\n>\n",
+		},
+		{
+			name:    "a container-aware blank line beats a bare one",
+			content: quoted, offset: 6,
+			texts: []string{"\n", ">\n"},
+			want:  ">\n",
+		},
+		{
+			name:    "nested containers with indentation",
+			content: "- item\n\n  > > # A\n  > > ## B\n", offset: 18,
+			texts: []string{"  > >\n", "  > >\n"},
+			want:  "  > >\n",
+		},
+		{
+			name:    "converted to CRLF and still merged",
+			content: "> # A\r\n> ## B\r\n", offset: 7,
+			texts: []string{">\n", ">\n"},
+			want:  ">\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var rules []lint.Rule
+			for idx, text := range tt.texts {
+				rules = append(rules, insertRule(fmt.Sprintf("TEST%03d", idx+1), tt.offset, text))
+			}
+
+			result := lintWithRules(t, tt.content, true, rules...)
+
+			assert.Equal(t, []fix.TextEdit{{StartOffset: tt.offset, EndOffset: tt.offset, NewText: tt.want}}, result.Edits,
+				"blank-line insertions at one boundary must insert one blank line")
+		})
+	}
+}
+
+func TestEngine_DoesNotMergeInsertionsWithContent(t *testing.T) {
+	t.Parallel()
+
+	result := lintWithRules(t, "> # A\n> ## B\n", true,
+		insertRule("TEST001", 6, ">\n"),
+		insertRule("TEST002", 6, "> text\n"),
+	)
+
+	assert.Equal(t, []fix.TextEdit{
+		{StartOffset: 6, EndOffset: 6, NewText: ">\n"},
+		{StartOffset: 6, EndOffset: 6, NewText: "> text\n"},
+	}, result.Edits)
 }
 
 func TestEngine_RejectsFixThatSplitsCRLF(t *testing.T) {
