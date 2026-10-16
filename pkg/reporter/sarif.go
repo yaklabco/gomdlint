@@ -56,6 +56,10 @@ type SARIFOutput struct {
 type SARIFRun struct {
 	Tool SARIFTool `json:"tool"`
 
+	// Invocations records whether the run succeeded. A file that could not be
+	// linted makes the run unsuccessful and is reported as a notification.
+	Invocations []SARIFInvocation `json:"invocations,omitempty"`
+
 	// OriginalURIBaseIDs maps each URI base ID used by relative artifact URIs
 	// (%SRCROOT%) to the absolute file URI it stood for when the log was
 	// written. It is empty when the base is unknown.
@@ -65,6 +69,21 @@ type SARIFRun struct {
 
 	// ColumnKind names the unit of every column in the run: utf16CodeUnits.
 	ColumnKind string `json:"columnKind,omitempty"`
+}
+
+// SARIFInvocation describes how the run went. ExecutionSuccessful is false
+// when a file could not be linted; findings alone do not make it false.
+type SARIFInvocation struct {
+	ExecutionSuccessful        bool                `json:"executionSuccessful"`
+	ToolExecutionNotifications []SARIFNotification `json:"toolExecutionNotifications,omitempty"`
+}
+
+// SARIFNotification reports a problem the tool met while running, such as a
+// file it could not read, as opposed to a finding in a file.
+type SARIFNotification struct {
+	Level     string          `json:"level"`
+	Message   SARIFMessage    `json:"message"`
+	Locations []SARIFLocation `json:"locations,omitempty"`
 }
 
 // SARIFTool describes the analysis tool.
@@ -245,6 +264,10 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 			described: make(map[string]bool),
 		}
 		for _, file := range result.Files {
+			if file.Error != nil {
+				builder.addFailure(file.Error, file.Path)
+				continue
+			}
 			if file.Result == nil || file.Result.FileResult == nil {
 				continue
 			}
@@ -252,6 +275,13 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 				builder.addResult(file, &file.Result.Diagnostics[idx])
 			}
 		}
+		for _, err := range result.Errors {
+			builder.addFailure(err, "")
+		}
+
+		invocation := builder.invocation
+		invocation.ExecutionSuccessful = len(invocation.ToolExecutionNotifications) == 0
+		run.Invocations = []SARIFInvocation{invocation}
 	}
 
 	return &SARIFOutput{
@@ -278,12 +308,26 @@ func toolVersion(explicit string, buildInfo *debug.BuildInfo) string {
 	return ""
 }
 
-// sarifRunBuilder accumulates the rules and results of a run.
+// sarifRunBuilder accumulates the rules, results and failures of a run.
 type sarifRunBuilder struct {
-	run       *SARIFRun
-	registry  *lint.Registry
-	locator   *artifactLocator
-	described map[string]bool
+	run        *SARIFRun
+	registry   *lint.Registry
+	locator    *artifactLocator
+	described  map[string]bool
+	invocation SARIFInvocation
+}
+
+// addFailure records an error the run met as an error notification, located
+// at path when it concerns a file.
+func (b *sarifRunBuilder) addFailure(err error, path string) {
+	notification := SARIFNotification{Level: "error", Message: SARIFMessage{Text: err.Error()}}
+	if path != "" {
+		notification.Locations = []SARIFLocation{{
+			PhysicalLocation: SARIFPhysicalLocation{ArtifactLocation: b.locator.locate(path)},
+		}}
+	}
+
+	b.invocation.ToolExecutionNotifications = append(b.invocation.ToolExecutionNotifications, notification)
 }
 
 // addResult appends the result for diag, describing its rule on first use.

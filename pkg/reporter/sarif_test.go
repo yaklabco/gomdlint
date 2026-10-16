@@ -477,6 +477,51 @@ func TestSARIFReporter_DescribesRulesFromRegistry(t *testing.T) {
 	assert.Equal(t, "error", log.Runs[0].Results[0].Level, "results keep their configured severity")
 }
 
+func TestSARIFReporter_RecordsFilesThatFailed(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{
+		Files: []runner.FileOutcome{
+			sarifFile(filepath.Join(root, "ok.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+			{Path: filepath.Join(root, "docs", "locked.md"), Error: errors.New("permission denied")},
+		},
+		Errors: []error{errors.New("walk interrupted")},
+	}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
+
+	require.Len(t, run.Invocations, 1)
+	invocation := run.Invocations[0]
+	assert.False(t, invocation.ExecutionSuccessful, "a file that could not be linted is a failed run")
+	assert.Equal(t, []reporter.SARIFNotification{
+		{
+			Level:   "error",
+			Message: reporter.SARIFMessage{Text: "permission denied"},
+			Locations: []reporter.SARIFLocation{{PhysicalLocation: reporter.SARIFPhysicalLocation{
+				ArtifactLocation: reporter.SARIFArtifactLocation{URI: "docs/locked.md", URIBaseID: "%SRCROOT%"},
+			}}},
+		},
+		{Level: "error", Message: reporter.SARIFMessage{Text: "walk interrupted"}},
+	}, invocation.ToolExecutionNotifications)
+	assert.Len(t, run.Results, 1, "findings in other files are still reported")
+}
+
+func TestSARIFReporter_SuccessfulRun(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "ok.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
+
+	require.Len(t, run.Invocations, 1)
+	assert.True(t, run.Invocations[0].ExecutionSuccessful, "findings do not make a run fail")
+	assert.Empty(t, run.Invocations[0].ToolExecutionNotifications)
+}
+
 func TestSARIFReporter_ToolMetadata(t *testing.T) {
 	t.Parallel()
 
