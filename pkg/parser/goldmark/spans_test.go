@@ -361,6 +361,27 @@ func TestSpansSurviveContainers(t *testing.T) {
 	})
 }
 
+func TestOrderedListDelimiter(t *testing.T) {
+	tests := []struct {
+		input     string
+		delimiter string
+	}{
+		{"1. one\n2. two\n", "."},
+		{"1) one\n1) two\n3) three\n", ")"},
+		{"> 7) quoted\n", ")"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			list := nthNode(file.Root, mdast.NodeList, 0)
+			require.NotNil(t, list)
+			require.True(t, list.Block.List.Ordered)
+			require.Equal(t, tt.delimiter, list.Block.List.Delimiter)
+			require.Empty(t, list.Block.List.BulletMarker)
+		})
+	}
+}
+
 func TestListItemContentIndent(t *testing.T) {
 	tests := []struct {
 		name   string

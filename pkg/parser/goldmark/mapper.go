@@ -195,13 +195,12 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 		Tight:       list.IsTight,
 	}
 
-	// Determine bullet marker from source if available.
-	if !list.IsOrdered() {
-		listAttrs.BulletMarker = string(list.Marker)
+	// goldmark's Marker is the bullet character of a bullet list and the
+	// delimiter ('.' or ')') of an ordered list.
+	if list.IsOrdered() {
+		listAttrs.Delimiter = string(list.Marker)
 	} else {
-		// For ordered lists, determine delimiter.
-		// goldmark doesn't expose this directly, so we infer from marker.
-		listAttrs.Delimiter = "."
+		listAttrs.BulletMarker = string(list.Marker)
 	}
 
 	node.Block = mdast.NewBlockAttrs().WithList(listAttrs)

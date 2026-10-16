@@ -88,6 +88,14 @@ func TestFirstLineHeadingSeesLeadingThematicBreak(t *testing.T) {
 	require.Equal(t, 1, diags[0].StartLine)
 }
 
+func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
+	input := "# Title\n\n1) one\n1) two\n3) three\n"
+	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)
+	require.Len(t, diags, 1)
+	require.Equal(t, "Use 2) instead", diags[0].Suggestion)
+	require.Equal(t, "# Title\n\n1) one\n2) two\n3) three\n", applyAllFixEdits(t, input, diags))
+}
+
 func TestTrailingWhitespaceIgnoreCodeBlocksChecksFences(t *testing.T) {
 	input := "# Title\n\n```sh  \necho hi  \n```  \n"
 	diags := applyRuleWithOptions(t, NewTrailingWhitespaceRule(), input, map[string]any{"ignore_code_blocks": true})
