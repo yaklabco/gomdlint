@@ -59,11 +59,9 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			continue
 		}
 
-		// IMPORTANT: goldmark SourcePosition for fenced code blocks:
-		// pos.StartLine = first content line
-		// pos.EndLine = closing fence line
-		// So: opening fence is at pos.StartLine - 1
-		fenceOpenLine := pos.StartLine - 1
+		// The full span of a fenced code block runs from the opening fence
+		// to the closing fence (or the last content line when unclosed).
+		fenceOpenLine := pos.StartLine
 		fenceCloseLine := pos.EndLine
 
 		// Validate fence lines exist.

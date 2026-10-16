@@ -3,7 +3,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 6,
-    "column": 3,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 9,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true

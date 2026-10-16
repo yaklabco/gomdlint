@@ -32,10 +32,11 @@ type ListAttrs struct {
 
 // CodeBlockAttrs holds attributes for code block nodes.
 type CodeBlockAttrs struct {
-	// FenceChar is the fence character ('`' or '~').
+	// FenceChar is the fence character ('`' or '~') of a fenced code block,
+	// read from its opening fence.
 	FenceChar byte
 
-	// FenceLength is the number of fence characters.
+	// FenceLength is the number of characters in the opening fence.
 	FenceLength int
 
 	// Info is the info string (language identifier, etc.).
@@ -43,6 +44,11 @@ type CodeBlockAttrs struct {
 
 	// Indented is true for indented code blocks (vs fenced).
 	Indented bool
+
+	// Closed is true when a fenced code block ends with a closing fence. The
+	// closing fence is then the last line of the block's full span. An
+	// unclosed block runs to the end of its container.
+	Closed bool
 }
 
 // InlineAttrs holds attributes for inline-level nodes.

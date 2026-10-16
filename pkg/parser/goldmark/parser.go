@@ -24,6 +24,9 @@ const (
 type Parser struct {
 	flavor string
 	md     goldmark.Markdown
+
+	// spans locates the span recorder of a parse in the parser context.
+	spans spanKey
 }
 
 // New creates a new goldmark-based parser for the given flavor.
@@ -31,9 +34,11 @@ type Parser struct {
 // Invalid flavors default to "commonmark".
 func New(flavor string) *Parser {
 	f := flavorOrDefault(flavor)
+	spans := spanKey{key: parser.NewContextKey()}
 	return &Parser{
 		flavor: f,
-		md:     newGoldmarkInstance(f),
+		md:     newGoldmarkInstance(f, spans),
+		spans:  spans,
 	}
 }
 
@@ -47,10 +52,10 @@ func (p *Parser) Flavor() string {
 // The method:
 //  1. Checks for context cancellation.
 //  2. Builds a FileSnapshot shell with path, content, and lines.
-//  3. Parses content with goldmark.
-//  4. Builds the mdast.Node tree from goldmark AST.
+//  3. Parses content with goldmark, recording source positions.
+//  4. Builds the mdast.Node tree from goldmark AST, with source spans.
 //  5. Tokenizes the content.
-//  6. Assigns token ranges to nodes.
+//  6. Assigns token ranges to nodes from their source spans.
 //  7. Sets File back-references throughout the tree.
 //  8. Validates the token stream.
 //
@@ -81,7 +86,10 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 		}
 	}
 	reader := text.NewReader(parseContent)
-	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(parser.NewContext()))
+	recorder := newSpanRecorder()
+	pc := parser.NewContext()
+	pc.Set(p.spans.key, recorder)
+	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(pc))
 
 	// Check for cancellation after parsing.
 	if err := ctx.Err(); err != nil {
@@ -89,15 +97,14 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	}
 
 	// Build mdast.Node tree from goldmark AST.
-	mapper := newMapper(snapshot.Content)
+	mapper := newSourceMapper(snapshot.Content, parseContent, 0, snapshot.Lines, recorder)
 	snapshot.Root = mapper.mapDocument(gmDoc)
 
 	// Tokenize content.
 	snapshot.Tokens = Tokenize(snapshot.Content)
 
-	// Assign token ranges to nodes.
-	assigner := NewTokenRangeAssigner(snapshot.Tokens, snapshot.Content)
-	assigner.AssignRanges(snapshot.Root, gmDoc)
+	// Derive token ranges from the source spans.
+	assignTokenRanges(snapshot.Root, snapshot.Tokens)
 
 	// Set File back-references.
 	mdast.SetFile(snapshot.Root, snapshot)
@@ -151,8 +158,8 @@ func flavorOrDefault(flavor string) string {
 }
 
 // newGoldmarkInstance creates a configured goldmark.Markdown instance.
-func newGoldmarkInstance(flavor string) goldmark.Markdown {
-	opts := []goldmark.Option{goldmark.WithParserOptions(positionedLinks{})}
+func newGoldmarkInstance(flavor string, spans spanKey) goldmark.Markdown {
+	var opts []goldmark.Option
 
 	// Configure extensions based on flavor.
 	switch flavor {
@@ -166,7 +173,11 @@ func newGoldmarkInstance(flavor string) goldmark.Markdown {
 		// No extensions for pure CommonMark.
 	}
 
-	return goldmark.New(opts...)
+	md := goldmark.New(opts...)
+	// Span recording wraps every parser, so it must see the parsers the
+	// extensions added. goldmark applies extensions inside New.
+	md.Parser().AddOptions(sourceSpans{spanKey: spans})
+	return md
 }
 
 // copyContent creates a copy of the content slice to ensure immutability.

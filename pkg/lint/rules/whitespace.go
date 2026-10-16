@@ -34,6 +34,11 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	}
 
 	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", false)
+	var codeLines map[int]bool
+	if ignoreCodeBlocks {
+		// Fence lines are not code, so their trailing whitespace is checked.
+		codeLines = lint.CodeContentLines(ctx.CodeBlocks())
+	}
 
 	var diags []lint.Diagnostic
 
@@ -43,7 +48,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 
 		// Skip lines in code blocks if configured.
-		if ignoreCodeBlocks && ctx.IsLineInCodeBlock(lineNum) {
+		if codeLines[lineNum] {
 			continue
 		}
 		if ctx.OptionBool("list_item_empty_lines", false) && isListBlankLine(ctx, lineNum) {

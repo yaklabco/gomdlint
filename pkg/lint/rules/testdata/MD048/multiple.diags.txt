@@ -1,1 +1,1 @@
-multiple.input.md:12:1 warning Code fence style 'tilde' does not match expected 'backtick' (MD048/code-fence-style) [fixable]
+multiple.input.md:11:1 warning Code fence style 'tilde' does not match expected 'backtick' (MD048/code-fence-style) [fixable]

@@ -3,7 +3,7 @@
     "rule": "MD005",
     "name": "list-indent",
     "line": 8,
-    "column": 4,
+    "column": 2,
     "message": "List item indentation 1 does not match expected 0",
     "severity": "warning",
     "fixable": true

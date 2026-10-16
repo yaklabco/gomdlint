@@ -278,15 +278,12 @@ func crossesTableCell(content []byte) bool {
 func emphasisMatchIsParsed(ctx *lint.RuleContext, start, end int) bool {
 	for _, nodes := range [][]*mdast.Node{ctx.EmphasisNodes(), ctx.StrongNodes()} {
 		for _, node := range nodes {
+			// The full span of emphasis includes its delimiters.
 			rng := node.SourceRange()
 			if rng.Len() == 0 {
 				continue
 			}
-			markerLength := 1
-			if node.Kind == mdast.NodeStrong {
-				markerLength = 2
-			}
-			if start < rng.EndOffset+markerLength && end > rng.StartOffset-markerLength {
+			if start < rng.EndOffset && end > rng.StartOffset {
 				return true
 			}
 		}
@@ -354,7 +351,7 @@ func (r *EmphasisStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		}
 
 		// Detect style from the source.
-		style := r.detectEmphasisStyle(ctx.File, pos)
+		style := r.detectEmphasisStyle(ctx.File, em)
 		if style == "" {
 			continue
 		}
@@ -382,15 +379,14 @@ func (r *EmphasisStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 	return diags, nil
 }
 
-func (r *EmphasisStyleRule) detectEmphasisStyle(file *mdast.FileSnapshot, pos mdast.SourcePosition) string {
-	lineContent := lint.LineContent(file, pos.StartLine)
-	if pos.StartColumn < 2 || pos.StartColumn > len(lineContent) {
+func (r *EmphasisStyleRule) detectEmphasisStyle(file *mdast.FileSnapshot, em *mdast.Node) string {
+	// The full span of emphasis starts with its opening marker.
+	rng := em.SourceRange()
+	if rng.Len() == 0 || rng.StartOffset >= len(file.Content) {
 		return ""
 	}
 
-	// SourcePosition points to the content, not the marker.
-	// The marker is immediately before the content.
-	ch := lineContent[pos.StartColumn-2]
+	ch := file.Content[rng.StartOffset]
 	switch ch {
 	case '*':
 		return "asterisk"
@@ -456,7 +452,7 @@ func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 		}
 
 		// Detect style from the source.
-		style := r.detectStrongStyle(ctx.File, pos)
+		style := r.detectStrongStyle(ctx.File, st)
 		if style == "" {
 			continue
 		}
@@ -484,16 +480,15 @@ func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 	return diags, nil
 }
 
-func (r *StrongStyleRule) detectStrongStyle(file *mdast.FileSnapshot, pos mdast.SourcePosition) string {
-	lineContent := lint.LineContent(file, pos.StartLine)
-	if pos.StartColumn < 3 || pos.StartColumn > len(lineContent) {
+func (r *StrongStyleRule) detectStrongStyle(file *mdast.FileSnapshot, st *mdast.Node) string {
+	// The full span of strong emphasis starts with its two marker characters.
+	rng := st.SourceRange()
+	if rng.Len() < 2 || rng.StartOffset+2 > len(file.Content) {
 		return ""
 	}
 
-	// SourcePosition points to the content, not the marker.
-	// For strong emphasis, two marker chars are before the content.
-	ch1 := lineContent[pos.StartColumn-2]
-	ch2 := lineContent[pos.StartColumn-3]
+	ch1 := file.Content[rng.StartOffset]
+	ch2 := file.Content[rng.StartOffset+1]
 	if ch1 == '*' && ch2 == '*' {
 		return "asterisk"
 	}

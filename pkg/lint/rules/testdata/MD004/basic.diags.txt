@@ -1,4 +1,4 @@
-basic.input.md:6:3 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
-basic.input.md:7:3 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
-basic.input.md:9:3 warning Unordered list bullet '+' does not match expected '-' (MD004/unordered-list-style) [fixable]
-basic.input.md:10:3 warning Unordered list bullet '+' does not match expected '-' (MD004/unordered-list-style) [fixable]
+basic.input.md:6:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
+basic.input.md:7:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
+basic.input.md:9:1 warning Unordered list bullet '+' does not match expected '-' (MD004/unordered-list-style) [fixable]
+basic.input.md:10:1 warning Unordered list bullet '+' does not match expected '-' (MD004/unordered-list-style) [fixable]

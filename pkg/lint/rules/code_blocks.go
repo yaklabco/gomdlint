@@ -120,53 +120,34 @@ func (r *CodeBlockLanguageRule) buildLanguageFix(
 		return nil // Don't insert "text" as language.
 	}
 
-	// Find position right after opening fence.
-	// pos.StartLine is the first content line, so the fence is on the line before.
-	pos := cb.SourcePosition()
-	fenceLine := pos.StartLine - 1
-	if !pos.IsValid() || fenceLine < 1 || fenceLine > len(file.Lines) {
-		return nil
-	}
-
-	fenceLineInfo := file.Lines[fenceLine-1]
-	lineContent := file.Content[fenceLineInfo.StartOffset:fenceLineInfo.NewlineStart]
-
-	// Find end of fence characters (``` or ~~~).
-	fenceEnd := 0
-	for i, ch := range lineContent {
-		if ch == '`' || ch == '~' {
-			fenceEnd = i + 1
-		} else if fenceEnd > 0 {
-			break
-		}
-	}
-
-	if fenceEnd == 0 {
+	// The full span of a fenced code block starts at its opening fence.
+	fence := cb.SourceRange()
+	fenceLength := lint.CodeFenceLength(cb)
+	if fenceLength == 0 || fence.StartOffset+fenceLength > len(file.Content) {
 		return nil
 	}
 
 	// Insert language right after fence.
 	builder := fix.NewEditBuilder()
-	builder.Insert(fenceLineInfo.StartOffset+fenceEnd, detectedLang)
+	builder.Insert(fence.StartOffset+fenceLength, detectedLang)
 	return builder
 }
 
-// getCodeBlockContent extracts the content of a code block (excluding fences).
-// Note: For fenced code blocks, pos.StartLine points to the first content line
-// (not the opening fence), and pos.EndLine includes the closing fence.
+// getCodeBlockContent extracts the content lines of a code block (excluding fences).
 func (r *CodeBlockLanguageRule) getCodeBlockContent(
 	file *mdast.FileSnapshot,
 	cb *mdast.Node,
 ) []byte {
-	pos := cb.SourcePosition()
+	if cb.ContentRange().IsEmpty() {
+		return nil
+	}
+	pos := cb.ContentPosition()
 	if !pos.IsValid() {
 		return nil
 	}
 
-	// StartLine is already the first content line.
-	// EndLine includes the closing fence, so we skip it.
 	startLine := pos.StartLine
-	endLine := pos.EndLine - 1
+	endLine := pos.EndLine
 
 	if startLine > endLine || startLine < 1 || endLine > len(file.Lines) {
 		return nil
@@ -425,7 +406,8 @@ func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast
 	}
 
 	builder := r.buildDollarRemovalFix(contentLines)
-	diag := lint.NewDiagnostic(r.ID(), cb,
+	// Report at the first command line: the content span of the code block.
+	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, cb.ContentPosition(),
 		"Dollar signs used before commands without showing output").
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion("Remove dollar signs from command-only code blocks").

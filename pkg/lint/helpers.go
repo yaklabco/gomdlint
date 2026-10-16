@@ -335,10 +335,7 @@ func IsCommentLine(file *mdast.FileSnapshot, lineNum int) bool {
 	}
 	for _, node := range HTMLBlocks(file.Root) {
 		pos := node.SourcePosition()
-		if pos.StartLine <= lineNum && lineNum < pos.EndLine && IsHTMLComment(node) {
-			return true
-		}
-		if pos.StartLine == lineNum && pos.EndLine == lineNum && IsHTMLComment(node) {
+		if pos.StartLine <= lineNum && lineNum <= pos.EndLine && IsHTMLComment(node) {
 			return true
 		}
 	}

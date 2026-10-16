@@ -85,6 +85,16 @@ func (n *Node) SourceRange() SourceRange {
 	return SourceRange{StartOffset: start, EndOffset: end}
 }
 
+// ContentRange returns the byte range of the node's content: the part of
+// the full span inside the node's syntax markers. It equals SourceRange
+// when the node has no separate content span.
+func (n *Node) ContentRange() SourceRange {
+	if n.ContentSpan != nil {
+		return *n.ContentSpan
+	}
+	return n.SourceRange()
+}
+
 // SourcePosition returns the line/column range for this node.
 // Returns an invalid position if the node has no associated file.
 func (n *Node) SourcePosition() SourcePosition {
@@ -93,15 +103,33 @@ func (n *Node) SourcePosition() SourcePosition {
 	}
 
 	sourceRange := n.SourceRange()
-	if sourceRange.IsEmpty() && sourceRange.StartOffset == 0 {
+	if n.SourceSpan == nil && sourceRange.IsEmpty() && sourceRange.StartOffset == 0 {
 		// Check if this is a truly empty range or just uninitialized.
 		if n.FirstToken < 0 {
 			return SourcePosition{}
 		}
 	}
 
-	startLine, startCol := n.File.LineAt(sourceRange.StartOffset)
-	endLine, endCol := n.File.LineAt(sourceRange.EndOffset)
+	return n.File.positionOf(sourceRange)
+}
+
+// ContentPosition returns the line/column range of the node's content span.
+// Returns an invalid position if the node has no associated file.
+func (n *Node) ContentPosition() SourcePosition {
+	if n.ContentSpan == nil {
+		return n.SourcePosition()
+	}
+	if n.File == nil {
+		return SourcePosition{}
+	}
+	return n.File.positionOf(*n.ContentSpan)
+}
+
+// positionOf converts a byte range into 1-based line and column positions.
+// The end position is exclusive, like the range itself.
+func (f *FileSnapshot) positionOf(r SourceRange) SourcePosition {
+	startLine, startCol := f.LineAt(r.StartOffset)
+	endLine, endCol := f.LineAt(r.EndOffset)
 
 	return SourcePosition{
 		StartLine:   startLine,
@@ -114,14 +142,22 @@ func (n *Node) SourcePosition() SourcePosition {
 // Text returns the source text for this node.
 // Returns nil if the node has no associated file.
 func (n *Node) Text() []byte {
+	return n.sourceText(n.SourceRange())
+}
+
+// ContentText returns the source text of the node's content span.
+// Returns nil if the node has no associated file.
+func (n *Node) ContentText() []byte {
+	return n.sourceText(n.ContentRange())
+}
+
+func (n *Node) sourceText(rng SourceRange) []byte {
 	if n.File == nil {
 		return nil
 	}
-
-	r := n.SourceRange()
-	if r.StartOffset < 0 || r.EndOffset > len(n.File.Content) {
+	if rng.StartOffset < 0 || rng.EndOffset > len(n.File.Content) || rng.StartOffset > rng.EndOffset {
 		return nil
 	}
 
-	return n.File.Content[r.StartOffset:r.EndOffset]
+	return n.File.Content[rng.StartOffset:rng.EndOffset]
 }

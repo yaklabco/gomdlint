@@ -1,1 +1,1 @@
-detect_go.input.md:4:1 warning Fenced code block has no language specified (MD040/fenced-code-language) [fixable]
+detect_go.input.md:3:1 warning Fenced code block has no language specified (MD040/fenced-code-language) [fixable]

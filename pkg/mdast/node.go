@@ -48,14 +48,21 @@ type Node struct {
 	Next       *Node
 
 	// Token span (indices into FileSnapshot.Tokens).
-	// FirstToken <= LastToken for non-empty nodes.
-	// Both are -1 for synthetic/degenerate nodes.
+	// FirstToken <= LastToken whenever both are set; for parsed nodes they
+	// are the tokens overlapping SourceSpan. Both are -1 for synthetic nodes.
 	FirstToken int
 	LastToken  int
 
-	// SourceSpan preserves exact offsets when several nodes share one token.
-	// Nil uses the complete token range as the source span.
+	// SourceSpan is the node's full span: the exact source of the construct,
+	// including its syntax markers. The parser sets it on every node; see
+	// the package documentation for the contract per node kind. Nil (only
+	// for hand-built nodes) derives the span from the token range.
 	SourceSpan *SourceRange
+
+	// ContentSpan is the part of the full span inside the node's markers,
+	// such as the text of a heading or the code of a fenced code block.
+	// Nil means the content span equals the full span.
+	ContentSpan *SourceRange
 
 	// File is a back-reference to the containing FileSnapshot.
 	File *FileSnapshot
