@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
@@ -75,7 +76,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts)
+			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts, opts.PreviewFixes)
 		}()
 	}
 
@@ -135,6 +136,7 @@ func (r *Runner) worker(
 	outCh chan<- FileOutcome,
 	cfg *config.Config,
 	opts lint.PipelineOptions,
+	preview bool,
 ) {
 	for path := range workCh {
 		select {
@@ -146,6 +148,9 @@ func (r *Runner) worker(
 		outcome := FileOutcome{Path: path}
 
 		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
+		if err == nil && preview && pr.FileResult != nil && pr.FixableCount() > 0 {
+			pr.Diff, err = r.previewDiff(ctx, path, cfg, opts)
+		}
 		if err != nil {
 			outcome.Error = err
 		} else {
@@ -161,4 +166,28 @@ func (r *Runner) worker(
 		case outCh <- outcome:
 		}
 	}
+}
+
+// previewDiff returns the diff that fixing path would produce, computed in
+// dry-run mode so nothing is written.
+func (r *Runner) previewDiff(
+	ctx context.Context,
+	path string,
+	cfg *config.Config,
+	opts lint.PipelineOptions,
+) (*fix.Diff, error) {
+	fixCfg := config.NewConfig()
+	if cfg != nil {
+		fixCfg = new(config.Config)
+		*fixCfg = *cfg
+	}
+	fixCfg.Fix = true
+	opts.Fix = true
+	opts.DryRun = true
+
+	preview, err := r.Pipeline.ProcessFile(ctx, path, fixCfg, opts)
+	if err != nil {
+		return nil, fmt.Errorf("preview fixes: %w", err)
+	}
+	return preview.Diff, nil
 }

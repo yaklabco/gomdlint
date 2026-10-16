@@ -54,6 +54,11 @@ type Options struct {
 
 	// Config is the resolved configuration for this run.
 	Config *config.Config
+
+	// PreviewFixes attaches to each file with fixable issues the diff that
+	// --fix would apply, without writing anything. Diagnostics still
+	// describe the files as they are. It is meant for runs without Fix.
+	PreviewFixes bool
 }
 
 // DefaultExtensions returns the default set of Markdown file extensions.

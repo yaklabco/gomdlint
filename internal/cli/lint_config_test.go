@@ -189,6 +189,24 @@ func TestInitTemplateUsesGFM(t *testing.T) {
 	assert.Contains(t, readFile(t, filepath.Join(dir, ".gomdlint.yml")), "\nflavor: gfm\n")
 }
 
+// TestLintDiffFormatPreviewsFixes covers --format diff without --fix: it
+// shows the diff --fix would apply and leaves the file alone.
+func TestLintDiffFormatPreviewsFixes(t *testing.T) {
+	dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+
+	got := execute(t, "lint", "--format", "diff", "--color", "never", "doc.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Contains(t, got.stdout, "-# Title  ")
+	assert.Contains(t, got.stdout, "+# Title")
+	assert.Equal(t, trailingDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	assert.Empty(t, backupFiles(t, dir))
+
+	// The exit code still describes the file as it is.
+	got = execute(t, "lint", "--format", "diff", "--strict", "doc.md")
+	assert.Equal(t, cli.ExitLintWarnings, got.code)
+}
+
 func TestLintFormatFromEnvironment(t *testing.T) {
 	t.Run("selects the format", func(t *testing.T) {
 		inProject(t, map[string]string{"doc.md": trailingDoc})

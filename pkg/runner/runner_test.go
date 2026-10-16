@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -573,6 +574,58 @@ func TestRunner_Run_DryRun(t *testing.T) {
 
 	if result.Files[0].Result == nil || result.Files[0].Result.Diff == nil {
 		t.Error("expected diff in dry-run mode")
+	}
+}
+
+// TestRunner_Run_PreviewFixes covers previews: the diff --fix would apply,
+// with diagnostics that still describe the unchanged file.
+func TestRunner_Run_PreviewFixes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(mdFile, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	registry := lint.NewRegistry()
+	registry.Register(&fixableRule{
+		BaseRule: lint.NewBaseRule("TEST001", "test-rule", "", nil, true),
+		diags: []lint.Diagnostic{{
+			RuleID:   "TEST001",
+			Message:  "fix needed",
+			FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "world"}},
+		}},
+	})
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:        []string{"."},
+		WorkingDir:   dir,
+		Config:       config.NewConfig(),
+		PreviewFixes: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	content, err := os.ReadFile(mdFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(content) != "hello" {
+		t.Errorf("preview modified the file: %q", content)
+	}
+	if result.Stats.FilesModified != 0 || result.Stats.DiagnosticsTotal != 1 {
+		t.Errorf("FilesModified = %d, DiagnosticsTotal = %d, want 0 and 1",
+			result.Stats.FilesModified, result.Stats.DiagnosticsTotal)
+	}
+	outcome := result.Files[0]
+	if outcome.Result == nil || outcome.Result.Diff == nil || !outcome.Result.Diff.HasChanges() {
+		t.Fatal("expected a preview diff")
+	}
+	if !strings.Contains(outcome.Result.Diff.String(), "+world") {
+		t.Errorf("diff does not show the fix:\n%s", outcome.Result.Diff.String())
 	}
 }
 
