@@ -184,10 +184,12 @@ func TestMultilineSetextHeadingFragment(t *testing.T) {
 }
 
 func TestEmphasisAsHeadingKeepsWordsAcrossLines(t *testing.T) {
+	// Like markdownlint, MD036 does not report multi-line emphasis, so the
+	// paragraph is never rewritten and no words are lost.
 	input := "# Title\n\n**Bold\ntext**\n\nMore.\n"
 	diags := applyCompatibilityRule(t, NewNoEmphasisAsHeadingRule(), input)
-	require.Len(t, diags, 1)
-	require.Equal(t, "# Title\n\n## Bold text\n\nMore.\n", applyAllFixEdits(t, input, diags))
+	require.Empty(t, diags)
+	require.Equal(t, input, applyAllFixEdits(t, input, diags))
 }
 
 func TestStrikethroughIsNotEmphasisAsHeading(t *testing.T) {

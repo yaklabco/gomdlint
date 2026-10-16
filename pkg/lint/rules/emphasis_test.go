@@ -58,6 +58,91 @@ func TestNoEmphasisAsHeadingRule(t *testing.T) {
 	}
 }
 
+// applyGFMRule parses input as GFM and applies rule with options.
+func applyGFMRule(t *testing.T, rule lint.Rule, input string, options map[string]any) []lint.Diagnostic {
+	t.Helper()
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	var ruleCfg *config.RuleConfig
+	if options != nil {
+		ruleCfg = &config.RuleConfig{Options: options}
+	}
+	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
+	require.NoError(t, err)
+	return diags
+}
+
+// TestNoEmphasisAsHeadingRule_MarkdownlintParity verifies MD036 matches
+// markdownlint 0.41 detection and that its fix (a gomdlint extension) is
+// built from the source line and withheld whenever it could change meaning.
+func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "inline code and link are not plain text", input: "**Use `foo` with [docs](https://x.y) now**\n", wantLines: []int{}},
+		{
+			name:      "plain bold paragraph",
+			input:     "**Section Title**\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "## Section Title\n",
+		},
+		{name: "italic paragraph is reported without a fix", input: "_Another section_\n", wantLines: []int{1}},
+		{name: "blockquote paragraph", input: "> **Quoted Title**\n", wantLines: []int{}},
+		{name: "list item paragraph", input: "- **Listed Title**\n", wantLines: []int{}},
+		{name: "multi-line emphasis", input: "**Two\nlines**\n", wantLines: []int{}},
+		{name: "strikethrough", input: "~~Struck paragraph~~\n", wantLines: []int{}},
+		{name: "character reference", input: "**Price &amp; Value**\n", wantLines: []int{}},
+		{name: "backslash escape", input: "**Price \\* Value**\n", wantLines: []int{}},
+		{name: "nested emphasis", input: "***Both***\n", wantLines: []int{}},
+		{name: "full-width question mark", input: "**Title？**\n", wantLines: []int{}},
+		{
+			name:      "trailing comment is ignored but blocks the fix",
+			input:     "**Title** <!-- note -->\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "indented paragraph",
+			input:     "   **Indented**\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "## Indented\n",
+		},
+		{
+			// "## Item #" would read the "#" as a closing sequence.
+			name:      "trailing hash blocks the fix",
+			input:     "**Item #**\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "level follows the previous heading",
+			input:     "# Title\n\n## Part\n\n__Detail__\n",
+			wantLines: []int{5},
+			wantFix:   true,
+			wantFixed: "# Title\n\n## Part\n\n### Detail\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyGFMRule(t, NewNoEmphasisAsHeadingRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoSpaceInEmphasisRule(t *testing.T) {
 	tests := []struct {
 		name      string

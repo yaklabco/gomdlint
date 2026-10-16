@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -30,13 +31,30 @@ func NewNoEmphasisAsHeadingRule() *NoEmphasisAsHeadingRule {
 	}
 }
 
-// defaultEmphasisPunctuation is the default punctuation that indicates emphasis is not a heading.
-const defaultEmphasisPunctuation = ".,;:!?"
+// defaultEmphasisPunctuation is markdownlint's default punctuation that
+// indicates emphasis is not a heading: normal and full-width.
+const defaultEmphasisPunctuation = ".,;:!?。，；：！？"
+
+// escapeOrReferencePattern matches a backslash escape or a character
+// reference. markdownlint's parser splits emphasized text at these, so it
+// does not treat such emphasis as plain text.
+var escapeOrReferencePattern = regexp.MustCompile(
+	"\\\\[!-/:-@\\[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31});")
 
 // emphasisSpaceMatchGroups is the minimum submatch indices for the emphasisSpacePattern.
 const emphasisSpaceMatchGroups = 8
 
 // Apply checks for emphasis used instead of headings.
+//
+// Like markdownlint, it reports a top-level paragraph whose only content is
+// emphasis or strong emphasis around a single line of plain text that does
+// not end in punctuation. Paragraphs in blockquotes and lists, multi-line
+// emphasis, and emphasis containing code, links, escapes or other markup are
+// not reported. Inline HTML (such as a trailing comment) is ignored.
+//
+// The fix is a gomdlint extension: a bold paragraph on a line of its own is
+// replaced by an ATX heading one level below the preceding heading. It is
+// withheld whenever the conversion could change the text.
 func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -48,52 +66,34 @@ func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	diags := make([]lint.Diagnostic, 0, len(paragraphs))
 
 	for _, para := range paragraphs {
-		if para.Parent != nil && para.Parent.Kind == mdast.NodeListItem {
-			continue
-		}
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		// Check if this paragraph is just a single emphasized element.
-		if !r.isEmphasisOnlyParagraph(para) {
+		if para.Parent == nil || para.Parent.Kind != mdast.NodeDocument {
 			continue
 		}
 
-		// Get the text content.
-		text := extractTextFromNode(para)
-		if text == "" {
+		emphasis := soleEmphasisChild(para)
+		if emphasis == nil {
+			continue
+		}
+		text := plainEmphasisText(emphasis)
+		if text == nil {
 			continue
 		}
 
-		// Check if it ends with punctuation.
-		lastRune := []rune(text)[len([]rune(text))-1]
-		if strings.ContainsRune(punctuation, lastRune) {
+		// Text ending with punctuation reads as a sentence, not a heading.
+		if lastRune, _ := utf8.DecodeLastRune(text); strings.ContainsRune(punctuation, lastRune) {
 			continue
 		}
-
-		// Check if the child is bold (NodeStrong) for autofix.
-		// We only autofix bold paragraphs, not italic ones.
-		child := para.FirstChild
-		isBold := child != nil && child.Kind == mdast.NodeStrong
 
 		diagBuilder := lint.NewDiagnostic(r.ID(), para,
 			"Emphasis used instead of a heading").
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a heading instead of emphasis for section titles")
 
-		// Add fix only for bold paragraphs.
-		if isBold {
-			sourceRange := para.SourceRange()
-			if sourceRange.StartOffset >= 0 && sourceRange.EndOffset > sourceRange.StartOffset {
-				level := r.inferHeadingLevel(ctx, para)
-				innerText := extractTextFromNode(child)
-				replacement := strings.Repeat("#", level) + " " + innerText
-
-				builder := fix.NewEditBuilder()
-				builder.ReplaceRange(sourceRange.StartOffset, sourceRange.EndOffset, replacement)
-				diagBuilder = diagBuilder.WithFix(builder)
-			}
+		if builder := r.buildHeadingFix(ctx, para, emphasis, text); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
 		}
 
 		diags = append(diags, diagBuilder.Build())
@@ -102,23 +102,77 @@ func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	return diags, nil
 }
 
-func (r *NoEmphasisAsHeadingRule) isEmphasisOnlyParagraph(para *mdast.Node) bool {
-	if para == nil || para.Kind != mdast.NodeParagraph {
-		return false
-	}
-
-	// Check if paragraph has exactly one child that is emphasis or strong.
-	childCount := 0
-	hasEmphasis := false
-
+// soleEmphasisChild returns the paragraph's emphasis or strong child when it
+// is the paragraph's only meaningful content (inline HTML and whitespace are
+// ignored), or nil.
+func soleEmphasisChild(para *mdast.Node) *mdast.Node {
+	var emphasis *mdast.Node
 	for child := para.FirstChild; child != nil; child = child.Next {
-		childCount++
-		if child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong {
-			hasEmphasis = true
+		switch {
+		case child.Kind == mdast.NodeHTMLInline:
+			continue
+		case child.Kind == mdast.NodeText && child.Inline != nil && len(bytes.TrimSpace(child.Inline.Text)) == 0:
+			continue
+		case emphasis == nil && (child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong) &&
+			!isStrikethrough(child):
+			emphasis = child
+		default:
+			return nil
 		}
 	}
+	return emphasis
+}
 
-	return childCount == 1 && hasEmphasis
+// isStrikethrough reports whether a node is GFM strikethrough, which the
+// parser represents as emphasis.
+func isStrikethrough(node *mdast.Node) bool {
+	_, ok := node.Ext["strikethrough"]
+	return ok
+}
+
+// plainEmphasisText returns the raw text of emphasis whose only child is a
+// single line of plain text, or nil.
+func plainEmphasisText(emphasis *mdast.Node) []byte {
+	child := emphasis.FirstChild
+	if child == nil || child.Next != nil || child.Kind != mdast.NodeText || child.Inline == nil {
+		return nil
+	}
+	text := child.Inline.Text
+	if len(text) == 0 || bytes.ContainsAny(text, "\r\n") || escapeOrReferencePattern.Match(text) {
+		return nil
+	}
+	return text
+}
+
+// buildHeadingFix replaces a bold paragraph with an ATX heading holding the
+// same source text. It returns nil when the paragraph's line holds anything
+// besides the bold text, or when the text ends with a hash, which the heading
+// would read as a closing sequence.
+func (r *NoEmphasisAsHeadingRule) buildHeadingFix(
+	ctx *lint.RuleContext,
+	para, emphasis *mdast.Node,
+	text []byte,
+) *fix.EditBuilder {
+	if emphasis.Kind != mdast.NodeStrong || bytes.HasSuffix(text, []byte("#")) {
+		return nil
+	}
+	pos := para.SourcePosition()
+	if !pos.IsValid() || pos.StartLine != pos.EndLine {
+		return nil
+	}
+	line := ctx.File.Lines[pos.StartLine-1]
+	source := bytes.TrimSpace(ctx.File.Content[line.StartOffset:line.NewlineStart])
+	matchesDelimiters := func(delimiter string) bool {
+		return bytes.Equal(source, []byte(delimiter+string(text)+delimiter))
+	}
+	if !matchesDelimiters("**") && !matchesDelimiters("__") {
+		return nil
+	}
+
+	level := r.inferHeadingLevel(ctx, para)
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(line.StartOffset, line.NewlineStart, strings.Repeat("#", level)+" "+string(text))
+	return builder
 }
 
 // inferHeadingLevel determines the appropriate heading level for an emphasis paragraph.
@@ -501,24 +555,4 @@ func (r *StrongStyleRule) detectStrongStyle(file *mdast.FileSnapshot, st *mdast.
 func (r *StrongStyleRule) buildStyleFix(_ *mdast.FileSnapshot, _ mdast.SourcePosition, _, _ string) *fix.EditBuilder {
 	// For now, return nil - auto-fix would need more work.
 	return nil
-}
-
-// extractTextFromNode extracts all text content from a node's descendants.
-// A line break separates the words on either side of it.
-func extractTextFromNode(node *mdast.Node) string {
-	if node == nil {
-		return ""
-	}
-	var buf bytes.Buffer
-	//nolint:errcheck // Walk visitor never returns error.
-	_ = mdast.Walk(node, func(n *mdast.Node) error {
-		switch {
-		case n.Kind == mdast.NodeText && n.Inline != nil:
-			buf.Write(n.Inline.Text)
-		case n.Kind == mdast.NodeSoftBreak || n.Kind == mdast.NodeHardBreak:
-			buf.WriteByte(' ')
-		}
-		return nil
-	})
-	return buf.String()
 }
