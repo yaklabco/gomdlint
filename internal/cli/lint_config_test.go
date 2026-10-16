@@ -64,6 +64,75 @@ func backupFiles(t *testing.T, dir string) []string {
 	return backups
 }
 
+// repoFiles is a Git working tree with a gitignored build directory and
+// third-party directories, each holding a file with a fixable issue.
+func repoFiles() map[string]string {
+	return map[string]string{
+		".git/HEAD":                  "ref: refs/heads/main\n",
+		".gitignore":                 "build/\n",
+		"doc.md":                     trailingDoc,
+		"build/out.md":               trailingDoc,
+		"node_modules/pkg/readme.md": trailingDoc,
+		"vendor/mod/doc.md":          trailingDoc,
+	}
+}
+
+func TestLintFixSkipsVendoredAndGitignoredFiles(t *testing.T) {
+	dir := inProject(t, repoFiles())
+
+	got := execute(t, "lint", "--fix", "--no-backups")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Equal(t, fixedDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	for _, untouched := range []string{"build/out.md", "node_modules/pkg/readme.md", "vendor/mod/doc.md"} {
+		assert.Equal(t, trailingDoc, readFile(t, filepath.Join(dir, filepath.FromSlash(untouched))), untouched)
+	}
+}
+
+func TestLintIgnoreDefaultsCanBeTurnedOff(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		config string
+		want   string
+	}{
+		{name: "--no-gitignore flag", args: []string{"--no-gitignore"}, want: "build/out.md"},
+		{name: "gitignore config key", config: "gitignore: false\n", want: "build/out.md"},
+		{name: "--no-default-ignores flag", args: []string{"--no-default-ignores"}, want: "node_modules/pkg/readme.md"},
+		{name: "default_ignores config key", config: "default_ignores: false\n", want: "vendor/mod/doc.md"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := repoFiles()
+			if tt.config != "" {
+				files[".gomdlint.yml"] = tt.config
+			}
+			inProject(t, files)
+
+			got := execute(t, append([]string{"lint", "--color", "never", "--no-context"}, tt.args...)...)
+
+			assert.Contains(t, got.stdout, filepath.FromSlash(tt.want))
+		})
+	}
+}
+
+// TestLintIgnoreRelativeToConfigFile covers running from a subdirectory: the
+// project config's patterns stay relative to the config file.
+func TestLintIgnoreRelativeToConfigFile(t *testing.T) {
+	dir := inProject(t, map[string]string{
+		".gomdlint.yml":      "ignore:\n  - \"docs/drafts/**\"\n",
+		"docs/guide.md":      trailingDoc,
+		"docs/drafts/wip.md": trailingDoc,
+	})
+	t.Chdir(filepath.Join(dir, "docs"))
+
+	got := execute(t, "lint", "--color", "never", "--no-context")
+
+	assert.Contains(t, got.stdout, "guide.md")
+	assert.NotContains(t, got.stdout, "wip.md")
+}
+
 func TestLintFormatFromEnvironment(t *testing.T) {
 	t.Run("selects the format", func(t *testing.T) {
 		inProject(t, map[string]string{"doc.md": trailingDoc})

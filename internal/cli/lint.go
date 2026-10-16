@@ -23,21 +23,23 @@ import (
 )
 
 type lintFlags struct {
-	format       string
-	flavor       string
-	ignore       []string
-	enable       []string
-	disable      []string
-	fixRules     []string
-	strict       bool
-	noContext    bool
-	compact      bool
-	perFile      bool
-	ruleFormat   string
-	summaryOrder string
-	cpuprofile   string
-	memprofile   string
-	trace        string
+	format           string
+	flavor           string
+	ignore           []string
+	noGitignore      bool
+	noDefaultIgnores bool
+	enable           []string
+	disable          []string
+	fixRules         []string
+	strict           bool
+	noContext        bool
+	compact          bool
+	perFile          bool
+	ruleFormat       string
+	summaryOrder     string
+	cpuprofile       string
+	memprofile       string
+	trace            string
 
 	// toolVersion is not a flag: it is the build version that machine-readable
 	// reports record.
@@ -188,7 +190,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 
 	finalCfg := loadResult.Config
-	applyExplicitFlags(cmd, cfg, finalCfg)
+	applyExplicitFlags(cmd, flags, cfg, finalCfg)
 
 	// Log warnings from config loading.
 	for _, warning := range loadResult.Warnings {
@@ -222,15 +224,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Create the runner.
 	lintRunner := runner.New(pipeline)
 
-	// Build runner options.
-	runOpts := runner.Options{
-		Paths:        args,
-		WorkingDir:   workDir,
-		Extensions:   runner.DefaultExtensions(),
-		ExcludeGlobs: finalCfg.Ignore,
-		Jobs:         finalCfg.Jobs,
-		Config:       finalCfg,
-	}
+	runOpts := runnerOptions(args, workDir, loadResult)
 
 	logger.Debug("starting lint run",
 		"paths", runOpts.Paths,
@@ -293,11 +287,30 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	return resultError(result, flags.strict)
 }
 
+// runnerOptions builds the file discovery and processing options of a run.
+func runnerOptions(args []string, workDir string, loadResult *configloader.LoadResult) runner.Options {
+	cfg := loadResult.Config
+	opts := runner.Options{
+		Paths:         args,
+		WorkingDir:    workDir,
+		Extensions:    runner.DefaultExtensions(),
+		ExcludeGlobs:  cfg.Ignore,
+		IgnoreBaseDir: loadResult.IgnoreBaseDir,
+		Gitignore:     cfg.GitignoreEnabled(),
+		Jobs:          cfg.Jobs,
+		Config:        cfg,
+	}
+	if cfg.DefaultIgnoresEnabled() {
+		opts.SkipDirs = runner.DefaultSkipDirs()
+	}
+	return opts
+}
+
 // applyExplicitFlags gives flags the user set explicitly the last word over
 // the loaded configuration. The configuration merge only sees non-zero
 // values, so without this --fix=false or --jobs 0 could not override the
 // environment.
-func applyExplicitFlags(cmd *cobra.Command, flagCfg, finalCfg *config.Config) {
+func applyExplicitFlags(cmd *cobra.Command, flags *lintFlags, flagCfg, finalCfg *config.Config) {
 	changed := cmd.Flags().Changed
 	if changed("fix") {
 		finalCfg.Fix = flagCfg.Fix
@@ -310,6 +323,12 @@ func applyExplicitFlags(cmd *cobra.Command, flagCfg, finalCfg *config.Config) {
 	}
 	if changed("jobs") {
 		finalCfg.Jobs = flagCfg.Jobs
+	}
+	if changed("no-gitignore") {
+		finalCfg.Gitignore = config.Bool(!flags.noGitignore)
+	}
+	if changed("no-default-ignores") {
+		finalCfg.DefaultIgnores = config.Bool(!flags.noDefaultIgnores)
 	}
 }
 
@@ -432,7 +451,12 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "show fixes without applying them")
 	cmd.Flags().StringVar(&flags.format, "format", "text", "output format: text, table, json, sarif, diff, summary")
 	cmd.Flags().IntVar(&cfg.Jobs, "jobs", 0, "number of parallel workers (0 = auto)")
-	cmd.Flags().StringSliceVar(&flags.ignore, "ignore", nil, "glob patterns to ignore")
+	cmd.Flags().StringSliceVar(&flags.ignore, "ignore", nil,
+		"glob patterns to ignore, relative to the current directory (replace config ignore patterns)")
+	cmd.Flags().BoolVar(&flags.noGitignore, "no-gitignore", false,
+		"lint files that .gitignore files ignore")
+	cmd.Flags().BoolVar(&flags.noDefaultIgnores, "no-default-ignores", false,
+		"lint files in node_modules and vendor directories")
 	cmd.Flags().StringSliceVar(&flags.enable, "enable", nil,
 		"rules to enable, by ID or name (overrides config files)")
 	cmd.Flags().StringSliceVar(&flags.disable, "disable", nil,
