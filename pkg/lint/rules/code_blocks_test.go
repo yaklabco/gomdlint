@@ -284,6 +284,48 @@ func TestCodeBlockStyleRule(t *testing.T) {
 	}
 }
 
+// applyDefaultRule parses CommonMark input and applies a rule with no rule options.
+func applyDefaultRule(t *testing.T, rule lint.Rule, input string) []lint.Diagnostic {
+	t.Helper()
+	snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	if err != nil {
+		t.Fatalf("Apply error: %v", err)
+	}
+	return diags
+}
+
+// TestCodeBlockStyleRule_DefaultConsistent checks the markdownlint default style "consistent".
+func TestCodeBlockStyleRule_DefaultConsistent(t *testing.T) {
+	if diags := applyDefaultRule(t, NewCodeBlockStyleRule(), "Text.\n\n    indented one\n\nText.\n\n    indented two\n"); len(diags) != 0 {
+		t.Errorf("consistent indented blocks: got %d diagnostics, want 0", len(diags))
+	}
+	diags := applyDefaultRule(t, NewCodeBlockStyleRule(), "Text.\n\n    indented\n\nText.\n\n```\nfenced\n```\n")
+	if len(diags) != 1 {
+		t.Fatalf("indented then fenced: got %d diagnostics, want 1", len(diags))
+	}
+	if diags[0].Message != "Code block style 'fenced' does not match expected 'indented'" {
+		t.Errorf("unexpected message %q", diags[0].Message)
+	}
+}
+
+// TestCodeFenceStyleRule_DefaultConsistent checks the markdownlint default style "consistent".
+func TestCodeFenceStyleRule_DefaultConsistent(t *testing.T) {
+	if diags := applyDefaultRule(t, NewCodeFenceStyleRule(), "~~~\none\n~~~\n\n~~~\ntwo\n~~~\n"); len(diags) != 0 {
+		t.Errorf("consistent tilde fences: got %d diagnostics, want 0", len(diags))
+	}
+	diags := applyDefaultRule(t, NewCodeFenceStyleRule(), "~~~\none\n~~~\n\n```\ntwo\n```\n")
+	if len(diags) != 1 {
+		t.Fatalf("tilde then backtick: got %d diagnostics, want 1", len(diags))
+	}
+	if diags[0].Message != "Code fence style 'backtick' does not match expected 'tilde'" {
+		t.Errorf("unexpected message %q", diags[0].Message)
+	}
+}
+
 func TestCodeFenceStyleRule(t *testing.T) {
 	tests := []struct {
 		name    string

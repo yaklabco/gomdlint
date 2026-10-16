@@ -200,7 +200,7 @@ func (r *CodeBlockStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		return nil, nil
 	}
 
-	configStyle := CodeBlockStyle(ctx.OptionString("style", string(CodeBlockFenced)))
+	configStyle := CodeBlockStyle(ctx.OptionString("style", string(CodeBlockConsistent)))
 	effectiveStyle := configStyle
 	if configStyle == CodeBlockConsistent {
 		effectiveStyle = "" // Will be set from first code block.
@@ -279,7 +279,7 @@ func (r *CodeFenceStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		return nil, nil
 	}
 
-	configStyle := FenceStyle(ctx.OptionString("style", string(FenceBacktick)))
+	configStyle := FenceStyle(ctx.OptionString("style", string(FenceConsistent)))
 	effectiveStyle := configStyle
 	effectiveChar := byte('`')
 
