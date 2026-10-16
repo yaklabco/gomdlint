@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -28,18 +29,34 @@ func NewTrailingWhitespaceRule() *TrailingWhitespaceRule {
 	}
 }
 
+// defaultBreakSpaces is markdownlint's default br_spaces: two trailing spaces
+// written to produce a hard line break are allowed.
+const defaultBreakSpaces = 2
+
 // Apply checks for trailing whitespace on each line.
+//
+// Defaults follow markdownlint: two trailing spaces (br_spaces) are allowed,
+// code blocks are skipped (ignore_code_blocks), and with strict the allowance
+// only applies where the spaces actually produce a hard line break.
 func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
 	}
 
-	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", false)
+	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", true)
 	var codeLines map[int]bool
 	if ignoreCodeBlocks {
 		// Fence lines are not code, so their trailing whitespace is checked.
 		codeLines = lint.CodeContentLines(ctx.CodeBlocks())
 	}
+	listItemEmptyLines := ctx.OptionBool("list_item_empty_lines", false)
+	strict := ctx.OptionBool("strict", false)
+	breakSpaces := ctx.OptionInt("br_spaces", defaultBreakSpaces)
+	if breakSpaces < 2 {
+		// markdownlint: values below 2 disallow trailing spaces entirely.
+		breakSpaces = 0
+	}
+	breakLines := hardBreakLines(ctx)
 
 	var diags []lint.Diagnostic
 
@@ -52,7 +69,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		if codeLines[lineNum] {
 			continue
 		}
-		if ctx.OptionBool("list_item_empty_lines", false) && isListBlankLine(ctx, lineNum) {
+		if listItemEmptyLines && isListBlankLine(ctx, lineNum) {
 			continue
 		}
 
@@ -64,54 +81,103 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		if start < 0 || end <= start {
 			continue
 		}
-		breakSpaces := ctx.OptionInt("br_spaces", 0)
-		if breakSpaces >= 2 && end-start == breakSpaces && (!ctx.OptionBool("strict", false) || isHardBreakLine(ctx, lineNum)) {
+		canBreak := breakLines[lineNum]
+		if end-start == breakSpaces && (!strict || canBreak) {
 			continue
 		}
 
-		// Build the fix edit.
-		builder := fix.NewEditBuilder()
-		builder.Delete(start, end)
-
-		// Calculate the column where trailing whitespace starts.
 		line := ctx.File.Lines[lineNum-1]
-		col := start - line.StartOffset + 1
-
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: col,
+			StartColumn: start - line.StartOffset + 1,
 			EndLine:     lineNum,
 			EndColumn:   end - line.StartOffset + 1,
 		}
 
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Trailing whitespace").
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Trailing whitespace").
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove trailing whitespace").
-			WithFix(builder).
-			Build()
-		diags = append(diags, diag)
+			WithSuggestion("Remove trailing whitespace")
+		if builder := trailingWhitespaceFix(ctx.File.Content[start:end], start, end, canBreak, breakSpaces); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
 }
 
-func isHardBreakLine(ctx *lint.RuleContext, lineNum int) bool {
-	if ctx.IsLineInCodeBlock(lineNum) {
-		return false
+// trailingWhitespaceFix builds the fix for trailing whitespace without changing
+// the rendered output: whitespace that forms a hard line break (two or more
+// spaces before the line ending inside a paragraph) is normalized to the
+// configured break spaces instead of being deleted. When trailing-space breaks
+// are disallowed (breakSpaces is 0) such a break is reported without a fix.
+func trailingWhitespaceFix(trailing []byte, start, end int, canBreak bool, breakSpaces int) *fix.EditBuilder {
+	builder := fix.NewEditBuilder()
+	hardBreak := canBreak && bytes.HasSuffix(trailing, []byte("  "))
+	switch {
+	case !hardBreak:
+		builder.Delete(start, end)
+	case breakSpaces >= 2:
+		builder.ReplaceRange(start, end, strings.Repeat(" ", breakSpaces))
+	default:
+		return nil
+	}
+	return builder
+}
+
+// hardBreakLines returns the lines whose trailing spaces would produce a hard
+// line break: every paragraph line except the last, outside code blocks and
+// outside code spans that continue onto the next line.
+func hardBreakLines(ctx *lint.RuleContext) map[int]bool {
+	lines := make(map[int]bool)
+	for _, paragraph := range paragraphLikeNodes(ctx) {
+		pos := paragraph.SourcePosition()
+		if !pos.IsValid() {
+			continue
+		}
+		for lineNum := pos.StartLine; lineNum < pos.EndLine; lineNum++ {
+			lines[lineNum] = true
+		}
 	}
 	for _, span := range ctx.CodeSpans() {
 		pos := span.SourcePosition()
-		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
-			return false
+		for lineNum := pos.StartLine; lineNum < pos.EndLine; lineNum++ {
+			delete(lines, lineNum)
 		}
 	}
-	for _, paragraph := range ctx.Paragraphs() {
-		pos := paragraph.SourcePosition()
-		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
-			return true
+	for lineNum := range lines {
+		if ctx.IsLineInCodeBlock(lineNum) {
+			delete(lines, lineNum)
 		}
 	}
-	return false
+	return lines
+}
+
+// paragraphLikeNodes returns the paragraphs of the document, including the
+// text blocks of tight list items, which the parser currently maps to raw nodes.
+func paragraphLikeNodes(ctx *lint.RuleContext) []*mdast.Node {
+	nodes := append([]*mdast.Node(nil), ctx.Paragraphs()...)
+	for _, item := range ctx.ListItems() {
+		for child := item.FirstChild; child != nil; child = child.Next {
+			if isParagraphLike(child) && child.Kind != mdast.NodeParagraph {
+				nodes = append(nodes, child)
+			}
+		}
+	}
+	return nodes
+}
+
+// isParagraphLike reports whether a node is a paragraph or the text block of a
+// tight list item.
+func isParagraphLike(node *mdast.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind == mdast.NodeParagraph {
+		return true
+	}
+	return node.Kind == mdast.NodeRaw && node.Ext == nil &&
+		node.Parent != nil && node.Parent.Kind == mdast.NodeListItem
 }
 
 func isListBlankLine(ctx *lint.RuleContext, lineNum int) bool {

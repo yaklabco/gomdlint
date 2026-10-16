@@ -18,19 +18,19 @@ func TestEngineMarkdownlintDirectives(t *testing.T) {
 		input     string
 		wantLines []int
 	}{
-		{"disable enable", "<!-- markdownlint-disable MD009 -->\nbad  \n<!-- markdownlint-enable MD009 -->\nbad  \n", []int{4}},
-		{"next line", "<!-- markdownlint-disable-next-line no-trailing-spaces -->\nbad  \nbad  \n", []int{3}},
-		{"same line", "bad <!-- markdownlint-disable-line whitespace -->  \nbad  \n", []int{2}},
-		{"whole file", "bad  \n<!-- markdownlint-disable-file MD009 -->\nbad  \n", nil},
-		{"all rules", "<!-- markdownlint-disable -->\nbad  \n<!-- markdownlint-enable -->\nbad  \n", []int{4}},
-		{"unknown rule", "<!-- markdownlint-disable unknown -->\nbad  \n", []int{2}},
-		{"code is inert", "```html\n<!-- markdownlint-disable MD009 -->\n```\nbad  \n", []int{4}},
-		{"capture restore", "<!-- markdownlint-capture -->\n<!-- markdownlint-disable MD009 -->\nbad  \n<!-- markdownlint-restore -->\nbad  \n", []int{5}},
-		{"ordered on one line", "<!-- markdownlint-disable MD009 --><!-- markdownlint-enable MD009 -->\nbad  \n", []int{2}},
-		{"inline code is inert", "`<!-- markdownlint-disable MD009 -->`\nbad  \n", []int{2}},
-		{"file then local enable", "<!-- markdownlint-disable-file MD009 -->\n<!-- markdownlint-enable MD009 -->\nbad  \n", []int{3}},
-		{"line override applied last", "<!-- markdownlint-disable-next-line MD009 -->\n<!-- markdownlint-enable MD009 -->  \nbad  \n", []int{3}},
-		{"metadata is inert", "---\nnote: '<!-- markdownlint-disable MD009 -->'\n---\nbad  \n", []int{4}},
+		{"disable enable", "<!-- markdownlint-disable MD009 -->\nbad \n<!-- markdownlint-enable MD009 -->\nbad \n", []int{4}},
+		{"next line", "<!-- markdownlint-disable-next-line no-trailing-spaces -->\nbad \nbad \n", []int{3}},
+		{"same line", "bad <!-- markdownlint-disable-line whitespace --> \nbad \n", []int{2}},
+		{"whole file", "bad \n<!-- markdownlint-disable-file MD009 -->\nbad \n", nil},
+		{"all rules", "<!-- markdownlint-disable -->\nbad \n<!-- markdownlint-enable -->\nbad \n", []int{4}},
+		{"unknown rule", "<!-- markdownlint-disable unknown -->\nbad \n", []int{2}},
+		{"code is inert", "```html\n<!-- markdownlint-disable MD009 -->\n```\nbad \n", []int{4}},
+		{"capture restore", "<!-- markdownlint-capture -->\n<!-- markdownlint-disable MD009 -->\nbad \n<!-- markdownlint-restore -->\nbad \n", []int{5}},
+		{"ordered on one line", "<!-- markdownlint-disable MD009 --><!-- markdownlint-enable MD009 -->\nbad \n", []int{2}},
+		{"inline code is inert", "`<!-- markdownlint-disable MD009 -->`\nbad \n", []int{2}},
+		{"file then local enable", "<!-- markdownlint-disable-file MD009 -->\n<!-- markdownlint-enable MD009 -->\nbad \n", []int{3}},
+		{"line override applied last", "<!-- markdownlint-disable-next-line MD009 -->\n<!-- markdownlint-enable MD009 --> \nbad \n", []int{3}},
+		{"metadata is inert", "---\nnote: '<!-- markdownlint-disable MD009 -->'\n---\nbad \n", []int{4}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestEngineDirectiveCanEnableConfiguredDisabledRule(t *testing.T) {
 	cfg := config.NewConfig()
 	disabled := false
 	cfg.Rules["MD009"] = config.RuleConfig{Enabled: &disabled}
-	input := "bad  \n<!-- markdownlint-enable-file MD009 -->\n"
+	input := "bad \n<!-- markdownlint-enable-file MD009 -->\n"
 	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 		context.Background(), "test.md", []byte(input), cfg)
 	require.NoError(t, err)
@@ -118,12 +118,12 @@ func TestEngineConfigureFileIsFileScoped(t *testing.T) {
 	cfg := config.NewConfig()
 	cfg.Fix = true
 	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
-	input := "bad  \n<!-- markdownlint-configure-file {\"MD009\": {\"br_spaces\": 2}} -->\n"
+	input := "bad   \n<!-- markdownlint-configure-file {\"MD009\": {\"br_spaces\": 3}} -->\n"
 	result, err := engine.LintFile(context.Background(), "configured.md", []byte(input), cfg)
 	require.NoError(t, err)
 	require.Empty(t, result.Diagnostics)
 	require.Empty(t, result.Edits)
-	result, err = engine.LintFile(context.Background(), "ordinary.md", []byte("bad  \n"), cfg)
+	result, err = engine.LintFile(context.Background(), "ordinary.md", []byte("bad   \n"), cfg)
 	require.NoError(t, err)
 	require.Len(t, result.Diagnostics, 1)
 	require.Len(t, result.Edits, 1)

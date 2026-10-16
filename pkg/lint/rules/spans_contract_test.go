@@ -244,7 +244,7 @@ func TestBlanksBetweenBlockquotesAroundQuotedCode(t *testing.T) {
 }
 
 func TestTrailingWhitespaceIgnoreCodeBlocksChecksFences(t *testing.T) {
-	input := "# Title\n\n```sh  \necho hi  \n```  \n"
+	input := "# Title\n\n```sh   \necho hi   \n```   \n"
 	diags := applyRuleWithOptions(t, NewTrailingWhitespaceRule(), input, map[string]any{"ignore_code_blocks": true})
 	lines := make([]int, 0, len(diags))
 	for _, diag := range diags {

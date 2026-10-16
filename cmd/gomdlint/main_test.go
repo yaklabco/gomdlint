@@ -15,7 +15,7 @@ import (
 
 const (
 	cleanMarkdown    = "# Title\n\nSome text.\n"
-	trailingMarkdown = "# Title  \n\nSome text.\n"
+	trailingMarkdown = "# Title \n\nSome text.\n"
 )
 
 // isolate runs the test from an empty directory with no user configuration

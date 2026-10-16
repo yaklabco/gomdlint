@@ -45,7 +45,7 @@ func TestNoTerminalColorQueries(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "doc.md"), []byte("# Title  \n\nText.\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "doc.md"), []byte("# Title \n\nText.\n"), 0o644))
 
 	tests := []struct {
 		args []string

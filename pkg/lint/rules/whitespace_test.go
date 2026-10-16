@@ -53,9 +53,9 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 		},
 		{
 			name:      "multiple lines with trailing whitespace",
-			input:     "Line one \nLine two  \nLine three\n",
-			wantDiags: 2,
-			wantFix:   "Line one\nLine two\nLine three\n",
+			input:     "Line one \nLine two   \nLine three \n",
+			wantDiags: 3,
+			wantFix:   "Line one\nLine two  \nLine three\n",
 		},
 		{
 			name:      "blank line is not flagged",
@@ -68,6 +68,105 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			input:     "",
 			wantDiags: 0,
 			wantFix:   "",
+		},
+		{
+			name:      "two-space hard break is allowed by default",
+			input:     "Line one  \nLine two\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "two spaces at paragraph end are allowed when not strict",
+			input:     "Line one  \n",
+			wantDiags: 0,
+		},
+		{
+			name:      "strict reports two spaces at paragraph end",
+			input:     "Line one  \n",
+			wantDiags: 1,
+			wantFix:   "Line one\n",
+			config:    map[string]any{"strict": true},
+		},
+		{
+			name:      "strict allows a hard break",
+			input:     "Line one  \nLine two\n",
+			wantDiags: 0,
+			config:    map[string]any{"strict": true},
+		},
+		{
+			name:      "strict allows a hard break in a tight list item",
+			input:     "- item one  \n  continued\n- item two\n",
+			wantDiags: 0,
+			config:    map[string]any{"strict": true},
+		},
+		{
+			name:      "strict reports two spaces after a heading",
+			input:     "# Title  \n",
+			wantDiags: 1,
+			wantFix:   "# Title\n",
+			config:    map[string]any{"strict": true},
+		},
+		{
+			name:      "fix keeps a hard break written with extra spaces",
+			input:     "Line one    \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one  \nLine two\n",
+		},
+		{
+			name:      "fix keeps a hard break in a tight list item",
+			input:     "- item one   \n  continued\n",
+			wantDiags: 1,
+			wantFix:   "- item one  \n  continued\n",
+		},
+		{
+			name:      "fix keeps a hard break that follows a tab",
+			input:     "Line one\t  \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one  \nLine two\n",
+		},
+		{
+			name:      "fix removes a single space where no hard break exists",
+			input:     "Line one \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one\nLine two\n",
+		},
+		{
+			name:      "extra spaces at paragraph end are removed",
+			input:     "Line one   \n",
+			wantDiags: 1,
+			wantFix:   "Line one\n",
+		},
+		{
+			// With br_spaces below 2 trailing-space hard breaks are reported,
+			// but deleting the spaces would change the rendered output.
+			name:      "br_spaces 0 reports a hard break without fixing it",
+			input:     "Line one  \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one  \nLine two\n",
+			config:    map[string]any{"br_spaces": 0},
+		},
+		{
+			name:      "br_spaces 1 behaves like 0",
+			input:     "Line one  \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one  \nLine two\n",
+			config:    map[string]any{"br_spaces": 1},
+		},
+		{
+			name:      "fenced code is ignored by default",
+			input:     "```\ncode   \n```\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "indented code is ignored by default",
+			input:     "Para\n\n    code   \n",
+			wantDiags: 0,
+		},
+		{
+			name:      "code is checked when ignore_code_blocks is false",
+			input:     "```\ncode   \n```\n",
+			wantDiags: 1,
+			wantFix:   "```\ncode\n```\n",
+			config:    map[string]any{"ignore_code_blocks": false},
 		},
 	}
 
@@ -100,13 +199,13 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
 				assert.Equal(t, tt.wantFix, string(fixed))
 
-				// Verify idempotency.
+				// Verify idempotency: no fixable diagnostics remain.
 				snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
 				require.NoError(t, err)
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
