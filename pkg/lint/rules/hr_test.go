@@ -58,6 +58,89 @@ func TestHRStyleRule(t *testing.T) {
 	}
 }
 
+// TestHRStyleRule_SafeFix verifies MD035 ignores lines that are not thematic
+// breaks and that its fix rewrites only the marker characters, never turning
+// a paragraph line into a setext heading.
+func TestHRStyleRule_SafeFix(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "setext underline is not a horizontal rule",
+			input:     "Heading\n---\n\n***\n",
+			options:   map[string]any{"style": "***"},
+			wantLines: []int{},
+		},
+		{
+			name:      "front matter delimiters are not horizontal rules",
+			input:     "---\ntitle: x\n---\n\n***\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "HTML block content is not a horizontal rule",
+			input:     "<div>\n***\n</div>\n\n---\n",
+			options:   map[string]any{"style": "---"},
+			wantLines: []int{},
+		},
+		{
+			// "---" under the paragraph would make it a setext heading.
+			name:      "no dashes directly under a paragraph line",
+			input:     "Some paragraph text\n***\n",
+			options:   map[string]any{"style": "---"},
+			wantLines: []int{2},
+		},
+		{
+			name:      "spaced dashes cannot be a setext underline",
+			input:     "Para\n***\n",
+			options:   map[string]any{"style": "- - -"},
+			wantLines: []int{2},
+			wantFix:   true,
+			wantFixed: "Para\n- - -\n",
+		},
+		{
+			name:      "indentation inside a list item is kept",
+			input:     "- item\n\n  ___\n\n---\n",
+			options:   map[string]any{"style": "---"},
+			wantLines: []int{3},
+			wantFix:   true,
+			wantFixed: "- item\n\n  ---\n\n---\n",
+		},
+		{
+			name:      "trailing whitespace is kept",
+			input:     "---\n\n***   \n",
+			wantLines: []int{3},
+			wantFix:   true,
+			wantFixed: "---\n\n---   \n",
+		},
+		{
+			name:      "no fix to a style that is not a horizontal rule",
+			input:     "***\n",
+			options:   map[string]any{"style": "==="},
+			wantLines: []int{1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHRStyleRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestHRStyleRule_Metadata(t *testing.T) {
 	rule := NewHRStyleRule()
 
@@ -100,6 +183,7 @@ func TestHRStyleRule_Fix(t *testing.T) {
 			wantFix:   "",
 		},
 		{
+			// A leading heading keeps the dashes from forming front matter.
 			name:      "explicit style config - fix dashes to asterisks",
 			input:     "# Title\n\n---\n\nSome text\n\n---\n",
 			wantDiags: 2,

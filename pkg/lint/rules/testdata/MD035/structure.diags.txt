@@ -1,0 +1,2 @@
+structure.input.md:12:3 warning Horizontal rule style "***" does not match expected "---" (MD035/hr-style) [fixable]
+structure.input.md:15:1 warning Horizontal rule style "***" does not match expected "---" (MD035/hr-style)
