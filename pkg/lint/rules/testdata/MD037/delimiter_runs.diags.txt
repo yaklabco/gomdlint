@@ -1,0 +1,3 @@
+delimiter_runs.input.md:5:11 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis) [fixable]
+delimiter_runs.input.md:7:12 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis) [fixable]
+delimiter_runs.input.md:9:18 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis) [fixable]

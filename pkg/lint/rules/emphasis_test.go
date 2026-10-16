@@ -143,6 +143,97 @@ func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
 	}
 }
 
+// TestNoSpaceInEmphasisRule_DelimiterRuns verifies MD037 pairs unmatched
+// delimiter runs like markdownlint 0.41 and reports one diagnostic per pair.
+func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			// markdownlint reports this; gomdlint treats markers around
+			// content without letters as arithmetic.
+			name:      "arithmetic",
+			input:     "See 2 * 3 * 4\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "space only after the opening marker",
+			input:     "One-sided ** bold** here\n",
+			wantLines: []int{1},
+			wantFixed: "One-sided **bold** here\n",
+		},
+		{
+			name:      "space only before the closing marker",
+			input:     "And **bold ** too\n",
+			wantLines: []int{1},
+			wantFixed: "And **bold** too\n",
+		},
+		{
+			name:      "pair across lines",
+			input:     "Some ** text\nmore ** here\n",
+			wantLines: []int{1},
+			wantFixed: "Some **text\nmore** here\n",
+		},
+		{name: "escaped markers", input: "Some \\* text \\* here\n", wantLines: []int{}},
+		{name: "single marker", input: "x * y\n", wantLines: []int{}},
+		{name: "runs longer than three", input: "**** x ****\n", wantLines: []int{}},
+		{name: "intraword underscores", input: "snake_case_name and other_var_x\n", wantLines: []int{}},
+		{name: "markers inside strong text", input: "**bold * x * here**\n", wantLines: []int{}},
+		{name: "markers inside link text", input: "[a * x * b](https://example.com)\n", wantLines: []int{}},
+		{
+			name:      "letters between markers",
+			input:     "a * b * c\n",
+			wantLines: []int{1},
+			wantFixed: "a *b* c\n",
+		},
+		{
+			name:      "heading",
+			input:     "# Title * x *\n",
+			wantLines: []int{1},
+			wantFixed: "# Title *x*\n",
+		},
+		{
+			name:      "tight list item",
+			input:     "- a * x * b\n",
+			wantLines: []int{1},
+			wantFixed: "- a *x* b\n",
+		},
+		{
+			name:      "blockquote",
+			input:     "> a * x * b\n",
+			wantLines: []int{1},
+			wantFixed: "> a *x* b\n",
+		},
+		{
+			name:      "after inline HTML",
+			input:     "a <b>x</b> * y * z\n",
+			wantLines: []int{1},
+			wantFixed: "a <b>x</b> *y* z\n",
+		},
+		{
+			name:      "table cell",
+			input:     "| A | B |\n| - | - |\n| a * x * b | c |\n",
+			wantLines: []int{3},
+			wantFixed: "| A | B |\n| - | - |\n| a *x* b | c |\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyGFMRule(t, NewNoSpaceInEmphasisRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoSpaceInEmphasisRule(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -310,17 +401,20 @@ func TestStrongStyleRule_Metadata(t *testing.T) {
 }
 
 func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
-	// NOTE: The emphasisSpacePattern regex `(\*{1,2}|_{1,2})\s+([^*_]+)\s+(\*{1,2}|_{1,2})`
-	// is greedy and can match incorrectly when there are multiple emphasis markers on
-	// the same line. For example, in "*valid* and * invalid *", it matches "* and *"
-	// instead of "* invalid *" because [^*_]+ captures everything between any two markers.
-	// This is a known limitation of the rule implementation.
 	tests := []struct {
 		name      string
 		input     string
 		wantDiags int
 		wantFix   string
 	}{
+		{
+			// Matched emphasis on the same line does not pair with the
+			// unmatched markers.
+			name:      "valid emphasis before spaced markers",
+			input:     "Some *valid* and * invalid * here.\n",
+			wantDiags: 1,
+			wantFix:   "Some *valid* and *invalid* here.\n",
+		},
 		{
 			name:      "clean input - no spaces in emphasis",
 			input:     "Some *text* here.\n",
@@ -364,10 +458,12 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			wantFix:   "",
 		},
 		{
-			name:      "violation at start of line",
+			// "* " at the start of a line is a list item, not emphasis;
+			// rewriting it to "*spaced*" would turn the list into a paragraph.
+			name:      "list marker at start of line",
 			input:     "* spaced * text.\n",
-			wantDiags: 1,
-			wantFix:   "*spaced* text.\n",
+			wantDiags: 0,
+			wantFix:   "* spaced * text.\n",
 		},
 		{
 			name:      "violation at end of line",

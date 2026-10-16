@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -40,9 +42,6 @@ const defaultEmphasisPunctuation = ".,;:!?。，；：！？"
 // does not treat such emphasis as plain text.
 var escapeOrReferencePattern = regexp.MustCompile(
 	"\\\\[!-/:-@\\[-`{-~]|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31});")
-
-// emphasisSpaceMatchGroups is the minimum submatch indices for the emphasisSpacePattern.
-const emphasisSpaceMatchGroups = 8
 
 // Apply checks for emphasis used instead of headings.
 //
@@ -242,113 +241,204 @@ func NewNoSpaceInEmphasisRule() *NoSpaceInEmphasisRule {
 	}
 }
 
-// emphasisSpacePattern matches emphasis with spaces inside.
-var emphasisSpacePattern = regexp.MustCompile(`(\*{1,2}|_{1,2})\s+([^*_]+)\s+(\*{1,2}|_{1,2})`)
+// maxEmphasisRun is the longest delimiter run MD037 considers (***).
+const maxEmphasisRun = 3
+
+// delimiterRun is a run of emphasis markers that the parser left unmatched.
+type delimiterRun struct {
+	start, end int // Byte offsets of the run.
+	marker     string
+}
 
 // Apply checks for spaces inside emphasis markers.
+//
+// Like markdownlint, it collects the delimiter runs (*, **, ***, _, __, ___)
+// that the parser could not match in each block's inline content, pairs runs
+// of the same marker in order, and reports a pair whose opening run is
+// followed by whitespace or whose closing run is preceded by whitespace on its
+// line. Runs inside emphasis, link or image text are not checked. Unlike
+// markdownlint, a pair around content without any letter, such as
+// "2 * 3 * 4", is read as arithmetic and not reported.
 func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	//nolint:errcheck // The visitor only returns cancellation errors, checked below.
+	_ = mdast.Walk(ctx.Root, func(node *mdast.Node) error {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return ctx.Ctx.Err()
 		}
-
-		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
+		if node.IsInline() {
+			return nil
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		matches := emphasisSpacePattern.FindAllSubmatchIndex(lineContent, -1)
-
-		for _, match := range matches {
-			if len(match) < emphasisSpaceMatchGroups {
-				continue
+		byMarker := make(map[string][]delimiterRun)
+		var markers []string
+		for _, run := range unmatchedDelimiterRuns(ctx.File, node) {
+			if _, seen := byMarker[run.marker]; !seen {
+				markers = append(markers, run.marker)
 			}
-
-			// Extract the matched groups.
-			start, end := match[0], match[1]
-			if lint.IsLineInTable(ctx.File, ctx.Root, lineNum) && crossesTableCell(lineContent[start:end]) {
-				continue
-			}
-			openMarker := string(lineContent[match[2]:match[3]])
-			content := string(lineContent[match[4]:match[5]])
-			closeMarker := string(lineContent[match[6]:match[7]])
-
-			// Markers should match.
-			if openMarker != closeMarker {
-				continue
-			}
-
-			line := ctx.File.Lines[lineNum-1]
-			if emphasisMatchIsParsed(ctx, line.StartOffset+start, line.StartOffset+end) {
-				continue
-			}
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			fixedEmphasis := openMarker + strings.TrimSpace(content) + closeMarker
-			builder.ReplaceRange(line.StartOffset+start, line.StartOffset+end, fixedEmphasis)
-
-			diagPos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: start + 1,
-				EndLine:     lineNum,
-				EndColumn:   end + 1,
-			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				"Spaces inside emphasis markers").
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Remove spaces from inside emphasis markers").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+			byMarker[run.marker] = append(byMarker[run.marker], run)
 		}
+		for _, marker := range markers {
+			runs := byMarker[marker]
+			for i := 0; i+1 < len(runs); i += 2 {
+				if diag, ok := r.checkPair(ctx.File, runs[i], runs[i+1]); ok {
+					diags = append(diags, diag)
+				}
+			}
+		}
+		return nil
+	})
+	if ctx.Cancelled() {
+		return diags, ctx.Ctx.Err()
 	}
 
+	sort.SliceStable(diags, func(i, j int) bool {
+		if diags[i].StartLine != diags[j].StartLine {
+			return diags[i].StartLine < diags[j].StartLine
+		}
+		return diags[i].StartColumn < diags[j].StartColumn
+	})
 	return diags, nil
 }
 
-func crossesTableCell(content []byte) bool {
-	for idx := 0; idx < len(content); idx++ {
-		if content[idx] == '\\' && idx+1 < len(content) {
-			idx++
-			continue
-		}
-		if content[idx] == '|' {
-			return true
-		}
+// checkPair reports a pair of runs with whitespace just inside them.
+func (r *NoSpaceInEmphasisRule) checkPair(
+	file *mdast.FileSnapshot,
+	open, closing delimiterRun,
+) (lint.Diagnostic, bool) {
+	openSpaces, openBad := spacesAfterRun(file, open)
+	closeSpaces, closeBad := spacesBeforeRun(file, closing)
+	if !openBad && !closeBad {
+		return lint.Diagnostic{}, false
 	}
-	return false
+	if !containsLetter(file.Content[open.end:closing.start]) {
+		return lint.Diagnostic{}, false
+	}
+
+	builder := fix.NewEditBuilder()
+	reported := closing
+	if openBad {
+		builder.Delete(openSpaces.StartOffset, openSpaces.EndOffset)
+		reported = open
+	}
+	if closeBad {
+		builder.Delete(closeSpaces.StartOffset, closeSpaces.EndOffset)
+	}
+
+	pos := rangePosition(file, mdast.SourceRange{StartOffset: reported.start, EndOffset: reported.end})
+	return lint.NewDiagnosticAt(r.ID(), file.Path, pos, "Spaces inside emphasis markers").
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Remove spaces from inside emphasis markers").
+		WithFix(builder).
+		Build(), true
 }
 
-// emphasisMatchIsParsed excludes code and delimiters already used by valid emphasis.
-func emphasisMatchIsParsed(ctx *lint.RuleContext, start, end int) bool {
-	for _, nodes := range [][]*mdast.Node{ctx.EmphasisNodes(), ctx.StrongNodes()} {
-		for _, node := range nodes {
-			// The full span of emphasis includes its delimiters.
-			rng := node.SourceRange()
-			if rng.Len() == 0 {
+// unmatchedDelimiterRuns returns the emphasis delimiter runs in the direct
+// text children of a block, which the parser left as literal text.
+func unmatchedDelimiterRuns(file *mdast.FileSnapshot, block *mdast.Node) []delimiterRun {
+	var runs []delimiterRun
+	for child := block.FirstChild; child != nil; child = child.Next {
+		switch child.Kind {
+		case mdast.NodeText, mdast.NodeSoftBreak, mdast.NodeHardBreak:
+		default:
+			continue
+		}
+		start, ok := textNodeStart(file, child)
+		if !ok {
+			continue
+		}
+		text := child.Inline.Text
+		for idx := 0; idx < len(text); {
+			char := text[idx]
+			if char == '\\' && idx+1 < len(text) && isASCIIPunctuation(text[idx+1]) {
+				idx += 2
 				continue
 			}
-			if start < rng.EndOffset && end > rng.StartOffset {
-				return true
+			if char != '*' && char != '_' {
+				idx++
+				continue
 			}
+			runEnd := idx
+			for runEnd < len(text) && text[runEnd] == char {
+				runEnd++
+			}
+			if runEnd-idx <= maxEmphasisRun {
+				runs = append(runs, delimiterRun{start: start + idx, end: start + runEnd, marker: string(text[idx:runEnd])})
+			}
+			idx = runEnd
 		}
 	}
-	for _, node := range ctx.CodeSpans() {
-		rng := node.SourceRange()
-		if start < rng.EndOffset && end > rng.StartOffset {
-			return true
-		}
+	return runs
+}
+
+// textNodeStart returns the source offset of a node's raw inline text, or
+// false when the node's source range does not hold exactly that text.
+func textNodeStart(file *mdast.FileSnapshot, node *mdast.Node) (int, bool) {
+	if node.Inline == nil || len(node.Inline.Text) == 0 {
+		return 0, false
 	}
-	return false
+	rng := node.SourceRange()
+	if rng.StartOffset < 0 || rng.EndOffset > len(file.Content) || rng.Len() != len(node.Inline.Text) ||
+		!bytes.Equal(file.Content[rng.StartOffset:rng.EndOffset], node.Inline.Text) {
+		return 0, false
+	}
+	return rng.StartOffset, true
+}
+
+// spacesAfterRun returns the whitespace that follows a run when non-space
+// text follows it on the same line.
+func spacesAfterRun(file *mdast.FileSnapshot, run delimiterRun) (mdast.SourceRange, bool) {
+	line := lineOf(file, run.start)
+	if line == nil {
+		return mdast.SourceRange{}, false
+	}
+	end := run.end
+	for end < line.NewlineStart {
+		char, size := utf8.DecodeRune(file.Content[end:line.NewlineStart])
+		if !unicode.IsSpace(char) {
+			break
+		}
+		end += size
+	}
+	if end == run.end || end == line.NewlineStart {
+		return mdast.SourceRange{}, false
+	}
+	return mdast.SourceRange{StartOffset: run.end, EndOffset: end}, true
+}
+
+// spacesBeforeRun returns the whitespace that precedes a run when non-space
+// text precedes it on the same line.
+func spacesBeforeRun(file *mdast.FileSnapshot, run delimiterRun) (mdast.SourceRange, bool) {
+	line := lineOf(file, run.start)
+	if line == nil {
+		return mdast.SourceRange{}, false
+	}
+	start := run.start
+	for start > line.StartOffset {
+		char, size := utf8.DecodeLastRune(file.Content[line.StartOffset:start])
+		if !unicode.IsSpace(char) {
+			break
+		}
+		start -= size
+	}
+	if start == run.start || start == line.StartOffset {
+		return mdast.SourceRange{}, false
+	}
+	return mdast.SourceRange{StartOffset: start, EndOffset: run.start}, true
+}
+
+// containsLetter reports whether text contains a Unicode letter.
+func containsLetter(text []byte) bool {
+	return bytes.IndexFunc(text, unicode.IsLetter) >= 0
+}
+
+// isASCIIPunctuation reports whether b is an ASCII punctuation character,
+// which a backslash can escape.
+func isASCIIPunctuation(b byte) bool {
+	return (b >= '!' && b <= '/') || (b >= ':' && b <= '@') || (b >= '[' && b <= '`') || (b >= '{' && b <= '~')
 }
 
 // EmphasisStyleRule checks for consistent emphasis style.
