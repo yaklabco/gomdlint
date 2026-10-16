@@ -149,7 +149,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 
 	// Map string flags to typed config values.
 	// Only set values that were explicitly provided via CLI flags.
-	cfg.Format = config.OutputFormat(flags.format)
+	if cmd.Flags().Changed("format") {
+		cfg.Format = config.OutputFormat(flags.format)
+	}
 	if cmd.Flags().Changed("flavor") {
 		cfg.Flavor = config.Flavor(flags.flavor)
 	}
@@ -248,10 +250,11 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		colorMode = "auto" // Default to auto if flag retrieval fails
 	}
 
-	// Parse output format.
-	format, err := reporter.ParseFormat(flags.format)
+	// The output format comes from the flag, GOMDLINT_FORMAT or the
+	// default, in that order; loading has validated it.
+	format, err := reporter.ParseFormat(string(finalCfg.Format))
 	if err != nil {
-		return withExitCode(ExitInvalidUsage, err)
+		return withExitCode(ExitConfigError, err)
 	}
 
 	// Create reporter.

@@ -64,6 +64,39 @@ func backupFiles(t *testing.T, dir string) []string {
 	return backups
 }
 
+func TestLintFormatFromEnvironment(t *testing.T) {
+	t.Run("selects the format", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+		t.Setenv("GOMDLINT_FORMAT", "json")
+
+		got := execute(t, "lint", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.True(t, strings.HasPrefix(strings.TrimSpace(got.stdout), "{"), "want JSON, got:\n%s", got.stdout)
+	})
+
+	t.Run("loses to the flag", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+		t.Setenv("GOMDLINT_FORMAT", "json")
+
+		got := execute(t, "lint", "--format", "text", "--color", "never", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Contains(t, got.stdout, "1 issue")
+		assert.NotContains(t, got.stdout, "{")
+	})
+
+	t.Run("invalid value is a configuration error", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+		t.Setenv("GOMDLINT_FORMAT", "bogus")
+
+		got := execute(t, "lint", "doc.md")
+
+		assert.Equal(t, cli.ExitConfigError, got.code)
+		assert.Contains(t, got.stderr, `invalid format "bogus"`)
+	})
+}
+
 func TestLintWarnsAboutUnknownConfigKeys(t *testing.T) {
 	inProject(t, map[string]string{
 		"doc.md":        fixedDoc,
