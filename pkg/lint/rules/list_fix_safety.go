@@ -17,6 +17,9 @@ const maxListItemSpacing = 4
 // which a line can still start a list item or other block.
 const maxBlockIndent = 3
 
+// tabStop is the CommonMark tab stop width.
+const tabStop = 4
+
 // listItemLayout is the column layout of a list item on its marker line.
 // Columns are 0-based byte columns, which equal visual columns because the
 // layout is only built when the marker prefix holds no tabs.
@@ -276,7 +279,7 @@ func firstColumnAfter(file *mdast.FileSnapshot, lineNum int) (int, bool) {
 			case ' ':
 				col++
 			case '\t':
-				col += 4 - col%4
+				col += tabStop - col%tabStop
 			default:
 				return col, true
 			}

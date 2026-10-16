@@ -320,11 +320,24 @@ func NewOrderedListIncrementRule() *OrderedListIncrementRule {
 	}
 }
 
-// orderedListStyles maps the MD029 styles to markdownlint's example text.
-var orderedListStyles = map[string]string{
-	"one":     "1/1/1",
-	"ordered": "1/2/3",
-	"zero":    "0/0/0",
+// MD029 styles.
+const (
+	orderedStyleOne          = "one"
+	orderedStyleOrdered      = "ordered"
+	orderedStyleZero         = "zero"
+	orderedStyleOneOrOrdered = "one_or_ordered"
+)
+
+// isOrderedListStyle reports whether a style forces one numbering pattern.
+// Any other value, including the default one_or_ordered, accepts either the
+// one or the ordered pattern, as markdownlint does.
+func isOrderedListStyle(style string) bool {
+	switch style {
+	case orderedStyleOne, orderedStyleOrdered, orderedStyleZero:
+		return true
+	default:
+		return false
+	}
 }
 
 // orderedItem is an ordered list item and its located marker.
@@ -353,7 +366,7 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 		return nil, nil
 	}
 
-	style := ctx.OptionString("style", "one_or_ordered")
+	style := ctx.OptionString("style", orderedStyleOneOrOrdered)
 	allowRenumbering := ctx.OptionBool("allow_renumbering", true)
 
 	var mismatches []numberMismatch
@@ -421,16 +434,16 @@ func orderedListMismatches(file *mdast.FileSnapshot, list *mdast.Node, style str
 	rightAligned := orderedPrefixesAligned(items)
 
 	listStyle := style
-	if _, known := orderedListStyles[listStyle]; !known {
-		listStyle = "one"
+	if !isOrderedListStyle(listStyle) {
+		listStyle = orderedStyleOne
 		if incrementing {
-			listStyle = "ordered"
+			listStyle = orderedStyleOrdered
 		}
 	}
 	switch listStyle {
-	case "zero":
+	case orderedStyleZero:
 		expected = 0
-	case "one":
+	case orderedStyleOne:
 		expected = 1
 	}
 
@@ -443,7 +456,7 @@ func orderedListMismatches(file *mdast.FileSnapshot, list *mdast.Node, style str
 				text:        orderedNumberText(expected, item.marker.NumberText, rightAligned, zeroPrefixed),
 			})
 		}
-		if listStyle == "ordered" {
+		if listStyle == orderedStyleOrdered {
 			expected++
 		}
 	}
