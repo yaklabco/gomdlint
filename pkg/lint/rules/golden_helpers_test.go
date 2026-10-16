@@ -68,7 +68,8 @@ func diagFromLint(diag lint.Diagnostic) DiagExpectation {
 
 // discoverTestCases walks the testdata directory and discovers all test cases.
 // Per-rule directories (like MD001, MD031) run only that specific rule.
-// The real-world directory runs all enabled rules.
+// The real-world directory runs all enabled rules. Other directories are
+// skipped, because no runner would compare their files.
 func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 	t.Helper()
 
@@ -90,11 +91,16 @@ func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 		dirName := entry.Name()
 		dirPath := filepath.Join(baseDir, dirName)
 
-		// Determine if this is a rule-specific directory or real-world
+		// Only rule directories and real-world have a runner that compares
+		// their files. TestGoldenTestdataFiles reports files anywhere else.
 		isRealWorld := dirName == "real-world"
 		ruleID := ""
-		if !isRealWorld && isRuleID(dirName) {
+		switch {
+		case isRealWorld:
+		case isRuleID(dirName):
 			ruleID = dirName
+		default:
+			continue
 		}
 
 		// Find all *.input.md files in this directory

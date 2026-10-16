@@ -138,22 +138,27 @@ type goldenRun struct {
 }
 
 // newGoldenRun prepares a case. A per-rule case runs its directory's rule,
-// even when that rule is disabled by default, and any other case runs the
+// even when that rule is disabled by default, and a real-world case runs the
 // default-enabled rules. A sidecar that configures a rule the case does not
 // run is an error, because those options would have no effect.
 func newGoldenRun(tc GoldenTestCase) (goldenRun, error) {
-	cfg, err := loadGoldenConfig(tc.ConfigPath)
-	if err != nil {
-		return goldenRun{}, err
-	}
-
-	rules := defaultEnabledRules(lint.DefaultRegistry)
-	if tc.RuleID != "" {
+	var rules []lint.Rule
+	switch {
+	case tc.RuleID != "":
 		rule, ok := lint.DefaultRegistry.GetByID(tc.RuleID)
 		if !ok {
 			return goldenRun{}, fmt.Errorf("rule %s not found in registry", tc.RuleID)
 		}
 		rules = []lint.Rule{rule}
+	case tc.IsRealWorld:
+		rules = defaultEnabledRules(lint.DefaultRegistry)
+	default:
+		return goldenRun{}, fmt.Errorf("case %s is neither a per-rule nor a real-world case", tc.Name)
+	}
+
+	cfg, err := loadGoldenConfig(tc.ConfigPath)
+	if err != nil {
+		return goldenRun{}, err
 	}
 
 	run := goldenRun{

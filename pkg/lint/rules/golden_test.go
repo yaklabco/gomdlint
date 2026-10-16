@@ -289,6 +289,21 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 		require.Len(t, cases, 1)
 		assert.Equal(t, filepath.Join(ruleDir, "required"+goldenConfigSuffix), cases[0].ConfigPath)
 	})
+
+	t.Run("discoverTestCases_unsupported_directory", func(t *testing.T) {
+		baseDir := t.TempDir()
+		for _, rel := range []string{"MD043/a.input.md", "real-world/b.input.md", "MD05S/c.input.md", "notes/d.input.md"} {
+			path := filepath.Join(baseDir, rel)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			require.NoError(t, os.WriteFile(path, []byte("# Title\n"), 0o644))
+		}
+
+		var names []string
+		for _, tc := range discoverTestCases(t, baseDir) {
+			names = append(names, tc.Name)
+		}
+		assert.ElementsMatch(t, []string{filepath.Join("MD043", "a"), filepath.Join("real-world", "b")}, names)
+	})
 }
 
 // writeSidecar writes sidecar content to a fresh temporary file and returns its path.
@@ -461,6 +476,11 @@ func TestGoldenRun(t *testing.T) {
 		_, err := newGoldenRun(GoldenTestCase{ConfigPath: writeSidecar(t, "flavour: gfm\n"), RuleID: "MD009"})
 		require.ErrorContains(t, err, "flavour")
 	})
+
+	t.Run("case that is neither per-rule nor real-world is rejected", func(t *testing.T) {
+		_, err := newGoldenRun(GoldenTestCase{Name: "MD05S/case", ConfigPath: absentSidecar(t)})
+		require.ErrorContains(t, err, "MD05S/case")
+	})
 }
 
 // stubRule is a lint.Rule that returns a fixed result.
@@ -588,6 +608,10 @@ func TestGoldenTestdataFiles(t *testing.T) {
 			write("MD043/renamed.golden.md"),
 			write("MD043/nested/deep.input.md"),
 			write("top.config.yml"),
+			// No runner compares cases in a directory that is neither a rule ID nor real-world.
+			write("MD05S/case.input.md"),
+			write("MD05S/case.golden.md"),
+			write("MD05S/case.diags.json"),
 		}
 
 		assert.ElementsMatch(t, want, strayTestdataFiles(t, baseDir))
