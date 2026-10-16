@@ -531,6 +531,35 @@ func TestGoldenLintFile(t *testing.T) {
 		assert.Empty(t, result.Diagnostics)
 	})
 
+	t.Run("bare enable directive runs no other rule", func(t *testing.T) {
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: "MD047"})
+
+		// The bare enable turns every rule on, and MD009 would report the trailing spaces.
+		enableAll := []byte("# Title\n\n<!-- markdownlint-disable -->\n<!-- markdownlint-enable -->\nTrailing   \n")
+		result := run.mustLintFile(t, "enable.input.md", enableAll)
+		assert.Empty(t, result.Diagnostics)
+	})
+
+	directives := []struct {
+		name    string
+		ruleID  string
+		key     string
+		content string
+	}{
+		{name: "legacy alias", ruleID: "MD022", key: "blanks-around-headings", content: "# Title\nText right below the heading.\n"},
+		{name: "rule name", ruleID: "MD009", key: "no-trailing-spaces", content: "# Title\n\nTrailing   \n"},
+		{name: "tag", ruleID: "MD009", key: "whitespace", content: "# Title\n\nTrailing   \n"},
+	}
+	for _, tt := range directives {
+		t.Run("directive by "+tt.name, func(t *testing.T) {
+			run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: tt.ruleID})
+
+			require.NotEmpty(t, run.mustLintFile(t, "plain.input.md", []byte(tt.content)).Diagnostics)
+			disabled := "<!-- markdownlint-disable " + tt.key + " -->\n" + tt.content
+			assert.Empty(t, run.mustLintFile(t, "directive.input.md", []byte(disabled)).Diagnostics)
+		})
+	}
+
 	t.Run("another rule's ID is rejected", func(t *testing.T) {
 		rule := newStubRule(lint.Diagnostic{RuleID: "MD001", Message: "stub", StartLine: 1, StartColumn: 1})
 

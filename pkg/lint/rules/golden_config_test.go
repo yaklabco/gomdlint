@@ -139,8 +139,9 @@ type goldenRun struct {
 
 // newGoldenRun prepares a case. A per-rule case runs its directory's rule,
 // even when that rule is disabled by default, and a real-world case runs the
-// default-enabled rules. A sidecar that configures a rule the case does not
-// run is an error, because those options would have no effect.
+// default-enabled rules. No other rule can report, even when a directive
+// enables it. A sidecar that configures a rule the case does not run is an
+// error, because those options would have no effect.
 func newGoldenRun(tc GoldenTestCase) (goldenRun, error) {
 	var rules []lint.Rule
 	switch {
@@ -164,7 +165,7 @@ func newGoldenRun(tc GoldenTestCase) (goldenRun, error) {
 	run := goldenRun{
 		cfg:      cfg,
 		parser:   goldmark.New(string(cfg.Flavor)),
-		registry: lint.DefaultRegistry,
+		registry: isolatedRegistry(rules),
 		rules:    rules,
 	}
 	if unused := run.unusedRuleConfigs(); len(unused) > 0 {
@@ -265,6 +266,39 @@ func (run goldenRun) unusedRuleConfigs() []string {
 	slices.Sort(unused)
 
 	return unused
+}
+
+// inertRule stands in for a rule outside the case. It keeps the rule's ID,
+// name, tags and defaults, so directives resolve as in the product, but it
+// never reports anything.
+type inertRule struct {
+	lint.Rule
+}
+
+// Apply reports nothing.
+func (inertRule) Apply(_ *lint.RuleContext) ([]lint.Diagnostic, error) {
+	return nil, nil
+}
+
+// isolatedRegistry returns a registry with the rules, names, tags and legacy
+// aliases of lint.DefaultRegistry, in which every rule outside rules is an
+// inert stand-in. Inline directives resolve exactly as in the product, but
+// even a bare markdownlint-enable cannot make another rule report.
+func isolatedRegistry(rules []lint.Rule) *lint.Registry {
+	registry := lint.NewRegistry()
+	for _, rule := range lint.DefaultRegistry.Rules() {
+		inCase := slices.ContainsFunc(rules, func(caseRule lint.Rule) bool {
+			return caseRule.ID() == rule.ID()
+		})
+		if inCase {
+			registry.Register(rule)
+		} else {
+			registry.Register(inertRule{Rule: rule})
+		}
+	}
+	RegisterLegacyAliases(registry)
+
+	return registry
 }
 
 // defaultEnabledRules returns the registry's rules that are enabled by default.
