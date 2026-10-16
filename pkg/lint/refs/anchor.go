@@ -48,9 +48,9 @@ type AnchorMap struct {
 	// anchorLower maps lowercase IDs for case-insensitive lookup.
 	anchorLower map[string]string
 
-	// seenCounts tracks how many times each base anchor has been seen,
-	// used for generating duplicate suffixes.
-	seenCounts map[string]int
+	// occurrences mirrors github-slugger's state: every slug generated so
+	// far, with the number of suffixed variants issued for it.
+	occurrences map[string]int
 }
 
 // NewAnchorMap creates an empty AnchorMap.
@@ -58,7 +58,7 @@ func NewAnchorMap() *AnchorMap {
 	return &AnchorMap{
 		anchors:     make(map[string][]*Anchor),
 		anchorLower: make(map[string]string),
-		seenCounts:  make(map[string]int),
+		occurrences: make(map[string]int),
 	}
 }
 
@@ -85,63 +85,43 @@ func (m *AnchorMap) AddFromHeading(text string, pos mdast.SourcePosition) string
 	return id
 }
 
-// GenerateAnchor converts heading text to a GitHub-compatible anchor.
-// This method handles duplicate detection and suffix generation.
+// GenerateAnchor converts heading text to the anchor GitHub generates for it.
+// Repeated slugs get a numeric suffix exactly as github-slugger assigns it: a
+// suffix that collides with an earlier slug keeps counting, so the headings
+// "Foo", "Foo", and "Foo 1" become foo, foo-1, and foo-1-1.
 func (m *AnchorMap) GenerateAnchor(text string) string {
-	base := generateAnchorBase(text)
-
-	// Handle duplicates with -1, -2 suffix
-	count := m.seenCounts[base]
-	m.seenCounts[base] = count + 1
-
-	if count == 0 {
-		return base
+	original := generateAnchorBase(text)
+	slug := original
+	for {
+		if _, taken := m.occurrences[slug]; !taken {
+			break
+		}
+		m.occurrences[original]++
+		slug = original + "-" + itoa(m.occurrences[original])
 	}
-	return base + "-" + itoa(count)
+	m.occurrences[slug] = 0
+	return slug
 }
 
-// generateAnchorBase converts heading text to a base anchor ID.
-// Algorithm (GitHub-compatible):
-//  1. Convert to lowercase
-//  2. Remove punctuation (except hyphens and underscores)
-//  3. Replace spaces with hyphens
-//  4. Collapse multiple hyphens
-//  5. Trim leading/trailing hyphens
+// generateAnchorBase converts heading text to a slug with github-slugger's
+// rules: lowercase the text, remove every character except letters, marks,
+// numbers, connector punctuation, hyphens, and spaces, then replace each
+// space with a hyphen. Nothing is trimmed or collapsed, so "A - B" becomes
+// "a---b".
 func generateAnchorBase(text string) string {
 	var buf strings.Builder
 	buf.Grow(len(text))
 
-	prevHyphen := false
-
 	for _, ch := range strings.ToLower(text) {
 		switch {
-		case unicode.IsLetter(ch) || unicode.IsNumber(ch):
-			buf.WriteRune(ch)
-			prevHyphen = false
-		case ch == '-' || ch == '_':
-			buf.WriteRune(ch)
-			prevHyphen = (ch == '-')
 		case ch == ' ':
-			// Replace space with hyphen, but avoid consecutive hyphens
-			if !prevHyphen && buf.Len() > 0 {
-				_ = buf.WriteByte('-') // strings.Builder.WriteByte never fails
-				prevHyphen = true
-			}
+			_ = buf.WriteByte('-') // strings.Builder.WriteByte never fails
+		case ch == '-', unicode.IsLetter(ch), unicode.IsMark(ch), unicode.IsNumber(ch), unicode.Is(unicode.Pc, ch):
+			buf.WriteRune(ch)
 		}
-		// Other punctuation is silently dropped
 	}
 
-	result := buf.String()
-
-	// Trim leading/trailing hyphens
-	result = strings.Trim(result, "-")
-
-	// Collapse multiple consecutive hyphens
-	for strings.Contains(result, "--") {
-		result = strings.ReplaceAll(result, "--", "-")
-	}
-
-	return result
+	return buf.String()
 }
 
 // itoa is a simple int-to-string without importing strconv.

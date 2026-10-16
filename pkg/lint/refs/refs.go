@@ -4,6 +4,7 @@
 package refs
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -139,8 +140,18 @@ func (c *Context) ResolveLabel(label string) *ReferenceDefinition {
 	return c.Definitions[normalized]
 }
 
-// ValidateFragment checks if a fragment references a valid anchor.
+// ValidateFragment checks if a fragment references a valid anchor. The
+// fragment may be percent-encoded, as browsers decode it before matching ids.
 func (c *Context) ValidateFragment(fragment string) bool {
+	return c.validateFragment(fragment, c.Anchors.Has)
+}
+
+// ValidateFragmentIgnoreCase is ValidateFragment with case-insensitive anchor matching.
+func (c *Context) ValidateFragmentIgnoreCase(fragment string) bool {
+	return c.validateFragment(fragment, c.Anchors.HasIgnoreCase)
+}
+
+func (c *Context) validateFragment(fragment string, has func(string) bool) bool {
 	if fragment == "" {
 		return true // No fragment is always valid
 	}
@@ -163,8 +174,11 @@ func (c *Context) ValidateFragment(fragment string) bool {
 		return true
 	}
 
-	// Check against anchor map
-	return c.Anchors.Has(id)
+	if has(id) {
+		return true
+	}
+	decoded, err := url.PathUnescape(id)
+	return err == nil && decoded != id && has(decoded)
 }
 
 // UnusedDefinitions returns definitions with zero usage count.

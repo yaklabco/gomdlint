@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -62,22 +64,48 @@ func (c *collector) collectHeadingAnchor(node *mdast.Node) {
 	c.ctx.Anchors.AddFromHeading(text, pos)
 }
 
-// extractHeadingText extracts plain text from a heading node.
-// This includes text from inline code spans, which contribute to anchor generation.
+// extractHeadingText returns the text GitHub derives a heading's anchor from:
+// the rendered text content. Text has its backslash escapes and entity
+// references resolved, code spans contribute their content, and images and
+// raw HTML contribute nothing. Line breaks contribute nothing either; the
+// slug would drop the line ending anyway.
 func extractHeadingText(node *mdast.Node) string {
 	if node == nil || node.Kind != mdast.NodeHeading {
 		return ""
 	}
 
 	var buf bytes.Buffer
-	_ = mdast.Walk(node, func(n *mdast.Node) error { //nolint:errcheck // visitor never returns error
-		// Both NodeText and NodeCodeSpan store their content in Inline.Text
-		if (n.Kind == mdast.NodeText || n.Kind == mdast.NodeCodeSpan) && n.Inline != nil {
-			buf.Write(n.Inline.Text)
+	var collect func(parent *mdast.Node)
+	collect = func(parent *mdast.Node) {
+		for child := parent.FirstChild; child != nil; child = child.Next {
+			switch child.Kind {
+			case mdast.NodeImage, mdast.NodeHTMLInline:
+				continue
+			case mdast.NodeText, mdast.NodeSoftBreak, mdast.NodeHardBreak:
+				// Break nodes may carry the text that precedes the line ending.
+				if child.Inline != nil {
+					buf.Write(renderedText(child.Inline.Text))
+				}
+			case mdast.NodeCodeSpan:
+				if child.Inline != nil {
+					buf.Write(child.Inline.Text)
+				}
+			default:
+				collect(child)
+			}
 		}
-		return nil
-	})
+	}
+	collect(node)
 	return buf.String()
+}
+
+// renderedText resolves backslash escapes and entity references in raw text
+// the way a renderer does, and drops line endings.
+func renderedText(raw []byte) []byte {
+	text := bytes.TrimRight(raw, "\r\n")
+	text = util.UnescapePunctuations(text)
+	text = util.ResolveNumericReferences(text)
+	return util.ResolveEntityNames(text)
 }
 
 // collectLinkUsage records a link or image usage.

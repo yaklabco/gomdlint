@@ -197,9 +197,10 @@ func TestAnchorMap_GenerateAnchor(t *testing.T) {
 		{"punctuation", "Don't Panic!", "dont-panic"},
 		{"c++", "C++ Guide", "c-guide"},
 		{"underscores", "foo_bar_baz", "foo_bar_baz"},
-		{"multiple spaces", "hello   world", "hello-world"},
-		{"leading trailing spaces", "  hello  ", "hello"},
-		{"emoji", "Hello World 🎉", "hello-world"},
+		// github-slugger turns every space into a hyphen and never trims or collapses.
+		{"multiple spaces", "hello   world", "hello---world"},
+		{"leading trailing spaces", "  hello  ", "--hello--"},
+		{"emoji", "Hello World 🎉", "hello-world-"},
 		{"only special", "!!!???", ""},
 	}
 
@@ -209,6 +210,110 @@ func TestAnchorMap_GenerateAnchor(t *testing.T) {
 			got := m.GenerateAnchor(tt.text)
 			if got != tt.expected {
 				t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGenerateAnchor_GitHubSlugger checks github-slugger semantics: lowercase,
+// drop everything except letters, marks, numbers, connector punctuation,
+// hyphens and spaces, then turn each space into a hyphen. Nothing is trimmed
+// or collapsed.
+func TestGenerateAnchor_GitHubSlugger(t *testing.T) {
+	tests := []struct {
+		text string
+		want string
+	}{
+		{"A - B", "a---b"},
+		{"--flag option", "--flag-option"},
+		{"हिन्दी", "हिन्दी"},
+		{"Café Menu", "café-menu"},
+		{"Hello World 🎉", "hello-world-"},
+		{"hello   world", "hello---world"},
+		{"Tab\tseparated", "tabseparated"},
+		{"snake_case_name", "snake_case_name"},
+		{"Version 1.0.0", "version-100"},
+		{"Don't Panic!", "dont-panic"},
+		{"!!!???", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			if got := NewAnchorMap().GenerateAnchor(tt.text); got != tt.want {
+				t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerateAnchor_GitHubSluggerDuplicates checks that a suffixed slug that
+// collides with a later heading's slug keeps counting, as github-slugger does.
+func TestGenerateAnchor_GitHubSluggerDuplicates(t *testing.T) {
+	anchors := NewAnchorMap()
+	got := []string{anchors.GenerateAnchor("Foo"), anchors.GenerateAnchor("Foo"), anchors.GenerateAnchor("Foo 1")}
+	want := []string{"foo", "foo-1", "foo-1-1"}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Errorf("anchor %d = %q, want %q", idx, got[idx], want[idx])
+		}
+	}
+
+	anchors = NewAnchorMap()
+	got = []string{anchors.GenerateAnchor("Foo 1"), anchors.GenerateAnchor("Foo"), anchors.GenerateAnchor("Foo")}
+	want = []string{"foo-1", "foo", "foo-2"}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Errorf("anchor %d = %q, want %q", idx, got[idx], want[idx])
+		}
+	}
+}
+
+func TestContext_ValidateFragmentPercentEncoded(t *testing.T) {
+	ctx := NewContext(nil)
+	ctx.Anchors.AddFromHeading("Café Menu", mdast.SourcePosition{})
+
+	for _, fragment := range []string{"#café-menu", "#caf%C3%A9-menu", "#caf%c3%a9-menu"} {
+		if !ctx.ValidateFragment(fragment) {
+			t.Errorf("ValidateFragment(%q) = false, want true", fragment)
+		}
+	}
+	for _, fragment := range []string{"#cafe-menu", "#caf%zz-menu"} {
+		if ctx.ValidateFragment(fragment) {
+			t.Errorf("ValidateFragment(%q) = true, want false", fragment)
+		}
+	}
+	if !ctx.ValidateFragmentIgnoreCase("#CAF%C3%A9-Menu") {
+		t.Error("ValidateFragmentIgnoreCase(\"#CAF%C3%A9-Menu\") = false, want true")
+	}
+}
+
+func TestCollect_HeadingTextForAnchors(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		want     string
+	}{
+		{"code span with leading hyphens", "## `--flag` option\n", "--flag-option"},
+		{"escaped punctuation", "## Learn C\\#\n", "learn-c"},
+		{"entity reference", "## Tom &amp; Jerry\n", "tom--jerry"},
+		{"link text counts", "## [Docs](https://example.com) page\n", "docs-page"},
+		{"image alt text does not count", "## ![logo](logo.png) Title\n", "-title"},
+		{"emphasis markers do not count", "## *Important* note\n", "important-note"},
+		{"inline html does not count", "## <span>Styled</span> heading\n", "styled-heading"},
+		{"multi-line setext heading", "First\nsecond line\n---\n", "firstsecond-line"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New("gfm").Parse(context.Background(), "test.md", []byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			refCtx := Collect(file.Root, file)
+			if !refCtx.Anchors.Has(tt.want) {
+				var ids []string
+				for _, anchor := range refCtx.Anchors.All() {
+					ids = append(ids, anchor.ID)
+				}
+				t.Errorf("anchor %q not found; anchors: %q", tt.want, ids)
 			}
 		})
 	}

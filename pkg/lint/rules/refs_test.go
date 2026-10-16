@@ -334,6 +334,39 @@ func TestLinkImageStyleRule(t *testing.T) {
 	}
 }
 
+// TestLinkFragmentsRule_GitHubSlugs checks fragments against the anchors GitHub
+// generates (github-slugger) and accepts percent-encoded fragments.
+func TestLinkFragmentsRule_GitHubSlugs(t *testing.T) {
+	rule := NewLinkFragmentsRule()
+	tests := []struct {
+		name     string
+		markdown string
+		want     int
+	}{
+		{"spaced hyphen keeps every hyphen", "## A - B\n\n[x](#a---b)\n", 0},
+		{"collapsed hyphens are not the github slug", "## A - B\n\n[x](#a-b)\n", 1},
+		{"code span with leading hyphens", "## `--flag` option\n\n[x](#--flag-option)\n", 0},
+		{"combining marks are kept", "## हिन्दी\n\n[x](#हिन्दी)\n", 0},
+		{"percent-encoded fragment", "## Café Menu\n\n[x](#caf%C3%A9-menu)\n", 0},
+		{"unencoded fragment", "## Café Menu\n\n[x](#café-menu)\n", 0},
+		{"suffix collision keeps counting", "# Foo\n\n# Foo\n\n# Foo 1\n\n[x](#foo-1-1)\n", 0},
+		{"missing duplicate suffix", "# Foo\n\n# Foo\n\n[x](#foo-2)\n", 1},
+		{"trailing emoji leaves a hyphen", "## Hello World 🎉\n\n[x](#hello-world-)\n", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diags := testHelper(t, rule, tt.markdown); len(diags) != tt.want {
+				t.Errorf("got %d diagnostics, want %d: %+v", len(diags), tt.want, diags)
+			}
+		})
+	}
+
+	diags := testHelperWithOptions(t, rule, "## Café Menu\n\n[x](#CAF%C3%A9-Menu)\n", map[string]any{"ignore_case": true})
+	if len(diags) != 0 {
+		t.Errorf("ignore_case with encoded fragment: got %d diagnostics, want 0", len(diags))
+	}
+}
+
 func TestDescriptiveLinkTextRule(t *testing.T) {
 	rule := NewDescriptiveLinkTextRule()
 

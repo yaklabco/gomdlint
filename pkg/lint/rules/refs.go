@@ -80,8 +80,7 @@ func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		// Validate fragment
 		valid := refCtx.ValidateFragment(usage.Fragment)
 		if !valid && ignoreCase {
-			// Try case-insensitive lookup
-			valid = refCtx.Anchors.HasIgnoreCase(fragment)
+			valid = refCtx.ValidateFragmentIgnoreCase(usage.Fragment)
 		}
 
 		if !valid {
