@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 )
 
@@ -34,26 +35,42 @@ func New(level string) *log.Logger {
 // NewWithWriter creates a logger with the specified level that writes to
 // writer.
 func NewWithWriter(writer io.Writer, level string) *log.Logger {
-	logger := log.NewWithOptions(writer, log.Options{
-		ReportTimestamp: false,
-		ReportCaller:    false,
-	})
-
+	logger := newLogger(writer)
 	setLoggerLevel(logger, level)
-
 	return logger
 }
 
 // NewInteractive creates a logger for interactive CLI commands.
 // It writes to stdout (not stderr) and is suitable for user-facing output
-// from commands like init, migrate, and rules.
+// from commands like init and migrate.
 func NewInteractive() *log.Logger {
-	logger := log.NewWithOptions(os.Stdout, log.Options{
+	logger := newLogger(os.Stdout)
+	logger.SetLevel(log.InfoLevel)
+	return logger
+}
+
+// newLogger creates a logger on writer that never queries the terminal.
+//
+// charmbracelet/log builds its renderer with termenv's color cache, which
+// asks a terminal for its foreground and background colors (OSC 10 and 11,
+// each fenced by a cursor position report) as soon as the logger exists.
+// The queries ignore NO_COLOR and stall for seconds on terminals that do
+// not answer. Hiding the terminal behind opaqueWriter avoids them, and the
+// color profile then comes from termenv's environment checks, which honour
+// NO_COLOR, CLICOLOR_FORCE and TERM without talking to the terminal.
+func newLogger(writer io.Writer) *log.Logger {
+	logger := log.NewWithOptions(&opaqueWriter{Writer: writer}, log.Options{
 		ReportTimestamp: false,
 		ReportCaller:    false,
 	})
-	logger.SetLevel(log.InfoLevel)
+	logger.SetColorProfile(lipgloss.NewRenderer(writer).ColorProfile())
 	return logger
+}
+
+// opaqueWriter forwards writes while hiding the file behind them, so termenv
+// cannot detect a terminal to query.
+type opaqueWriter struct {
+	io.Writer
 }
 
 func setLoggerLevel(logger *log.Logger, level string) {
