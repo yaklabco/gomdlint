@@ -1,0 +1,1 @@
+several_per_line.input.md:11:1 warning Unused reference definition [unused] (MD053/link-image-reference-definitions)

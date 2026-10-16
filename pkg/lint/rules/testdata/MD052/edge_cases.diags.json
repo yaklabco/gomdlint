@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD052",
+    "name": "reference-links-images",
+    "line": 3,
+    "column": 43,
+    "message": "Reference link uses undefined label [gone]",
+    "severity": "warning",
+    "fixable": false
+  }
+]

@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "rule": "MD052",
+    "name": "reference-links-images",
+    "line": 7,
+    "column": 11,
+    "message": "Reference link uses undefined label [nonexistent]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD052",
+    "name": "reference-links-images",
+    "line": 9,
+    "column": 12,
+    "message": "Reference image uses undefined label [missing-ref]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD052",
+    "name": "reference-links-images",
+    "line": 11,
+    "column": 9,
+    "message": "Reference link uses undefined label [also-missing]",
+    "severity": "warning",
+    "fixable": false
+  }
+]

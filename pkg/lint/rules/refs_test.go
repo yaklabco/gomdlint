@@ -334,6 +334,98 @@ func TestLinkImageStyleRule(t *testing.T) {
 	}
 }
 
+// TestReferenceLinkImagesRule_Undefined reports full and collapsed references
+// whose label has no definition. The parser leaves such references as text.
+func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
+	rule := NewReferenceLinkImagesRule()
+	type want struct {
+		line, column int
+		message      string
+	}
+	tests := []struct {
+		name     string
+		markdown string
+		options  map[string]any
+		want     []want
+	}{
+		{name: "full reference", markdown: "Text [missing][nope] end.\n",
+			want: []want{{1, 6, "Reference link uses undefined label [nope]"}}},
+		{name: "collapsed reference", markdown: "[gone][]\n",
+			want: []want{{1, 1, "Reference link uses undefined label [gone]"}}},
+		{name: "image reference", markdown: "![img][nada]\n",
+			want: []want{{1, 1, "Reference image uses undefined label [nada]"}}},
+		{name: "reference in link text", markdown: "[see [missing][nope]](https://example.com)\n",
+			want: []want{{1, 6, "Reference link uses undefined label [nope]"}}},
+		{name: "reference in heading", markdown: "## Heading [h][hh]\n",
+			want: []want{{1, 12, "Reference link uses undefined label [hh]"}}},
+		{name: "defined reference", markdown: "Text [defined][ok] here.\n\n[ok]: https://example.com\n"},
+		{name: "code span is not a reference", markdown: "`[missing][nope]`\n"},
+		{name: "escaped brackets", markdown: "\\[missing\\]\\[nope\\]\n"},
+		{name: "shortcut ignored by default", markdown: "Use [nope] here.\n"},
+		{name: "shortcut checked when enabled", markdown: "Use [nope] here.\n",
+			options: map[string]any{"shortcut_syntax": true},
+			want:    []want{{1, 5, "Reference link uses undefined label [nope]"}}},
+		{name: "ignored label", markdown: "- [x] done\n", options: map[string]any{"shortcut_syntax": true}},
+		{name: "definition inside blockquote", markdown: "> [docs]: https://example.com\n\nSee [docs][] and [Docs][docs].\n"},
+		{name: "unicode case folding", markdown: "[Straße][]\n\n[STRASSE]: https://example.com\n"},
+		{name: "multi-line label", markdown: "See [multi\nline][]\n\n[multi line]: https://example.com\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var diags []lint.Diagnostic
+			if tt.options != nil {
+				diags = testHelperWithOptions(t, rule, tt.markdown, tt.options)
+			} else {
+				diags = testHelper(t, rule, tt.markdown)
+			}
+			if len(diags) != len(tt.want) {
+				t.Fatalf("got %d diagnostics, want %d: %+v", len(diags), len(tt.want), diags)
+			}
+			for idx, expected := range tt.want {
+				got := diags[idx]
+				if got.StartLine != expected.line || got.StartColumn != expected.column || got.Message != expected.message {
+					t.Errorf("diagnostic %d = %d:%d %q, want %d:%d %q", idx,
+						got.StartLine, got.StartColumn, got.Message, expected.line, expected.column, expected.message)
+				}
+			}
+		})
+	}
+}
+
+// TestLinkImageRefDefsRule_LabelPerLink attributes each reference to its own
+// label, even with several references on one line, and folds case like the parser.
+func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
+	rule := NewLinkImageRefDefsRule()
+	for _, markdown := range []string{
+		"See [one][alpha] and [two][beta].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n",
+		"[Straße][]\n\n[STRASSE]: https://example.com\n",
+		"See [alpha][] and [beta].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n",
+		"Undefined [text][used] still uses nothing, but [ref][kept] uses kept.\n\n[kept]: https://example.com\n",
+	} {
+		if diags := testHelper(t, rule, markdown); len(diags) != 0 {
+			t.Errorf("%q: got %d diagnostics, want 0: %+v", markdown, len(diags), diags)
+		}
+	}
+	diags := testHelper(t, rule, "See [one][alpha].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n")
+	if len(diags) != 1 || diags[0].Message != "Unused reference definition [beta]" {
+		t.Errorf("got %+v, want one unused [beta]", diags)
+	}
+}
+
+// TestReferenceRulesIgnoreUnresolvedText checks that text the parser did not
+// turn into a link is not treated as a link by style rules.
+func TestReferenceRulesIgnoreUnresolvedText(t *testing.T) {
+	markdown := "[missing][nope] and [here][]\n"
+	if diags := testHelperWithOptions(t, NewLinkImageStyleRule(), markdown, map[string]any{
+		"full": false, "collapsed": false,
+	}); len(diags) != 0 {
+		t.Errorf("MD054: got %d diagnostics, want 0: %+v", len(diags), diags)
+	}
+	if diags := testHelper(t, NewDescriptiveLinkTextRule(), markdown); len(diags) != 0 {
+		t.Errorf("MD059: got %d diagnostics, want 0: %+v", len(diags), diags)
+	}
+}
+
 // TestLinkFragmentsRule_GitHubSlugs checks fragments against the anchors GitHub
 // generates (github-slugger) and accepts percent-encoded fragments.
 func TestLinkFragmentsRule_GitHubSlugs(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/yuin/goldmark/util"
 
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -21,6 +22,7 @@ func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
 		root: root,
 	}
 	coll.collect(root)
+	coll.collectUnresolvedReferences()
 	coll.collectDefinitionsFromSource()
 	coll.resolveReferences()
 
@@ -178,106 +180,46 @@ func (c *collector) detectLinkStyle(node *mdast.Node, isImage bool) (ReferenceSt
 		}
 	}
 
-	pos := node.SourcePosition()
-	if !pos.IsValid() || c.ctx.File == nil {
+	if c.ctx.File == nil {
 		return StyleInline, ""
 	}
+	return linkStyleFromSource(c.ctx.File.Content, node, isImage)
+}
 
-	// Get the source line containing the link
-	if pos.StartLine < 1 || pos.StartLine > len(c.ctx.File.Lines) {
+// linkStyleFromSource classifies a link or image by its own source text: the
+// bracketed link text followed by "(" (inline), "[]" (collapsed), "[label]"
+// (full), or nothing (shortcut). For collapsed and shortcut references the
+// label is the link text.
+func linkStyleFromSource(content []byte, node *mdast.Node, isImage bool) (ReferenceStyle, string) {
+	span := node.SourceRange()
+	if span.StartOffset < 0 || span.EndOffset > len(content) || span.IsEmpty() {
 		return StyleInline, ""
 	}
-
-	lineInfo := c.ctx.File.Lines[pos.StartLine-1]
-	line := c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
-
-	// Look for reference patterns in the line
-	// This is a simplified heuristic based on source inspection
-	text := extractLinkText(node)
-
-	// Check for full reference: [text][label]
-	if idx := findFullReference(line, text); idx >= 0 {
-		label := extractFullReferenceLabel(line, idx, len(text))
-		if label != "" {
-			return StyleFull, label
-		}
+	src := content[:span.EndOffset]
+	open := span.StartOffset
+	if isImage && src[open] == '!' {
+		open++
 	}
-
-	// Check for collapsed reference: [label][]
-	if isCollapsedReference(line, text) {
+	closing, ok := mdscan.LinkTextEnd(src, open)
+	if !ok {
+		return StyleInline, ""
+	}
+	text := string(src[open+1 : closing])
+	after := closing + 1
+	switch {
+	case after >= len(src):
+		return StyleShortcut, text
+	case src[after] == '(':
+		return StyleInline, ""
+	case src[after] != '[':
+		return StyleShortcut, text
+	case after+1 < len(src) && src[after+1] == ']':
 		return StyleCollapsed, text
 	}
-
-	// Check for shortcut reference: [label] (no following brackets or parens)
-	if isShortcutReference(line, text, isImage) {
-		return StyleShortcut, text
+	if labelEnd, found := mdscan.LinkLabelEnd(src, after); found {
+		return StyleFull, string(src[after+1 : labelEnd])
 	}
-
-	// Default to inline
-	return StyleInline, ""
-}
-
-// findFullReference looks for [text][label] pattern.
-func findFullReference(line []byte, _ string) int {
-	// Look for ][
-	pattern := "]" + "["
-	idx := bytes.Index(line, []byte(pattern))
-	return idx
-}
-
-// extractFullReferenceLabel extracts the label from [text][label].
-func extractFullReferenceLabel(line []byte, closeBracketIdx, _ int) string {
-	// Find the opening [ of the label part
-	start := closeBracketIdx + 2 // Skip ][
-	if start >= len(line) {
-		return ""
-	}
-
-	// Find closing ]
-	end := bytes.IndexByte(line[start:], ']')
-	if end < 0 {
-		return ""
-	}
-
-	return string(line[start : start+end])
-}
-
-// isCollapsedReference checks for [label][] pattern.
-func isCollapsedReference(line []byte, text string) bool {
-	pattern := "[" + text + "][]"
-	return bytes.Contains(line, []byte(pattern))
-}
-
-// isShortcutReference checks for [label] without following () or [].
-func isShortcutReference(line []byte, text string, isImage bool) bool {
-	// Build the pattern to look for
-	var prefix string
-	if isImage {
-		prefix = "!["
-	} else {
-		prefix = "["
-	}
-	pattern := prefix + text + "]"
-	patternBytes := []byte(pattern)
-
-	idx := bytes.Index(line, patternBytes)
-	if idx < 0 {
-		return false
-	}
-
-	// Check what follows the closing bracket
-	afterIdx := idx + len(patternBytes)
-	if afterIdx >= len(line) {
-		return true // Nothing follows - shortcut
-	}
-
-	nextChar := line[afterIdx]
-	// If followed by ( or [, it's inline or full reference
-	if nextChar == '(' || nextChar == '[' {
-		return false
-	}
-
-	return true
+	return StyleShortcut, text
 }
 
 // collectHTMLAnchors extracts id and name attributes from HTML.

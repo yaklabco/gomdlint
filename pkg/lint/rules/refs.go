@@ -114,7 +114,10 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 	}
 }
 
-// Apply checks that reference-style links/images use defined labels.
+// Apply reports full and collapsed references, and shortcut references when
+// shortcut_syntax is set, whose label matches no definition. The parser turns
+// every reference with a defined label into a link or image, so only the
+// reference syntax it left as text can be undefined.
 func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -127,7 +130,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	// Build ignored set
 	ignoredSet := make(map[string]bool)
 	for _, label := range ignoredLabels {
-		ignoredSet[strings.ToLower(label)] = true
+		ignoredSet[refs.NormalizeLabel(label)] = true
 	}
 
 	var diags []lint.Diagnostic
@@ -137,8 +140,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip inline/autolink styles - they don't use references
-		if usage.Style == refs.StyleInline || usage.Style == refs.StyleAutolink {
+		if !usage.Unresolved || usage.Label == "" {
 			continue
 		}
 
@@ -147,17 +149,13 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			continue
 		}
 
-		// Skip if no label
-		if usage.Label == "" {
-			continue
-		}
-
 		// Skip ignored labels
 		if ignoredSet[usage.NormalizedLabel] {
 			continue
 		}
 
-		// Check if label is defined
+		// A defined label can still stay text, for example when the link text
+		// contains another link, so only report labels with no definition.
 		if usage.ResolvedDefinition == nil {
 			kind := "link"
 			if usage.IsImage {
@@ -292,6 +290,11 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 			return diags, ctx.Ctx.Err()
 		}
 
+		// Reference syntax the parser left as text is not a link or image.
+		if usage.Unresolved {
+			continue
+		}
+
 		allowed := true
 		var msg string
 
@@ -413,8 +416,9 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip images - they have alt text, not link text
-		if usage.IsImage {
+		// Skip images - they have alt text, not link text - and reference
+		// syntax the parser left as text, which is not a link.
+		if usage.IsImage || usage.Unresolved {
 			continue
 		}
 		if compatible && (len(mdast.FindByKind(usage.Node, mdast.NodeCodeSpan)) > 0 ||

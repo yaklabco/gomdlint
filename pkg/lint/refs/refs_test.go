@@ -319,6 +319,61 @@ func TestCollect_HeadingTextForAnchors(t *testing.T) {
 	}
 }
 
+func TestCollect_UnresolvedReferences(t *testing.T) {
+	type found struct {
+		style ReferenceStyle
+		label string
+		image bool
+	}
+	tests := []struct {
+		name     string
+		markdown string
+		want     []found
+	}{
+		{"full", "[text][label]\n", []found{{StyleFull, "label", false}}},
+		{"collapsed", "[label][]\n", []found{{StyleCollapsed, "label", false}}},
+		{"shortcut", "[label]\n", []found{{StyleShortcut, "label", false}}},
+		{"image", "![alt][pic]\n", []found{{StyleFull, "pic", true}}},
+		{"escaped image marker", "\\![alt][pic]\n", []found{{StyleFull, "pic", false}}},
+		{"nested brackets in link text", "[a [b] c][d]\n", []found{{StyleShortcut, "b", false}, {StyleFull, "d", false}}},
+		{"brackets cannot form a shortcut label", "[a [b] c]\n", []found{{StyleShortcut, "b", false}}},
+		{"emphasis inside link text", "[*em*][ref]\n", []found{{StyleFull, "ref", false}}},
+		{"failed inline link", "[text](\n", nil},
+		{"code span", "`[text][label]`\n", nil},
+		{"blank label", "[ ]\n", nil},
+		{"resolved reference is not unresolved", "[text][ok]\n\n[ok]: https://example.com\n", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			var got []found
+			for _, usage := range Collect(file.Root, file).Usages {
+				if usage.Unresolved {
+					got = append(got, found{usage.Style, usage.Label, usage.IsImage})
+				}
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+			for idx := range tt.want {
+				if got[idx] != tt.want[idx] {
+					t.Errorf("reference %d = %+v, want %+v", idx, got[idx], tt.want[idx])
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizeLabel_UnicodeCaseFolding(t *testing.T) {
+	if NormalizeLabel("Straße") != NormalizeLabel("STRASSE") {
+		t.Errorf("NormalizeLabel(%q) = %q, NormalizeLabel(%q) = %q, want equal",
+			"Straße", NormalizeLabel("Straße"), "STRASSE", NormalizeLabel("STRASSE"))
+	}
+}
+
 func TestAnchorMap_DuplicateHandling(t *testing.T) {
 	m := NewAnchorMap()
 

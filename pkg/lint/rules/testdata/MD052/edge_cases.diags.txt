@@ -1,0 +1,1 @@
+edge_cases.input.md:3:43 warning Reference link uses undefined label [gone] (MD052/reference-links-images)

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -86,11 +88,17 @@ type ReferenceUsage struct {
 	// Position in source.
 	Position mdast.SourcePosition
 
-	// Node is the original AST node.
+	// Node is the original AST node. For an unresolved reference it is the
+	// text node where the reference starts.
 	Node *mdast.Node
 
 	// ResolvedDefinition points to the matching definition (if any).
 	ResolvedDefinition *ReferenceDefinition
+
+	// Unresolved is true for reference syntax the parser left as text
+	// because no definition matched its label, such as [text][missing].
+	// Unresolved usages are not links or images.
+	Unresolved bool
 }
 
 // IsSameFileFragment returns true if this is a same-file anchor reference.
@@ -214,14 +222,11 @@ func (c *Context) UnresolvedUsages() []*ReferenceUsage {
 	return unresolved
 }
 
-// NormalizeLabel normalizes a reference label for matching.
-// Per CommonMark: case-insensitive, collapse whitespace.
+// NormalizeLabel normalizes a reference label for matching, exactly as the
+// parser does when it resolves references: trim, apply Unicode full case
+// folding (so "Straße" matches "STRASSE"), and collapse whitespace.
 func NormalizeLabel(label string) string {
-	// Lowercase
-	label = strings.ToLower(label)
-	// Collapse whitespace
-	label = strings.Join(strings.Fields(label), " ")
-	return label
+	return util.ToLinkReference([]byte(label))
 }
 
 // isGitHubLineReference checks for GitHub's line/column reference syntax.
