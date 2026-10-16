@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -327,22 +328,27 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 		}
 	})
 
-	t.Run("itoa", func(t *testing.T) {
-		tests := []struct {
-			input int
-			want  string
-		}{
-			{0, "0"},
-			{1, "1"},
-			{10, "10"},
-			{123, "123"},
-			{-5, "-5"},
+	t.Run("formatDiagLine", func(t *testing.T) {
+		diag := lint.Diagnostic{
+			RuleID:      "MD009",
+			RuleName:    "no-trailing-spaces",
+			Message:     "Trailing whitespace",
+			Severity:    config.SeverityWarning,
+			StartLine:   3,
+			StartColumn: 30,
 		}
+		assert.Equal(t, "basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces)",
+			formatDiagLine("basic.input.md", diag))
 
-		for _, tt := range tests {
-			got := itoa(tt.input)
-			assert.Equal(t, tt.want, got)
-		}
+		diag.FixEdits = []fix.TextEdit{{StartOffset: 1, EndOffset: 2}}
+		assert.Equal(t, "basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]",
+			formatDiagLine("basic.input.md", diag))
+	})
+
+	t.Run("diagFromLint", func(t *testing.T) {
+		got := diagFromLint(lint.Diagnostic{RuleID: "MD009", RuleName: "no-trailing-spaces"})
+		assert.Equal(t, "MD009", got.Rule)
+		assert.Equal(t, "no-trailing-spaces", got.Name)
 	})
 
 	t.Run("testdataDir", func(t *testing.T) {
@@ -493,6 +499,54 @@ func TestGoldenEnv(t *testing.T) {
 
 		assert.Equal(t, []string{"MD043"}, env.idleRuleConfigs([]lint.Rule{getRuleByID(t, "MD044")}))
 		assert.Empty(t, env.idleRuleConfigs([]lint.Rule{getRuleByID(t, "MD043"), getRuleByID(t, "MD044")}))
+	})
+}
+
+// stubRule is a lint.Rule that returns a fixed set of diagnostics.
+type stubRule struct {
+	lint.BaseRule
+
+	diags []lint.Diagnostic
+}
+
+// Apply returns a copy of the stub's diagnostics.
+func (r *stubRule) Apply(_ *lint.RuleContext) ([]lint.Diagnostic, error) {
+	return slices.Clone(r.diags), nil
+}
+
+// TestGoldenDiagnosticIdentity verifies that golden cases record diagnostics
+// the way the engine reports them: with the rule's ID, name and severity.
+func TestGoldenDiagnosticIdentity(t *testing.T) {
+	newStub := func(diags ...lint.Diagnostic) *stubRule {
+		return &stubRule{BaseRule: lint.NewBaseRule("MD999", "stub-rule", "Stub rule", nil, false), diags: diags}
+	}
+
+	t.Run("name and severity are filled like the engine", func(t *testing.T) {
+		env := newGoldenEnv(t, GoldenTestCase{ConfigPath: filepath.Join(t.TempDir(), "absent"+goldenConfigSuffix)})
+		snapshot := env.parse(t, "stub.input.md", []byte("# Title\n"))
+
+		diags := env.applyRule(t, newStub(lint.Diagnostic{RuleID: "MD999", Message: "stub", StartLine: 1, StartColumn: 1}), snapshot)
+		require.Len(t, diags, 1)
+		assert.Equal(t, "stub-rule", diags[0].RuleName)
+		assert.Equal(t, config.SeverityWarning, diags[0].Severity)
+	})
+
+	t.Run("real rule records its ID and name", func(t *testing.T) {
+		env := newGoldenEnv(t, GoldenTestCase{ConfigPath: filepath.Join(t.TempDir(), "absent"+goldenConfigSuffix)})
+		snapshot := env.parse(t, "spaces.input.md", []byte("# Title\n\nTrailing   \n"))
+
+		diags := env.applyRule(t, getRuleByID(t, "MD009"), snapshot)
+		require.NotEmpty(t, diags)
+		assert.Equal(t, "MD009", diags[0].RuleID)
+		assert.Equal(t, "no-trailing-spaces", diags[0].RuleName)
+	})
+
+	t.Run("foreign identity is rejected", func(t *testing.T) {
+		rule := newStub()
+
+		require.NoError(t, checkDiagIdentity(rule, []lint.Diagnostic{{RuleID: "MD999", RuleName: "stub-rule"}}))
+		require.ErrorContains(t, checkDiagIdentity(rule, []lint.Diagnostic{{RuleID: "MD001", RuleName: "stub-rule"}}), "MD001")
+		require.ErrorContains(t, checkDiagIdentity(rule, []lint.Diagnostic{{RuleID: "MD999", RuleName: "other-name"}}), "other-name")
 	})
 }
 

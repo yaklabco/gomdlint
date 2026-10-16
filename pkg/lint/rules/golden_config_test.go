@@ -143,8 +143,11 @@ func (env goldenEnv) parse(t *testing.T, name string, content []byte) *mdast.Fil
 	return snapshot
 }
 
-// applyRule runs one rule with the fixture's configuration, passing the rule
-// its configured options the way the engine does.
+// applyRule runs one rule with the fixture's configuration and returns its
+// diagnostics as the engine reports them. Like lint.Engine.LintFile, it passes
+// the rule its configured options, fills in the rule name, and sets the
+// resolved severity, which is the rule default because sidecars cannot
+// configure severity. Every diagnostic must carry the rule's ID and name.
 func (env goldenEnv) applyRule(t *testing.T, rule lint.Rule, snapshot *mdast.FileSnapshot) []lint.Diagnostic {
 	t.Helper()
 
@@ -159,7 +162,28 @@ func (env goldenEnv) applyRule(t *testing.T, rule lint.Rule, snapshot *mdast.Fil
 	diags, err := rule.Apply(ruleCtx)
 	require.NoError(t, err, "rule %s failed to apply", rule.ID())
 
+	for idx := range diags {
+		if diags[idx].RuleName == "" {
+			diags[idx].RuleName = rule.Name()
+		}
+		diags[idx].Severity = rule.DefaultSeverity()
+	}
+	require.NoError(t, checkDiagIdentity(rule, diags))
+
 	return diags
+}
+
+// checkDiagIdentity returns an error when a diagnostic does not carry the ID
+// and name of the rule that produced it.
+func checkDiagIdentity(rule lint.Rule, diags []lint.Diagnostic) error {
+	for idx, diag := range diags {
+		if diag.RuleID != rule.ID() || diag.RuleName != rule.Name() {
+			return fmt.Errorf("diagnostic %d from %s/%s is labelled %s/%s",
+				idx, rule.ID(), rule.Name(), diag.RuleID, diag.RuleName)
+		}
+	}
+
+	return nil
 }
 
 // idleRuleConfigs returns the sorted IDs of configured rules that are not in

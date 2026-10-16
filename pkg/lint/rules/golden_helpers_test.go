@@ -3,13 +3,13 @@ package rules
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -209,73 +209,28 @@ func writeDiagsJSON(t *testing.T, path string, diags []lint.Diagnostic) {
 	t.Logf("Updated golden file: %s", path)
 }
 
-// writeDiagsTxt writes diagnostics to a human-readable text file.
-func writeDiagsTxt(t *testing.T, path string, diags []lint.Diagnostic, filename string) {
-	t.Helper()
-
-	var buf bytes.Buffer
-	for _, diag := range diags {
-		fixable := ""
-		if diag.HasFix() {
-			fixable = " [fixable]"
-		}
-		// Format: file.input.md:2:1 warning Message (rule-name)%s
-		_, err := buf.WriteString(filename)
-		require.NoError(t, err)
-		_, err = buf.WriteString(":")
-		require.NoError(t, err)
-		_, err = buf.WriteString(itoa(diag.StartLine))
-		require.NoError(t, err)
-		_, err = buf.WriteString(":")
-		require.NoError(t, err)
-		_, err = buf.WriteString(itoa(diag.StartColumn))
-		require.NoError(t, err)
-		_, err = buf.WriteString(" ")
-		require.NoError(t, err)
-		_, err = buf.WriteString(string(diag.Severity))
-		require.NoError(t, err)
-		_, err = buf.WriteString(" ")
-		require.NoError(t, err)
-		_, err = buf.WriteString(diag.Message)
-		require.NoError(t, err)
-		_, err = buf.WriteString(" (")
-		require.NoError(t, err)
-		_, err = buf.WriteString(diag.RuleName)
-		require.NoError(t, err)
-		_, err = buf.WriteString(")")
-		require.NoError(t, err)
-		_, err = buf.WriteString(fixable)
-		require.NoError(t, err)
-		_, err = buf.WriteString("\n")
-		require.NoError(t, err)
+// formatDiagLine renders one diagnostic as a line of a .diags.txt file:
+//
+//	basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
+func formatDiagLine(filename string, diag lint.Diagnostic) string {
+	fixable := ""
+	if diag.HasFix() {
+		fixable = " [fixable]"
 	}
 
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("failed to create directory for %s: %v", path, err)
-	}
-
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		t.Fatalf("failed to write diagnostics text %s: %v", path, err)
-	}
-
-	t.Logf("Updated golden file: %s", path)
+	return fmt.Sprintf("%s:%d:%d %s %s (%s/%s)%s",
+		filename, diag.StartLine, diag.StartColumn, diag.Severity, diag.Message, diag.RuleID, diag.RuleName, fixable)
 }
 
-// itoa converts an integer to a string without importing strconv.
-func itoa(num int) string {
-	if num == 0 {
-		return "0"
+// renderDiagsTxt renders the contents of a .diags.txt file, one line per diagnostic.
+func renderDiagsTxt(diags []lint.Diagnostic, filename string) []byte {
+	var buf bytes.Buffer
+	for _, diag := range diags {
+		buf.WriteString(formatDiagLine(filename, diag))
+		buf.WriteByte('\n')
 	}
-	if num < 0 {
-		return "-" + itoa(-num)
-	}
-	var digits []byte
-	for num > 0 {
-		digits = append([]byte{byte('0' + num%10)}, digits...)
-		num /= 10
-	}
-	return string(digits)
+
+	return buf.Bytes()
 }
 
 // writeGoldenFile writes content to a golden file.
@@ -327,19 +282,23 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 	t.Helper()
 
 	inputFilename := filepath.Base(tc.InputPath)
+	actualTxt := renderDiagsTxt(actual, inputFilename)
 
 	if update {
 		writeDiagsJSON(t, tc.DiagsJSONPath, actual)
-		writeDiagsTxt(t, tc.DiagsTxtPath, actual, inputFilename)
+		writeGoldenFile(t, tc.DiagsTxtPath, actualTxt)
 		return
 	}
+
+	// The text file renders the same diagnostics; a stale one fails too.
+	compareWithGolden(t, actualTxt, tc.DiagsTxtPath, false)
 
 	expected := loadExpectedDiags(t, tc.DiagsJSONPath)
 	if expected == nil {
 		t.Errorf("Diagnostics JSON file does not exist: %s\nRun with -update flag to create it.", tc.DiagsJSONPath)
 		t.Logf("Actual diagnostics: %d", len(actual))
 		for _, d := range actual {
-			t.Logf("  %s:%d:%d %s %s (%s)", inputFilename, d.StartLine, d.StartColumn, d.Severity, d.Message, d.RuleName)
+			t.Logf("  %s", formatDiagLine(inputFilename, d))
 		}
 		return
 	}
@@ -349,11 +308,11 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 		t.Errorf("Diagnostic count mismatch: got %d, want %d", len(actual), len(expected))
 		t.Logf("Expected diagnostics:")
 		for _, d := range expected {
-			t.Logf("  %s:%d:%d %s %s (%s)", inputFilename, d.Line, d.Column, d.Severity, d.Message, d.Name)
+			t.Logf("  %s:%d:%d %s %s (%s/%s)", inputFilename, d.Line, d.Column, d.Severity, d.Message, d.Rule, d.Name)
 		}
 		t.Logf("Actual diagnostics:")
 		for _, d := range actual {
-			t.Logf("  %s:%d:%d %s %s (%s)", inputFilename, d.StartLine, d.StartColumn, d.Severity, d.Message, d.RuleName)
+			t.Logf("  %s", formatDiagLine(inputFilename, d))
 		}
 		return
 	}
