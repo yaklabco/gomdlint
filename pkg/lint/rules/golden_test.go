@@ -3,9 +3,11 @@ package rules
 import (
 	"context"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +16,6 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
-	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // update is a flag to update golden files instead of comparing.
@@ -122,21 +123,14 @@ func runPerRuleGoldenTest(t *testing.T, tc GoldenTestCase, updateGolden bool) {
 	input, err := os.ReadFile(tc.InputPath)
 	require.NoError(t, err, "failed to read input file: %s", tc.InputPath)
 
-	// Parse markdown
-	parser := goldmark.New(string(config.FlavorCommonMark))
-	snapshot, err := parser.Parse(context.Background(), filepath.Base(tc.InputPath), input)
-	require.NoError(t, err, "failed to parse input file: %s", tc.InputPath)
-
-	// Get the specific rule
+	// Load the sidecar configuration and parse with its flavor
+	env := newGoldenEnv(t, tc)
 	rule := getRuleByID(t, tc.RuleID)
+	env.requireRulesRun(t, tc, []lint.Rule{rule})
+	snapshot := env.parse(t, filepath.Base(tc.InputPath), input)
 
-	// Create rule context and run the rule
-	cfg := config.NewConfig()
-	ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-	ruleCtx.Registry = lint.DefaultRegistry
-
-	diags, err := rule.Apply(ruleCtx)
-	require.NoError(t, err, "rule %s failed to apply", tc.RuleID)
+	// Run the rule
+	diags := env.applyRule(t, rule, snapshot)
 
 	// Compare diagnostics
 	compareDiags(t, diags, tc, updateGolden)
@@ -159,27 +153,17 @@ func runRealWorldGoldenTest(t *testing.T, tc GoldenTestCase, updateGolden bool) 
 	input, err := os.ReadFile(tc.InputPath)
 	require.NoError(t, err, "failed to read input file: %s", tc.InputPath)
 
-	// Parse markdown
-	parser := goldmark.New(string(config.FlavorCommonMark))
-
-	// Get all enabled rules
+	// Load the sidecar configuration and get all enabled rules
+	env := newGoldenEnv(t, tc)
 	rules := getEnabledRules(t)
-	cfg := config.NewConfig()
+	env.requireRulesRun(t, tc, rules)
 
 	// Run all rules and collect diagnostics
 	allDiags := make([]lint.Diagnostic, 0, len(rules))
 	for _, rule := range rules {
 		// Re-parse for each rule to avoid state issues
-		snapshot, parseErr := parser.Parse(context.Background(), filepath.Base(tc.InputPath), input)
-		require.NoError(t, parseErr)
-
-		ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-		ruleCtx.Registry = lint.DefaultRegistry
-
-		diags, applyErr := rule.Apply(ruleCtx)
-		require.NoError(t, applyErr, "rule %s failed to apply", rule.ID())
-
-		allDiags = append(allDiags, diags...)
+		snapshot := env.parse(t, filepath.Base(tc.InputPath), input)
+		allDiags = append(allDiags, env.applyRule(t, rule, snapshot)...)
 	}
 
 	// Sort diagnostics by line, column for consistent output
@@ -206,12 +190,9 @@ func runRoundTripTest(t *testing.T, tc GoldenTestCase) {
 	input, err := os.ReadFile(tc.InputPath)
 	require.NoError(t, err, "failed to read input file: %s", tc.InputPath)
 
-	// Parse markdown
-	parser := goldmark.New(string(config.FlavorCommonMark))
-	snapshot, err := parser.Parse(context.Background(), filepath.Base(tc.InputPath), input)
-	require.NoError(t, err, "failed to parse input file: %s", tc.InputPath)
-
-	cfg := config.NewConfig()
+	// Load the sidecar configuration and parse with its flavor
+	env := newGoldenEnv(t, tc)
+	snapshot := env.parse(t, filepath.Base(tc.InputPath), input)
 
 	// Determine which rules to run
 	var rules []lint.Rule
@@ -220,17 +201,12 @@ func runRoundTripTest(t *testing.T, tc GoldenTestCase) {
 	} else {
 		rules = getEnabledRules(t)
 	}
+	env.requireRulesRun(t, tc, rules)
 
 	// Run all rules and collect diagnostics
 	allDiags := make([]lint.Diagnostic, 0, len(rules))
 	for _, rule := range rules {
-		ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-		ruleCtx.Registry = lint.DefaultRegistry
-
-		diags, applyErr := rule.Apply(ruleCtx)
-		require.NoError(t, applyErr, "rule %s failed to apply", rule.ID())
-
-		allDiags = append(allDiags, diags...)
+		allDiags = append(allDiags, env.applyRule(t, rule, snapshot)...)
 	}
 
 	// Check if there are any fixable diagnostics
@@ -244,18 +220,11 @@ func runRoundTripTest(t *testing.T, tc GoldenTestCase) {
 	fixedContent := applyAllFixes(t, input, allDiags)
 
 	// Re-parse and re-run rules
-	snapshot2, err := parser.Parse(context.Background(), filepath.Base(tc.InputPath), fixedContent)
-	require.NoError(t, err, "failed to parse fixed content")
+	snapshot2 := env.parse(t, filepath.Base(tc.InputPath), fixedContent)
 
 	var secondPassDiags []lint.Diagnostic
 	for _, rule := range rules {
-		ruleCtx := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
-		ruleCtx.Registry = lint.DefaultRegistry
-
-		diags, err := rule.Apply(ruleCtx)
-		require.NoError(t, err, "rule %s failed to apply on second pass", rule.ID())
-
-		secondPassDiags = append(secondPassDiags, diags...)
+		secondPassDiags = append(secondPassDiags, env.applyRule(t, rule, snapshot2)...)
 	}
 
 	// Assert zero fixable diagnostics remain
@@ -389,4 +358,166 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 		// Just verify it returns a slice (possibly empty)
 		assert.NotNil(t, cases)
 	})
+
+	t.Run("discoverTestCases_sidecar", func(t *testing.T) {
+		baseDir := t.TempDir()
+		ruleDir := filepath.Join(baseDir, "MD043")
+		require.NoError(t, os.MkdirAll(ruleDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(ruleDir, "required.input.md"), []byte("# Title\n"), 0o644))
+
+		cases := discoverTestCases(t, baseDir)
+		require.Len(t, cases, 1)
+		assert.Equal(t, filepath.Join(ruleDir, "required"+goldenConfigSuffix), cases[0].ConfigPath)
+	})
+}
+
+// writeSidecar writes sidecar content to a fresh temporary file and returns its path.
+func writeSidecar(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "case"+goldenConfigSuffix)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	return path
+}
+
+// TestGoldenSidecarConfig verifies loading of per-fixture sidecar configuration.
+func TestGoldenSidecarConfig(t *testing.T) {
+	t.Run("missing sidecar uses product defaults", func(t *testing.T) {
+		cfg, err := loadGoldenConfig(filepath.Join(t.TempDir(), "absent"+goldenConfigSuffix))
+		require.NoError(t, err)
+
+		assert.Equal(t, config.NewConfig().Flavor, cfg.Flavor)
+		assert.Empty(t, cfg.Rules)
+	})
+
+	t.Run("flavor and rule options", func(t *testing.T) {
+		path := writeSidecar(t, `flavor: gfm
+rules:
+  MD043:
+    options:
+      headings:
+        - "# Title"
+        - "*"
+      match_case: true
+  MD013:
+    options:
+      line_length: 100
+`)
+
+		cfg, err := loadGoldenConfig(path)
+		require.NoError(t, err)
+
+		assert.Equal(t, config.FlavorGFM, cfg.Flavor)
+		// Option values keep the types the product's YAML loader produces.
+		assert.Equal(t, map[string]any{"headings": []any{"# Title", "*"}, "match_case": true}, cfg.Rules["MD043"].Options)
+		assert.Equal(t, map[string]any{"line_length": 100}, cfg.Rules["MD013"].Options)
+		assert.Len(t, cfg.Rules, 2)
+	})
+
+	t.Run("explicit commonmark flavor", func(t *testing.T) {
+		cfg, err := loadGoldenConfig(writeSidecar(t, "flavor: commonmark\n"))
+		require.NoError(t, err)
+
+		assert.Equal(t, config.FlavorCommonMark, cfg.Flavor)
+	})
+
+	invalid := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{name: "empty file", content: "", wantErr: "empty"},
+		{name: "comment only", content: "# nothing configured\n", wantErr: "empty"},
+		{name: "misspelled key", content: "flavour: gfm\n", wantErr: "flavour"},
+		{name: "unsupported config key", content: "severity_default: error\n", wantErr: "severity_default"},
+		{name: "unsupported rule key", content: "rules:\n  MD009:\n    severity: error\n", wantErr: "severity"},
+		{name: "invalid flavor", content: "flavor: markdown\n", wantErr: `"markdown"`},
+		{name: "unknown rule", content: "rules:\n  MD999:\n    options:\n      style: x\n", wantErr: "MD999"},
+		{name: "rule name instead of ID", content: "rules:\n  proper-names:\n    options:\n      names: [GitHub]\n", wantErr: "MD044"},
+		{name: "rule without options", content: "rules:\n  MD009: {}\n", wantErr: "MD009"},
+		{name: "second document", content: "flavor: gfm\n---\nflavor: commonmark\n", wantErr: "document"},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadGoldenConfig(writeSidecar(t, tt.content))
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestGoldenEnv verifies that the sidecar drives the parser and rule options.
+func TestGoldenEnv(t *testing.T) {
+	table := []byte("| a | b |\n| - | - |\n| 1 | 2 |\n")
+
+	t.Run("default flavor follows the product default", func(t *testing.T) {
+		env := newGoldenEnv(t, GoldenTestCase{ConfigPath: filepath.Join(t.TempDir(), "absent"+goldenConfigSuffix)})
+
+		assert.Equal(t, config.NewConfig().Flavor, env.cfg.Flavor)
+		assert.Equal(t, string(config.NewConfig().Flavor), env.parser.Flavor())
+	})
+
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run("sidecar flavor "+string(flavor), func(t *testing.T) {
+			env := newGoldenEnv(t, GoldenTestCase{ConfigPath: writeSidecar(t, "flavor: "+string(flavor)+"\n")})
+			snapshot := env.parse(t, "table.input.md", table)
+
+			ruleCtx := lint.NewRuleContext(context.Background(), snapshot, env.cfg, nil)
+			wantTables := 0
+			if flavor == config.FlavorGFM {
+				wantTables = 1
+			}
+			assert.Len(t, ruleCtx.Tables(), wantTables)
+			assert.Equal(t, flavor, env.cfg.Flavor)
+		})
+	}
+
+	t.Run("rule options reach the rule", func(t *testing.T) {
+		env := newGoldenEnv(t, GoldenTestCase{ConfigPath: writeSidecar(t, "rules:\n  MD044:\n    options:\n      names: [GitHub]\n")})
+		snapshot := env.parse(t, "names.input.md", []byte("# Title\n\nUse github here.\n"))
+
+		diags := env.applyRule(t, getRuleByID(t, "MD044"), snapshot)
+		require.Len(t, diags, 1)
+		assert.Equal(t, 3, diags[0].StartLine)
+	})
+
+	t.Run("idle rule configuration", func(t *testing.T) {
+		env := newGoldenEnv(t, GoldenTestCase{ConfigPath: writeSidecar(t, `rules:
+  MD043:
+    options:
+      headings: ["# Title"]
+  MD044:
+    options:
+      names: [GitHub]
+`)})
+
+		assert.Equal(t, []string{"MD043"}, env.idleRuleConfigs([]lint.Rule{getRuleByID(t, "MD044")}))
+		assert.Empty(t, env.idleRuleConfigs([]lint.Rule{getRuleByID(t, "MD043"), getRuleByID(t, "MD044")}))
+	})
+}
+
+// TestGoldenSidecarFiles verifies that every sidecar in testdata is picked up.
+// A misnamed or orphaned sidecar would otherwise be ignored silently.
+func TestGoldenSidecarFiles(t *testing.T) {
+	baseDir := testdataDir(t)
+
+	err := filepath.WalkDir(baseDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		name := entry.Name()
+		switch {
+		case entry.IsDir():
+			return nil
+		case strings.HasSuffix(name, ".config.yaml"):
+			t.Errorf("sidecar %s must use the %s suffix", path, goldenConfigSuffix)
+		case strings.HasSuffix(name, goldenConfigSuffix):
+			inputPath := strings.TrimSuffix(path, goldenConfigSuffix) + ".input.md"
+			if _, statErr := os.Stat(inputPath); statErr != nil {
+				t.Errorf("sidecar %s has no matching input %s", path, inputPath)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }

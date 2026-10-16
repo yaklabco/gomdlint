@@ -31,6 +31,10 @@ type GoldenTestCase struct {
 	// DiagsTxtPath is the path to the expected diagnostics text file.
 	DiagsTxtPath string
 
+	// ConfigPath is the path to the optional sidecar configuration file.
+	// The file need not exist; without it the case uses the product defaults.
+	ConfigPath string
+
 	// RuleID is the rule to test (empty means run all rules).
 	RuleID string
 
@@ -108,6 +112,7 @@ func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 				GoldenPath:    filepath.Join(dirPath, baseName+".golden.md"),
 				DiagsJSONPath: filepath.Join(dirPath, baseName+".diags.json"),
 				DiagsTxtPath:  filepath.Join(dirPath, baseName+".diags.txt"),
+				ConfigPath:    filepath.Join(dirPath, baseName+goldenConfigSuffix),
 				RuleID:        ruleID,
 				IsRealWorld:   isRealWorld,
 			}
