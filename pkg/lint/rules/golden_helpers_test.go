@@ -212,21 +212,21 @@ func writeDiagsJSON(t *testing.T, path string, diags []lint.Diagnostic) {
 // formatDiagLine renders one diagnostic as a line of a .diags.txt file:
 //
 //	basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
-func formatDiagLine(filename string, diag lint.Diagnostic) string {
+func formatDiagLine(filename string, diag DiagExpectation) string {
 	fixable := ""
-	if diag.HasFix() {
+	if diag.Fixable {
 		fixable = " [fixable]"
 	}
 
 	return fmt.Sprintf("%s:%d:%d %s %s (%s/%s)%s",
-		filename, diag.StartLine, diag.StartColumn, diag.Severity, diag.Message, diag.RuleID, diag.RuleName, fixable)
+		filename, diag.Line, diag.Column, diag.Severity, diag.Message, diag.Rule, diag.Name, fixable)
 }
 
 // renderDiagsTxt renders the contents of a .diags.txt file, one line per diagnostic.
-func renderDiagsTxt(diags []lint.Diagnostic, filename string) []byte {
+func renderDiagsTxt(filename string, diags []lint.Diagnostic) []byte {
 	var buf bytes.Buffer
 	for _, diag := range diags {
-		buf.WriteString(formatDiagLine(filename, diag))
+		buf.WriteString(formatDiagLine(filename, diagFromLint(diag)))
 		buf.WriteByte('\n')
 	}
 
@@ -282,7 +282,7 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 	t.Helper()
 
 	inputFilename := filepath.Base(tc.InputPath)
-	actualTxt := renderDiagsTxt(actual, inputFilename)
+	actualTxt := renderDiagsTxt(inputFilename, actual)
 
 	if update {
 		writeDiagsJSON(t, tc.DiagsJSONPath, actual)
@@ -298,7 +298,7 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 		t.Errorf("Diagnostics JSON file does not exist: %s\nRun with -update flag to create it.", tc.DiagsJSONPath)
 		t.Logf("Actual diagnostics: %d", len(actual))
 		for _, d := range actual {
-			t.Logf("  %s", formatDiagLine(inputFilename, d))
+			t.Logf("  %s", formatDiagLine(inputFilename, diagFromLint(d)))
 		}
 		return
 	}
@@ -308,11 +308,11 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 		t.Errorf("Diagnostic count mismatch: got %d, want %d", len(actual), len(expected))
 		t.Logf("Expected diagnostics:")
 		for _, d := range expected {
-			t.Logf("  %s:%d:%d %s %s (%s/%s)", inputFilename, d.Line, d.Column, d.Severity, d.Message, d.Rule, d.Name)
+			t.Logf("  %s", formatDiagLine(inputFilename, d))
 		}
 		t.Logf("Actual diagnostics:")
 		for _, d := range actual {
-			t.Logf("  %s", formatDiagLine(inputFilename, d))
+			t.Logf("  %s", formatDiagLine(inputFilename, diagFromLint(d)))
 		}
 		return
 	}
@@ -371,32 +371,6 @@ func showDiff(t *testing.T, expected, actual []byte) {
 	if diffBuf.Len() > 0 {
 		t.Logf("Diff (- expected, + actual):\n%s", diffBuf.String())
 	}
-}
-
-// getRuleByID gets a rule by its ID from the default registry.
-func getRuleByID(t *testing.T, ruleID string) lint.Rule {
-	t.Helper()
-
-	rule, ok := lint.DefaultRegistry.GetByID(ruleID)
-	if !ok {
-		t.Fatalf("rule %s not found in registry", ruleID)
-	}
-
-	return rule
-}
-
-// getEnabledRules returns all default-enabled rules from the registry.
-func getEnabledRules(t *testing.T) []lint.Rule {
-	t.Helper()
-
-	var enabled []lint.Rule
-	for _, rule := range lint.DefaultRegistry.Rules() {
-		if rule.DefaultEnabled() {
-			enabled = append(enabled, rule)
-		}
-	}
-
-	return enabled
 }
 
 // filterFixableDiags returns only diagnostics that have fixes.

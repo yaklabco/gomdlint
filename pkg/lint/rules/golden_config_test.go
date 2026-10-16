@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,7 +18,6 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
-	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -24,6 +25,14 @@ import (
 // configuration, which sits next to the input:
 // testdata/<RULE_ID>/<scenario>.config.yml.
 const goldenConfigSuffix = ".config.yml"
+
+var (
+	// errEmptySidecar reports a sidecar that configures nothing.
+	errEmptySidecar = errors.New("sidecar sets neither a flavor nor rule options")
+
+	// errMultipleDocuments reports a sidecar with more than one YAML document.
+	errMultipleDocuments = errors.New("sidecar holds more than one YAML document")
+)
 
 // goldenSidecar is the schema of a sidecar file. It is a strict subset of the
 // .gomdlint.yml schema, so a sidecar is also a valid gomdlint config file.
@@ -70,17 +79,18 @@ func loadGoldenConfig(path string) (*config.Config, error) {
 			path, sidecar.Flavor, config.FlavorCommonMark, config.FlavorGFM)
 	}
 
-	for key, rule := range sidecar.Rules {
+	for _, key := range slices.Sorted(maps.Keys(sidecar.Rules)) {
 		if _, ok := lint.DefaultRegistry.GetByID(key); !ok {
 			if ruleID, _, found := lint.DefaultRegistry.Resolve(key); found {
-				return nil, fmt.Errorf("sidecar %s: key rules by ID, use %s instead of %q", path, ruleID, key)
+				return nil, fmt.Errorf("sidecar %s: rules.%s: use the rule ID %s, not the name", path, key, ruleID)
 			}
-			return nil, fmt.Errorf("sidecar %s: unknown rule %q", path, key)
+			return nil, fmt.Errorf("sidecar %s: rules.%s: unknown rule", path, key)
 		}
-		if len(rule.Options) == 0 {
+		options := sidecar.Rules[key].Options
+		if len(options) == 0 {
 			return nil, fmt.Errorf("sidecar %s: rules.%s sets no options", path, key)
 		}
-		cfg.Rules[key] = config.RuleConfig{Options: rule.Options}
+		cfg.Rules[key] = config.RuleConfig{Options: options}
 	}
 
 	return cfg, nil
@@ -96,118 +106,170 @@ func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
 
 	err := decoder.Decode(&sidecar)
 	if errors.Is(err, io.EOF) {
-		return sidecar, errors.New("sidecar is empty, delete it or set flavor or rules")
+		return goldenSidecar{}, errEmptySidecar
 	}
 	if err != nil {
-		return sidecar, fmt.Errorf("parse: %w", err)
+		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
 	}
 
 	var extra yaml.Node
 	switch err := decoder.Decode(&extra); {
 	case err == nil:
-		return sidecar, errors.New("sidecar must hold a single YAML document")
+		return goldenSidecar{}, errMultipleDocuments
 	case !errors.Is(err, io.EOF):
-		return sidecar, fmt.Errorf("parse: %w", err)
+		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
 	}
 
 	if sidecar.Flavor == "" && len(sidecar.Rules) == 0 {
-		return sidecar, errors.New("sidecar is empty, delete it or set flavor or rules")
+		return goldenSidecar{}, errEmptySidecar
 	}
 
 	return sidecar, nil
 }
 
-// goldenEnv is the configuration and parser for one golden fixture.
-type goldenEnv struct {
-	cfg    *config.Config
-	parser *goldmark.Parser
+// goldenRun holds what one golden case needs to lint a document: the
+// configuration from its sidecar, a parser for its flavor, the registry, and
+// the rules the case runs.
+type goldenRun struct {
+	cfg      *config.Config
+	parser   *goldmark.Parser
+	registry *lint.Registry
+	rules    []lint.Rule
 }
 
-// newGoldenEnv loads the fixture's sidecar and builds a parser for its flavor.
-func newGoldenEnv(t *testing.T, tc GoldenTestCase) goldenEnv {
+// newGoldenRun prepares a case. A per-rule case runs its directory's rule,
+// even when that rule is disabled by default, and any other case runs the
+// default-enabled rules. A sidecar that configures a rule the case does not
+// run is an error, because those options would have no effect.
+func newGoldenRun(tc GoldenTestCase) (goldenRun, error) {
+	cfg, err := loadGoldenConfig(tc.ConfigPath)
+	if err != nil {
+		return goldenRun{}, err
+	}
+
+	rules := defaultEnabledRules(lint.DefaultRegistry)
+	if tc.RuleID != "" {
+		rule, ok := lint.DefaultRegistry.GetByID(tc.RuleID)
+		if !ok {
+			return goldenRun{}, fmt.Errorf("rule %s not found in registry", tc.RuleID)
+		}
+		rules = []lint.Rule{rule}
+	}
+
+	run := goldenRun{
+		cfg:      cfg,
+		parser:   goldmark.New(string(cfg.Flavor)),
+		registry: lint.DefaultRegistry,
+		rules:    rules,
+	}
+	if unused := run.unusedRuleConfigs(); len(unused) > 0 {
+		return goldenRun{}, fmt.Errorf("sidecar %s configures rules the case does not run: %s",
+			tc.ConfigPath, strings.Join(unused, ", "))
+	}
+
+	return run, nil
+}
+
+// lintFile lints content the way the product lints one file: through
+// lint.Engine.LintFile, with fixes on and only the case's rules enabled. The
+// engine applies inline directives, resolves severity, fills in rule names
+// and prepares the fix edits. Rule errors fail the case, and so does a
+// diagnostic that does not carry the ID and name of one of the case's rules.
+func (run goldenRun) lintFile(name string, content []byte) (*lint.FileResult, error) {
+	enabled := make([]string, 0, len(run.rules))
+	for _, rule := range run.rules {
+		enabled = append(enabled, rule.ID())
+	}
+	var disabled []string
+	for _, ruleID := range run.registry.IDs() {
+		if !slices.Contains(enabled, ruleID) {
+			disabled = append(disabled, ruleID)
+		}
+	}
+
+	cfg := *run.cfg
+	cfg.Fix = true
+	cfg.EnableRules = enabled
+	cfg.DisableRules = disabled
+
+	result, err := lint.NewEngine(run.parser, run.registry).LintFile(context.Background(), name, content, &cfg)
+	if err != nil {
+		return nil, fmt.Errorf("lint %s: %w", name, err)
+	}
+	if len(result.RuleErrors) > 0 {
+		return nil, fmt.Errorf("lint %s: rule errors: %v", name, result.RuleErrors)
+	}
+	if err := checkDiagIdentity(run.rules, result.Diagnostics); err != nil {
+		return nil, fmt.Errorf("lint %s: %w", name, err)
+	}
+
+	return result, nil
+}
+
+// mustGoldenRun prepares a case, failing the test on error.
+func mustGoldenRun(t *testing.T, tc GoldenTestCase) goldenRun {
 	t.Helper()
 
-	cfg, err := loadGoldenConfig(tc.ConfigPath)
+	run, err := newGoldenRun(tc)
 	require.NoError(t, err)
 
-	return goldenEnv{cfg: cfg, parser: goldmark.New(string(cfg.Flavor))}
+	return run
 }
 
-// parse parses content with the fixture's flavor.
-func (env goldenEnv) parse(t *testing.T, name string, content []byte) *mdast.FileSnapshot {
+// mustLintFile lints content, failing the test on error.
+func (run goldenRun) mustLintFile(t *testing.T, name string, content []byte) *lint.FileResult {
 	t.Helper()
 
-	snapshot, err := env.parser.Parse(context.Background(), name, content)
-	require.NoError(t, err, "failed to parse %s", name)
-
-	return snapshot
-}
-
-// applyRule runs one rule with the fixture's configuration and returns its
-// diagnostics as the engine reports them. Like lint.Engine.LintFile, it passes
-// the rule its configured options, fills in the rule name, and sets the
-// resolved severity, which is the rule default because sidecars cannot
-// configure severity. Every diagnostic must carry the rule's ID and name.
-func (env goldenEnv) applyRule(t *testing.T, rule lint.Rule, snapshot *mdast.FileSnapshot) []lint.Diagnostic {
-	t.Helper()
-
-	var ruleCfg *config.RuleConfig
-	if configured, ok := env.cfg.Rules[rule.ID()]; ok {
-		ruleCfg = &configured
+	result, err := run.lintFile(name, content)
+	require.NoError(t, err)
+	if len(result.SkippedEdits) > 0 {
+		t.Logf("Note: %d edits skipped due to conflicts", len(result.SkippedEdits))
 	}
 
-	ruleCtx := lint.NewRuleContext(context.Background(), snapshot, env.cfg, ruleCfg)
-	ruleCtx.Registry = lint.DefaultRegistry
-
-	diags, err := rule.Apply(ruleCtx)
-	require.NoError(t, err, "rule %s failed to apply", rule.ID())
-
-	for idx := range diags {
-		if diags[idx].RuleName == "" {
-			diags[idx].RuleName = rule.Name()
-		}
-		diags[idx].Severity = rule.DefaultSeverity()
-	}
-	require.NoError(t, checkDiagIdentity(rule, diags))
-
-	return diags
+	return result
 }
 
 // checkDiagIdentity returns an error when a diagnostic does not carry the ID
-// and name of the rule that produced it.
-func checkDiagIdentity(rule lint.Rule, diags []lint.Diagnostic) error {
+// and name of one of the given rules.
+func checkDiagIdentity(rules []lint.Rule, diags []lint.Diagnostic) error {
 	for idx, diag := range diags {
-		if diag.RuleID != rule.ID() || diag.RuleName != rule.Name() {
-			return fmt.Errorf("diagnostic %d from %s/%s is labelled %s/%s",
-				idx, rule.ID(), rule.Name(), diag.RuleID, diag.RuleName)
+		known := slices.ContainsFunc(rules, func(rule lint.Rule) bool {
+			return rule.ID() == diag.RuleID && rule.Name() == diag.RuleName
+		})
+		if !known {
+			return fmt.Errorf("diagnostic %d is labelled %s/%s, which is not a rule of this case",
+				idx, diag.RuleID, diag.RuleName)
 		}
 	}
 
 	return nil
 }
 
-// idleRuleConfigs returns the sorted IDs of configured rules that are not in
-// rules. Their options would have no effect on the case.
-func (env goldenEnv) idleRuleConfigs(rules []lint.Rule) []string {
-	var idle []string
-	for ruleID := range env.cfg.Rules {
-		runs := slices.ContainsFunc(rules, func(rule lint.Rule) bool {
+// unusedRuleConfigs returns the sorted IDs of configured rules that the case
+// does not run.
+func (run goldenRun) unusedRuleConfigs() []string {
+	var unused []string
+	for ruleID := range run.cfg.Rules {
+		runs := slices.ContainsFunc(run.rules, func(rule lint.Rule) bool {
 			return rule.ID() == ruleID
 		})
 		if !runs {
-			idle = append(idle, ruleID)
+			unused = append(unused, ruleID)
 		}
 	}
-	slices.Sort(idle)
+	slices.Sort(unused)
 
-	return idle
+	return unused
 }
 
-// requireRulesRun fails the test when the sidecar configures a rule that the
-// case does not run.
-func (env goldenEnv) requireRulesRun(t *testing.T, tc GoldenTestCase, rules []lint.Rule) {
-	t.Helper()
+// defaultEnabledRules returns the registry's rules that are enabled by default.
+func defaultEnabledRules(registry *lint.Registry) []lint.Rule {
+	var enabled []lint.Rule
+	for _, rule := range registry.Rules() {
+		if rule.DefaultEnabled() {
+			enabled = append(enabled, rule)
+		}
+	}
 
-	require.Empty(t, env.idleRuleConfigs(rules),
-		"sidecar %s configures rules that this case does not run", tc.ConfigPath)
+	return enabled
 }
