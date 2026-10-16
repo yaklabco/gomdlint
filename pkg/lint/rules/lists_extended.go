@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
@@ -30,90 +29,130 @@ func NewListIndentRule() *ListIndentRule {
 }
 
 // Apply checks for inconsistent list item indentation.
+//
+// Like markdownlint, every item of a list must start in the column of the
+// first item's marker, and ordered lists may instead right-align their
+// numbers so that the markers end in the same column. Unordered lists are
+// reported without a fix, because MD007 moves their items to the configured
+// indentation; ordered items are moved only when that keeps the structure.
 func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	var diags []lint.Diagnostic
-
-	// Track indentation levels within each list.
-	lists := ctx.Lists()
-	for _, list := range lists {
+	plan := newListShiftPlan(ctx.File)
+	var mismatches []indentMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-
-		listDiags := r.checkList(ctx, list)
-		diags = append(diags, listDiags...)
+		mismatches = append(mismatches, listIndentMismatches(ctx.File, plan, list)...)
 	}
+	safeShifts := plan.resolve()
 
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		msg := fmt.Sprintf("List item indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
+		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
+		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, safeShifts, msg, suggestion))
+	}
 	return diags, nil
 }
 
-func (r *ListIndentRule) checkList(ctx *lint.RuleContext, list *mdast.Node) []lint.Diagnostic {
-	var diags []lint.Diagnostic
-	items := lint.ListItems(list)
-	if len(items) < 2 {
-		return diags
-	}
-
-	// Get the indentation of the first item to use as reference.
-	firstItem := items[0]
-	firstPos := firstItem.SourcePosition()
-	if !firstPos.IsValid() {
-		return diags
-	}
-
-	referenceIndent := r.getItemIndent(ctx.File, firstPos.StartLine)
-
-	// Check remaining items.
-	for i := 1; i < len(items); i++ {
-		item := items[i]
-		pos := item.SourcePosition()
-		if !pos.IsValid() {
-			continue
-		}
-
-		indent := r.getItemIndent(ctx.File, pos.StartLine)
-		if indent != referenceIndent {
-			line := ctx.File.Lines[pos.StartLine-1]
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			lineContent := lint.LineContent(ctx.File, pos.StartLine)
-			trimmed := bytes.TrimLeft(lineContent, " \t")
-
-			newLine := strings.Repeat(" ", referenceIndent) + string(trimmed)
-			builder.ReplaceRange(line.StartOffset, line.NewlineStart, newLine)
-
-			diag := lint.NewDiagnostic(r.ID(), item,
-				fmt.Sprintf("List item indentation %d does not match expected %d", indent, referenceIndent)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Indent list item by %d spaces", referenceIndent)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
-	}
-
-	return diags
+// indentMismatch is a list item whose marker is not in the expected column.
+type indentMismatch struct {
+	item     *mdast.Node
+	marker   listItemMarker
+	actual   int
+	expected int
 }
 
-func (r *ListIndentRule) getItemIndent(file *mdast.FileSnapshot, lineNum int) int {
-	content := lint.LineText(file, lineNum)
-	indent := 0
-	for _, ch := range content {
-		switch ch {
-		case ' ':
-			indent++
-		case '\t':
-			indent += 4 // Count tab as 4 spaces.
-		default:
-			return indent
-		}
+// listIndentMismatches finds the misaligned items of one list and proposes
+// moving ordered items to the expected column.
+func listIndentMismatches(file *mdast.FileSnapshot, plan *listShiftPlan, list *mdast.Node) []indentMismatch {
+	items := lint.ListItems(list)
+	if len(items) < 2 {
+		return nil
 	}
-	return indent
+	first, found := findListItemMarker(file, items[0])
+	if !found {
+		return nil
+	}
+	ordered := lint.IsOrderedList(list)
+	expectedIndent := first.Column()
+	expectedEnd := first.Column() + first.Width()
+	endMatching := false
+
+	var mismatches []indentMismatch
+	for _, item := range items[1:] {
+		marker, found := findListItemMarker(file, item)
+		if !found {
+			continue
+		}
+		actual := marker.Column()
+		if !ordered {
+			if actual != expectedIndent {
+				mismatches = append(mismatches, indentMismatch{item: item, marker: marker, actual: actual, expected: expectedIndent})
+			}
+			continue
+		}
+		if actual == expectedIndent && !endMatching {
+			continue
+		}
+		if actual+marker.Width() == expectedEnd {
+			endMatching = true
+			continue
+		}
+		expected := expectedIndent
+		if endMatching {
+			expected = expectedEnd - marker.Width()
+		}
+		mismatches = append(mismatches, indentMismatch{item: item, marker: marker, actual: actual, expected: expected})
+		proposeIndentShift(plan, item, actual, expected)
+	}
+	return mismatches
+}
+
+// proposeIndentShift proposes moving an item's marker, and with it its
+// content, from one column to another.
+func proposeIndentShift(plan *listShiftPlan, item *mdast.Node, actual, expected int) {
+	if expected < 0 {
+		return
+	}
+	layout, ok := plan.layout(item)
+	if !ok {
+		return
+	}
+	plan.propose(item, listShift{markerCol: expected, contentCol: layout.contentCol + expected - actual})
+}
+
+// indentDiagnostic reports a misaligned marker. Like markdownlint, the range
+// covers the line from its start through the marker. A fix rewrites that
+// range with the expected indentation when the plan accepted the move.
+func indentDiagnostic(
+	ctx *lint.RuleContext,
+	ruleID string,
+	mismatch indentMismatch,
+	safeShifts map[*mdast.Node]listShift,
+	msg, suggestion string,
+) lint.Diagnostic {
+	marker := mismatch.marker
+	pos := mdast.SourcePosition{
+		StartLine:   marker.Line,
+		StartColumn: 1,
+		EndLine:     marker.Line,
+		EndColumn:   marker.End - marker.LineStart + 1,
+	}
+	diagBuilder := lint.NewDiagnosticAt(ruleID, ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion(suggestion)
+	if shift, ok := safeShifts[mismatch.item]; ok && shift.markerCol == mismatch.expected {
+		builder := fix.NewEditBuilder()
+		builder.ReplaceRange(marker.LineStart, marker.End,
+			strings.Repeat(" ", mismatch.expected)+string(ctx.File.Content[marker.Start:marker.End]))
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build()
 }
 
 // ULIndentRule checks unordered list indentation.
@@ -134,120 +173,83 @@ func NewULIndentRule() *ULIndentRule {
 	}
 }
 
+// ulIndentOptions holds the MD007 settings.
+type ulIndentOptions struct {
+	indent        int
+	startIndented bool
+	startIndent   int
+}
+
 // Apply checks unordered list indentation.
+//
+// Like markdownlint, the rule covers unordered lists whose enclosing lists are
+// all unordered, and measures each marker from the start of its line. All
+// moves in a list tree are planned together, and only those that keep every
+// item under the same parent are fixed.
 func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	indent := ctx.OptionInt("indent", 2)
-	startIndented := ctx.OptionBool("start_indented", false)
-	startIndent := ctx.OptionInt("start_indent", indent)
+	opts := ulIndentOptions{
+		indent:        indent,
+		startIndented: ctx.OptionBool("start_indented", false),
+		startIndent:   ctx.OptionInt("start_indent", indent),
+	}
 
-	var diags []lint.Diagnostic
+	plan := newListShiftPlan(ctx.File)
+	var mismatches []indentMismatch
 
 	// Only process top-level lists (direct children of document).
 	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-
-		if child.Kind != mdast.NodeList {
+		if child.Kind != mdast.NodeList || lint.IsOrderedList(child) {
 			continue
 		}
-
-		// Skip ordered lists.
-		if lint.IsOrderedList(child) {
-			continue
-		}
-
-		listDiags := r.checkULIndent(ctx, child, 0, indent, startIndented, startIndent)
-		diags = append(diags, listDiags...)
+		mismatches = append(mismatches, ulIndentMismatches(ctx.File, plan, child, 0, opts)...)
 	}
+	safeShifts := plan.resolve()
 
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		msg := fmt.Sprintf("Unordered list indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
+		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
+		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, safeShifts, msg, suggestion))
+	}
 	return diags, nil
 }
 
-func (r *ULIndentRule) checkULIndent(
-	ctx *lint.RuleContext,
+// ulIndentMismatches checks the items of an unordered list at the given
+// depth and recurses into nested unordered lists.
+func ulIndentMismatches(
+	file *mdast.FileSnapshot,
+	plan *listShiftPlan,
 	list *mdast.Node,
 	depth int,
-	indent int,
-	startIndented bool,
-	startIndent int,
-) []lint.Diagnostic {
-	var diags []lint.Diagnostic
-
-	// Calculate expected indentation.
-	var expectedIndent int
-	if depth == 0 {
-		if startIndented {
-			expectedIndent = startIndent
-		} else {
-			expectedIndent = 0
-		}
-	} else {
-		if startIndented {
-			expectedIndent = startIndent + (depth * indent)
-		} else {
-			expectedIndent = depth * indent
-		}
+	opts ulIndentOptions,
+) []indentMismatch {
+	expected := depth * opts.indent
+	if opts.startIndented {
+		expected += opts.startIndent
 	}
 
-	items := lint.ListItems(list)
-	for _, item := range items {
-		pos := item.SourcePosition()
-		if !pos.IsValid() {
-			continue
+	var mismatches []indentMismatch
+	for _, item := range lint.ListItems(list) {
+		if marker, found := findListItemMarker(file, item); found && marker.Column() != expected {
+			mismatches = append(mismatches, indentMismatch{item: item, marker: marker, actual: marker.Column(), expected: expected})
+			proposeIndentShift(plan, item, marker.Column(), expected)
 		}
 
-		actualIndent := r.getItemIndent(ctx.File, pos.StartLine)
-		if actualIndent != expectedIndent {
-			line := ctx.File.Lines[pos.StartLine-1]
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			lineContent := lint.LineText(ctx.File, pos.StartLine)
-			trimmed := bytes.TrimLeft(lineContent, " \t")
-
-			newLine := strings.Repeat(" ", expectedIndent) + string(trimmed)
-			builder.ReplaceRange(line.StartOffset+lint.LineTextOffset(ctx.File, pos.StartLine), line.NewlineStart, newLine)
-
-			diag := lint.NewDiagnostic(r.ID(), item,
-				fmt.Sprintf("Unordered list indentation %d does not match expected %d", actualIndent, expectedIndent)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Indent list item by %d spaces", expectedIndent)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
-
-		// Check nested lists.
 		for child := item.FirstChild; child != nil; child = child.Next {
 			if child.Kind == mdast.NodeList && !lint.IsOrderedList(child) {
-				childDiags := r.checkULIndent(ctx, child, depth+1, indent, startIndented, startIndent)
-				diags = append(diags, childDiags...)
+				mismatches = append(mismatches, ulIndentMismatches(file, plan, child, depth+1, opts)...)
 			}
 		}
 	}
-
-	return diags
-}
-
-func (r *ULIndentRule) getItemIndent(file *mdast.FileSnapshot, lineNum int) int {
-	content := lint.LineText(file, lineNum)
-	indent := 0
-	for _, ch := range content {
-		switch ch {
-		case ' ':
-			indent++
-		case '\t':
-			indent += 4
-		default:
-			return indent
-		}
-	}
-	return indent
+	return mismatches
 }
 
 // ListMarkerSpaceRule checks for correct spaces after list markers.

@@ -1,17 +1,17 @@
 # Many Indentation Violations
 
 - First item
-- Second item wrong
+ - Second item wrong
 - Third item correct
 
 ## Second Section
 
 - Alpha
   - Beta
-  - Gamma wrong
+   - Gamma wrong
 
 ## Third Section
 
 - One
-- Two wrong
+ - Two wrong
 - Three correct

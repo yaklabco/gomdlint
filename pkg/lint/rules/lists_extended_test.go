@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -100,6 +102,16 @@ func TestULIndentRule(t *testing.T) {
 		{
 			name:      "empty file",
 			input:     "",
+			wantDiags: 0,
+		},
+		{
+			name:      "nested list on the parent marker line",
+			input:     "- - x\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "ordered parent is not checked",
+			input:     "1. a\n   - b\n",
 			wantDiags: 0,
 		},
 	}
@@ -334,16 +346,18 @@ func TestListIndentRule_Fix(t *testing.T) {
 			wantFix:   "* Item 1\n* Item 2\n* Item 3\n",
 		},
 		{
+			// Like markdownlint, MD005 does not fix unordered lists; MD007
+			// moves their items to the configured indentation.
 			name:      "single violation - second item extra indent",
 			input:     "* Item 1\n * Item 2\n* Item 3\n",
 			wantDiags: 1,
-			wantFix:   "* Item 1\n* Item 2\n* Item 3\n",
+			wantFix:   "* Item 1\n * Item 2\n* Item 3\n",
 		},
 		{
 			name:      "multiple violations - varying indentation",
 			input:     "* Item 1\n * Item 2\n  * Item 3\n",
 			wantDiags: 2,
-			wantFix:   "* Item 1\n* Item 2\n* Item 3\n",
+			wantFix:   "* Item 1\n * Item 2\n  * Item 3\n",
 		},
 		{
 			name:      "empty file",
@@ -368,6 +382,50 @@ func TestListIndentRule_Fix(t *testing.T) {
 			input:     "1. Item 1\n 2. Item 2\n1. Item 3\n",
 			wantDiags: 1,
 			wantFix:   "1. Item 1\n2. Item 2\n1. Item 3\n",
+		},
+		{
+			name:      "ordered list nested on a bullet line is aligned",
+			input:     "- 1. alpha\n  2. beta\n",
+			wantDiags: 0,
+			wantFix:   "- 1. alpha\n  2. beta\n",
+		},
+		{
+			name:      "right-aligned numbers are allowed",
+			input:     " 9. nine\n10. ten\n",
+			wantDiags: 0,
+			wantFix:   " 9. nine\n10. ten\n",
+		},
+		{
+			name:      "right-aligned list with a misaligned item",
+			input:     " 9. nine\n10. ten\n 11. eleven\n",
+			wantDiags: 1,
+			wantFix:   " 9. nine\n10. ten\n11. eleven\n",
+		},
+		{
+			name:      "ordered item moved left keeps its continuation",
+			input:     "1. Item 1\n  2. Item 2\n     continued\n",
+			wantDiags: 1,
+			wantFix:   "1. Item 1\n2. Item 2\n     continued\n",
+		},
+		{
+			name:      "ordered item is moved right to the first item column",
+			input:     "  1. Item 1\n2. Item 2\n",
+			wantDiags: 1,
+			wantFix:   "  1. Item 1\n  2. Item 2\n",
+		},
+		{
+			// Moving the item left would leave the nested item four columns
+			// past the content, turning it into paragraph text.
+			name:      "ordered item is not moved when its nested list would break",
+			input:     "1. Item 1\n 2. Item 2\n       - nested\n",
+			wantDiags: 1,
+			wantFix:   "1. Item 1\n 2. Item 2\n       - nested\n",
+		},
+		{
+			name:      "ordered list in a blockquote is reported",
+			input:     "> 1. Item 1\n>  2. Item 2\n",
+			wantDiags: 1,
+			wantFix:   "> 1. Item 1\n>  2. Item 2\n",
 		},
 	}
 
@@ -459,11 +517,20 @@ func TestULIndentRule_Fix(t *testing.T) {
 			config:    map[string]any{"start_indented": true},
 		},
 		{
+			// Four spaces at the top level make an indented code block, so
+			// the fix is withheld.
 			name:      "start_indented with custom start_indent - violation",
 			input:     "  * Item 1\n",
 			wantDiags: 1,
-			wantFix:   "    * Item 1\n",
+			wantFix:   "  * Item 1\n",
 			config:    map[string]any{"start_indented": true, "start_indent": 4},
+		},
+		{
+			name:      "start_indented with start_indent 3 is fixed",
+			input:     "  * Item 1\n",
+			wantDiags: 1,
+			wantFix:   "   * Item 1\n",
+			config:    map[string]any{"start_indented": true, "start_indent": 3},
 		},
 		{
 			name:      "custom indent=4 - correct",
@@ -478,6 +545,32 @@ func TestULIndentRule_Fix(t *testing.T) {
 			wantDiags: 1,
 			wantFix:   "* Item 1\n    * Nested\n",
 			config:    map[string]any{"indent": 4},
+		},
+		{
+			name:      "indented top-level item keeps its continuation",
+			input:     "   - Item\n     continued\n",
+			wantDiags: 1,
+			wantFix:   "- Item\n     continued\n",
+		},
+		{
+			name:      "whole indented list moves together",
+			input:     "  - Alpha\n    - Beta\n  - Gamma\n   - Delta\n",
+			wantDiags: 4,
+			wantFix:   "- Alpha\n  - Beta\n- Gamma\n- Delta\n",
+		},
+		{
+			// The parent content starts at column 4, so moving the child
+			// to column 2 would make it a sibling of its parent.
+			name:      "no fix when the nested item would leave its parent",
+			input:     "-   Parent\n    - Child\n",
+			wantDiags: 1,
+			wantFix:   "-   Parent\n    - Child\n",
+		},
+		{
+			name:      "no fix when the item holds a code block",
+			input:     "   - Item\n\n         code\n",
+			wantDiags: 1,
+			wantFix:   "   - Item\n\n         code\n",
 		},
 	}
 
@@ -776,6 +869,95 @@ func TestBlanksAroundListsRule_Fix(t *testing.T) {
 				require.NoError(t, err)
 				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
+		})
+	}
+}
+
+// listShape renders the nesting of lists, items, paragraphs and other blocks,
+// so that a fix can be checked for keeping the document structure.
+func listShape(t *testing.T, input string) string {
+	t.Helper()
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	var shape strings.Builder
+	var walk func(node *mdast.Node)
+	walk = func(node *mdast.Node) {
+		for child := node.FirstChild; child != nil; child = child.Next {
+			switch {
+			case child.Kind == mdast.NodeList:
+				shape.WriteString("[")
+				walk(child)
+				shape.WriteString("]")
+			case child.Kind == mdast.NodeListItem:
+				shape.WriteString("(")
+				walk(child)
+				shape.WriteString(")")
+			case isParagraphLike(child):
+				shape.WriteString("p")
+			case child.IsBlock():
+				shape.WriteString(child.Kind.String())
+				walk(child)
+			}
+		}
+	}
+	walk(snapshot.Root)
+	return shape.String()
+}
+
+// TestListIndentationFixesPreserveStructure applies the MD005, MD007 and
+// MD030 fixes together, the way one fix pass does, and checks that the lists
+// keep their structure.
+func TestListIndentationFixesPreserveStructure(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "indented list with a misaligned sibling",
+			input: "  - Alpha\n    - Beta\n  - Gamma\n   - Delta\n",
+			want:  "- Alpha\n  - Beta\n- Gamma\n- Delta\n",
+		},
+		{
+			name:  "spacing and indentation on the same item",
+			input: "  -   Alpha\n      - Beta\n",
+		},
+		{
+			name:  "sibling indented past a narrowed item",
+			input: "-  Top\n  -  Next\n",
+		},
+		{
+			name:  "ordered list with misaligned items and spacing",
+			input: "1.  One\n 2. Two\n  3.  Three\n",
+		},
+		{
+			name:  "following paragraph close to the content column",
+			input: "   -  Item\n\n  After\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+
+			var edits []fix.TextEdit
+			for _, rule := range []lint.Rule{NewListIndentRule(), NewULIndentRule(), NewListMarkerSpaceRule()} {
+				ruleCtx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+				diags, err := rule.Apply(ruleCtx)
+				require.NoError(t, err)
+				for _, diag := range diags {
+					edits = append(edits, diag.FixEdits...)
+				}
+			}
+			accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(tt.input))
+			require.NoError(t, err)
+			fixed := string(fix.ApplyEdits([]byte(tt.input), accepted))
+
+			if tt.want != "" {
+				assert.Equal(t, tt.want, fixed)
+			}
+			assert.Equal(t, listShape(t, tt.input), listShape(t, fixed), "fixed:\n%s", fixed)
 		})
 	}
 }

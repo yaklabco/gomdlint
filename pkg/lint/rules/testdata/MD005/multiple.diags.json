@@ -3,27 +3,27 @@
     "rule": "MD005",
     "name": "list-indent",
     "line": 4,
-    "column": 2,
+    "column": 1,
     "message": "List item indentation 1 does not match expected 0",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD005",
     "name": "list-indent",
     "line": 11,
-    "column": 4,
+    "column": 1,
     "message": "List item indentation 3 does not match expected 2",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD005",
     "name": "list-indent",
     "line": 16,
-    "column": 2,
+    "column": 1,
     "message": "List item indentation 1 does not match expected 0",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   }
 ]

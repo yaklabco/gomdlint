@@ -1,1 +1,1 @@
-frontmatter.input.md:8:2 warning List item indentation 1 does not match expected 0 (MD005/list-indent) [fixable]
+frontmatter.input.md:8:1 warning List item indentation 1 does not match expected 0 (MD005/list-indent)
