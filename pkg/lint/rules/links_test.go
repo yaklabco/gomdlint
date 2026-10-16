@@ -169,9 +169,10 @@ func TestEmptyLinkRule(t *testing.T) {
 			wantN: 1,
 		},
 		{
+			// markdownlint MD042 checks destinations only; empty text is not an empty link.
 			name:  "empty text",
 			input: "[](url)",
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			name:  "both empty",
@@ -181,12 +182,37 @@ func TestEmptyLinkRule(t *testing.T) {
 		{
 			name:  "whitespace only text",
 			input: "[   ](url)",
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			name:  "multiple empty links",
-			input: "[text]() and [](url)",
+			input: "[text]() and [](url) and [other](<>)",
 			wantN: 2,
+		},
+		{
+			name:  "empty fragment",
+			input: "[text](#)",
+			wantN: 1,
+		},
+		{
+			name:  "non-empty fragment",
+			input: "[text](#section)",
+			wantN: 0,
+		},
+		{
+			name:  "reference to empty fragment definition",
+			input: "[text][ref] and [ref][]\n\n[ref]: #\n",
+			wantN: 2,
+		},
+		{
+			name:  "reference to valid definition",
+			input: "[text][ref]\n\n[ref]: https://example.com\n",
+			wantN: 0,
+		},
+		{
+			name:  "image with empty destination is not a link",
+			input: "![alt]()",
+			wantN: 0,
 		},
 	}
 

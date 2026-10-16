@@ -1,2 +1,1 @@
-frontmatter.input.md:7:21 warning Link has empty text (MD042/no-empty-links)
 frontmatter.input.md:9:21 warning Link has empty destination (MD042/no-empty-links)

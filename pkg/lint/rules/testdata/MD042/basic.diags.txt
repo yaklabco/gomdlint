@@ -1,3 +1,2 @@
-basic.input.md:3:21 warning Link has empty text (MD042/no-empty-links)
 basic.input.md:5:21 warning Link has empty destination (MD042/no-empty-links)
-basic.input.md:7:21 warning Link has empty text and destination (MD042/no-empty-links)
+basic.input.md:7:21 warning Link has empty destination (MD042/no-empty-links)
