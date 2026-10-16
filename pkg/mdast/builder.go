@@ -15,10 +15,23 @@ func NewDocument() *Node {
 	return NewNode(NodeDocument)
 }
 
+// isAncestorOrSelf reports whether node is candidate or one of its
+// ancestors. Attaching node below candidate would then create a cycle.
+func isAncestorOrSelf(node, candidate *Node) bool {
+	for current := candidate; current != nil; current = current.Parent {
+		if current == node {
+			return true
+		}
+	}
+	return false
+}
+
 // AppendChild appends a child node to a parent.
 // It maintains the parent/child/sibling relationships correctly.
+// It does nothing when child is parent or one of its ancestors, since that
+// would create a cycle.
 func AppendChild(parent, child *Node) {
-	if parent == nil || child == nil {
+	if parent == nil || child == nil || isAncestorOrSelf(child, parent) {
 		return
 	}
 
@@ -41,8 +54,9 @@ func AppendChild(parent, child *Node) {
 }
 
 // PrependChild prepends a child node to a parent.
+// Like AppendChild, it refuses to create a cycle.
 func PrependChild(parent, child *Node) {
-	if parent == nil || child == nil {
+	if parent == nil || child == nil || isAncestorOrSelf(child, parent) {
 		return
 	}
 
@@ -65,9 +79,10 @@ func PrependChild(parent, child *Node) {
 }
 
 // InsertBefore inserts newNode before sibling.
-// sibling must have a parent.
+// sibling must have a parent. It does nothing when newNode is sibling, its
+// parent or one of their ancestors.
 func InsertBefore(sibling, newNode *Node) {
-	if sibling == nil || newNode == nil || sibling.Parent == nil {
+	if sibling == nil || newNode == nil || sibling.Parent == nil || isAncestorOrSelf(newNode, sibling) {
 		return
 	}
 
@@ -92,9 +107,10 @@ func InsertBefore(sibling, newNode *Node) {
 }
 
 // InsertAfter inserts newNode after sibling.
-// sibling must have a parent.
+// sibling must have a parent. It does nothing when newNode is sibling, its
+// parent or one of their ancestors.
 func InsertAfter(sibling, newNode *Node) {
-	if sibling == nil || newNode == nil || sibling.Parent == nil {
+	if sibling == nil || newNode == nil || sibling.Parent == nil || isAncestorOrSelf(newNode, sibling) {
 		return
 	}
 
@@ -142,12 +158,14 @@ func RemoveChild(parent, child *Node) {
 }
 
 // ReplaceChild replaces oldChild with newChild in the tree.
+// Replacing a node with itself does nothing, and so does a replacement
+// that would make newChild its own descendant.
 func ReplaceChild(parent, oldChild, newChild *Node) {
 	if parent == nil || oldChild == nil || newChild == nil {
 		return
 	}
 
-	if oldChild.Parent != parent {
+	if oldChild.Parent != parent || oldChild == newChild || isAncestorOrSelf(newChild, parent) {
 		return
 	}
 

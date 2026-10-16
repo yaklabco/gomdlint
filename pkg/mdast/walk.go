@@ -7,6 +7,10 @@ type WalkFunc func(n *Node) error
 // Walk performs a pre-order traversal of the AST starting at root.
 // The callback walkFunc is called for each node. If walkFunc returns a non-nil error,
 // the walk stops immediately and returns that error.
+//
+// The callback may remove the node it visits from its parent; the walk then
+// still visits the node's children and continues with its former next
+// sibling.
 func Walk(root *Node, walkFunc WalkFunc) error {
 	if root == nil {
 		return nil
@@ -18,13 +22,27 @@ func Walk(root *Node, walkFunc WalkFunc) error {
 	}
 
 	// Visit children.
-	for child := root.FirstChild; child != nil; child = child.Next {
+	for child := root.FirstChild; child != nil; {
+		next := child.Next
 		if err := Walk(child, walkFunc); err != nil {
 			return err
 		}
+		child = nextSibling(root, child, next)
 	}
 
 	return nil
+}
+
+// nextSibling returns the sibling to visit after child. If a callback
+// removed child from parent, next (saved before the visit) is used.
+func nextSibling(parent, child, next *Node) *Node {
+	if child.Parent == parent {
+		return child.Next
+	}
+	if next != nil && next.Parent != parent {
+		return nil
+	}
+	return next
 }
 
 // WalkContextFunc is the function signature for WalkWithContext callbacks.
@@ -35,7 +53,8 @@ type WalkContextFunc func(n *Node) error
 
 // WalkWithContext performs a traversal with enter and leave callbacks.
 // Enter is called before visiting children, leave is called after.
-// Either callback may be nil.
+// Either callback may be nil. Like Walk, it tolerates a callback removing
+// the node it visits.
 func WalkWithContext(root *Node, enter, leave WalkContextFunc) error {
 	if root == nil {
 		return nil
@@ -49,10 +68,12 @@ func WalkWithContext(root *Node, enter, leave WalkContextFunc) error {
 	}
 
 	// Visit children.
-	for child := root.FirstChild; child != nil; child = child.Next {
+	for child := root.FirstChild; child != nil; {
+		next := child.Next
 		if err := WalkWithContext(child, enter, leave); err != nil {
 			return err
 		}
+		child = nextSibling(root, child, next)
 	}
 
 	// Leave the current node.
