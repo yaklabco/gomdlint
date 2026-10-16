@@ -63,6 +63,69 @@ func TestNoBareURLsRule(t *testing.T) {
 	}
 }
 
+// TestNoBareURLsRule_AutolinkLiterals follows markdownlint MD034, which reports
+// GFM autolink literals: trailing punctuation and unbalanced parentheses are
+// not part of a URL, and URLs in link text, code, or inline HTML content are
+// not bare.
+func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  []position
+		fixed string
+	}{
+		{"trailing period", "Visit https://example.com/path.\n", []position{{1, 7}}, "Visit <https://example.com/path>.\n"},
+		{"balanced parentheses", "See https://en.wikipedia.org/wiki/Foo_(bar) now\n", []position{{1, 5}},
+			"See <https://en.wikipedia.org/wiki/Foo_(bar)> now\n"},
+		{"inside parentheses", "Docs (see https://example.com/a) here\n", []position{{1, 11}},
+			"Docs (see <https://example.com/a>) here\n"},
+		{"email with trailing period", "Mail user@example.com.\n", []position{{1, 6}}, "Mail <user@example.com>.\n"},
+		{"entity after url", "Go to https://example.com/q?a=1&amp; now\n", []position{{1, 7}},
+			"Go to <https://example.com/q?a=1>&amp; now\n"},
+		{"inside emphasis", "Read *https://example.com* now\n", []position{{1, 7}}, "Read *<https://example.com>* now\n"},
+		{"blockquote", "> Visit https://example.com\n", []position{{1, 9}}, "> Visit <https://example.com>\n"},
+		{"multibyte text before url", "中文中文 https://example.com\n", []position{{1, 14}}, "中文中文 <https://example.com>\n"},
+		{"url in link text", "[https://example.com](https://example.com)\n", nil, ""},
+		{"url in brackets", "[https://example.com]\n", nil, ""},
+		{"url after unclosed bracket", "[see https://example.com and more\n", nil, ""},
+		{"url after closed bracket", "[note] https://example.com\n", []position{{1, 8}}, "[note] <https://example.com>\n"},
+		{"url in code span", "Use `https://example.com` here\n", nil, ""},
+		{"url in inline html content", "Use <span>https://example.com</span> here\n", nil, ""},
+		{"url in html attribute", "Use <a href=\"https://example.com\">x</a> here\n", nil, ""},
+		{"url in html block", "<div>\nhttps://example.com\n</div>\n", nil, ""},
+		{"letter before protocol", "xhttps://example.com\n", nil, ""},
+		{"autolink", "<https://example.com>\n", nil, ""},
+		{"reference definition", "[ref]: https://example.com\n\n[ref]\n", nil, ""},
+	}
+
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		for _, tt := range tests {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(tt.input))
+				require.NoError(t, err)
+				cfg := config.NewConfig()
+				cfg.Flavor = flavor
+				diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+				require.NoError(t, err)
+				require.Len(t, diags, len(tt.want), "diagnostics: %+v", diags)
+				var edits []fix.TextEdit
+				for idx, want := range tt.want {
+					assert.Equal(t, want.line, diags[idx].StartLine, "diagnostic %d line", idx)
+					assert.Equal(t, want.column, diags[idx].StartColumn, "diagnostic %d column", idx)
+					edits = append(edits, diags[idx].FixEdits...)
+				}
+				if len(tt.want) == 0 {
+					return
+				}
+				prepared, err := fix.PrepareEdits(edits, len(tt.input))
+				require.NoError(t, err)
+				assert.Equal(t, tt.fixed, string(fix.ApplyEdits([]byte(tt.input), prepared)))
+			})
+		}
+	}
+}
+
 func TestNoBareURLsRule_Metadata(t *testing.T) {
 	rule := NewNoBareURLsRule()
 

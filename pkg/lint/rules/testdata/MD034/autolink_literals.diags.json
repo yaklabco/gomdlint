@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD034",
+    "name": "no-bare-urls",
+    "line": 3,
+    "column": 37,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "no-bare-urls",
+    "line": 5,
+    "column": 35,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "no-bare-urls",
+    "line": 7,
+    "column": 46,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "no-bare-urls",
+    "line": 9,
+    "column": 48,
+    "message": "Bare email address used",
+    "severity": "warning",
+    "fixable": true
+  }
+]

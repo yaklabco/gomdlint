@@ -1,11 +1,12 @@
 package rules
 
 import (
-	"regexp"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -27,117 +28,199 @@ func NewNoBareURLsRule() *NoBareURLsRule {
 	}
 }
 
-// bareURLPattern matches bare URLs and emails without consuming boundary characters.
-// Boundary validation (angle brackets, parens, brackets) is done in code after matching.
-var bareURLPattern = regexp.MustCompile(`https?://[^\s<>\[\]()]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
+// bareURL is an autolink literal found in inline text.
+type bareURL struct {
+	start, end int
+	email      bool
+}
 
-var emailCheckPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-
-// Apply checks for bare URLs without angle brackets.
+// Apply reports bare URLs and email addresses the way markdownlint does: the
+// GFM autolink literals in inline text, with trailing punctuation and
+// unbalanced parentheses left out. URLs in link text, code spans, autolinks,
+// raw HTML, the content of inline HTML elements, HTML blocks, code blocks, and
+// reference definitions are not bare. With the GFM flavor the parser has
+// already turned these literals into autolinks; with CommonMark they are text.
 func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	var diags []lint.Diagnostic
-	definitionLines := make(map[int]bool)
-	for _, definition := range ctx.RefContext().AllDefinitions {
-		definitionLines[definition.LineNumber] = true
-	}
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	var urls []bareURL
+	err := mdast.Walk(ctx.Root, func(node *mdast.Node) error {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return ctx.Ctx.Err()
 		}
-
-		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) || definitionLines[lineNum] {
-			continue
+		if isTextContainer(node) {
+			scan := &bareURLScan{content: ctx.File.Content}
+			scan.visit(node)
+			urls = append(urls, scan.found...)
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines that are already autolinks.
-		if isAutolinkLine(lineContent) {
-			continue
-		}
-
-		matches := bareURLPattern.FindAllIndex(lineContent, -1)
-
-		for _, match := range matches {
-			urlStart, urlEnd := match[0], match[1]
-			url := string(lineContent[urlStart:urlEnd])
-
-			// Skip if the URL is inside a code span.
-			if r.isInsideCodeSpan(lineContent, urlStart) {
-				continue
-			}
-
-			// Skip if preceded by <, (, or [ (autolink, markdown link, or reference).
-			if urlStart > 0 {
-				prev := lineContent[urlStart-1]
-				if prev == '<' || prev == '(' || prev == '[' {
-					continue
-				}
-			}
-
-			// Skip if followed by >, ), or ] (closing autolink, link, or reference).
-			if urlEnd < len(lineContent) {
-				next := lineContent[urlEnd]
-				if next == '>' || next == ')' || next == ']' {
-					continue
-				}
-			}
-
-			line := ctx.File.Lines[lineNum-1]
-
-			// Build fix: wrap in angle brackets.
-			builder := fix.NewEditBuilder()
-			builder.ReplaceRange(line.StartOffset+urlStart, line.StartOffset+urlEnd, "<"+url+">")
-
-			diagPos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: urlStart + 1,
-				EndLine:     lineNum,
-				EndColumn:   urlEnd + 1,
-			}
-
-			var msg string
-			if isEmail(url) {
-				msg = "Bare email address used"
-			} else {
-				msg = "Bare URL used"
-			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos, msg).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Wrap the URL/email in angle brackets").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
+	diags := make([]lint.Diagnostic, 0, len(urls))
+	for _, url := range urls {
+		text := string(ctx.File.Content[url.start:url.end])
+		builder := fix.NewEditBuilder()
+		builder.ReplaceRange(url.start, url.end, "<"+text+">")
+
+		startLine, startColumn := ctx.File.LineAt(url.start)
+		endLine, endColumn := ctx.File.LineAt(url.end)
+		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+
+		msg := "Bare URL used"
+		if url.email {
+			msg = "Bare email address used"
+		}
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Wrap the URL/email in angle brackets").
+			WithFix(builder).
+			Build())
+	}
+	sortDiagnosticsByPosition(diags)
 	return diags, nil
 }
 
-func (r *NoBareURLsRule) isInsideCodeSpan(line []byte, pos int) bool {
-	// Count backticks before the position.
-	backticks := 0
-	for i := 0; i < pos && i < len(line); i++ {
-		if line[i] == '`' {
-			backticks++
+// isTextContainer reports whether a block's children are inline content: a
+// paragraph, heading, or table cell. Link and image text is never searched.
+func isTextContainer(node *mdast.Node) bool {
+	if node.IsInline() {
+		return false
+	}
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if child.IsInline() {
+			return true
 		}
 	}
-	// Odd number of backticks means we're inside a code span.
-	return backticks%2 == 1
+	return false
 }
 
-func isAutolinkLine(line []byte) bool {
-	// Simple check for <url> pattern.
-	return len(line) >= 2 && line[0] == '<' && line[len(line)-1] == '>'
+// bareURLScan walks one container's inline nodes in order, tracking the
+// unclosed '[' that suppress autolink literals, like micromark.
+type bareURLScan struct {
+	content  []byte
+	brackets int
+	found    []bareURL
 }
 
-func isEmail(s string) bool {
-	return emailCheckPattern.MatchString(s)
+func (s *bareURLScan) visit(parent *mdast.Node) {
+	children := parent.Children()
+	for idx := 0; idx < len(children); idx++ {
+		child := children[idx]
+		switch {
+		case child.Kind == mdast.NodeText && child.Inline != nil:
+			last := idx
+			for last+1 < len(children) && isContiguousText(children[last], children[last+1]) {
+				last++
+			}
+			s.scanText(children[idx].SourceRange().StartOffset, children[last].SourceRange().EndOffset)
+			idx = last
+		case child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong:
+			s.visit(child)
+		case child.Kind == mdast.NodeHTMLInline:
+			idx = skipHTMLElementContent(children, idx)
+		case isAutolinkNode(child):
+			s.checkParsedLiteral(child)
+		}
+	}
+}
+
+// isContiguousText reports whether two siblings are text nodes that are
+// adjacent in the source, so a URL may continue from one into the next.
+func isContiguousText(prev, next *mdast.Node) bool {
+	return next.Kind == mdast.NodeText && next.Inline != nil &&
+		next.SourceRange().StartOffset == prev.SourceRange().EndOffset
+}
+
+// skipHTMLElementContent returns the index of the closing tag that matches the
+// opening tag at children[idx], or idx when there is none, so the element's
+// content is skipped as markdownlint does.
+func skipHTMLElementContent(children []*mdast.Node, idx int) int {
+	open, ok := htmlNodeConstruct(children[idx])
+	if !ok || !open.IsOpeningElement() {
+		return idx
+	}
+	depth := 1
+	for next := idx + 1; next < len(children); next++ {
+		if children[next].Kind != mdast.NodeHTMLInline {
+			continue
+		}
+		tag, ok := htmlNodeConstruct(children[next])
+		if !ok || !strings.EqualFold(tag.Name, open.Name) {
+			continue
+		}
+		if !tag.Closing {
+			depth++
+			continue
+		}
+		depth--
+		if depth == 0 {
+			return next
+		}
+	}
+	return idx
+}
+
+// scanText searches content[start:end] for autolink literals, skipping
+// backslash escapes and counting brackets.
+func (s *bareURLScan) scanText(start, end int) {
+	text := s.content[:end]
+	for pos := start; pos < end; pos++ {
+		switch ch := text[pos]; {
+		case ch == '\\' && pos+1 < end && mdscan.IsASCIIPunct(text[pos+1]):
+			pos++
+			continue
+		case ch == '[':
+			s.brackets++
+			continue
+		case ch == ']':
+			if s.brackets > 0 {
+				s.brackets--
+			}
+			continue
+		}
+		if s.brackets > 0 {
+			continue
+		}
+		var prev byte
+		if pos > 0 {
+			prev = s.content[pos-1]
+		}
+		literalEnd, kind := mdscan.MatchAutolinkLiteral(text, pos, prev)
+		if kind == mdscan.LiteralNone {
+			continue
+		}
+		s.add(pos, literalEnd, kind == mdscan.LiteralEmail)
+		pos = literalEnd - 1
+	}
+}
+
+// checkParsedLiteral reports an autolink the parser created from a GFM
+// autolink literal. Autolinks written in angle brackets, "www." literals,
+// and other schemes are not reported.
+func (s *bareURLScan) checkParsedLiteral(node *mdast.Node) {
+	span := node.SourceRange()
+	if s.brackets > 0 || span.IsEmpty() || s.content[span.StartOffset] == '<' {
+		return
+	}
+	text := strings.ToLower(string(s.content[span.StartOffset:span.EndOffset]))
+	switch {
+	case strings.HasPrefix(text, "http://"), strings.HasPrefix(text, "https://"):
+		s.add(span.StartOffset, span.EndOffset, false)
+	case !strings.Contains(text, "://") && !strings.HasPrefix(text, "www.") && strings.Contains(text, "@"):
+		s.add(span.StartOffset, span.EndOffset, true)
+	}
+}
+
+// add records a literal unless it sits between '<' and '>', which markdownlint
+// ignores (micromark issue 164).
+func (s *bareURLScan) add(start, end int, email bool) {
+	if start > 0 && end < len(s.content) && s.content[start-1] == '<' && s.content[end] == '>' {
+		return
+	}
+	s.found = append(s.found, bareURL{start: start, end: end, email: email})
 }

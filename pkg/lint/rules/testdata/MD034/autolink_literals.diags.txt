@@ -1,0 +1,4 @@
+autolink_literals.input.md:3:37 warning Bare URL used (MD034/no-bare-urls) [fixable]
+autolink_literals.input.md:5:35 warning Bare URL used (MD034/no-bare-urls) [fixable]
+autolink_literals.input.md:7:46 warning Bare URL used (MD034/no-bare-urls) [fixable]
+autolink_literals.input.md:9:48 warning Bare email address used (MD034/no-bare-urls) [fixable]
