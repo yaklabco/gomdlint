@@ -404,67 +404,45 @@ func NewHeadingStartLeftRule() *HeadingStartLeftRule {
 	}
 }
 
-// indentedHeadingPattern matches headings that have any leading whitespace.
-var indentedHeadingPattern = regexp.MustCompile(`^([ \t]+)(#{1,6})(\s|$)`)
-
-// codeBlockIndent is the minimum spaces that indicate an indented code block.
-const codeBlockIndent = 4
-
 // Apply checks that headings start at the beginning of the line.
+//
+// Like markdownlint, it checks parsed headings (ATX and setext) and measures
+// indentation from the content column of the heading's containers: the
+// blockquote markers and list item indentation do not count, so a heading
+// at a list item's content column is not reported. The fix deletes only the
+// extra indentation and keeps the container prefix.
 func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		match := indentedHeadingPattern.FindSubmatch(lineContent)
-		if match == nil {
+		start := heading.SourceRange().StartOffset
+		line := lineOf(ctx.File, start)
+		if line == nil {
+			continue
+		}
+		lineNum, _ := ctx.File.LineAt(start)
+		prefixEnd := line.StartOffset + len(lint.ContainerPrefix(ctx.File, heading, lineNum))
+		if prefixEnd >= start {
+			continue
+		}
+		indent := ctx.File.Content[prefixEnd:start]
+		if len(bytes.Trim(indent, " \t")) > 0 {
 			continue
 		}
 
-		indent := match[1]
-
-		// Skip if 4+ spaces (would be an indented code block, not a heading).
-		spaceCount := 0
-		for _, ch := range indent {
-			if ch == ' ' {
-				spaceCount++
-			} else if ch == '\t' {
-				// Tab is typically rendered as 4 spaces, so treat it as a potential code block.
-				// However, a tab followed by # is usually an indented heading, not code.
-				// We'll allow tabs to be flagged since they're usually a mistake.
-				break
-			}
-		}
-		if spaceCount >= codeBlockIndent {
-			continue
-		}
-
-		// Also skip lines inside actual code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
-		}
-
-		line := ctx.File.Lines[lineNum-1]
-
-		// Build fix: remove leading whitespace.
+		// Build fix: remove the indentation after the container prefix.
 		builder := fix.NewEditBuilder()
-		builder.Delete(line.StartOffset, line.StartOffset+len(indent))
+		builder.Delete(prefixEnd, start)
 
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: 1,
-			EndLine:     lineNum,
-			EndColumn:   len(indent) + 1,
-		}
-
+		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: prefixEnd, EndOffset: start})
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 			fmt.Sprintf("Heading is indented by %d character(s)", len(indent))).
 			WithSeverity(config.SeverityWarning).

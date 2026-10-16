@@ -623,6 +623,58 @@ func TestHeadingStartLeftRule(t *testing.T) {
 	}
 }
 
+// TestHeadingStartLeftRule_Containers verifies that MD023 measures heading
+// indentation from the content column of the heading's containers, like
+// markdownlint 0.41.
+func TestHeadingStartLeftRule_Containers(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "heading at the list item content column", input: "- item\n\n  ## Heading\n", wantLines: []int{}},
+		{
+			name:      "heading indented past the list item content column",
+			input:     "- item\n\n   ## Heading\n",
+			wantLines: []int{3},
+			wantFixed: "- item\n\n  ## Heading\n",
+		},
+		{
+			name:      "ordered list item",
+			input:     "1. item\n\n    ## Heading\n",
+			wantLines: []int{3},
+			wantFixed: "1. item\n\n   ## Heading\n",
+		},
+		{name: "heading on the list item line", input: "-   ## Heading\n", wantLines: []int{}},
+		{name: "heading in a blockquote", input: "> # Heading\n", wantLines: []int{}},
+		{
+			name:      "heading indented inside a blockquote",
+			input:     ">  # Heading\n",
+			wantLines: []int{1},
+			wantFixed: "> # Heading\n",
+		},
+		{
+			name:      "indented setext heading",
+			input:     "  Title\n  =====\n",
+			wantLines: []int{1},
+			wantFixed: "Title\n  =====\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingStartLeftRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoDuplicateHeadingRule(t *testing.T) {
 	tests := []struct {
 		name      string
