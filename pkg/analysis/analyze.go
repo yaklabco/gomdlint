@@ -2,11 +2,11 @@ package analysis
 
 import (
 	"cmp"
-	"path/filepath"
 	"slices"
 	"time"
 
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
@@ -19,19 +19,6 @@ const (
 	severityWarning = "warning"
 	severityInfo    = "info"
 )
-
-// makeRelativePath converts an absolute path to a relative path from workDir.
-// If workDir is empty or conversion fails, returns the original path.
-func makeRelativePath(absPath, workDir string) string {
-	if workDir == "" {
-		return absPath
-	}
-	relPath, err := filepath.Rel(workDir, absPath)
-	if err != nil {
-		return absPath
-	}
-	return relPath
-}
 
 // analysisContext holds temporary state during analysis.
 type analysisContext struct {
@@ -108,7 +95,8 @@ func (ctx *analysisContext) getOrCreateRuleAnalysis(ruleID, ruleName string) *Ru
 }
 
 // createDiagnosticEntry builds a DiagnosticEntry from a lint diagnostic.
-func createDiagnosticEntry(path, severity string, diag *lint.Diagnostic) DiagnosticEntry {
+// Columns are converted from bytes to characters using the file snapshot.
+func createDiagnosticEntry(path, severity string, snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) DiagnosticEntry {
 	entry := DiagnosticEntry{
 		FilePath:    path,
 		RuleID:      diag.RuleID,
@@ -116,9 +104,9 @@ func createDiagnosticEntry(path, severity string, diag *lint.Diagnostic) Diagnos
 		Severity:    severity,
 		Message:     diag.Message,
 		StartLine:   diag.StartLine,
-		StartColumn: diag.StartColumn,
+		StartColumn: ConvertColumn(snapshot, diag.StartLine, diag.StartColumn, ColumnCharacters),
 		EndLine:     diag.EndLine,
-		EndColumn:   diag.EndColumn,
+		EndColumn:   ConvertColumn(snapshot, diag.EndLine, diag.EndColumn, ColumnCharacters),
 		Suggestion:  diag.Suggestion,
 		Fixable:     len(diag.FixEdits) > 0,
 	}
@@ -186,7 +174,7 @@ func Analyze(result *runner.Result, opts Options) *Report {
 			report.Totals.FilesWithIssues++
 		}
 
-		displayPath := makeRelativePath(file.Path, opts.WorkingDir)
+		displayPath := DisplayPath(file.Path, opts.WorkingDir)
 		fa := ctx.getOrCreateFileAnalysis(displayPath)
 
 		for _, diag := range file.Result.Diagnostics {
@@ -211,7 +199,8 @@ func Analyze(result *runner.Result, opts Options) *Report {
 			ctx.ruleFiles[diag.RuleID][displayPath] = true
 
 			if opts.IncludeDiagnostics {
-				report.Diagnostics = append(report.Diagnostics, createDiagnosticEntry(displayPath, severity, &diag))
+				report.Diagnostics = append(report.Diagnostics,
+					createDiagnosticEntry(displayPath, severity, file.Result.Snapshot, &diag))
 			}
 		}
 	}

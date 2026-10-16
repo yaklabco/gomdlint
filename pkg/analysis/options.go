@@ -44,8 +44,9 @@ type Options struct {
 	// RuleFormat controls how rule identifiers appear.
 	RuleFormat config.RuleFormat
 
-	// WorkingDir is the directory to make paths relative to.
-	// If empty, paths are kept as-is (typically absolute).
+	// WorkingDir is the directory paths are shown relative to. Paths inside it
+	// become relative; paths outside it, and every path when WorkingDir is
+	// empty, are kept as-is (typically absolute). See DisplayPath.
 	WorkingDir string
 }
 

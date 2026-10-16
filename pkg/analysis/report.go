@@ -25,6 +25,8 @@ type Report struct {
 }
 
 // DiagnosticEntry represents a single diagnostic in the report.
+// FilePath follows DisplayPath. Lines are 1-based and columns are 1-based
+// character columns (Unicode code points); EndColumn is exclusive.
 type DiagnosticEntry struct {
 	FilePath    string     `json:"filePath"`
 	RuleID      string     `json:"ruleId"`
@@ -41,6 +43,7 @@ type DiagnosticEntry struct {
 }
 
 // FixEntry represents a text edit fix.
+// StartOffset and EndOffset are byte offsets into the file content.
 type FixEntry struct {
 	StartOffset int    `json:"startOffset"`
 	EndOffset   int    `json:"endOffset"`
