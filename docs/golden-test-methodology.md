@@ -118,7 +118,7 @@ From that point on, the golden files are locked. Any future change that produces
 1. The diagnostics match `diags.json` exactly: the same rule ID and name, line, column, message, severity, and fixability. The `diags.txt` file must match the same diagnostics.
 2. After applying all fixes, the output matches `golden.md` byte-for-byte.
 
-Diagnostics are recorded the way the engine reports them. The rule name is filled in, and the severity is the rule's default severity, which is what the engine resolves when no config sets one. A diagnostic that carries another rule's ID or name fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
+Each scenario is linted through `lint.Engine.LintFile`, the same entry point the CLI pipeline calls on every pass, with fixes on and only the scenario's rules enabled. Inline directives, severities, rule names and the preparation of fix edits therefore match the product. The harness applies one pass of fixes, while the CLI repeats passes until nothing changes. A rule error, or a diagnostic that carries another rule's ID or name, fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
 
 ```text
 basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
@@ -143,7 +143,7 @@ Without a sidecar, a scenario runs with the product defaults from `config.NewCon
 A scenario that needs a different setup puts a sidecar next to its input, named `<scenario>.config.yml`. The sidecar uses the `.gomdlint.yml` schema, limited to two settings, so it is also a valid gomdlint config file:
 
 - `flavor` is `commonmark` or `gfm`. The harness parses the input with this flavor and passes it to the rules in the configuration, so rules that check the flavor, such as the table rules, see it too.
-- `rules.<RULE_ID>.options` holds options for one rule. The harness passes them to the rule the way the engine passes options from a config file.
+- `rules.<RULE_ID>.options` holds options for one rule. The engine passes them to the rule as it does options from a config file.
 
 ```yaml
 # testdata/MD043/missing_heading.config.yml
@@ -158,6 +158,8 @@ rules:
 
 A scenario that depends on a flavor sets it explicitly, even when it matches the current default. The GFM table scenarios set `flavor: gfm` for this reason.
 
+A per-rule scenario runs its directory's rule even when that rule is disabled by default, such as MD043 or MD044, and runs no other rule. To reproduce one with the CLI, pass the sidecar with `--config` and enable the rule with `--enable`. The CLI also runs the other default-enabled rules, so expect their findings too.
+
 The harness fails a scenario rather than ignore part of its sidecar. These sidecars are rejected:
 
 - A sidecar with any other key, such as a misspelled `flavour` or a per-rule `severity`.
@@ -165,7 +167,7 @@ The harness fails a scenario rather than ignore part of its sidecar. These sidec
 - An empty sidecar, a sidecar with more than one YAML document, or a rule entry without options.
 - A sidecar that configures a rule the scenario does not run. A per-rule scenario runs only its directory's rule, and a real-world scenario runs the default-enabled rules.
 
-`TestGoldenSidecarFiles` also fails for a sidecar with a `.config.yaml` suffix or without a matching `.input.md`, because the harness would never read it.
+`TestGoldenTestdataFiles` also fails for any file under `testdata` that belongs to no scenario, because the harness would never read it. Examples are a sidecar with a `.config.yaml` suffix, a sidecar or golden file without a matching `.input.md`, and a file in a nested directory.
 
 Option names are not checked. A rule reads the options it knows by name and ignores the rest, as it does in the product, so a misspelled option name leaves the default in place without any error. When you add a sidecar, check that each option changes the generated diagnostics or fixed output.
 
