@@ -34,9 +34,7 @@ func (c HTMLConstruct) Text(content []byte) []byte {
 
 // ScanHTML finds the raw HTML constructs in content[start:end]. Text between
 // constructs, including a '<' that does not begin a valid construct, is
-// skipped. A comment, processing instruction, declaration, or CDATA section
-// that begins at start may end beyond end, because the parser reports the
-// closing line of such HTML blocks separately from the block's lines.
+// skipped. Every construct ends within the range.
 func ScanHTML(content []byte, start, end int) []HTMLConstruct {
 	if start < 0 || end > len(content) || start >= end {
 		return nil
@@ -46,11 +44,7 @@ func ScanHTML(content []byte, start, end int) []HTMLConstruct {
 		if content[idx] != '<' {
 			continue
 		}
-		limit := end
-		if idx == start {
-			limit = len(content)
-		}
-		construct, ok := MatchHTML(content[:limit], idx)
+		construct, ok := MatchHTML(content[:end], idx)
 		if !ok {
 			continue
 		}

@@ -55,12 +55,14 @@ func TestScanHTMLFindsEveryConstruct(t *testing.T) {
 	assert.Len(t, constructs, 5)
 }
 
-func TestScanHTMLExtendsOnlyLeadingConstruct(t *testing.T) {
+func TestScanHTMLStaysInRange(t *testing.T) {
 	src := []byte("<!--\n<b>\n-->\n")
-	constructs := ScanHTML(src, 0, len("<!--\n<b>\n"))
+	constructs := ScanHTML(src, 0, len(src))
 	require.Len(t, constructs, 1)
 	assert.Equal(t, len(src)-1, constructs[0].End)
 
+	// A comment that does not end in the range is not a construct, so the
+	// markup after its opener is still found.
 	src = []byte("<div>\n<!-- open\n<b>x</b>\n")
 	names := []string{}
 	for _, construct := range ScanHTML(src, 0, len(src)) {
