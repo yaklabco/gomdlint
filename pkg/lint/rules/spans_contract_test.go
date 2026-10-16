@@ -51,7 +51,8 @@ func TestSetextHeadingBlankLinesFixKeepsUnderline(t *testing.T) {
 
 func TestHeadingAfterSetextHeadingIsAdjacentHeading(t *testing.T) {
 	input := "Setext heading\n==============\n## Next\n\nText.\n"
-	diags := applyCompatibilityRule(t, NewHeadingBlankLinesRule(), input)
+	// Adjacent headings are only exempt in the relaxed (non-markdownlint) mode.
+	diags := applyRuleWithOptions(t, NewHeadingBlankLinesRule(), input, map[string]any{"markdownlint_compatible": false})
 	for _, diag := range diags {
 		require.NotContains(t, diag.Message, "above", "the underline ends the previous heading")
 	}

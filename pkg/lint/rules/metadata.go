@@ -195,11 +195,21 @@ func NewHeadingBlankLinesRule() *HeadingBlankLinesRule {
 }
 
 // Apply checks that headings have blank lines around them.
+//
+// The gomdlint-only markdownlint_compatible option defaults to true, which
+// matches markdownlint: adjacent headings need blank lines between them, and
+// a heading followed only by blank lines up to the end of the file is fine.
+// Setting it to false allows headings to touch other headings.
+//
+// Each diagnostic's fix inserts the blank lines its own heading needs. Where
+// two adjacent headings share a gap, both insert at the same offset and the
+// engine keeps the larger insertion after applying suppressions.
 func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
+	compatible := ctx.OptionBool("markdownlint_compatible", true)
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
@@ -228,7 +238,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			if blanksBefore < linesAbove {
 				// Check if previous line is also a heading (allow no blank between headings).
 				prevIsHeading := r.isPreviousLineHeading(ctx.File, ctx.Root, pos.StartLine)
-				if !prevIsHeading || ctx.OptionBool("markdownlint_compatible", false) {
+				if !prevIsHeading || compatible {
 					diag := r.createBlankBeforeDiagnostic(ctx, heading, pos, blanksBefore, linesAbove)
 					diags = append(diags, diag)
 				}
@@ -238,13 +248,13 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		// Check blank lines below (unless it's the last line).
 		if pos.EndLine < len(ctx.File.Lines) && linesBelow > 0 {
 			blanksAfter := lint.CountBlankLinesAfter(ctx.File, pos.EndLine)
-			if ctx.OptionBool("markdownlint_compatible", false) && pos.EndLine+blanksAfter >= len(ctx.File.Lines) {
+			if compatible && pos.EndLine+blanksAfter >= len(ctx.File.Lines) {
 				blanksAfter = linesBelow
 			}
 			if blanksAfter < linesBelow {
 				// Check if next non-blank line is also a heading.
 				nextIsHeading := r.isNextLineHeading(ctx.File, ctx.Root, pos.EndLine)
-				if !nextIsHeading || ctx.OptionBool("markdownlint_compatible", false) {
+				if !nextIsHeading || compatible {
 					diag := r.createBlankAfterDiagnostic(ctx, heading, pos, blanksAfter, linesBelow)
 					diags = append(diags, diag)
 				}

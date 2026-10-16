@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -196,6 +197,7 @@ func TestHeadingBlankLinesRule(t *testing.T) {
 		input      string
 		linesAbove int
 		linesBelow int
+		relaxed    bool // Sets markdownlint_compatible: false.
 		wantN      int
 	}{
 		{
@@ -241,10 +243,20 @@ func TestHeadingBlankLinesRule(t *testing.T) {
 			wantN:      0,
 		},
 		{
-			name:       "consecutive headings allowed",
+			// markdownlint, and so the default, wants blank lines between
+			// adjacent headings too.
+			name:       "consecutive headings flagged by default",
 			input:      "# H1\n## H2\n\nText",
 			linesAbove: 1,
 			linesBelow: 1,
+			wantN:      2,
+		},
+		{
+			name:       "consecutive headings allowed when relaxed",
+			input:      "# H1\n## H2\n\nText",
+			linesAbove: 1,
+			linesBelow: 1,
+			relaxed:    true,
 			wantN:      0, // Headings directly adjacent to other headings are OK.
 		},
 	}
@@ -265,6 +277,9 @@ func TestHeadingBlankLinesRule(t *testing.T) {
 					"lines_below": tt.linesBelow,
 				},
 			}
+			if tt.relaxed {
+				ruleCfg.Options["markdownlint_compatible"] = false
+			}
 
 			ctx := lint.NewRuleContext(context.Background(), snapshot, cfg, ruleCfg)
 			diags, err := rule.Apply(ctx)
@@ -279,6 +294,28 @@ func TestHeadingBlankLinesRule(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestHeadingBlankLinesRule_DefaultAdjacentHeadingsEngine verifies that, by
+// default, adjacent headings are reported and the engine's fix inserts a
+// single blank line into the gap they share.
+func TestHeadingBlankLinesRule_DefaultAdjacentHeadingsEngine(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(NewHeadingBlankLinesRule())
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	input := "# Title\n## Section\n\nText.\n"
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).
+		LintFile(context.Background(), "test.md", []byte(input), cfg)
+	if err != nil {
+		t.Fatalf("LintFile: %v", err)
+	}
+	if len(result.Diagnostics) != 2 {
+		t.Fatalf("got %d diagnostics, want 2", len(result.Diagnostics))
+	}
+	if fixed := string(fix.ApplyEdits([]byte(input), result.Edits)); fixed != "# Title\n\n## Section\n\nText.\n" {
+		t.Errorf("fixed = %q", fixed)
 	}
 }
 
