@@ -2,6 +2,8 @@ package rules
 
 import (
 	"testing"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 func TestPacks(t *testing.T) {
@@ -151,11 +153,26 @@ func TestRelaxedPack(t *testing.T) {
 	}
 }
 
+func TestPackRulesExistInRegistry(t *testing.T) {
+	for _, pack := range Packs() {
+		for ruleID := range pack.Rules {
+			rule, ok := lint.DefaultRegistry.GetByID(ruleID)
+			if !ok {
+				t.Errorf("pack %q configures unknown rule %q", pack.Name, ruleID)
+				continue
+			}
+			if rule.ID() != ruleID {
+				t.Errorf("pack %q rule %q resolves to %q", pack.Name, ruleID, rule.ID())
+			}
+		}
+	}
+}
+
 func TestGFMAuthoringPack(t *testing.T) {
 	pack := GFMAuthoringPack()
 
 	// GFM pack should have table rules.
-	tableRules := []string{"MDL002", "MDL003", "MDL004"}
+	tableRules := []string{"MD056", "MDL003", "MD058"}
 	for _, ruleID := range tableRules {
 		if _, ok := pack.Rules[ruleID]; !ok {
 			t.Errorf("GFM pack missing table rule %q", ruleID)

@@ -2,127 +2,100 @@
 //
 // # Rule Domains
 //
-// This package contains rule implementations across several domains:
+// The rules are grouped by the Markdown construct they check.
 //
-//   - Whitespace and layout:
+// Whitespace and layout:
 //
-//   - MD009: no-trailing-spaces - Lines should not have trailing spaces
+//   - MD009: no-trailing-spaces
+//   - MD010: no-hard-tabs
+//   - MD012: no-multiple-blank-lines
+//   - MD047: single-trailing-newline
 //
-//   - MD010: no-hard-tabs - Hard tabs should not be used
+// Headings:
 //
-//   - MD012: no-multiple-blanks - Multiple consecutive blank lines
+//   - MD001: heading-increment
+//   - MD003: heading-style
+//   - MD018: no-missing-space-atx
+//   - MD019: no-multiple-space-atx
+//   - MD020: no-missing-space-closed-atx
+//   - MD021: no-multiple-space-closed-atx
+//   - MD022: heading-blank-lines
+//   - MD023: heading-start-left
+//   - MD024: no-duplicate-heading
+//   - MD025: single-h1
+//   - MD026: no-trailing-punctuation
+//   - MD036: no-emphasis-as-heading
+//   - MD041: first-line-heading
+//   - MD043: required-headings
 //
-//   - MD047: single-trailing-newline - Files should end with a single newline
+// Lists:
 //
-//   - Headings:
+//   - MD004: unordered-list-style
+//   - MD005: list-indent
+//   - MD007: ul-indent
+//   - MD029: ol-prefix
+//   - MD030: list-marker-space
+//   - MD032: blanks-around-lists
 //
-//   - MD001: heading-increment - Heading levels should only increment by one
+// Blockquotes:
 //
-//   - MD003: heading-style - Heading style should be consistent
+//   - MD027: no-multiple-space-blockquote
+//   - MD028: no-blanks-blockquote
 //
-//   - MD018: no-missing-space-atx - No space after hash on ATX headings
+// Line length and text:
 //
-//   - MD019: no-multiple-space-atx - Multiple spaces after hash on ATX headings
+//   - MD013: line-length
+//   - MD044: proper-names
 //
-//   - MD020: no-missing-space-closed-atx - No space inside closed ATX headings
+// Links and images:
 //
-//   - MD021: no-multiple-space-closed-atx - Multiple spaces inside closed ATX headings
+//   - MD011: no-reversed-links
+//   - MD034: no-bare-urls
+//   - MD039: no-space-in-links
+//   - MD042: no-empty-links
+//   - MD045: no-alt-text
+//   - MD051: link-fragments
+//   - MD052: reference-links-images
+//   - MD053: link-image-reference-definitions
+//   - MD054: link-image-style
+//   - MD059: descriptive-link-text
+//   - MDL001: link-destination-style
 //
-//   - MD022: blanks-around-headings - Headings should be surrounded by blank lines
+// Code:
 //
-//   - MD023: heading-start-left - Headings must start at beginning of line
+//   - MD014: commands-show-output
+//   - MD031: blanks-around-fences
+//   - MD038: no-space-in-code
+//   - MD040: fenced-code-language
+//   - MD046: code-block-style
+//   - MD048: code-fence-style
 //
-//   - MD024: no-duplicate-heading - Multiple headings with same content
+// Emphasis and horizontal rules:
 //
-//   - MD025: single-h1 - Multiple top-level headings in the same document
+//   - MD035: hr-style
+//   - MD037: no-space-in-emphasis
+//   - MD049: emphasis-style
+//   - MD050: strong-style
 //
-//   - MD026: no-trailing-punctuation - Trailing punctuation in heading
+// HTML:
 //
-//   - MD041: first-line-heading - First line should be a top-level heading
+//   - MD033: no-inline-html
 //
-//   - Lists:
+// Tables (GFM):
 //
-//   - MD004: ul-style - Unordered list style should be consistent
-//
-//   - MD005: list-indent - Inconsistent indentation for list items
-//
-//   - MD007: ul-indent - Unordered list indentation
-//
-//   - MD029: ol-prefix - Ordered list item prefix
-//
-//   - MD030: list-marker-space - Spaces after list markers
-//
-//   - MD032: blanks-around-lists - Lists should be surrounded by blank lines
-//
-//   - Blockquotes:
-//
-//   - MD027: no-multiple-space-blockquote - Multiple spaces after blockquote symbol
-//
-//   - MD028: no-blanks-blockquote - Blank line inside blockquote
-//
-//   - Line length:
-//
-//   - MD013: line-length - Line length should not exceed configured maximum
-//
-//   - Links and images:
-//
-//   - MD011: no-reversed-links - Reversed link syntax
-//
-//   - MD034: no-bare-urls - Bare URL used
-//
-//   - MD039: no-space-in-links - Spaces inside link text
-//
-//   - MD042: no-empty-links - Empty links
-//
-//   - MD045: no-alt-text - Images should have alternative text
-//
-//   - MDL001: link-destination-style - Link destination style
-//
-//   - Code blocks:
-//
-//   - MD031: blanks-around-fences - Fenced code blocks should have blank lines around them
-//
-//   - MD038: no-space-in-code - Spaces inside code span elements
-//
-//   - MD040: fenced-code-language - Fenced code blocks should have language info
-//
-//   - MD046: code-block-style - Code block style should be consistent
-//
-//   - MD048: code-fence-style - Code fence style should be consistent
-//
-//   - Emphasis:
-//
-//   - MD036: no-emphasis-as-heading - Emphasis used instead of heading
-//
-//   - MD037: no-space-in-emphasis - Spaces inside emphasis markers
-//
-//   - MD049: emphasis-style - Emphasis style should be consistent
-//
-//   - MD050: strong-style - Strong style should be consistent
-//
-//   - Horizontal rules:
-//
-//   - MD035: hr-style - Horizontal rule style should be consistent
-//
-//   - HTML:
-//
-//   - MD033: no-inline-html - Inline HTML should be avoided
-//
-//   - Tables (GFM):
-//
-//   - MDL002: table-column-count - Table column count should be consistent
-//
-//   - MDL003: table-alignment - Table alignment should be consistent
-//
-//   - MDL004: table-blank-lines - Tables should be surrounded by blank lines
+//   - MD055: table-pipe-style
+//   - MD056: table-column-count
+//   - MD058: blanks-around-tables
+//   - MD060: table-column-style
+//   - MDL003: table-alignment
 //
 // # Rule IDs
 //
 // Rule IDs follow the markdownlint MDxxx convention for compatibility.
-// Rules unique to mdlint use the MDLxxx namespace:
+// Rules unique to gomdlint use the MDLxxx namespace:
 //
 //   - MD001-MD060: markdownlint-compatible rules
-//   - MDL001-MDLxxx: mdlint-specific rules
+//   - MDL001-MDLxxx: gomdlint-specific rules
 //
 // # Rule Packs
 //
@@ -131,7 +104,7 @@
 //   - core: Essential rules for clean Markdown (whitespace, basic structure)
 //   - strict: All core rules as errors plus comprehensive checks
 //   - relaxed: Minimal noise, only essential whitespace rules
-//   - gfm: GFM authoring with tables, task lists, and links
+//   - gfm: GFM authoring with tables, links, and code blocks
 //
 // Use PackByName or Packs to access pack definitions programmatically.
 //
