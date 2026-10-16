@@ -37,7 +37,10 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.8.0
+          # golangci-lint refuses to lint a module whose toolchain is newer
+          # than the Go release it was built with. v2.11.4 is built with
+          # go1.26, which covers the go1.26.9 toolchain in go.mod.
+          version: v2.11.4
 
       - name: Build
         run: go build -o /dev/null ./cmd/gomdlint

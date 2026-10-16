@@ -2,6 +2,8 @@ module github.com/yaklabco/gomdlint
 
 go 1.25.4
 
+toolchain go1.26.9
+
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2
