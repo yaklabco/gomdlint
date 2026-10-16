@@ -55,7 +55,9 @@ func TestLoad_AppliesMarkdownlintConfig(t *testing.T) {
 	assert.Contains(t, result.LoadedFrom, source)
 	require.Len(t, result.Notices, 1)
 	assert.Contains(t, result.Notices[0], source)
-	assert.Contains(t, result.Notices[0], "gomdlint migrate")
+	assert.Contains(t, result.Notices[0],
+		"gomdlint migrate "+source+" --output "+filepath.Join(dir, ".gomdlint.yml"),
+		"the notice gives a command that works from any directory")
 	assert.False(t, result.MigrationPerformed)
 	assert.Empty(t, stderr.String(), "no prompt without a terminal")
 	assert.NoFileExists(t, filepath.Join(dir, ".gomdlint.yml"))

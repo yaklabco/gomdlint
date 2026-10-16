@@ -338,7 +338,7 @@ func applyMarkdownlint(path string, opts LoadOptions, result *LoadResult) (*conf
 	if !result.MigrationPerformed {
 		result.Notices = append(result.Notices,
 			fmt.Sprintf("using %s, translated to gomdlint settings for this run; "+
-				"run 'gomdlint migrate' to save them as %s", path, gomdlintConfigFiles[0]))
+				"run 'gomdlint migrate %s --output %s' to save them", path, path, target))
 	}
 
 	// Only rule settings come from markdownlint; other settings keep the
