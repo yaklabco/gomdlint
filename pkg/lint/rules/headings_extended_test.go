@@ -107,6 +107,7 @@ func TestNoMissingSpaceATXRule_MarkdownlintParity(t *testing.T) {
 		{name: "closed heading is left to MD020", input: "#Heading#\n", wantLines: []int{}},
 		{name: "closing hash with trailing space", input: "#Heading #  \n", wantLines: []int{}},
 		{name: "inside an HTML comment", input: "<!--\n#notaheading\n-->\n", wantLines: []int{}},
+		{name: "on the closing line of an HTML comment", input: "<!--\nx\n#also -->\n", wantLines: []int{}},
 		{name: "inside an HTML block", input: "<div>\n#inside\n</div>\n", wantLines: []int{}},
 		{name: "inside a fenced code block", input: "```\n#comment\n```\n", wantLines: []int{}},
 		{name: "indented line", input: "  #Indented\n", wantLines: []int{}},
