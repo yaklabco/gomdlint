@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD045",
+    "name": "no-alt-text",
+    "line": 3,
+    "column": 17,
+    "message": "HTML image is missing alt text",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD045",
+    "name": "no-alt-text",
+    "line": 8,
+    "column": 3,
+    "message": "HTML image is missing alt text",
+    "severity": "warning",
+    "fixable": false
+  }
+]

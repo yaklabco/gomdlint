@@ -81,12 +81,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		report(construct, allowedSet)
 	}
 
-	sort.SliceStable(diags, func(i, j int) bool {
-		if diags[i].StartLine != diags[j].StartLine {
-			return diags[i].StartLine < diags[j].StartLine
-		}
-		return diags[i].StartColumn < diags[j].StartColumn
-	})
+	sortDiagnosticsByPosition(diags)
 	return diags, nil
 }
 

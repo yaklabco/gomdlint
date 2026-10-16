@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -254,7 +255,14 @@ func NewImageAltTextRule() *ImageAltTextRule {
 	}
 }
 
-// Apply checks that all images have non-empty alt text.
+// Attribute patterns markdownlint uses to decide whether an HTML image has alt text.
+var (
+	imgAltAttributePattern        = htmlAttributePattern("alt")
+	imgAriaHiddenAttributePattern = htmlAttributePattern("aria-hidden")
+)
+
+// Apply checks that Markdown images have non-empty alt text and that HTML img
+// elements have an alt attribute or are hidden with aria-hidden="true".
 func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -280,7 +288,64 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		diags = append(diags, diag)
 	}
 
+	if ctx.File == nil {
+		return diags, nil
+	}
+	for _, construct := range r.htmlImages(ctx) {
+		if ctx.Cancelled() {
+			return diags, ctx.Ctx.Err()
+		}
+		tag := construct.text(ctx.File.Content)
+		if imgAltAttributePattern.Match(tag) {
+			continue
+		}
+		if hidden := imgAriaHiddenAttributePattern.FindSubmatch(tag); hidden != nil &&
+			strings.EqualFold(string(hidden[1]), "true") {
+			continue
+		}
+		startLine, startColumn := ctx.File.LineAt(construct.Start)
+		endLine, endColumn := ctx.File.LineAt(construct.End)
+		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "HTML image is missing alt text").
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Add an alt attribute to the img element").
+			Build())
+	}
+
+	sortDiagnosticsByPosition(diags)
 	return diags, nil
+}
+
+// sortDiagnosticsByPosition orders diagnostics by start line, then start column.
+func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
+	sort.SliceStable(diags, func(i, j int) bool {
+		if diags[i].StartLine != diags[j].StartLine {
+			return diags[i].StartLine < diags[j].StartLine
+		}
+		return diags[i].StartColumn < diags[j].StartColumn
+	})
+}
+
+// htmlImages returns the opening img tags in HTML blocks and inline HTML.
+func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlConstruct {
+	var images []htmlConstruct
+	keep := func(construct htmlConstruct) {
+		if construct.isOpeningElement() && strings.EqualFold(construct.Name, "img") {
+			images = append(images, construct)
+		}
+	}
+	for _, block := range ctx.HTMLBlocks() {
+		span := block.SourceRange()
+		for _, construct := range scanHTMLConstructs(ctx.File.Content, span.StartOffset, span.EndOffset) {
+			keep(construct)
+		}
+	}
+	for _, inline := range ctx.HTMLInlines() {
+		if construct, ok := htmlNodeConstruct(inline); ok {
+			keep(construct)
+		}
+	}
+	return images
 }
 
 // LinkDestinationStyleRule enforces link destination style (relative vs absolute).

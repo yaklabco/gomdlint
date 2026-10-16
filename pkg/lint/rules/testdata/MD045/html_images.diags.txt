@@ -1,0 +1,2 @@
+html_images.input.md:3:17 warning HTML image is missing alt text (MD045/no-alt-text)
+html_images.input.md:8:3 warning HTML image is missing alt text (MD045/no-alt-text)

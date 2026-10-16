@@ -267,6 +267,48 @@ func TestImageAltTextRule(t *testing.T) {
 	}
 }
 
+// TestImageAltTextRule_HTMLImages checks HTML img elements like markdownlint:
+// an alt attribute (even an empty one) or aria-hidden="true" satisfies the rule.
+func TestImageAltTextRule_HTMLImages(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  []position
+	}{
+		{name: "inline img without alt", input: "Text <img src=\"a.png\"> here.\n", want: []position{{1, 6}}},
+		{name: "inline img with alt", input: "Text <img src=\"a.png\" alt=\"A cat\"> here.\n"},
+		{name: "empty alt marks a decorative image", input: "Text <img src=\"a.png\" alt=\"\"> here.\n"},
+		{name: "aria-hidden image", input: "Text <img src=\"a.png\" aria-hidden=\"true\"> here.\n"},
+		{name: "aria-hidden false still needs alt", input: "Text <img src=\"a.png\" aria-hidden=\"false\">.\n", want: []position{{1, 6}}},
+		{name: "uppercase element name", input: "Text <IMG SRC=\"a.png\"> here.\n", want: []position{{1, 6}}},
+		{name: "img inside HTML block", input: "<p>\n  <img src=\"a.png\">\n</p>\n", want: []position{{2, 3}}},
+		{name: "img inside HTML comment", input: "<!-- <img src=\"a.png\"> -->\n"},
+		{name: "other elements ignored", input: "<div class=\"x\">text</div>\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			diags, err := NewImageAltTextRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			if err != nil {
+				t.Fatalf("Apply error: %v", err)
+			}
+			if len(diags) != len(tt.want) {
+				t.Fatalf("got %d diagnostics, want %d: %+v", len(diags), len(tt.want), diags)
+			}
+			for idx, want := range tt.want {
+				if diags[idx].StartLine != want.line || diags[idx].StartColumn != want.column {
+					t.Errorf("diagnostic %d at %d:%d, want %d:%d", idx, diags[idx].StartLine, diags[idx].StartColumn, want.line, want.column)
+				}
+			}
+		})
+	}
+}
+
 func TestLinkDestinationStyleRule(t *testing.T) {
 	tests := []struct {
 		name  string
