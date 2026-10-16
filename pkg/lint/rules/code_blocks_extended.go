@@ -1,8 +1,8 @@
 package rules
 
 import (
-	"regexp"
-	"strings"
+	"bytes"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -148,137 +148,209 @@ func NewNoSpaceInCodeRule() *NoSpaceInCodeRule {
 	}
 }
 
-// codeSpanPattern matches inline code spans with their content.
-var codeSpanPattern = regexp.MustCompile("`+[^`]+`+")
-
-// Apply checks for spaces inside code span elements.
+// Apply reports code spans with spaces beside the backticks, following
+// markdownlint: one space of padding on both sides is part of the syntax and
+// allowed, a space that separates a backtick in the content from the
+// delimiter is allowed, and content made only of spaces is allowed.
 func (r *NoSpaceInCodeRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, span := range ctx.CodeSpans() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
-		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		matches := codeSpanPattern.FindAllIndex(lineContent, -1)
-
-		for _, match := range matches {
-			start, end := match[0], match[1]
-			codeSpan := string(lineContent[start:end])
-
-			// Extract content between backticks.
-			content := extractCodeSpanContent(codeSpan)
-			if content == "" {
-				continue
-			}
-
-			// Check for leading/trailing spaces.
-			trimmed := strings.Trim(content, " ")
-			hasLeading := len(content) > 0 && content[0] == ' '
-			hasTrailing := len(content) > 0 && content[len(content)-1] == ' '
-
-			// Allow single space padding if content contains backticks.
-			if strings.Contains(trimmed, "`") {
-				// Single space on each side is allowed for backtick-containing content.
-				if len(content) >= 2 && content[0] == ' ' && content[len(content)-1] == ' ' {
-					innerContent := content[1 : len(content)-1]
-					if !strings.HasPrefix(innerContent, " ") && !strings.HasSuffix(innerContent, " ") {
-						continue
-					}
-				}
-			}
-
-			// Only spaces content is allowed.
-			if len(strings.TrimSpace(content)) == 0 {
-				continue
-			}
-
-			// Check for excessive spaces.
-			leadingSpaces := len(content) - len(strings.TrimLeft(content, " "))
-			trailingSpaces := len(content) - len(strings.TrimRight(content, " "))
-
-			if leadingSpaces <= 1 && trailingSpaces <= 1 {
-				// Single space padding is allowed.
-				continue
-			}
-
-			if !hasLeading && !hasTrailing {
-				continue
-			}
-
-			line := ctx.File.Lines[lineNum-1]
-			diagPos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: start + 1,
-				EndLine:     lineNum,
-				EndColumn:   end + 1,
-			}
-
-			var msg string
-			switch {
-			case hasLeading && hasTrailing && (leadingSpaces > 1 || trailingSpaces > 1):
-				msg = "Excessive spaces inside code span"
-			case hasLeading && leadingSpaces > 1:
-				msg = "Excessive leading space inside code span"
-			case hasTrailing && trailingSpaces > 1:
-				msg = "Excessive trailing space inside code span"
-			default:
-				continue
-			}
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			backtickCount := countLeadingBackticks(codeSpan)
-			backticks := strings.Repeat("`", backtickCount)
-			fixedContent := backticks + strings.TrimSpace(content) + backticks
-			builder.ReplaceRange(line.StartOffset+start, line.StartOffset+end, fixedContent)
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos, msg).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Remove extra spaces from inside the code span").
-				WithFix(builder).
-				Build()
+		if diag, ok := r.checkCodeSpan(ctx, span); ok {
 			diags = append(diags, diag)
 		}
 	}
-
 	return diags, nil
 }
 
-func extractCodeSpanContent(span string) string {
-	// Count leading backticks.
-	backtickCount := countLeadingBackticks(span)
-	if backtickCount == 0 {
-		return ""
+func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Node) (lint.Diagnostic, bool) {
+	inner := span.ContentRange()
+	if inner.IsEmpty() {
+		return lint.Diagnostic{}, false
+	}
+	tokens := codeTextTokens(ctx.File, span, inner.StartOffset, inner.EndOffset)
+	datas, paddings := resolveCodeText(tokens)
+	if len(datas) == 0 {
+		return lint.Diagnostic{}, false
+	}
+	content := ctx.File.Content
+	hasPadding := len(paddings) == 2
+
+	startData := datas[0]
+	startSpaces, startNext := leadingSpaceRun(content[startData.start:startData.end])
+	startBacktick := startNext == '`'
+	startCount := startSpaces
+	if startBacktick && !hasPadding {
+		startCount--
 	}
 
-	// Remove leading and trailing backticks.
-	content := span[backtickCount:]
-	if len(content) < backtickCount {
-		return ""
+	endData := datas[len(datas)-1]
+	endSpaces, endPrev := trailingSpaceRun(content[endData.start:endData.end])
+	endBacktick := endPrev == '`'
+	endCount := endSpaces
+	if endBacktick && !hasPadding {
+		endCount--
 	}
-	content = content[:len(content)-backtickCount]
 
-	return content
+	if startCount <= 0 && endCount <= 0 {
+		return lint.Diagnostic{}, false
+	}
+	removePadding := startCount > 0 && endCount > 0 && hasPadding && !startBacktick && !endBacktick
+
+	builder := fix.NewEditBuilder()
+	if startCount > 0 {
+		from, to := startData.start, startData.start+startCount
+		if removePadding {
+			from = paddings[0].start
+		}
+		deleteSameLine(builder, content, from, to)
+	}
+	if endCount > 0 {
+		from, to := endData.end-endCount, endData.end
+		if removePadding {
+			to = paddings[1].end
+		}
+		deleteSameLine(builder, content, from, to)
+	}
+
+	var msg string
+	switch {
+	case startCount > 0 && endCount > 0:
+		msg = "Excessive spaces inside code span"
+	case startCount > 0:
+		msg = "Excessive leading space inside code span"
+	default:
+		msg = "Excessive trailing space inside code span"
+	}
+	diagBuilder := lint.NewDiagnostic(r.ID(), span, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Remove extra spaces from inside the code span")
+	if len(builder.Edits) > 0 {
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build(), true
 }
 
-func countLeadingBackticks(s string) int {
-	count := 0
-	for _, ch := range s {
-		if ch != '`' {
-			break
-		}
-		count++
+// deleteSameLine deletes content[from:to] unless the range holds a line
+// ending, which a fix must not join.
+func deleteSameLine(builder *fix.EditBuilder, content []byte, from, to int) {
+	if from < to && !bytes.ContainsAny(content[from:to], "\r\n") {
+		builder.Delete(from, to)
 	}
-	return count
+}
+
+// codeTextKind classifies a piece of code span content the way micromark does.
+type codeTextKind int
+
+const (
+	codeTextData codeTextKind = iota
+	codeTextSpace
+	codeTextLineEnding
+	codeTextPadding
+)
+
+// codeTextToken is a piece of code span content with absolute offsets.
+type codeTextToken struct {
+	kind       codeTextKind
+	start, end int
+}
+
+// codeTextTokens splits the content of a code span into micromark's code text
+// tokens: one token per space, one per line ending, and runs of other
+// characters. Container prefixes and the indentation that paragraphs strip
+// from continuation lines are not content.
+func codeTextTokens(file *mdast.FileSnapshot, span *mdast.Node, start, end int) []codeTextToken {
+	content := file.Content
+	var tokens []codeTextToken
+	for pos := start; pos < end; {
+		switch ch := content[pos]; ch {
+		case '\r', '\n':
+			lineEnd := pos + 1
+			if ch == '\r' && lineEnd < end && content[lineEnd] == '\n' {
+				lineEnd++
+			}
+			tokens = append(tokens, codeTextToken{kind: codeTextLineEnding, start: pos, end: lineEnd})
+			pos = lineEnd
+			if pos < end {
+				lineNum, _ := file.LineAt(pos)
+				pos += len(lint.ContainerPrefix(file, span, lineNum))
+				for pos < end && (content[pos] == ' ' || content[pos] == '\t') {
+					pos++
+				}
+			}
+		case ' ':
+			tokens = append(tokens, codeTextToken{kind: codeTextSpace, start: pos, end: pos + 1})
+			pos++
+		default:
+			dataEnd := pos
+			for dataEnd < end && content[dataEnd] != ' ' && content[dataEnd] != '\r' && content[dataEnd] != '\n' {
+				dataEnd++
+			}
+			tokens = append(tokens, codeTextToken{kind: codeTextData, start: pos, end: dataEnd})
+			pos = dataEnd
+		}
+	}
+	return tokens
+}
+
+// resolveCodeText applies micromark's resolveCodeText: when the content starts
+// and ends with a space or line ending and has data in between, those two
+// become padding; then runs of spaces and data merge into data tokens.
+func resolveCodeText(tokens []codeTextToken) ([]codeTextToken, []codeTextToken) {
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	head, tail := 0, len(tokens)-1
+	var paddings []codeTextToken
+	if head < tail && tokens[head].kind != codeTextData && tokens[tail].kind != codeTextData {
+		for idx := head + 1; idx < tail; idx++ {
+			if tokens[idx].kind == codeTextData {
+				paddings = []codeTextToken{tokens[head], tokens[tail]}
+				head++
+				tail--
+				break
+			}
+		}
+	}
+
+	var datas []codeTextToken
+	for idx := head; idx <= tail; idx++ {
+		if tokens[idx].kind == codeTextLineEnding {
+			continue
+		}
+		merged := tokens[idx]
+		for idx+1 <= tail && tokens[idx+1].kind != codeTextLineEnding {
+			idx++
+			merged.end = tokens[idx].end
+		}
+		merged.kind = codeTextData
+		datas = append(datas, merged)
+	}
+	return datas, paddings
+}
+
+// leadingSpaceRun returns the length of the whitespace that starts text when
+// a non-space character follows it, and that character.
+func leadingSpaceRun(text []byte) (int, byte) {
+	trimmed := bytes.TrimLeftFunc(text, unicode.IsSpace)
+	if len(trimmed) == 0 || len(trimmed) == len(text) {
+		return 0, 0
+	}
+	return len(text) - len(trimmed), trimmed[0]
+}
+
+// trailingSpaceRun returns the length of the whitespace that ends text when a
+// non-space character precedes it, and that character.
+func trailingSpaceRun(text []byte) (int, byte) {
+	trimmed := bytes.TrimRightFunc(text, unicode.IsSpace)
+	if len(trimmed) == 0 || len(trimmed) == len(text) {
+		return 0, 0
+	}
+	return len(text) - len(trimmed), trimmed[len(trimmed)-1]
 }

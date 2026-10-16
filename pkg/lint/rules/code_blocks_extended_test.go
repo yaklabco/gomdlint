@@ -232,6 +232,49 @@ func TestBlanksAroundFencesRule_Fix(t *testing.T) {
 	}
 }
 
+// TestNoSpaceInCodeRule_MarkdownlintSemantics follows markdownlint MD038: a
+// single space of padding is allowed only on both sides, a space that
+// separates a backtick in the content from the delimiter is allowed, and
+// escaped backticks are not code.
+func TestNoSpaceInCodeRule_MarkdownlintSemantics(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  int
+		fixed string
+	}{
+		{"extra space after backtick content", "A `` `x`  `` b\n", 1, "A `` `x` `` b\n"},
+		{"escaped backtick is not code", "A \\`  not code  ` b\n", 0, ""},
+		{"single leading space", "A ` x` b\n", 1, "A `x` b\n"},
+		{"single trailing space", "A `y ` b\n", 1, "A `y` b\n"},
+		{"backtick inside padded content", "A ``  b`c  `` b\n", 1, "A ``b`c`` b\n"},
+		{"space separating a backtick", "A `` `a `` b\n", 0, ""},
+		{"symmetric padding", "A ` code ` b\n", 0, ""},
+		{"only spaces", "A `   ` b\n", 0, ""},
+		{"trailing space on a later line", "A `foo\nbar ` b\n", 1, "A `foo\nbar` b\n"},
+		{"blockquote", "> A `  quoted` b\n", 1, "> A `quoted` b\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+			diags, err := NewNoSpaceInCodeRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			require.NoError(t, err)
+			require.Len(t, diags, tt.want, "diagnostics: %+v", diags)
+			if tt.want == 0 {
+				return
+			}
+			var edits []fix.TextEdit
+			for _, diag := range diags {
+				edits = append(edits, diag.FixEdits...)
+			}
+			prepared, err := fix.PrepareEdits(edits, len(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.fixed, string(fix.ApplyEdits([]byte(tt.input), prepared)))
+		})
+	}
+}
+
 func TestNoSpaceInCodeRule_Fix(t *testing.T) {
 	tests := []struct {
 		name      string
