@@ -246,8 +246,7 @@ rules:
 }
 
 // TestIntegration_RulesCommandWithFormat tests that the rules command accepts --rule-format flag.
-// Note: The rules command outputs to os.Stdout via logging, which is difficult to capture
-// in tests. We verify the command runs without error with each format.
+// TestRulesCommandPrintsPlainTable checks the output of each format.
 func TestIntegration_RulesCommandWithFormat(t *testing.T) {
 	t.Parallel()
 

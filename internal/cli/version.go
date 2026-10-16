@@ -1,12 +1,9 @@
 package cli
 
 import (
-	"os"
+	"fmt"
 
-	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
-
-	"github.com/yaklabco/gomdlint/internal/logging"
 )
 
 func newVersionCommand(info BuildInfo) *cobra.Command {
@@ -14,18 +11,13 @@ func newVersionCommand(info BuildInfo) *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Long:  `Print the version, commit hash, and build date of gomdlint.`,
-		Run: func(_ *cobra.Command, _ []string) {
-			logger := log.NewWithOptions(os.Stdout, log.Options{
-				ReportTimestamp: false,
-				ReportCaller:    false,
-			})
-			logger.SetLevel(log.InfoLevel)
-
-			logger.Info("gomdlint",
-				logging.FieldVersion, info.Version,
-				logging.FieldCommit, info.Commit,
-				logging.FieldBuilt, info.Date,
-			)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "gomdlint %s (commit %s, built %s)\n",
+				info.Version, info.Commit, info.Date)
+			if err != nil {
+				return withExitCode(ExitIOError, fmt.Errorf("write version: %w", err))
+			}
+			return nil
 		},
 	}
 

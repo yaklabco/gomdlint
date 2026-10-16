@@ -71,13 +71,14 @@ By default, lints all .md and .markdown files in the current directory
 and subdirectories. Specify paths to lint specific files or directories.
 
 Examples:
-  mdlint lint                    # Lint current directory
-  mdlint lint docs/              # Lint docs directory
-  mdlint lint README.md          # Lint single file
-  mdlint lint --fix              # Lint and auto-fix issues
-  mdlint lint --fix --dry-run    # Show fixes without applying
-  mdlint lint --format json      # Output as JSON for CI
-  mdlint lint --strict           # Treat warnings as errors
+  gomdlint lint                    # Lint current directory
+  gomdlint lint docs/              # Lint docs directory
+  gomdlint lint README.md          # Lint single file
+  gomdlint lint --fix              # Lint and auto-fix issues
+  gomdlint lint --fix --dry-run    # Show fixes without applying
+  gomdlint lint --format diff      # Preview fixes as a diff
+  gomdlint lint --format json      # Output as JSON for CI
+  gomdlint lint --strict           # Treat warnings as errors
 
 ` + exitCodeHelp
 
