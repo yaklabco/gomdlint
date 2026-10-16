@@ -86,17 +86,17 @@ And then we needed to actually create ~170 hand-crafted test input files across 
 
 ## How the Golden Tests Work
 
-The golden test system is built on a simple file convention:
+The golden test system is built on a simple file convention. Each scenario in a rule directory such as `testdata/MD009/` is a set of files that share a name:
 
-```
-testdata/MD009/
-├── basic.input.md          ← you write this
-├── basic.golden.md         ← generated: expected output after fix
-├── basic.diags.json        ← generated: expected diagnostics
-└── basic.diags.txt         ← generated: human-readable diagnostics
-```
+| File | Written by | Contents |
+| --- | --- | --- |
+| `basic.input.md` | you | The Markdown to lint |
+| `basic.config.yml` | you, optional | The flavor and rule options for this scenario |
+| `basic.golden.md` | `-update` | The expected output after applying all fixes |
+| `basic.diags.json` | `-update` | The expected diagnostics |
+| `basic.diags.txt` | `-update` | The same diagnostics, one readable line each |
 
-You only ever write `.input.md` files by hand. Everything else is generated.
+You only ever write the `.input.md` file and, when a scenario needs one, the `.config.yml` sidecar. Everything else is generated.
 
 ### The Generate-Then-Lock Workflow
 
@@ -107,16 +107,22 @@ When you create a new test case or change a rule:
 go test ./pkg/lint/rules/... -run TestGoldenPerRule/MD009 -args -update
 ```
 
-This runs the rule against the input, captures the diagnostics and fixed output, and writes them to disk. You review the generated files — are the diagnostics correct? Does the fixed output look right? — and commit them.
+This runs the rule against the input, captures the diagnostics and fixed output, and writes them to disk. Decide what the rule should report and what the fix should produce before you generate. For a rule that markdownlint also has, base that on the markdownlint rule documentation. Then compare the generated files with your expectation, and commit them only if they match.
 
 From that point on, the golden files are locked. Any future change that produces different diagnostics or different fix output will fail the test. You either fix the regression or deliberately re-generate with `-update`.
 
 ### What Gets Tested
 
-**TestGoldenPerRule** runs a single rule against each input file in its directory. It checks two things:
+**TestGoldenPerRule** runs a single rule against each input file in its directory, using the scenario's configuration. It checks two things:
 
-1. The diagnostics match `diags.json` exactly — same rule ID, line, column, message, severity, and fixability
-2. After applying all fixes, the output matches `golden.md` byte-for-byte
+1. The diagnostics match `diags.json` exactly: the same rule ID and name, line, column, message, severity, and fixability. The `diags.txt` file must match the same diagnostics.
+2. After applying all fixes, the output matches `golden.md` byte-for-byte.
+
+Diagnostics are recorded the way the engine reports them. The rule name is filled in, and the severity is the rule's default severity, which is what the engine resolves when no config sets one. A diagnostic that carries another rule's ID or name fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
+
+```text
+basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
+```
 
 **TestGoldenRoundTrip** goes further. It applies the fixes, then re-parses the fixed document and runs the rule again. If any fixable diagnostics remain, the test fails. This catches a class of bugs that are otherwise hard to detect:
 
@@ -128,7 +134,40 @@ The round-trip guarantee means: **if the tool says it can fix something, applyin
 
 ### Test Discovery
 
-The test harness discovers cases automatically. Drop an `.input.md` file into `testdata/MD009/` and it gets picked up on the next test run. No registration, no test function to write. The directory name determines which rule runs — `testdata/MD009/` runs MD009, `testdata/real-world/` runs all enabled rules.
+The test harness discovers cases automatically. Drop an `.input.md` file, with an optional `.config.yml` sidecar, into `testdata/MD009/` and it gets picked up on the next test run. No registration, no test function to write. The directory name determines which rule runs. `testdata/MD009/` runs MD009, and `testdata/real-world/` runs all enabled rules.
+
+### Per-Scenario Configuration
+
+Without a sidecar, a scenario runs with the product defaults from `config.NewConfig()`: the default Markdown flavor and no rule options. Such scenarios follow the product's default flavor, so they change when it changes.
+
+A scenario that needs a different setup puts a sidecar next to its input, named `<scenario>.config.yml`. The sidecar uses the `.gomdlint.yml` schema, limited to two settings, so it is also a valid gomdlint config file:
+
+- `flavor` is `commonmark` or `gfm`. The harness parses the input with this flavor and passes it to the rules in the configuration, so rules that check the flavor, such as the table rules, see it too.
+- `rules.<RULE_ID>.options` holds options for one rule. The harness passes them to the rule the way the engine passes options from a config file.
+
+```yaml
+# testdata/MD043/missing_heading.config.yml
+rules:
+  MD043:
+    options:
+      headings:
+        - "# Project"
+        - "## Overview"
+        - "## Usage"
+```
+
+A scenario that depends on a flavor sets it explicitly, even when it matches the current default. The GFM table scenarios set `flavor: gfm` for this reason.
+
+The harness fails a scenario rather than ignore part of its sidecar. These sidecars are rejected:
+
+- A sidecar with any other key, such as a misspelled `flavour` or a per-rule `severity`.
+- A sidecar with an invalid flavor or an unknown rule, or one that uses a rule name such as `proper-names` instead of the rule ID.
+- An empty sidecar, a sidecar with more than one YAML document, or a rule entry without options.
+- A sidecar that configures a rule the scenario does not run. A per-rule scenario runs only its directory's rule, and a real-world scenario runs the default-enabled rules.
+
+`TestGoldenSidecarFiles` also fails for a sidecar with a `.config.yaml` suffix or without a matching `.input.md`, because the harness would never read it.
+
+Option names are not checked. A rule reads the options it knows by name and ignores the rest, as it does in the product, so a misspelled option name leaves the default in place without any error. When you add a sidecar, check that each option changes the generated diagnostics or fixed output.
 
 ### Fix Application
 
@@ -225,7 +264,7 @@ The [authoring skill](../.claude/skills/golden-test-authoring.md) now includes a
 | Round-trip failure | Fixable diagnostics remain after one pass | Fix is non-idempotent or creates new violations |
 | Position anomaly | Diagnostics report line 0 or column 0 | Position calculation bug |
 
-When an anomaly is detected, the agent must **stop** — not work around it. It deletes the generated golden files (keeping only the hand-crafted `.input.md`), writes a structured bug report, and returns to the orchestrator with a blocked status. No broken behavior gets committed.
+When an anomaly is detected, the agent must **stop** and not work around it. It deletes the generated golden files and keeps only the hand-written `.input.md` and any `.config.yml` sidecar. It writes a structured bug report and returns to the orchestrator with a blocked status. No broken behavior gets committed.
 
 ### Bug Reports
 
