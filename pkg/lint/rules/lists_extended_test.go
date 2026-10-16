@@ -110,6 +110,21 @@ func TestULIndentRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
+			name:      "list in a blockquote measured from the quote",
+			input:     "> - a\n>   - b\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "wrong nesting in a blockquote",
+			input:     "> - a\n>    - b\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "list in a blockquote inside a list item starts a new nesting",
+			input:     "- a\n\n  > - b\n",
+			wantDiags: 0,
+		},
+		{
 			name:      "ordered parent is not checked",
 			input:     "1. a\n   - b\n",
 			wantDiags: 0,
@@ -422,10 +437,24 @@ func TestListIndentRule_Fix(t *testing.T) {
 			wantFix:   "1. Item 1\n 2. Item 2\n       - nested\n",
 		},
 		{
-			name:      "ordered list in a blockquote is reported",
+			name:      "ordered list in a blockquote is fixed",
 			input:     "> 1. Item 1\n>  2. Item 2\n",
 			wantDiags: 1,
-			wantFix:   "> 1. Item 1\n>  2. Item 2\n",
+			wantFix:   "> 1. Item 1\n> 2. Item 2\n",
+		},
+		{
+			name:      "ordered list in a nested blockquote is fixed",
+			input:     "> > 1. Item 1\n> >  2. Item 2\n",
+			wantDiags: 1,
+			wantFix:   "> > 1. Item 1\n> > 2. Item 2\n",
+		},
+		{
+			// Without the space after ">", columns still count from the
+			// blockquote content.
+			name:      "blockquote markers without spaces",
+			input:     ">1. Item 1\n> 2. Item 2\n",
+			wantDiags: 0,
+			wantFix:   ">1. Item 1\n> 2. Item 2\n",
 		},
 	}
 
@@ -565,6 +594,18 @@ func TestULIndentRule_Fix(t *testing.T) {
 			input:     "-   Parent\n    - Child\n",
 			wantDiags: 1,
 			wantFix:   "-   Parent\n    - Child\n",
+		},
+		{
+			name:      "nested item in a blockquote is fixed",
+			input:     "> - a\n>    - b\n",
+			wantDiags: 1,
+			wantFix:   "> - a\n>   - b\n",
+		},
+		{
+			name:      "indented list in a blockquote is fixed",
+			input:     ">  - a\n>  - b\n",
+			wantDiags: 2,
+			wantFix:   "> - a\n> - b\n",
 		},
 		{
 			name:      "no fix when the item holds a code block",
@@ -716,6 +757,25 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 			input:     "-  item\n\n   ```\n   code\n   ```\n",
 			wantDiags: 1,
 			wantFix:   "-  item\n\n   ```\n   code\n   ```\n",
+		},
+		{
+			name:      "spacing in a blockquote is fixed",
+			input:     "> -  item\n> -  other\n",
+			wantDiags: 2,
+			wantFix:   "> - item\n> - other\n",
+		},
+		{
+			name:      "spacing in a nested blockquote is fixed",
+			input:     "> > 1.  item\n",
+			wantDiags: 1,
+			wantFix:   "> > 1. item\n",
+		},
+		{
+			// The quoted paragraph after the list would join the narrowed item.
+			name:      "no fix in a blockquote when a following line would join the item",
+			input:     "> -  item\n>\n>   after\n",
+			wantDiags: 1,
+			wantFix:   "> -  item\n>\n>   after\n",
 		},
 		{
 			name:      "no fix when the expected spacing would make code",
@@ -933,6 +993,14 @@ func TestListIndentationFixesPreserveStructure(t *testing.T) {
 		{
 			name:  "following paragraph close to the content column",
 			input: "   -  Item\n\n  After\n",
+		},
+		{
+			name:  "blockquoted list with misaligned items and spacing",
+			input: ">  -  Alpha\n>     - Beta\n>  -  Gamma\n>   - Delta\n",
+		},
+		{
+			name:  "blockquoted list followed by a lazy line",
+			input: "> -  item\nlazy text\n",
 		},
 	}
 

@@ -195,6 +195,7 @@ func TestUnorderedListStyleRuleKeepsThematicBreaksOut(t *testing.T) {
 			ruleCtx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
 			diags, err := NewUnorderedListStyleRule().Apply(ruleCtx)
 			require.NoError(t, err)
+			require.Len(t, diags, 1, "the middle bullet differs from the first list")
 			assert.Empty(t, filterFixableDiags(diags))
 		})
 	}

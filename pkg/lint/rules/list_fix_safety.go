@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"sort"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -21,15 +22,21 @@ const maxBlockIndent = 3
 const tabStop = 4
 
 // listItemLayout is the column layout of a list item on its marker line.
-// Columns are 0-based byte columns, which equal visual columns because the
-// layout is only built when the marker prefix holds no tabs.
+//
+// Columns are relative to the content of the nearest enclosing blockquote
+// (or to the start of the line outside blockquotes), so that items on lines
+// with different blockquote markers compare correctly. They are byte
+// columns, which equal visual columns because a layout is only built when
+// the marker prefix holds no tabs.
 type listItemLayout struct {
 	marker     listItemMarker
+	base       int
 	markerCol  int
 	contentCol int
 }
 
-// listShift is a change of the marker and content columns of a list item.
+// listShift is a change of the marker and content columns of a list item,
+// relative to its blockquote content like listItemLayout.
 type listShift struct {
 	markerCol  int
 	contentCol int
@@ -127,20 +134,21 @@ func (p *listShiftPlan) orderedShiftItems() []*mdast.Node {
 // in ways this check does not model.
 func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 	layout, ok := p.layout(item)
-	if !ok || !isSimpleListItem(item, layout.marker.Line) || insideBlockquote(item) {
+	if !ok || !isSimpleListItem(item, layout.marker.Line) {
 		return false
 	}
-	if shift.markerCol != layout.markerCol && !markerIndentEditable(p.file, layout.marker) {
+	if shift.markerCol != layout.markerCol && !markerIndentEditable(p.file, layout) {
 		return false
 	}
-	if shift.contentCol <= shift.markerCol {
+	if shift.markerCol < 0 || shift.contentCol <= shift.markerCol {
 		return false
 	}
 
 	list := item.Parent
 	if parent := list.Parent; parent != nil && parent.Kind == mdast.NodeListItem {
 		parentShift, ok := p.final(parent)
-		if !ok || shift.markerCol < parentShift.contentCol || shift.markerCol > parentShift.contentCol+maxBlockIndent {
+		if !ok || !sameBlockquote(parent, item) ||
+			shift.markerCol < parentShift.contentCol || shift.markerCol > parentShift.contentCol+maxBlockIndent {
 			return false
 		}
 	} else if shift.markerCol > maxBlockIndent {
@@ -174,11 +182,39 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 	}
 
 	if next == nil {
-		if col, found := firstColumnAfter(p.file, nodeLastLine(item)); found && col >= shift.contentCol {
+		if col, found := p.firstColumnAfter(list, nodeLastLine(item)); found && col >= shift.contentCol {
 			return false
 		}
 	}
 	return true
+}
+
+// firstColumnAfter returns the column, relative to the blockquote content of
+// list, of the first non-blank line after the given line. Lines outside that
+// blockquote, such as lazy continuation lines, cannot join the list and are
+// not reported.
+func (p *listShiftPlan) firstColumnAfter(list *mdast.Node, lineNum int) (int, bool) {
+	for next := lineNum + 1; next <= len(p.file.Lines); next++ {
+		if lint.IsBlankLineInContainer(p.file, list, next) {
+			continue
+		}
+		base, ok := blockquoteContentBase(p.file, list, next)
+		if !ok {
+			return 0, false
+		}
+		col := 0
+		for _, char := range lint.RawLineContent(p.file, next)[base:] {
+			switch char {
+			case ' ':
+				col++
+			case '\t':
+				col += tabStop - col%tabStop
+			default:
+				return col, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // computeListItemLayout measures an item's marker and content columns.
@@ -187,18 +223,63 @@ func computeListItemLayout(file *mdast.FileSnapshot, item *mdast.Node) (listItem
 	if !ok {
 		return listItemLayout{}, false
 	}
-	if bytes.IndexByte(file.Content[marker.LineStart:marker.ContentStart], '\t') >= 0 {
+	base, ok := blockquoteContentBase(file, item.Parent, marker.Line)
+	if !ok || bytes.IndexByte(file.Content[marker.LineStart+base:marker.ContentStart], '\t') >= 0 {
 		return listItemLayout{}, false
 	}
 	spacing := marker.Spacing()
 	if !marker.HasContent() || spacing > maxListItemSpacing {
 		spacing = 1
 	}
+	markerCol := marker.Column() - base
 	return listItemLayout{
 		marker:     marker,
-		markerCol:  marker.Column(),
-		contentCol: marker.Column() + marker.Width() + spacing,
+		base:       base,
+		markerCol:  markerCol,
+		contentCol: markerCol + marker.Width() + spacing,
 	}, true
+}
+
+// blockquoteContentBase returns the byte column where the content of the
+// nearest blockquote enclosing node starts on a line: the length of the
+// container prefix up to and including that blockquote's marker. It is 0
+// when node is not inside a blockquote, and false when the line does not
+// continue the blockquote.
+func blockquoteContentBase(file *mdast.FileSnapshot, node *mdast.Node, lineNum int) (int, bool) {
+	child := node
+	depth := 0
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind != mdast.NodeBlockquote {
+			if depth == 0 {
+				child = parent
+			}
+			continue
+		}
+		depth++
+	}
+	if depth == 0 {
+		return 0, true
+	}
+	prefix := lint.ContainerPrefix(file, child, lineNum)
+	if strings.Count(string(prefix), ">") < depth {
+		return 0, false
+	}
+	return len(prefix), true
+}
+
+// sameBlockquote reports whether two nodes have the same nearest enclosing
+// blockquote, so that their relative columns are comparable.
+func sameBlockquote(first, second *mdast.Node) bool {
+	return nearestBlockquote(first) == nearestBlockquote(second)
+}
+
+func nearestBlockquote(node *mdast.Node) *mdast.Node {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeBlockquote {
+			return parent
+		}
+	}
+	return nil
 }
 
 // isSimpleListItem reports whether an item holds a paragraph that starts on
@@ -216,21 +297,11 @@ func isSimpleListItem(item *mdast.Node, markerLine int) bool {
 	return true
 }
 
-// insideBlockquote reports whether a node has a blockquote ancestor.
-func insideBlockquote(node *mdast.Node) bool {
-	for parent := node.Parent; parent != nil; parent = parent.Parent {
-		if parent.Kind == mdast.NodeBlockquote {
-			return true
-		}
-	}
-	return false
-}
-
-// markerIndentEditable reports whether the whitespace before a marker is
-// plain indentation from the start of the line, so that changing it moves
-// only this marker.
-func markerIndentEditable(file *mdast.FileSnapshot, marker listItemMarker) bool {
-	for offset := marker.LineStart; offset < marker.Start; offset++ {
+// markerIndentEditable reports whether the whitespace between the blockquote
+// content and a marker is plain indentation, so that changing it moves only
+// this marker.
+func markerIndentEditable(file *mdast.FileSnapshot, layout listItemLayout) bool {
+	for offset := layout.marker.LineStart + layout.base; offset < layout.marker.Start; offset++ {
 		if file.Content[offset] != ' ' {
 			return false
 		}
@@ -266,24 +337,4 @@ func nodeLastLine(node *mdast.Node) int {
 		return pos.EndLine - 1
 	}
 	return pos.EndLine
-}
-
-// firstColumnAfter returns the column of the first non-whitespace byte on the
-// first non-blank line after the given line.
-func firstColumnAfter(file *mdast.FileSnapshot, lineNum int) (int, bool) {
-	for next := lineNum + 1; next <= len(file.Lines); next++ {
-		content := lint.LineContent(file, next)
-		col := 0
-		for _, char := range content {
-			switch char {
-			case ' ':
-				col++
-			case '\t':
-				col += tabStop - col%tabStop
-			default:
-				return col, true
-			}
-		}
-	}
-	return 0, false
 }

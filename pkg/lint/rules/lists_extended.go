@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -32,9 +33,10 @@ func NewListIndentRule() *ListIndentRule {
 //
 // Like markdownlint, every item of a list must start in the column of the
 // first item's marker, and ordered lists may instead right-align their
-// numbers so that the markers end in the same column. Unordered lists are
-// reported without a fix, because MD007 moves their items to the configured
-// indentation; ordered items are moved only when that keeps the structure.
+// numbers so that the markers end in the same column. Columns count from the
+// content of the enclosing blockquote. Unordered lists are reported without a
+// fix, because MD007 moves their items to the configured indentation; ordered
+// items are moved only when that keeps the structure.
 func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -60,11 +62,29 @@ func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 }
 
 // indentMismatch is a list item whose marker is not in the expected column.
+// The columns are relative to the content of the enclosing blockquote, which
+// starts at byte column base of the marker line.
 type indentMismatch struct {
 	item     *mdast.Node
 	marker   listItemMarker
+	base     int
 	actual   int
 	expected int
+}
+
+// relativeListMarker locates an item's marker and returns it with its column
+// relative to the content of the enclosing blockquote and that content's
+// byte column on the marker line.
+func relativeListMarker(file *mdast.FileSnapshot, item *mdast.Node) (listItemMarker, int, int, bool) {
+	marker, found := findListItemMarker(file, item)
+	if !found {
+		return listItemMarker{}, 0, 0, false
+	}
+	base, ok := blockquoteContentBase(file, item.Parent, marker.Line)
+	if !ok {
+		return listItemMarker{}, 0, 0, false
+	}
+	return marker, marker.Column() - base, base, true
 }
 
 // listIndentMismatches finds the misaligned items of one list and proposes
@@ -74,25 +94,24 @@ func listIndentMismatches(file *mdast.FileSnapshot, plan *listShiftPlan, list *m
 	if len(items) < 2 {
 		return nil
 	}
-	first, found := findListItemMarker(file, items[0])
+	first, expectedIndent, _, found := relativeListMarker(file, items[0])
 	if !found {
 		return nil
 	}
 	ordered := lint.IsOrderedList(list)
-	expectedIndent := first.Column()
-	expectedEnd := first.Column() + first.Width()
+	expectedEnd := expectedIndent + first.Width()
 	endMatching := false
 
 	var mismatches []indentMismatch
 	for _, item := range items[1:] {
-		marker, found := findListItemMarker(file, item)
+		marker, actual, base, found := relativeListMarker(file, item)
 		if !found {
 			continue
 		}
-		actual := marker.Column()
+		mismatch := indentMismatch{item: item, marker: marker, base: base, actual: actual, expected: expectedIndent}
 		if !ordered {
 			if actual != expectedIndent {
-				mismatches = append(mismatches, indentMismatch{item: item, marker: marker, actual: actual, expected: expectedIndent})
+				mismatches = append(mismatches, mismatch)
 			}
 			continue
 		}
@@ -103,32 +122,35 @@ func listIndentMismatches(file *mdast.FileSnapshot, plan *listShiftPlan, list *m
 			endMatching = true
 			continue
 		}
-		expected := expectedIndent
 		if endMatching {
-			expected = expectedEnd - marker.Width()
+			mismatch.expected = expectedEnd - marker.Width()
 		}
-		mismatches = append(mismatches, indentMismatch{item: item, marker: marker, actual: actual, expected: expected})
-		proposeIndentShift(plan, item, actual, expected)
+		mismatches = append(mismatches, mismatch)
+		proposeIndentShift(plan, mismatch)
 	}
 	return mismatches
 }
 
 // proposeIndentShift proposes moving an item's marker, and with it its
-// content, from one column to another.
-func proposeIndentShift(plan *listShiftPlan, item *mdast.Node, actual, expected int) {
-	if expected < 0 {
+// content, to the expected column.
+func proposeIndentShift(plan *listShiftPlan, mismatch indentMismatch) {
+	if mismatch.expected < 0 {
 		return
 	}
-	layout, ok := plan.layout(item)
+	layout, ok := plan.layout(mismatch.item)
 	if !ok {
 		return
 	}
-	plan.propose(item, listShift{markerCol: expected, contentCol: layout.contentCol + expected - actual})
+	plan.propose(mismatch.item, listShift{
+		markerCol:  mismatch.expected,
+		contentCol: layout.contentCol + mismatch.expected - layout.markerCol,
+	})
 }
 
 // indentDiagnostic reports a misaligned marker. Like markdownlint, the range
-// covers the line from its start through the marker. A fix rewrites that
-// range with the expected indentation when the plan accepted the move.
+// covers the line from its start through the marker. A fix rewrites the
+// indentation between the blockquote content and the marker when the plan
+// accepted the move.
 func indentDiagnostic(
 	ctx *lint.RuleContext,
 	ruleID string,
@@ -148,7 +170,7 @@ func indentDiagnostic(
 		WithSuggestion(suggestion)
 	if shift, ok := safeShifts[mismatch.item]; ok && shift.markerCol == mismatch.expected {
 		builder := fix.NewEditBuilder()
-		builder.ReplaceRange(marker.LineStart, marker.End,
+		builder.ReplaceRange(marker.LineStart+mismatch.base, marker.End,
 			strings.Repeat(" ", mismatch.expected)+string(ctx.File.Content[marker.Start:marker.End]))
 		diagBuilder = diagBuilder.WithFix(builder)
 	}
@@ -173,46 +195,53 @@ func NewULIndentRule() *ULIndentRule {
 	}
 }
 
-// ulIndentOptions holds the MD007 settings.
-type ulIndentOptions struct {
-	indent        int
-	startIndented bool
-	startIndent   int
-}
-
 // Apply checks unordered list indentation.
 //
-// Like markdownlint, the rule covers unordered lists whose enclosing lists are
-// all unordered, and measures each marker from the start of its line. All
-// moves in a list tree are planned together, and only those that keep every
-// item under the same parent are fixed.
+// Like markdownlint, the rule covers unordered lists whose enclosing lists,
+// up to the nearest blockquote, are all unordered; the nesting depth restarts
+// inside each blockquote and columns count from the blockquote content. All
+// moves are planned together, and only those that keep every item under the
+// same parent are fixed.
 func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	indent := ctx.OptionInt("indent", 2)
-	opts := ulIndentOptions{
-		indent:        indent,
-		startIndented: ctx.OptionBool("start_indented", false),
-		startIndent:   ctx.OptionInt("start_indent", indent),
+	baseIndent := 0
+	if ctx.OptionBool("start_indented", false) {
+		baseIndent = ctx.OptionInt("start_indent", indent)
 	}
 
 	plan := newListShiftPlan(ctx.File)
 	var mismatches []indentMismatch
-
-	// Only process top-level lists (direct children of document).
-	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
 			return nil, ctx.Ctx.Err()
 		}
-		if child.Kind != mdast.NodeList || lint.IsOrderedList(child) {
+		if lint.IsOrderedList(list) {
 			continue
 		}
-		mismatches = append(mismatches, ulIndentMismatches(ctx.File, plan, child, 0, opts)...)
+		nesting, unordered := unorderedListNesting(list)
+		if !unordered {
+			continue
+		}
+		expected := baseIndent + nesting*indent
+		for _, item := range lint.ListItems(list) {
+			marker, actual, base, found := relativeListMarker(ctx.File, item)
+			if !found || actual == expected {
+				continue
+			}
+			mismatch := indentMismatch{item: item, marker: marker, base: base, actual: actual, expected: expected}
+			mismatches = append(mismatches, mismatch)
+			proposeIndentShift(plan, mismatch)
+		}
 	}
 	safeShifts := plan.resolve()
 
+	sort.Slice(mismatches, func(i, j int) bool {
+		return mismatches[i].marker.Start < mismatches[j].marker.Start
+	})
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		msg := fmt.Sprintf("Unordered list indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
@@ -222,34 +251,24 @@ func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	return diags, nil
 }
 
-// ulIndentMismatches checks the items of an unordered list at the given
-// depth and recurses into nested unordered lists.
-func ulIndentMismatches(
-	file *mdast.FileSnapshot,
-	plan *listShiftPlan,
-	list *mdast.Node,
-	depth int,
-	opts ulIndentOptions,
-) []indentMismatch {
-	expected := depth * opts.indent
-	if opts.startIndented {
-		expected += opts.startIndent
-	}
-
-	var mismatches []indentMismatch
-	for _, item := range lint.ListItems(list) {
-		if marker, found := findListItemMarker(file, item); found && marker.Column() != expected {
-			mismatches = append(mismatches, indentMismatch{item: item, marker: marker, actual: marker.Column(), expected: expected})
-			proposeIndentShift(plan, item, marker.Column(), expected)
-		}
-
-		for child := item.FirstChild; child != nil; child = child.Next {
-			if child.Kind == mdast.NodeList && !lint.IsOrderedList(child) {
-				mismatches = append(mismatches, ulIndentMismatches(file, plan, child, depth+1, opts)...)
+// unorderedListNesting counts the lists enclosing a list up to the nearest
+// blockquote. It reports false when one of them is ordered, because MD007
+// only covers lists whose parents are all unordered.
+func unorderedListNesting(list *mdast.Node) (int, bool) {
+	nesting := 0
+	for parent := list.Parent; parent != nil; parent = parent.Parent {
+		switch parent.Kind {
+		case mdast.NodeBlockquote:
+			return nesting, true
+		case mdast.NodeList:
+			if lint.IsOrderedList(parent) {
+				return 0, false
 			}
+			nesting++
+		default:
 		}
 	}
-	return mismatches
+	return nesting, true
 }
 
 // ListMarkerSpaceRule checks for correct spaces after list markers.

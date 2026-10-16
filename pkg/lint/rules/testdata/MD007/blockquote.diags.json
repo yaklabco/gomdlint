@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD007",
+    "name": "ul-indent",
+    "line": 4,
+    "column": 1,
+    "message": "Unordered list indentation 3 does not match expected 2",
+    "severity": "warning",
+    "fixable": true
+  }
+]

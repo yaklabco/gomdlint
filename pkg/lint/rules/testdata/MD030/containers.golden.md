@@ -1,11 +1,11 @@
 # Marker Spacing In Containers
 
-> -  Quoted item with two spaces
-> -  Another quoted item
+> - Quoted item with two spaces
+> - Another quoted item
 
 Text between.
 
-> > 1.  Doubly quoted item
+> > 1. Doubly quoted item
 
 Text between.
 

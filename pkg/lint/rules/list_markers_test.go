@@ -128,6 +128,32 @@ func TestFindListItemMarker(t *testing.T) {
 			input: "- \\- not a list\n",
 			want:  []markerExpectation{{line: 1, column: 0, text: "-", spacing: 1}},
 		},
+		{
+			name:  "item starting with a blank line",
+			input: "-\n  foo\n",
+			want:  []markerExpectation{{line: 1, column: 0, text: "-", spacing: 0}},
+		},
+		{
+			name:  "item starting with a heading",
+			input: "- # Heading\n",
+			want:  []markerExpectation{{line: 1, column: 0, text: "-", spacing: 1}},
+		},
+		{
+			name:  "item starting with a fenced code block",
+			input: "1. ```\n   code\n   ```\n",
+			want: []markerExpectation{
+				{line: 1, column: 0, text: "1.", spacing: 1, ordered: true, number: 1, delimiter: '.'},
+			},
+		},
+		{
+			name:  "nested empty items on one line",
+			input: "* + *\n",
+			want: []markerExpectation{
+				{line: 1, column: 0, text: "*", spacing: 1},
+				{line: 1, column: 2, text: "+", spacing: 1},
+				{line: 1, column: 4, text: "*", spacing: 0},
+			},
+		},
 	}
 
 	for _, tt := range tests {

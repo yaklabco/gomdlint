@@ -66,14 +66,10 @@ func (m listItemMarker) HasContent() bool {
 	return m.ContentStart < m.LineEnd
 }
 
-// findListItemMarker locates the marker of a list item in the source.
-//
-// When the item's span starts at its marker (optionally preceded by
-// indentation), the marker is read from there. Otherwise the span starts at the
-// item's first content, which is how the parser currently records list items:
-// the marker is then found by walking back over the markers of nested lists
-// that start on the same content. It reports false when the marker cannot be
-// located, for example for an item whose first line holds no content.
+// findListItemMarker locates the marker of a list item in the source. The
+// full span of a list item starts at its marker (see package mdast), so the
+// marker is read from there. It reports false for nodes that are not list
+// items or have no source.
 func findListItemMarker(file *mdast.FileSnapshot, item *mdast.Node) (listItemMarker, bool) {
 	if file == nil || item == nil || item.Kind != mdast.NodeListItem {
 		return listItemMarker{}, false
@@ -83,84 +79,16 @@ func findListItemMarker(file *mdast.FileSnapshot, item *mdast.Node) (listItemMar
 		return listItemMarker{}, false
 	}
 	line := file.Lines[pos.StartLine-1]
-	content := file.Content
-	spanStart := item.SourceRange().StartOffset
-	if spanStart < line.StartOffset || spanStart > line.NewlineStart {
+	start := item.SourceRange().StartOffset
+	if start < line.StartOffset || start > line.NewlineStart || !markerBoundaryBefore(file.Content, line, start) {
 		return listItemMarker{}, false
 	}
-
-	// The span starts at the marker.
-	start := spanStart
-	for start < line.NewlineStart && isMarkerSpace(content[start]) {
-		start++
-	}
-	if marker, ok := readListMarker(content, line, start); ok && markerBoundaryBefore(content, line, start) {
-		marker.Line = pos.StartLine
-		return marker, true
-	}
-
-	// The span starts at the first content: walk back over the markers of
-	// nested lists that begin on the same content, then read this item's.
-	depth := sameContentNesting(item, spanStart)
-	end := spanStart
-	var marker listItemMarker
-	for range depth + 1 {
-		var ok bool
-		marker, ok = listMarkerBefore(content, line, end)
-		if !ok {
-			return listItemMarker{}, false
-		}
-		end = marker.Start
+	marker, ok := readListMarker(file.Content, line, start)
+	if !ok {
+		return listItemMarker{}, false
 	}
 	marker.Line = pos.StartLine
 	return marker, true
-}
-
-// sameContentNesting counts the nested lists that begin, through first
-// children, at the same offset as the item's content.
-func sameContentNesting(item *mdast.Node, offset int) int {
-	depth := 0
-	for node := item; ; {
-		list := node.FirstChild
-		if list == nil || list.Kind != mdast.NodeList {
-			return depth
-		}
-		first := list.FirstChild
-		if first == nil || first.Kind != mdast.NodeListItem || first.SourceRange().StartOffset != offset {
-			return depth
-		}
-		depth++
-		node = first
-	}
-}
-
-// listMarkerBefore finds the list marker that ends before offset on the line,
-// separated from it by at least one whitespace byte.
-func listMarkerBefore(content []byte, line mdast.LineInfo, offset int) (listItemMarker, bool) {
-	end := offset
-	for end > line.StartOffset && isMarkerSpace(content[end-1]) {
-		end--
-	}
-	if end == offset || end == line.StartOffset {
-		return listItemMarker{}, false
-	}
-	start := end - 1
-	switch content[start] {
-	case '-', '+', '*':
-	case '.', ')':
-		for start > line.StartOffset && isASCIIDigit(content[start-1]) && end-1-(start-1) <= maxOrderedMarkerDigits {
-			start--
-		}
-		if start == end-1 {
-			return listItemMarker{}, false
-		}
-	default:
-		return listItemMarker{}, false
-	}
-	if !markerBoundaryBefore(content, line, start) {
-		return listItemMarker{}, false
-	}
-	return readListMarker(content, line, start)
 }
 
 // readListMarker reads a list marker starting exactly at start. The marker
