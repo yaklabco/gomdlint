@@ -14,11 +14,30 @@ const (
 	wordFiles           = "files"
 )
 
+// filesNoun returns "file" or "files" to agree with count.
+func filesNoun(count int) string {
+	if count == 1 {
+		return wordFile
+	}
+	return wordFiles
+}
+
+// formatErrored describes the files a run could not lint.
+func (s *Styles) formatErrored(stats runner.Stats) string {
+	return s.Failure.Render(fmt.Sprintf("%d %s could not be linted", stats.FilesErrored, filesNoun(stats.FilesErrored)))
+}
+
 // FormatSummaryOneLine formats run statistics as a single line.
 // Example: "12 issues (8 errors, 4 warnings) in 3 files, 6 fixable".
 func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
+	checked := fmt.Sprintf("%d %s checked", stats.FilesProcessed, filesNoun(stats.FilesProcessed))
+
+	if stats.DiagnosticsTotal == 0 && stats.FilesErrored > 0 {
+		return s.formatErrored(stats) + s.Dim.Render(" ("+checked+", no issues found)") + "\n"
+	}
+
 	if stats.DiagnosticsTotal == 0 {
-		msg := s.Success.Render("No issues found") + s.Dim.Render(fmt.Sprintf(" (%d files checked)", stats.FilesProcessed))
+		msg := s.Success.Render("No issues found") + s.Dim.Render(" ("+checked+")")
 		// Show fixes applied even when no issues remain
 		if stats.DiagnosticsFixed > 0 {
 			fileWord := wordFiles
@@ -76,6 +95,10 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 			fixedFileWord = wordFile
 		}
 		parts = append(parts, s.Success.Render(fmt.Sprintf("%d fixed in %d %s", stats.DiagnosticsFixed, stats.FilesModified, fixedFileWord)))
+	}
+
+	if stats.FilesErrored > 0 {
+		parts = append(parts, s.formatErrored(stats))
 	}
 
 	return strings.Join(parts, ", ") + "\n"

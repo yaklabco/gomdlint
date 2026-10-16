@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -20,9 +19,6 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/reporter"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
-
-// ErrLintIssuesFound is returned when lint issues are found.
-var ErrLintIssuesFound = errors.New("lint issues found")
 
 type lintFlags struct {
 	format       string
@@ -77,7 +73,9 @@ Examples:
   mdlint lint --fix              # Lint and auto-fix issues
   mdlint lint --fix --dry-run    # Show fixes without applying
   mdlint lint --format json      # Output as JSON for CI
-  mdlint lint --strict           # Treat warnings as errors`
+  mdlint lint --strict           # Treat warnings as errors
+
+` + exitCodeHelp
 
 // profileCleanup holds cleanup functions for profiling.
 type profileCleanup struct {
@@ -132,10 +130,14 @@ func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
 func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags) error {
 	logger := logging.Default()
 
+	if err := validateLintFlags(flags, cfg.Jobs); err != nil {
+		return err
+	}
+
 	// Setup profiling.
 	profCleanup, err := setupProfiling(flags)
 	if err != nil {
-		return err
+		return withExitCode(ExitIOError, err)
 	}
 	defer profCleanup.run()
 
@@ -150,22 +152,19 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	cfg.DisableRules = flags.disable
 	cfg.FixRules = flags.fixRules
 
-	// Load and merge configuration.
+	// Load and merge configuration. Cobra always provides a context.
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	// Get the explicit config path from the root command's persistent flag.
 	configPath, err := cmd.Flags().GetString("config")
 	if err != nil {
-		return fmt.Errorf("get config flag: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("get config flag: %w", err))
 	}
 
 	// Get working directory for config discovery.
 	workDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("get working directory: %w", err))
 	}
 
 	// Build load options.
@@ -177,7 +176,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 
 	loadResult, err := configloader.Load(ctx, loadOpts)
 	if err != nil {
-		return errors.Join(errors.New("failed to load configuration"), err)
+		return failure(ctx, ExitConfigError, fmt.Errorf("load configuration: %w", err))
 	}
 
 	finalCfg := loadResult.Config
@@ -233,7 +232,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Run linting.
 	result, err := lintRunner.Run(ctx, runOpts)
 	if err != nil {
-		return errors.Join(errors.New("lint run failed"), err)
+		return failure(ctx, ExitIOError, err)
 	}
 
 	// Get color mode from persistent flag.
@@ -245,7 +244,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Parse output format.
 	format, err := reporter.ParseFormat(flags.format)
 	if err != nil {
-		return fmt.Errorf("invalid format: %w", err)
+		return withExitCode(ExitInvalidUsage, err)
 	}
 
 	// Create reporter.
@@ -266,34 +265,83 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		Registry:     registry,
 	})
 	if err != nil {
-		return fmt.Errorf("create reporter: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("create reporter: %w", err))
 	}
 
 	// Report results.
 	if _, err := rep.Report(ctx, result); err != nil {
-		logger.Error("report failed", "error", err)
-		return fmt.Errorf("report results: %w", err)
+		return withExitCode(ExitIOError, fmt.Errorf("report results: %w", err))
 	}
 
 	// Write memory profile if requested.
 	if flags.memprofile != "" {
-		memFile, err := os.Create(flags.memprofile)
-		if err != nil {
-			return fmt.Errorf("create memory profile: %w", err)
-		}
-		defer memFile.Close()
-		runtime.GC() //nolint:revive // Intentional GC before heap profile for accurate stats.
-		if err := pprof.WriteHeapProfile(memFile); err != nil {
-			return fmt.Errorf("write memory profile: %w", err)
+		if err := writeMemProfile(flags.memprofile); err != nil {
+			return withExitCode(ExitIOError, err)
 		}
 	}
 
-	// Determine exit code based on result.
-	exitCode := ExitCodeFromResult(result, flags.strict)
-	if exitCode != ExitSuccess {
-		return ErrLintIssuesFound
-	}
+	return resultError(result, flags.strict)
+}
 
+// resultError turns the outcome of a completed run into the command error
+// that carries its exit code.
+func resultError(result *runner.Result, strict bool) error {
+	code := ExitCodeFromResult(result, strict)
+	switch code {
+	case ExitSuccess:
+		return nil
+	case ExitIOError:
+		noun := "files"
+		if result.Stats.FilesErrored == 1 {
+			noun = "file"
+		}
+		return &ExitError{Code: code, Err: fmt.Errorf("%d %s could not be linted", result.Stats.FilesErrored, noun)}
+	default:
+		return &ExitError{Code: code, Err: ErrLintIssuesFound}
+	}
+}
+
+// failure classifies the error of a stage that also fails when the run is
+// interrupted. An interrupted run is an internal error, not a failure of the
+// stage's inputs.
+func failure(ctx context.Context, code int, err error) error {
+	if ctx.Err() != nil {
+		return withExitCode(ExitInternalError, err)
+	}
+	return withExitCode(code, err)
+}
+
+// validateLintFlags rejects invalid flag values before any work starts.
+func validateLintFlags(flags *lintFlags, jobs int) error {
+	if _, err := reporter.ParseFormat(flags.format); err != nil {
+		return withExitCode(ExitInvalidUsage, err)
+	}
+	if !configloader.IsValidFlavor(config.Flavor(flags.flavor)) {
+		return usageError("invalid flavor %q; valid flavors: commonmark, gfm", flags.flavor)
+	}
+	if !config.RuleFormat(flags.ruleFormat).IsValid() {
+		return usageError("invalid rule format %q; valid formats: name, id, combined", flags.ruleFormat)
+	}
+	if !config.SummaryOrder(flags.summaryOrder).IsValid() {
+		return usageError("invalid summary order %q; valid orders: rules, files", flags.summaryOrder)
+	}
+	if jobs < 0 {
+		return usageError("invalid jobs value %d; use 0 for one worker per CPU", jobs)
+	}
+	return nil
+}
+
+// writeMemProfile writes a heap profile to path.
+func writeMemProfile(path string) error {
+	memFile, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create memory profile: %w", err)
+	}
+	defer memFile.Close()
+	runtime.GC() //nolint:revive // Intentional GC before heap profile for accurate stats.
+	if err := pprof.WriteHeapProfile(memFile); err != nil {
+		return fmt.Errorf("write memory profile: %w", err)
+	}
 	return nil
 }
 

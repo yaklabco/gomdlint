@@ -204,3 +204,57 @@ func TestFormatSummaryOneLine_NoFixable(t *testing.T) {
 	assert.Contains(t, result, "3 errors")
 	assert.NotContains(t, result, "fixable")
 }
+
+func TestFormatSummaryOneLine_ErroredFiles(t *testing.T) {
+	styles := pretty.NewStyles(false)
+
+	t.Run("without findings", func(t *testing.T) {
+		stats := runner.Stats{
+			FilesProcessed:        2,
+			FilesErrored:          1,
+			DiagnosticsBySeverity: map[string]int{},
+		}
+
+		result := styles.FormatSummaryOneLine(stats)
+
+		assert.Contains(t, result, "1 file could not be linted")
+		assert.Contains(t, result, "2 files checked")
+		assert.NotContains(t, result, "No issues found")
+	})
+
+	t.Run("with findings", func(t *testing.T) {
+		stats := runner.Stats{
+			FilesProcessed:        1,
+			FilesErrored:          2,
+			FilesWithIssues:       1,
+			DiagnosticsTotal:      1,
+			DiagnosticsBySeverity: map[string]int{"warning": 1},
+		}
+
+		result := styles.FormatSummaryOneLine(stats)
+
+		assert.Contains(t, result, "1 issue")
+		assert.Contains(t, result, "2 files could not be linted")
+	})
+}
+
+func TestFormatTableSummary_ErroredFiles(t *testing.T) {
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80)
+
+	result := formatter.FormatTableSummary(runner.Stats{
+		FilesProcessed:        1,
+		FilesErrored:          1,
+		DiagnosticsBySeverity: map[string]int{},
+	}, "")
+
+	assert.Contains(t, result, "1 file checked")
+	assert.Contains(t, result, "1 file could not be linted")
+}
+
+func TestFormatSummaryOneLine_SingleFileChecked(t *testing.T) {
+	styles := pretty.NewStyles(false)
+
+	result := styles.FormatSummaryOneLine(runner.Stats{FilesProcessed: 1, DiagnosticsBySeverity: map[string]int{}})
+
+	assert.Contains(t, result, "(1 file checked)")
+}

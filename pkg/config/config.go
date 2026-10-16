@@ -46,6 +46,16 @@ const (
 	RuleFormatCombined RuleFormat = "combined" // "MD009/no-trailing-spaces"
 )
 
+// IsValid returns true if the rule format is valid.
+func (f RuleFormat) IsValid() bool {
+	switch f {
+	case RuleFormatName, RuleFormatID, RuleFormatCombined:
+		return true
+	default:
+		return false
+	}
+}
+
 // SummaryOrder controls the order of tables in summary output.
 type SummaryOrder string
 

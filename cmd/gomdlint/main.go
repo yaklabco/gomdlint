@@ -2,11 +2,11 @@
 package main
 
 import (
-	"errors"
+	"context"
+	"io"
 	"os"
 
 	"github.com/yaklabco/gomdlint/internal/cli"
-	"github.com/yaklabco/gomdlint/internal/logging"
 
 	// Import rules package to register built-in rules via init().
 	_ "github.com/yaklabco/gomdlint/pkg/lint/rules"
@@ -22,27 +22,16 @@ var (
 )
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run() int {
-	// Build and execute the root command.
+// run executes the command line in args and returns the process exit code.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	info := cli.BuildInfo{
 		Version: version,
 		Commit:  commit,
 		Date:    date,
 	}
 
-	rootCmd := cli.NewRootCommand(info)
-
-	if err := rootCmd.Execute(); err != nil {
-		// Don't log ErrLintIssuesFound - it's just a signal for exit code.
-		if !errors.Is(err, cli.ErrLintIssuesFound) {
-			logger := logging.Default()
-			logger.Error("command failed", logging.FieldError, err)
-		}
-		return 1
-	}
-
-	return 0
+	return cli.Execute(ctx, info, args, stdout, stderr)
 }

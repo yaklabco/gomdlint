@@ -62,12 +62,12 @@ func runMigrate(flags *migrateFlags) error {
 		// Auto-detect markdownlint config
 		cwd, err := os.Getwd()
 		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
+			return withExitCode(ExitInternalError, fmt.Errorf("get working directory: %w", err))
 		}
 
 		inputPath = configloader.FindMarkdownlintConfig(cwd)
 		if inputPath == "" {
-			return errors.New("no markdownlint configuration file found in current directory")
+			return withExitCode(ExitIOError, errors.New("no markdownlint configuration file found in current directory"))
 		}
 
 		logger.Info("found markdownlint config", logging.FieldPath, inputPath)
@@ -75,24 +75,25 @@ func runMigrate(flags *migrateFlags) error {
 
 	// Check input exists
 	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
-		return fmt.Errorf("input file does not exist: %s", inputPath)
+		return withExitCode(ExitIOError, fmt.Errorf("input file does not exist: %s", inputPath))
 	}
 
 	// Check if we can migrate
 	if !configloader.CanMigrate(inputPath) {
-		return fmt.Errorf("migration not supported: %s", configloader.GetMigrationWarning(inputPath))
+		return withExitCode(ExitConfigError,
+			fmt.Errorf("migration not supported: %s", configloader.GetMigrationWarning(inputPath)))
 	}
 
 	// Make output path absolute
 	absOutput, err := filepath.Abs(flags.output)
 	if err != nil {
-		return fmt.Errorf("resolve output path: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("resolve output path: %w", err))
 	}
 
 	// Check output exists
 	if _, err := os.Stat(absOutput); err == nil {
 		if !flags.force {
-			return fmt.Errorf("output file %q already exists; use --force to overwrite", flags.output)
+			return usageError("output file %q already exists; use --force to overwrite", flags.output)
 		}
 		logger.Warn("overwriting existing file", logging.FieldPath, flags.output)
 	}
@@ -100,7 +101,7 @@ func runMigrate(flags *migrateFlags) error {
 	// Perform migration
 	result, err := configloader.ConvertMarkdownlintConfig(inputPath)
 	if err != nil {
-		return fmt.Errorf("convert configuration: %w", err)
+		return withExitCode(ExitConfigError, fmt.Errorf("convert configuration: %w", err))
 	}
 
 	// Report warnings
@@ -112,12 +113,12 @@ func runMigrate(flags *migrateFlags) error {
 	header := configloader.GenerateMigrationHeader(inputPath)
 	content, err := result.Config.ToYAMLWithHeader(header)
 	if err != nil {
-		return fmt.Errorf("serialize configuration: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("serialize configuration: %w", err))
 	}
 
 	// Write output
 	if err := os.WriteFile(absOutput, content, configFilePermissions); err != nil {
-		return fmt.Errorf("write output file: %w", err)
+		return withExitCode(ExitIOError, fmt.Errorf("write output file: %w", err))
 	}
 
 	logger.Info("migration complete", logging.FieldInput, inputPath, logging.FieldOutput, flags.output)

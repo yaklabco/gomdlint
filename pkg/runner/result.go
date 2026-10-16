@@ -24,6 +24,15 @@ type FileOutcome struct {
 	FixPasses int
 }
 
+// Failed reports whether the file could not be linted completely. Failed
+// files count toward Stats.FilesErrored, which fails the run.
+//
+// Every per-file failure belongs here, so that new kinds (for example errors
+// from individual rules) fail the run without changes elsewhere.
+func (o *FileOutcome) Failed() bool {
+	return o.Error != nil
+}
+
 // Stats captures aggregate information about a run.
 type Stats struct {
 	// FilesDiscovered is the total number of files found during discovery.
@@ -97,9 +106,8 @@ func newStats() Stats {
 func (r *Result) accumulate(outcome FileOutcome) {
 	r.Files = append(r.Files, outcome)
 
-	if outcome.Error != nil {
+	if outcome.Failed() {
 		r.Stats.FilesErrored++
-		return
 	}
 
 	if outcome.Result == nil {

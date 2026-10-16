@@ -21,6 +21,10 @@ func newRulesCommand() *cobra.Command {
 		Long: `List all available lint rules with their IDs, descriptions,
 default severity, and whether they support auto-fixing.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if !config.RuleFormat(flags.ruleFormat).IsValid() {
+				return usageError("invalid rule format %q; valid formats: name, id, combined", flags.ruleFormat)
+			}
+
 			logger := logging.NewInteractive()
 
 			rules := lint.DefaultRegistry.Rules()

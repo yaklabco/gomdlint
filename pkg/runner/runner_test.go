@@ -576,6 +576,47 @@ func TestRunner_Run_DryRun(t *testing.T) {
 	}
 }
 
+func TestRunner_Run_UnreadableFileFails(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root can read files without permission bits")
+	}
+
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked.md")
+	for _, name := range []string{"ok.md", "locked.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# Test\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, lint.NewRegistry())))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     config.NewConfig(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Stats.FilesErrored != 1 || result.Stats.FilesProcessed != 1 {
+		t.Errorf("FilesErrored = %d, FilesProcessed = %d, want 1 and 1",
+			result.Stats.FilesErrored, result.Stats.FilesProcessed)
+	}
+	for idx := range result.Files {
+		outcome := &result.Files[idx]
+		if got, want := outcome.Failed(), outcome.Path == locked; got != want {
+			t.Errorf("%s: Failed() = %v, want %v", outcome.Path, got, want)
+		}
+	}
+}
+
 func TestResult_HasFailures(t *testing.T) {
 	t.Parallel()
 

@@ -55,7 +55,7 @@ func runInit(flags *initFlags) error {
 
 	// Validate format
 	if flags.format != "yaml" && flags.format != "json" {
-		return fmt.Errorf("invalid format %q: must be yaml or json", flags.format)
+		return usageError("invalid format %q: must be yaml or json", flags.format)
 	}
 
 	// Determine output path
@@ -71,13 +71,13 @@ func runInit(flags *initFlags) error {
 	// Make path absolute
 	absPath, err := filepath.Abs(outputPath)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("resolve path: %w", err))
 	}
 
 	// Check if file exists
 	if _, err := os.Stat(absPath); err == nil {
 		if !flags.force {
-			return fmt.Errorf("file %q already exists; use --force to overwrite", outputPath)
+			return usageError("file %q already exists; use --force to overwrite", outputPath)
 		}
 		logger.Warn("overwriting existing file", logging.FieldPath, outputPath)
 	}
@@ -90,12 +90,12 @@ func runInit(flags *initFlags) error {
 
 	content, err := config.GenerateTemplate(opts)
 	if err != nil {
-		return fmt.Errorf("generate template: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("generate template: %w", err))
 	}
 
 	// Write file
 	if err := os.WriteFile(absPath, content, configFilePermissions); err != nil {
-		return fmt.Errorf("write file: %w", err)
+		return withExitCode(ExitIOError, fmt.Errorf("write file: %w", err))
 	}
 
 	logger.Info("created configuration file", logging.FieldPath, outputPath)

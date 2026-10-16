@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -41,6 +42,9 @@ func Discover(ctx context.Context, opts Options) ([]string, error) {
 		absPath = filepath.Clean(absPath)
 
 		info, err := os.Stat(absPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%s: %w", inputPath, fs.ErrNotExist)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("stat %s: %w", inputPath, err)
 		}
