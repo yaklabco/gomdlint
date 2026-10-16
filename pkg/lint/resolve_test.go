@@ -3,6 +3,8 @@ package lint_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -150,6 +152,94 @@ func TestResolveRules_SeverityOverride(t *testing.T) {
 
 	if resolved[0].Severity != config.SeverityError {
 		t.Errorf("expected error severity, got %v", resolved[0].Severity)
+	}
+}
+
+// infoRule is a rule whose built-in default severity is info.
+type infoRule struct {
+	lint.BaseRule
+}
+
+func (r *infoRule) DefaultSeverity() config.Severity {
+	return config.SeverityInfo
+}
+
+func resolveOne(t *testing.T, rule lint.Rule, cfg *config.Config) lint.ResolvedRule {
+	t.Helper()
+
+	registry := lint.NewRegistry()
+	registry.Register(rule)
+
+	resolved := lint.ResolveRules(registry, cfg)
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(resolved))
+	}
+	return resolved[0]
+}
+
+func TestResolveRules_SeverityDefault(t *testing.T) {
+	t.Parallel()
+
+	errorSeverity := string(config.SeverityError)
+	infoSeverity := string(config.SeverityInfo)
+
+	tests := []struct {
+		name  string
+		rule  lint.Rule
+		setup func(cfg *config.Config)
+		want  config.Severity
+	}{
+		{
+			name: "applies to rules without an explicit severity",
+			rule: newTestRule(testRuleID1, false),
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+			},
+			want: config.SeverityError,
+		},
+		{
+			name: "replaces a rule's built-in default",
+			rule: &infoRule{BaseRule: lint.NewBaseRule(testRuleID1, "info-rule", "", nil, false)},
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+			},
+			want: config.SeverityError,
+		},
+		{
+			name: "loses to a rule severity",
+			rule: newTestRule(testRuleID1, false),
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+				cfg.Rules[testRuleID1] = config.RuleConfig{Severity: &infoSeverity}
+			},
+			want: config.SeverityInfo,
+		},
+		{
+			name: "loses to a rule_defaults severity",
+			rule: newTestRule(testRuleID1, false),
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+				cfg.RuleDefaults = map[string]config.RuleConfig{testRuleID1: {Severity: &infoSeverity}}
+			},
+			want: config.SeverityInfo,
+		},
+		{
+			name:  "unset keeps the built-in default",
+			rule:  &infoRule{BaseRule: lint.NewBaseRule(testRuleID1, "info-rule", "", nil, false)},
+			setup: func(*config.Config) {},
+			want:  config.SeverityInfo,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := config.NewConfig()
+			tt.setup(cfg)
+
+			assert.Equal(t, tt.want, resolveOne(t, tt.rule, cfg).Severity)
+		})
 	}
 }
 

@@ -52,6 +52,13 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 	if cfg == nil {
 		return rr
 	}
+
+	// severity_default replaces the built-in severity of every rule that
+	// rule_defaults or rules do not give an explicit severity.
+	if cfg.SeverityDefault != "" {
+		rr.Severity = config.Severity(cfg.SeverityDefault)
+	}
+
 	if baseline, ok := cfg.RuleDefaults[rule.ID()]; ok {
 		rr.Config = &baseline
 		if baseline.Enabled != nil {

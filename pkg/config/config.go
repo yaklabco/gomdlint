@@ -103,8 +103,9 @@ type Config struct {
 	// Flavor specifies the Markdown flavor ("commonmark" or "gfm").
 	Flavor Flavor `mapstructure:"flavor" yaml:"flavor"`
 
-	// SeverityDefault is the default severity for rules that don't specify one.
-	SeverityDefault string `mapstructure:"severity_default" yaml:"severity_default"`
+	// SeverityDefault is the severity for rules that don't specify one. It
+	// replaces each rule's built-in default severity; empty keeps them.
+	SeverityDefault string `mapstructure:"severity_default" yaml:"severity_default,omitempty"`
 
 	// Rules contains per-rule configuration keyed by rule ID.
 	Rules map[string]RuleConfig `mapstructure:"rules" yaml:"rules"`
@@ -152,10 +153,10 @@ type Config struct {
 // NewConfig returns a Config with sensible defaults.
 func NewConfig() *Config {
 	return &Config{
-		Flavor:          FlavorCommonMark,
-		SeverityDefault: string(SeverityWarning),
-		Rules:           make(map[string]RuleConfig),
-		Ignore:          nil,
+		Flavor: FlavorCommonMark,
+		// No SeverityDefault: rules keep their built-in severities.
+		Rules:  make(map[string]RuleConfig),
+		Ignore: nil,
 		Backups: BackupsConfig{
 			Enabled: Bool(true),
 			Mode:    "sidecar",

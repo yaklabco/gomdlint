@@ -64,6 +64,18 @@ func backupFiles(t *testing.T, dir string) []string {
 	return backups
 }
 
+func TestLintAppliesSeverityDefault(t *testing.T) {
+	inProject(t, map[string]string{
+		"doc.md":        trailingDoc,
+		".gomdlint.yml": "severity_default: error\n",
+	})
+
+	got := execute(t, "lint", "--color", "never", "--no-context", "doc.md")
+
+	assert.Equal(t, cli.ExitLintErrors, got.code, got.stdout)
+	assert.NotContains(t, got.stdout, "warning")
+}
+
 func TestLintFixCreatesBackupsByDefault(t *testing.T) {
 	dir := inProject(t, map[string]string{"doc.md": trailingDoc})
 
