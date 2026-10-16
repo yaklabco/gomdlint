@@ -25,7 +25,8 @@ type Report struct {
 }
 
 // DiagnosticEntry represents a single diagnostic in the report.
-// FilePath follows DisplayPath. Lines are 1-based and columns are 1-based
+// FilePath is relative to the working directory when the file lies inside
+// it, and absolute otherwise. Lines are 1-based and columns are 1-based
 // character columns (Unicode code points); EndColumn is exclusive.
 type DiagnosticEntry struct {
 	FilePath    string     `json:"filePath"`

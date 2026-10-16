@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
-	"github.com/yaklabco/gomdlint/pkg/analysis"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
@@ -42,7 +42,7 @@ func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (int, er
 	for _, file := range result.Files {
 		if file.Error != nil {
 			fmt.Fprintf(r.out, "%s: %s\n",
-				r.styles.FilePath.Render(analysis.DisplayPath(file.Path, r.opts.WorkingDir)),
+				r.styles.FilePath.Render(display.Path(file.Path, r.opts.WorkingDir)),
 				r.styles.Error.Render(fmt.Sprintf("error: %v", file.Error)),
 			)
 			continue
@@ -92,13 +92,13 @@ func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 }
 
 // displayPath returns the path shown in the diff headers: relative to the
-// working directory when the file lies inside it (see analysis.DisplayPath),
+// working directory when the file lies inside it (see display.Path),
 // as every other reporter shows it. A file outside the working directory keeps
 // its full path, not just its basename, so the patch still applies
 // unambiguously; the leading slash is dropped so the a/ and b/ prefixes do not
 // produce a//path.
 func (r *DiffReporter) displayPath(path string) string {
-	shown := filepath.ToSlash(analysis.DisplayPath(path, r.opts.WorkingDir))
+	shown := filepath.ToSlash(display.Path(path, r.opts.WorkingDir))
 	return strings.TrimPrefix(shown, "/")
 }
 

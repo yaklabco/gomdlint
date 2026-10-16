@@ -11,7 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/yaklabco/gomdlint/pkg/analysis"
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -33,7 +33,7 @@ const (
 	sarifSourceRootID = "%SRCROOT%"
 
 	// sarifColumnKind declares the unit of every column in the log, matching
-	// the analysis.ColumnUTF16 conversion the regions use. SARIF requires it
+	// the display.UTF16CodeUnits conversion the regions use. SARIF requires it
 	// whenever a run reports results on text files.
 	sarifColumnKind = "utf16CodeUnits"
 
@@ -454,10 +454,10 @@ func toSARIFPoint(snapshot *mdast.FileSnapshot, line, byteColumn int) sarifPoint
 		last := line - 1
 		info := snapshot.Lines[last-1]
 		pastNewline := info.EndOffset - info.StartOffset + 1
-		return sarifPoint{line: last, column: analysis.ConvertColumn(snapshot, last, pastNewline, analysis.ColumnUTF16)}
+		return sarifPoint{line: last, column: display.Column(snapshot, mdast.Position{Line: last, Column: pastNewline}, display.UTF16CodeUnits)}
 	}
 
-	return sarifPoint{line: line, column: analysis.ConvertColumn(snapshot, line, byteColumn, analysis.ColumnUTF16)}
+	return sarifPoint{line: line, column: display.Column(snapshot, mdast.Position{Line: line, Column: byteColumn}, display.UTF16CodeUnits)}
 }
 
 // isTrailingEmptyLine reports whether line is the empty line that follows the
@@ -614,12 +614,12 @@ func (l *artifactLocator) relativeToRoot(absPath string) (string, bool) {
 	}
 
 	if realPath, err := filepath.EvalSymlinks(absPath); err == nil && realPath != absPath {
-		if rel := analysis.DisplayPath(realPath, l.root); !filepath.IsAbs(rel) {
+		if rel := display.Path(realPath, l.root); !filepath.IsAbs(rel) {
 			return rel, true
 		}
 	}
 
-	if rel := analysis.DisplayPath(absPath, l.root); !filepath.IsAbs(rel) {
+	if rel := display.Path(absPath, l.root); !filepath.IsAbs(rel) {
 		return rel, true
 	}
 

@@ -1,16 +1,17 @@
 package reporter
 
 import (
-	"github.com/yaklabco/gomdlint/pkg/analysis"
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
 // displayResult returns a copy of result in the form the text, table and JSON
-// reporters print. File paths follow analysis.DisplayPath for workDir, and
-// diagnostic columns count characters (Unicode code points) instead of the
-// bytes lint uses internally, matching markdownlint. result is not modified.
+// reporters print. File paths are relative to workDir when they lie inside it
+// (see display.Path), and diagnostic columns count characters (Unicode code
+// points) instead of the bytes lint uses internally, matching markdownlint.
+// result is not modified.
 func displayResult(result *runner.Result, workDir string) *runner.Result {
 	if result == nil {
 		return nil
@@ -28,7 +29,7 @@ func displayResult(result *runner.Result, workDir string) *runner.Result {
 // displayOutcome returns a copy of file with a display path and character
 // columns. The pipeline and lint results are copied rather than modified.
 func displayOutcome(file runner.FileOutcome, workDir string) runner.FileOutcome {
-	shownPath := analysis.DisplayPath(file.Path, workDir)
+	shownPath := display.Path(file.Path, workDir)
 
 	shown := file
 	shown.Path = shownPath
@@ -63,11 +64,11 @@ func displayDiagnostic(
 	if diag.FilePath == "" || diag.FilePath == filePath {
 		diag.FilePath = shownPath
 	} else {
-		diag.FilePath = analysis.DisplayPath(diag.FilePath, workDir)
+		diag.FilePath = display.Path(diag.FilePath, workDir)
 	}
 
-	diag.StartColumn = analysis.ConvertColumn(snapshot, diag.StartLine, diag.StartColumn, analysis.ColumnCharacters)
-	diag.EndColumn = analysis.ConvertColumn(snapshot, diag.EndLine, diag.EndColumn, analysis.ColumnCharacters)
+	diag.StartColumn = display.Column(snapshot, mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}, display.CodePoints)
+	diag.EndColumn = display.Column(snapshot, mdast.Position{Line: diag.EndLine, Column: diag.EndColumn}, display.CodePoints)
 
 	return diag
 }
@@ -76,5 +77,5 @@ func displayDiagnostic(
 // matches the character columns of displayResult: no line terminator and no
 // byte order mark.
 func sourceLine(snapshot *mdast.FileSnapshot, line int) string {
-	return string(analysis.LineText(snapshot, line))
+	return string(display.LineText(snapshot, line))
 }

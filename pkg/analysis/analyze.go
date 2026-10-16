@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/runner"
@@ -104,9 +105,9 @@ func createDiagnosticEntry(path, severity string, snapshot *mdast.FileSnapshot, 
 		Severity:    severity,
 		Message:     diag.Message,
 		StartLine:   diag.StartLine,
-		StartColumn: ConvertColumn(snapshot, diag.StartLine, diag.StartColumn, ColumnCharacters),
+		StartColumn: display.Column(snapshot, mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}, display.CodePoints),
 		EndLine:     diag.EndLine,
-		EndColumn:   ConvertColumn(snapshot, diag.EndLine, diag.EndColumn, ColumnCharacters),
+		EndColumn:   display.Column(snapshot, mdast.Position{Line: diag.EndLine, Column: diag.EndColumn}, display.CodePoints),
 		Suggestion:  diag.Suggestion,
 		Fixable:     len(diag.FixEdits) > 0,
 	}
@@ -174,7 +175,7 @@ func Analyze(result *runner.Result, opts Options) *Report {
 			report.Totals.FilesWithIssues++
 		}
 
-		displayPath := DisplayPath(file.Path, opts.WorkingDir)
+		displayPath := display.Path(file.Path, opts.WorkingDir)
 		fa := ctx.getOrCreateFileAnalysis(displayPath)
 
 		for _, diag := range file.Result.Diagnostics {

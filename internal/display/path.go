@@ -1,21 +1,20 @@
-package analysis
+package display
 
 import (
 	"path/filepath"
 	"strings"
 )
 
-// DisplayPath returns path in the form reporters show it: relative to workDir
-// when path lies inside workDir, and unchanged otherwise. Relative paths and
-// paths reported with an empty workDir are returned unchanged.
+// Path returns path in the form reporters show it: relative to workDir when
+// path lies inside workDir, and unchanged otherwise. Relative paths and paths
+// reported with an empty workDir are returned unchanged.
 //
-// When path is not lexically inside workDir, DisplayPath resolves symbolic
-// links in workDir and in the directory holding path and compares again, so
-// two spellings of the same directory (for example a macOS /Volumes mount and
-// its home-directory alias) still produce a relative path. The file name
-// itself is never resolved, so a symlinked file keeps the name it was linted
-// by.
-func DisplayPath(path, workDir string) string {
+// When path is not lexically inside workDir, Path resolves symbolic links in
+// workDir and in the directory holding path and compares again, so two
+// spellings of the same directory (for example a macOS /Volumes mount and its
+// home-directory alias) still produce a relative path. The file name itself
+// is never resolved, so a symlinked file keeps the name it was linted by.
+func Path(path, workDir string) string {
 	if workDir == "" || !filepath.IsAbs(path) {
 		return path
 	}

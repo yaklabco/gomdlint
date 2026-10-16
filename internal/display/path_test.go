@@ -1,4 +1,4 @@
-package analysis
+package display
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDisplayPath(t *testing.T) {
+func TestPath(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
@@ -69,12 +69,12 @@ func TestDisplayPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, DisplayPath(tt.path, tt.workDir))
+			assert.Equal(t, tt.want, Path(tt.path, tt.workDir))
 		})
 	}
 }
 
-func TestDisplayPath_ResolvesSymlinkedDirectories(t *testing.T) {
+func TestPath_ResolvesSymlinkedDirectories(t *testing.T) {
 	t.Parallel()
 
 	realDir := t.TempDir()
@@ -87,14 +87,14 @@ func TestDisplayPath_ResolvesSymlinkedDirectories(t *testing.T) {
 
 	// Working directory reached through the link, file path through the real directory.
 	assert.Equal(t, filepath.Join("docs", "a.md"),
-		DisplayPath(filepath.Join(realDir, "docs", "a.md"), linkDir))
+		Path(filepath.Join(realDir, "docs", "a.md"), linkDir))
 
 	// Working directory is the real directory, file path goes through the link.
 	assert.Equal(t, filepath.Join("docs", "a.md"),
-		DisplayPath(filepath.Join(linkDir, "docs", "a.md"), realDir))
+		Path(filepath.Join(linkDir, "docs", "a.md"), realDir))
 }
 
-func TestDisplayPath_DoesNotFollowFileSymlink(t *testing.T) {
+func TestPath_DoesNotFollowFileSymlink(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
@@ -107,5 +107,5 @@ func TestDisplayPath_DoesNotFollowFileSymlink(t *testing.T) {
 	}
 
 	// The file is shown under the name it was linted by, not its target.
-	assert.Equal(t, "link.md", DisplayPath(link, workDir))
+	assert.Equal(t, "link.md", Path(link, workDir))
 }

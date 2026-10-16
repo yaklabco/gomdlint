@@ -46,7 +46,7 @@ type Options struct {
 
 	// WorkingDir is the directory paths are shown relative to. Paths inside it
 	// become relative; paths outside it, and every path when WorkingDir is
-	// empty, are kept as-is (typically absolute). See DisplayPath.
+	// empty, are kept as-is (typically absolute).
 	WorkingDir string
 }
 
