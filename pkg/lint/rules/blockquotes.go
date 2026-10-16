@@ -39,6 +39,9 @@ type quoteSpace struct {
 	spaces  int // whitespace after the '>' marker, including the optional space
 	item    *mdast.Node
 	inList  bool
+	// unsafe is true when the whitespace indents a code fence or an HTML
+	// block, whose indentation is part of the content.
+	unsafe bool
 }
 
 // Apply checks for multiple spaces after blockquote symbol.
@@ -69,14 +72,17 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 		if !pos.IsValid() || quote.FirstChild == nil {
 			continue
 		}
+		items := quoteListItems(quote)
+		unsafeLines := quoteVerbatimLines(quote)
 		for lineNum := pos.StartLine; lineNum <= nodeLastLine(quote); lineNum++ {
 			if codeLines[lineNum] {
 				continue
 			}
-			finding, ok := extraQuoteSpace(ctx.File, quote, lineNum)
+			finding, ok := extraQuoteSpace(ctx.File, quote, items, lineNum)
 			if !ok || (!includeListItems && (finding.item != nil || finding.inList)) {
 				continue
 			}
+			finding.unsafe = unsafeLines[lineNum]
 			if finding.item != nil {
 				proposeQuoteSpaceShift(plan, finding)
 			}
@@ -114,7 +120,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 // It reports false when the line does not continue the blockquote, holds
 // nothing after the whitespace, or when a list item inside the blockquote
 // claims the whitespace as its content indentation.
-func extraQuoteSpace(file *mdast.FileSnapshot, quote *mdast.Node, lineNum int) (quoteSpace, bool) {
+func extraQuoteSpace(file *mdast.FileSnapshot, quote *mdast.Node, items []*mdast.Node, lineNum int) (quoteSpace, bool) {
 	prefix := lint.ContainerPrefix(file, quote.FirstChild, lineNum)
 	if strings.Count(string(prefix), ">") < blockquoteDepth(quote) {
 		return quoteSpace{}, false
@@ -140,7 +146,7 @@ func extraQuoteSpace(file *mdast.FileSnapshot, quote *mdast.Node, lineNum int) (
 		finding.spaces++
 	}
 
-	for _, item := range quoteListItems(quote) {
+	for _, item := range items {
 		itemPos := item.SourcePosition()
 		switch {
 		case itemPos.StartLine == lineNum && item.SourceRange().StartOffset == finding.end:
@@ -191,6 +197,30 @@ func proposeQuoteSpaceShift(plan *listShiftPlan, finding quoteSpace) {
 	plan.propose(finding.item, listShift{markerCol: layout.markerCol - width, contentCol: layout.contentCol - width})
 }
 
+// quoteVerbatimLines returns the lines of a blockquote whose indentation is
+// part of the content: the lines of HTML blocks and the fence lines of fenced
+// code blocks.
+func quoteVerbatimLines(quote *mdast.Node) map[int]bool {
+	lines := make(map[int]bool)
+	_ = mdast.Walk(quote, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+		pos := node.SourcePosition()
+		if !pos.IsValid() || nearestBlockquote(node) != quote {
+			return nil
+		}
+		switch {
+		case node.Kind == mdast.NodeHTMLBlock:
+			for line := pos.StartLine; line <= nodeLastLine(node); line++ {
+				lines[line] = true
+			}
+		case lint.IsFencedCodeBlock(node):
+			lines[pos.StartLine] = true
+			lines[nodeLastLine(node)] = true
+		}
+		return nil
+	})
+	return lines
+}
+
 // quoteSpaceFixable reports whether removing the whitespace keeps the
 // document structure: a list item must have been accepted by the shift plan,
 // and the whitespace must not indent a code fence or an HTML block.
@@ -199,21 +229,7 @@ func quoteSpaceFixable(finding quoteSpace, safeShifts map[*mdast.Node]listShift)
 		_, ok := safeShifts[finding.item]
 		return ok
 	}
-	fixable := true
-	_ = mdast.Walk(finding.quote, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
-		pos := node.SourcePosition()
-		if !pos.IsValid() || nearestBlockquote(node) != finding.quote {
-			return nil
-		}
-		switch {
-		case node.Kind == mdast.NodeHTMLBlock && pos.StartLine <= finding.lineNum && finding.lineNum <= nodeLastLine(node):
-			fixable = false
-		case lint.IsFencedCodeBlock(node) && (pos.StartLine == finding.lineNum || nodeLastLine(node) == finding.lineNum):
-			fixable = false
-		}
-		return nil
-	})
-	return fixable
+	return !finding.unsafe
 }
 
 // NoBlanksBlockquoteRule checks for blank lines inside blockquotes.
