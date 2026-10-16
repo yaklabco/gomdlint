@@ -112,7 +112,7 @@ func TestNoMissingSpaceATXRule_MarkdownlintParity(t *testing.T) {
 		{name: "indented line", input: "  #Indented\n", wantLines: []int{}},
 		{name: "list item continuation", input: "- item\n\n  #Heading\n", wantLines: []int{}},
 		{name: "blockquote", input: "> #Quoted\n", wantLines: []int{}},
-		{name: "keycap emoji", input: "#️⃣ keycap\n", wantLines: []int{}},
+		{name: "keycap emoji", input: "#\uFE0F\u20E3 keycap\n", wantLines: []int{}},
 		{name: "seven hashes are never a heading", input: "#######seven\n", wantLines: []int{}},
 		{
 			name:      "heading after a one-line comment",
@@ -824,7 +824,7 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 		{name: "GitHub emoji code", input: "# Smile :smile:\n", wantLines: []int{}},
 		{
 			name:      "full-width punctuation by default",
-			input:     "# Full width。\n",
+			input:     "# Full width\u3002\n",
 			wantLines: []int{1},
 			wantFix:   true,
 			wantFixed: "# Full width\n",

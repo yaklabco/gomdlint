@@ -35,7 +35,7 @@ func NewNoEmphasisAsHeadingRule() *NoEmphasisAsHeadingRule {
 
 // defaultEmphasisPunctuation is markdownlint's default punctuation that
 // indicates emphasis is not a heading: normal and full-width.
-const defaultEmphasisPunctuation = ".,;:!?。，；：！？"
+const defaultEmphasisPunctuation = ".,;:!?\u3002\uFF0C\uFF1B\uFF1A\uFF01\uFF1F"
 
 // escapeOrReferencePattern matches a backslash escape or a character
 // reference. markdownlint's parser splits emphasized text at these, so it

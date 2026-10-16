@@ -99,7 +99,7 @@ func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
 		{name: "character reference", input: "**Price &amp; Value**\n", wantLines: []int{}},
 		{name: "backslash escape", input: "**Price \\* Value**\n", wantLines: []int{}},
 		{name: "nested emphasis", input: "***Both***\n", wantLines: []int{}},
-		{name: "full-width question mark", input: "**Title？**\n", wantLines: []int{}},
+		{name: "full-width question mark", input: "**Title\uFF1F**\n", wantLines: []int{}},
 		{
 			name:      "trailing comment is ignored but blocks the fix",
 			input:     "**Title** <!-- note -->\n",
@@ -304,10 +304,11 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			wantLines: []int{1},
 		},
 		{
-			// "é_foo_" is not emphasis: underscores cannot open inside a word.
+			// After a letter such as U+00E9, "_foo_" is not emphasis:
+			// underscores cannot open inside a word.
 			name:      "MD049 no fix to underscore after a non-ASCII letter",
 			rule:      NewEmphasisStyleRule(),
-			input:     "é*foo*\n",
+			input:     "\u00E9*foo*\n",
 			options:   map[string]any{"style": "underscore"},
 			wantLines: []int{1},
 		},

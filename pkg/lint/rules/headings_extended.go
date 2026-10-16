@@ -39,8 +39,9 @@ var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#{1,6})[^#\s]`)
 // whitespace; such lines look like closed headings, which MD020 handles.
 var closingHashPattern = regexp.MustCompile(`#\s*$`)
 
-// keycapHash is the "#️⃣" emoji, which starts with a hash but is not a heading.
-const keycapHash = "#️⃣"
+// keycapHash is the keycap number sign emoji (#, U+FE0F, U+20E3), which
+// starts with a hash but is not a heading.
+const keycapHash = "#\uFE0F\u20E3"
 
 // Apply checks for missing space after hash on ATX headings.
 //
@@ -630,7 +631,7 @@ func NewNoTrailingPunctuationRule() *NoTrailingPunctuationRule {
 
 // defaultPunctuation is markdownlint's default set of trailing punctuation
 // characters: normal and full-width, without the question mark.
-const defaultPunctuation = ".,;:!。，；：！"
+const defaultPunctuation = ".,;:!\u3002\uFF0C\uFF1B\uFF1A\uFF01"
 
 // htmlEntityPattern matches an HTML entity reference at the end of text
 // (markdownlint's endOfLineHtmlEntityRe).
