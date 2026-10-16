@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -390,16 +391,37 @@ func categorizeError(err error) error {
 
 	// Check for file not found errors.
 	if errors.Is(err, fsutil.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("%w: %w", ErrFileNotFound, err)
+		return categorized(ErrFileNotFound, err)
 	}
 
 	// Check for permission errors.
 	if errors.Is(err, fsutil.ErrPermissionDenied) || errors.Is(err, os.ErrPermission) {
-		return fmt.Errorf("%w: %w", ErrPermissionDenied, err)
+		return categorized(ErrPermissionDenied, err)
 	}
 
 	return err
 }
+
+// categorized wraps err with a pipeline error category. When err's message
+// already starts with the category, as fsutil errors do, the message is
+// kept as is rather than repeating it.
+func categorized(category, err error) error {
+	if strings.HasPrefix(err.Error(), category.Error()+":") {
+		return &categoryError{category: category, err: err}
+	}
+	return fmt.Errorf("%w: %w", category, err)
+}
+
+// categoryError matches its category and the wrapped error but reads as the
+// wrapped error alone.
+type categoryError struct {
+	category error
+	err      error
+}
+
+func (e *categoryError) Error() string { return e.err.Error() }
+
+func (e *categoryError) Unwrap() []error { return []error{e.category, e.err} }
 
 // IsPipelineError checks if an error is a known pipeline error type.
 func IsPipelineError(err error) bool {

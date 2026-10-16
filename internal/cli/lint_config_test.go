@@ -207,6 +207,23 @@ func TestLintDiffFormatPreviewsFixes(t *testing.T) {
 	assert.Equal(t, cli.ExitLintWarnings, got.code)
 }
 
+func TestLintReportsUnreadableFileOnce(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read files without permission bits")
+	}
+
+	dir := inProject(t, map[string]string{"locked.md": fixedDoc})
+	locked := filepath.Join(dir, "locked.md")
+	require.NoError(t, os.Chmod(locked, 0))
+	t.Cleanup(func() { assert.NoError(t, os.Chmod(locked, 0o600)) })
+
+	got := execute(t, "lint", "--color", "never", "locked.md")
+
+	assert.Equal(t, cli.ExitIOError, got.code)
+	assert.Contains(t, got.stdout, "permission denied")
+	assert.NotContains(t, got.stdout, "permission denied: permission denied")
+}
+
 func TestLintFormatFromEnvironment(t *testing.T) {
 	t.Run("selects the format", func(t *testing.T) {
 		inProject(t, map[string]string{"doc.md": trailingDoc})
