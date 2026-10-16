@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -147,6 +148,54 @@ func TestLinkSpacesRule(t *testing.T) {
 
 			if len(diags) != tt.wantN {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
+			}
+		})
+	}
+}
+
+// TestLinkSpacesRule_Fix trims the whitespace inside link text like markdownlint:
+// only spaces and tabs on the same line as the bracket are removed.
+func TestLinkSpacesRule_Fix(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"both sides", "[ text ](url)\n", "[text](url)\n"},
+		{"leading", "[ text](url)\n", "[text](url)\n"},
+		{"trailing tab", "[text\t](url)\n", "[text](url)\n"},
+		{"only whitespace", "[   ](url)\n", "[](url)\n"},
+		{"code span inside", "[ a `b` ](url)\n", "[a `b`](url)\n"},
+		{"bracket inside code span", "[ a `]` ](url)\n", "[a `]`](url)\n"},
+		{"image inside link", "[ ![img](x.png) ](url)\n", "[![img](x.png)](url)\n"},
+		{"full reference", "[ text ][ref]\n\n[ref]: https://example.com\n", "[text][ref]\n\n[ref]: https://example.com\n"},
+		{"collapsed reference", "[ ref ][]\n\n[ref]: https://example.com\n", "[ref][]\n\n[ref]: https://example.com\n"},
+		{"blockquote", "> [ text ](url)\n", "> [text](url)\n"},
+		{"line ending is not trimmed", "[\ntext ](url)\n", "[\ntext](url)\n"},
+		{"title is not link text", "[text](url \"title \")\n", "[text](url \"title \")\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := goldmark.New(string(config.FlavorCommonMark))
+			snapshot, err := parser.Parse(context.Background(), "test.md", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			diags, err := NewLinkSpacesRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			if err != nil {
+				t.Fatalf("Apply error: %v", err)
+			}
+			var edits []fix.TextEdit
+			for _, diag := range diags {
+				edits = append(edits, diag.FixEdits...)
+			}
+			prepared, err := fix.PrepareEdits(edits, len(tt.input))
+			if err != nil {
+				t.Fatalf("PrepareEdits error: %v", err)
+			}
+			if got := string(fix.ApplyEdits([]byte(tt.input), prepared)); got != tt.want {
+				t.Errorf("fixed = %q, want %q", got, tt.want)
 			}
 		})
 	}

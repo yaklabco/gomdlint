@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -128,7 +129,9 @@ func NewLinkSpacesRule() *LinkSpacesRule {
 	}
 }
 
-// Apply checks for spaces inside link text.
+// Apply checks the raw link text between the brackets for leading or trailing
+// whitespace. Like markdownlint, the fix removes the spaces and tabs beside
+// each bracket but never a line ending.
 func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -141,20 +144,20 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		text := lint.LinkText(link)
-		if text == "" {
+		if isAutolinkNode(link) {
 			continue
 		}
 
-		trimmed := strings.TrimSpace(text)
-		if text == trimmed {
+		start, end, ok := linkTextSpan(ctx.File.Content, link)
+		if !ok {
 			continue
 		}
-
-		// Text has leading or trailing spaces.
-		hasLeading := len(text) > 0 && (text[0] == ' ' || text[0] == '\t')
-		hasTrailing := len(text) > 0 && (text[len(text)-1] == ' ' || text[len(text)-1] == '\t')
+		text := string(ctx.File.Content[start:end])
+		hasLeading := strings.TrimLeftFunc(text, unicode.IsSpace) != text
+		hasTrailing := strings.TrimRightFunc(text, unicode.IsSpace) != text
+		if !hasLeading && !hasTrailing {
+			continue
+		}
 
 		var msg string
 		switch {
@@ -166,14 +169,54 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			msg = "Link text has trailing spaces"
 		}
 
-		diag := lint.NewDiagnostic(r.ID(), link, msg).
+		builder := fix.NewEditBuilder()
+		leading := len(text) - len(strings.TrimLeftFunc(text, isSameLineSpace))
+		trailing := len(text) - len(strings.TrimRightFunc(text, isSameLineSpace))
+		if leading > 0 {
+			builder.Delete(start, start+leading)
+		}
+		if trailing > 0 && leading < len(text) {
+			builder.Delete(end-trailing, end)
+		}
+
+		diagBuilder := lint.NewDiagnostic(r.ID(), link, msg).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove spaces from link text").
-			Build()
-		diags = append(diags, diag)
+			WithSuggestion("Remove spaces from link text")
+		if len(builder.Edits) > 0 {
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
+}
+
+// isSameLineSpace reports whether r is whitespace other than a line ending.
+func isSameLineSpace(r rune) bool {
+	return r != '\n' && r != '\r' && unicode.IsSpace(r)
+}
+
+// isAutolinkNode reports whether a link node is an autolink, which has no link text brackets.
+func isAutolinkNode(node *mdast.Node) bool {
+	return node.Inline != nil && node.Inline.Link != nil && node.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink
+}
+
+// linkTextSpan returns the byte range of the text between the brackets of a
+// link or image, excluding the brackets themselves.
+func linkTextSpan(content []byte, node *mdast.Node) (int, int, bool) {
+	span := node.SourceRange()
+	if span.StartOffset < 0 || span.EndOffset > len(content) || span.IsEmpty() {
+		return 0, 0, false
+	}
+	open := span.StartOffset
+	if content[open] == '!' {
+		open++
+	}
+	closing, ok := mdscan.LinkTextEnd(content[:span.EndOffset], open)
+	if !ok {
+		return 0, 0, false
+	}
+	return open + 1, closing, true
 }
 
 // EmptyLinkRule detects links with empty destination or text.

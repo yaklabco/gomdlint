@@ -6,7 +6,7 @@
     "column": 9,
     "message": "Link text has leading and trailing spaces",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD039",
@@ -15,7 +15,7 @@
     "column": 9,
     "message": "Link text has leading spaces",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD039",
@@ -24,6 +24,6 @@
     "column": 9,
     "message": "Link text has trailing spaces",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   }
 ]
