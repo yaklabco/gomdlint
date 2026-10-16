@@ -1,13 +1,16 @@
 package lint_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/charmbracelet/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -173,6 +176,30 @@ func TestEngine_RecoversFromRulePanic(t *testing.T) {
 	assert.NotEmpty(t, ruleErr.Stack, "the stack is kept for debugging")
 	require.Len(t, result.Diagnostics, 1, "other rules still run")
 	assert.Equal(t, "TEST002", result.Diagnostics[0].RuleID)
+}
+
+func TestEngine_LogsRulePanicStackAtDebugLevel(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	logger := log.New(&logs)
+	logger.SetLevel(log.DebugLevel)
+	ctx := logging.WithLogger(context.Background(), logger)
+
+	registry := lint.NewRegistry()
+	registry.Register(newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		panic("rule bug")
+	}))
+	engine := lint.NewEngine(&mockParser{}, registry)
+
+	_, err := engine.LintFile(ctx, "doc.md", []byte("hello"), config.NewConfig())
+	require.NoError(t, err)
+
+	out := logs.String()
+	assert.Contains(t, out, "rule panicked")
+	assert.Contains(t, out, "TEST001")
+	assert.Contains(t, out, "doc.md")
+	assert.Contains(t, out, "goroutine", "the debug log must carry the stack trace")
 }
 
 func TestEngine_RulePanicWithErrorValueIsUnwrappable(t *testing.T) {
