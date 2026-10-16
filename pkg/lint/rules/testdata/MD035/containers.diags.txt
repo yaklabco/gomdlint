@@ -1,0 +1,5 @@
+containers.input.md:5:3 warning Horizontal rule style "* * *" does not match expected "---" (MD035/hr-style) [fixable]
+containers.input.md:7:3 warning Horizontal rule style "* * *" does not match expected "---" (MD035/hr-style)
+containers.input.md:9:3 warning Horizontal rule style "- - -" does not match expected "---" (MD035/hr-style) [fixable]
+containers.input.md:12:3 warning Horizontal rule style "***" does not match expected "---" (MD035/hr-style)
+containers.input.md:15:3 warning Horizontal rule style "***" does not match expected "---" (MD035/hr-style)

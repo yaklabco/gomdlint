@@ -141,6 +141,66 @@ func TestHRStyleRule_SafeFix(t *testing.T) {
 	}
 }
 
+// TestHRStyleRule_Containers verifies MD035 finds horizontal rules inside
+// blockquotes and list items and only fixes them when the result keeps the
+// document structure.
+func TestHRStyleRule_Containers(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "blockquote",
+			input:     "---\n\n> * * *\n",
+			wantLines: []int{3},
+			wantFix:   true,
+			wantFixed: "---\n\n> ---\n",
+		},
+		{
+			// "- ---" is itself a horizontal rule and would end the list.
+			name:      "list item line with the same marker",
+			input:     "---\n\n- * * *\n",
+			wantLines: []int{3},
+		},
+		{
+			name:      "list item line with a different marker",
+			input:     "---\n\n* - - -\n",
+			wantLines: []int{3},
+			wantFix:   true,
+			wantFixed: "---\n\n* ---\n",
+		},
+		{
+			name:      "under a paragraph in a blockquote",
+			input:     "---\n\n> para\n> ***\n",
+			wantLines: []int{4},
+		},
+		{
+			// "  ---" under "- item" would make the item a setext heading.
+			name:      "under a paragraph in a list item",
+			input:     "---\n\n- item\n  ***\n",
+			wantLines: []int{4},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHRStyleRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestHRStyleRule_Metadata(t *testing.T) {
 	rule := NewHRStyleRule()
 

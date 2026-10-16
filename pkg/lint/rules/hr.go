@@ -37,15 +37,17 @@ func NewHRStyleRule() *HRStyleRule {
 
 // Apply checks for consistent horizontal rule style.
 //
-// This uses the token stream instead of AST node positions because goldmark
-// does not assign source positions to ThematicBreak AST nodes (Lines.Len() == 0).
-// Tokens that are not thematic breaks are skipped: front matter delimiters,
-// setext heading underlines, and lines inside code and HTML blocks.
+// Like markdownlint, it checks the parsed thematic breaks, including those in
+// blockquotes and list items; setext underlines, front matter delimiters and
+// lines in code or HTML blocks are not thematic breaks. A rule's style is its
+// marker text without trailing whitespace.
 //
-// The fix rewrites only the marker characters, so indentation (for example
-// inside a list item) and trailing whitespace are kept. It is withheld when
-// the expected style is not a thematic break, or when it is a run of dashes
-// directly under a non-blank line, which could make that line a setext heading.
+// The fix rewrites only the marker characters, so the container prefix,
+// indentation and trailing whitespace are kept. It is withheld when the
+// expected style is not a thematic break, when it is a run of dashes directly
+// under a non-blank line (which would make that line a setext heading), and
+// when the line's container prefix holds the style's marker (a list item
+// "- * * *" rewritten to "- ---" would become a rule and end the list).
 func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -60,29 +62,16 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		expectedStyle = configStyle
 	}
 
-	underlines := setextUnderlineLines(ctx)
-	htmlLines := htmlBlockLines(ctx)
-
-	for _, tok := range ctx.File.Tokens {
-		if tok.Kind != mdast.TokThematicBreak {
-			continue
-		}
-
+	for _, node := range ctx.ThematicBreaks() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		line, col := ctx.File.LineAt(tok.StartOffset)
-		if line == 0 || line <= ctx.File.FrontMatterLines || underlines[line] || htmlLines[line] {
+		rng := node.SourceRange()
+		if rng.IsEmpty() || rng.EndOffset > len(ctx.File.Content) {
 			continue
 		}
-
-		// Skip HRs inside code blocks.
-		if ctx.IsLineInCodeBlock(line) {
-			continue
-		}
-
-		marker := bytes.TrimRight(tok.Text(ctx.File.Content), " \t")
+		marker := bytes.TrimRight(ctx.File.Content[rng.StartOffset:rng.EndOffset], " \t")
 		hrStyle := string(marker)
 
 		// Set expected style from first HR if consistent mode.
@@ -93,21 +82,19 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 		// Check for style mismatch.
 		if hrStyle != expectedStyle {
-			pos := mdast.SourcePosition{
-				StartLine:   line,
-				StartColumn: col,
-				EndLine:     line,
-				EndColumn:   col + len(hrStyle),
-			}
+			pos := rangePosition(ctx.File, mdast.SourceRange{
+				StartOffset: rng.StartOffset,
+				EndOffset:   rng.StartOffset + len(marker),
+			})
 
 			diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 				fmt.Sprintf("Horizontal rule style %q does not match expected %q", hrStyle, expectedStyle)).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion(fmt.Sprintf("Use %q for all horizontal rules", expectedStyle))
 
-			if hrFixAllowed(ctx.File, line, expectedStyle) {
+			if hrFixAllowed(ctx.File, node, pos.StartLine, expectedStyle) {
 				builder := fix.NewEditBuilder()
-				builder.ReplaceRange(tok.StartOffset, tok.StartOffset+len(marker), expectedStyle)
+				builder.ReplaceRange(rng.StartOffset, rng.StartOffset+len(marker), expectedStyle)
 				diagBuilder = diagBuilder.WithFix(builder)
 			}
 
@@ -118,32 +105,19 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	return diags, nil
 }
 
-// setextUnderlineLines returns the lines holding setext heading underlines.
-func setextUnderlineLines(ctx *lint.RuleContext) map[int]bool {
-	lines := make(map[int]bool)
-	for _, heading := range ctx.Headings() {
-		if detectHeadingStyle(ctx.File, heading) != StyleSetext {
-			continue
-		}
-		content, ok := headingContentRange(ctx.File, heading)
-		if !ok {
-			continue
-		}
-		lastLine, _ := ctx.File.LineAt(content.EndOffset - 1)
-		lines[lastLine+1] = true
-	}
-	return lines
-}
-
-// hrFixAllowed reports whether a thematic break on line can be rewritten to
-// style without changing the document structure.
-func hrFixAllowed(file *mdast.FileSnapshot, line int, style string) bool {
+// hrFixAllowed reports whether the thematic break node on line can be
+// rewritten to style without changing the document structure.
+func hrFixAllowed(file *mdast.FileSnapshot, node *mdast.Node, line int, style string) bool {
 	if !isThematicBreakStyle(style) {
+		return false
+	}
+	marker := strings.TrimLeft(style, " \t")[:1]
+	if strings.Contains(string(lint.ContainerPrefix(file, node, line)), marker) {
 		return false
 	}
 	// A run of dashes under a paragraph line is a setext heading underline.
 	dashesOnly := strings.Trim(style, "-") == ""
-	return !dashesOnly || line == 1 || lint.IsBlankLine(file, line-1)
+	return !dashesOnly || line == 1 || lint.IsBlankLineInContainer(file, node, line-1)
 }
 
 // isThematicBreakStyle reports whether style is a valid thematic break: three
