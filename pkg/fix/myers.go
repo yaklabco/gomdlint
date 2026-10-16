@@ -1,33 +1,111 @@
 package fix
 
-// maxSnakeSearch bounds how many edit steps a single middle-snake search may
-// take. Inputs that need more edits than about twice this number in one
-// region are reported as a whole-region replacement instead of a minimal
-// script, which keeps the running time near O((N+M) * maxSnakeSearch) for
-// large rewrites. GNU diff uses the same lower bound for its cost limit.
+// maxSnakeSearch bounds the number of edit steps of a single middle-snake
+// search, so one search costs at most about maxSnakeSearch^2 steps. When a
+// search reaches the bound, the region is split at the point furthest along
+// either search and both parts are diffed on, as GNU diff does at its cost
+// limit (whose lower bound is also 4096). The script is then close to, but
+// not always exactly, minimal.
 const maxSnakeSearch = 4096
+
+// diffWorkBudget bounds the total search steps of one diff. Once it is spent,
+// the remaining regions are replaced whole: still a correct script, which
+// keeps pathological inputs (many repeated lines in a different order) from
+// taking seconds.
+const diffWorkBudget = 1 << 26
+
+// diffLineIDs computes a shortest edit script between left and right with
+// Myers' O(ND) algorithm, using the linear-space divide and conquer
+// refinement. It returns, for each line of left, whether it is removed, and
+// for each line of right, whether it is added. The unmarked lines form a
+// longest common subsequence of the two inputs, except where very large or
+// pathological inputs hit the search bounds.
+func diffLineIDs(left, right []int) ([]bool, []bool) {
+	removed, added, _ := diffWithBudget(left, right, diffWorkBudget)
+	return removed, added
+}
+
+// diffWithBudget is diffLineIDs with an explicit work budget. It also
+// returns the unspent budget, which is negative when the last search
+// overshot it.
+func diffWithBudget(left, right []int, budget int) ([]bool, []bool, int) {
+	removed := make([]bool, len(left))
+	added := make([]bool, len(right))
+
+	// A line that never occurs on the other side cannot be part of a common
+	// subsequence, so it is changed in every minimal script. Marking such
+	// lines up front keeps the result minimal and leaves only the lines that
+	// can match for the search, which makes large rewrites of distinct lines
+	// cheap.
+	keptLeft, keptRight := matchableLines(left, right)
+	for idx := range removed {
+		removed[idx] = true
+	}
+	for idx := range added {
+		added[idx] = true
+	}
+
+	ld := &lineDiff{
+		a:       gatherIDs(left, keptLeft),
+		b:       gatherIDs(right, keptRight),
+		removed: make([]bool, len(keptLeft)),
+		added:   make([]bool, len(keptRight)),
+		budget:  budget,
+	}
+	ld.compare(0, len(ld.a), 0, len(ld.b))
+
+	for idx, orig := range keptLeft {
+		removed[orig] = ld.removed[idx]
+	}
+	for idx, orig := range keptRight {
+		added[orig] = ld.added[idx]
+	}
+	return removed, added, ld.budget
+}
+
+// matchableLines returns the indexes of the lines of left that occur in
+// right, and of the lines of right that occur in left.
+func matchableLines(left, right []int) ([]int, []int) {
+	inLeft := make(map[int]bool, len(left))
+	for _, id := range left {
+		inLeft[id] = true
+	}
+	inRight := make(map[int]bool, len(right))
+	for _, id := range right {
+		inRight[id] = true
+	}
+
+	var keptLeft, keptRight []int
+	for idx, id := range left {
+		if inRight[id] {
+			keptLeft = append(keptLeft, idx)
+		}
+	}
+	for idx, id := range right {
+		if inLeft[id] {
+			keptRight = append(keptRight, idx)
+		}
+	}
+	return keptLeft, keptRight
+}
+
+// gatherIDs returns ids[i] for each index i in indexes.
+func gatherIDs(ids, indexes []int) []int {
+	out := make([]int, len(indexes))
+	for idx, orig := range indexes {
+		out[idx] = ids[orig]
+	}
+	return out
+}
 
 // lineDiff marks the lines that differ between two line sequences.
 type lineDiff struct {
 	a, b    []int
 	removed []bool
 	added   []bool
-}
 
-// diffLineIDs computes a shortest edit script between left and right with
-// Myers' O(ND) algorithm, using the linear-space divide and conquer
-// refinement. It returns, for each line of left, whether it is removed, and
-// for each line of right, whether it is added. The unmarked lines form a
-// longest common subsequence of the two inputs.
-func diffLineIDs(left, right []int) ([]bool, []bool) {
-	ld := &lineDiff{
-		a:       left,
-		b:       right,
-		removed: make([]bool, len(left)),
-		added:   make([]bool, len(right)),
-	}
-	ld.compare(0, len(left), 0, len(right))
-	return ld.removed, ld.added
+	// budget is the number of search steps left; see diffWorkBudget.
+	budget int
 }
 
 // compare marks the differences between a[aLo:aHi] and b[bLo:bHi].
@@ -47,11 +125,11 @@ func (ld *lineDiff) compare(aLo, aHi, bLo, bHi int) {
 	case bLo == bHi:
 		markAll(ld.removed[aLo:aHi])
 	default:
-		splitA, splitB, found := middleSnake(ld.a[aLo:aHi], ld.b[bLo:bHi])
+		splitA, splitB, found := middleSnake(ld.a[aLo:aHi], ld.b[bLo:bHi], &ld.budget)
 		noProgress := (splitA == 0 && splitB == 0) || (splitA == aHi-aLo && splitB == bHi-bLo)
 		if !found || noProgress {
-			// No common line was found within the search bound: replace the
-			// whole region. This is always a correct script, if not minimal.
+			// The inputs share no line, or the work budget is spent: replace
+			// the whole region. This is always a correct script.
 			markAll(ld.removed[aLo:aHi])
 			markAll(ld.added[bLo:bHi])
 			return
@@ -61,17 +139,22 @@ func (ld *lineDiff) compare(aLo, aHi, bLo, bHi int) {
 	}
 }
 
-// middleSnake finds a point (x, y) on a shortest edit path from (0, 0) to
-// (len(left), len(right)) by running the forward and reverse searches until
-// they overlap. Both inputs must be non-empty and must not share a first or
-// last element. The boolean result is false when the inputs share no
-// element, or when the search exceeds maxSnakeSearch steps.
+// middleSnake finds a point (x, y) that splits the edit graph from (0, 0) to
+// (len(left), len(right)): a point on a shortest edit path, found where the
+// forward and reverse searches overlap, or, when the search reaches
+// maxSnakeSearch steps first, the point furthest along either search. Both
+// inputs must be non-empty and must not share a first or last element.
+// The search's steps are taken from budget. The boolean result is false when
+// the inputs share no element or the budget runs out.
 //
-// This follows the bisection in Neil Fraser's diff-match-patch, a widely used
-// formulation of Myers' "find the middle snake" procedure.
-func middleSnake(left, right []int) (int, int, bool) {
-	limit := min((len(left)+len(right)+1)/2, maxSnakeSearch)
+// The search follows the bisection in Neil Fraser's diff-match-patch, a
+// widely used formulation of Myers' "find the middle snake" procedure.
+func middleSnake(left, right []int, budget *int) (int, int, bool) {
+	maxD := (len(left) + len(right) + 1) / 2
+	limit := min(maxD, maxSnakeSearch)
 	search := newSnakeSearch(left, right, limit)
+	defer func() { *budget -= search.work }()
+
 	for depth := range limit {
 		if x, y, found := search.stepForward(depth); found {
 			return x, y, true
@@ -79,8 +162,18 @@ func middleSnake(left, right []int) (int, int, bool) {
 		if x, y, found := search.stepReverse(depth); found {
 			return x, y, true
 		}
+		if search.work >= *budget {
+			return 0, 0, false
+		}
 	}
-	return 0, 0, false
+
+	if limit == maxD {
+		// Both searches covered the whole graph without meeting: the inputs
+		// have no element in common.
+		return 0, 0, false
+	}
+	x, y := search.furthestPoint()
+	return x, y, true
 }
 
 // snakeSearch holds the state of one middle-snake search. forward[offset+k]
@@ -99,6 +192,8 @@ type snakeSearch struct {
 	// Offsets for the start and end of the k loops, which keep each search
 	// inside the edit graph.
 	k1start, k1end, k2start, k2end int
+	// work counts the diagonals visited and the snake steps taken.
+	work int
 }
 
 func newSnakeSearch(left, right []int, limit int) *snakeSearch {
@@ -130,10 +225,12 @@ func (s *snakeSearch) stepForward(depth int) (int, int, bool) {
 	for k1 := -depth + s.k1start; k1 <= depth-s.k1end; k1 += 2 {
 		x1 := s.furthest(s.forward, k1, depth)
 		y1 := x1 - k1
+		start := x1
 		for x1 < s.lenA && y1 < s.lenB && s.left[x1] == s.right[y1] {
 			x1++
 			y1++
 		}
+		s.work += 1 + x1 - start
 		s.forward[s.offset+k1] = x1
 
 		switch {
@@ -158,10 +255,12 @@ func (s *snakeSearch) stepReverse(depth int) (int, int, bool) {
 	for k2 := -depth + s.k2start; k2 <= depth-s.k2end; k2 += 2 {
 		x2 := s.furthest(s.reverse, k2, depth)
 		y2 := x2 - k2
+		start := x2
 		for x2 < s.lenA && y2 < s.lenB && s.left[s.lenA-x2-1] == s.right[s.lenB-y2-1] {
 			x2++
 			y2++
 		}
+		s.work += 1 + x2 - start
 		s.reverse[s.offset+k2] = x2
 
 		switch {
@@ -200,6 +299,26 @@ func (s *snakeSearch) reached(v []int, k int) (int, bool) {
 		return 0, false
 	}
 	return v[idx], true
+}
+
+// furthestPoint returns the reached point that lies furthest from the corner
+// its search started from, in forward coordinates. Every reached point lies
+// on some edit path, so it is a valid place to split the graph.
+func (s *snakeSearch) furthestPoint() (int, int) {
+	bestX, bestY, best := 0, 0, 0
+	for idx, x := range s.forward {
+		y := x - (idx - s.offset)
+		if x >= 0 && x <= s.lenA && y >= 0 && y <= s.lenB && x+y > best {
+			bestX, bestY, best = x, y, x+y
+		}
+	}
+	for idx, x := range s.reverse {
+		y := x - (idx - s.offset)
+		if x >= 0 && x <= s.lenA && y >= 0 && y <= s.lenB && x+y > best {
+			bestX, bestY, best = s.lenA-x, s.lenB-y, x+y
+		}
+	}
+	return bestX, bestY
 }
 
 // markAll sets every element of flags to true.

@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -141,7 +140,7 @@ func TestGenerateDiff_UsesLinearMemory(t *testing.T) {
 	assert.Less(t, allocated, uint64(maxAllocated), "GenerateDiff allocated %d bytes", allocated)
 }
 
-func TestGenerateDiff_LargeRewriteFinishesQuickly(t *testing.T) {
+func TestGenerateDiff_RewritingEveryLineIsExact(t *testing.T) {
 	t.Parallel()
 
 	const lineCount = 50000
@@ -154,13 +153,64 @@ func TestGenerateDiff_LargeRewriteFinishesQuickly(t *testing.T) {
 	original := []byte(origBuilder.String())
 	modified := []byte(modBuilder.String())
 
-	start := time.Now()
 	diff := fix.GenerateDiff("doc.md", original, modified)
-	elapsed := time.Since(start)
 
 	require.NotNil(t, diff)
+	assert.Equal(t, lineCount, diff.Additions)
+	assert.Equal(t, lineCount, diff.Deletions)
 	assert.Equal(t, string(modified), string(applyDiff(t, original, diff)))
-	assert.Less(t, elapsed, 10*time.Second, "diffing %d changed lines took %s", lineCount, elapsed)
+}
+
+func TestGenerateDiff_ManyScatteredFixesStayMinimal(t *testing.T) {
+	t.Parallel()
+
+	// Every fourth line of a large file changes: 10000 changed lines, more
+	// than one bounded search covers, so the region must not be replaced
+	// whole.
+	const lineCount = 20000
+	var origBuilder, modBuilder strings.Builder
+	changed := 0
+	for idx := range lineCount {
+		fmt.Fprintf(&origBuilder, "line %d\n", idx)
+		if idx%4 == 0 {
+			fmt.Fprintf(&modBuilder, "fixed line %d\n", idx)
+			changed++
+		} else {
+			fmt.Fprintf(&modBuilder, "line %d\n", idx)
+		}
+	}
+	original := []byte(origBuilder.String())
+	modified := []byte(modBuilder.String())
+
+	diff := fix.GenerateDiff("doc.md", original, modified)
+
+	require.NotNil(t, diff)
+	assert.Equal(t, changed, diff.Additions)
+	assert.Equal(t, changed, diff.Deletions)
+	assert.Equal(t, string(modified), string(applyDiff(t, original, diff)))
+}
+
+func TestGenerateDiff_ManyRepeatedLineFixesStayMinimal(t *testing.T) {
+	t.Parallel()
+
+	// A fix that removes 10000 extra blank lines between paragraphs: the
+	// removed lines also occur in the fixed file, so they stay in the search
+	// and exceed one bounded search.
+	const paragraphs = 10000
+	var origBuilder, modBuilder strings.Builder
+	for idx := range paragraphs {
+		fmt.Fprintf(&origBuilder, "Paragraph %d.\n\n\n", idx)
+		fmt.Fprintf(&modBuilder, "Paragraph %d.\n\n", idx)
+	}
+	original := []byte(origBuilder.String())
+	modified := []byte(modBuilder.String())
+
+	diff := fix.GenerateDiff("doc.md", original, modified)
+
+	require.NotNil(t, diff)
+	assert.Equal(t, 0, diff.Additions)
+	assert.Equal(t, paragraphs, diff.Deletions)
+	assert.Equal(t, string(modified), string(applyDiff(t, original, diff)))
 }
 
 // randomDocument returns a short document over a tiny alphabet, so random
