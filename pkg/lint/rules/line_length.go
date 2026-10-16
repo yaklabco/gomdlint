@@ -159,7 +159,7 @@ type lineLengthScan struct {
 	tables      map[int]bool
 	definitions map[int]bool
 	linkOnly    map[int]bool
-	wrappable   map[int]bool
+	wrappable   map[int]*mdast.Node
 	noBreak     map[int][]offsetRange
 }
 
@@ -319,11 +319,11 @@ func nodeLineSet(nodes []*mdast.Node) map[int]bool {
 	return lines
 }
 
-// wrappableLines returns the lines of paragraph text that the wrap fix may
-// break. Paragraphs holding a table delimiter row are left alone: wrapping
-// them would break the table for GFM renderers.
-func wrappableLines(ctx *lint.RuleContext) map[int]bool {
-	lines := make(map[int]bool)
+// wrappableLines maps the lines of paragraph text that the wrap fix may
+// break to their paragraph. Paragraphs holding a table delimiter row are left
+// alone: wrapping them would break the table for GFM renderers.
+func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
+	lines := make(map[int]*mdast.Node)
 	for _, paragraph := range paragraphLikeNodes(ctx) {
 		pos := paragraph.SourcePosition()
 		if !pos.IsValid() {
@@ -342,7 +342,7 @@ func wrappableLines(ctx *lint.RuleContext) map[int]bool {
 			continue
 		}
 		for line := pos.StartLine; line <= last; line++ {
-			lines[line] = true
+			lines[line] = paragraph
 		}
 	}
 	return lines
@@ -388,15 +388,17 @@ func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 
 // wrapFix builds a fix that breaks a long paragraph line at whitespace, as
 // often as needed for every resulting line to fit. Each break replaces a run
-// of whitespace with a line ending and the continuation prefix (blockquote
-// markers and list indentation). A break is skipped when the new line would
+// of whitespace with a line ending and the continuation prefix of the
+// paragraph's containers (blockquote markers and list item content
+// indentation). A break is skipped when the new line would
 // start a block (a list item, heading, blockquote, fence, thematic break,
 // HTML block or table row), when it would follow a backslash (a hard line
 // break), or when it falls inside a code span, inline HTML or a link
 // destination. It returns nil when no safe break brings the line closer to
 // the limit.
 func (s *lineLengthScan) wrapFix(lineNum, maxLength int) *fix.EditBuilder {
-	if !s.wrappable[lineNum] {
+	paragraph := s.wrappable[lineNum]
+	if paragraph == nil {
 		return nil
 	}
 	info := s.ctx.File.Lines[lineNum-1]
@@ -404,7 +406,13 @@ func (s *lineLengthScan) wrapFix(lineNum, maxLength int) *fix.EditBuilder {
 	if isTableLine(content) {
 		return nil
 	}
-	prefix, contentStart := linePrefix(content)
+	containerEnd := len(lint.ContainerPrefix(s.ctx.File, paragraph, lineNum))
+	contentStart := containerEnd
+	for contentStart < len(content) && (content[contentStart] == ' ' || content[contentStart] == '\t') {
+		contentStart++
+	}
+	// Continuation lines repeat the containers and the line's own indentation.
+	prefix := lint.ContinuationPrefix(s.ctx.File, paragraph) + content[containerEnd:contentStart]
 	runs := whitespaceRuns(content)
 
 	builder := fix.NewEditBuilder()

@@ -321,6 +321,27 @@ func TestMaxLineLengthRule_Autofix(t *testing.T) {
 			wantText: "> - This is a nested list item in a blockquote\n>   that exceeds the limit.\n",
 		},
 		{
+			name:     "list item with wide marker spacing continues at its content column",
+			input:    "-   This is a list item with a very long description that exceeds the limit.\n",
+			maxLen:   50,
+			wantFix:  true,
+			wantText: "-   This is a list item with a very long\n    description that exceeds the limit.\n",
+		},
+		{
+			name:     "continuation line of a quoted list item keeps the item indentation",
+			input:    "> - First line of a quoted item\n>   and a continuation line that is long enough to wrap here.\n",
+			maxLen:   50,
+			wantFix:  true,
+			wantText: "> - First line of a quoted item\n>   and a continuation line that is long enough to\n>   wrap here.\n",
+		},
+		{
+			name:     "nested list item wraps at its own content column",
+			input:    "- Parent\n  - This nested list item is long enough that it has to be wrapped.\n",
+			maxLen:   50,
+			wantFix:  true,
+			wantText: "- Parent\n  - This nested list item is long enough that it\n    has to be wrapped.\n",
+		},
+		{
 			name:     "indented content wraps with same indent",
 			input:    "  This is indented content that is very long and needs wrapping.\n",
 			maxLen:   50,
