@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -317,6 +318,81 @@ func TestHeadingBlankLinesRule(t *testing.T) {
 				for _, d := range diags {
 					t.Logf("  - %s at line %d", d.Message, d.StartLine)
 				}
+			}
+		})
+	}
+}
+
+// TestHeadingBlankLinesRule_Containers verifies that MD022 counts blank lines
+// within blockquotes and list items, and that its fix keeps the container.
+func TestHeadingBlankLinesRule_Containers(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "blank blockquote line counts as blank", input: "> ## Quoted\n>\n> Para\n", wantLines: []int{}},
+		{
+			name:      "below inside a blockquote",
+			input:     "> ## Quoted\n> Para\n",
+			wantLines: []int{1},
+			wantFixed: "> ## Quoted\n>\n> Para\n",
+		},
+		{
+			name:      "above inside a blockquote",
+			input:     "> Para\n> ## Quoted\n>\n> More\n",
+			wantLines: []int{2},
+			wantFixed: "> Para\n>\n> ## Quoted\n>\n> More\n",
+		},
+		{
+			name:      "nested blockquote",
+			input:     "> Para\n> > ## Nested\n",
+			wantLines: []int{2},
+			wantFixed: "> Para\n> >\n> > ## Nested\n",
+		},
+		{
+			name:      "setext heading in a blockquote",
+			input:     "> Title\n> -----\n> Para\n",
+			wantLines: []int{1},
+			wantFixed: "> Title\n> -----\n>\n> Para\n",
+		},
+		{
+			name:      "list item",
+			input:     "- item\n\n  ## Heading\n  Text\n",
+			wantLines: []int{3},
+			wantFixed: "- item\n\n  ## Heading\n\n  Text\n",
+		},
+		{
+			name:      "lazy line after a quoted heading",
+			input:     "> ## Quoted\nlazy text\n",
+			wantLines: []int{1},
+			wantFixed: "> ## Quoted\n>\nlazy text\n",
+		},
+		{name: "heading at the end of the file", input: "Text\n\n# Heading\n", wantLines: []int{}},
+		{name: "heading at the end without a newline", input: "Text\n\n# Heading", wantLines: []int{}},
+		{
+			// The underline belongs to the heading: count from below it and
+			// never insert between the text and the underline.
+			name:      "setext heading followed by text",
+			input:     "# Title\n\nSetext heading\n--------------\nParagraph.\n",
+			wantLines: []int{3},
+			wantFixed: "# Title\n\nSetext heading\n--------------\n\nParagraph.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingBlankLinesRule(), tt.input, nil)
+			if got := diagLines(diags); !reflect.DeepEqual(got, tt.wantLines) {
+				t.Errorf("diagnostic lines = %v, want %v", got, tt.wantLines)
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			if fixed := applyAllEdits(t, tt.input, diags); fixed != want {
+				t.Errorf("fixed = %q, want %q", fixed, want)
 			}
 		})
 	}

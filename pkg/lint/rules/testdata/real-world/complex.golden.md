@@ -236,7 +236,6 @@ And another:
 ### Blockquote with Other Elements
 
 > ### Heading in Blockquote
-
 >
 > A paragraph with **bold** and *italic* text.
 >

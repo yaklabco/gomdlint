@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -224,9 +223,13 @@ func NewHeadingBlankLinesRule() *HeadingBlankLinesRule {
 // Apply checks that headings have blank lines around them.
 //
 // The gomdlint-only markdownlint_compatible option defaults to true, which
-// matches markdownlint: adjacent headings need blank lines between them, and
-// a heading followed only by blank lines up to the end of the file is fine.
+// matches markdownlint: adjacent headings need blank lines between them.
 // Setting it to false allows headings to touch other headings.
+//
+// Blank lines are counted inside the heading's containers, so a line holding
+// only ">" is blank within a blockquote, and the fix inserts the container
+// prefix (">" in a blockquote) so it never splits the container. A heading
+// followed only by blank lines up to the end of the file needs none below.
 //
 // Each diagnostic's fix inserts the blank lines its own heading needs. Where
 // two adjacent headings share a gap, both insert at the same offset and the
@@ -237,6 +240,8 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	compatible := ctx.OptionBool("markdownlint_compatible", true)
+	includeMetadata := ctx.OptionBool("include_front_matter", false)
+	lastLine := lastSourceLine(ctx.File)
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
 
@@ -251,37 +256,34 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 		linesAbove := headingBlankLineOption(ctx, "lines_above", lint.HeadingLevel(heading))
 		linesBelow := headingBlankLineOption(ctx, "lines_below", lint.HeadingLevel(heading))
-		includeMetadata := ctx.OptionBool("include_front_matter", false)
 
 		// Check blank lines above (unless it's the first line or follows front matter).
 		if pos.StartLine > 1 && linesAbove > 0 && (!headingIsFirstContent(ctx, heading) || includeMetadata) {
-			blanksBefore := lint.CountBlankLinesBefore(ctx.File, pos.StartLine)
-			if includeMetadata {
-				blanksBefore = 0
-				for line := pos.StartLine - 1; line > 0 && len(bytes.TrimSpace(lint.RawLineContent(ctx.File, line))) == 0; line-- {
-					blanksBefore++
+			blanksBefore := 0
+			for line := pos.StartLine - 1; line >= 1; line-- {
+				if includeMetadata && line <= ctx.File.FrontMatterLines {
+					break
 				}
+				if !lint.IsBlankLineInContainer(ctx.File, heading, line) {
+					break
+				}
+				blanksBefore++
 			}
 			if blanksBefore < linesAbove {
 				// Check if previous line is also a heading (allow no blank between headings).
-				prevIsHeading := r.isPreviousLineHeading(ctx.File, ctx.Root, pos.StartLine)
-				if !prevIsHeading || compatible {
+				if compatible || !r.isPreviousLineHeading(ctx, heading, pos.StartLine) {
 					diag := r.createBlankBeforeDiagnostic(ctx, heading, pos, blanksBefore, linesAbove)
 					diags = append(diags, diag)
 				}
 			}
 		}
 
-		// Check blank lines below (unless it's the last line).
-		if pos.EndLine < len(ctx.File.Lines) && linesBelow > 0 {
-			blanksAfter := lint.CountBlankLinesAfter(ctx.File, pos.EndLine)
-			if compatible && pos.EndLine+blanksAfter >= len(ctx.File.Lines) {
-				blanksAfter = linesBelow
-			}
-			if blanksAfter < linesBelow {
+		// Check blank lines below (unless only blank lines follow).
+		if pos.EndLine < lastLine && linesBelow > 0 {
+			blanksAfter := lint.CountBlankLinesAfterInContainer(ctx.File, heading, pos.EndLine)
+			if blanksAfter < linesBelow && pos.EndLine+blanksAfter < lastLine {
 				// Check if next non-blank line is also a heading.
-				nextIsHeading := r.isNextLineHeading(ctx.File, ctx.Root, pos.EndLine)
-				if !nextIsHeading || compatible {
+				if compatible || !r.isNextLineHeading(ctx, heading, pos.EndLine) {
 					diag := r.createBlankAfterDiagnostic(ctx, heading, pos, blanksAfter, linesBelow)
 					diags = append(diags, diag)
 				}
@@ -290,6 +292,16 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	return diags, nil
+}
+
+// lastSourceLine returns the number of the last line, not counting the empty
+// line that follows a final newline.
+func lastSourceLine(file *mdast.FileSnapshot) int {
+	count := len(file.Lines)
+	if count > 0 && file.Lines[count-1].StartOffset == len(file.Content) {
+		count--
+	}
+	return count
 }
 
 func headingBlankLineOption(ctx *lint.RuleContext, key string, level int) int {
@@ -319,61 +331,37 @@ func headingIsFirstContent(ctx *lint.RuleContext, heading *mdast.Node) bool {
 	return false
 }
 
-func (r *HeadingBlankLinesRule) isPreviousLineHeading(
-	file *mdast.FileSnapshot,
-	root *mdast.Node,
-	lineNum int,
-) bool {
-	if lineNum <= 1 {
-		return false
-	}
-
-	// Find the previous non-blank line.
+// isPreviousLineHeading reports whether the last non-blank line (within the
+// heading's containers) before lineNum ends a heading.
+func (r *HeadingBlankLinesRule) isPreviousLineHeading(ctx *lint.RuleContext, heading *mdast.Node, lineNum int) bool {
 	for ln := lineNum - 1; ln >= 1; ln-- {
-		if lint.IsBlankLine(file, ln) {
+		if lint.IsBlankLineInContainer(ctx.File, heading, ln) {
 			continue
 		}
-
-		// Check if any heading ends on this line.
-		headings := lint.Headings(root)
-		for _, h := range headings {
-			pos := h.SourcePosition()
-			if pos.EndLine == ln {
+		for _, h := range ctx.Headings() {
+			if h.SourcePosition().EndLine == ln {
 				return true
 			}
 		}
 		return false
 	}
-
 	return false
 }
 
-func (r *HeadingBlankLinesRule) isNextLineHeading(
-	file *mdast.FileSnapshot,
-	root *mdast.Node,
-	lineNum int,
-) bool {
-	if lineNum >= len(file.Lines) {
-		return false
-	}
-
-	// Find the next non-blank line.
-	for ln := lineNum + 1; ln <= len(file.Lines); ln++ {
-		if lint.IsBlankLine(file, ln) {
+// isNextLineHeading reports whether the next non-blank line (within the
+// heading's containers) after lineNum starts a heading.
+func (r *HeadingBlankLinesRule) isNextLineHeading(ctx *lint.RuleContext, heading *mdast.Node, lineNum int) bool {
+	for ln := lineNum + 1; ln <= len(ctx.File.Lines); ln++ {
+		if lint.IsBlankLineInContainer(ctx.File, heading, ln) {
 			continue
 		}
-
-		// Check if any heading starts on this line.
-		headings := lint.Headings(root)
-		for _, h := range headings {
-			pos := h.SourcePosition()
-			if pos.StartLine == ln {
+		for _, h := range ctx.Headings() {
+			if h.SourcePosition().StartLine == ln {
 				return true
 			}
 		}
 		return false
 	}
-
 	return false
 }
 
@@ -385,9 +373,9 @@ func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
 ) lint.Diagnostic {
 	msg := fmt.Sprintf("Heading needs %d blank line(s) above, found %d", required, current)
 
-	// Build fix: insert blank lines before the heading.
+	// Build fix: insert blank lines, with the container prefix, before the heading.
 	blanksNeeded := required - current
-	insertion := strings.Repeat("\n", blanksNeeded)
+	insertion := strings.Repeat(lint.BlankLineText(ctx.File, heading), blanksNeeded)
 
 	line := ctx.File.Lines[pos.StartLine-1]
 	builder := fix.NewEditBuilder()
@@ -408,9 +396,9 @@ func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
 ) lint.Diagnostic {
 	msg := fmt.Sprintf("Heading needs %d blank line(s) below, found %d", required, current)
 
-	// Build fix: insert blank lines after the heading.
+	// Build fix: insert blank lines, with the container prefix, after the heading.
 	blanksNeeded := required - current
-	insertion := strings.Repeat("\n", blanksNeeded)
+	insertion := strings.Repeat(lint.BlankLineText(ctx.File, heading), blanksNeeded)
 
 	line := ctx.File.Lines[pos.EndLine-1]
 	builder := fix.NewEditBuilder()
