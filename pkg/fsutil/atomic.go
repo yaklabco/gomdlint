@@ -31,7 +31,9 @@ const chmodBits = fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
 //     error the original file is untouched.
 //   - If the original owner cannot be restored on the temp file (a
 //     non-root user fixing another user's group-writable file), the file is
-//     rewritten in place instead, so its owner does not change.
+//     rewritten in place instead, so its owner does not change. If it cannot
+//     be written in place either, it is replaced as above and ends up owned
+//     by the current user, as with sed -i.
 //
 // An in-place rewrite is not atomic. If it fails part way, the original
 // content is written back on a best-effort basis and the error says whether
@@ -128,9 +130,17 @@ func replaceFile(target string, content []byte, mode os.FileMode, existing os.Fi
 			return err
 		}
 		if !restored {
-			// Keep the owner by rewriting the original file in place. The
-			// deferred cleanup removes the temp file.
-			return rewriteInPlace(target, content, mode)
+			// Keep the owner by rewriting the original file in place, if we
+			// may write it. The deferred cleanup removes the temp file.
+			file, err := os.OpenFile(target, os.O_WRONLY, 0)
+			switch {
+			case err == nil:
+				return rewriteOpenFile(target, file, content, mode)
+			case !errors.Is(err, fs.ErrPermission):
+				return fmt.Errorf("open %s for an in-place rewrite: %w", target, err)
+			}
+			// The file is not writable either: replace it as before, which
+			// leaves it owned by the current user.
 		}
 	}
 
@@ -159,14 +169,21 @@ func replaceFile(target string, content []byte, mode os.FileMode, existing os.Fi
 // it, which keeps its inode, hard links and owner. On failure it tries to
 // put the original content back.
 func rewriteInPlace(target string, content []byte, mode os.FileMode) error {
-	original, err := os.ReadFile(target)
-	if err != nil {
-		return fmt.Errorf("read %s before rewriting it in place: %w", target, err)
-	}
-
 	file, err := os.OpenFile(target, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("open %s for an in-place rewrite: %w", target, err)
+	}
+	return rewriteOpenFile(target, file, content, mode)
+}
+
+// rewriteOpenFile overwrites the content of target through file, which is
+// open for writing, and closes it. On failure it tries to put the original
+// content back.
+func rewriteOpenFile(target string, file *os.File, content []byte, mode os.FileMode) error {
+	original, err := os.ReadFile(target)
+	if err != nil {
+		_ = file.Close()
+		return fmt.Errorf("read %s before rewriting it in place: %w", target, err)
 	}
 
 	if err := overwriteFile(file, content); err != nil {

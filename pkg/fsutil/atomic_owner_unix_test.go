@@ -64,6 +64,38 @@ func TestReplaceFile_RestoresOwnerOrRewritesInPlace(t *testing.T) {
 	assertNoTempFilesInternal(t, dir)
 }
 
+func TestReplaceFile_ReplacesReadOnlyFileWhoseOwnerCannotBeRestored(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root can restore any owner and write any file")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	require.NoError(t, os.WriteFile(path, []byte("old content\n"), 0o444))
+
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+
+	// A read-only file of another user, such as one a container left in a
+	// repository: it can be neither given back its owner nor written in
+	// place, so it is replaced as before, keeping its mode.
+	other := *statT(t, before)
+	other.Uid++
+
+	require.NoError(t, replaceFile(path, []byte("new\n"), 0o444, ownerOverride{FileInfo: before, stat: &other}))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "new\n", string(got))
+
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o444), after.Mode().Perm())
+	assertNoTempFilesInternal(t, dir)
+}
+
 func TestWriteAtomic_PreservesOwnerAsRoot(t *testing.T) {
 	t.Parallel()
 
