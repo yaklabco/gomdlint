@@ -1,0 +1,5 @@
+gfm_consistent.input.md:8:1 warning Table row pipe style 'trailing_only' does not match expected 'leading_and_trailing' (MD055/table-pipe-style)
+gfm_consistent.input.md:9:1 warning Table row pipe style 'leading_only' does not match expected 'leading_and_trailing' (MD055/table-pipe-style)
+gfm_consistent.input.md:13:1 warning Table row pipe style 'leading_only' does not match expected 'leading_and_trailing' (MD055/table-pipe-style)
+gfm_consistent.input.md:14:1 warning Table row pipe style 'leading_only' does not match expected 'leading_and_trailing' (MD055/table-pipe-style)
+gfm_consistent.input.md:15:1 warning Table row pipe style 'leading_only' does not match expected 'leading_and_trailing' (MD055/table-pipe-style)

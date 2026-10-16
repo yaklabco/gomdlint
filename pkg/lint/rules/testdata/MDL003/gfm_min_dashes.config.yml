@@ -1,0 +1,5 @@
+flavor: gfm
+rules:
+  MDL003:
+    options:
+      min_dashes: 4

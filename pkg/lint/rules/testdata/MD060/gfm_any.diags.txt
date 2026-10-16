@@ -1,0 +1,4 @@
+gfm_any.input.md:20:1 warning Table pipe spacing does not match style compact (MD060/table-column-style)
+gfm_any.input.md:20:6 warning Table pipe spacing does not match style compact (MD060/table-column-style)
+gfm_any.input.md:20:6 warning Table pipe spacing does not match style compact (MD060/table-column-style)
+gfm_any.input.md:20:10 warning Table pipe spacing does not match style compact (MD060/table-column-style)

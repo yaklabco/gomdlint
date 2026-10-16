@@ -1,0 +1,5 @@
+flavor: gfm
+rules:
+  MD055:
+    options:
+      style: leading_only

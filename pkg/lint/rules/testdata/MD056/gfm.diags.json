@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD056",
+    "name": "table-column-count",
+    "line": 6,
+    "column": 1,
+    "message": "Table row has 2 columns, expected 3",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD056",
+    "name": "table-column-count",
+    "line": 7,
+    "column": 1,
+    "message": "Table row has 4 columns, expected 3",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD056",
+    "name": "table-column-count",
+    "line": 15,
+    "column": 1,
+    "message": "Table row has 3 columns, expected 4",
+    "severity": "warning",
+    "fixable": false
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "rule": "MD055",
+    "name": "table-pipe-style",
+    "line": 8,
+    "column": 1,
+    "message": "Table row pipe style 'trailing_only' does not match expected 'leading_and_trailing'",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD055",
+    "name": "table-pipe-style",
+    "line": 9,
+    "column": 1,
+    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD055",
+    "name": "table-pipe-style",
+    "line": 13,
+    "column": 1,
+    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD055",
+    "name": "table-pipe-style",
+    "line": 14,
+    "column": 1,
+    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD055",
+    "name": "table-pipe-style",
+    "line": 15,
+    "column": 1,
+    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "severity": "warning",
+    "fixable": false
+  }
+]
