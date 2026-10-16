@@ -47,7 +47,7 @@ and optional backups.`,
 		"colorize output: auto, always, never")
 
 	// Add subcommands.
-	rootCmd.AddCommand(newLintCommand())
+	rootCmd.AddCommand(newLintCommand(info))
 	rootCmd.AddCommand(newRulesCommand())
 	rootCmd.AddCommand(newInitCommand())
 	rootCmd.AddCommand(newMigrateCommand())

@@ -40,11 +40,15 @@ type lintFlags struct {
 	cpuprofile   string
 	memprofile   string
 	trace        string
+
+	// toolVersion is not a flag: it is the build version that machine-readable
+	// reports record.
+	toolVersion string
 }
 
-func newLintCommand() *cobra.Command {
+func newLintCommand(info BuildInfo) *cobra.Command {
 	var cfg config.Config
-	flags := &lintFlags{}
+	flags := &lintFlags{toolVersion: info.Version}
 
 	cmd := &cobra.Command{
 		Use:   "lint [paths...]",
@@ -258,6 +262,8 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		RuleFormat:   config.RuleFormat(flags.ruleFormat),
 		SummaryOrder: config.SummaryOrder(flags.summaryOrder),
 		WorkingDir:   workDir,
+		ToolVersion:  flags.toolVersion,
+		Registry:     registry,
 	})
 	if err != nil {
 		return fmt.Errorf("create reporter: %w", err)
