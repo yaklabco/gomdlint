@@ -49,10 +49,14 @@ func BOMLength(content []byte) int {
 // past the end of the line text (its line terminator) count one column each. A
 // byte order mark at the start of the file is not counted.
 //
-// The column is returned unchanged when it cannot be converted: a column below
-// 1 (unknown), a nil snapshot, or a line outside the snapshot.
+// A column below 1 is unknown and converts to 0. Any other column is returned
+// unchanged when it cannot be converted: for a nil snapshot or a line outside
+// the snapshot.
 func Column(snapshot *mdast.FileSnapshot, pos mdast.Position, unit Unit) int {
-	if snapshot == nil || pos.Column < 1 || pos.Line < 1 || pos.Line > len(snapshot.Lines) {
+	if pos.Column < 1 {
+		return 0
+	}
+	if snapshot == nil || pos.Line < 1 || pos.Line > len(snapshot.Lines) {
 		return pos.Column
 	}
 

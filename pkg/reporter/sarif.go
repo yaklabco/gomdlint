@@ -448,8 +448,13 @@ func diagnosticRegion(snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) *SARI
 // toSARIFPoint converts a 1-based line and byte column to SARIF's text model,
 // counting columns in UTF-16 code units. SARIF has no empty line after a
 // final newline, so a position on that line moves to the end of the last
-// line, past its newline.
+// line, past its newline. Without a snapshot the column cannot be converted
+// and is left out, as is a column below 1.
 func toSARIFPoint(snapshot *mdast.FileSnapshot, line, byteColumn int) sarifPoint {
+	if snapshot == nil {
+		return sarifPoint{line: line}
+	}
+
 	if isTrailingEmptyLine(snapshot, line) {
 		last := line - 1
 		info := snapshot.Lines[last-1]
@@ -463,10 +468,6 @@ func toSARIFPoint(snapshot *mdast.FileSnapshot, line, byteColumn int) sarifPoint
 // isTrailingEmptyLine reports whether line is the empty line that follows the
 // final newline of snapshot.
 func isTrailingEmptyLine(snapshot *mdast.FileSnapshot, line int) bool {
-	if snapshot == nil {
-		return false
-	}
-
 	count := len(snapshot.Lines)
 	return line == count && count > 1 && snapshot.Lines[count-1].StartOffset == len(snapshot.Content)
 }
@@ -588,7 +589,7 @@ func (l *artifactLocator) locate(path string) SARIFArtifactLocation {
 }
 
 func (l *artifactLocator) computeLocation(path string) SARIFArtifactLocation {
-	absPath := path
+	absPath := filepath.Clean(path)
 	if !filepath.IsAbs(absPath) {
 		if l.workDir == "" {
 			// The base of a relative path is unknown; keep it relative.

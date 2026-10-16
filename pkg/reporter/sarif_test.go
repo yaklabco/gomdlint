@@ -294,6 +294,9 @@ func TestSARIFReporter_RegionsCountUTF16CodeUnits(t *testing.T) {
 			lint.Diagnostic{RuleID: "MD012", StartLine: 5, StartColumn: 1, EndLine: 5, EndColumn: 1},
 			// A start without an end keeps the end absent.
 			lint.Diagnostic{RuleID: "MD034", StartLine: 3, StartColumn: 13},
+			// Columns below 1 are unknown, so they are left out.
+			lint.Diagnostic{RuleID: "MD001", StartLine: 1, StartColumn: -2},
+			lint.Diagnostic{RuleID: "MD003", StartLine: 1, StartColumn: 1, EndLine: 2, EndColumn: -5},
 		),
 		sarifFile(filepath.Join(root, "bom.md"), bomContent,
 			lint.Diagnostic{RuleID: "MD009", StartLine: 1, StartColumn: 12, EndLine: 1, EndColumn: 15},
@@ -316,8 +319,46 @@ func TestSARIFReporter_RegionsCountUTF16CodeUnits(t *testing.T) {
 		{StartLine: 3, StartColumn: 3, EndLine: 3, EndColumn: 3},
 		{StartLine: 4, StartColumn: 6, EndLine: 4, EndColumn: 6},
 		{StartLine: 3, StartColumn: 10},
+		{StartLine: 1},
+		{StartLine: 1, StartColumn: 1, EndLine: 2},
 		{StartLine: 1, StartColumn: 8, EndLine: 1, EndColumn: 11},
 	}, regions)
+}
+
+func TestSARIFReporter_RegionsWithoutSourceOmitColumns(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	file := sarifFile(filepath.Join(root, "nosnap.md"), umlautContent,
+		lint.Diagnostic{RuleID: "MD009", StartLine: 3, StartColumn: 13, EndLine: 3, EndColumn: 16},
+	)
+	file.Result.Snapshot = nil
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, &runner.Result{Files: []runner.FileOutcome{file}}).Runs[0]
+
+	require.Len(t, run.Results, 1)
+	assert.Equal(t, &reporter.SARIFRegion{StartLine: 3, EndLine: 3}, run.Results[0].Locations[0].PhysicalLocation.Region,
+		"byte columns cannot be converted to UTF-16 without the source, so only lines are reported")
+}
+
+func TestSARIFReporter_CleansAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	outside := filepath.Join(t.TempDir(), "x.md")
+	diag := lint.Diagnostic{RuleID: "MD041", StartLine: 1}
+
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile("/"+outside, "x\n", diag),
+		sarifFile(root+"/./docs/../a.md", "x\n", diag),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
+
+	assert.Equal(t, []reporter.SARIFArtifactLocation{
+		{URI: fileURIPrefix(outside)},
+		{URI: "a.md", URIBaseID: "%SRCROOT%"},
+	}, resultLocations(run), "a doubled leading slash must not become a URI host")
 }
 
 func TestSARIFReporter_FixesCarryFullRegions(t *testing.T) {

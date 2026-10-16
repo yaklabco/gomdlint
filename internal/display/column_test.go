@@ -34,6 +34,8 @@ func TestColumn(t *testing.T) {
 		{name: "column inside a character covers it", content: "中x\n", line: 1, column: 2, unit: CodePoints, want: 2},
 		{name: "invalid bytes count one each", content: "\xff\xfex\n", line: 1, column: 3, unit: CodePoints, want: 3},
 		{name: "zero column means unknown", content: "abc\n", line: 1, column: 0, unit: CodePoints, want: 0},
+		{name: "negative column means unknown", content: "abc\n", line: 1, column: -2, unit: CodePoints, want: 0},
+		{name: "negative column on unknown line means unknown", content: "abc\n", line: 9, column: -2, unit: UTF16CodeUnits, want: 0},
 		{name: "line zero is unchanged", content: "ÄÖÜ\n", line: 0, column: 5, unit: CodePoints, want: 5},
 		{name: "line past end is unchanged", content: "ÄÖÜ\n", line: 9, column: 5, unit: CodePoints, want: 5},
 	}
@@ -53,6 +55,7 @@ func TestColumn_NilSnapshot(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, 13, Column(nil, mdast.Position{Line: 3, Column: 13}, CodePoints))
+	assert.Zero(t, Column(nil, mdast.Position{Line: 3, Column: -1}, CodePoints), "a negative column is unknown")
 }
 
 func TestLineText(t *testing.T) {
