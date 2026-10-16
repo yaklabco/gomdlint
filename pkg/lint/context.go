@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -33,6 +34,10 @@ type RuleContext struct {
 
 	// Registry provides access to the rule registry for name lookups.
 	Registry *Registry
+
+	// lineEnding is the file's dominant line ending, set by the engine or
+	// detected lazily by LineEnding.
+	lineEnding string
 
 	// refCtx is the cached reference context, lazily initialized.
 	refCtx *refs.Context
@@ -65,6 +70,21 @@ func NewRuleContext(
 		Config:     cfg,
 		RuleConfig: ruleCfg,
 	}
+}
+
+// LineEnding returns the file's dominant line ending, fix.LineEndingLF or
+// fix.LineEndingCRLF. Rules build fix text with "\n" and the engine converts
+// it to this ending; rules only need it to compute lengths or offsets of
+// text they insert.
+func (rc *RuleContext) LineEnding() string {
+	if rc.lineEnding == "" {
+		var content []byte
+		if rc.File != nil {
+			content = rc.File.Content
+		}
+		rc.lineEnding = fix.DetectLineEnding(content)
+	}
+	return rc.lineEnding
 }
 
 // Cancelled returns true if the context has been cancelled.

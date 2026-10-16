@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -364,27 +365,22 @@ func TestPipeline_ProcessFile_NoEditsWhenConflicts(t *testing.T) {
 	parser := &mockParser{}
 	registry := lint.NewRegistry()
 
-	// Two rules with overlapping edits.
-	rule1 := &fixableRule{
-		BaseRule: lint.NewBaseRule("TEST001", "test-rule-1", "", nil, true),
-		diags: []lint.Diagnostic{
-			{
-				RuleID:   "TEST001",
-				Message:  "issue 1",
-				FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 10, NewText: "aaa"}},
-			},
-		},
-	}
-	rule2 := &fixableRule{
-		BaseRule: lint.NewBaseRule("TEST002", "test-rule-2", "", nil, true),
-		diags: []lint.Diagnostic{
-			{
-				RuleID:   "TEST002",
-				Message:  "issue 2",
-				FixEdits: []fix.TextEdit{{StartOffset: 5, EndOffset: 15, NewText: "bbb"}},
-			},
-		},
-	}
+	// Two rules with overlapping edits. Like real rules, each reports its
+	// issue only while the text it fixes is still there, so the pipeline
+	// re-lints the fixed content and stops.
+	rule1 := newFuncRule("TEST001", func(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+		if !strings.HasPrefix(string(ctx.File.Content), "hello worl") {
+			return nil, nil
+		}
+		return []lint.Diagnostic{fixDiag("TEST001", fix.TextEdit{StartOffset: 0, EndOffset: 10, NewText: "aaa"})}, nil
+	})
+	rule2 := newFuncRule("TEST002", func(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+		content := string(ctx.File.Content)
+		if len(content) < 15 || content[5:15] != " world aga" {
+			return nil, nil
+		}
+		return []lint.Diagnostic{fixDiag("TEST002", fix.TextEdit{StartOffset: 5, EndOffset: 15, NewText: "bbb"})}, nil
+	})
 	registry.Register(rule1)
 	registry.Register(rule2)
 

@@ -2,14 +2,67 @@ package lint
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"runtime/debug"
 	"slices"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
+
+// Errors wrapped by RuleError to classify rule failures.
+var (
+	// ErrRulePanic marks a rule that panicked while linting a file.
+	ErrRulePanic = errors.New("rule panicked")
+
+	// ErrInvalidFix marks a rule that proposed fix edits that do not fit the
+	// file: out of range, overlapping each other, or splitting a line ending
+	// or a UTF-8 character. The finding is still reported, without its fix.
+	ErrInvalidFix = errors.New("invalid fix")
+)
+
+// RuleError records a failure of one rule on one file. A rule with an error
+// may have reported incomplete findings for that file.
+type RuleError struct {
+	// RuleID is the ID of the rule that failed.
+	RuleID string
+
+	// RuleName is the human-readable name of the rule that failed.
+	RuleName string
+
+	// Err is the underlying error. It wraps ErrRulePanic for a recovered
+	// panic and ErrInvalidFix for invalid fix edits; otherwise it is the
+	// error the rule returned.
+	Err error
+
+	// Stack is the stack trace captured when the rule panicked, or nil.
+	Stack []byte
+}
+
+// Error implements error.
+func (e *RuleError) Error() string {
+	return fmt.Sprintf("rule %s (%s): %v", e.RuleID, e.RuleName, e.Err)
+}
+
+// Unwrap returns the underlying error.
+func (e *RuleError) Unwrap() error {
+	return e.Err
+}
+
+// SkippedEdit is a fix edit that was proposed but not applied because its fix
+// conflicted with an earlier fix.
+type SkippedEdit struct {
+	// RuleID identifies the rule that proposed the edit.
+	RuleID string
+
+	// Edit is the proposed edit.
+	Edit fix.TextEdit
+}
 
 // FileResult contains the results of linting a single file.
 type FileResult struct {
@@ -19,18 +72,22 @@ type FileResult struct {
 	// Diagnostics contains all issues found.
 	Diagnostics []Diagnostic
 
-	// Edits contains validated, sorted edits for auto-fix.
+	// Edits contains validated, sorted, conflict-free edits for auto-fix.
 	// Empty if no fixes are available or --fix was not requested.
 	Edits []fix.TextEdit
 
-	// SkippedEdits contains edits that were skipped due to conflicts.
-	// When multiple edits overlap, earlier edits (by start position) take precedence.
-	SkippedEdits []fix.TextEdit
+	// SkippedEdits contains the edits of fixes that were not applied because
+	// they conflicted with an earlier fix. A fix is applied whole or not at
+	// all, so every edit of a skipped fix is listed. The multi-pass pipeline
+	// proposes a skipped fix again on the next pass.
+	SkippedEdits []SkippedEdit
 
 	// EditConflicts is true if any edits were skipped due to conflicts.
 	EditConflicts bool
 
-	// RuleErrors contains any errors from rule execution.
+	// RuleErrors maps a rule ID to that rule's failure on this file: an error
+	// the rule returned, a recovered panic (ErrRulePanic) or invalid fix edits
+	// (ErrInvalidFix). Every value is a *RuleError.
 	RuleErrors map[string]error
 }
 
@@ -42,6 +99,29 @@ func (fr *FileResult) HasIssues() bool {
 // HasFixes returns true if any fixes are available.
 func (fr *FileResult) HasFixes() bool {
 	return len(fr.Edits) > 0
+}
+
+// HasRuleErrors reports whether any rule failed on this file.
+func (fr *FileResult) HasRuleErrors() bool {
+	return len(fr.RuleErrors) > 0
+}
+
+// RuleErrorList returns the rule errors sorted by rule ID.
+func (fr *FileResult) RuleErrorList() []*RuleError {
+	if len(fr.RuleErrors) == 0 {
+		return nil
+	}
+
+	ids := slices.Sorted(maps.Keys(fr.RuleErrors))
+	list := make([]*RuleError, 0, len(ids))
+	for _, id := range ids {
+		var ruleErr *RuleError
+		if !errors.As(fr.RuleErrors[id], &ruleErr) {
+			ruleErr = &RuleError{RuleID: id, Err: fr.RuleErrors[id]}
+		}
+		list = append(list, ruleErr)
+	}
+	return list
 }
 
 // IssueCount returns the total number of diagnostics.
@@ -78,11 +158,27 @@ func NewEngine(parser Parser, registry *Registry) *Engine {
 }
 
 // LintFile parses and lints a single file.
+//
+// A rule that returns an error, panics, or proposes invalid fix edits does
+// not stop the others: the failure is recorded in FileResult.RuleErrors and
+// only that rule's results (or only the invalid fix) are dropped. The
+// newlines in fix text are written with the file's dominant line ending.
 func (e *Engine) LintFile(
 	ctx context.Context,
 	path string,
 	content []byte,
 	cfg *config.Config,
+) (*FileResult, error) {
+	return e.lintFile(ctx, path, content, cfg, fix.DetectLineEnding(content))
+}
+
+// lintFile lints content, writing the newlines in fix text as lineEnding.
+func (e *Engine) lintFile(
+	ctx context.Context,
+	path string,
+	content []byte,
+	cfg *config.Config,
+	lineEnding string,
 ) (*FileResult, error) {
 	// Parse the file.
 	snapshot, err := e.Parser.Parse(ctx, path, content)
@@ -98,19 +194,18 @@ func (e *Engine) LintFile(
 	states := directiveStates(snapshot, e.Registry, cfg)
 
 	result := &FileResult{
-		Snapshot:    snapshot,
-		Diagnostics: nil,
-		Edits:       nil,
-		RuleErrors:  make(map[string]error),
+		Snapshot:   snapshot,
+		RuleErrors: make(map[string]error),
 	}
 
-	// Collect all edits for validation.
-	var allEdits []fix.TextEdit
+	validator := fix.NewValidator(content)
+	var fixes []pendingFix
 
 	// Run each rule.
 	for _, rule := range e.Registry.Rules() {
 		rr := resolveRule(rule, cfg)
-		if !slices.Contains(states[rule.ID()], true) {
+		ruleStates := states[rule.ID()]
+		if !slices.Contains(ruleStates, true) {
 			continue
 		}
 		// Check for cancellation.
@@ -123,77 +218,167 @@ func (e *Engine) LintFile(
 		// Create rule context.
 		ruleCtx := NewRuleContext(ctx, snapshot, cfg, rr.Config)
 		ruleCtx.Registry = e.Registry
+		ruleCtx.lineEnding = lineEnding
 
-		// Execute rule.
-		diags, err := rr.Rule.Apply(ruleCtx)
+		diags, err := applyRule(ctx, rule, ruleCtx, path)
 		if err != nil {
-			result.RuleErrors[rr.Rule.ID()] = err
+			result.RuleErrors[rule.ID()] = err
 			continue
 		}
 
-		// Process diagnostics.
-		for diagIdx := range diags {
-			line := diags[diagIdx].StartLine
-			if line > 0 && line < len(states[rule.ID()]) && !states[rule.ID()][line] {
+		var invalid []error
+		for _, diag := range diags {
+			line := diag.StartLine
+			if line > 0 && line < len(ruleStates) && !ruleStates[line] {
 				continue
 			}
 			// Apply resolved severity.
-			diags[diagIdx].Severity = rr.Severity
+			diag.Severity = rr.Severity
 
 			// Ensure file path is set.
-			if diags[diagIdx].FilePath == "" {
-				diags[diagIdx].FilePath = path
+			if diag.FilePath == "" {
+				diag.FilePath = path
 			}
 
 			// Ensure rule name is set for human-readable output.
-			if diags[diagIdx].RuleName == "" {
-				diags[diagIdx].RuleName = rr.Rule.Name()
+			if diag.RuleName == "" {
+				diag.RuleName = rule.Name()
 			}
 
-			// Collect edits if auto-fix is enabled for this rule.
-			if rr.AutoFix && len(diags[diagIdx].FixEdits) > 0 {
-				allEdits = append(allEdits, diags[diagIdx].FixEdits...)
+			if len(diag.FixEdits) > 0 {
+				edits, err := validator.Validate(diag.FixEdits)
+				if err != nil {
+					// Report the finding without its broken fix.
+					invalid = append(invalid, fmt.Errorf("fix for line %d: %w", diag.StartLine, err))
+					diag.FixEdits = nil
+				} else {
+					diag.FixEdits = convertNewlines(edits, lineEnding)
+					// Collect the fix if auto-fix is enabled for this rule.
+					if rr.AutoFix {
+						fixes = append(fixes, pendingFix{ruleID: rule.ID(), edits: diag.FixEdits})
+					}
+				}
 			}
-			result.Diagnostics = append(result.Diagnostics, diags[diagIdx])
+			result.Diagnostics = append(result.Diagnostics, diag)
+		}
+
+		if len(invalid) > 0 {
+			result.RuleErrors[rule.ID()] = &RuleError{
+				RuleID:   rule.ID(),
+				RuleName: rule.Name(),
+				Err:      fmt.Errorf("%w: %w", ErrInvalidFix, errors.Join(invalid...)),
+			}
 		}
 	}
 
-	// Validate and prepare edits, merging deletions and filtering conflicts.
-	if len(allEdits) > 0 {
-		allEdits = mergeBlankLineInsertions(allEdits)
-		accepted, skipped, _, err := fix.PrepareEditsFiltered(allEdits, len(content))
-		if err != nil {
-			// Validation error (not conflicts - those are filtered).
-			// Still include diagnostics but clear edits.
-			result.Edits = nil
-			result.SkippedEdits = nil
-			result.EditConflicts = true
-		} else {
-			result.Edits = accepted
-			result.SkippedEdits = skipped
-			result.EditConflicts = len(skipped) > 0
-		}
-	}
+	result.Edits, result.SkippedEdits = resolveFixes(mergeBlankLineInsertions(fixes))
+	result.EditConflicts = len(result.SkippedEdits) > 0
 
 	return result, nil
 }
 
-// mergeBlankLineInsertions combines formatting requirements at the same boundary.
-// It runs after suppression so disabled findings cannot increase an enabled fix.
-func mergeBlankLineInsertions(edits []fix.TextEdit) []fix.TextEdit {
-	result := make([]fix.TextEdit, 0, len(edits))
+// applyRule runs one rule. A returned error or a panic becomes a *RuleError;
+// a panic's stack is written to the debug log.
+func applyRule(ctx context.Context, rule Rule, ruleCtx *RuleContext, path string) ([]Diagnostic, error) {
+	var (
+		diags    []Diagnostic
+		applyErr error
+		panicErr *RuleError
+	)
+
+	func() {
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			stack := debug.Stack()
+			logging.FromContext(ctx).Debug("rule panicked",
+				"rule", rule.ID(), "path", path, "panic", recovered, "stack", string(stack))
+
+			cause, ok := recovered.(error)
+			if !ok {
+				cause = errors.New(fmt.Sprint(recovered))
+			}
+			panicErr = &RuleError{
+				RuleID:   rule.ID(),
+				RuleName: rule.Name(),
+				Err:      fmt.Errorf("%w: %w", ErrRulePanic, cause),
+				Stack:    stack,
+			}
+		}()
+		diags, applyErr = rule.Apply(ruleCtx)
+	}()
+
+	if panicErr != nil {
+		return nil, panicErr
+	}
+	if applyErr != nil {
+		return nil, &RuleError{RuleID: rule.ID(), RuleName: rule.Name(), Err: applyErr}
+	}
+	return diags, nil
+}
+
+// pendingFix is the fix of one diagnostic, waiting for conflict resolution.
+type pendingFix struct {
+	ruleID string
+	edits  []fix.TextEdit
+}
+
+// resolveFixes picks the fixes to apply and lists the edits of the others.
+func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit) {
+	if len(fixes) == 0 {
+		return nil, nil
+	}
+
+	groups := make([][]fix.TextEdit, len(fixes))
+	for idx, pending := range fixes {
+		groups[idx] = pending.edits
+	}
+	accepted, skippedFixes := fix.ResolveFixes(groups)
+
+	var skipped []SkippedEdit
+	for _, idx := range skippedFixes {
+		for _, edit := range fixes[idx].edits {
+			skipped = append(skipped, SkippedEdit{RuleID: fixes[idx].ruleID, Edit: edit})
+		}
+	}
+	return accepted, skipped
+}
+
+// convertNewlines writes the newlines in the text of edits as lineEnding, in
+// place. The engine only passes its own copies from fix.Validator.
+func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
+	for idx := range edits {
+		edits[idx].NewText = fix.ConvertNewlines(edits[idx].NewText, lineEnding)
+	}
+	return edits
+}
+
+// mergeBlankLineInsertions combines formatting requirements at the same
+// boundary: of several single-edit fixes that insert only newlines at one
+// offset, the longest is kept. It runs after suppression so disabled
+// findings cannot increase an enabled fix.
+func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
+	result := make([]pendingFix, 0, len(fixes))
 	boundaries := make(map[int]int)
-	for _, edit := range edits {
-		if edit.StartOffset == edit.EndOffset && edit.NewText != "" && strings.Trim(edit.NewText, "\n") == "" {
-			if idx, ok := boundaries[edit.StartOffset]; ok {
-				if len(edit.NewText) > len(result[idx].NewText) {
-					result[idx] = edit
+	for _, pending := range fixes {
+		if len(pending.edits) == 1 && isBlankLineInsertion(pending.edits[0]) {
+			offset := pending.edits[0].StartOffset
+			if idx, ok := boundaries[offset]; ok {
+				if len(pending.edits[0].NewText) > len(result[idx].edits[0].NewText) {
+					result[idx] = pending
 				}
 				continue
 			}
-			boundaries[edit.StartOffset] = len(result)
+			boundaries[offset] = len(result)
 		}
-		result = append(result, edit)
+		result = append(result, pending)
 	}
 	return result
+}
+
+// isBlankLineInsertion reports whether edit only inserts line breaks.
+func isBlankLineInsertion(edit fix.TextEdit) bool {
+	return edit.StartOffset == edit.EndOffset && edit.NewText != "" && strings.Trim(edit.NewText, "\r\n") == ""
 }
