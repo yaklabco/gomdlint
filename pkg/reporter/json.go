@@ -22,6 +22,8 @@ type JSONOutput struct {
 }
 
 // JSONFileResult represents a single file's results.
+// Path is relative to the working directory when the file lies inside it,
+// and absolute otherwise.
 type JSONFileResult struct {
 	Path        string           `json:"path"`
 	Diagnostics []JSONDiagnostic `json:"diagnostics"`
@@ -30,6 +32,8 @@ type JSONFileResult struct {
 }
 
 // JSONDiagnostic represents a single diagnostic.
+// Lines are 1-based. Columns are 1-based character columns (Unicode code
+// points), as markdownlint reports them, and EndColumn is exclusive.
 type JSONDiagnostic struct {
 	RuleID      string    `json:"ruleId"`
 	RuleName    string    `json:"ruleName"`
@@ -45,6 +49,7 @@ type JSONDiagnostic struct {
 }
 
 // JSONFix represents a proposed fix.
+// StartOffset and EndOffset are byte offsets into the file content.
 type JSONFix struct {
 	StartOffset int    `json:"startOffset"`
 	EndOffset   int    `json:"endOffset"`
@@ -104,12 +109,14 @@ func (r *JSONReporter) buildOutput(result *runner.Result) *JSONOutput {
 		return output
 	}
 
+	shown := displayResult(result, r.opts.WorkingDir)
+
 	// Pre-allocate if we have files
-	if len(result.Files) > 0 {
-		output.Files = make([]JSONFileResult, 0, len(result.Files))
+	if len(shown.Files) > 0 {
+		output.Files = make([]JSONFileResult, 0, len(shown.Files))
 	}
 
-	for _, file := range result.Files {
+	for _, file := range shown.Files {
 		fileResult := JSONFileResult{
 			Path:        file.Path,
 			Diagnostics: make([]JSONDiagnostic, 0),

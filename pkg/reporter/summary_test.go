@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,4 +153,28 @@ func TestSummaryRenderer_FixableIndicator(t *testing.T) {
 	output := buf.String()
 	// The fixable rule should have an indicator
 	assert.Contains(t, output, "✓")
+}
+
+func TestSummaryRenderer_TruncatesLongPathsOnCharacterBoundary(t *testing.T) {
+	t.Parallel()
+
+	// The table keeps the last 57 bytes of a long path. Here that cut falls on
+	// the second byte of a two-byte letter.
+	longPath := "/srv/" + strings.Repeat("é", 30) + "/readme.md"
+	require.Greater(t, len(longPath), maxFilePathLength)
+	require.False(t, utf8.RuneStart(longPath[len(longPath)-(maxFilePathLength-1)]), "fixture must cut mid-character")
+
+	var buf bytes.Buffer
+	renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never"})
+	report := &analysis.Report{
+		ByFile: []analysis.FileAnalysis{{Path: longPath, Issues: 1, Warnings: 1}},
+		Totals: analysis.Totals{Issues: 1, Warnings: 1, Files: 1, FilesWithIssues: 1},
+	}
+
+	require.NoError(t, renderer.Render(context.Background(), report))
+
+	output := buf.String()
+	assert.True(t, utf8.ValidString(output), "summary output must stay valid UTF-8")
+	assert.Contains(t, output, "…")
+	assert.Contains(t, output, "é/readme.md", "the end of the path is kept")
 }

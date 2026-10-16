@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/analysis"
@@ -42,6 +43,16 @@ func padLeft(s string, width int) string {
 		return s
 	}
 	return strings.Repeat(" ", width-len(s)) + s
+}
+
+// tailFromCharBoundary returns at most the last maxBytes bytes of s, starting
+// at a character boundary so a multibyte character is never split.
+func tailFromCharBoundary(s string, maxBytes int) string {
+	cut := max(len(s)-maxBytes, 0)
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return s[cut:]
 }
 
 // SummaryRenderer formats results as aggregated summary tables.
@@ -161,7 +172,7 @@ func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis) {
 	for _, file := range files {
 		path := file.Path
 		if len(path) > maxFilePathLength {
-			path = "…" + path[len(path)-(maxFilePathLength-1):]
+			path = "…" + tailFromCharBoundary(path, maxFilePathLength-1)
 		}
 
 		// Pad first, then style

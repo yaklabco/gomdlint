@@ -35,22 +35,25 @@ func (r *TextReporter) Report(ctx context.Context, result *runner.Result) (int, 
 		return 0, nil
 	}
 
+	shown := displayResult(result, r.opts.WorkingDir)
+
 	var totalIssues int
 
 	if r.opts.GroupByFile {
-		totalIssues = r.reportGrouped(ctx, result)
+		totalIssues = r.reportGrouped(ctx, shown)
 	} else {
-		totalIssues = r.reportFlat(ctx, result)
+		totalIssues = r.reportFlat(ctx, shown)
 	}
 
 	if r.opts.ShowSummary {
-		fmt.Fprint(r.out, r.styles.FormatSummaryOneLine(result.Stats))
+		fmt.Fprint(r.out, r.styles.FormatSummaryOneLine(shown.Stats))
 	}
 
 	return totalIssues, nil
 }
 
 // reportGrouped writes diagnostics grouped by file.
+// The result must already be in display form (see displayResult).
 func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) int {
 	var total int
 
@@ -78,12 +81,12 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 
 		for _, diag := range diagnostics {
 			// Get source line for context if enabled
-			var sourceLine string
-			if r.opts.ShowContext && file.Result.Snapshot != nil {
-				sourceLine = r.getSourceLine(file.Result.Snapshot.Content, diag.StartLine)
+			var contextLine string
+			if r.opts.ShowContext {
+				contextLine = sourceLine(file.Result.Snapshot, diag.StartLine)
 			}
 
-			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, sourceLine, r.opts.RuleFormat))
+			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, contextLine, r.opts.RuleFormat))
 			total++
 		}
 
@@ -102,6 +105,7 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 }
 
 // reportFlat writes diagnostics without grouping.
+// The result must already be in display form (see displayResult).
 func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int {
 	var total int
 
@@ -121,12 +125,12 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 
 		for _, diag := range file.Result.Diagnostics {
 			// Get source line for context if enabled
-			var sourceLine string
-			if r.opts.ShowContext && file.Result.Snapshot != nil {
-				sourceLine = r.getSourceLine(file.Result.Snapshot.Content, diag.StartLine)
+			var contextLine string
+			if r.opts.ShowContext {
+				contextLine = sourceLine(file.Result.Snapshot, diag.StartLine)
 			}
 
-			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, sourceLine, r.opts.RuleFormat))
+			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, contextLine, r.opts.RuleFormat))
 			total++
 		}
 
@@ -140,40 +144,4 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 	}
 
 	return total
-}
-
-// getSourceLine extracts a specific line from content (1-based line number).
-func (r *TextReporter) getSourceLine(content []byte, lineNum int) string {
-	if lineNum < 1 || len(content) == 0 {
-		return ""
-	}
-
-	lines := splitLines(content)
-	if lineNum > len(lines) {
-		return ""
-	}
-
-	return lines[lineNum-1]
-}
-
-// splitLines splits content into lines.
-func splitLines(content []byte) []string {
-	var lines []string
-	var line []byte
-
-	for _, b := range content {
-		if b == '\n' {
-			lines = append(lines, string(line))
-			line = nil
-		} else {
-			line = append(line, b)
-		}
-	}
-
-	// Handle last line without newline
-	if len(line) > 0 {
-		lines = append(lines, string(line))
-	}
-
-	return lines
 }
