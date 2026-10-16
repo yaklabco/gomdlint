@@ -57,6 +57,7 @@ func TestNode_IsInline(t *testing.T) {
 		mdast.NodeSoftBreak,
 		mdast.NodeHardBreak,
 		mdast.NodeHTMLInline,
+		mdast.NodeStrikethrough,
 	}
 
 	for _, kind := range inlineKinds {

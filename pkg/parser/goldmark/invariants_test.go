@@ -148,9 +148,12 @@ func checkMarkers(t *testing.T, file *mdast.FileSnapshot, node *mdast.Node) {
 	case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
 		require.Equal(t, byte('<'), src[0], "HTML does not start with '<': %q", src)
 	case mdast.NodeEmphasis, mdast.NodeStrong:
-		delimiters := "*_~"
+		delimiters := "*_"
 		require.Contains(t, delimiters, string(src[0]), "emphasis does not start with a delimiter: %q", src)
 		require.Contains(t, delimiters, string(src[len(src)-1]), "emphasis does not end with a delimiter: %q", src)
+	case mdast.NodeStrikethrough:
+		require.Equal(t, byte('~'), src[0], "strikethrough does not start with '~': %q", src)
+		require.Equal(t, byte('~'), src[len(src)-1], "strikethrough does not end with '~': %q", src)
 	case mdast.NodeCodeSpan:
 		require.Equal(t, byte('`'), src[0], "code span: %q", src)
 		require.Equal(t, byte('`'), src[len(src)-1], "code span: %q", src)

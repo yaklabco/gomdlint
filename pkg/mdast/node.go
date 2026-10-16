@@ -32,6 +32,11 @@ const (
 
 	// Fallback for unrecognized content.
 	NodeRaw
+
+	// GFM extension nodes. They follow NodeRaw so existing values stay stable.
+
+	// NodeStrikethrough is GFM strikethrough text (inline).
+	NodeStrikethrough
 )
 
 // Node represents a single node in the Markdown AST.
@@ -92,7 +97,7 @@ func (n *Node) IsBlock() bool {
 func (n *Node) IsInline() bool {
 	switch n.Kind {
 	case NodeText, NodeEmphasis, NodeStrong, NodeCodeSpan, NodeLink,
-		NodeImage, NodeSoftBreak, NodeHardBreak, NodeHTMLInline:
+		NodeImage, NodeSoftBreak, NodeHardBreak, NodeHTMLInline, NodeStrikethrough:
 		return true
 	default:
 		return false

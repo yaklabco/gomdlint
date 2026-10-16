@@ -43,6 +43,8 @@ func (i NodeKind) String() string {
 		return "HTMLInline"
 	case NodeRaw:
 		return "Raw"
+	case NodeStrikethrough:
+		return "Strikethrough"
 	default:
 		return "NodeKind(" + uitoa(uint(i)) + ")"
 	}

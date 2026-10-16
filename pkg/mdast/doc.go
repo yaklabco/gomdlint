@@ -77,6 +77,8 @@
 //     text before them is a separate Text node.
 //   - Emphasis and Strong: including their delimiters. Content: the text
 //     between the delimiters.
+//   - Strikethrough (GFM): including its one or two '~' on each side.
+//     Content: the text between them.
 //   - CodeSpan: including the backtick runs. Content: everything between
 //     the runs, including any padding space.
 //   - Link and Image: from '[' (or "![") through the destination or the

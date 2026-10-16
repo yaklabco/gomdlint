@@ -416,6 +416,19 @@ func TestLinkReferenceStyles(t *testing.T) {
 	}
 }
 
+func TestStrikethroughNode(t *testing.T) {
+	file := parseForSpans(t, FlavorGFM, "~~Struck~~ and *em* and ~one~\n")
+	assertSpans(t, file, []spanExpectation{
+		{mdast.NodeStrikethrough, 0, "~~Struck~~", "Struck"},
+		{mdast.NodeStrikethrough, 1, "~one~", "one"},
+		{mdast.NodeEmphasis, 0, "*em*", "em"},
+	})
+	require.Len(t, mdast.FindByKind(file.Root, mdast.NodeEmphasis), 1, "strikethrough is not emphasis")
+	strike := nthNode(file.Root, mdast.NodeStrikethrough, 0)
+	require.True(t, strike.IsInline())
+	require.Nil(t, strike.Ext)
+}
+
 func TestExtendedAutolinkSpans(t *testing.T) {
 	input := "Visit www.example.com, (https://example.org/path) or me@example.com.\n"
 	assertSpans(t, parseForSpans(t, FlavorGFM, input), []spanExpectation{

@@ -109,6 +109,11 @@ func TestEmphasisAsHeadingKeepsWordsAcrossLines(t *testing.T) {
 	require.Equal(t, "# Title\n\n## Bold text\n\nMore.\n", applyAllFixEdits(t, input, diags))
 }
 
+func TestStrikethroughIsNotEmphasisAsHeading(t *testing.T) {
+	input := "# Title\n\n~~Struck paragraph~~\n\nMore.\n"
+	require.Empty(t, applyCompatibilityRule(t, NewNoEmphasisAsHeadingRule(), input))
+}
+
 func TestMultilineCollapsedReferenceUsesDefinition(t *testing.T) {
 	input := "# Title\n\nSee [multi\nline][].\n\n[multi line]: https://example.com\n"
 	require.Empty(t, applyCompatibilityRule(t, NewLinkImageRefDefsRule(), input))

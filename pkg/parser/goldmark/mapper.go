@@ -444,8 +444,7 @@ func (m *mapper) mapString(s *ast.String) *mdast.Node {
 
 // mapStrikethrough converts a GFM Strikethrough to an mdast node.
 func (m *mapper) mapStrikethrough(s *east.Strikethrough) *mdast.Node {
-	node := mdast.NewNode(mdast.NodeEmphasis)
-	node.Ext = map[string]any{"strikethrough": true}
+	node := mdast.NewNode(mdast.NodeStrikethrough)
 	m.mapChildren(s, node)
 	m.setStrikethroughSpans(node)
 	return node
