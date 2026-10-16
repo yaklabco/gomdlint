@@ -1,8 +1,11 @@
 version: 2
 
+# Set explicitly so archive names do not depend on the clone's directory
+# or remote name.
+project_name: gomdlint
+
 before:
   hooks:
-    - go mod tidy
     - mkdir -p .buildcache/completions
     - sh -c "go run ./cmd/gomdlint completion bash > .buildcache/completions/gomdlint.bash"
     - sh -c "go run ./cmd/gomdlint completion zsh > .buildcache/completions/gomdlint.zsh"
@@ -46,7 +49,7 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - LICENSE
       - README.md
@@ -70,6 +73,12 @@ release:
 
     See [CHANGELOG.md](https://github.com/yaklabco/gomdlint/blob/main/CHANGELOG.md) for full details.
 
+# GoReleaser deprecates brews in favour of homebrew_casks, and
+# `goreleaser check` reports the deprecation. The formula stays until the
+# tap can move with it. A cask also needs a tap_migrations.json entry and
+# the removal of gomdlint.rb in yaklabco/homebrew-tap, shipped in the same
+# release. Without them, users who installed the formula stay on its last
+# version and never move to the cask.
 brews:
   - name: gomdlint
     repository:
@@ -81,7 +90,7 @@ brews:
       email: official@yaklab.org
     homepage: "https://github.com/yaklabco/gomdlint"
     description: "Fast Markdown linter with autofix support"
-    license: "Apache-2.0"
+    license: "MIT"
     install: |
       bin.install "gomdlint"
       bash_completion.install "completions/gomdlint.bash" => "gomdlint"
@@ -89,5 +98,3 @@ brews:
       fish_completion.install "completions/gomdlint.fish"
     test: |
       system "#{bin}/gomdlint", "version"
-
-
