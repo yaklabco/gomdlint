@@ -94,7 +94,7 @@ func matchProtocolLiteral(text []byte, pos int, prev byte) (int, bool) {
 	if idx >= len(text) {
 		return pos, false
 	}
-	if first, _ := utf8.DecodeRune(text[idx:]); unicode.IsControl(first) || unicode.IsSpace(first) || isUnicodePunct(first) {
+	if first, _ := utf8.DecodeRune(text[idx:]); isASCIIControl(first) || isUnicodeWhitespace(first) || isUnicodePunct(first) {
 		return pos, false
 	}
 	end, ok := matchLiteralDomain(text, idx)
@@ -127,7 +127,7 @@ func matchLiteralDomain(text []byte, idx int) (int, bool) {
 			continue
 		}
 		r, size := utf8.DecodeRune(text[idx:])
-		if unicode.IsSpace(r) || (ch != '-' && isUnicodePunct(r)) {
+		if isUnicodeWhitespace(r) || (ch != '-' && isUnicodePunct(r)) {
 			break
 		}
 		seen = true
@@ -162,7 +162,7 @@ func matchLiteralPath(text []byte, idx int) int {
 			continue
 		}
 		r, size := utf8.DecodeRune(text[idx:])
-		if unicode.IsSpace(r) {
+		if isUnicodeWhitespace(r) {
 			return idx
 		}
 		idx += size
@@ -256,7 +256,26 @@ func isUnicodePunct(r rune) bool {
 
 func isSpaceAt(text []byte, idx int) bool {
 	r, _ := utf8.DecodeRune(text[idx:])
-	return unicode.IsSpace(r)
+	return isUnicodeWhitespace(r)
+}
+
+// isUnicodeWhitespace reports whether r is whitespace the way micromark's
+// unicodeWhitespace decides, which tests JavaScript's \s: ASCII tab, line
+// feed, vertical tab, form feed, carriage return, and space, the Unicode
+// space separators, U+2028, U+2029, and U+FEFF. Unlike unicode.IsSpace, it
+// holds U+FEFF and not U+0085.
+func isUnicodeWhitespace(r rune) bool {
+	switch r {
+	case '\t', '\n', '\v', '\f', '\r', '\u2028', '\u2029', '\ufeff':
+		return true
+	}
+	return unicode.Is(unicode.Zs, r)
+}
+
+// isASCIIControl reports whether r is an ASCII control character, as
+// micromark's asciiControl decides: C1 controls such as U+0085 are not.
+func isASCIIControl(r rune) bool {
+	return r < ' ' || r == 0x7f
 }
 
 func hasPrefixAt(text []byte, idx int, prefix string) bool {

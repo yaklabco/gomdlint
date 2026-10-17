@@ -36,6 +36,17 @@ func TestMatchAutolinkLiteral(t *testing.T) {
 		{"www address", "www.example.com/path.", 0, ' ', "www.example.com/path", LiteralWWW},
 		{"www after emphasis marker", "WWW.example.com*", 0, '*', "WWW.example.com", LiteralWWW},
 		{"www email is an email", "www.foo@bar.com", 0, ' ', "www.foo@bar.com", LiteralEmail},
+		// micromark tests whitespace with JavaScript's \s, which holds U+FEFF
+		// but not U+0085, and after the protocol rejects only ASCII control
+		// characters.
+		{"next line in the path", "https://example.com/a\u0085b c", 0, ' ', "https://example.com/a\u0085b", LiteralURL},
+		{"byte order mark ends the path", "https://example.com/a\ufeffb", 0, ' ', "https://example.com/a", LiteralURL},
+		{"no-break space ends the path", "https://example.com/a\u00a0b", 0, ' ', "https://example.com/a", LiteralURL},
+		{"next line in the domain", "https://exa\u0085mple.com c", 0, ' ', "https://exa\u0085mple.com", LiteralURL},
+		{"next line after the protocol", "https://\u0085example.com c", 0, ' ', "https://\u0085example.com", LiteralURL},
+		{"period before a byte order mark", "https://example.com/a.\ufeffb", 0, ' ', "https://example.com/a", LiteralURL},
+		{"bracket before a byte order mark", "https://example.com/a]\ufeffb", 0, ' ', "https://example.com/a", LiteralURL},
+		{"next line in a www domain", "www.exa\u0085mple.com c", 0, ' ', "www.exa\u0085mple.com", LiteralWWW},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
