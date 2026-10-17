@@ -72,6 +72,15 @@ func failingRegistry() *lint.Registry {
 	return registry
 }
 
+// skipWithoutFilePermissions skips a test that needs a file it cannot read:
+// permission bits do not stop root or Windows from reading files.
+func skipWithoutFilePermissions(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permission bits do not stop root or Windows from reading files")
+	}
+}
+
 func executeWithFailingRules(t *testing.T, args ...string) execution {
 	t.Helper()
 
@@ -107,9 +116,7 @@ func TestLint_RuleFailureIsAnInternalError(t *testing.T) {
 }
 
 func TestLint_UnreadableFileOutranksRuleFailure(t *testing.T) {
-	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
-		t.Skip("permission bits do not stop root or Windows from reading files")
-	}
+	skipWithoutFilePermissions(t)
 
 	dir := inProject(t, map[string]string{"a.md": "panic\n", "locked.md": "# Locked\n"})
 	require.NoError(t, os.Chmod(filepath.Join(dir, "locked.md"), 0))
@@ -200,4 +207,62 @@ func TestLint_MachineReadableReportsCountRuleFailuresSeparately(t *testing.T) {
 	assert.False(t, invocation.ExecutionSuccessful)
 	require.Len(t, invocation.ToolExecutionNotifications, 1)
 	assert.Equal(t, "rule TEST001 failed: rule panicked: cannot lint this", invocation.ToolExecutionNotifications[0].Message.Text)
+}
+
+// successClaims are the messages of a run with nothing to report.
+var successClaims = []string{"All files passed", "No issues found", "No issues would remain"}
+
+func TestLint_EveryFormatReportsARuleFailureWithoutFindings(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		args    []string
+	}{
+		{name: "text", content: "panic\n", args: []string{"lint", "a.md"}},
+		{name: "table", content: "panic\n", args: []string{"lint", "--format", "table", "a.md"}},
+		{name: "table per file", content: "panic\n", args: []string{"lint", "--format", "table", "--per-file", "a.md"}},
+		{name: "summary", content: "panic\n", args: []string{"lint", "--format", "summary", "a.md"}},
+		{name: "diff", content: "panic\n", args: []string{"lint", "--format", "diff", "a.md"}},
+		// The dry run fixes "x" to "y", on which TEST005 fails: no finding
+		// remains, but the rule failed on the fixed content.
+		{name: "text dry run", content: "x\n", args: []string{"lint", "--fix", "--dry-run", "a.md"}},
+		{name: "table dry run", content: "x\n", args: []string{"lint", "--fix", "--dry-run", "--format", "table", "a.md"}},
+		{name: "table per file dry run", content: "x\n",
+			args: []string{"lint", "--fix", "--dry-run", "--format", "table", "--per-file", "a.md"}},
+		{name: "summary dry run", content: "x\n", args: []string{"lint", "--fix", "--dry-run", "--format", "summary", "a.md"}},
+		{name: "diff dry run", content: "x\n", args: []string{"lint", "--fix", "--dry-run", "--format", "diff", "a.md"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, map[string]string{"a.md": tt.content})
+
+			got := executeWithFailingRules(t, tt.args...)
+
+			assert.Equal(t, cli.ExitInternalError, got.code, "stderr: %s", got.stderr)
+			assert.Contains(t, got.stdout, "1 rule failure")
+			for _, claim := range successClaims {
+				assert.NotContains(t, got.stdout, claim)
+			}
+		})
+	}
+}
+
+func TestLint_EveryFormatReportsAnUnreadableFileWithoutFindings(t *testing.T) {
+	skipWithoutFilePermissions(t)
+
+	for _, format := range []string{"text", "table", "summary", "diff"} {
+		t.Run(format, func(t *testing.T) {
+			dir := inProject(t, map[string]string{"locked.md": "# Locked\n"})
+			require.NoError(t, os.Chmod(filepath.Join(dir, "locked.md"), 0))
+
+			got := executeWithFailingRules(t, "lint", "--format", format, "locked.md")
+
+			assert.Equal(t, cli.ExitIOError, got.code, "stderr: %s", got.stderr)
+			assert.Contains(t, got.stdout, "could not be linted")
+			for _, claim := range successClaims {
+				assert.NotContains(t, got.stdout, claim)
+			}
+		})
+	}
 }

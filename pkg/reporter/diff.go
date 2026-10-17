@@ -58,9 +58,11 @@ func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (int, er
 		r.writeDiff(file.Result.Diff)
 	}
 
-	// Write summary if there were any diffs.
-	if filesWithDiffs > 0 && r.opts.ShowSummary {
-		r.writeSummary(filesWithDiffs, totalAdditions, totalDeletions)
+	// Write a summary of the diffs and of any failures: without the
+	// failures, a run that changed nothing would look complete.
+	failures := r.styles.FormatFailures(result.Stats.FilesErrored, result.Stats.RuleErrors)
+	if r.opts.ShowSummary && (filesWithDiffs > 0 || len(failures) > 0) {
+		r.writeSummary(filesWithDiffs, totalAdditions, totalDeletions, failures)
 	}
 
 	return filesWithDiffs, nil
@@ -133,15 +135,17 @@ func (r *DiffReporter) writeDiffLine(line string) {
 }
 
 // writeSummary writes a summary line at the end.
-func (r *DiffReporter) writeSummary(files, additions, deletions int) {
+func (r *DiffReporter) writeSummary(files, additions, deletions int, failures []string) {
 	var parts []string
 
 	// Files changed.
-	fileWord := "files"
-	if files == 1 {
-		fileWord = "file"
+	if files > 0 {
+		fileWord := "files"
+		if files == 1 {
+			fileWord = "file"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s changed", files, fileWord))
 	}
-	parts = append(parts, fmt.Sprintf("%d %s changed", files, fileWord))
 
 	// Additions.
 	if additions > 0 {
@@ -161,5 +165,6 @@ func (r *DiffReporter) writeSummary(files, additions, deletions int) {
 		parts = append(parts, r.styles.DiffRemove.Render(fmt.Sprintf("%d %s(-)", deletions, deletionWord)))
 	}
 
+	parts = append(parts, failures...)
 	fmt.Fprintln(r.out, strings.Join(parts, ", "))
 }
