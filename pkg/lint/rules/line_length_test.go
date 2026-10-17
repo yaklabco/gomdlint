@@ -247,11 +247,17 @@ func TestMaxLineLengthRule_DiagnosticPosition(t *testing.T) {
 	diags := applyMaxLineLength(t, goldmark.FlavorCommonMark, spacedLine(130)+"\n", nil)
 	require.Len(t, diags, 1)
 
-	// Position should start at column 81 (the first character past the limit).
+	// Position should start at column 81 (the first character past the limit)
+	// and, like every span, end exclusively, one past the last character.
 	assert.Equal(t, 1, diags[0].StartLine)
 	assert.Equal(t, 81, diags[0].StartColumn)
 	assert.Equal(t, 1, diags[0].EndLine)
-	assert.Equal(t, 130, diags[0].EndColumn)
+	assert.Equal(t, 131, diags[0].EndColumn)
+
+	// Multibyte text: the end column is the byte column after the line.
+	diags = applyMaxLineLength(t, goldmark.FlavorCommonMark, strings.Repeat("é ", 50)+"\n", nil)
+	require.Len(t, diags, 1)
+	assert.Equal(t, len(strings.Repeat("é ", 50))+1, diags[0].EndColumn)
 }
 
 func TestMaxLineLengthRule_Autofix(t *testing.T) {

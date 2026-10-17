@@ -129,7 +129,7 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 			StartLine:   lineNum,
 			StartColumn: markdownlintByteLimit(line, maxLength) + 1,
 			EndLine:     lineNum,
-			EndColumn:   len(line),
+			EndColumn:   len(line) + 1,
 		}
 
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
