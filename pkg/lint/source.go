@@ -50,12 +50,90 @@ const tabWidth = 4
 // maxMarkerIndent is the indentation a blockquote marker may have.
 const maxMarkerIndent = 3
 
+// utf8BOM is the UTF-8 byte order mark, which is not part of a line's text.
+const utf8BOM = "\xEF\xBB\xBF"
+
 // prefixPart is the part of a line that one container claims.
 type prefixPart struct {
-	start, end int
-	// marker is true when the part holds a list item marker, which a
-	// continuation line replaces with spaces.
-	marker bool
+	kind mdast.NodeKind
+
+	// indent is the indentation, in columns, before a blockquote's '>'.
+	indent int
+
+	// space records that the optional space after a blockquote's '>' was
+	// consumed. For a tab it is one column of the tab.
+	space bool
+
+	// width is the number of columns a list item claims.
+	width int
+}
+
+// lineCursor walks the columns at the start of a line. A tab spans the
+// columns up to the next tab stop and can be consumed one column at a time,
+// as CommonMark does for the space after '>'.
+type lineCursor struct {
+	content []byte
+
+	// pos is the offset of the next byte not yet fully consumed.
+	pos int
+
+	// col is the column the cursor is at.
+	col int
+
+	// tabRest is the number of columns of the tab at pos that are not yet
+	// consumed, after some of them were.
+	tabRest int
+}
+
+// peek returns the byte at the cursor, 0 at the end of the line. The rest of
+// a partly consumed tab reads as a space.
+func (c *lineCursor) peek() byte {
+	if c.tabRest > 0 {
+		return ' '
+	}
+	if c.pos >= len(c.content) {
+		return 0
+	}
+	return c.content[c.pos]
+}
+
+// atEnd reports whether every column of the line is consumed.
+func (c *lineCursor) atEnd() bool {
+	return c.tabRest == 0 && c.pos >= len(c.content)
+}
+
+// advance consumes one column.
+func (c *lineCursor) advance() {
+	switch {
+	case c.tabRest > 0:
+		c.tabRest--
+		c.col++
+		if c.tabRest == 0 {
+			c.pos++
+		}
+	case c.pos >= len(c.content):
+	case c.content[c.pos] == '\t':
+		width := tabWidth - c.col%tabWidth
+		c.col++
+		if width == 1 {
+			c.pos++
+		} else {
+			c.tabRest = width - 1
+		}
+	default:
+		c.pos++
+		c.col++
+	}
+}
+
+// restIsBlank reports whether the line holds only whitespace from the cursor.
+func (c *lineCursor) restIsBlank() bool {
+	return len(bytes.TrimSpace(c.content[c.pos:])) == 0
+}
+
+// isBlank reports whether ch is a space or a tab.
+func isBlank(ch byte) bool {
+	return ch == ' ' || ch == '\t'
 }
 
 // containersOf returns the blockquotes and list items enclosing node,
@@ -81,72 +159,64 @@ func listItemIndent(item *mdast.Node) int {
 	return 0
 }
 
-// prefixParts splits the start of a line into the parts claimed by the
-// containers of node. It stops at the first container the line does not
-// continue, such as a lazy continuation line without a '>' marker.
-func prefixParts(content []byte, node *mdast.Node, lineNum int) []prefixPart {
+// scanPrefix splits the start of a line into the parts claimed by the
+// containers of node and returns them with the offset where the prefix
+// ends. It stops at the first container the line does not continue, such as
+// a lazy continuation line without a '>' marker. Columns follow CommonMark:
+// tabs advance to the next multiple of four, and a tab that is only partly
+// claimed stays with the rest of the line. A byte order mark at the start of
+// the first line is skipped and counts as part of the prefix.
+func scanPrefix(content []byte, node *mdast.Node, lineNum int) ([]prefixPart, int) {
+	cursor := &lineCursor{content: content}
+	if lineNum == 1 && bytes.HasPrefix(content, []byte(utf8BOM)) {
+		cursor.pos = len(utf8BOM)
+	}
 	var parts []prefixPart
-	pos, col := 0, 0
 	for _, container := range containersOf(node) {
 		switch container.Kind {
 		case mdast.NodeBlockquote:
-			end, endCol := skipSpaces(content, pos, col, col+maxMarkerIndent)
-			if end >= len(content) || content[end] != '>' {
-				return parts
+			saved := *cursor
+			indent := 0
+			for indent < maxMarkerIndent && isBlank(cursor.peek()) {
+				cursor.advance()
+				indent++
 			}
-			end++
-			endCol++
-			if end < len(content) && (content[end] == ' ' || content[end] == '\t') {
-				end, endCol = end+1, advanceColumn(content[end], endCol)
+			if cursor.peek() != '>' {
+				*cursor = saved
+				return parts, cursor.pos
 			}
-			parts = append(parts, prefixPart{start: pos, end: end})
-			pos, col = end, endCol
+			cursor.advance()
+			part := prefixPart{kind: mdast.NodeBlockquote, indent: indent}
+			if isBlank(cursor.peek()) {
+				cursor.advance()
+				part.space = true
+			}
+			parts = append(parts, part)
 		case mdast.NodeListItem:
-			target := col + listItemIndent(container)
+			width := listItemIndent(container)
 			if lineNum == container.SourcePosition().StartLine {
 				// The item's first line: the marker and the spaces after it.
-				end, endCol := pos, col
-				for end < len(content) && endCol < target {
-					end, endCol = end+1, advanceColumn(content[end], endCol)
+				for consumed := 0; consumed < width && !cursor.atEnd(); consumed++ {
+					cursor.advance()
 				}
-				parts = append(parts, prefixPart{start: pos, end: end, marker: true})
-				pos, col = end, endCol
+				parts = append(parts, prefixPart{kind: mdast.NodeListItem, width: width})
 				continue
 			}
-			end, endCol := skipSpaces(content, pos, col, target)
-			if endCol < target && len(bytes.TrimSpace(content[end:])) > 0 {
-				// Not indented enough to continue the item.
-				return parts
+			saved := *cursor
+			consumed := 0
+			for consumed < width && isBlank(cursor.peek()) {
+				cursor.advance()
+				consumed++
 			}
-			parts = append(parts, prefixPart{start: pos, end: end})
-			pos, col = end, endCol
+			if consumed < width && !cursor.restIsBlank() {
+				// Not indented enough to continue the item.
+				*cursor = saved
+				return parts, cursor.pos
+			}
+			parts = append(parts, prefixPart{kind: mdast.NodeListItem, width: width})
 		}
 	}
-	return parts
-}
-
-// skipSpaces consumes spaces and tabs from pos until column limit.
-func skipSpaces(content []byte, pos, col, limit int) (int, int) {
-	for pos < len(content) && col < limit && (content[pos] == ' ' || content[pos] == '\t') {
-		pos, col = pos+1, advanceColumn(content[pos], col)
-	}
-	return pos, col
-}
-
-// advanceColumn returns the column after ch, expanding tabs.
-func advanceColumn(ch byte, col int) int {
-	if ch == '\t' {
-		return col + tabWidth - col%tabWidth
-	}
-	return col + 1
-}
-
-// prefixLength returns the length of the container prefix in parts.
-func prefixLength(parts []prefixPart) int {
-	if len(parts) == 0 {
-		return 0
-	}
-	return parts[len(parts)-1].end
+	return parts, cursor.pos
 }
 
 // ContainerPrefix returns the bytes at the start of a 1-based line that
@@ -155,13 +225,17 @@ func prefixLength(parts []prefixPart) int {
 // item, its marker and the spaces after it on the item's first line, or its
 // content indentation on later lines. It stops at the first container the
 // line does not continue, so a lazy continuation line or a line outside the
-// containers gets a shorter prefix.
+// containers gets a shorter prefix. Columns are measured with tab stops of
+// four; a tab that the containers claim only in part is left out. A byte
+// order mark at the start of the first line is included, so the prefix
+// length is an offset into the line.
 func ContainerPrefix(file *mdast.FileSnapshot, node *mdast.Node, lineNum int) []byte {
 	content := RawLineContent(file, lineNum)
 	if content == nil || node == nil {
 		return nil
 	}
-	return content[:prefixLength(prefixParts(content, node, lineNum))]
+	_, end := scanPrefix(content, node, lineNum)
+	return content[:end]
 }
 
 // IsBlankLineInContainer reports whether a 1-based line is blank once the
@@ -173,8 +247,8 @@ func IsBlankLineInContainer(file *mdast.FileSnapshot, node *mdast.Node, lineNum 
 	if node == nil {
 		return len(bytes.TrimSpace(content)) == 0
 	}
-	rest := content[prefixLength(prefixParts(content, node, lineNum)):]
-	return len(bytes.TrimSpace(rest)) == 0
+	_, end := scanPrefix(content, node, lineNum)
+	return len(bytes.TrimSpace(content[end:])) == 0
 }
 
 // CountBlankLinesBeforeInContainer counts the consecutive lines before a
@@ -215,29 +289,28 @@ func lastContentLine(file *mdast.FileSnapshot) int {
 }
 
 // ContinuationPrefix returns the prefix a new line needs to continue inside
-// the containers of node: the blockquote markers and list indentation of
-// the node's first line, with list item markers replaced by spaces.
+// the containers of node, as they stand on the node's first line: each
+// blockquote's indentation, '>' and optional space, and each list item's
+// content indentation, all written with spaces. Tabs and a byte order mark
+// are not reproduced.
 func ContinuationPrefix(file *mdast.FileSnapshot, node *mdast.Node) string {
 	if file == nil || node == nil {
 		return ""
 	}
 	lineNum := node.SourcePosition().StartLine
-	content := RawLineContent(file, lineNum)
+	parts, _ := scanPrefix(RawLineContent(file, lineNum), node, lineNum)
 	var prefix strings.Builder
-	for _, part := range prefixParts(content, node, lineNum) {
-		if !part.marker {
-			prefix.Write(content[part.start:part.end])
-			continue
+	for _, part := range parts {
+		switch part.kind {
+		case mdast.NodeBlockquote:
+			prefix.WriteString(strings.Repeat(" ", part.indent))
+			prefix.WriteByte('>')
+			if part.space {
+				prefix.WriteByte(' ')
+			}
+		default:
+			prefix.WriteString(strings.Repeat(" ", part.width))
 		}
-		col := 0
-		for _, ch := range content[:part.start] {
-			col = advanceColumn(ch, col)
-		}
-		endCol := col
-		for _, ch := range content[part.start:part.end] {
-			endCol = advanceColumn(ch, endCol)
-		}
-		prefix.WriteString(strings.Repeat(" ", endCol-col))
 	}
 	return prefix.String()
 }

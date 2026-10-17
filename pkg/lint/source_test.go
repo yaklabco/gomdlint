@@ -164,6 +164,53 @@ func TestBlankLineTextKeepsBlockquoteIntact(t *testing.T) {
 	require.Len(t, mdast.FindByKind(refile.Root, mdast.NodeBlockquote), 1, "the blockquote must not split")
 }
 
+// insertBlankLineAfter inserts BlankLineText(node) after node's last line and
+// returns the result.
+func insertBlankLineAfter(file *mdast.FileSnapshot, node *mdast.Node) string {
+	line := file.Lines[node.SourcePosition().EndLine-1]
+	content := string(file.Content)
+	return content[:line.EndOffset] + lint.BlankLineText(file, node) + content[line.EndOffset:]
+}
+
+func TestContainerPrefixWithTabs(t *testing.T) {
+	t.Parallel()
+
+	// After ">", a tab counts one column as the optional space; its other
+	// columns belong to the list item inside, so the inner '>' is a marker.
+	input := ">\t- > # Heading\n>\t  > Text\n"
+	file := parseSource(t, input)
+	heading := lint.Headings(file.Root)[0]
+	require.Len(t, mdast.FindByKind(file.Root, mdast.NodeBlockquote), 2)
+
+	assert.Equal(t, ">     > ", lint.ContinuationPrefix(file, heading))
+	assert.Equal(t, ">     >\n", lint.BlankLineText(file, heading))
+	assert.Equal(t, ">\t- > ", string(lint.ContainerPrefix(file, heading, 1)))
+	assert.False(t, lint.IsBlankLineInContainer(file, heading, 2))
+
+	fixed := insertBlankLineAfter(file, heading)
+	refile := parseSource(t, fixed)
+	assert.Len(t, mdast.FindByKind(refile.Root, mdast.NodeBlockquote), 2, "the inserted line must stay inside the inner blockquote: %q", fixed)
+	assert.True(t, lint.IsBlankLineInContainer(refile, lint.Headings(refile.Root)[0], 2))
+}
+
+func TestContainerPrefixAfterByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	const bom = "\xEF\xBB\xBF"
+	input := bom + "> # H\n> Text\n"
+	file := parseSource(t, input)
+	heading := lint.Headings(file.Root)[0]
+
+	assert.Equal(t, bom+"> ", string(lint.ContainerPrefix(file, heading, 1)), "the prefix keeps byte offsets")
+	assert.Equal(t, "> ", lint.ContinuationPrefix(file, heading), "inserted text has no BOM")
+	assert.Equal(t, ">\n", lint.BlankLineText(file, heading))
+
+	fixed := insertBlankLineAfter(file, heading)
+	assert.Equal(t, bom+"> # H\n>\n> Text\n", fixed)
+	refile := parseSource(t, fixed)
+	assert.Len(t, mdast.FindByKind(refile.Root, mdast.NodeBlockquote), 1, "the blockquote must not split")
+}
+
 func TestTableHelpersFindTableNodes(t *testing.T) {
 	t.Parallel()
 
