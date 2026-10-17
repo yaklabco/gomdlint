@@ -271,6 +271,21 @@ func TestLintWarnsAboutUnknownConfigKeys(t *testing.T) {
 	assert.NotContains(t, got.stdout, "flavour")
 }
 
+// TestLintWarnsAboutRuleOptionsOutsideOptions covers a rule option written
+// directly in the rule entry, where gomdlint does not read it.
+func TestLintWarnsAboutRuleOptionsOutsideOptions(t *testing.T) {
+	inProject(t, map[string]string{
+		"doc.md":        fixedDoc,
+		".gomdlint.yml": "rules:\n  MD035:\n    style: \"***\"\n",
+	})
+
+	got := execute(t, "lint", "doc.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code)
+	assert.Contains(t, got.stderr,
+		`unknown key "rules.MD035.style"; rule options belong under "rules.MD035.options"`)
+}
+
 func TestLintAppliesSeverityDefault(t *testing.T) {
 	inProject(t, map[string]string{
 		"doc.md":        trailingDoc,
