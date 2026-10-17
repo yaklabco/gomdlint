@@ -2,7 +2,10 @@
 
 package fsutil
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 // openExchangeDir returns no directory: only Linux can exchange two names
 // atomically.
@@ -14,4 +17,10 @@ func openExchangeDir(_ *os.Root) (*os.File, error) {
 // available on this platform.
 func exchangeFiles(_ *os.File, _, _ string) error {
 	return errExchangeUnsupported
+}
+
+// renameNoReplace is only used after an exchange, which this platform
+// cannot do.
+func renameNoReplace(_ *os.File, from, to string) error {
+	return fmt.Errorf("rename %s to %s: %w", from, to, errExchangeUnsupported)
 }

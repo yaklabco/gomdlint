@@ -38,3 +38,14 @@ func exchangeFiles(dir *os.File, first, second string) error {
 		return fmt.Errorf("exchange %s and %s: %w", first, second, err)
 	}
 }
+
+// renameNoReplace moves the entry from in dir to the name given by to,
+// failing with an error that matches fs.ErrExist rather than replacing an
+// entry that already has that name.
+func renameNoReplace(dir *os.File, from, to string) error {
+	fd := int(dir.Fd()) //nolint:gosec // A file descriptor is a small non-negative integer.
+	if err := unix.Renameat2(fd, from, fd, to, unix.RENAME_NOREPLACE); err != nil {
+		return fmt.Errorf("rename %s to %s: %w", from, to, err)
+	}
+	return nil
+}

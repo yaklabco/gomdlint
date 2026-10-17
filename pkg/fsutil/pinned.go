@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 )
@@ -29,10 +30,10 @@ var errExchangeUnsupported = errors.New("atomic exchange not supported")
 // pinned directory: a directory on the path that is moved, or replaced by a
 // link, afterwards cannot redirect it, and links that would lead out of the
 // directory are refused. Before a backup or a write, the pinned file checks
-// that the directory is still where it was pinned, that the name in it
-// still refers to the file that was read, and that the file still holds the
-// content that was read (re-read through a handle on that file). Otherwise
-// it fails with ErrFileChanged.
+// that the directory is still where it was pinned, that the name in it is
+// itself the file that was read (not a symbolic link to it, nor any other
+// entry), and that the file still holds the content that was read (re-read
+// through a handle on that file). Otherwise it fails with ErrFileChanged.
 //
 // How a write commits, and what can still race with other programs:
 //   - A file with more than one hard link is rewritten in place, through a
@@ -42,12 +43,22 @@ var errExchangeUnsupported = errors.New("atomic exchange not supported")
 //     short of mandatory locking.
 //   - Otherwise the new content goes to a hidden temp file in the same
 //     directory. On Linux the temp file and the name are then exchanged
-//     atomically (renameat2 with RENAME_EXCHANGE), and the file swapped out
-//     must be the pinned file, with a single link and the content that was
-//     read; if it is not, the exchange is undone and the write fails with
-//     ErrFileChanged. Only a program that keeps the old file open and
-//     writes to it after the exchange loses that write, as with any save
-//     that replaces a file.
+//     atomically (renameat2 with RENAME_EXCHANGE), and the entry swapped
+//     out, inspected without following a symbolic link, must be the pinned
+//     file, with a single link and the content that was read. If it is
+//     not, the exchange is undone and the write fails with ErrFileChanged.
+//     The undo never assumes what is at the name: it does not exchange back
+//     once the name is seen to hold anything but the new file, and only the
+//     new file, identified by its inode and content, is ever deleted. Any
+//     other version it meets, such as a save made during the undo, is moved
+//     next to the file as "<name>.gomdlint-conflict-<n>" and the error
+//     names it. These checks open nothing at the swapped names: they use
+//     Lstat and read through the handles held on the two files. A program
+//     that keeps the old file open and writes to it after the exchange
+//     still loses that write, as with any save that replaces a file. A
+//     program that replaces the hidden temp name itself, between its check
+//     and its removal or exchange back (a few system calls), is not noticed
+//     either.
 //   - Where names cannot be exchanged (macOS, BSD, Windows, other
 //     platforms, and Linux file systems without RENAME_EXCHANGE), the temp
 //     file is renamed over the name right after the checks. A file replaced
@@ -73,6 +84,14 @@ type PinnedFile struct {
 	// a backup or a write is committed. Tests use it to race the commit.
 	beforeCommit func()
 
+	// beforeUndo and beforeUndoExchange, when set, run when a committed
+	// exchange has to be undone. beforeUndo runs after the swapped-out
+	// entry failed its check, before the name is checked to still hold the
+	// new file; beforeUndoExchange runs after that check, right before the
+	// exchange back. Tests use them to race the undo.
+	beforeUndo         func()
+	beforeUndoExchange func()
+
 	// noExchange forces the rename commit. Tests use it to cover the
 	// platforms without an atomic exchange.
 	noExchange bool
@@ -80,6 +99,8 @@ type PinnedFile struct {
 
 // Pin opens the regular file name, relative to the directory dir, and reads
 // it. Symbolic links in name are followed only while they stay inside dir.
+// Callers should pass a resolved name: a backup or a write is refused while
+// the file's own name, or its directory's, is a symbolic link.
 func Pin(dir, name string) (*PinnedFile, error) {
 	pinned := &PinnedFile{
 		dir:       dir,
@@ -227,7 +248,22 @@ func (p *PinnedFile) verify(flag int, content bool) (*os.File, []byte, error) {
 		return nil, nil, fmt.Errorf("%w: the directory of %s was moved or replaced", ErrFileChanged, p.name)
 	}
 
-	file, err := p.parent.OpenFile(p.base, flag, 0)
+	// The name itself must be the pinned file: a symbolic link to it, or
+	// any other entry, is a change. Checking before opening also keeps the
+	// open from waiting on a FIFO, as does openNonBlock should one appear
+	// in between.
+	entry, err := p.parent.Lstat(p.base)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %s: %w", ErrFileChanged, p.name, err)
+	}
+	switch {
+	case entry.Mode()&os.ModeSymlink != 0:
+		return nil, nil, fmt.Errorf("%w: %s is now a symbolic link", ErrFileChanged, p.name)
+	case !os.SameFile(entry, p.info):
+		return nil, nil, fmt.Errorf("%w: %s now refers to another file", ErrFileChanged, p.name)
+	}
+
+	file, err := p.parent.OpenFile(p.base, flag|openNonBlock, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: open %s: %w", ErrFileChanged, p.name, err)
 	}
@@ -402,10 +438,12 @@ func (p *PinnedFile) replace(content []byte) error {
 	if err != nil {
 		return err
 	}
+	// The temp file stays open until the write is settled, so its identity
+	// cannot be taken by another file meanwhile.
 	tmpLeft := true
 	defer func() {
+		_ = tmp.Close()
 		if tmpLeft {
-			_ = tmp.Close()
 			_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: cleaning up a temp file after a failed write.
 		}
 	}()
@@ -435,9 +473,11 @@ func (p *PinnedFile) replace(content []byte) error {
 	if err := tmp.Chmod(p.info.Mode()); err != nil {
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
+	stagedInfo, err := tmp.Stat()
+	if err != nil {
+		return fmt.Errorf("stat temp file: %w", err)
 	}
+	staged := stagedFile{file: tmp, info: stagedInfo, hash: sha256.Sum256(content)}
 
 	// The name must still refer to the pinned file, unchanged.
 	file, _, err := p.verify(os.O_RDONLY, true)
@@ -454,7 +494,7 @@ func (p *PinnedFile) replace(content []byte) error {
 		err := exchangeFiles(p.exchange, tmpName, p.base)
 		if err == nil {
 			tmpLeft = false
-			return p.settleExchange(tmpName)
+			return p.settleExchange(tmpName, staged)
 		}
 		if !errors.Is(err, errExchangeUnsupported) {
 			return err
@@ -462,7 +502,11 @@ func (p *PinnedFile) replace(content []byte) error {
 	}
 
 	// No atomic exchange here: rename over the name. A change between the
-	// check above and this rename is not detected.
+	// check above and this rename is not detected. Windows refuses to
+	// rename a file that is open, so both handles are closed first.
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
 	p.release()
 	if err := p.parent.Rename(tmpName, p.base); err != nil {
 		return fmt.Errorf("rename temp file: %w", err)
@@ -472,51 +516,158 @@ func (p *PinnedFile) replace(content []byte) error {
 	return nil
 }
 
+// stagedFile is the temp file that holds the new content, kept open.
+type stagedFile struct {
+	file *os.File
+	info os.FileInfo
+	hash [sha256.Size]byte
+}
+
 // settleExchange runs after the temp file and the name were exchanged: the
-// name now holds the new content and tmpName the file that had the name. If
-// that file is the pinned file, with a single link and the content that was
-// read, it is removed and the write is done. Otherwise the exchange is
+// name now holds the new content and tmpName the entry that had the name.
+// If that entry is the pinned file, with a single link and the content that
+// was read, it is removed and the write is done. Otherwise the exchange is
 // undone and the write fails with ErrFileChanged.
-func (p *PinnedFile) settleExchange(tmpName string) error {
+//
+// Other programs may save to the name meanwhile, so nothing is assumed. The
+// exchange is not undone once the name is seen to hold anything but the new
+// file, and only the new file, identified by its inode and content, is ever
+// deleted. Any other version found on the way is kept next to the file as
+// "<name>.gomdlint-conflict-<n>", and the error names it.
+func (p *PinnedFile) settleExchange(tmpName string, staged stagedFile) error {
 	reason := p.swappedOutChange(tmpName)
 	if reason == "" {
 		_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: the write is done; only the replaced file is left over.
 		p.syncDir()
 		return nil
 	}
+	changed := fmt.Sprintf("%s %s during the write", p.name, reason)
 
+	if p.beforeUndo != nil {
+		p.beforeUndo()
+	}
+	// Undo only while the name still holds the new file. When that cannot
+	// be told, undo anyway: the check after the exchange back keeps
+	// whatever the undo displaces.
+	if held, err := p.holdsStaged(p.base, staged); err == nil && !held {
+		return p.keepConflict(tmpName, changed+", then changed again, so it is left as it is",
+			"the version the write displaced")
+	}
+
+	if p.beforeUndoExchange != nil {
+		p.beforeUndoExchange()
+	}
 	if err := exchangeFiles(p.exchange, tmpName, p.base); err != nil {
-		return fmt.Errorf("%s %s during the write, and putting it back failed; its content is in %s: %w",
-			p.name, reason, filepath.Join(p.dir, p.parentRel, tmpName), err)
+		return fmt.Errorf("%s, and putting that version back failed; it is in %s: %w", changed, p.pathOf(tmpName), err)
+	}
+	// The exchange back moved whatever the name held to tmpName. Only the
+	// new file, unchanged, is deleted.
+	held, err := p.holdsStaged(tmpName, staged)
+	switch {
+	case err != nil:
+		return p.keepConflict(tmpName, changed+" and was put back",
+			"what the undo displaced, which could not be checked,")
+	case !held:
+		return p.keepConflict(tmpName, changed+" and was put back, but changed again meanwhile",
+			"that newer version")
 	}
 	_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: removing the unused new content.
-	return fmt.Errorf("%w: %s %s", ErrFileChanged, p.name, reason)
+	return fmt.Errorf("%w: %s", ErrFileChanged, changed)
 }
 
-// swappedOutChange describes how the file now at name differs from the
-// pinned file, or returns an empty string when it is the pinned file, with a
-// single link and the content that was read.
-func (p *PinnedFile) swappedOutChange(name string) string {
-	file, err := p.parent.Open(name)
+// keepConflict moves the entry at tmpName to a conflict name next to the
+// file, never replacing anything, and returns the refusal, which says where
+// it went. situation says what happened to the file and subject which
+// version is moved.
+func (p *PinnedFile) keepConflict(tmpName, situation, subject string) error {
+	kept, err := p.keepAside(tmpName)
 	if err != nil {
-		return "could not be checked"
+		return fmt.Errorf("%s; %s could not be moved aside and is still in %s: %w",
+			situation, subject, p.pathOf(tmpName), err)
 	}
-	defer file.Close()
+	return fmt.Errorf("%w: %s; %s is kept at %s", ErrFileChanged, situation, subject, kept)
+}
 
-	info, err := file.Stat()
+// maxConflictCopies bounds the conflict names tried for one file.
+const maxConflictCopies = 1000
+
+// keepAside moves the entry at name to "<file>.gomdlint-conflict-<n>", the
+// first such name that is free, without replacing anything, and returns its
+// path.
+func (p *PinnedFile) keepAside(name string) (string, error) {
+	for n := 1; n <= maxConflictCopies; n++ {
+		conflict := fmt.Sprintf("%s.gomdlint-conflict-%d", p.base, n)
+		err := renameNoReplace(p.exchange, name, conflict)
+		if err == nil {
+			p.syncDir()
+			return p.pathOf(conflict), nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free conflict name for %s", p.name)
+}
+
+// pathOf returns the path of an entry in the file's directory.
+func (p *PinnedFile) pathOf(name string) string {
+	return filepath.Join(p.dir, p.parentRel, name)
+}
+
+// holdsStaged reports whether the entry at name is the temp file with the
+// new content, unchanged. It inspects the entry with Lstat, without
+// following a symbolic link, and reads the content through the temp file's
+// own handle, so it opens nothing at name. An error means it cannot tell.
+func (p *PinnedFile) holdsStaged(name string, staged stagedFile) (bool, error) {
+	entry, err := p.parent.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat %s: %w", name, err)
+	}
+	if !os.SameFile(entry, staged.info) {
+		return false, nil
+	}
+	data, err := readAllAt(staged.file)
+	if err != nil {
+		return false, err
+	}
+	return sha256.Sum256(data) == staged.hash, nil
+}
+
+// swappedOutChange describes how the entry now at name differs from the
+// pinned file, or returns an empty string when it is the pinned file, with
+// a single link and the content that was read. It inspects the entry with
+// Lstat, so a symbolic link, or any other entry that is not the pinned file
+// itself, is a change. The link count and the content come from the handle
+// held since Pin, so it opens nothing at name.
+func (p *PinnedFile) swappedOutChange(name string) string {
+	entry, err := p.parent.Lstat(name)
 	switch {
 	case err != nil:
 		return "could not be checked"
-	case !os.SameFile(info, p.info):
+	case !entry.Mode().IsRegular():
+		return "was replaced by a symbolic link or special file"
+	case !os.SameFile(entry, p.info):
 		return "was replaced"
-	case hasMultipleLinks(file):
+	case hasMultipleLinks(p.held):
 		return "got another hard link"
 	}
-	data, err := io.ReadAll(file)
+	data, err := readAllAt(p.held)
 	if err != nil || sha256.Sum256(data) != p.hash {
 		return "was modified"
 	}
 	return ""
+}
+
+// readAllAt reads all of file from its start without moving its offset.
+func readAllAt(file *os.File) ([]byte, error) {
+	data, err := io.ReadAll(io.NewSectionReader(file, 0, math.MaxInt64))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", file.Name(), err)
+	}
+	return data, nil
 }
 
 // createTemp creates a new hidden file, named after base with a random

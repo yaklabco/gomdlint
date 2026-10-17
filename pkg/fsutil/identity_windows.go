@@ -10,6 +10,9 @@ import (
 // openNoFollow is not available on Windows.
 const openNoFollow = 0
 
+// openNonBlock is not needed on Windows, where opening does not wait.
+const openNonBlock = 0
+
 // syncDirectories is false: Windows cannot flush a directory handle.
 const syncDirectories = false
 

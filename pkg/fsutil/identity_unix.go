@@ -13,6 +13,10 @@ import (
 // after the path was checked.
 const openNoFollow = syscall.O_NOFOLLOW
 
+// openNonBlock makes opening a FIFO return at once instead of waiting for
+// a writer. It does not change reading or writing a regular file.
+const openNonBlock = syscall.O_NONBLOCK
+
 // syncDirectories is true where a directory can be synced to make a rename
 // in it durable.
 const syncDirectories = true

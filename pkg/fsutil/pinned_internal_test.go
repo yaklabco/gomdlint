@@ -111,6 +111,128 @@ func TestPinnedFile_RefusesContentSavedJustBeforeTheCommit(t *testing.T) {
 	assertNoStrayFiles(t, dir, "doc.md")
 }
 
+// saveByRename replaces path with new content the way most editors save:
+// write a sibling file, then rename it over path.
+func saveByRename(t *testing.T, path, content string) {
+	t.Helper()
+	sibling := path + ".editor-save"
+	writeFileForTest(t, sibling, content)
+	require.NoError(t, os.Rename(sibling, path))
+}
+
+func TestPinnedFile_UndoNeverDiscardsASaveThatReplacedTheNewFile(t *testing.T) {
+	t.Parallel()
+	requireExchange(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	writeFileForTest(t, path, "x\n")
+	pinned := pinForTest(t, dir, "doc.md")
+	// One save makes the commit check fail; a second one replaces the new
+	// file at the name before the exchange is undone.
+	pinned.beforeCommit = func() { require.NoError(t, os.WriteFile(path, []byte("earlier\n"), 0o644)) }
+	pinned.beforeUndo = func() { saveByRename(t, path, "newest\n") }
+
+	err := pinned.Write([]byte("y\n"))
+	require.ErrorIs(t, err, ErrFileChanged)
+	assert.Equal(t, "newest\n", readFileForTest(t, path), "the newest save stays at the name")
+	conflict := path + ".gomdlint-conflict-1"
+	assert.Equal(t, "earlier\n", readFileForTest(t, conflict), "the save it replaced is kept, not deleted")
+	assert.Contains(t, err.Error(), conflict, "the refusal names where the other version is")
+	assertNoStrayFiles(t, dir, "doc.md", "doc.md.gomdlint-conflict-1")
+}
+
+func TestPinnedFile_UndoNeverDiscardsASaveIntoTheNewFile(t *testing.T) {
+	t.Parallel()
+	requireExchange(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	writeFileForTest(t, path, "x\n")
+	pinned := pinForTest(t, dir, "doc.md")
+	pinned.beforeCommit = func() { require.NoError(t, os.WriteFile(path, []byte("earlier\n"), 0o644)) }
+	// The second save goes into the new file itself, in place.
+	pinned.beforeUndo = func() { require.NoError(t, os.WriteFile(path, []byte("newest\n"), 0o644)) }
+
+	err := pinned.Write([]byte("y\n"))
+	require.ErrorIs(t, err, ErrFileChanged)
+	assert.Equal(t, "newest\n", readFileForTest(t, path))
+	conflict := path + ".gomdlint-conflict-1"
+	assert.Equal(t, "earlier\n", readFileForTest(t, conflict))
+	assert.Contains(t, err.Error(), conflict)
+	assertNoStrayFiles(t, dir, "doc.md", "doc.md.gomdlint-conflict-1")
+}
+
+func TestPinnedFile_UndoKeepsAnythingUnexpectedItDisplaces(t *testing.T) {
+	t.Parallel()
+	requireExchange(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	writeFileForTest(t, path, "x\n")
+	pinned := pinForTest(t, dir, "doc.md")
+	pinned.beforeCommit = func() { require.NoError(t, os.WriteFile(path, []byte("earlier\n"), 0o644)) }
+	// A save lands after the live name was checked, right before the undo.
+	pinned.beforeUndoExchange = func() { saveByRename(t, path, "newest\n") }
+
+	err := pinned.Write([]byte("y\n"))
+	require.ErrorIs(t, err, ErrFileChanged)
+	conflict := path + ".gomdlint-conflict-1"
+	assert.Equal(t, "earlier\n", readFileForTest(t, path), "the version found at the name is put back")
+	assert.Equal(t, "newest\n", readFileForTest(t, conflict), "the save the undo displaced is kept, not deleted")
+	assert.Contains(t, err.Error(), conflict, "the refusal names where the other version is")
+	assertNoStrayFiles(t, dir, "doc.md", "doc.md.gomdlint-conflict-1")
+}
+
+func TestPinnedFile_RefusesALinkPutInPlaceOfTheFile(t *testing.T) {
+	t.Parallel()
+	requireExchange(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	saved := filepath.Join(dir, "saved.md")
+	writeFileForTest(t, path, "x\n")
+	pinned := pinForTest(t, dir, "doc.md")
+	// Move the file and leave a link to it under the old name.
+	pinned.beforeCommit = func() {
+		require.NoError(t, os.Rename(path, saved))
+		require.NoError(t, os.Symlink("saved.md", path))
+	}
+
+	require.ErrorIs(t, pinned.Write([]byte("y\n")), ErrFileChanged)
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link is put back")
+	assert.Equal(t, "x\n", readFileForTest(t, saved), "the moved file is not touched")
+	assertNoStrayFiles(t, dir, "doc.md", "saved.md")
+}
+
+func TestPinnedFile_RenameCommitRefusesALinkPutInPlaceOfTheFile(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot move a file that is open")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	saved := filepath.Join(dir, "saved.md")
+	writeFileForTest(t, path, "x\n")
+	pinned := pinForTest(t, dir, "doc.md")
+	pinned.noExchange = true
+	// Move the file and leave a link to it under the old name.
+	require.NoError(t, os.Rename(path, saved))
+	if err := os.Symlink("saved.md", path); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	require.ErrorIs(t, pinned.Write([]byte("y\n")), ErrFileChanged)
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link is not replaced")
+	assert.Equal(t, "x\n", readFileForTest(t, saved), "the moved file is not touched")
+	assertNoStrayFiles(t, dir, "doc.md", "saved.md")
+}
+
 func TestPinnedFile_CommitsByRenameWhereExchangeIsUnavailable(t *testing.T) {
 	t.Parallel()
 

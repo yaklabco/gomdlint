@@ -10,6 +10,9 @@ import (
 // openNoFollow is not used on WebAssembly hosts.
 const openNoFollow = 0
 
+// openNonBlock is not used on WebAssembly hosts.
+const openNonBlock = 0
+
 // syncDirectories is false: WebAssembly hosts do not sync directories.
 const syncDirectories = false
 

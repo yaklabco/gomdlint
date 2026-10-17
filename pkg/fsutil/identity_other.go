@@ -7,6 +7,9 @@ import "os"
 // openNoFollow is not available on these platforms.
 const openNoFollow = 0
 
+// openNonBlock is not available on these platforms.
+const openNonBlock = 0
+
 // syncDirectories is false where directories cannot be synced.
 const syncDirectories = false
 
