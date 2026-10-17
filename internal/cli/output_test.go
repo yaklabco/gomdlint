@@ -76,4 +76,5 @@ func TestLintHelpNamesGomdlint(t *testing.T) {
 
 	assert.NotContains(t, got.stdout, " mdlint ")
 	assert.Contains(t, got.stdout, "gomdlint lint docs/")
+	assert.Contains(t, got.stdout, "instead of the project config")
 }

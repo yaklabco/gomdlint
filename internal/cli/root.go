@@ -50,7 +50,8 @@ and optional backups.`,
 
 	// Global flags.
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config file")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "",
+		"path to a config file to use instead of the project config")
 	rootCmd.PersistentFlags().StringVar(&color, "color", "auto",
 		"colorize output: auto, always, never")
 
