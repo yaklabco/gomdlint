@@ -6,12 +6,14 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/clipperhouse/displaywidth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
@@ -67,7 +69,7 @@ func TestTableFormatter_RuleColumnFollowsRuleFormat(t *testing.T) {
 		t.Run(string(tt.format), func(t *testing.T) {
 			// A terminal of 80 columns shortens messages and paths, not rules.
 			for _, width := range []int{200, 80} {
-				formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, width, tt.format)
+				formatter := pretty.NewTableFormatter(pretty.NewStyles(false), width, tt.format)
 
 				assert.Equal(t, tt.want, tableRuleColumn(t, formatter.FormatTable(result)), "table at width %d", width)
 				assert.Equal(t, tt.want, tableRuleColumn(t, formatter.FormatFileTable(file)), "per-file table at width %d", width)
@@ -75,7 +77,7 @@ func TestTableFormatter_RuleColumnFollowsRuleFormat(t *testing.T) {
 
 			// Only a terminal too narrow for the other columns at their
 			// floors cuts rules, at their end, so their start stays.
-			formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 50, tt.format)
+			formatter := pretty.NewTableFormatter(pretty.NewStyles(false), 50, tt.format)
 			for _, table := range []string{formatter.FormatTable(result), formatter.FormatFileTable(file)} {
 				for idx, rule := range tableRuleColumn(t, table) {
 					cut := strings.TrimSuffix(rule, "...")
@@ -156,7 +158,7 @@ func TestTableFormatter_FitsTerminal(t *testing.T) {
 
 	for _, width := range []int{60, 80, 100, 120} {
 		for _, format := range []config.RuleFormat{config.RuleFormatName, config.RuleFormatID, config.RuleFormatCombined} {
-			formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, width, format)
+			formatter := pretty.NewTableFormatter(pretty.NewStyles(false), width, format)
 
 			assertTableFits(t, formatter.FormatTable(result), width, fmt.Sprintf("table, %s rules, width %d", format, width))
 			for _, file := range result.Files {
@@ -181,12 +183,159 @@ func TestTableFormatter_KeepsWidePathsWhole(t *testing.T) {
 			Severity: config.SeverityWarning, StartLine: 3, StartColumn: 1,
 		}}}},
 	}
-	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 100, config.RuleFormatName)
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), 100, config.RuleFormatName)
 
 	table := formatter.FormatTable(&runner.Result{Files: []runner.FileOutcome{file}})
 
 	assertTableFits(t, table, 100, "table")
 	assert.Contains(t, table, " docs/开发使用指南.md ")
+}
+
+// diagnostic returns a finding of rule MD009 with severity on line, with a
+// fix when fixable.
+func diagnostic(severity config.Severity, line int, fixable bool) lint.Diagnostic {
+	diag := lint.Diagnostic{
+		RuleID: "MD009", RuleName: "no-trailing-spaces", Message: "Trailing whitespace",
+		Severity: severity, StartLine: line, StartColumn: 1,
+	}
+	if fixable {
+		diag.FixEdits = []fix.TextEdit{{StartOffset: 0, EndOffset: 1}}
+	}
+	return diag
+}
+
+// resultOf returns a run with one file per list of diagnostics, named
+// a.md, b.md and so on.
+func resultOf(files ...[]lint.Diagnostic) *runner.Result {
+	result := &runner.Result{}
+	for idx, diagnostics := range files {
+		result.Files = append(result.Files, runner.FileOutcome{
+			Path:   string(rune('a'+idx)) + ".md",
+			Result: &lint.PipelineResult{FileResult: &lint.FileResult{Diagnostics: diagnostics}},
+		})
+	}
+	return result
+}
+
+// tableRows returns the rows of a table without color: the lines between
+// its heavy separators, without the light separators between files.
+func tableRows(table string) []string {
+	var rows []string
+	inRows := false
+	for _, line := range tableLines(ansiSequence.ReplaceAllString(table, "")) {
+		switch {
+		case strings.HasPrefix(line, "="):
+			inRows = !inRows
+		case inRows && !strings.HasPrefix(line, "-"):
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
+// TestTableFormatter_SeverityMarkers covers the marker that leads every
+// row, E, W or I for its severity, in combined and per-file tables, with
+// and without color. Without color, the marker is the only sign of a row's
+// severity. A finding without a severity counts as a warning, as in the
+// summary counts.
+func TestTableFormatter_SeverityMarkers(t *testing.T) {
+	result := resultOf(
+		[]lint.Diagnostic{
+			diagnostic(config.SeverityError, 1, false),
+			diagnostic(config.SeverityWarning, 2, true),
+			diagnostic(config.SeverityInfo, 3, false),
+		},
+		[]lint.Diagnostic{diagnostic("", 4, false)},
+	)
+
+	for _, colored := range []bool{false, true} {
+		formatter := pretty.NewTableFormatter(pretty.NewStyles(colored), 100, config.RuleFormatID)
+
+		var markers []string
+		for _, row := range tableRows(formatter.FormatTable(result)) {
+			markers = append(markers, strings.Fields(row)[0])
+		}
+		assert.Equal(t, []string{"E", "W", "I", "W"}, markers, "combined table, colored %t", colored)
+
+		markers = nil
+		for _, row := range tableRows(formatter.FormatFileTable(result.Files[0])) {
+			markers = append(markers, strings.Fields(row)[0])
+		}
+		assert.Equal(t, []string{"E", "W", "I"}, markers, "per-file table, colored %t", colored)
+	}
+}
+
+// TestTableFormatter_LegendDescribesRows covers the legend of a table: it
+// explains exactly the markers the rows show, in the same words with and
+// without color. With color, each severity marker in the legend has the
+// color of its rows.
+func TestTableFormatter_LegendDescribesRows(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *runner.Result
+		want   string
+	}{
+		{
+			name: "every marker",
+			result: resultOf([]lint.Diagnostic{
+				diagnostic(config.SeverityInfo, 1, false),
+				diagnostic(config.SeverityWarning, 2, true),
+				diagnostic(config.SeverityError, 3, false),
+			}),
+			want: " Legend: E = error | W = warning | I = info | + = fixable",
+		},
+		{
+			name:   "warnings in two files, none fixable",
+			result: resultOf([]lint.Diagnostic{diagnostic(config.SeverityWarning, 1, false)}, []lint.Diagnostic{diagnostic("", 2, false)}),
+			want:   " Legend: W = warning",
+		},
+		{
+			name:   "fixable errors",
+			result: resultOf([]lint.Diagnostic{diagnostic(config.SeverityError, 1, true)}),
+			want:   " Legend: E = error | + = fixable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plain := pretty.NewTableFormatter(pretty.NewStyles(false), 100, config.RuleFormatID)
+			styles := pretty.NewStyles(true)
+			colored := pretty.NewTableFormatter(styles, 100, config.RuleFormatID)
+
+			plainTable := plain.FormatTable(tt.result)
+			coloredTable := colored.FormatTable(tt.result)
+			lines := tableLines(plainTable)
+			assert.Equal(t, tt.want, lines[len(lines)-1], "the legend ends the table")
+			assert.Equal(t, plainTable, ansiSequence.ReplaceAllString(coloredTable, ""), "color changes no text")
+			assert.Equal(t, tt.want+"\n", plain.FormatLegend(tt.result), "the legend of per-file tables")
+			assert.Equal(t, tt.want+"\n", ansiSequence.ReplaceAllString(colored.FormatLegend(tt.result), ""))
+
+			coloredLines := tableLines(coloredTable)
+			coloredLegend := coloredLines[len(coloredLines)-1]
+			for marker, style := range map[string]lipgloss.Style{
+				"E": styles.TableErrorRow, "W": styles.TableWarnRow, "I": styles.TableInfoRow, "+": styles.TableFixable,
+			} {
+				if strings.Contains(tt.want, " "+marker+" = ") {
+					assert.Contains(t, coloredLegend, style.Render(marker), "the %q marker has the color of its rows", marker)
+				}
+			}
+		})
+	}
+}
+
+// TestTableFormatter_SameTextInBothColorModes covers whole combined and
+// per-file tables: color only adds escape sequences.
+func TestTableFormatter_SameTextInBothColorModes(t *testing.T) {
+	result := mixedResult()
+	for _, format := range []config.RuleFormat{config.RuleFormatName, config.RuleFormatCombined} {
+		plain := pretty.NewTableFormatter(pretty.NewStyles(false), 80, format)
+		colored := pretty.NewTableFormatter(pretty.NewStyles(true), 80, format)
+
+		assert.Equal(t, plain.FormatTable(result), ansiSequence.ReplaceAllString(colored.FormatTable(result), ""))
+		for _, file := range result.Files {
+			assert.Equal(t, plain.FormatFileTable(file), ansiSequence.ReplaceAllString(colored.FormatFileTable(file), ""))
+		}
+	}
 }
 
 // TestTableFormatter_CutsMessagesOnCharacterBoundaries covers a message of
@@ -203,7 +352,7 @@ func TestTableFormatter_CutsMessagesOnCharacterBoundaries(t *testing.T) {
 	}
 
 	for _, format := range []config.RuleFormat{config.RuleFormatName, config.RuleFormatID} {
-		formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 100, format)
+		formatter := pretty.NewTableFormatter(pretty.NewStyles(false), 100, format)
 		for name, table := range map[string]string{
 			"table":          formatter.FormatTable(&runner.Result{Files: []runner.FileOutcome{file}}),
 			"per-file table": formatter.FormatFileTable(file),

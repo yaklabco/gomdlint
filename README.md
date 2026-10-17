@@ -128,7 +128,9 @@ Text, table, summary and diff output, and help, use color on a terminal.
   show.
 - `never`: no color.
 
-JSON and SARIF output never contain color.
+JSON and SARIF output never contain color. Table rows start with a severity
+marker, `E`, `W` or `I`, which the legend under the table explains, so a
+table reads the same without color.
 
 ## Rule Identifier Format
 

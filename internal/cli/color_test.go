@@ -30,21 +30,22 @@ func inColorProject(t *testing.T) {
 // for this run. Without the escapes, the output is what --color never
 // prints.
 func TestLintColorAlways(t *testing.T) {
-	for _, format := range []string{"text", "summary", "diff"} {
+	for _, format := range [][]string{{"text"}, {"table"}, {"table", "--per-file"}, {"summary"}, {"diff"}} {
 		for name, env := range map[string]map[string]string{
 			"without TERM":      nil,
 			"with 256 colors":   {"TERM": "xterm-256color"},
 			"over NO_COLOR":     {"NO_COLOR": "1"},
 			"on a dumb console": {"TERM": "dumb"},
 		} {
-			t.Run(format+" "+name, func(t *testing.T) {
+			t.Run(argsName(format)+" "+name, func(t *testing.T) {
 				inColorProject(t)
 				for key, value := range env {
 					t.Setenv(key, value)
 				}
+				args := append([]string{"lint", "doc.md", "--format"}, format...)
 
-				colored := execute(t, "lint", "--color", "always", "--format", format, "doc.md")
-				plain := execute(t, "lint", "--color", "never", "--format", format, "doc.md")
+				colored := execute(t, append(args, "--color", "always")...)
+				plain := execute(t, append(args, "--color", "never")...)
 
 				assert.Regexp(t, ansiEscape, colored.stdout)
 				assert.NotRegexp(t, ansiEscape, plain.stdout)
@@ -53,14 +54,6 @@ func TestLintColorAlways(t *testing.T) {
 			})
 		}
 	}
-
-	t.Run("table", func(t *testing.T) {
-		inColorProject(t)
-
-		got := execute(t, "lint", "--color", "always", "--format", "table", "doc.md")
-
-		assert.Regexp(t, ansiEscape, got.stdout)
-	})
 }
 
 // TestLintColorOff covers output without color: --color never, auto on

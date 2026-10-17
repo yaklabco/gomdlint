@@ -1,0 +1,30 @@
+
+[1mREADME.md[0m
+[1;37m    LOC         MESSAGE                                     RULE                      [0m
+[90m=========================================================================================[0m
+[93m W  3:22        Trailing whitespace                         no-trailing-spaces       [92m+[0m[0m
+[93m W  8:19        Trailing whitespace                         no-trailing-spaces       [92m+[0m[0m
+[93m W  6:11        Heading ends with trailing punctuation ":"  no-trailing-punctuation  [92m+[0m[0m
+[90m=========================================================================================[0m
+ [1;93m3 warnings[0m | [92m3 fixable[0m
+
+[1mdocs/guide.md[0m
+[1;37m    LOC         MESSAGE                                     RULE                               [0m
+[90m==================================================================================================[0m
+[91m E  3:1         Heading level jumped from H1 to H3          heading-increment                  [0m
+[93m W  5:18        Trailing whitespace                         no-trailing-spaces                [92m+[0m[0m
+[93m W  13:14       Trailing whitespace                         no-trailing-spaces                [92m+[0m[0m
+[93m W  14:12       Trailing whitespace                         no-trailing-spaces                [92m+[0m[0m
+[93m W  7:10        Heading ends with trailing punctuation "."  no-trailing-punctuation           [92m+[0m[0m
+[93m W  11:9        Heading ends with trailing punctuation ":"  no-trailing-punctuation           [92m+[0m[0m
+[93m W  17:1        Unused reference definition [unused]        link-image-reference-definitions   [0m
+[90m==================================================================================================[0m
+ [1;91m1 errors[0m | [1;93m6 warnings[0m | [92m5 fixable[0m
+
+ [3;90mLegend: [0m[91mE[0m[3;90m = error[0m[3;90m | [0m[93mW[0m[3;90m = warning[0m[3;90m | [0m[92m+[0m[3;90m = fixable[0m
+
+[90m════════════════════════════════════════════════════════════════════════════════[0m
+[1mOverall Summary[0m
+ 2 files checked | [1;91m1 errors[0m | [1;93m9 warnings[0m
+
+[90mRun with --fix to auto-repair fixable issues[0m

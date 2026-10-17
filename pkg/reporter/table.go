@@ -39,7 +39,7 @@ func NewTableReporter(opts Options) *TableReporter {
 	return &TableReporter{
 		opts:      opts,
 		styles:    styles,
-		formatter: pretty.NewTableFormatter(styles, styles.Colored(), termWidth, opts.RuleFormat),
+		formatter: pretty.NewTableFormatter(styles, termWidth, opts.RuleFormat),
 		out:       opts.Writer,
 		termWidth: termWidth,
 	}
@@ -130,6 +130,13 @@ func (r *TableReporter) reportPerFile(result *runner.Result) {
 		// Format and print this file's table
 		table := r.formatter.FormatFileTable(file)
 		fmt.Fprint(r.out, table)
+	}
+
+	// One legend explains the markers of every table, as the legend of a
+	// combined table does.
+	if legend := r.formatter.FormatLegend(result); legend != "" {
+		fmt.Fprintln(r.out)
+		fmt.Fprint(r.out, legend)
 	}
 
 	// Print overall summary

@@ -1,17 +1,17 @@
- FILE                  LOC         MESSAGE                                     RULE       
-=============================================================================================
- README.md             3:22        Trailing whitespace                         MD009     +
- README.md             8:19        Trailing whitespace                         MD009     +
- README.md             6:11        Heading ends with trailing punctuation ":"  MD026     +
----------------------------------------------------------------------------------------------
- docs/guide.md         3:1         Heading level jumped from H1 to H3          MD001      
- docs/guide.md         5:18        Trailing whitespace                         MD009     +
- docs/guide.md         13:14       Trailing whitespace                         MD009     +
- docs/guide.md         14:12       Trailing whitespace                         MD009     +
- docs/guide.md         7:10        Heading ends with trailing punctuation "."  MD026     +
- docs/guide.md         11:9        Heading ends with trailing punctuation ":"  MD026     +
- docs/guide.md         17:1        Unused reference definition [unused]        MD053      
-=============================================================================================
+    FILE                  LOC         MESSAGE                                     RULE       
+================================================================================================
+ W  README.md             3:22        Trailing whitespace                         MD009     +
+ W  README.md             8:19        Trailing whitespace                         MD009     +
+ W  README.md             6:11        Heading ends with trailing punctuation ":"  MD026     +
+------------------------------------------------------------------------------------------------
+ E  docs/guide.md         3:1         Heading level jumped from H1 to H3          MD001      
+ W  docs/guide.md         5:18        Trailing whitespace                         MD009     +
+ W  docs/guide.md         13:14       Trailing whitespace                         MD009     +
+ W  docs/guide.md         14:12       Trailing whitespace                         MD009     +
+ W  docs/guide.md         7:10        Heading ends with trailing punctuation "."  MD026     +
+ W  docs/guide.md         11:9        Heading ends with trailing punctuation ":"  MD026     +
+ W  docs/guide.md         17:1        Unused reference definition [unused]        MD053      
+================================================================================================
  Legend: E = error | W = warning | + = fixable
  2 files checked | 1 errors | 9 warnings
 
