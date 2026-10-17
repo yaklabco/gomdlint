@@ -114,6 +114,64 @@ func TestRunner_Run_ReportsRuleErrorsPerFile(t *testing.T) {
 	assert.True(t, result.HasRuleErrors())
 }
 
+func TestRunner_Run_PreviewKeepsRuleFailuresOfTheFixedContent(t *testing.T) {
+	t.Parallel()
+
+	// TEST001 fixes "x" to "y"; TEST002 fails only on the fixed content, so
+	// only the preview, which applies the fixes, sees it fail. TEST003
+	// fails on every content and must be reported once.
+	fixer := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		idx := bytes.IndexByte(content, 'x')
+		if idx < 0 {
+			return nil, nil
+		}
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "x", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}}}}, nil
+	})
+	picky := newContentRule("TEST002", func(content []byte) ([]lint.Diagnostic, error) {
+		if bytes.Contains(content, []byte("y")) {
+			panic("cannot handle y")
+		}
+		return nil, nil
+	})
+	errBroken := errors.New("always broken")
+	broken := newContentRule("TEST003", func([]byte) ([]lint.Diagnostic, error) {
+		return nil, errBroken
+	})
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("x\n"), 0o644))
+	registry := lint.NewRegistry()
+	for _, rule := range []lint.Rule{fixer, picky, broken} {
+		registry.Register(rule)
+	}
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:        []string{"."},
+		WorkingDir:   dir,
+		Config:       config.NewConfig(),
+		PreviewFixes: true,
+	})
+	require.NoError(t, err)
+
+	outcome := outcomeFor(t, result, "a.md")
+	require.NoError(t, outcome.Error)
+	require.NotNil(t, outcome.Result.Diff, "the preview diff is attached")
+	require.Len(t, outcome.RuleErrors, 2, "each failing rule is reported once")
+	assert.Equal(t, "TEST002", outcome.RuleErrors[0].RuleID)
+	require.ErrorIs(t, outcome.RuleErrors[0], lint.ErrRulePanic)
+	assert.Equal(t, "TEST003", outcome.RuleErrors[1].RuleID)
+	require.ErrorIs(t, outcome.RuleErrors[1], errBroken)
+	assert.Contains(t, outcome.Result.RuleErrors, "TEST002", "reporters that read the pipeline result see the failure too")
+	assert.Equal(t, 1, result.Stats.FilesWithRuleErrors)
+	assert.Equal(t, 2, result.Stats.RuleErrors)
+	assert.Zero(t, result.Stats.FilesErrored)
+	content, err := os.ReadFile(filepath.Join(dir, "a.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(content), "a preview never writes")
+}
+
 func TestRunner_Run_ReportsSkippedEditsAndOscillation(t *testing.T) {
 	t.Parallel()
 

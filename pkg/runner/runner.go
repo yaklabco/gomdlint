@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
@@ -181,7 +180,7 @@ func (r *Runner) processFile(
 
 		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
 		if err == nil && preview && pr.FileResult != nil && pr.FixableCount() > 0 {
-			pr.Diff, err = r.previewDiff(ctx, path, cfg, opts)
+			err = r.attachPreview(ctx, path, cfg, opts, pr)
 		}
 		if err != nil {
 			outcome.Error = err
@@ -201,14 +200,45 @@ func (r *Runner) processFile(
 	return outcome
 }
 
-// previewDiff returns the diff that fixing path would produce, computed in
-// dry-run mode so nothing is written.
-func (r *Runner) previewDiff(
+// attachPreview attaches to pr the diff that fixing path would produce,
+// computed in dry-run mode so nothing is written. The fix passes lint the
+// fixed content, so a rule can fail there that did not fail on the file as
+// it is. Such failures are recorded on pr too, unless pr already records a
+// failure of the same rule.
+func (r *Runner) attachPreview(
 	ctx context.Context,
 	path string,
 	cfg *config.Config,
 	opts lint.PipelineOptions,
-) (*fix.Diff, error) {
+	pr *lint.PipelineResult,
+) error {
+	preview, err := r.previewFixes(ctx, path, cfg, opts)
+	if err != nil {
+		return err
+	}
+	pr.Diff = preview.Diff
+	if preview.FileResult == nil {
+		return nil
+	}
+	for ruleID, ruleErr := range preview.RuleErrors {
+		if _, recorded := pr.RuleErrors[ruleID]; recorded {
+			continue
+		}
+		if pr.RuleErrors == nil {
+			pr.RuleErrors = make(map[string]error)
+		}
+		pr.RuleErrors[ruleID] = ruleErr
+	}
+	return nil
+}
+
+// previewFixes processes path as a dry run of --fix, so nothing is written.
+func (r *Runner) previewFixes(
+	ctx context.Context,
+	path string,
+	cfg *config.Config,
+	opts lint.PipelineOptions,
+) (*lint.PipelineResult, error) {
 	fixCfg := config.NewConfig()
 	if cfg != nil {
 		fixCfg = new(config.Config)
@@ -222,5 +252,5 @@ func (r *Runner) previewDiff(
 	if err != nil {
 		return nil, fmt.Errorf("preview fixes: %w", err)
 	}
-	return preview.Diff, nil
+	return preview, nil
 }

@@ -122,6 +122,22 @@ func TestLint_UnreadableFileOutranksRuleFailure(t *testing.T) {
 		"the rule failure is still reported")
 }
 
+func TestLint_DiffPreviewReportsRuleFailuresOfTheFixedContent(t *testing.T) {
+	for _, args := range [][]string{
+		{"lint", "--format", "diff", "a.md"},
+		{"lint", "--fix", "--dry-run", "a.md"},
+	} {
+		t.Run(args[2], func(t *testing.T) {
+			inProject(t, map[string]string{"a.md": "x\n"})
+
+			got := executeWithFailingRules(t, args...)
+
+			assert.Equal(t, cli.ExitInternalError, got.code, "stderr: %s", got.stderr)
+			assert.Contains(t, got.stderr, "rule TEST005 failed on a.md: rule panicked: cannot lint fixed content")
+		})
+	}
+}
+
 func TestLint_RulePanicStackOnlyWithDebug(t *testing.T) {
 	inProject(t, map[string]string{"a.md": "panic\n"})
 
