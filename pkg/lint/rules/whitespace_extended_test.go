@@ -41,7 +41,7 @@ func TestHardTabsRule(t *testing.T) {
 			name:      "multiple tabs same line",
 			input:     "\t\tDouble indent\n",
 			wantDiags: 1,
-			wantFix:   "     Double indent\n",
+			wantFix:   "    \tDouble indent\n",
 		},
 		{
 			name:      "tabs on multiple lines",
@@ -109,6 +109,18 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   ">   quote\n",
 		},
 		{
+			name:      "tabs in a Makefile block are reported but not fixed",
+			input:     "```makefile\nall:\n\tgo build ./...\n\tgo test ./...\n```\n",
+			wantDiags: 2,
+			wantFix:   "```makefile\nall:\n\tgo build ./...\n\tgo test ./...\n```\n",
+		},
+		{
+			name:      "tab in prose is fixed but not the one in a code span",
+			input:     "Text\twith `code\there` tab\n",
+			wantDiags: 1,
+			wantFix:   "Text with `code\there` tab\n",
+		},
+		{
 			name:      "tab in middle of line",
 			input:     "Hello\tworld\n",
 			wantDiags: 1,
@@ -122,10 +134,12 @@ func TestHardTabsRule(t *testing.T) {
 			config:    map[string]any{"spaces_per_tab": 4},
 		},
 		{
-			name:      "tab in code block included by default",
+			// Code is reported like markdownlint does, but its tabs can be
+			// significant, so they are kept.
+			name:      "tab in code block is reported but not fixed",
 			input:     "```\n\tcode\n```\n",
 			wantDiags: 1,
-			wantFix:   "```\n code\n```\n",
+			wantFix:   "```\n\tcode\n```\n",
 		},
 		{
 			name:      "tab in code block excluded",
@@ -190,7 +204,7 @@ func TestHardTabsRule(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -219,6 +233,19 @@ func TestHardTabsRule_IgnoreCodeLanguages(t *testing.T) {
 			name:      "multiple languages ignored",
 			input:     "```makefile\n\ttarget:\n```\n\n```go\n\tcode\n```\n",
 			wantDiags: 1,
+			config:    map[string]any{"ignore_code_languages": []any{"makefile"}},
+		},
+		{
+			name:      "ignored languages given as strings",
+			input:     "```makefile\n\ttarget:\n```\n",
+			wantDiags: 0,
+			config:    map[string]any{"ignore_code_languages": []string{"makefile"}},
+		},
+		{
+			// The language is the first word of the info string.
+			name:      "language followed by more info",
+			input:     "```makefile title=\"Build\"\n\ttarget:\n```\n",
+			wantDiags: 0,
 			config:    map[string]any{"ignore_code_languages": []any{"makefile"}},
 		},
 		{

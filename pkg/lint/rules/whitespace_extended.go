@@ -35,8 +35,13 @@ const tabWidth = 4
 // The fix keeps the document structure: a tab in the part of a line that
 // CommonMark measures in columns (indentation, blockquote markers, list
 // markers and the space after them, and the indentation of indented code) is
-// replaced by the spaces that reach the same tab stop. Other tabs, in text
-// and code, are replaced by spaces_per_tab spaces, as markdownlint does.
+// replaced by the spaces that reach the same tab stop. Other tabs in text are
+// replaced by spaces_per_tab spaces, as markdownlint does. Tabs in code, the
+// text of code blocks and code spans, are reported like markdownlint reports
+// them but never fixed, because they can be significant, as in Makefiles, Go
+// or tab-separated data. The ignore_code_languages option names fenced code
+// languages, matched on the first word of the info string in any case, whose
+// code is not checked at all.
 func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
@@ -48,16 +53,9 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		spacesPerTab = 1
 	}
 
-	// Get ignore_code_languages option.
 	ignoreCodeLanguages := make(map[string]bool)
-	if langs := ctx.Option("ignore_code_languages", nil); langs != nil {
-		if langSlice, ok := langs.([]any); ok {
-			for _, l := range langSlice {
-				if s, ok := l.(string); ok {
-					ignoreCodeLanguages[strings.ToLower(s)] = true
-				}
-			}
-		}
+	for _, language := range ctx.OptionStringSlice("ignore_code_languages", nil) {
+		ignoreCodeLanguages[strings.ToLower(language)] = true
 	}
 
 	// Build map of code block lines and their languages.
@@ -69,12 +67,14 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		}
 	}
 
-	// Like markdownlint, excluding code blocks also excludes code spans.
 	var codeSpans []mdast.SourceRange
+	for _, span := range ctx.CodeSpans() {
+		codeSpans = append(codeSpans, span.SourceRange())
+	}
+	// Like markdownlint, excluding code blocks also excludes code spans.
+	var excludedSpans []mdast.SourceRange
 	if !includeCodeBlocks {
-		for _, span := range ctx.CodeSpans() {
-			codeSpans = append(codeSpans, span.SourceRange())
-		}
+		excludedSpans = codeSpans
 	}
 
 	var diags []lint.Diagnostic
@@ -102,18 +102,23 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		textStart := ctx.File.Lines[lineNum-1].StartOffset + textOffset
 
 		// Find all tabs in the line, outside excluded code spans.
-		tabPositions := findTabPositions(lineContent, textStart, codeSpans)
+		tabPositions := findTabPositions(lineContent, textStart, excludedSpans)
 		if len(tabPositions) == 0 {
 			continue
 		}
 
-		// Build fix: replace all tabs with spaces.
+		// Build the fix from the tabs outside code text.
+		codeLine := codeBlockByLine[lineNum] != nil
 		structureEnd := tabStructureEnd(ctx.File, lineNum, lineContent, codeBlockByLine[lineNum])
 		builder := fix.NewEditBuilder()
 		for _, tabPos := range tabPositions {
 			offset := textStart + tabPos
+			structural := tabPos < structureEnd
+			if (codeLine && !structural) || inRanges(offset, codeSpans) {
+				continue
+			}
 			spaces := spacesPerTab
-			if tabPos < structureEnd {
+			if structural {
 				spaces = tabWidth - visualColumn(lineContent[:tabPos])%tabWidth
 			}
 			builder.ReplaceRange(offset, offset+1, strings.Repeat(" ", spaces))
@@ -128,12 +133,13 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			EndColumn:   textOffset + firstTabPos + 2,
 		}
 
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Hard tab character found").
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Hard tab character found").
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Replace tabs with spaces").
-			WithFix(builder).
-			Build()
-		diags = append(diags, diag)
+			WithSuggestion("Replace tabs with spaces")
+		if len(builder.Edits) > 0 {
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return keepSafeFixes(ctx, diags, fixCheckOptions{codeTabSpaces: spacesPerTab}), nil
@@ -243,23 +249,22 @@ func buildCodeBlockInfo(root *mdast.Node) map[int]codeBlockLineInfo {
 	return info
 }
 
+// inRanges reports whether an offset lies in one of the ranges.
+func inRanges(offset int, ranges []mdast.SourceRange) bool {
+	for _, rng := range ranges {
+		if rng.StartOffset <= offset && offset < rng.EndOffset {
+			return true
+		}
+	}
+	return false
+}
+
 // findTabPositions returns the positions (0-indexed) of the tab characters in
 // a line that starts at lineStart, skipping tabs inside the excluded ranges.
 func findTabPositions(content []byte, lineStart int, excluded []mdast.SourceRange) []int {
 	var positions []int
 	for idx, ch := range content {
-		if ch != '\t' {
-			continue
-		}
-		offset := lineStart + idx
-		inside := false
-		for _, rng := range excluded {
-			if rng.StartOffset <= offset && offset < rng.EndOffset {
-				inside = true
-				break
-			}
-		}
-		if !inside {
+		if ch == '\t' && !inRanges(lineStart+idx, excluded) {
 			positions = append(positions, idx)
 		}
 	}
