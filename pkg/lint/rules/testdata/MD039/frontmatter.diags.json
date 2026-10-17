@@ -3,8 +3,17 @@
     "rule": "MD039",
     "name": "no-space-in-links",
     "line": 7,
-    "column": 9,
-    "message": "Link text has leading and trailing spaces",
+    "column": 10,
+    "message": "Link text has leading spaces",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD039",
+    "name": "no-space-in-links",
+    "line": 7,
+    "column": 17,
+    "message": "Link text has trailing spaces",
     "severity": "warning",
     "fixable": true
   },
@@ -12,7 +21,7 @@
     "rule": "MD039",
     "name": "no-space-in-links",
     "line": 9,
-    "column": 9,
+    "column": 18,
     "message": "Link text has trailing spaces",
     "severity": "warning",
     "fixable": true

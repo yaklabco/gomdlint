@@ -80,9 +80,10 @@ func TestNoSpaceInCodeRule(t *testing.T) {
 			wantDiags: 1,
 		},
 		{
+			// markdownlint reports each side separately.
 			name:      "excessive both sides",
 			input:     "`  code  `\n",
-			wantDiags: 1,
+			wantDiags: 2,
 		},
 		{
 			name:      "backtick content with padding",
@@ -297,6 +298,20 @@ func TestBlanksAroundFencesRule_Containers(t *testing.T) {
 	}
 }
 
+// TestNoSpaceInCodeRule_ReportsEachSide reports leading and trailing spaces
+// separately at the spaces that the fix deletes, like markdownlint.
+func TestNoSpaceInCodeRule_ReportsEachSide(t *testing.T) {
+	snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte("A `  code  ` b\n"))
+	require.NoError(t, err)
+	diags, err := NewNoSpaceInCodeRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	require.NoError(t, err)
+	require.Len(t, diags, 2)
+	assert.Equal(t, [2]int{1, 4}, [2]int{diags[0].StartLine, diags[0].StartColumn})
+	assert.Equal(t, "Excessive leading space inside code span", diags[0].Message)
+	assert.Equal(t, [2]int{1, 10}, [2]int{diags[1].StartLine, diags[1].StartColumn})
+	assert.Equal(t, "Excessive trailing space inside code span", diags[1].Message)
+}
+
 // TestNoSpaceInCodeRule_MarkdownlintSemantics follows markdownlint MD038: a
 // single space of padding is allowed only on both sides, a space that
 // separates a backtick in the content from the delimiter is allowed, and
@@ -312,7 +327,7 @@ func TestNoSpaceInCodeRule_MarkdownlintSemantics(t *testing.T) {
 		{"escaped backtick is not code", "A \\`  not code  ` b\n", 0, ""},
 		{"single leading space", "A ` x` b\n", 1, "A `x` b\n"},
 		{"single trailing space", "A `y ` b\n", 1, "A `y` b\n"},
-		{"backtick inside padded content", "A ``  b`c  `` b\n", 1, "A ``b`c`` b\n"},
+		{"backtick inside padded content", "A ``  b`c  `` b\n", 2, "A ``b`c`` b\n"},
 		{"space separating a backtick", "A `` `a `` b\n", 0, ""},
 		{"symmetric padding", "A ` code ` b\n", 0, ""},
 		{"only spaces", "A `   ` b\n", 0, ""},
@@ -374,7 +389,7 @@ func TestNoSpaceInCodeRule_Fix(t *testing.T) {
 		{
 			name:      "excessive both sides",
 			input:     "`  code  `\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "`code`\n",
 		},
 		{
@@ -398,19 +413,19 @@ func TestNoSpaceInCodeRule_Fix(t *testing.T) {
 		{
 			name:      "multiple code spans with violations",
 			input:     "Use `  cmd1  ` and `  cmd2  ` here.\n",
-			wantDiags: 2,
+			wantDiags: 4,
 			wantFix:   "Use `cmd1` and `cmd2` here.\n",
 		},
 		{
 			name:      "mixed valid and invalid spans",
 			input:     "Valid `code` and invalid `  spaces  ` here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Valid `code` and invalid `spaces` here.\n",
 		},
 		{
 			name:      "double backticks with excessive spaces",
 			input:     "``  code  ``\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "``code``\n",
 		},
 	}

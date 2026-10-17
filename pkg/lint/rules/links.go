@@ -153,42 +153,47 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			continue
 		}
 		text := string(ctx.File.Content[start:end])
-		hasLeading := strings.TrimLeftFunc(text, unicode.IsSpace) != text
-		hasTrailing := strings.TrimRightFunc(text, unicode.IsSpace) != text
-		if !hasLeading && !hasTrailing {
-			continue
-		}
-
-		var msg string
-		switch {
-		case hasLeading && hasTrailing:
-			msg = "Link text has leading and trailing spaces"
-		case hasLeading:
-			msg = "Link text has leading spaces"
-		default:
-			msg = "Link text has trailing spaces"
-		}
-
-		builder := fix.NewEditBuilder()
+		allLeading := len(text) - len(strings.TrimLeftFunc(text, unicode.IsSpace))
+		allTrailing := len(text) - len(strings.TrimRightFunc(text, unicode.IsSpace))
 		leading := len(text) - len(strings.TrimLeftFunc(text, isSameLineSpace))
 		trailing := len(text) - len(strings.TrimRightFunc(text, isSameLineSpace))
-		if leading > 0 {
-			builder.Delete(start, start+leading)
-		}
-		if trailing > 0 && leading < len(text) {
-			builder.Delete(end-trailing, end)
-		}
 
-		diagBuilder := lint.NewDiagnostic(r.ID(), link, msg).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove spaces from link text")
-		if len(builder.Edits) > 0 {
-			diagBuilder = diagBuilder.WithFix(builder)
+		// Each side is reported where its spaces are. Without spaces on the
+		// bracket's own line (the text starts or ends with a line ending),
+		// the side is reported where the whitespace ends, without a fix.
+		if allLeading > 0 {
+			at, deleteTo := start+allLeading, start
+			if leading > 0 {
+				at, deleteTo = start, start+leading
+			}
+			diags = append(diags, r.spaceDiagnostic(ctx, at, start, deleteTo, "Link text has leading spaces"))
 		}
-		diags = append(diags, diagBuilder.Build())
+		if allTrailing > 0 {
+			at, deleteFrom := end-allTrailing, end
+			if trailing > 0 && leading < len(text) {
+				at, deleteFrom = end-trailing, end-trailing
+			}
+			diags = append(diags, r.spaceDiagnostic(ctx, at, deleteFrom, end, "Link text has trailing spaces"))
+		}
 	}
 
 	return diags, nil
+}
+
+// spaceDiagnostic reports spaces at offset at, with a fix that deletes
+// content[from:to] when that range is not empty.
+func (r *LinkSpacesRule) spaceDiagnostic(ctx *lint.RuleContext, at, from, to int, msg string) lint.Diagnostic {
+	line, column := ctx.File.LineAt(at)
+	pos := mdast.SourcePosition{StartLine: line, StartColumn: column, EndLine: line, EndColumn: column + 1}
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Remove spaces from link text")
+	if from < to {
+		builder := fix.NewEditBuilder()
+		builder.Delete(from, to)
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build()
 }
 
 // isSameLineSpace reports whether r is whitespace other than a line ending.

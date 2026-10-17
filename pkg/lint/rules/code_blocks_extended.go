@@ -166,22 +166,22 @@ func (r *NoSpaceInCodeRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		if diag, ok := r.checkCodeSpan(ctx, span); ok {
-			diags = append(diags, diag)
-		}
+		diags = append(diags, r.checkCodeSpan(ctx, span)...)
 	}
 	return diags, nil
 }
 
-func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Node) (lint.Diagnostic, bool) {
+// checkCodeSpan reports the extra space at the start and at the end of a code
+// span separately, each at the spaces its fix deletes, like markdownlint.
+func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Node) []lint.Diagnostic {
 	inner := span.ContentRange()
 	if inner.IsEmpty() {
-		return lint.Diagnostic{}, false
+		return nil
 	}
 	tokens := codeTextTokens(ctx.File, span, inner.StartOffset, inner.EndOffset)
 	datas, paddings := resolveCodeText(tokens)
 	if len(datas) == 0 {
-		return lint.Diagnostic{}, false
+		return nil
 	}
 	content := ctx.File.Content
 	hasPadding := len(paddings) == 2
@@ -202,51 +202,41 @@ func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Nod
 		endCount--
 	}
 
-	if startCount <= 0 && endCount <= 0 {
-		return lint.Diagnostic{}, false
-	}
 	removePadding := startCount > 0 && endCount > 0 && hasPadding && !startBacktick && !endBacktick
 
-	builder := fix.NewEditBuilder()
+	var diags []lint.Diagnostic
 	if startCount > 0 {
 		from, to := startData.start, startData.start+startCount
 		if removePadding {
 			from = paddings[0].start
 		}
-		deleteSameLine(builder, content, from, to)
+		diags = append(diags, r.spaceDiagnostic(ctx, from, to, "Excessive leading space inside code span"))
 	}
 	if endCount > 0 {
 		from, to := endData.end-endCount, endData.end
 		if removePadding {
 			to = paddings[1].end
 		}
-		deleteSameLine(builder, content, from, to)
+		diags = append(diags, r.spaceDiagnostic(ctx, from, to, "Excessive trailing space inside code span"))
 	}
-
-	var msg string
-	switch {
-	case startCount > 0 && endCount > 0:
-		msg = "Excessive spaces inside code span"
-	case startCount > 0:
-		msg = "Excessive leading space inside code span"
-	default:
-		msg = "Excessive trailing space inside code span"
-	}
-	diagBuilder := lint.NewDiagnostic(r.ID(), span, msg).
-		WithSeverity(config.SeverityWarning).
-		WithSuggestion("Remove extra spaces from inside the code span")
-	if len(builder.Edits) > 0 {
-		diagBuilder = diagBuilder.WithFix(builder)
-	}
-	return diagBuilder.Build(), true
+	return diags
 }
 
-// deleteSameLine deletes content[from:to] unless the range holds a line
-// ending, which a fix must not join.
-func deleteSameLine(builder *fix.EditBuilder, content []byte, from, to int) {
-	if from < to && !bytes.ContainsAny(content[from:to], "\r\n") {
+// spaceDiagnostic reports the spaces in content[from:to] with a fix that
+// deletes them, unless the range holds a line ending, which a fix must not join.
+func (r *NoSpaceInCodeRule) spaceDiagnostic(ctx *lint.RuleContext, from, to int, msg string) lint.Diagnostic {
+	startLine, startColumn := ctx.File.LineAt(from)
+	endLine, endColumn := ctx.File.LineAt(to)
+	pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Remove extra spaces from inside the code span")
+	if from < to && !bytes.ContainsAny(ctx.File.Content[from:to], "\r\n") {
+		builder := fix.NewEditBuilder()
 		builder.Delete(from, to)
+		diagBuilder = diagBuilder.WithFix(builder)
 	}
+	return diagBuilder.Build()
 }
 
 // codeTextKind classifies a piece of code span content the way micromark does.

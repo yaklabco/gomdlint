@@ -1,3 +1,4 @@
-basic.input.md:3:9 warning Link text has leading and trailing spaces (MD039/no-space-in-links) [fixable]
-basic.input.md:5:9 warning Link text has leading spaces (MD039/no-space-in-links) [fixable]
-basic.input.md:7:9 warning Link text has trailing spaces (MD039/no-space-in-links) [fixable]
+basic.input.md:3:10 warning Link text has leading spaces (MD039/no-space-in-links) [fixable]
+basic.input.md:3:17 warning Link text has trailing spaces (MD039/no-space-in-links) [fixable]
+basic.input.md:5:10 warning Link text has leading spaces (MD039/no-space-in-links) [fixable]
+basic.input.md:7:18 warning Link text has trailing spaces (MD039/no-space-in-links) [fixable]

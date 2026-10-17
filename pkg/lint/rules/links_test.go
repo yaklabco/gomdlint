@@ -115,9 +115,10 @@ func TestLinkSpacesRule(t *testing.T) {
 			wantN: 1,
 		},
 		{
+			// markdownlint reports each side separately.
 			name:  "both spaces",
 			input: "[ text ](url)",
-			wantN: 1,
+			wantN: 2,
 		},
 		{
 			name:  "multiple links with issues",
@@ -150,6 +151,31 @@ func TestLinkSpacesRule(t *testing.T) {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
 			}
 		})
+	}
+}
+
+// TestLinkSpacesRule_ReportsEachSide reports leading and trailing spaces
+// separately at the spaces the fix deletes, like markdownlint.
+func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
+	snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte("Here is [ a link ](url).\n"))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	diags, err := NewLinkSpacesRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	if err != nil {
+		t.Fatalf("Apply error: %v", err)
+	}
+	if len(diags) != 2 {
+		t.Fatalf("got %d diagnostics, want 2", len(diags))
+	}
+	want := []struct {
+		column  int
+		message string
+	}{{10, "Link text has leading spaces"}, {17, "Link text has trailing spaces"}}
+	for idx, exp := range want {
+		if diags[idx].StartColumn != exp.column || diags[idx].Message != exp.message {
+			t.Errorf("diagnostic %d = %d %q, want %d %q", idx, diags[idx].StartColumn, diags[idx].Message, exp.column, exp.message)
+		}
 	}
 }
 
