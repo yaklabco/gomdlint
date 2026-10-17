@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -92,17 +93,57 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 		{"backslash in the path", "See https://example.com/a\\b here\n", []position{{1, 5}},
 			"See https://example.com/a\\b here\n", ""},
 		{"quote that ends the literal", "See https://example.com/\"q\" now\n", []position{{1, 5}},
-			"See <https://example.com/\"q>\" now\n", "See https://example.com/\"q\" now\n"},
+			"See https://example.com/\"q\" now\n", ""},
 		{"path that runs into emphasis", "See https://example.com/a*b* now\n", []position{{1, 5}},
 			"See https://example.com/a*b* now\n", ""},
 		{"address after mailto", "Write mailto:user@example.com now\n", []position{{1, 14}},
 			"Write mailto:user@example.com now\n", ""},
 		{"digit in the last domain label of an email", "Mail user@example.co1 now\n", nil, "", ""},
 		{"underscore in the last two domain labels", "See https://example.a_b.com/a now\n", nil, "", ""},
+		// GitHub renders with cmark-gfm, which finds emails in decoded text
+		// and scans a URL to ASCII whitespace, so a literal keeps its fix only
+		// where its neighbours are plain ASCII.
+		{"character reference after an email", "Mail user@example.com&#97; now\n", []position{{1, 6}},
+			"Mail user@example.com&#97; now\n", ""},
+		{"hexadecimal character reference after an email", "Mail user@example.com&#x61; now\n", []position{{1, 6}},
+			"Mail user@example.com&#x61; now\n", ""},
+		{"named character reference after an email", "Mail user@example.com&amp; now\n", []position{{1, 6}},
+			"Mail user@example.com&amp; now\n", ""},
+		{"less-than reference after an email", "Mail user@example.com&lt; now\n", []position{{1, 6}},
+			"Mail user@example.com&lt; now\n", ""},
+		{"scheme colon written as a character reference", "Write xmpp&#58;user@example.com now\n", []position{{1, 16}},
+			"Write xmpp&#58;user@example.com now\n", ""},
+		{"no-break space in the path", "See https://example.com/a\u00a0b here\n", []position{{1, 5}},
+			"See https://example.com/a\u00a0b here\n", ""},
+		{"em space in the path", "See https://example.com/a\u2003b here\n", []position{{1, 5}},
+			"See https://example.com/a\u2003b here\n", ""},
+		{"ideographic space in the path", "See https://example.com/a\u3000b here\n", []position{{1, 5}},
+			"See https://example.com/a\u3000b here\n", ""},
+		{"next line character in the path", "See https://example.com/a\u0085b here\n", []position{{1, 5}},
+			"See https://example.com/a\u0085b here\n", ""},
+		{"byte order mark in the path", "See https://example.com/a\ufeffb here\n", []position{{1, 5}},
+			"See https://example.com/a\ufeffb here\n", ""},
+		{"no-break space before the url", "See\u00a0https://example.com here\n", []position{{1, 6}},
+			"See\u00a0https://example.com here\n", ""},
+		{"accented letter after an email", "Mail user@example.com\u00e9 now\n", []position{{1, 6}},
+			"Mail user@example.com\u00e9 now\n", ""},
+		{"closing bracket after the url", "See https://example.com/a] here\n", []position{{1, 5}},
+			"See https://example.com/a] here\n", ""},
+		{"underscore after a url without a path", "See https://example.com_ here\n", []position{{1, 5}},
+			"See https://example.com_ here\n", ""},
+		{"asterisk that would open emphasis after the fix", "See https://example.com*. and more*\n", []position{{1, 5}},
+			"See https://example.com*. and more*\n", ""},
+		{"email that starts with www", "Mail www.foo@example.com now\n", []position{{1, 6}},
+			"Mail www.foo@example.com now\n", ""},
+		{"email with an underscore after a period", "Mail foo._bar@example.com now\n", []position{{1, 6}},
+			"Mail foo._bar@example.com now\n", ""},
+		{"email in parentheses", "Mail (user@example.com) now\n", []position{{1, 7}}, "Mail (<user@example.com>) now\n", ""},
+		{"url after a parenthesis at the line start", "(https://example.com/a) here\n", []position{{1, 2}},
+			"(<https://example.com/a>) here\n", ""},
 		{"email with trailing period", "Mail user@example.com.\n", []position{{1, 6}}, "Mail <user@example.com>.\n", ""},
 		{"entity after url", "Go to https://example.com/q?a=1&amp; now\n", []position{{1, 7}},
-			"Go to <https://example.com/q?a=1>&amp; now\n", ""},
-		{"inside emphasis", "Read *https://example.com* now\n", []position{{1, 7}}, "Read *<https://example.com>* now\n", ""},
+			"Go to https://example.com/q?a=1&amp; now\n", ""},
+		{"inside emphasis", "Read *https://example.com* now\n", []position{{1, 7}}, "Read *https://example.com* now\n", ""},
 		{"inside strikethrough", "Old ~~see https://example.com~~ now\n", []position{{1, 11}}, "Old ~~see <https://example.com>~~ now\n", ""},
 		{"blockquote", "> Visit https://example.com\n", []position{{1, 9}}, "> Visit <https://example.com>\n", ""},
 		{"multibyte text before url", "中文中文 https://example.com\n", []position{{1, 14}}, "中文中文 <https://example.com>\n", ""},
@@ -152,24 +193,35 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 
 // TestNoBareURLsRule_FixesAgreeWithTheParser runs MD034 over generated autolink
 // literal shapes in several contexts, with both flavors. Every finding must be
-// a GFM autolink literal. A fix may only come where the parser read the
-// literal as plain text or as one autolink with exactly its span, since the
-// fix check sees only what the parser sees, and never for an address after
-// mailto: or xmpp:. Every fix must leave an autolink to the literal's address.
+// a GFM autolink literal. Every fix must meet the conditions under which
+// GitHub, markdownlint, and the parser read the literal alike (see
+// fixEligible), checked here on their own: the parser read the literal as
+// plain text or as one autolink with exactly its span, the model of
+// cmark-gfm links exactly the literal to the same address and nothing else
+// changes with the fix, and the parser's autolink after the fix has the
+// literal's address.
 func TestNoBareURLsRule_FixesAgreeWithTheParser(t *testing.T) {
 	shapes := []string{
 		`https://example.com/a\b`, `https://example.com/a\)b`, `https://example.com/a\_b`,
 		`https://example.com/a&amp;`, `https://example.com/a&amp;b`, `https://example.com/&copy;`,
 		`https://example.com/a&b;c`, `https://example.com/a&;`, `https://example.com/a&#38;`,
 		`https://example.com/(a(b)c)`, `https://example.com/a))`, `https://example.com/a(b))`,
-		`https://example.com/a).`, `https://example.com/((a)`,
+		`https://example.com/a).`, `https://example.com/((a)`, `https://example.com/a)b)`, `https://example.com/((a).)`,
 		`https://example.com/a?!.,`, `https://example.com/a...`, `https://example.com/a:;`, `https://example.com/a_~`,
+		`https://example.com/a*`, `https://example.com*.`, `https://example.com_`, `https://example.com/a]`,
 		`https://example.a_b.com/a`, `https://a_b.example.com/a`, `www.a_b.example.com`, `www.example.a_b.com`,
 		`user@example.co1`, `https://example.co1/a`, `user@example.1co`,
 		`www.example.com`, `www.example.com/a.`, `WWW.EXAMPLE.COM`,
 		`http://example.com`, `https://example.com`, `HTTPS://EXAMPLE.COM/A`, `https://`, `https://.`,
-		`mailto:user@example.com`, `xmpp:user@example.com/res`, `user@example.com`,
+		`mailto:user@example.com`, `xmpp:user@example.com/res`, `user@example.com`, `(user@example.com)`,
 		`user.name+tag@sub.example.org.`, `user@example.com_`, `user@exa_mple.com`, `user@example.c_m`,
+		`user@example.com**`, `user@example.com@x.yz`, `www.foo@example.com`, `foo_www.bar@example.com`,
+		`foo._bar@example.com`, `first_last@example.com`,
+		`user@example.com&#97;`, `user@example.com&#x61;`, `user@example.com&amp;`, `user@example.com&lt;`,
+		`xmpp&#58;user@example.com`,
+		"https://example.com/a\u00a0b", "https://example.com/a\u2003b", "https://example.com/a\u3000b",
+		"https://example.com/a\u0085b", "https://example.com/a\ufeffb",
+		"user@example.com\u00e9", "https://example.com/a\u00e9",
 		`https://example.com/a<b`, `https://example.com/<x>`,
 		`https://example.com/"q"`, `'https://example.com'`, `"https://example.com"`,
 		`https://example.com/a*b*`, "https://example.com/a`b`",
@@ -177,19 +229,24 @@ func TestNoBareURLsRule_FixesAgreeWithTheParser(t *testing.T) {
 	layouts := []string{
 		"See %s here\n", "%s\n", "> Quote %s here\n", "- Item %s here\n", "# Heading %s\n",
 		"| %s | b |\n| - | - |\n", "Read *%s* now\n", "Docs (%s) here\n", "Say \"%s\" now\n",
-		mdast.ByteOrderMark + "%s here\n",
+		mdast.ByteOrderMark + "%s here\n", "See\u00a0%s here\n", "(%s) here\n", ">%s here\n",
+		"|%s|b|\n|-|-|\n", "See %s\u00e9 here\n",
 	}
+	fixes := 0
 	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
 		for _, layout := range layouts {
 			for _, shape := range shapes {
-				checkBareURLFixes(t, flavor, fmt.Sprintf(layout, shape))
+				fixes += checkBareURLFixes(t, flavor, fmt.Sprintf(layout, shape))
 			}
 		}
 	}
+	// The sweep must exercise the checks of attached fixes, not only withhold.
+	assert.Positive(t, fixes)
 }
 
-// checkBareURLFixes checks MD034's findings and fixes on one document.
-func checkBareURLFixes(t *testing.T, flavor config.Flavor, doc string) {
+// checkBareURLFixes checks MD034's findings and fixes on one document and
+// returns how many fixes it attached.
+func checkBareURLFixes(t *testing.T, flavor config.Flavor, doc string) int {
 	t.Helper()
 	parse := func(source string) *mdast.FileSnapshot {
 		snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(source))
@@ -205,34 +262,146 @@ func checkBareURLFixes(t *testing.T, flavor config.Flavor, doc string) {
 	if strings.HasPrefix(doc, mdast.ByteOrderMark) {
 		textStart = len(mdast.ByteOrderMark)
 	}
+	fixes := 0
 	for _, diag := range diags {
 		start := snapshot.Lines[diag.StartLine-1].StartOffset + diag.StartColumn - 1
 		end := snapshot.Lines[diag.EndLine-1].StartOffset + diag.EndColumn - 1
+		label := fmt.Sprintf("%s %q", flavor, doc)
+		contentStart, contentEnd := inlineContentAround(snapshot.Root, start, end)
+		require.Less(t, contentStart, contentEnd, "%s: no inline content around %d", label, start)
+		// Nothing comes before a literal at the start of the inline content.
 		var prev byte
-		if start > textStart {
+		if start > textStart && start != contentStart {
 			prev = doc[start-1]
 		}
-		literalEnd, kind := mdscan.MatchAutolinkLiteral([]byte(doc), start, prev)
-		require.NotEqual(t, mdscan.LiteralNone, kind, "%s %q: finding at %d is no GFM literal", flavor, doc, start)
-		require.Equal(t, literalEnd, end, "%s %q: finding is not the whole GFM literal", flavor, doc)
+		literalEnd, kind := mdscan.MatchAutolinkLiteral([]byte(doc[:contentEnd]), start, prev)
+		require.NotEqual(t, mdscan.LiteralNone, kind, "%s: finding at %d is no GFM literal", label, start)
+		require.Equal(t, literalEnd, end, "%s: finding is not the whole GFM literal", label)
 		if !diag.HasFix() {
 			continue
 		}
+		fixes++
 		literal := doc[start:end]
-		before := strings.ToLower(doc[:start])
-		require.False(t, strings.HasSuffix(before, "mailto:") || strings.HasSuffix(before, "xmpp:"),
-			"%s %q: fix for an address after a scheme", flavor, doc)
 		require.True(t, readAsText(snapshot.Root, start, end),
-			"%s %q: fix for %q, which the parser reads differently", flavor, doc, literal)
+			"%s: fix for %q, which the parser reads differently", label, literal)
+		checkFixConditions(t, label, doc, contentStart, start, end, kind)
+		content := []byte(doc[contentStart:contentEnd])
+		checkGitHubKeepsLinks(t, label, content, start-contentStart, end-contentStart, kind)
 		require.Len(t, diag.FixEdits, 1)
 		edit := diag.FixEdits[0]
-		require.Equal(t, [2]int{start, end}, [2]int{edit.StartOffset, edit.EndOffset}, "%s %q: fix range", flavor, doc)
+		require.Equal(t, [2]int{start, end}, [2]int{edit.StartOffset, edit.EndOffset}, "%s: fix range", label)
 		require.Equal(t, "<"+literal+">", edit.NewText)
 		// The parser records an email autolink's address without "mailto:".
 		fixed := parse(doc[:start] + edit.NewText + doc[end:])
 		require.Equal(t, literal, autolinkDestinationAt(fixed.Root, start, end+2),
-			"%s %q: the fix changes the address", flavor, doc)
+			"%s: the fix changes the address", label)
 	}
+	return fixes
+}
+
+// inlineContentAround returns the span of the inline content of the
+// innermost paragraph, heading, or table cell that holds source[start:end].
+func inlineContentAround(root *mdast.Node, start, end int) (int, int) {
+	from, to := 0, 0
+	_ = mdast.Walk(root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if !isTextContainer(node) {
+			return nil
+		}
+		first, last := node.FirstChild.SourceRange().StartOffset, node.LastChild.SourceRange().EndOffset
+		if first <= start && end <= last && first >= from {
+			from, to = first, last
+		}
+		return nil
+	})
+	return from, to
+}
+
+// checkFixConditions checks the conditions under which MD034 attaches a fix,
+// on their own, for the literal doc[ls:le] on a line whose inline content
+// starts at doc[lineStart].
+func checkFixConditions(t *testing.T, label, doc string, lineStart, ls, le int, kind mdscan.LiteralKind) {
+	t.Helper()
+	content := []byte(doc)
+	literal := content[ls:le]
+	for _, ch := range literal {
+		require.True(t, ch > ' ' && ch < 0x7f && !strings.ContainsRune("&\\<>\"'`", rune(ch)),
+			"%s: the literal holds %q", label, ch)
+	}
+	blank := func(pos int) bool {
+		return strings.IndexByte(" \t\r\n", content[pos]) >= 0
+	}
+	runStart := ls
+	if runStart > lineStart && content[runStart-1] == '(' {
+		runStart--
+	}
+	require.True(t, runStart == lineStart || blank(runStart-1), "%s: text before the literal", label)
+	stop := le
+	for stop < len(content) && strings.IndexByte(".,:;!?*_~\"')", content[stop]) >= 0 {
+		stop++
+	}
+	require.True(t, stop == len(content) || blank(stop), "%s: text after the literal", label)
+	trail := content[le:stop]
+	if bytes.IndexByte(trail, ')') >= 0 {
+		require.LessOrEqual(t, bytes.Count(literal, []byte("(")), bytes.Count(literal, []byte(")")),
+			"%s: a closing parenthesis after an unbalanced one", label)
+	}
+	if len(trail) > 0 && strings.IndexByte("*_~", trail[0]) >= 0 {
+		require.Equal(t, len(trail), bytes.Count(trail, trail[:1]), "%s: a delimiter that could open", label)
+	}
+	if kind != mdscan.LiteralEmail {
+		return
+	}
+	lower := strings.ToLower(string(literal))
+	require.False(t, strings.HasPrefix(lower, "www.") || strings.Contains(lower, "_www."), "%s: a www address", label)
+	for idx, ch := range literal {
+		if ch != '_' {
+			continue
+		}
+		before, after := idx, idx
+		for before > 0 && literal[before-1] == '_' {
+			before--
+		}
+		for after < len(literal) && literal[after] == '_' {
+			after++
+		}
+		require.True(t, before > 0 && after < len(literal) &&
+			cmarkIsAlnum(literal[before-1]) && cmarkIsAlnum(literal[after]),
+			"%s: an underscore that could open or close emphasis", label)
+	}
+}
+
+// checkGitHubKeepsLinks checks with the model of cmark-gfm that GitHub links
+// exactly the literal content[ls:le] to its address before the fix, and that
+// wrapping it in angle brackets changes no other link.
+func checkGitHubKeepsLinks(t *testing.T, label string, content []byte, ls, le int, kind mdscan.LiteralKind) {
+	t.Helper()
+	literal := string(content[ls:le])
+	want := literal
+	if kind == mdscan.LiteralEmail {
+		want = "mailto:" + literal
+	}
+	var others []cmarkLink
+	found := false
+	for _, link := range cmarkAutolinks(content) {
+		switch {
+		case link.end <= ls || link.start >= le:
+			if link.start >= le {
+				link.start, link.end = link.start+2, link.end+2
+			}
+			others = append(others, link)
+		case link.start == ls && link.end == le && link.url == want:
+			found = true
+		default:
+			require.Failf(t, "GitHub reads the literal differently",
+				"%s: GitHub links %q to %q", label, content[link.start:link.end], link.url)
+		}
+	}
+	require.True(t, found, "%s: GitHub does not link %q", label, literal)
+	fixed := make([]byte, 0, len(content)+2)
+	fixed = append(fixed, content[:ls]...)
+	fixed = append(fixed, "<"+literal+">"...)
+	fixed = append(fixed, content[le:]...)
+	require.Equal(t, others, cmarkAutolinks(fixed), "%s: the fix changes what GitHub links", label)
 }
 
 // readAsText reports whether the parser read source[start:end] as plain text
