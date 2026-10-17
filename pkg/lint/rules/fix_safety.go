@@ -48,8 +48,8 @@ const (
 // beyond what allow permits, keeping the diagnostic itself. A fix is applied
 // to a copy of the content, which is parsed again with the configured flavor;
 // its outline (block structure, nesting, list tightness, and text) must equal
-// the original document's. A fix that shares a top-level block with another
-// fix is first checked on its own. The fixes left are then tried together. When that
+// the original document's. A fix that can depend on another fix (see
+// fixLayers) is first checked on its own. The fixes left are then tried together. When that
 // fails, the set is split in halves until the failing fixes are found, and a
 // fix is kept, in document order, only if it passes together with the fixes
 // kept before it. The fixes kept are therefore always the last set checked
@@ -65,13 +65,11 @@ func verifyFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, allow fixAllowa
 		return diags
 	}
 	verifier := newFixVerifier(ctx, allow)
-	// A fix that shares a top-level block, or the gap between two of them,
-	// with another fix may only be safe next to it (the blocks of one list
-	// share its tightness, for example), and the engine may apply either one
-	// without the other, so each such fix must be safe on its own. Fixes in
-	// one layer touch different top-level blocks, so a layer is checked as
-	// one set.
-	for _, layer := range fixLayers(ctx.Root, diags, fixable) {
+	// A fix that can depend on another fix may only be safe next to it, and
+	// the engine may apply either one without the other, so each such fix
+	// must be safe on its own. Fixes in one layer cannot depend on each
+	// other, so a layer is checked as one set.
+	for _, layer := range fixLayers(ctx.File, ctx.Root, diags, fixable) {
 		verifier.keepSafeAlone(diags, layer)
 	}
 	kept := fixable[:0]
@@ -103,15 +101,20 @@ func (v *fixVerifier) keepSafeAlone(diags []lint.Diagnostic, idxs []int) {
 	}
 }
 
-// fixLayers groups the fixes of diags[fixable] that touch a common top-level
-// block (a direct child of the document) and returns layers of them: the
-// nth layer holds the nth fix of every group, so no two fixes in a layer
-// share a block. A top-level block holds everything that can depend on its
-// parts, such as a list's tightness. An edit inside one block touches only
-// that block; any other edit sits on a block's edge or between blocks, where
-// it can join or split them, and touches the blocks on both sides. Fixes
-// that share no block with another fix are left out.
-func fixLayers(root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int {
+// fixLayers groups the fixes of diags[fixable] that can depend on each other
+// and returns layers of them: the nth layer holds the nth fix of every
+// group, so no two fixes in a layer can depend on each other. An edit that
+// stays on one line of one leaf block (a paragraph, heading, code block,
+// HTML block, thematic break, or table), adds and removes no line breaks,
+// and leaves its line with text can only change that block, so it depends
+// on the fixes that touch the same block. Any other edit can change what
+// the blocks of a top-level block (a direct child of the document) share,
+// such as a list's tightness, so it depends on every fix that touches the
+// same top-level block, or a leaf block it touches. An edit sits inside one
+// block, or else touches every block it overlaps or borders and the nearest
+// block on each side. Fixes that depend on no other fix are left out.
+func fixLayers(file *mdast.FileSnapshot, root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int {
+	leaves := leafBlockSpans(root)
 	blocks := topLevelBlockSpans(root)
 	parent := make([]int, len(fixable))
 	for pos := range parent {
@@ -127,11 +130,11 @@ func fixLayers(root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int
 	owner := make(map[int]int)
 	for pos, idx := range fixable {
 		for _, edit := range diags[idx].FixEdits {
-			for _, block := range touchedBlocks(blocks, edit) {
-				if other, taken := owner[block]; taken {
+			for _, key := range editKeys(file, leaves, blocks, edit) {
+				if other, taken := owner[key]; taken {
 					parent[find(pos)] = find(other)
 				} else {
-					owner[block] = pos
+					owner[key] = pos
 				}
 			}
 		}
@@ -139,15 +142,15 @@ func fixLayers(root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int
 	groups := make(map[int][]int)
 	var order []int
 	for pos := range fixable {
-		root := find(pos)
-		if _, seen := groups[root]; !seen {
-			order = append(order, root)
+		group := find(pos)
+		if _, seen := groups[group]; !seen {
+			order = append(order, group)
 		}
-		groups[root] = append(groups[root], fixable[pos])
+		groups[group] = append(groups[group], fixable[pos])
 	}
 	var layers [][]int
-	for _, root := range order {
-		members := groups[root]
+	for _, group := range order {
+		members := groups[group]
 		if len(members) < 2 {
 			continue
 		}
@@ -159,6 +162,73 @@ func fixLayers(root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int
 		}
 	}
 	return layers
+}
+
+// editKeys returns the blocks an edit can change, as keys: leaf block n is
+// n, and top-level block n is len(leaves)+n. A local edit has only the key
+// of its leaf block.
+func editKeys(file *mdast.FileSnapshot, leaves, blocks []mdast.SourceRange, edit fix.TextEdit) []int {
+	if leaf, ok := localLeaf(file, leaves, edit); ok {
+		return []int{leaf}
+	}
+	keys := touchedSpans(leaves, edit)
+	for _, block := range touchedSpans(blocks, edit) {
+		keys = append(keys, len(leaves)+block)
+	}
+	return keys
+}
+
+// localLeaf returns the leaf block an edit stays inside: strictly within its
+// span and on one of its lines, adding and removing no line breaks, and
+// leaving that line with something besides spaces, tabs, and blockquote
+// markers, so it cannot start, end, join, or split a block.
+func localLeaf(file *mdast.FileSnapshot, leaves []mdast.SourceRange, edit fix.TextEdit) (int, bool) {
+	start, end := edit.StartOffset, edit.EndOffset
+	idx := sort.Search(len(leaves), func(i int) bool { return leaves[i].EndOffset > start })
+	if idx == len(leaves) || leaves[idx].StartOffset >= start || end >= leaves[idx].EndOffset ||
+		end > len(file.Content) || start > end {
+		return 0, false
+	}
+	if strings.ContainsAny(edit.NewText, "\r\n") || bytes.ContainsAny(file.Content[start:end], "\r\n") {
+		return 0, false
+	}
+	line, _ := file.LineAt(start)
+	if line < 1 || line > len(file.Lines) {
+		return 0, false
+	}
+	info := file.Lines[line-1]
+	after := string(file.Content[info.StartOffset:start]) + edit.NewText + string(file.Content[end:info.NewlineStart])
+	if strings.Trim(after, " \t>") == "" {
+		return 0, false
+	}
+	return idx, true
+}
+
+// leafBlockSpans returns the spans of the blocks that hold content rather
+// than other blocks, in document order. An empty container counts as one.
+func leafBlockSpans(root *mdast.Node) []mdast.SourceRange {
+	var spans []mdast.SourceRange
+	var walk func(node *mdast.Node)
+	walk = func(node *mdast.Node) {
+		for child := node.FirstChild; child != nil; child = child.Next {
+			if child.IsInline() {
+				continue
+			}
+			switch child.Kind {
+			case mdast.NodeBlockquote, mdast.NodeList, mdast.NodeListItem:
+				if child.FirstChild != nil {
+					walk(child)
+					continue
+				}
+			}
+			spans = append(spans, child.SourceRange())
+		}
+	}
+	if root != nil {
+		walk(root)
+	}
+	sort.SliceStable(spans, func(i, j int) bool { return spans[i].StartOffset < spans[j].StartOffset })
+	return spans
 }
 
 // topLevelBlockSpans returns the spans of the document's direct children,
@@ -177,13 +247,13 @@ func topLevelBlockSpans(root *mdast.Node) []mdast.SourceRange {
 	return spans
 }
 
-// touchedBlocks returns the indices of the top-level blocks an edit
-// touches: the one it sits inside, or else every block it overlaps or
-// borders and the nearest block on each side.
-func touchedBlocks(blocks []mdast.SourceRange, edit fix.TextEdit) []int {
+// touchedSpans returns the indices of the spans, which do not overlap, that
+// an edit touches: the one it sits inside, or else every span it overlaps
+// or borders and the nearest span on each side.
+func touchedSpans(spans []mdast.SourceRange, edit fix.TextEdit) []int {
 	start, end := edit.StartOffset, edit.EndOffset
-	first := sort.Search(len(blocks), func(i int) bool { return blocks[i].EndOffset >= start })
-	if first < len(blocks) && blocks[first].StartOffset < start && end < blocks[first].EndOffset {
+	first := sort.Search(len(spans), func(i int) bool { return spans[i].EndOffset >= start })
+	if first < len(spans) && spans[first].StartOffset < start && end < spans[first].EndOffset {
 		return []int{first}
 	}
 	var touched []int
@@ -191,10 +261,10 @@ func touchedBlocks(blocks []mdast.SourceRange, edit fix.TextEdit) []int {
 		touched = append(touched, first-1)
 	}
 	idx := first
-	for ; idx < len(blocks) && blocks[idx].StartOffset <= end; idx++ {
+	for ; idx < len(spans) && spans[idx].StartOffset <= end; idx++ {
 		touched = append(touched, idx)
 	}
-	if idx < len(blocks) {
+	if idx < len(spans) {
 		touched = append(touched, idx)
 	}
 	return touched

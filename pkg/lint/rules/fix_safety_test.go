@@ -204,3 +204,58 @@ func TestStripColumns(t *testing.T) {
 		assert.Equal(t, tt.want, stripColumns(tt.line, tt.columns), "stripColumns(%q, %d)", tt.line, tt.columns)
 	}
 }
+
+// TestFixLayers groups fixes that can depend on each other. An edit that
+// stays on one line of one leaf block can only change that block, so it is
+// grouped with fixes in the same block; any other edit can change what a
+// top-level block shares, such as a list's tightness, so it is grouped with
+// fixes in the same top-level block.
+func TestFixLayers(t *testing.T) {
+	sixItems := "- one\n- two\n- three\n- four\n- five\n- six\n"
+	nested := "- a\n  sec\n  three\n- b\n- c\n"
+	tests := []struct {
+		name  string
+		input string
+		diags []lint.Diagnostic
+		want  [][]int
+	}{
+		{
+			name:  "edits on lines of different items stay apart",
+			input: sixItems,
+			diags: []lint.Diagnostic{edit(9, 10, "W"), edit(23, 25, "U")},
+		},
+		{
+			name:  "edits in one item depend on each other",
+			input: "- one two\n",
+			diags: []lint.Diagnostic{edit(3, 4, "N"), edit(7, 8, "W")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "line breaks far apart in one list depend on each other",
+			input: sixItems,
+			diags: []lint.Diagnostic{edit(6, 6, "\n"), edit(34, 34, "\n"), edit(15, 18, "x")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit that empties its line is not local",
+			input: nested,
+			diags: []lint.Diagnostic{edit(6, 9, ""), edit(22, 22, "\n")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit that leaves its line with text is local",
+			input: nested,
+			diags: []lint.Diagnostic{edit(6, 8, ""), edit(22, 22, "\n")},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := fixSafetyContext(t, config.FlavorCommonMark, tt.input)
+			fixable := make([]int, len(tt.diags))
+			for idx := range fixable {
+				fixable[idx] = idx
+			}
+			assert.Equal(t, tt.want, fixLayers(ctx.File, ctx.Root, tt.diags, fixable))
+		})
+	}
+}
