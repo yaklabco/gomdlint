@@ -583,6 +583,13 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Before <textarea>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</textarea> after.\n",
 		},
 		{
+			name:     "wraps before an inline element",
+			input:    "Some words come first and fill the line <b>bold words here</b> after.\n",
+			maxLen:   50,
+			wantFix:  true,
+			wantText: "Some words come first and fill the\nline <b>bold words here</b> after.\n",
+		},
+		{
 			name:     "no fix inside code",
 			input:    "```\nthis is code that is long and must not wrap at all\n```\n",
 			maxLen:   30,

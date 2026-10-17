@@ -412,7 +412,8 @@ var taskMarkerPattern = regexp.MustCompile(`^\[[ \txX]\]`)
 
 // noBreakRanges returns, per line, the byte ranges where inserting a line
 // break would change inline content: code spans (whose whitespace is
-// literal), inline HTML, the destination and title of links and images, and
+// literal), inline HTML and the text of the elements it opens (see
+// inlineElementRanges), the destination and title of links and images, and
 // GFM task list checkboxes, which a break between the brackets turns into
 // bracket text. Checkboxes are found in the text in every flavor, because
 // GFM renderers show them even when the file is linted as CommonMark.
@@ -436,6 +437,11 @@ func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 		rng := html.SourceRange()
 		add(rng.StartOffset, rng.EndOffset)
 	}
+	for _, paragraph := range ctx.Paragraphs() {
+		for _, rng := range inlineElementRanges(paragraph) {
+			add(rng.start, rng.end)
+		}
+	}
 	for _, links := range [][]*mdast.Node{ctx.Links(), ctx.Images()} {
 		for _, link := range links {
 			// Breaking inside the link text is fine; after it come the
@@ -453,6 +459,45 @@ func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 		if found && marker.HasContent() && taskMarkerPattern.Match(ctx.File.Content[marker.ContentStart:marker.LineEnd]) {
 			add(marker.ContentStart, marker.ContentStart+len("[ ]"))
 		}
+	}
+	return ranges
+}
+
+// inlineElementRanges returns the ranges of the elements that inline raw
+// HTML opens in a paragraph, from the start tag through the matching end
+// tag, or through the end of the paragraph, which closes them, when the end
+// tag is missing. CSS or the element itself can keep the whitespace of their
+// text, so a line break there could show.
+func inlineElementRanges(paragraph *mdast.Node) []offsetRange {
+	type openTag struct {
+		name  string
+		start int
+	}
+	var open []openTag
+	var ranges []offsetRange
+	_ = mdast.Walk(paragraph, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+		if node.Kind != mdast.NodeHTMLInline {
+			return nil
+		}
+		rng := node.SourceRange()
+		for _, tag := range scanHTMLTags(string(node.Text())) {
+			switch {
+			case tag.closing:
+				for idx := len(open) - 1; idx >= 0; idx-- {
+					if open[idx].name == tag.name {
+						ranges = append(ranges, offsetRange{start: open[idx].start, end: rng.EndOffset})
+						open = open[:idx]
+						break
+					}
+				}
+			case !tag.selfClosing && !isVoidElement(tag.name):
+				open = append(open, openTag{name: tag.name, start: rng.StartOffset})
+			}
+		}
+		return nil
+	})
+	for _, tag := range open {
+		ranges = append(ranges, offsetRange{start: tag.start, end: paragraph.SourceRange().EndOffset})
 	}
 	return ranges
 }
