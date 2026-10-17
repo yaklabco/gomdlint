@@ -311,10 +311,23 @@ func hasAnyPrefix(text string, prefixes []string) bool {
 	return false
 }
 
-// normalize converts go-enry language names to fence tags.
+// normalize converts go-enry language names to fence tags. An info string
+// ends its first word at a space, so a name with spaces, such as "Common
+// Lisp", becomes its first alias without one, or the name with hyphens.
 func normalize(lang string) string {
 	if lang == "Shell" {
 		return langBash
 	}
-	return strings.ToLower(lang)
+	name := strings.ToLower(lang)
+	if !strings.ContainsAny(name, " \t") {
+		return name
+	}
+	if info, err := enry.GetLanguageInfo(lang); err == nil {
+		for _, alias := range info.Aliases {
+			if alias != "" && !strings.ContainsAny(alias, " \t") {
+				return alias
+			}
+		}
+	}
+	return strings.Join(strings.Fields(name), "-")
 }

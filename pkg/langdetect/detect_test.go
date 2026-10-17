@@ -166,6 +166,7 @@ func TestDetect_ConfidentLanguages(t *testing.T) {
 		{"json array", "[\"a\", \"b\"]", "json"},
 		{"uppercase sql insert", "INSERT INTO users (id) VALUES (1);", "sql"},
 		{"dockerfile with arg", "ARG BASE=golang\nFROM ${BASE}\nRUN go build", "dockerfile"},
+		{"multi-word language name uses an alias", "#!/usr/bin/env sbcl\n(print 1)", "lisp"},
 	}
 
 	for _, tt := range tests {
