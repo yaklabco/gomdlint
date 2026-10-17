@@ -1,0 +1,806 @@
+package rules
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"html"
+	"math"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
+	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
+)
+
+// Fix safety check.
+//
+// A fix is offered only when it changes the document the way its rule
+// intends and in no other way. fixesKeepDocument parses the blocks around
+// a fix twice, as they are and with the fix applied, with the document's
+// flavor, and summarizes each parse as a list of blocks: their kind,
+// attributes (heading level and style, list type and tightness, code fence
+// info, table alignment), nesting, and rendered text, with inline markup,
+// link destinations and decoded escapes and character references. The
+// summaries must match, except for the rule's target block, which must
+// become what the rule says. Rules offer their fixes to a fixChecker, which
+// keeps the fixes that pass and checks them together where it can.
+
+// fixIntent describes the change a fix is meant to make. The zero value
+// allows no change: every block keeps its kind, attributes, nesting and
+// text.
+type fixIntent struct {
+	// target is the leaf block (paragraph, heading, table cell, code block,
+	// HTML block or thematic break) whose summary may change.
+	target *mdast.Node
+	// into lists the blocks that target becomes, in order. Empty keeps
+	// target as it is.
+	into []blockWant
+}
+
+// blockWant is one block that a fix's target becomes.
+type blockWant struct {
+	// keep gives the block the target's kind and attributes; otherwise it
+	// has kind and attrs.
+	keep  bool
+	kind  mdast.NodeKind
+	attrs string
+	// from is the part of the target's source whose rendered text the block
+	// holds, without line breaks and whitespace at either end.
+	from mdast.SourceRange
+	// subs change what parts of that source render as.
+	subs []textSub
+}
+
+// textSub replaces the rendering of a source range of the document with
+// text. An empty range inserts text where it lies.
+type textSub struct {
+	rng  mdast.SourceRange
+	text string
+}
+
+// changeText returns the intent of a fix that keeps target's kind and
+// attributes and changes its text by subs.
+func changeText(target *mdast.Node, subs ...textSub) fixIntent {
+	return fixIntent{target: target, into: []blockWant{{keep: true, from: target.SourceRange(), subs: subs}}}
+}
+
+// becomes returns the intent of a fix that turns target into a block of kind
+// with attrs and its text changed by subs.
+func becomes(target *mdast.Node, kind mdast.NodeKind, attrs string, subs ...textSub) fixIntent {
+	return fixIntent{target: target, into: []blockWant{{kind: kind, attrs: attrs, from: target.SourceRange(), subs: subs}}}
+}
+
+// headingAttrs returns the summary attributes of a heading.
+func headingAttrs(level int, style HeadingStyle) string {
+	return fmt.Sprintf("h%d %s", level, style)
+}
+
+// fixChecker collects the fixes that a rule offers and keeps those that
+// pass fixesKeepDocument. It checks them together, with one parse of the
+// blocks around all of them, and only when that fails checks halves of them,
+// down to single fixes, so that a long list with many fixes is not parsed
+// again for each of them.
+type fixChecker struct {
+	ctx     *lint.RuleContext
+	pending []pendingFix
+}
+
+// pendingFix is a fix that a fixChecker has yet to check.
+type pendingFix struct {
+	edits  []fix.TextEdit
+	intent fixIntent
+}
+
+// newFixChecker returns a fixChecker for a rule's run.
+func newFixChecker(ctx *lint.RuleContext) *fixChecker {
+	return &fixChecker{ctx: ctx}
+}
+
+// offer records a fix and returns builder, so that a diagnostic carries its
+// edits until filter checks them.
+func (c *fixChecker) offer(builder *fix.EditBuilder, intent fixIntent) *fix.EditBuilder {
+	if builder == nil || len(builder.Edits) == 0 {
+		return nil
+	}
+	c.pending = append(c.pending, pendingFix{edits: slices.Clone(builder.Edits), intent: intent})
+	return builder
+}
+
+// filter checks the offered fixes and removes from diags those that fail.
+// When the run was cancelled, it removes them all.
+func (c *fixChecker) filter(diags []lint.Diagnostic) []lint.Diagnostic {
+	safe := make(map[string]bool, len(c.pending))
+	if !c.ctx.Cancelled() {
+		order := make([]int, len(c.pending))
+		for idx := range order {
+			order[idx] = idx
+		}
+		sort.SliceStable(order, func(a, b int) bool {
+			return c.pending[order[a]].edits[0].StartOffset < c.pending[order[b]].edits[0].StartOffset
+		})
+		c.check(order, safe)
+	}
+	for idx := range diags {
+		if len(diags[idx].FixEdits) > 0 && !safe[editsKey(diags[idx].FixEdits)] {
+			diags[idx].FixEdits = nil
+		}
+	}
+	return diags
+}
+
+// check checks the fixes in group, which is in document order, and records
+// those that pass in safe.
+func (c *fixChecker) check(group []int, safe map[string]bool) {
+	if len(group) == 0 {
+		return
+	}
+	var edits []fix.TextEdit
+	intents := make([]fixIntent, 0, len(group))
+	for _, idx := range group {
+		edits = append(edits, c.pending[idx].edits...)
+		intents = append(intents, c.pending[idx].intent)
+	}
+	if fixesKeepDocument(c.ctx, edits, intents) {
+		for _, idx := range group {
+			safe[editsKey(c.pending[idx].edits)] = true
+		}
+		return
+	}
+	if len(group) > 1 {
+		half := len(group) / 2
+		c.check(group[:half], safe)
+		c.check(group[half:], safe)
+	}
+}
+
+// editsKey identifies a fix by its edits.
+func editsKey(edits []fix.TextEdit) string {
+	var key strings.Builder
+	for _, edit := range edits {
+		fmt.Fprintf(&key, "%d:%d:%q;", edit.StartOffset, edit.EndOffset, edit.NewText)
+	}
+	return key.String()
+}
+
+// fixesKeepDocument reports whether applying edits changes the document only
+// as the intents say.
+func fixesKeepDocument(ctx *lint.RuleContext, edits []fix.TextEdit, intents []fixIntent) bool {
+	file := ctx.File
+	if file == nil || file.Root == nil || len(edits) == 0 {
+		return false
+	}
+	low, high := edits[0].StartOffset, edits[0].EndOffset
+	for _, edit := range edits[1:] {
+		low, high = min(low, edit.StartOffset), max(high, edit.EndOffset)
+	}
+	for _, intent := range intents {
+		if intent.target != nil {
+			rng := intent.target.SourceRange()
+			low, high = min(low, rng.StartOffset), max(high, rng.EndOffset)
+		}
+	}
+	if low < 0 || high > len(file.Content) {
+		return false
+	}
+
+	// Parsed on their own, the blocks of a window that does not start the
+	// document must not be taken for front matter, so a blank line goes
+	// first.
+	start, end, looseDepth := fixWindow(file, low, high)
+	prefix := ""
+	if start > 0 {
+		prefix = "\n"
+	}
+	shift := len(prefix) - start
+	before := append([]byte(prefix), file.Content[start:end]...)
+	after, ok := applyShiftedEdits(before, edits, shift)
+	if !ok {
+		return false
+	}
+	beforeDoc, ok := reparse(ctx, before)
+	if !ok {
+		return false
+	}
+	afterDoc, ok := reparse(ctx, after)
+	if !ok {
+		return false
+	}
+	beforeBlocks, afterBlocks := summarizeBlocks(beforeDoc, -shift), summarizeBlocks(afterDoc, 0)
+	if looseDepth >= 0 {
+		loosenLists(beforeBlocks, looseDepth)
+		loosenLists(afterBlocks, looseDepth)
+	}
+	want, ok := expectedBlocks(beforeBlocks, intents)
+	if !ok {
+		return false
+	}
+	return slices.EqualFunc(want, afterBlocks, sameBlock)
+}
+
+// loosenLists marks the lists at depth as loose. A window that holds some of
+// the items of a loose list need not show that the list is loose, and none of
+// the fixes removes the blank lines that make it so.
+func loosenLists(blocks []blockSummary, depth int) {
+	for idx := range blocks {
+		if blocks[idx].kind == mdast.NodeList && blocks[idx].depth == depth {
+			blocks[idx].attrs = strings.Replace(blocks[idx].attrs, "tight=true", "tight=false", 1)
+		}
+	}
+}
+
+// leafBlockAt returns the innermost block of root whose source holds
+// offset, or nil.
+func leafBlockAt(root *mdast.Node, offset int) *mdast.Node {
+	var found *mdast.Node
+	for node := root; node != nil; {
+		var next *mdast.Node
+		for child := node.FirstChild; child != nil; child = child.Next {
+			rng := child.SourceRange()
+			if !child.IsInline() && rng.StartOffset <= offset && offset < rng.EndOffset {
+				next = child
+				break
+			}
+		}
+		if next == nil {
+			break
+		}
+		found, node = next, next
+	}
+	return found
+}
+
+// fixWindow returns the part of the document that fixesKeepDocument parses
+// for a change from low to high. It holds the top-level blocks that the
+// change touches, with one more block on either side, so that a change in
+// how a block starts or ends shows, from the start of the first block's line
+// to the end of the last block's line; it starts at the start of the
+// document or ends at its end when the change reaches the first or last
+// block.
+//
+// While the change lies inside one list or blockquote that is a top-level
+// block or a block of a blockquote, and away from its first and last item or
+// block, the window narrows to the items or blocks of that container in the
+// same way: a long list is then not parsed whole for each fix in it. Lines
+// keep their blockquote markers, so the window parses with the same nesting.
+// looseDepth is the depth of the list whose items the window holds when that
+// list is loose, and -1 otherwise.
+func fixWindow(file *mdast.FileSnapshot, low, high int) (int, int, int) {
+	type level struct {
+		container   *mdast.Node
+		depth       int
+		children    []*mdast.Node
+		first, last int
+	}
+	children, first, last := blockSlice(file.Root, low, high)
+	levels := []level{{container: file.Root, children: children, first: first, last: last}}
+	for {
+		current := levels[len(levels)-1]
+		if current.container.Kind == mdast.NodeList || current.first != current.last ||
+			current.first < 0 || current.first >= len(current.children) {
+			break
+		}
+		child := current.children[current.first]
+		if child.Kind != mdast.NodeList && child.Kind != mdast.NodeBlockquote {
+			break
+		}
+		inner, innerFirst, innerLast := blockSlice(child, low, high)
+		levels = append(levels, level{
+			container: child, depth: current.depth + 1, children: inner, first: innerFirst, last: innerLast,
+		})
+	}
+	chosen := levels[0]
+	for _, candidate := range levels[1:] {
+		if min(candidate.first, candidate.last) >= 1 && max(candidate.first, candidate.last) <= len(candidate.children)-2 {
+			chosen = candidate
+		}
+	}
+	container, depth := chosen.container, chosen.depth
+	children, first, last = chosen.children, chosen.first, chosen.last
+	if len(children) == 0 {
+		return 0, len(file.Content), -1
+	}
+
+	first, last = max(min(first, last)-1, 0), min(max(first, last)+1, len(children)-1)
+	start := 0
+	if first > 0 || container != file.Root {
+		start = lineStartOf(file, children[first].SourceRange().StartOffset)
+	}
+	end := len(file.Content)
+	if last < len(children)-1 || container != file.Root {
+		end = lineEndOf(file, children[last].SourceRange().EndOffset)
+	}
+	looseDepth := -1
+	if container.Kind == mdast.NodeList && !lint.IsTightList(container) {
+		looseDepth = depth - 1
+	}
+	return min(start, lineStartOf(file, low)), max(end, lineEndOf(file, high)), looseDepth
+}
+
+// blockSlice returns the block children of container and the indexes of the
+// first one that ends at or after low and of the last one that starts at or
+// before high. first is greater than last when the range lies between two
+// children.
+func blockSlice(container *mdast.Node, low, high int) ([]*mdast.Node, int, int) {
+	var children []*mdast.Node
+	for child := container.FirstChild; child != nil; child = child.Next {
+		if !child.IsInline() {
+			children = append(children, child)
+		}
+	}
+	first := sort.Search(len(children), func(i int) bool { return children[i].SourceRange().EndOffset >= low })
+	last := sort.Search(len(children), func(i int) bool { return children[i].SourceRange().StartOffset > high }) - 1
+	return children, first, last
+}
+
+// lineStartOf returns the offset where the line holding offset starts.
+func lineStartOf(file *mdast.FileSnapshot, offset int) int {
+	if line := lineOf(file, offset); line != nil {
+		return line.StartOffset
+	}
+	return min(max(offset, 0), len(file.Content))
+}
+
+// lineEndOf returns the offset after the line ending of the line holding
+// offset, or after the line that ends just before it.
+func lineEndOf(file *mdast.FileSnapshot, offset int) int {
+	if offset > 0 {
+		offset--
+	}
+	if line := lineOf(file, offset); line != nil {
+		return line.EndOffset
+	}
+	return len(file.Content)
+}
+
+// applyShiftedEdits applies edits, whose offsets are shift bytes off from
+// text's, to a copy of text.
+func applyShiftedEdits(text []byte, edits []fix.TextEdit, shift int) ([]byte, bool) {
+	shifted := make([]fix.TextEdit, 0, len(edits))
+	for _, edit := range edits {
+		edit.StartOffset += shift
+		edit.EndOffset += shift
+		shifted = append(shifted, edit)
+	}
+	prepared, err := fix.PrepareEdits(shifted, len(text))
+	if err != nil {
+		return nil, false
+	}
+	return fix.ApplyEdits(slices.Clone(text), prepared), true
+}
+
+// parseFlavor returns the Markdown flavor the document was linted with.
+func parseFlavor(ctx *lint.RuleContext) string {
+	if ctx.Config != nil && ctx.Config.Flavor != "" {
+		return string(ctx.Config.Flavor)
+	}
+	return string(config.FlavorCommonMark)
+}
+
+// reparse parses text on its own with the document's flavor.
+func reparse(ctx *lint.RuleContext, text []byte) (*mdast.FileSnapshot, bool) {
+	parseCtx := ctx.Ctx
+	if parseCtx == nil {
+		parseCtx = context.Background()
+	}
+	snapshot, err := gmparser.New(parseFlavor(ctx)).Parse(parseCtx, "", text)
+	if err != nil || snapshot == nil || snapshot.Root == nil {
+		return nil, false
+	}
+	return snapshot, true
+}
+
+// blockSummary is what fixesKeepDocument compares of a block.
+type blockSummary struct {
+	depth int
+	kind  mdast.NodeKind
+	attrs string
+	// start is where the block starts in the document.
+	start int
+	atoms []textAtom
+}
+
+// text returns the block's rendered text. Like CommonMark, it leaves out
+// whitespace and line breaks at either end of inline content.
+func (b blockSummary) text() string {
+	var out strings.Builder
+	for _, atom := range b.atoms {
+		out.WriteString(atom.text)
+	}
+	if hasInlineContent(b.kind) {
+		return trimRendered(out.String())
+	}
+	return out.String()
+}
+
+// hasInlineContent reports whether blocks of kind hold inline content.
+func hasInlineContent(kind mdast.NodeKind) bool {
+	return kind == mdast.NodeParagraph || kind == mdast.NodeHeading || kind == mdast.NodeTableCell
+}
+
+// sameBlock reports whether two summaries match.
+func sameBlock(a, b blockSummary) bool {
+	return a.depth == b.depth && a.kind == b.kind && a.attrs == b.attrs && a.text() == b.text()
+}
+
+// textAtom is a piece of a block's rendered text and the source it comes
+// from.
+type textAtom struct {
+	text string
+	rng  mdast.SourceRange
+	// linear is true when text is a copy of the source in rng, so that each
+	// byte has its own offset.
+	linear bool
+}
+
+// summarizeBlocks lists the blocks of doc in document order. offset is
+// added to source offsets, to map them to the document a window comes from.
+func summarizeBlocks(doc *mdast.FileSnapshot, offset int) []blockSummary {
+	var blocks []blockSummary
+	var visit func(parent *mdast.Node, depth int)
+	visit = func(parent *mdast.Node, depth int) {
+		for node := parent.FirstChild; node != nil; node = node.Next {
+			if node.IsInline() {
+				continue
+			}
+			summary := blockSummary{
+				depth: depth,
+				kind:  node.Kind,
+				attrs: blockAttrs(doc, node),
+				start: node.SourceRange().StartOffset + offset,
+			}
+			render := &atomRenderer{doc: doc, offset: offset}
+			switch {
+			case hasInlineContent(node.Kind):
+				render.inlines(node)
+			case node.Kind == mdast.NodeCodeBlock:
+				render.raw(node.ContentRange())
+			case node.Kind == mdast.NodeHTMLBlock:
+				render.raw(node.SourceRange())
+			}
+			summary.atoms = render.atoms
+			blocks = append(blocks, summary)
+			visit(node, depth+1)
+		}
+	}
+	visit(doc.Root, 0)
+	return blocks
+}
+
+// blockAttrs returns the attributes of a block that its summary compares.
+func blockAttrs(doc *mdast.FileSnapshot, node *mdast.Node) string {
+	block := node.Block
+	switch {
+	case node.Kind == mdast.NodeHeading:
+		return headingAttrs(lint.HeadingLevel(node), detectHeadingStyle(doc, node))
+	case block == nil:
+		return ""
+	case node.Kind == mdast.NodeList && block.List != nil:
+		list := block.List
+		return fmt.Sprintf("ordered=%t bullet=%q start=%d delimiter=%q tight=%t",
+			list.Ordered, list.BulletMarker, list.StartNumber, list.Delimiter, list.Tight)
+	case node.Kind == mdast.NodeCodeBlock && block.CodeBlock != nil:
+		return fmt.Sprintf("indented=%t info=%q", block.CodeBlock.Indented, block.CodeBlock.Info)
+	case block.Table != nil:
+		return fmt.Sprintf("%v %t %v", block.Table.Alignments, block.Table.Header, block.Table.Alignment)
+	default:
+		return ""
+	}
+}
+
+// atomRenderer renders the inline content of a block as atoms.
+type atomRenderer struct {
+	doc    *mdast.FileSnapshot
+	offset int
+	atoms  []textAtom
+}
+
+// token adds markup text that rng's source stands for.
+func (r *atomRenderer) token(text string, start, end int) {
+	r.atoms = append(r.atoms, textAtom{
+		text: text,
+		rng:  mdast.SourceRange{StartOffset: start + r.offset, EndOffset: end + r.offset},
+	})
+}
+
+// raw adds the source in rng as it is.
+func (r *atomRenderer) raw(rng mdast.SourceRange) {
+	if rng.StartOffset < 0 || rng.EndOffset > len(r.doc.Content) || rng.IsEmpty() {
+		return
+	}
+	r.atoms = append(r.atoms, textAtom{
+		text:   string(r.doc.Content[rng.StartOffset:rng.EndOffset]),
+		rng:    mdast.SourceRange{StartOffset: rng.StartOffset + r.offset, EndOffset: rng.EndOffset + r.offset},
+		linear: true,
+	})
+}
+
+// inlines renders the inline children of parent.
+func (r *atomRenderer) inlines(parent *mdast.Node) {
+	for node := parent.FirstChild; node != nil; node = node.Next {
+		full, content := node.SourceRange(), node.ContentRange()
+		switch node.Kind {
+		case mdast.NodeText:
+			r.text(node)
+		case mdast.NodeSoftBreak:
+			r.token("\n", full.StartOffset, full.EndOffset)
+		case mdast.NodeHardBreak:
+			r.token("\x00br\x00", full.StartOffset, full.EndOffset)
+		case mdast.NodeCodeSpan:
+			r.token("\x00code\x00", full.StartOffset, content.StartOffset)
+			r.literal(node.Inline, content)
+			r.token("\x00/code\x00", content.EndOffset, full.EndOffset)
+		case mdast.NodeHTMLInline:
+			r.token("\x00html\x00", full.StartOffset, full.StartOffset)
+			r.raw(full)
+			r.token("\x00/html\x00", full.EndOffset, full.EndOffset)
+		case mdast.NodeTaskCheckbox:
+			checked := node.Inline != nil && node.Inline.Checked
+			r.token(fmt.Sprintf("\x00task %t\x00", checked), full.StartOffset, full.EndOffset)
+		default:
+			target := ""
+			if node.Inline != nil && node.Inline.Link != nil {
+				target = node.Inline.Link.Destination + "\x01" + node.Inline.Link.Title
+			}
+			r.token(markupToken(node.Kind, target, false), full.StartOffset, content.StartOffset)
+			r.inlines(node)
+			r.token(markupToken(node.Kind, "", true), content.EndOffset, full.EndOffset)
+		}
+	}
+}
+
+// markupToken returns the summary token that stands for the opening
+// delimiter of inline markup of kind, such as emphasis or a link, or with
+// closing for its closing delimiter. target holds a link's destination and
+// title.
+func markupToken(kind mdast.NodeKind, target string, closing bool) string {
+	name := strings.ToLower(kind.String())
+	switch {
+	case closing:
+		return "\x00/" + name + "\x00"
+	case target != "":
+		return "\x00" + name + " " + target + "\x00"
+	default:
+		return "\x00" + name + "\x00"
+	}
+}
+
+// literal adds an inline node's text, which comes from the source in rng.
+func (r *atomRenderer) literal(inline *mdast.InlineAttrs, rng mdast.SourceRange) {
+	if inline == nil {
+		return
+	}
+	if rng.StartOffset >= 0 && rng.EndOffset <= len(r.doc.Content) &&
+		bytes.Equal(r.doc.Content[rng.StartOffset:rng.EndOffset], inline.Text) {
+		r.raw(rng)
+		return
+	}
+	r.token(string(inline.Text), rng.StartOffset, rng.EndOffset)
+}
+
+// characterReferenceStart matches a character reference at the start of
+// text.
+var characterReferenceStart = regexp.MustCompile(`^` + characterReferencePattern.String())
+
+// text adds a text node, with backslash escapes and character references
+// decoded, as they render.
+func (r *atomRenderer) text(node *mdast.Node) {
+	start, ok := textNodeStart(r.doc, node)
+	if !ok {
+		r.literal(node.Inline, node.SourceRange())
+		return
+	}
+	text := node.Inline.Text
+	runStart := 0
+	flush := func(end int) {
+		if end > runStart {
+			r.raw(mdast.SourceRange{StartOffset: start + runStart, EndOffset: start + end})
+		}
+	}
+	for idx := 0; idx < len(text); {
+		size := 0
+		decoded := ""
+		switch {
+		case text[idx] == '\\' && idx+1 < len(text) && isASCIIPunctuation(text[idx+1]):
+			size, decoded = 2, string(text[idx+1])
+		case text[idx] == '&':
+			if loc := characterReferenceStart.FindIndex(text[idx:]); loc != nil {
+				reference := string(text[idx : idx+loc[1]])
+				if unescaped := html.UnescapeString(reference); unescaped != reference {
+					size, decoded = loc[1], unescaped
+				}
+			}
+		}
+		if size == 0 {
+			idx++
+			continue
+		}
+		flush(idx)
+		r.token(decoded, start+idx, start+idx+size)
+		idx += size
+		runStart = idx
+	}
+	flush(len(text))
+}
+
+// expectedBlocks returns the summaries that fixes with intents should
+// leave, given the summaries before them. ok is false when an intent's target
+// is not a leaf block among them, when two intents change one block in ways
+// that cannot be merged, or when a block an intent makes would split an atom.
+func expectedBlocks(before []blockSummary, intents []fixIntent) ([]blockSummary, bool) {
+	type blockKey struct {
+		kind  mdast.NodeKind
+		start int
+	}
+	index := make(map[blockKey]int, len(before))
+	for idx, block := range before {
+		if _, seen := index[blockKey{block.kind, block.start}]; !seen {
+			index[blockKey{block.kind, block.start}] = idx
+		}
+	}
+	plans := make(map[int][]blockWant)
+	for _, intent := range intents {
+		if intent.target == nil {
+			continue
+		}
+		idx, found := index[blockKey{intent.target.Kind, intent.target.SourceRange().StartOffset}]
+		if !found || (idx+1 < len(before) && before[idx+1].depth > before[idx].depth) {
+			return nil, false
+		}
+		into, ok := mergeWants(plans[idx], intent.into)
+		if !ok {
+			return nil, false
+		}
+		plans[idx] = into
+	}
+
+	want := make([]blockSummary, 0, len(before))
+	for idx, target := range before {
+		into := plans[idx]
+		if len(into) == 0 {
+			want = append(want, target)
+			continue
+		}
+		for _, block := range into {
+			atoms, ok := atomsWithin(target.atoms, block.from)
+			if !ok {
+				return nil, false
+			}
+			summary := blockSummary{
+				depth: target.depth,
+				kind:  block.kind,
+				attrs: block.attrs,
+				atoms: []textAtom{{text: substitute(atoms, block.subs)}},
+			}
+			if block.keep {
+				summary.kind, summary.attrs = target.kind, target.attrs
+			}
+			want = append(want, summary)
+		}
+	}
+	return want, true
+}
+
+// mergeWants combines what two fixes make of one block: either may keep it
+// as it is, and two text changes that keep its kind merge their subs. ok is
+// false for anything else.
+func mergeWants(earlier, later []blockWant) ([]blockWant, bool) {
+	switch {
+	case len(earlier) == 0:
+		return later, true
+	case len(later) == 0:
+		return earlier, true
+	case len(earlier) == 1 && len(later) == 1 && earlier[0].keep && later[0].keep && earlier[0].from == later[0].from:
+		merged := earlier[0]
+		merged.subs = append(slices.Clone(earlier[0].subs), later[0].subs...)
+		return []blockWant{merged}, true
+	default:
+		return nil, false
+	}
+}
+
+// atomsWithin returns the atoms, or parts of linear atoms, whose source lies
+// within rng. ok is false when an atom that is not linear crosses an end of
+// rng.
+func atomsWithin(atoms []textAtom, rng mdast.SourceRange) ([]textAtom, bool) {
+	var within []textAtom
+	for _, atom := range atoms {
+		switch {
+		case atom.rng.StartOffset >= rng.StartOffset && atom.rng.EndOffset <= rng.EndOffset:
+			within = append(within, atom)
+		case atom.rng.EndOffset <= rng.StartOffset || atom.rng.StartOffset >= rng.EndOffset:
+		case atom.linear:
+			start := max(atom.rng.StartOffset, rng.StartOffset)
+			end := min(atom.rng.EndOffset, rng.EndOffset)
+			within = append(within, textAtom{
+				text:   atom.text[start-atom.rng.StartOffset : end-atom.rng.StartOffset],
+				rng:    mdast.SourceRange{StartOffset: start, EndOffset: end},
+				linear: true,
+			})
+		default:
+			return nil, false
+		}
+	}
+	return within, true
+}
+
+// substitute renders atoms with subs applied: the text of a sub replaces the
+// atoms, or bytes of linear atoms, whose source it overlaps, and a sub that
+// overlaps none is inserted where its range starts.
+func substitute(atoms []textAtom, subs []textSub) string {
+	overlapsAtom := make([]bool, len(subs))
+	for idx, sub := range subs {
+		overlapsAtom[idx] = slices.ContainsFunc(atoms, func(atom textAtom) bool {
+			return rangesOverlap(sub.rng, atom.rng)
+		})
+	}
+	var out strings.Builder
+	used := make([]bool, len(subs))
+	use := func(idx int) {
+		if !used[idx] {
+			out.WriteString(subs[idx].text)
+			used[idx] = true
+		}
+	}
+	insertBefore := func(offset int) {
+		for idx, sub := range subs {
+			if !used[idx] && !overlapsAtom[idx] && sub.rng.StartOffset <= offset {
+				use(idx)
+			}
+		}
+	}
+	covering := func(rng mdast.SourceRange) int {
+		for idx, sub := range subs {
+			if rangesOverlap(sub.rng, rng) {
+				return idx
+			}
+		}
+		return -1
+	}
+	for _, atom := range atoms {
+		if !atom.linear {
+			if idx := covering(atom.rng); idx >= 0 {
+				use(idx)
+				continue
+			}
+			insertBefore(atom.rng.StartOffset)
+			out.WriteString(atom.text)
+			continue
+		}
+		for pos := range len(atom.text) {
+			offset := atom.rng.StartOffset + pos
+			if idx := covering(mdast.SourceRange{StartOffset: offset, EndOffset: offset + 1}); idx >= 0 {
+				use(idx)
+				continue
+			}
+			insertBefore(offset)
+			out.WriteByte(atom.text[pos])
+		}
+	}
+	insertBefore(math.MaxInt)
+	return out.String()
+}
+
+// rangesOverlap reports whether two ranges share a byte.
+func rangesOverlap(a, b mdast.SourceRange) bool {
+	return a.StartOffset < b.EndOffset && b.StartOffset < a.EndOffset
+}
+
+// trimRendered removes whitespace and line breaks at both ends of rendered
+// inline content.
+func trimRendered(text string) string {
+	const hardBreak = "\x00br\x00"
+	for {
+		trimmed := strings.Trim(text, " \t\n")
+		trimmed = strings.TrimPrefix(strings.TrimSuffix(trimmed, hardBreak), hardBreak)
+		if trimmed == text {
+			return text
+		}
+		text = trimmed
+	}
+}

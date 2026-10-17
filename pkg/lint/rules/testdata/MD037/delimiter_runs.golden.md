@@ -6,7 +6,7 @@ One-sided **bold** text.
 
 And **bold** too.
 
-Some *valid* and *invalid* here.
+Some *valid* and * invalid * here.
 
 Escaped \* stars \* stay.
 

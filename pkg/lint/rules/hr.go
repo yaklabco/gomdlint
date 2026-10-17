@@ -56,6 +56,7 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	configStyle := strings.TrimSpace(ctx.OptionString("style", styleConsistent))
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 	var expectedStyle string
 
 	if configStyle != styleConsistent {
@@ -64,7 +65,7 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	for _, node := range ctx.ThematicBreaks() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		rng := node.SourceRange()
@@ -95,14 +96,14 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			if hrFixAllowed(ctx.File, node, pos.StartLine, expectedStyle) {
 				builder := fix.NewEditBuilder()
 				builder.ReplaceRange(rng.StartOffset, rng.StartOffset+len(marker), expectedStyle)
-				diagBuilder = diagBuilder.WithFix(builder)
+				diagBuilder = diagBuilder.WithFix(checker.offer(builder, fixIntent{}))
 			}
 
 			diags = append(diags, diagBuilder.Build())
 		}
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // hrFixAllowed reports whether the thematic break node on line can be

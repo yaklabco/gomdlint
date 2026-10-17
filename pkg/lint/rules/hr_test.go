@@ -112,10 +112,17 @@ func TestHRStyleRule_SafeFix(t *testing.T) {
 		},
 		{
 			name:      "trailing whitespace is kept",
-			input:     "---\n\n***   \n",
-			wantLines: []int{3},
+			input:     "Text\n\n---\n\n***   \n",
+			wantLines: []int{5},
 			wantFix:   true,
-			wantFixed: "---\n\n---   \n",
+			wantFixed: "Text\n\n---\n\n---   \n",
+		},
+		{
+			// "---" on the first line and again below would read as front
+			// matter.
+			name:      "no fix that makes front matter",
+			input:     "---\n\n***\n",
+			wantLines: []int{3},
 		},
 		{
 			name:      "no fix to a style that is not a horizontal rule",

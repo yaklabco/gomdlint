@@ -67,7 +67,9 @@ func applyGFMRule(t *testing.T, rule lint.Rule, input string, options map[string
 	if options != nil {
 		ruleCfg = &config.RuleConfig{Options: options}
 	}
-	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
+	cfg := config.NewConfig()
+	cfg.Flavor = config.FlavorGFM
+	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, ruleCfg))
 	require.NoError(t, err)
 	return diags
 }
@@ -160,6 +162,19 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 			wantLines: []int{1},
 		},
 		{
+			// Single asterisks with whitespace on both sides read as
+			// multiplication, so no fix is offered.
+			name:      "multiplication is reported without a fix",
+			input:     "The product is a * b * c.\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "single asterisk spaced on one side only",
+			input:     "Some *text * here\n",
+			wantLines: []int{1},
+			wantFixed: "Some *text* here\n",
+		},
+		{
 			name:      "space only after the opening marker",
 			input:     "One-sided ** bold** here\n",
 			wantLines: []int{1},
@@ -184,38 +199,43 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 		{name: "markers inside strong text", input: "**bold * x * here**\n", wantLines: []int{}},
 		{name: "markers inside link text", input: "[a * x * b](https://example.com)\n", wantLines: []int{}},
 		{
-			name:      "letters between markers",
+			name:      "letters between spaced single asterisks",
 			input:     "a * b * c\n",
 			wantLines: []int{1},
-			wantFixed: "a *b* c\n",
+		},
+		{
+			name:      "letters between spaced underscores",
+			input:     "a _ b _ c\n",
+			wantLines: []int{1},
+			wantFixed: "a _b_ c\n",
 		},
 		{
 			name:      "heading",
-			input:     "# Title * x *\n",
+			input:     "# Title *x *\n",
 			wantLines: []int{1},
 			wantFixed: "# Title *x*\n",
 		},
 		{
 			name:      "tight list item",
-			input:     "- a * x * b\n",
+			input:     "- a *x * b\n",
 			wantLines: []int{1},
 			wantFixed: "- a *x* b\n",
 		},
 		{
 			name:      "blockquote",
-			input:     "> a * x * b\n",
+			input:     "> a *x * b\n",
 			wantLines: []int{1},
 			wantFixed: "> a *x* b\n",
 		},
 		{
 			name:      "after inline HTML",
-			input:     "a <b>x</b> * y * z\n",
+			input:     "a <b>x</b> ** y** z\n",
 			wantLines: []int{1},
-			wantFixed: "a <b>x</b> *y* z\n",
+			wantFixed: "a <b>x</b> **y** z\n",
 		},
 		{
 			name:      "table cell",
-			input:     "| A | B |\n| - | - |\n| a * x * b | c |\n",
+			input:     "| A | B |\n| - | - |\n| a *x * b | c |\n",
 			wantLines: []int{3},
 			wantFixed: "| A | B |\n| - | - |\n| a *x* b | c |\n",
 		},
@@ -602,7 +622,7 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			// Matched emphasis on the same line does not pair with the
 			// unmatched markers.
 			name:      "valid emphasis before spaced markers",
-			input:     "Some *valid* and * invalid * here.\n",
+			input:     "Some *valid* and *invalid * here.\n",
 			wantDiags: 1,
 			wantFix:   "Some *valid* and *invalid* here.\n",
 		},
@@ -613,10 +633,12 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			wantFix:   "Some *text* here.\n",
 		},
 		{
+			// Reported, but single asterisks spaced on both sides could be
+			// multiplication, so the fix is withheld.
 			name:      "single violation - spaces in asterisk emphasis",
 			input:     "Some * text * here.\n",
 			wantDiags: 1,
-			wantFix:   "Some *text* here.\n",
+			wantFix:   "Some * text * here.\n",
 		},
 		{
 			name:      "strong emphasis with spaces",
@@ -638,7 +660,7 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 		},
 		{
 			name:      "multiple lines with violations",
-			input:     "First * line * text.\n\nSecond * para * here.\n",
+			input:     "First *line * text.\n\nSecond * para* here.\n",
 			wantDiags: 2,
 			wantFix:   "First *line* text.\n\nSecond *para* here.\n",
 		},
@@ -658,7 +680,7 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 		},
 		{
 			name:      "violation at end of line",
-			input:     "text * spaced *\n",
+			input:     "text *spaced *\n",
 			wantDiags: 1,
 			wantFix:   "text *spaced*\n",
 		},
@@ -694,6 +716,9 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
+			if string(fixed) == tt.input {
+				return
+			}
 			snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
 			require.NoError(t, err)
 			ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)

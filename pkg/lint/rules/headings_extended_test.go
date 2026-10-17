@@ -517,6 +517,20 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			wantFixed: "## ##\n",
 		},
 		{name: "MD019 skips an empty closed heading", rule: NewNoMultipleSpaceATXRule(), input: "##  ##\n", wantLines: []int{}},
+		{
+			name:      "MD019 after a byte order mark",
+			rule:      NewNoMultipleSpaceATXRule(),
+			input:     "\uFEFF##  Heading\n",
+			wantLines: []int{1},
+			wantFixed: "\uFEFF## Heading\n",
+		},
+		{
+			name:      "MD021 after a byte order mark",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "\uFEFF#  Closed  #\n",
+			wantLines: []int{1},
+			wantFixed: "\uFEFF# Closed #\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -700,6 +714,20 @@ func TestHeadingStartLeftRule_Containers(t *testing.T) {
 			input:     "\uFEFF>  # Quoted\n",
 			wantLines: []int{1},
 			wantFixed: "\uFEFF> # Quoted\n",
+		},
+		{
+			// The list item claims two of the tab's four columns; deleting
+			// the tab would move the heading out of the list.
+			name:      "heading after a tab the list item claims in part",
+			input:     "- item\n\n\t## Heading\n",
+			wantLines: []int{3},
+			wantFixed: "- item\n\n  ## Heading\n",
+		},
+		{
+			name:      "quoted heading after a tab the blockquote claims in part",
+			input:     ">\t # Heading\n",
+			wantLines: []int{1},
+			wantFixed: "> # Heading\n",
 		},
 	}
 
@@ -979,6 +1007,21 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 			wantLines: []int{1},
 			wantFix:   true,
 			wantFixed: "# Foo &copy;\n",
+		},
+		{
+			// Deleting only the "!" would leave the backslash showing.
+			name:      "escaped punctuation",
+			input:     "# Text\\!\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Text\n",
+		},
+		{
+			name:      "punctuation after an escaped backslash",
+			input:     "# Text\\\\!\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Text\\\\\n",
 		},
 	}
 

@@ -1,8 +1,6 @@
 package rules
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"strings"
 
@@ -10,7 +8,6 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
-	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // HeadingIncrementRule checks that heading levels increment by one.
@@ -220,10 +217,11 @@ func (r *HeadingStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		detectedStyle := detectHeadingStyle(ctx.File, heading)
@@ -238,11 +236,11 @@ func (r *HeadingStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 		expected := expectedHeadingStyle(style, lint.HeadingLevel(heading), requireClosingATX)
 		if detectedStyle != expected {
-			diags = append(diags, r.createStyleDiagnostic(ctx, heading, detectedStyle, expected))
+			diags = append(diags, r.createStyleDiagnostic(ctx, checker, heading, detectedStyle, expected))
 		}
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // expectedHeadingStyle returns the style a heading of the given level must use.
@@ -268,6 +266,7 @@ func expectedHeadingStyle(style HeadingStyle, level int, requireClosingATX bool)
 
 func (r *HeadingStyleRule) createStyleDiagnostic(
 	ctx *lint.RuleContext,
+	checker *fixChecker,
 	heading *mdast.Node,
 	detected, expected HeadingStyle,
 ) lint.Diagnostic {
@@ -279,7 +278,7 @@ func (r *HeadingStyleRule) createStyleDiagnostic(
 
 	// Only auto-fix ATX style changes (not setext conversions).
 	if canAutoFix(detected, expected) {
-		fixBuilder := buildHeadingStyleFix(ctx, heading, detected, expected)
+		fixBuilder := buildHeadingStyleFix(ctx, checker, heading, detected, expected)
 		if fixBuilder != nil {
 			builder = builder.WithFix(fixBuilder)
 		}
@@ -412,106 +411,6 @@ func detectHeadingStyle(file *mdast.FileSnapshot, heading *mdast.Node) HeadingSt
 	}
 }
 
-// headingText returns a heading's text without trailing whitespace.
-func headingText(file *mdast.FileSnapshot, heading *mdast.Node) string {
-	if rng, ok := headingContentRange(file, heading); ok {
-		return string(file.Content[rng.StartOffset:rng.EndOffset])
-	}
-	return ""
-}
-
-// parseFlavor returns the Markdown flavor the document was linted with.
-func parseFlavor(ctx *lint.RuleContext) string {
-	if ctx.Config != nil && ctx.Config.Flavor != "" {
-		return string(ctx.Config.Flavor)
-	}
-	return string(config.FlavorCommonMark)
-}
-
-// reparse parses text on its own with the document's flavor.
-func reparse(ctx *lint.RuleContext, text []byte) (*mdast.FileSnapshot, bool) {
-	parseCtx := ctx.Ctx
-	if parseCtx == nil {
-		parseCtx = context.Background()
-	}
-	snapshot, err := gmparser.New(parseFlavor(ctx)).Parse(parseCtx, "", text)
-	if err != nil || snapshot == nil || snapshot.Root == nil {
-		return nil, false
-	}
-	return snapshot, true
-}
-
-// reparsedHeading parses the lines of a heading on their own, without their
-// container prefixes and with edit applied when it is not nil, and returns
-// the heading when the lines hold exactly one. ok is false when the edit
-// does not lie within one line of the heading, outside the container prefix.
-func reparsedHeading(
-	ctx *lint.RuleContext,
-	heading *mdast.Node,
-	edit *fix.TextEdit,
-) (*mdast.FileSnapshot, *mdast.Node, bool) {
-	file := ctx.File
-	full := heading.SourceRange()
-	if full.IsEmpty() || full.EndOffset > len(file.Content) {
-		return nil, nil, false
-	}
-	first, _ := file.LineAt(full.StartOffset)
-	last, _ := file.LineAt(full.EndOffset - 1)
-	var block bytes.Buffer
-	applied := edit == nil
-	for lineNum := first; lineNum <= last; lineNum++ {
-		line := file.Lines[lineNum-1]
-		start := line.StartOffset + len(lint.ContainerPrefix(file, heading, lineNum))
-		end := line.NewlineStart
-		if !applied && edit.StartOffset >= start && edit.EndOffset <= end {
-			block.Write(file.Content[start:edit.StartOffset])
-			block.WriteString(edit.NewText)
-			block.Write(file.Content[edit.EndOffset:end])
-			applied = true
-		} else {
-			block.Write(file.Content[start:end])
-		}
-		block.WriteByte('\n')
-	}
-	if !applied {
-		return nil, nil, false
-	}
-	snapshot, ok := reparse(ctx, block.Bytes())
-	if !ok {
-		return nil, nil, false
-	}
-	parsed := snapshot.Root.FirstChild
-	if parsed == nil || parsed.Next != nil || parsed.Kind != mdast.NodeHeading {
-		return nil, nil, false
-	}
-	return snapshot, parsed, true
-}
-
-// headingEditKeeps reports whether a heading, with edit applied, still parses
-// as one heading of the same level, with the given style and text. Rules use
-// it to withhold fixes that would change the document's structure.
-func headingEditKeeps(
-	ctx *lint.RuleContext,
-	heading *mdast.Node,
-	edit fix.TextEdit,
-	style HeadingStyle,
-	text string,
-) bool {
-	snapshot, edited, ok := reparsedHeading(ctx, heading, &edit)
-	return ok && lint.HeadingLevel(edited) == lint.HeadingLevel(heading) &&
-		detectHeadingStyle(snapshot, edited) == style && headingText(snapshot, edited) == text
-}
-
-// reparsedHeadingText returns the text of a heading as headingEditKeeps sees
-// it: parsed on its own, without container prefixes.
-func reparsedHeadingText(ctx *lint.RuleContext, heading *mdast.Node) (string, bool) {
-	snapshot, parsed, ok := reparsedHeading(ctx, heading, nil)
-	if !ok {
-		return "", false
-	}
-	return headingText(snapshot, parsed), true
-}
-
 // allSameChar returns true if all bytes in b are the same as c.
 func allSameChar(b []byte, c byte) bool {
 	if len(b) == 0 {
@@ -533,11 +432,13 @@ func canAutoFix(from, to HeadingStyle) bool {
 
 // buildHeadingStyleFix converts between open and closed ATX headings. It edits
 // only the text after the heading content, so indentation and container
-// prefixes such as blockquote markers are preserved. It returns nil when the
-// heading text would change, for example when removing the closing sequence
-// of "# Text # #" would make the literal "#" a closing sequence.
+// prefixes such as blockquote markers are preserved. It returns nil unless
+// the fix changes only the heading's style, which it does not when, for
+// example, removing the closing sequence of "# Text # #" would make the
+// literal "#" a closing sequence.
 func buildHeadingStyleFix(
 	ctx *lint.RuleContext,
+	checker *fixChecker,
 	heading *mdast.Node,
 	from, to HeadingStyle,
 ) *fix.EditBuilder {
@@ -561,11 +462,7 @@ func buildHeadingStyleFix(
 	default:
 		return nil
 	}
-	text, ok := reparsedHeadingText(ctx, heading)
-	if !ok || !headingEditKeeps(ctx, heading, edit, to, text) {
-		return nil
-	}
 	builder := fix.NewEditBuilder()
 	builder.ReplaceRange(edit.StartOffset, edit.EndOffset, edit.NewText)
-	return builder
+	return checker.offer(builder, becomes(heading, mdast.NodeHeading, headingAttrs(level, to)))
 }

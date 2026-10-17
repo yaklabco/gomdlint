@@ -54,18 +54,19 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 	htmlLines := htmlBlockLines(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		if ctx.IsLineInCodeBlock(lineNum) || htmlLines[lineNum] {
 			continue
 		}
 
-		lineContent, bom := lineAfterBOM(ctx.File, lineNum)
+		lineContent, bom := lint.LineText(ctx.File, lineNum), lint.LineTextOffset(ctx.File, lineNum)
 		match := atxHeadingNoSpacePattern.FindSubmatch(lineContent)
 		if match == nil || closingHashPattern.Match(lineContent) || bytes.HasPrefix(lineContent, []byte(keycapHash)) {
 			continue
@@ -75,8 +76,14 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		line := ctx.File.Lines[lineNum-1]
 
 		// Build fix: insert space after hashes.
-		builder := fix.NewEditBuilder()
-		builder.Insert(line.StartOffset+bom+len(hashes), " ")
+		hashStart := line.StartOffset + bom
+		hashRange := mdast.SourceRange{StartOffset: hashStart, EndOffset: hashStart + len(hashes)}
+		var offered *fix.EditBuilder
+		if intent, ok := lineHeadingIntent(ctx, line, hashStart, headingAttrs(len(hashes), StyleATX), false, hashRange); ok {
+			builder := fix.NewEditBuilder()
+			builder.Insert(hashRange.EndOffset, " ")
+			offered = checker.offer(builder, intent)
+		}
 
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
@@ -89,26 +96,12 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			"No space after hash on ATX style heading").
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Add a space after the hash characters").
-			WithFix(builder).
+			WithFix(offered).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
-}
-
-// utf8BOM is the UTF-8 byte order mark, which markdownlint strips before
-// linting and the parser skips.
-const utf8BOM = "\xEF\xBB\xBF"
-
-// lineAfterBOM returns the content of a 1-based line without a leading byte
-// order mark, which only the first line can hold, and the mark's length.
-func lineAfterBOM(file *mdast.FileSnapshot, lineNum int) ([]byte, int) {
-	content := lint.LineContent(file, lineNum)
-	if lineNum == 1 && bytes.HasPrefix(content, []byte(utf8BOM)) {
-		return content[len(utf8BOM):], len(utf8BOM)
-	}
-	return content, 0
+	return checker.filter(diags), nil
 }
 
 // htmlBlockLines returns the set of lines occupied by HTML blocks.
@@ -158,10 +151,11 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
 	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 		parts, ok := atxHeadingParts(ctx.File, heading)
 		if !ok || !parts.close.IsEmpty() || parts.openSpace.Len() < 2 {
@@ -177,12 +171,12 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", spaces.Len())).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the hash characters").
-			WithFix(builder).
+			WithFix(checker.offer(builder, fixIntent{})).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // rangePosition converts a byte range to a line and column position.
@@ -244,21 +238,26 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 	htmlLines := htmlBlockLines(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		if ctx.IsLineInCodeBlock(lineNum) || htmlLines[lineNum] {
 			continue
 		}
 
-		lineContent, bom := lineAfterBOM(ctx.File, lineNum)
-		match := closedATXPattern.FindSubmatch(lineContent)
-		if match == nil {
+		lineContent, bom := lint.LineText(ctx.File, lineNum), lint.LineTextOffset(ctx.File, lineNum)
+		loc := closedATXPattern.FindSubmatchIndex(lineContent)
+		if loc == nil {
 			continue
+		}
+		match := make([][]byte, len(loc)/2)
+		for group := range match {
+			match[group] = lineContent[loc[2*group]:loc[2*group+1]]
 		}
 
 		openHashes := match[closedATXOpen]
@@ -280,8 +279,20 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 			replacement += string(match[closedATXCloseSpace]) + string(escape)
 		}
 		replacement += " " + string(closeHashes)
-		builder := fix.NewEditBuilder()
-		builder.ReplaceRange(line.StartOffset+bom, line.NewlineStart, replacement)
+		textStart := line.StartOffset + bom
+		openRange := mdast.SourceRange{
+			StartOffset: textStart + loc[2*closedATXOpen], EndOffset: textStart + loc[2*closedATXOpen+1],
+		}
+		closeRange := mdast.SourceRange{
+			StartOffset: textStart + loc[2*closedATXClose], EndOffset: textStart + loc[2*closedATXClose+1],
+		}
+		var offered *fix.EditBuilder
+		if intent, ok := lineHeadingIntent(ctx, line, textStart,
+			headingAttrs(len(openHashes), StyleATXClosed), true, openRange, closeRange); ok {
+			builder := fix.NewEditBuilder()
+			builder.ReplaceRange(textStart, line.NewlineStart, replacement)
+			offered = checker.offer(builder, intent)
+		}
 
 		closeEnd := bom + len(lineContent) - len(match[closedATXTrail])
 		pos := mdast.SourcePosition{
@@ -304,12 +315,12 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Add spaces inside the hash characters").
-			WithFix(builder).
+			WithFix(offered).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // NoMultipleSpaceClosedATXRule checks for multiple spaces inside hashes on closed ATX headings.
@@ -340,10 +351,11 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
 	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 		parts, ok := atxHeadingParts(ctx.File, heading)
 		if !ok || parts.close.IsEmpty() {
@@ -381,12 +393,12 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space inside the hash characters").
-			WithFix(builder).
+			WithFix(checker.offer(builder, fixIntent{})).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // HeadingStartLeftRule checks that headings start at the beginning of the line.
@@ -420,10 +432,11 @@ func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
 	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		start := heading.SourceRange().StartOffset
@@ -442,21 +455,25 @@ func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 			continue
 		}
 
-		// Build fix: remove the indentation after the container prefix.
+		// Build fix: remove the indentation after the container prefix. A tab
+		// that the containers claim only in part is not in the prefix; the
+		// columns they claim of it are kept as spaces.
+		claimed := len(lint.ContinuationPrefix(ctx.File, heading)) -
+			columnsOf(ctx.File.Content[line.StartOffset+lint.LineTextOffset(ctx.File, lineNum):prefixEnd])
 		builder := fix.NewEditBuilder()
-		builder.Delete(prefixEnd, start)
+		builder.ReplaceRange(prefixEnd, start, strings.Repeat(" ", max(claimed, 0)))
 
 		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: prefixEnd, EndOffset: start})
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 			fmt.Sprintf("Heading is indented by %d character(s)", len(indent))).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove leading whitespace from the heading").
-			WithFix(builder).
+			WithFix(checker.offer(builder, fixIntent{})).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // NoDuplicateHeadingRule checks for multiple headings with the same content.
@@ -649,10 +666,11 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 
 	headings := ctx.Headings()
 	diags := make([]lint.Diagnostic, 0, len(headings))
+	checker := newFixChecker(ctx)
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		content, ok := headingContentRange(ctx.File, heading)
@@ -690,23 +708,24 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 			fmt.Sprintf("Heading ends with trailing punctuation %q", run)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove trailing punctuation from the heading")
-		if builder := trailingPunctuationFix(ctx, heading, content, start); builder != nil {
+		if builder := trailingPunctuationFix(ctx, checker, heading, content, start); builder != nil {
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
-// trailingPunctuationFix deletes the punctuation starting at start, together
-// with the whitespace before it on the same line. It returns nil unless the
-// heading, parsed again with the deletion, is still one heading of the same
-// level and style whose text only lost the deleted characters: removing the
-// punctuation must not leave a setext line blank or turn it into a thematic
-// break, underline or other block, nor expose a closing hash sequence.
+// trailingPunctuationFix deletes the punctuation starting at start, with the
+// backslash that escapes it and the whitespace before them on the same line.
+// It returns nil unless the fix changes nothing but the heading's text, and
+// that only by the deleted characters: removing the punctuation must not
+// leave a setext line blank or turn it into a thematic break, underline or
+// other block, expose a closing hash sequence, or leave a backslash showing.
 func trailingPunctuationFix(
 	ctx *lint.RuleContext,
+	checker *fixChecker,
 	heading *mdast.Node,
 	content mdast.SourceRange,
 	start int,
@@ -718,19 +737,92 @@ func trailingPunctuationFix(
 	}
 	lineStart := max(line.StartOffset, content.StartOffset)
 	deleteStart := start
+	if isASCIIPunctuation(file.Content[start]) && escapedAt(file.Content, lineStart, start) {
+		deleteStart--
+	}
 	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
 		deleteStart--
 	}
-	text, ok := reparsedHeadingText(ctx, heading)
-	deleted := string(file.Content[deleteStart:content.EndOffset])
-	if !ok || !strings.HasSuffix(text, deleted) {
-		return nil
-	}
-	edit := fix.TextEdit{StartOffset: deleteStart, EndOffset: content.EndOffset}
-	if !headingEditKeeps(ctx, heading, edit, detectHeadingStyle(file, heading), strings.TrimSuffix(text, deleted)) {
-		return nil
-	}
+	deleted := mdast.SourceRange{StartOffset: deleteStart, EndOffset: content.EndOffset}
 	builder := fix.NewEditBuilder()
-	builder.Delete(deleteStart, content.EndOffset)
-	return builder
+	builder.Delete(deleted.StartOffset, deleted.EndOffset)
+	return checker.offer(builder, changeText(heading, textSub{rng: deleted}))
+}
+
+// escapedAt reports whether the byte at offset follows an odd number of
+// backslashes, counting back no further than from, so that a backslash
+// escapes it.
+func escapedAt(content []byte, from, offset int) bool {
+	count := 0
+	for pos := offset - 1; pos >= from && content[pos] == '\\'; pos-- {
+		count++
+	}
+	return count%2 == 1
+}
+
+// columnsOf returns the number of columns that text takes from the start of
+// a line, with tab stops of four.
+func columnsOf(text []byte) int {
+	const tabWidth = 4
+	columns := 0
+	for _, b := range text {
+		if b == '\t' {
+			columns += tabWidth - columns%tabWidth
+		} else {
+			columns++
+		}
+	}
+	return columns
+}
+
+// lineHeadingIntent returns the intent of a fix that turns a line, whose
+// text starts at textStart, into an ATX heading with attrs whose text is the
+// line's without the hash sequences in markers. The line may be a paragraph
+// or part of one, which then splits around the heading, or, when
+// atxHeading is true, an ATX heading already. ok is false for other blocks.
+func lineHeadingIntent(
+	ctx *lint.RuleContext,
+	line mdast.LineInfo,
+	textStart int,
+	attrs string,
+	atxHeading bool,
+	markers ...mdast.SourceRange,
+) (fixIntent, bool) {
+	target := leafBlockAt(ctx.Root, textStart)
+	if target == nil {
+		return fixIntent{}, false
+	}
+	subs := make([]textSub, 0, len(markers))
+	for _, marker := range markers {
+		subs = append(subs, textSub{rng: marker})
+	}
+	rng := target.SourceRange()
+	heading := blockWant{
+		kind:  mdast.NodeHeading,
+		attrs: attrs,
+		from:  mdast.SourceRange{StartOffset: textStart, EndOffset: line.EndOffset},
+		subs:  subs,
+	}
+	switch {
+	case target.Kind == mdast.NodeHeading && atxHeading && !isSetextHeading(ctx.File, target):
+		heading.from = rng
+		return fixIntent{target: target, into: []blockWant{heading}}, true
+	case target.Kind != mdast.NodeParagraph:
+		return fixIntent{}, false
+	}
+	var into []blockWant
+	if rng.StartOffset < line.StartOffset {
+		into = append(into, blockWant{
+			kind: mdast.NodeParagraph,
+			from: mdast.SourceRange{StartOffset: rng.StartOffset, EndOffset: line.StartOffset},
+		})
+	}
+	into = append(into, heading)
+	if line.EndOffset < rng.EndOffset {
+		into = append(into, blockWant{
+			kind: mdast.NodeParagraph,
+			from: mdast.SourceRange{StartOffset: line.EndOffset, EndOffset: rng.EndOffset},
+		})
+	}
+	return fixIntent{target: target, into: into}, true
 }
