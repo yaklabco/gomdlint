@@ -60,6 +60,7 @@ func TestPipeline_RelintsAfterTheFinalPass(t *testing.T) {
 	assert.Zero(t, result.RemainingEdits)
 	assert.Empty(t, result.Diagnostics, "diagnostics must describe the fixed content")
 	assert.Equal(t, 3, result.TotalEditsApplied)
+	assert.Equal(t, 3, result.TotalFixesApplied)
 }
 
 func TestPipeline_ExhaustedReportsWhatRemainsInTheFixedContent(t *testing.T) {
@@ -304,6 +305,7 @@ func TestPipeline_WritesSymlinkTargetsOnlyInsideTheRoots(t *testing.T) {
 			assert.Nil(t, result.ModifiedContent)
 			assert.Zero(t, result.FixPasses)
 			assert.Zero(t, result.TotalEditsApplied)
+			assert.Zero(t, result.TotalFixesApplied)
 			assert.Empty(t, result.Edits)
 		})
 	}
@@ -370,6 +372,7 @@ func TestPipeline_RefusesWhenThePathIsRetargetedDuringProcessing(t *testing.T) {
 	assert.True(t, result.Skipped)
 	assert.False(t, result.Written)
 	assert.Zero(t, result.TotalEditsApplied, "a refused write reports no applied fixes")
+	assert.Zero(t, result.TotalFixesApplied, "a refused write reports no applied fixes")
 	got, err := os.ReadFile(other)
 	require.NoError(t, err)
 	assert.Equal(t, "other x", string(got), "the fix of one file must never land in another")

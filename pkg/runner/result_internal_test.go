@@ -8,7 +8,8 @@ import (
 
 // TestAccumulateCountsFixes covers how fixes count: written files as
 // modified, unwritten ones from a dry run as pending, and skipped files not
-// at all, since their fixes never reached the disk.
+// at all, since their fixes never reached the disk. A fix is one fixed
+// diagnostic, however many edits it took.
 func TestAccumulateCountsFixes(t *testing.T) {
 	t.Parallel()
 
@@ -22,19 +23,19 @@ func TestAccumulateCountsFixes(t *testing.T) {
 	}{
 		{
 			name:        "written",
-			result:      lint.PipelineResult{Modified: true, Written: true, TotalEditsApplied: 2},
+			result:      lint.PipelineResult{Modified: true, Written: true, TotalEditsApplied: 3, TotalFixesApplied: 2},
 			wantFixed:   2,
 			wantWritten: 1,
 		},
 		{
 			name:        "dry run",
-			result:      lint.PipelineResult{Modified: true, TotalEditsApplied: 2},
+			result:      lint.PipelineResult{Modified: true, TotalEditsApplied: 3, TotalFixesApplied: 2},
 			wantFixed:   2,
 			wantPending: 1,
 		},
 		{
 			name:        "skipped",
-			result:      lint.PipelineResult{Modified: true, Skipped: true, SkipReason: "file modified during processing", TotalEditsApplied: 2},
+			result:      lint.PipelineResult{Modified: true, Skipped: true, SkipReason: "file modified during processing", TotalEditsApplied: 3, TotalFixesApplied: 2},
 			wantSkipped: 1,
 		},
 	}

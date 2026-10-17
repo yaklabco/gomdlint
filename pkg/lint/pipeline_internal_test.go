@@ -142,6 +142,7 @@ func requireRefused(t *testing.T, result *PipelineResult) {
 	assert.True(t, result.Skipped)
 	assert.False(t, result.Written)
 	assert.Zero(t, result.TotalEditsApplied)
+	assert.Zero(t, result.TotalFixesApplied)
 	require.Len(t, result.Diagnostics, 1, "the unfixed finding is reported")
 }
 

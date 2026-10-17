@@ -115,6 +115,11 @@ type PipelineResult struct {
 	// TotalEditsApplied is the total number of edits applied across all passes.
 	TotalEditsApplied int
 
+	// TotalFixesApplied is the total number of fixes applied across all
+	// passes, one for each diagnostic whose fix was applied (see
+	// FileResult.AcceptedFixes).
+	TotalFixesApplied int
+
 	// Exhausted is true if the fix loop hit MaxFixPasses while the fixed
 	// content still had fixes to apply.
 	Exhausted bool
@@ -470,6 +475,7 @@ func refuseWrite(result *PipelineResult, original *FileResult, reason string) {
 		}
 	}
 	original.Edits = nil
+	original.AcceptedFixes = 0
 	original.SkippedEdits = nil
 	original.EditConflicts = false
 
@@ -481,6 +487,7 @@ func refuseWrite(result *PipelineResult, original *FileResult, reason string) {
 	result.Diff = nil
 	result.FixPasses = 0
 	result.TotalEditsApplied = 0
+	result.TotalFixesApplied = 0
 	result.Exhausted = false
 	result.Oscillated = false
 	result.RemainingEdits = 0
@@ -615,6 +622,7 @@ func (p *Pipeline) lintAndFix(
 		content = next
 		result.FixPasses++
 		result.TotalEditsApplied += len(fileResult.Edits)
+		result.TotalFixesApplied += fileResult.AcceptedFixes
 		fileResult = nextResult
 	}
 
