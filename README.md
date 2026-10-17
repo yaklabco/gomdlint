@@ -98,17 +98,17 @@ The summary format shows aggregated statistics:
 ```text
 Rules Summary
 ──────────────────────────────────────────────────────────────────────
-Rule                           Count   Errors Warnings  Fixable
+Rule                 Count  Errors Warnings  Fixable
 ──────────────────────────────────────────────────────────────────────
-no-trailing-spaces                 5       0        5        ✓
-no-hard-tabs                       2       0        2        ✓
+no-trailing-spaces       5       0        5        ✓
+no-hard-tabs             2       0        2        ✓
 
 Files Summary
 ────────────────────────────────────────────────────────────────────────
 File                                Count   Errors Warnings
 ────────────────────────────────────────────────────────────────────────
-README.md                               3       0        3
 docs/guide.md                           4       0        4
+README.md                               3       0        3
 
 Total: 7 issues (7 warnings) in 2 files
 ```
@@ -117,13 +117,18 @@ Control table order with `--summary-order rules` (default) or `--summary-order f
 
 ## Rule Identifier Format
 
-Control how rules are identified in output with `--rule-format`:
+Text, table and summary output name each rule by its name. Use
+`--rule-format` to show its ID, or both:
 
 ```bash
 gomdlint lint file.md                        # name (default): no-trailing-spaces
 gomdlint lint --rule-format id file.md       # id: MD009
 gomdlint lint --rule-format combined file.md # combined: MD009/no-trailing-spaces
 ```
+
+To change the default, set `GOMDLINT_RULE_FORMAT`, for example to `id`.
+The flag wins over the variable. JSON and SARIF output always carry both
+the ID and the name.
 
 ## Configuration
 
