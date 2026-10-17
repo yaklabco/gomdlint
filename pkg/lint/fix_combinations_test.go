@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // registers the rules in lint.DefaultRegistry
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -161,6 +163,71 @@ func TestPipeline_IndentAndMarkerSpaceFixesKeepListsApartAcrossABlankLine(t *tes
 	assert.NotEqual(t, content, fixed, "the fixes that keep the lists apart are applied")
 	assert.False(t, result.Exhausted)
 	assert.False(t, result.Oscillated)
+}
+
+// cancellingFixes are AA001's two fixes on "a  b \n": deleting the second
+// space and inserting a space after the first. Each fix changes the text,
+// but together they change nothing.
+var cancellingFixes = [][]fix.TextEdit{
+	{{StartOffset: 1, EndOffset: 2}},
+	{{StartOffset: 2, EndOffset: 2, NewText: " "}},
+}
+
+func TestEngine_FixesOfOneRuleThatCancelOutDoNotHoldBackAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	const content = "a  b \n"
+	result := lintOnce(t, content, fixedRule("AA001", cancellingFixes...), productRules(t, "MD009")[0])
+
+	assert.Equal(t, "a  b\n", string(fix.ApplyEdits([]byte(content), result.Edits)), "MD009 removes the trailing space")
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Empty(t, result.DeferredEdits)
+}
+
+func TestPipeline_FixesOfOneRuleThatCancelOutDoNotStarveAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	const content = "a  b \n"
+	result := fixWithRules(t, content, config.NewConfig(), fixedRule("AA001", cancellingFixes...), productRules(t, "MD009")[0])
+
+	assert.Equal(t, "a  b\n", fixedContent(result, content))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 1, result.TotalFixesApplied)
+	assert.True(t, result.Oscillated, "the fixes that cancel out make no progress")
+}
+
+func TestPipeline_FixesOfOneRuleThatCancelOutAcrossTwoBlocksDoNotStarveAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	// AA001 deletes the line ending of "x" and inserts it again at the
+	// start of "y ". Both fixes touch both blocks, and together they change
+	// nothing.
+	const content = "x\n\ny \n"
+	aa001 := fixedRule("AA001",
+		[]fix.TextEdit{{StartOffset: 1, EndOffset: 2}},
+		[]fix.TextEdit{{StartOffset: 3, EndOffset: 3, NewText: "\n"}})
+
+	result := fixWithRules(t, content, config.NewConfig(), aa001, productRules(t, "MD009")[0])
+
+	assert.Equal(t, "x\n\ny\n", fixedContent(result, content))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 1, result.TotalFixesApplied)
+}
+
+func TestEngine_FixesThatCancelOutInOneBlockFreeItWhileTheRulesOtherFixesApply(t *testing.T) {
+	t.Parallel()
+
+	// AA001's fixes in the first block cancel out; its fix in the second
+	// block changes "d".
+	const content = "a  b \n\ncd\n"
+	aa001 := fixedRule("AA001", append(slices.Clone(cancellingFixes),
+		[]fix.TextEdit{{StartOffset: 8, EndOffset: 9, NewText: "D"}})...)
+
+	result := lintOnce(t, content, aa001, productRules(t, "MD009")[0])
+
+	assert.Equal(t, "a  b\n\ncD\n", string(fix.ApplyEdits([]byte(content), result.Edits)))
+	assert.Equal(t, 2, result.AcceptedFixes, "MD009's fix and AA001's fix in the second block")
+	assert.Empty(t, result.DeferredEdits)
 }
 
 func TestPipeline_FixesABlockWithManyRulesWithinThePassLimit(t *testing.T) {

@@ -433,3 +433,161 @@ func TestPipeline_KeepsAnExplicitPassLimit(t *testing.T) {
 	assert.True(t, result.Exhausted)
 	assert.Equal(t, 1, result.RemainingEdits)
 }
+
+func TestEngine_AFixThatChangesNothingDoesNotHoldBackAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	const content = "para x\n"
+	result := lintMarkdown(t, content,
+		fixedRule("TEST001", []fix.TextEdit{edit(t, content, "para", "para")}),
+		fixedRule("TEST002", []fix.TextEdit{edit(t, content, "x", "y")}),
+	)
+
+	assert.Equal(t, []fix.TextEdit{edit(t, content, "x", "y")}, result.Edits)
+	assert.Equal(t, 1, result.AcceptedFixes, "the fix that changes nothing is not offered")
+	assert.Empty(t, result.DeferredEdits)
+}
+
+func TestEngine_OffersFixesThatChangeNothingWhenNothingElseApplies(t *testing.T) {
+	t.Parallel()
+
+	const content = "para x\n"
+	noop := edit(t, content, "para", "para")
+	result := lintMarkdown(t, content, fixedRule("TEST001", []fix.TextEdit{noop}))
+
+	assert.Equal(t, []fix.TextEdit{noop}, result.Edits, "the pipeline sees that the fix makes no progress")
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Empty(t, result.DeferredEdits)
+}
+
+func TestPipeline_AFixThatChangesNothingDoesNotStarveAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	// Like a blank-line rule that proposes an empty edit at the end of the
+	// file on every pass, next to a rule that removes trailing blank lines.
+	emptyAtEnd := newFuncRule("TEST001", func(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+		end := len(ctx.File.Content)
+		return []lint.Diagnostic{fixDiag("TEST001", fix.TextEdit{StartOffset: end, EndOffset: end})}, nil
+	})
+	trailing := newFuncRule("TEST002", func(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+		content := ctx.File.Content
+		trimmed := len(bytes.TrimRight(content, "\n")) + 1
+		if trimmed >= len(content) {
+			return nil, nil
+		}
+		return []lint.Diagnostic{fixDiag("TEST002", fix.TextEdit{StartOffset: trimmed, EndOffset: len(content)})}, nil
+	})
+
+	result := fixMarkdown(t, "# Title\n\ntext\n\n\n", lint.PipelineOptions{}, emptyAtEnd, trailing)
+
+	assert.Equal(t, "# Title\n\ntext\n", string(result.ModifiedContent))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 1, result.TotalFixesApplied, "the fix that changes nothing is never applied")
+	assert.True(t, result.Oscillated, "the remaining fix makes no progress")
+	assert.Equal(t, 1, result.RemainingEdits)
+}
+
+// cancelAndConflict is a rule whose first two fixes on "a  b\n" cancel out
+// and whose third fix conflicts with the first.
+func cancelAndConflict() *funcRule {
+	return fixedRule("TEST001",
+		[]fix.TextEdit{{StartOffset: 1, EndOffset: 2}},
+		[]fix.TextEdit{{StartOffset: 2, EndOffset: 2, NewText: " "}},
+		[]fix.TextEdit{{StartOffset: 1, EndOffset: 3, NewText: "z"}})
+}
+
+func TestEngine_OfferedFixesThatChangeNothingKeepTheirConflicts(t *testing.T) {
+	t.Parallel()
+
+	const content = "a  b\n"
+	result := lintMarkdown(t, content, cancelAndConflict())
+
+	assert.Equal(t, content, string(fix.ApplyEdits([]byte(content), result.Edits)), "the offered fixes change nothing")
+	assert.Equal(t, []lint.SkippedEdit{
+		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 1, EndOffset: 3, NewText: "z"}},
+	}, result.SkippedEdits)
+	assert.True(t, result.EditConflicts)
+}
+
+func TestPipeline_ReportsTheConflictsOfFixesThatMakeNoProgress(t *testing.T) {
+	t.Parallel()
+
+	result := fixMarkdown(t, "a  b\n", lint.PipelineOptions{}, cancelAndConflict())
+
+	assert.True(t, result.Oscillated)
+	assert.Equal(t, 2, result.RemainingEdits)
+	assert.Equal(t, []lint.SkippedEdit{
+		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 1, EndOffset: 3, NewText: "z"}},
+	}, result.SkippedEdits)
+	assert.True(t, result.EditConflicts)
+}
+
+// blankLineConflictInIdleGroup is a rule whose fixes on "> >\n> > # A\n"
+// delete the first line, insert it again twice and insert ">\n" at the same
+// boundary. The duplicate insertions merge and cancel the deletion, and
+// ">\n" is for a different container, so it conflicts with them.
+func blankLineConflictInIdleGroup() *funcRule {
+	return fixedRule("TEST001",
+		[]fix.TextEdit{{StartOffset: 0, EndOffset: 4}},
+		[]fix.TextEdit{{StartOffset: 4, EndOffset: 4, NewText: "> >\n"}},
+		[]fix.TextEdit{{StartOffset: 4, EndOffset: 4, NewText: "> >\n"}},
+		[]fix.TextEdit{{StartOffset: 4, EndOffset: 4, NewText: ">\n"}})
+}
+
+func TestEngine_OfferedFixesThatChangeNothingKeepTheirBlankLineConflicts(t *testing.T) {
+	t.Parallel()
+
+	const content = "> >\n> > # A\n"
+	result := lintMarkdown(t, content, blankLineConflictInIdleGroup())
+
+	assert.Equal(t, content, string(fix.ApplyEdits([]byte(content), result.Edits)), "the offered fixes change nothing")
+	assert.Equal(t, 3, result.AcceptedFixes, "the deletion and the merged insertion of two findings")
+	assert.Equal(t, []lint.SkippedEdit{
+		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 4, EndOffset: 4, NewText: ">\n"}},
+	}, result.SkippedEdits, "the insertion for another container is never offered")
+	assert.True(t, result.EditConflicts)
+}
+
+func TestPipeline_ReportsTheBlankLineConflictsOfFixesThatMakeNoProgress(t *testing.T) {
+	t.Parallel()
+
+	result := fixMarkdown(t, "> >\n> > # A\n", lint.PipelineOptions{}, blankLineConflictInIdleGroup())
+
+	assert.True(t, result.Oscillated)
+	assert.Equal(t, 2, result.RemainingEdits)
+	assert.Equal(t, []lint.SkippedEdit{
+		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 4, EndOffset: 4, NewText: ">\n"}},
+	}, result.SkippedEdits)
+	assert.True(t, result.EditConflicts)
+}
+
+// putBack deletes the first character of the content and inserts it again
+// right after itself: each edit changes the text, but together they change
+// nothing.
+var putBack = []fix.TextEdit{{StartOffset: 0, EndOffset: 1}, {StartOffset: 1, EndOffset: 1, NewText: "x"}}
+
+func TestEngine_AFixWhoseEditsTogetherChangeNothingDoesNotHoldBackAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	const content = "x y\n"
+	result := lintMarkdown(t, content,
+		fixedRule("TEST001", putBack),
+		fixedRule("TEST002", []fix.TextEdit{edit(t, content, "y", "Y")}),
+	)
+
+	assert.Equal(t, []fix.TextEdit{edit(t, content, "y", "Y")}, result.Edits)
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Empty(t, result.DeferredEdits)
+}
+
+func TestPipeline_AFixWhoseEditsTogetherChangeNothingDoesNotStarveAnotherRule(t *testing.T) {
+	t.Parallel()
+
+	result := fixMarkdown(t, "x y\n", lint.PipelineOptions{},
+		fixedRule("TEST001", putBack), replaceAllRule("TEST002", "y", "Y"))
+
+	assert.Equal(t, "x Y\n", string(result.ModifiedContent))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 1, result.TotalFixesApplied)
+	assert.True(t, result.Oscillated, "the remaining fix makes no progress")
+}

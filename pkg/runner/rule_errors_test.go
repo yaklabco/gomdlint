@@ -175,13 +175,17 @@ func TestRunner_Run_PreviewKeepsRuleFailuresOfTheFixedContent(t *testing.T) {
 func TestRunner_Run_ReportsSkippedEditsAndOscillation(t *testing.T) {
 	t.Parallel()
 
-	// The rule always proposes both fixes, and they overlap: the first is
-	// applied, then reproposed as a no-op, so the loop stops with the
-	// second fix still skipped.
-	rule := newContentRule("TEST001", func([]byte) ([]lint.Diagnostic, error) {
+	// The rule's first fix toggles the case of the first word on every
+	// pass, and its second fix overlaps the first, so the loop stops on
+	// repeating content with the second fix still skipped.
+	rule := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		toggled := "HELLO"
+		if bytes.HasPrefix(content, []byte("HELLO")) {
+			toggled = "hello"
+		}
 		return []lint.Diagnostic{
 			{RuleID: "TEST001", Message: "one", StartLine: 1,
-				FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "HELLO"}}},
+				FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: toggled}}},
 			{RuleID: "TEST001", Message: "two", StartLine: 1,
 				FixEdits: []fix.TextEdit{{StartOffset: 3, EndOffset: 8, NewText: "xx"}}},
 		}, nil

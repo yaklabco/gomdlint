@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -305,23 +306,83 @@ func (e *Engine) lintFile(
 		}
 	}
 
-	selectEdits(result, fixes, newTopLevelBlocks(snapshot))
+	selectEdits(result, fixes, content, newTopLevelBlocks(snapshot))
 	return result, nil
 }
 
-// selectEdits decides which fixes this pass applies and records the
-// outcome in result. Blank-line insertions at one boundary are merged
+// selectEdits decides which fixes this pass applies to content and records
+// the outcome in result. Blank-line insertions at one boundary are merged
 // first. Then each top-level block keeps the fixes of one rule, and the
 // other rules' fixes there are deferred (see selectFixes). Finally the
 // fixes taken are resolved against each other, so a fix that overlaps
 // another fix of the same rule is skipped.
-func selectEdits(result *FileResult, fixes []pendingFix, blocks *topLevelBlocks) {
-	merged, conflicting := mergeBlankLineInsertions(fixes)
+//
+// Fixes that change nothing must not keep another rule's fixes out of a
+// block, or the pass would end without progress while those wait. A fix
+// that changes nothing by itself takes no part, and neither does a rule's
+// group of fixes that changes nothing together (see selectFixes). If the
+// selection as a whole still changes nothing while fixes wait, the rules
+// it holds sit out the pass and the fixes are chosen again, so a pass whose
+// edits change nothing never defers a fix. Fixes that take no part are
+// offered only when nothing else can be applied, and only if together they
+// change nothing, so the pipeline sees that the remaining fixes make no
+// progress without applying two rules' fixes to one block. Their conflicts
+// are reported as skipped, like those of any fixes the pass applies.
+func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks *topLevelBlocks) {
+	changes, idle := splitNoops(fixes, content)
+	merged, conflicting := mergeBlankLineInsertions(changes)
 	for idx := range conflicting {
 		conflicting[idx].mergeConflict = true
 	}
-	selected, deferred := selectFixes(append(merged, conflicting...), blocks)
+	candidates := slices.Concat(merged, conflicting)
 
+	var selection fixSelection
+	var conflicts []pendingFix
+	for {
+		selection = selectFixes(candidates, blocks, content)
+		var accepted []pendingFix
+		accepted, conflicts = splitMergeConflicts(selection.selected)
+		result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(accepted)
+		if len(selection.deferred) == 0 || changesContent(content, result.Edits) {
+			break
+		}
+		// Every rule's fixes here change content, but together they do not.
+		// Each round removes at least one rule, so the loop ends.
+		held := make(map[string]bool)
+		for _, pending := range selection.selected {
+			held[pending.ruleID] = true
+		}
+		kept := candidates[:0:0]
+		for _, pending := range candidates {
+			if held[pending.ruleID] {
+				idle = append(idle, pending)
+			} else {
+				kept = append(kept, pending)
+			}
+		}
+		candidates = kept
+	}
+	idle = append(idle, selection.idle...)
+
+	if len(result.Edits) == 0 {
+		// A blank-line insertion that conflicts with another at its boundary
+		// is never applied, so it is reported, not offered.
+		offered, idleConflicts := splitMergeConflicts(idle)
+		if edits, skipped, count := resolveFixes(offered); !changesContent(content, edits) {
+			result.Edits, result.AcceptedFixes = edits, count
+			result.SkippedEdits = append(result.SkippedEdits, skipped...)
+			result.SkippedEdits = appendEditsOf(result.SkippedEdits, idleConflicts)
+		}
+	}
+	result.SkippedEdits = appendEditsOf(result.SkippedEdits, conflicts)
+	result.EditConflicts = len(result.SkippedEdits) > 0
+	result.DeferredEdits = appendEditsOf(nil, selection.deferred)
+}
+
+// splitMergeConflicts separates the selected fixes the pass applies from
+// the blank-line insertions that conflict with another insertion at their
+// boundary, which the pass skips.
+func splitMergeConflicts(selected []pendingFix) ([]pendingFix, []pendingFix) {
 	var accepted, conflicts []pendingFix
 	for _, pending := range selected {
 		if pending.mergeConflict {
@@ -330,10 +391,59 @@ func selectEdits(result *FileResult, fixes []pendingFix, blocks *topLevelBlocks)
 			accepted = append(accepted, pending)
 		}
 	}
-	result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(accepted)
-	result.SkippedEdits = appendEditsOf(result.SkippedEdits, conflicts)
-	result.EditConflicts = len(result.SkippedEdits) > 0
-	result.DeferredEdits = appendEditsOf(nil, deferred)
+	return accepted, conflicts
+}
+
+// splitNoops separates the fixes that change content from the fixes that,
+// applied, would leave it as it is.
+func splitNoops(fixes []pendingFix, content []byte) ([]pendingFix, []pendingFix) {
+	var changes, noops []pendingFix
+	for _, pending := range fixes {
+		if changesContent(content, pending.edits) {
+			changes = append(changes, pending)
+		} else {
+			noops = append(noops, pending)
+		}
+	}
+	return changes, noops
+}
+
+// changesContent reports whether applying edits, sorted and without
+// overlaps as fix.Validator returns them, would change content. Edits can
+// change nothing each, or only together, as when one deletes a character
+// and the next inserts it again where it was.
+//
+// Content that keeps its length matches the fixed content before the first
+// edit and after the last one, so only the text in between is compared,
+// piece by piece, and the comparison stops at the first difference.
+func changesContent(content []byte, edits []fix.TextEdit) bool {
+	delta := 0
+	for _, edit := range edits {
+		delta += len(edit.NewText) - (edit.EndOffset - edit.StartOffset)
+	}
+	if delta != 0 {
+		return true
+	}
+	if len(edits) == 0 {
+		return false
+	}
+
+	// pos is the offset in content that the next piece of fixed text must
+	// match; kept is where the content the edits keep resumes.
+	pos, kept := edits[0].StartOffset, edits[0].StartOffset
+	for _, edit := range edits {
+		unchanged := content[kept:edit.StartOffset]
+		if pos+len(unchanged) > len(content) || !bytes.Equal(content[pos:pos+len(unchanged)], unchanged) {
+			return true
+		}
+		pos += len(unchanged)
+		if pos+len(edit.NewText) > len(content) || string(content[pos:pos+len(edit.NewText)]) != edit.NewText {
+			return true
+		}
+		pos += len(edit.NewText)
+		kept = edit.EndOffset
+	}
+	return false
 }
 
 // appendEditsOf appends every edit of fixes, with its rule.

@@ -18,7 +18,7 @@ import (
 // child of the document root). The other rules' fixes in that block are
 // deferred: the next pass lints the fixed content, and each rule derives
 // and checks its fixes again. Fixes in different top-level blocks share a
-// pass.
+// pass. Fixes that would change nothing hold no block.
 
 // topLevelBlocks holds the byte ranges of a file's top-level blocks, in
 // document order. A block covers whole lines, from the start of its first
@@ -270,12 +270,38 @@ func (b *topLevelBlocks) appendTouched(touched []int, edit fix.TextEdit) []int {
 	return touched
 }
 
-// selectFixes chooses the fixes to apply in this pass and returns them, in
-// input order, with the deferred fixes, also in input order. Rules are
-// served in ID order. A rule's fixes are taken when no earlier rule took a
-// block they touch. They are taken or deferred together for all the
-// blocks they connect, since the rule checked them as a set.
-func selectFixes(fixes []pendingFix, blocks *topLevelBlocks) ([]pendingFix, []pendingFix) {
+// fixSelection sorts the fixes of a pass by what the pass does with them.
+// Each list keeps the input order.
+type fixSelection struct {
+	// selected holds the fixes the pass applies, or skips as conflicts.
+	selected []pendingFix
+
+	// deferred holds the fixes that touch a block another rule's fixes hold.
+	deferred []pendingFix
+
+	// idle holds the fixes of groups that change nothing together.
+	idle []pendingFix
+}
+
+// fixState is what a pass does with one fix.
+type fixState uint8
+
+const (
+	fixDeferred fixState = iota
+	fixSelected
+	fixIdle
+)
+
+// selectFixes chooses the fixes to apply to content in this pass. Rules are
+// served in ID order. A rule's fixes that touch a common block form a group
+// with all the blocks they touch, since the rule checked them as a set. A
+// group is selected, and holds its blocks, when no earlier rule holds any
+// of them and its fixes, resolved against each other as the pass applies
+// them, change content. A group that changes nothing is idle: it holds no
+// block, so it cannot keep a later rule's fixes out of one. Any other
+// group is deferred. It takes time linear in the fixes, apart from sorting
+// them.
+func selectFixes(fixes []pendingFix, blocks *topLevelBlocks, content []byte) fixSelection {
 	touched := make([][]int, len(fixes))
 	order := make([]int, len(fixes))
 	for idx, pending := range fixes {
@@ -287,32 +313,42 @@ func selectFixes(fixes []pendingFix, blocks *topLevelBlocks) ([]pendingFix, []pe
 	})
 
 	owner := make(map[int]string)
-	take := make([]bool, len(fixes))
+	states := make([]fixState, len(fixes))
 	for low := 0; low < len(order); {
 		high := low
 		for high < len(order) && fixes[order[high]].ruleID == fixes[order[low]].ruleID {
 			high++
 		}
-		takeRuleFixes(fixes[order[low]].ruleID, order[low:high], touched, owner, take)
+		selectRuleFixes(fixes, order[low:high], touched, owner, states, content)
 		low = high
 	}
 
-	var selected, deferred []pendingFix
+	var selection fixSelection
 	for idx, pending := range fixes {
-		if take[idx] {
-			selected = append(selected, pending)
-		} else {
-			deferred = append(deferred, pending)
+		switch states[idx] {
+		case fixSelected:
+			selection.selected = append(selection.selected, pending)
+		case fixIdle:
+			selection.idle = append(selection.idle, pending)
+		default:
+			selection.deferred = append(selection.deferred, pending)
 		}
 	}
-	return selected, deferred
+	return selection
 }
 
-// takeRuleFixes decides on one rule's fixes, the indexes in members. Fixes
-// that touch a common block form one group with all the blocks they touch.
-// A group is taken, and its blocks given to the rule, when no other rule
-// owns any of those blocks.
-func takeRuleFixes(ruleID string, members []int, touched [][]int, owner map[int]string, take []bool) {
+// selectRuleFixes decides on one rule's fixes, the indexes in members, in
+// input order, recording the outcome in states and the blocks the rule now
+// holds in owner (see selectFixes).
+func selectRuleFixes(
+	fixes []pendingFix,
+	members []int,
+	touched [][]int,
+	owner map[int]string,
+	states []fixState,
+	content []byte,
+) {
+	ruleID := fixes[members[0]].ruleID
 	parent := make(map[int]int)
 	find := func(block int) int {
 		for parent[block] != block {
@@ -332,22 +368,53 @@ func takeRuleFixes(ruleID string, members []int, touched [][]int, owner map[int]
 		}
 	}
 
-	free := make(map[int]bool)
+	groups := make(map[int][]int)
+	for _, member := range members {
+		root := find(touched[member][0])
+		groups[root] = append(groups[root], member)
+	}
+	groupBlocks := make(map[int][]int)
 	for block := range parent {
 		root := find(block)
-		if _, seen := free[root]; !seen {
-			free[root] = true
+		groupBlocks[root] = append(groupBlocks[root], block)
+	}
+
+	// The groups of one rule touch different blocks, so they can be decided
+	// in any order.
+	for root, group := range groups {
+		state := fixSelected
+		for _, block := range groupBlocks[root] {
+			if other, held := owner[block]; held && other != ruleID {
+				state = fixDeferred
+				break
+			}
 		}
-		if other, owned := owner[block]; owned && other != ruleID {
-			free[root] = false
+		if state == fixSelected && !groupChangesContent(fixes, group, content) {
+			state = fixIdle
+		}
+		if state == fixSelected {
+			for _, block := range groupBlocks[root] {
+				owner[block] = ruleID
+			}
+		}
+		for _, member := range group {
+			states[member] = state
 		}
 	}
-	for block := range parent {
-		if free[find(block)] {
-			owner[block] = ruleID
+}
+
+// groupChangesContent reports whether a group of one rule's fixes, the
+// indexes in group, changes content once its fixes are resolved against
+// each other as the pass would apply them. A blank-line insertion that
+// conflicts with another at its boundary is never applied, so it does not
+// count.
+func groupChangesContent(fixes []pendingFix, group []int, content []byte) bool {
+	edits := make([][]fix.TextEdit, 0, len(group))
+	for _, member := range group {
+		if !fixes[member].mergeConflict {
+			edits = append(edits, fixes[member].edits)
 		}
 	}
-	for _, member := range members {
-		take[member] = free[find(touched[member][0])]
-	}
+	accepted, _ := fix.ResolveFixes(edits)
+	return changesContent(content, accepted)
 }
