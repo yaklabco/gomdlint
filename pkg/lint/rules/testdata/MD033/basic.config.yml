@@ -1,0 +1,3 @@
+# Kept on CommonMark: under GFM, MD033 allows <br> by default, which
+# markdownlint flags. Remove once MD033 matches markdownlint under GFM.
+flavor: commonmark

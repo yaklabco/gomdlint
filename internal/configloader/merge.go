@@ -37,9 +37,9 @@ func merge(base, override *config.Config) *config.Config {
 		result.Jobs = override.Jobs
 	}
 
-	// Booleans: these are tricky because false is the zero value.
-	// For Fix, DryRun, NoBackups - we check if they're true in override.
-	// This means CLI --fix will override, but config file cannot unset.
+	// Fix, DryRun and NoBackups are command-line settings that config files
+	// cannot hold, so only true values from the environment or flags reach
+	// this point. The CLI applies flags set explicitly to false after loading.
 	if override.Fix {
 		result.Fix = override.Fix
 	}
@@ -54,11 +54,16 @@ func merge(base, override *config.Config) *config.Config {
 	if override.Backups.Mode != "" {
 		result.Backups.Mode = override.Backups.Mode
 	}
-	// For Enabled, we need to handle it specially since false is meaningful
-	// The BackupsConfig struct uses bool directly, so we can only detect
-	// "true" being set. This is a limitation of the current config structure.
-	if override.Backups.Enabled {
-		result.Backups.Enabled = override.Backups.Enabled
+	// A nil Enabled means the override leaves the setting alone, so false
+	// from a config file disables backups.
+	if override.Backups.Enabled != nil {
+		result.Backups.Enabled = config.Bool(*override.Backups.Enabled)
+	}
+	if override.Gitignore != nil {
+		result.Gitignore = config.Bool(*override.Gitignore)
+	}
+	if override.DefaultIgnores != nil {
+		result.DefaultIgnores = config.Bool(*override.DefaultIgnores)
 	}
 
 	// Maps: deep merge

@@ -3,6 +3,8 @@ package lint_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -82,16 +84,122 @@ func TestResolveRules_EnableViaConfig(t *testing.T) {
 	registry.Register(newTestRule(testRuleID1, false))
 
 	cfg := config.NewConfig()
-	// First disable via CLI, then enable via config.
-	cfg.DisableRules = []string{testRuleID1}
-	enabled := true
-	cfg.Rules[testRuleID1] = config.RuleConfig{Enabled: &enabled}
+	cfg.RuleDefaults = map[string]config.RuleConfig{testRuleID1: {Enabled: config.Bool(false)}}
+	cfg.Rules[testRuleID1] = config.RuleConfig{Enabled: config.Bool(true)}
 
 	resolved := lint.ResolveRules(registry, cfg)
 
-	// Config should override CLI disable.
+	// Per-rule config overrides rule_defaults.
 	if len(resolved) != 1 {
 		t.Fatalf("expected 1 rule, got %d", len(resolved))
+	}
+}
+
+// TestResolveRules_CLIListsOverrideConfig covers --enable and --disable,
+// which apply after rule_defaults and rules from configuration files.
+func TestResolveRules_CLIListsOverrideConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enable beats a config disable", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.Rules[testRuleID1] = config.RuleConfig{Enabled: config.Bool(false)}
+		cfg.EnableRules = []string{testRuleID1}
+
+		assert.True(t, resolveOne(t, newTestRule(testRuleID1, false), cfg).Enabled)
+	})
+
+	t.Run("enable beats a rule_defaults disable", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.RuleDefaults = map[string]config.RuleConfig{testRuleID1: {Enabled: config.Bool(false)}}
+		cfg.EnableRules = []string{testRuleID1}
+
+		assert.True(t, resolveOne(t, newTestRule(testRuleID1, false), cfg).Enabled)
+	})
+
+	t.Run("disable beats a config enable", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.Rules[testRuleID1] = config.RuleConfig{Enabled: config.Bool(true)}
+		cfg.DisableRules = []string{testRuleID1}
+
+		registry := lint.NewRegistry()
+		registry.Register(newTestRule(testRuleID1, false))
+		assert.Empty(t, lint.ResolveRules(registry, cfg))
+	})
+
+	t.Run("disable beats enable", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.EnableRules = []string{testRuleID1}
+		cfg.DisableRules = []string{testRuleID1}
+
+		registry := lint.NewRegistry()
+		registry.Register(newTestRule(testRuleID1, false))
+		assert.Empty(t, lint.ResolveRules(registry, cfg))
+	})
+}
+
+// TestResolveRules_CLIListsMatchNames covers rule names and case-insensitive
+// IDs in --enable, --disable and --fix-rules.
+func TestResolveRules_CLIListsMatchNames(t *testing.T) {
+	t.Parallel()
+
+	rule := newTestRule(testRuleID1, true) // Name is "MD001-name".
+
+	t.Run("disable by name", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.DisableRules = []string{"md001-name"}
+
+		registry := lint.NewRegistry()
+		registry.Register(rule)
+		assert.Empty(t, lint.ResolveRules(registry, cfg))
+	})
+
+	t.Run("enable by lowercase ID", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.Rules[testRuleID1] = config.RuleConfig{Enabled: config.Bool(false)}
+		cfg.EnableRules = []string{"md001"}
+
+		assert.True(t, resolveOne(t, rule, cfg).Enabled)
+	})
+
+	t.Run("fix-rules by name", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewConfig()
+		cfg.Fix = true
+		cfg.FixRules = []string{"MD001-name"}
+
+		assert.True(t, resolveOne(t, rule, cfg).AutoFix)
+	})
+}
+
+func TestLookupRuleID(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	registry.Register(&testRule{BaseRule: lint.NewBaseRule("MD009", "no-trailing-spaces", "", nil, true)})
+	registry.RegisterAlias("trailing-spaces", "MD009")
+
+	for _, key := range []string{"MD009", "md009", "no-trailing-spaces", "No-Trailing-Spaces", "trailing-spaces", " MD009 "} {
+		id, ok := lint.LookupRuleID(registry, key)
+		assert.True(t, ok, key)
+		assert.Equal(t, "MD009", id, key)
+	}
+
+	for _, key := range []string{"MD999", "", "no-such-rule"} {
+		_, ok := lint.LookupRuleID(registry, key)
+		assert.False(t, ok, key)
 	}
 }
 
@@ -150,6 +258,94 @@ func TestResolveRules_SeverityOverride(t *testing.T) {
 
 	if resolved[0].Severity != config.SeverityError {
 		t.Errorf("expected error severity, got %v", resolved[0].Severity)
+	}
+}
+
+// infoRule is a rule whose built-in default severity is info.
+type infoRule struct {
+	lint.BaseRule
+}
+
+func (r *infoRule) DefaultSeverity() config.Severity {
+	return config.SeverityInfo
+}
+
+func resolveOne(t *testing.T, rule lint.Rule, cfg *config.Config) lint.ResolvedRule {
+	t.Helper()
+
+	registry := lint.NewRegistry()
+	registry.Register(rule)
+
+	resolved := lint.ResolveRules(registry, cfg)
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(resolved))
+	}
+	return resolved[0]
+}
+
+func TestResolveRules_SeverityDefault(t *testing.T) {
+	t.Parallel()
+
+	errorSeverity := string(config.SeverityError)
+	infoSeverity := string(config.SeverityInfo)
+
+	tests := []struct {
+		name  string
+		rule  lint.Rule
+		setup func(cfg *config.Config)
+		want  config.Severity
+	}{
+		{
+			name: "applies to rules without an explicit severity",
+			rule: newTestRule(testRuleID1, false),
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+			},
+			want: config.SeverityError,
+		},
+		{
+			name: "replaces a rule's built-in default",
+			rule: &infoRule{BaseRule: lint.NewBaseRule(testRuleID1, "info-rule", "", nil, false)},
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+			},
+			want: config.SeverityError,
+		},
+		{
+			name: "loses to a rule severity",
+			rule: newTestRule(testRuleID1, false),
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+				cfg.Rules[testRuleID1] = config.RuleConfig{Severity: &infoSeverity}
+			},
+			want: config.SeverityInfo,
+		},
+		{
+			name: "loses to a rule_defaults severity",
+			rule: newTestRule(testRuleID1, false),
+			setup: func(cfg *config.Config) {
+				cfg.SeverityDefault = errorSeverity
+				cfg.RuleDefaults = map[string]config.RuleConfig{testRuleID1: {Severity: &infoSeverity}}
+			},
+			want: config.SeverityInfo,
+		},
+		{
+			name:  "unset keeps the built-in default",
+			rule:  &infoRule{BaseRule: lint.NewBaseRule(testRuleID1, "info-rule", "", nil, false)},
+			setup: func(*config.Config) {},
+			want:  config.SeverityInfo,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := config.NewConfig()
+			tt.setup(cfg)
+
+			assert.Equal(t, tt.want, resolveOne(t, tt.rule, cfg).Severity)
+		})
 	}
 }
 

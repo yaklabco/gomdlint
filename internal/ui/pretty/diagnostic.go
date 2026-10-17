@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/clipperhouse/displaywidth"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -63,23 +65,59 @@ func (s *Styles) FormatSeverity(sev config.Severity) string {
 	}
 }
 
-// FormatSourceContext formats the source line with a caret marker.
+// contextTabWidth is the tab stop used to print source lines. CommonMark
+// uses the same stop for indentation.
+const contextTabWidth = 4
+
+// FormatSourceContext formats the source line with a caret marker under
+// column, a 1-based character column. The line is printed with its tabs
+// expanded, and the caret is padded by the display width of the text
+// before the column, so it lines up after wide characters and tabs.
 func (s *Styles) FormatSourceContext(line string, column int) string {
 	var builder strings.Builder
 
 	// Indent to align with diagnostic output
 	const indent = "        "
 
+	runes := []rune(line)
+	split := min(max(column-1, 0), len(runes))
+	before, caretOffset := expandTabs(string(runes[:split]), 0)
+	after, _ := expandTabs(string(runes[split:]), caretOffset)
+
 	// Source line
-	builder.WriteString(indent + s.SourceLine.Render(line) + "\n")
+	builder.WriteString(indent + s.SourceLine.Render(before+after) + "\n")
 
 	// Caret marker
 	if column > 0 {
-		padding := indent + strings.Repeat(" ", column-1)
+		padding := indent + strings.Repeat(" ", caretOffset)
 		builder.WriteString(padding + s.Caret.Render("^") + "\n")
 	}
 
 	return builder.String()
+}
+
+// expandTabs replaces the tabs in text with spaces up to the next tab stop,
+// counting display cells from start. It returns the expanded text and the
+// display cell after it.
+func expandTabs(text string, start int) (string, int) {
+	var out strings.Builder
+	cell := start
+	for {
+		tab := strings.IndexByte(text, '\t')
+		chunk := text
+		if tab >= 0 {
+			chunk = text[:tab]
+		}
+		out.WriteString(chunk)
+		cell += displaywidth.String(chunk)
+		if tab < 0 {
+			return out.String(), cell
+		}
+		spaces := contextTabWidth - cell%contextTabWidth
+		out.WriteString(strings.Repeat(" ", spaces))
+		cell += spaces
+		text = text[tab+1:]
+	}
 }
 
 // FormatFileHeader formats a file header for grouped output.

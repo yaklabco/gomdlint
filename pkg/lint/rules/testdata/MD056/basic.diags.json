@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "rule": "MD056",
+    "name": "table-column-count",
+    "line": 5,
+    "column": 1,
+    "message": "Table row has 2 columns, expected 3",
+    "severity": "warning",
+    "fixable": false
+  }
+]

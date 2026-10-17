@@ -24,6 +24,15 @@ type FileOutcome struct {
 	FixPasses int
 }
 
+// Failed reports whether the file could not be linted completely. Failed
+// files count toward Stats.FilesErrored, which fails the run.
+//
+// Every per-file failure belongs here, so that new kinds (for example errors
+// from individual rules) fail the run without changes elsewhere.
+func (o *FileOutcome) Failed() bool {
+	return o.Error != nil
+}
+
 // Stats captures aggregate information about a run.
 type Stats struct {
 	// FilesDiscovered is the total number of files found during discovery.
@@ -53,7 +62,13 @@ type Stats struct {
 	// FilesModified is the number of files that were modified by fixes.
 	FilesModified int
 
-	// DiagnosticsFixed is the total number of issues fixed across all files.
+	// FilesWithPendingFixes is the number of files whose fixes were
+	// computed but not written, as in a dry run.
+	FilesWithPendingFixes int
+
+	// DiagnosticsFixed is the number of fix edits applied across all files,
+	// in memory for a dry run. The pipeline reports edits, not the
+	// diagnostics they fixed, so one diagnostic may count more than once.
 	DiagnosticsFixed int
 }
 
@@ -97,9 +112,8 @@ func newStats() Stats {
 func (r *Result) accumulate(outcome FileOutcome) {
 	r.Files = append(r.Files, outcome)
 
-	if outcome.Error != nil {
+	if outcome.Failed() {
 		r.Stats.FilesErrored++
-		return
 	}
 
 	if outcome.Result == nil {
@@ -112,12 +126,16 @@ func (r *Result) accumulate(outcome FileOutcome) {
 		r.Stats.FilesSkipped++
 	}
 
-	if outcome.Result.Written {
+	// Fixes count once written, or as pending in a dry run. A skipped file's
+	// fixes never reached the disk, so they do not count.
+	switch {
+	case outcome.Result.Written:
 		r.Stats.FilesModified++
+		r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
+	case outcome.Result.Modified && !outcome.Result.Skipped:
+		r.Stats.FilesWithPendingFixes++
+		r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
 	}
-
-	// Track total edits applied (issues fixed).
-	r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
 
 	if outcome.Result.FileResult != nil {
 		diagCount := len(outcome.Result.Diagnostics)

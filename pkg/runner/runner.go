@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
@@ -27,22 +29,27 @@ func New(pipeline *lint.Pipeline) *Runner {
 // The runner:
 //   - Discovers files matching the options criteria
 //   - Processes files concurrently using a worker pool
+//   - Processes the paths of one file, such as hard links, in turn
 //   - Aggregates results into a single Result with statistics
 //   - Respects context cancellation
 func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	// Discover files.
-	files, err := Discover(ctx, opts)
+	found, err := discover(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	files, groups := found.files, found.groups
 
 	result := &Result{
-		Files: make([]FileOutcome, 0, len(files)),
+		Files: make([]FileOutcome, 0, len(files)+len(found.unreadable)),
 		Stats: newStats(),
 	}
 	result.Stats.FilesDiscovered = len(files)
 
 	if len(files) == 0 {
+		for _, outcome := range found.unreadable {
+			result.accumulate(outcome)
+		}
 		return result, nil
 	}
 
@@ -51,16 +58,16 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if jobs <= 0 {
 		jobs = runtime.NumCPU()
 	}
-	// Don't use more workers than files.
-	if jobs > len(files) {
-		jobs = len(files)
+	// Don't use more workers than there is work.
+	if jobs > len(groups) {
+		jobs = len(groups)
 	}
 
 	// Get pipeline options from config.
 	pipelineOpts := lint.PipelineOptionsFromConfig(opts.Config)
 
-	// Create channels.
-	workCh := make(chan string)
+	// Create channels. Each unit of work is the paths naming one file.
+	workCh := make(chan []string)
 	outCh := make(chan FileOutcome)
 
 	var wg sync.WaitGroup
@@ -70,18 +77,18 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts)
+			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts, opts.PreviewFixes)
 		}()
 	}
 
 	// Feed work in a separate goroutine.
 	go func() {
 		defer close(workCh)
-		for _, path := range files {
+		for _, group := range groups {
 			select {
 			case <-ctx.Done():
 				return
-			case workCh <- path:
+			case workCh <- group:
 			}
 		}
 	}()
@@ -100,11 +107,19 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		outcomes[outcome.Path] = outcome
 	}
 
+	// Directories that could not be read fail the run like unreadable files.
+	for _, outcome := range found.unreadable {
+		outcomes[outcome.Path] = outcome
+	}
+
 	// Build result in deterministic order.
-	for _, path := range files {
-		if outcome, ok := outcomes[path]; ok {
-			result.accumulate(outcome)
-		}
+	paths := make([]string, 0, len(outcomes))
+	for path := range outcomes {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	for _, path := range paths {
+		result.accumulate(outcomes[path])
 	}
 
 	// Check for context error.
@@ -115,37 +130,90 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	return result, nil
 }
 
-// worker processes files from workCh and sends outcomes to outCh.
+// worker processes groups of paths from workCh, the paths of each group in
+// turn, and sends outcomes to outCh.
 func (r *Runner) worker(
 	ctx context.Context,
-	workCh <-chan string,
+	workCh <-chan []string,
 	outCh chan<- FileOutcome,
 	cfg *config.Config,
 	opts lint.PipelineOptions,
+	preview bool,
 ) {
-	for path := range workCh {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	for group := range workCh {
+		for _, path := range group {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 
-		outcome := FileOutcome{Path: path}
+			outcome := r.processFile(ctx, path, cfg, opts, preview)
 
-		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
-		if err != nil {
-			outcome.Error = err
-		} else {
-			outcome.Result = pr
-			outcome.Exhausted = pr.Exhausted
-			outcome.RemainingEdits = pr.RemainingEdits
-			outcome.FixPasses = pr.FixPasses
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case outCh <- outcome:
+			select {
+			case <-ctx.Done():
+				return
+			case outCh <- outcome:
+			}
 		}
 	}
+}
+
+// processFile lints one file. A panic while processing it fails that file
+// instead of crashing the run, which would exit with Go's status 2.
+func (r *Runner) processFile(
+	ctx context.Context,
+	path string,
+	cfg *config.Config,
+	opts lint.PipelineOptions,
+	preview bool,
+) FileOutcome {
+	outcome := FileOutcome{Path: path}
+
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				outcome = FileOutcome{Path: path, Error: fmt.Errorf("internal error: %v", recovered)}
+			}
+		}()
+
+		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
+		if err == nil && preview && pr.FileResult != nil && pr.FixableCount() > 0 {
+			pr.Diff, err = r.previewDiff(ctx, path, cfg, opts)
+		}
+		if err != nil {
+			outcome.Error = err
+			return
+		}
+		outcome.Result = pr
+		outcome.Exhausted = pr.Exhausted
+		outcome.RemainingEdits = pr.RemainingEdits
+		outcome.FixPasses = pr.FixPasses
+	}()
+
+	return outcome
+}
+
+// previewDiff returns the diff that fixing path would produce, computed in
+// dry-run mode so nothing is written.
+func (r *Runner) previewDiff(
+	ctx context.Context,
+	path string,
+	cfg *config.Config,
+	opts lint.PipelineOptions,
+) (*fix.Diff, error) {
+	fixCfg := config.NewConfig()
+	if cfg != nil {
+		fixCfg = new(config.Config)
+		*fixCfg = *cfg
+	}
+	fixCfg.Fix = true
+	opts.Fix = true
+	opts.DryRun = true
+
+	preview, err := r.Pipeline.ProcessFile(ctx, path, fixCfg, opts)
+	if err != nil {
+		return nil, fmt.Errorf("preview fixes: %w", err)
+	}
+	return preview.Diff, nil
 }

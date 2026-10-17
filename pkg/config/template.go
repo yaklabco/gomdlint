@@ -63,23 +63,23 @@ func generateMinimalTemplate(opts TemplateOptions) ([]byte, error) {
 
 	buf.WriteString(`# gomdlint configuration
 # See: https://github.com/yaklabco/gomdlint
+#
+# Run-time settings such as --fix, --dry-run, --jobs and --format are
+# command-line flags and cannot be set in this file.
 
 # Markdown flavor: commonmark or gfm
-flavor: commonmark
+flavor: gfm
 
-# Default severity for all rules: error, warning, or info
+# Severity for every rule that does not set one: error, warning, or info.
+# Leave it unset to keep each rule's built-in severity.
 # severity_default: error
 
-# Enable auto-fix mode
-# fix: false
-
-# Number of parallel workers (0 = auto)
-# jobs: 0
-
-# File patterns to ignore (glob patterns)
+# File patterns to ignore (glob patterns, relative to this file). Files that
+# .gitignore ignores and node_modules and vendor directories are skipped by
+# default; see the gitignore and default_ignores settings.
 # ignore:
-#   - "vendor/**"
-#   - "node_modules/**"
+#   - "docs/drafts/**"
+#   - "CHANGELOG.md"
 
 # Rule-specific configuration
 # rules:
@@ -89,8 +89,8 @@ flavor: commonmark
 #   MD013:
 #     enabled: true
 #     options:
-#       line_length: 80
-#       tables: false
+#       max: 80
+#       ignore_tables: true
 `)
 
 	if opts.Format == "json" {
@@ -109,49 +109,32 @@ func generateFullTemplate(opts TemplateOptions) ([]byte, error) {
 #
 # This template includes all available rules with their default settings.
 # Uncomment and modify settings as needed.
+#
+# Run-time settings are command-line flags and cannot be set in this file:
+# --fix, --dry-run, --jobs, --format, --enable, --disable and --fix-rules.
 
 # Markdown flavor: commonmark or gfm
-flavor: commonmark
+flavor: gfm
 
-# Default severity for all rules: error, warning, or info
-severity_default: error
-
-# Enable auto-fix mode
-fix: false
-
-# Show changes without applying them (requires fix: true)
-dry_run: false
-
-# Number of parallel workers (0 = auto based on CPU cores)
-jobs: 0
-
-# Output format: text, json, sarif, or diff
-format: text
+# Severity for every rule that does not set one: error, warning, or info.
+# Leave it unset to keep each rule's built-in severity.
+# severity_default: error
 
 # Backup configuration for auto-fix
 backups:
   enabled: true
   mode: sidecar
 
-# File patterns to ignore (glob patterns)
-ignore:
-  - "vendor/**"
-  - "node_modules/**"
-  - ".git/**"
+# Skip files that .gitignore files ignore when walking directories
+gitignore: true
 
-# Rules to explicitly enable (overrides defaults)
-# enable_rules:
-#   - MD001
-#   - MD002
+# Skip node_modules and vendor directories when walking directories
+default_ignores: true
 
-# Rules to explicitly disable
-# disable_rules:
-#   - MD013
-
-# Rules to allow auto-fixing
-# fix_rules:
-#   - MD009
-#   - MD010
+# File patterns to ignore (glob patterns, relative to this file)
+# ignore:
+#   - "docs/drafts/**"
+#   - "CHANGELOG.md"
 
 # Rule-specific configuration
 rules:
@@ -304,20 +287,18 @@ func templateToJSON(yamlContent []byte) ([]byte, error) {
 	lines := strings.Split(string(yamlContent), "\n")
 	var jsonLines []string
 
-	// Build a simple config for JSON
+	// Build a simple config for JSON. Run-time settings such as fix and
+	// format are command-line flags, so the file does not carry them.
 	cfg := map[string]any{
-		"flavor":           "commonmark",
-		"severity_default": "error",
-		"fix":              false,
-		"dry_run":          false,
-		"jobs":             0,
-		"format":           "text",
+		"flavor": "gfm",
 		"backups": map[string]any{
 			"enabled": true,
 			"mode":    "sidecar",
 		},
-		"ignore": []string{"vendor/**", "node_modules/**", ".git/**"},
-		"rules":  map[string]any{},
+		"gitignore":       true,
+		"default_ignores": true,
+		"ignore":          []string{},
+		"rules":           map[string]any{},
 	}
 
 	// Parse rules from YAML content (simplified)

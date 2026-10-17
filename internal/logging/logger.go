@@ -2,10 +2,12 @@
 package logging
 
 import (
+	"io"
 	"os"
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 )
 
@@ -27,26 +29,51 @@ func getDefaultLogger() *log.Logger {
 // New creates a new logger with the specified level.
 // Valid levels: "debug", "info", "warn", "error".
 func New(level string) *log.Logger {
-	logger := log.NewWithOptions(os.Stderr, log.Options{
-		ReportTimestamp: false,
-		ReportCaller:    false,
-	})
+	return NewWithWriter(os.Stderr, level)
+}
 
+// NewWithWriter creates a logger with the specified level that writes to
+// writer.
+func NewWithWriter(writer io.Writer, level string) *log.Logger {
+	logger := newLogger(writer)
 	setLoggerLevel(logger, level)
-
 	return logger
 }
 
 // NewInteractive creates a logger for interactive CLI commands.
 // It writes to stdout (not stderr) and is suitable for user-facing output
-// from commands like init, migrate, and rules.
+// from commands like init and migrate.
 func NewInteractive() *log.Logger {
-	logger := log.NewWithOptions(os.Stdout, log.Options{
+	logger := newLogger(os.Stdout)
+	logger.SetLevel(log.InfoLevel)
+	return logger
+}
+
+// newLogger creates a logger on writer that never queries the terminal.
+//
+// charmbracelet/log builds its renderer with termenv's color cache, which
+// asks a terminal for its foreground and background colors (OSC 10 and 11,
+// each fenced by a cursor position report) as soon as the logger exists.
+// The queries ignore NO_COLOR and stall for seconds on terminals that do
+// not answer. Hiding the terminal behind opaqueWriter avoids them, and the
+// color profile then comes from termenv's environment checks, which honour
+// NO_COLOR, CLICOLOR_FORCE and TERM without talking to the terminal.
+func newLogger(writer io.Writer) *log.Logger {
+	// A value, not a pointer: charm keeps a renderer per writer in a global
+	// registry, and equal values reuse one entry instead of adding another
+	// for every logger.
+	logger := log.NewWithOptions(opaqueWriter{Writer: writer}, log.Options{
 		ReportTimestamp: false,
 		ReportCaller:    false,
 	})
-	logger.SetLevel(log.InfoLevel)
+	logger.SetColorProfile(lipgloss.NewRenderer(writer).ColorProfile())
 	return logger
+}
+
+// opaqueWriter forwards writes while hiding the file behind them, so termenv
+// cannot detect a terminal to query.
+type opaqueWriter struct {
+	io.Writer
 }
 
 func setLoggerLevel(logger *log.Logger, level string) {

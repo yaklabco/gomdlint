@@ -2,16 +2,18 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/yaklabco/gomdlint/internal/configloader"
+	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -21,25 +23,24 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
-// ErrLintIssuesFound is returned when lint issues are found.
-var ErrLintIssuesFound = errors.New("lint issues found")
-
 type lintFlags struct {
-	format       string
-	flavor       string
-	ignore       []string
-	enable       []string
-	disable      []string
-	fixRules     []string
-	strict       bool
-	noContext    bool
-	compact      bool
-	perFile      bool
-	ruleFormat   string
-	summaryOrder string
-	cpuprofile   string
-	memprofile   string
-	trace        string
+	format           string
+	flavor           string
+	ignore           []string
+	noGitignore      bool
+	noDefaultIgnores bool
+	enable           []string
+	disable          []string
+	fixRules         []string
+	strict           bool
+	noContext        bool
+	compact          bool
+	perFile          bool
+	ruleFormat       string
+	summaryOrder     string
+	cpuprofile       string
+	memprofile       string
+	trace            string
 
 	// toolVersion is not a flag: it is the build version that machine-readable
 	// reports record.
@@ -71,13 +72,16 @@ By default, lints all .md and .markdown files in the current directory
 and subdirectories. Specify paths to lint specific files or directories.
 
 Examples:
-  mdlint lint                    # Lint current directory
-  mdlint lint docs/              # Lint docs directory
-  mdlint lint README.md          # Lint single file
-  mdlint lint --fix              # Lint and auto-fix issues
-  mdlint lint --fix --dry-run    # Show fixes without applying
-  mdlint lint --format json      # Output as JSON for CI
-  mdlint lint --strict           # Treat warnings as errors`
+  gomdlint lint                    # Lint current directory
+  gomdlint lint docs/              # Lint docs directory
+  gomdlint lint README.md          # Lint single file
+  gomdlint lint --fix              # Lint and auto-fix issues
+  gomdlint lint --fix --dry-run    # Show fixes without applying
+  gomdlint lint --format diff      # Preview fixes as a diff
+  gomdlint lint --format json      # Output as JSON for CI
+  gomdlint lint --strict           # Treat warnings as errors
+
+` + exitCodeHelp
 
 // profileCleanup holds cleanup functions for profiling.
 type profileCleanup struct {
@@ -130,42 +134,49 @@ func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
 }
 
 func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags) error {
-	logger := logging.Default()
+	logger := logging.FromContext(cmd.Context())
+
+	if err := validateLintFlags(flags, cfg.Jobs); err != nil {
+		return err
+	}
+	ruleLists, err := resolveRuleListFlags(flags)
+	if err != nil {
+		return err
+	}
 
 	// Setup profiling.
 	profCleanup, err := setupProfiling(flags)
 	if err != nil {
-		return err
+		return withExitCode(ExitIOError, err)
 	}
 	defer profCleanup.run()
 
 	// Map string flags to typed config values.
 	// Only set values that were explicitly provided via CLI flags.
-	cfg.Format = config.OutputFormat(flags.format)
+	if cmd.Flags().Changed("format") {
+		cfg.Format = config.OutputFormat(flags.format)
+	}
 	if cmd.Flags().Changed("flavor") {
 		cfg.Flavor = config.Flavor(flags.flavor)
 	}
 	cfg.Ignore = flags.ignore
-	cfg.EnableRules = flags.enable
-	cfg.DisableRules = flags.disable
-	cfg.FixRules = flags.fixRules
+	cfg.EnableRules = ruleLists.enable
+	cfg.DisableRules = ruleLists.disable
+	cfg.FixRules = ruleLists.fix
 
-	// Load and merge configuration.
+	// Load and merge configuration. Cobra always provides a context.
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	// Get the explicit config path from the root command's persistent flag.
 	configPath, err := cmd.Flags().GetString("config")
 	if err != nil {
-		return fmt.Errorf("get config flag: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("get config flag: %w", err))
 	}
 
 	// Get working directory for config discovery.
 	workDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("get working directory: %w", err))
 	}
 
 	// Build load options.
@@ -173,16 +184,22 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		WorkingDir:   workDir,
 		ExplicitPath: configPath,
 		CLIConfig:    cfg,
+		Stdin:        cmd.InOrStdin(),
+		Stderr:       cmd.ErrOrStderr(),
 	}
 
 	loadResult, err := configloader.Load(ctx, loadOpts)
 	if err != nil {
-		return errors.Join(errors.New("failed to load configuration"), err)
+		return failure(ctx, ExitConfigError, fmt.Errorf("load configuration: %w", err))
 	}
 
 	finalCfg := loadResult.Config
+	applyExplicitFlags(cmd, flags, cfg, finalCfg)
 
-	// Log warnings from config loading.
+	// Log notices and warnings from config loading.
+	for _, notice := range loadResult.Notices {
+		logger.Info(notice)
+	}
 	for _, warning := range loadResult.Warnings {
 		logger.Warn(warning)
 	}
@@ -214,15 +231,16 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Create the runner.
 	lintRunner := runner.New(pipeline)
 
-	// Build runner options.
-	runOpts := runner.Options{
-		Paths:        args,
-		WorkingDir:   workDir,
-		Extensions:   runner.DefaultExtensions(),
-		ExcludeGlobs: finalCfg.Ignore,
-		Jobs:         finalCfg.Jobs,
-		Config:       finalCfg,
+	// The output format comes from the flag, GOMDLINT_FORMAT or the
+	// default, in that order; loading has validated it.
+	format, err := reporter.ParseFormat(string(finalCfg.Format))
+	if err != nil {
+		return withExitCode(ExitConfigError, err)
 	}
+
+	runOpts := runnerOptions(args, workDir, loadResult)
+	// Without --fix, the diff format previews what --fix would change.
+	runOpts.PreviewFixes = format == reporter.FormatDiff && !finalCfg.Fix
 
 	logger.Debug("starting lint run",
 		"paths", runOpts.Paths,
@@ -233,19 +251,13 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Run linting.
 	result, err := lintRunner.Run(ctx, runOpts)
 	if err != nil {
-		return errors.Join(errors.New("lint run failed"), err)
+		return failure(ctx, ExitIOError, err)
 	}
 
 	// Get color mode from persistent flag.
 	colorMode, err := cmd.Flags().GetString("color")
 	if err != nil {
 		colorMode = "auto" // Default to auto if flag retrieval fails
-	}
-
-	// Parse output format.
-	format, err := reporter.ParseFormat(flags.format)
-	if err != nil {
-		return fmt.Errorf("invalid format: %w", err)
 	}
 
 	// Create reporter.
@@ -266,48 +278,222 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		Registry:     registry,
 	})
 	if err != nil {
-		return fmt.Errorf("create reporter: %w", err)
+		return withExitCode(ExitInternalError, fmt.Errorf("create reporter: %w", err))
 	}
 
 	// Report results.
 	if _, err := rep.Report(ctx, result); err != nil {
-		logger.Error("report failed", "error", err)
-		return fmt.Errorf("report results: %w", err)
+		return withExitCode(ExitIOError, fmt.Errorf("report results: %w", err))
+	}
+	for _, warning := range skipWarnings(result) {
+		logger.Warn(warning)
 	}
 
 	// Write memory profile if requested.
 	if flags.memprofile != "" {
-		memFile, err := os.Create(flags.memprofile)
-		if err != nil {
-			return fmt.Errorf("create memory profile: %w", err)
-		}
-		defer memFile.Close()
-		runtime.GC() //nolint:revive // Intentional GC before heap profile for accurate stats.
-		if err := pprof.WriteHeapProfile(memFile); err != nil {
-			return fmt.Errorf("write memory profile: %w", err)
+		if err := writeMemProfile(flags.memprofile); err != nil {
+			return withExitCode(ExitIOError, err)
 		}
 	}
 
-	// Determine exit code based on result.
-	exitCode := ExitCodeFromResult(result, flags.strict)
-	if exitCode != ExitSuccess {
-		return ErrLintIssuesFound
+	return resultError(result, flags.strict)
+}
+
+// runnerOptions builds the file discovery and processing options of a run.
+func runnerOptions(args []string, workDir string, loadResult *configloader.LoadResult) runner.Options {
+	cfg := loadResult.Config
+	opts := runner.Options{
+		Paths:         args,
+		WorkingDir:    workDir,
+		Extensions:    runner.DefaultExtensions(),
+		ExcludeGlobs:  cfg.Ignore,
+		IgnoreBaseDir: loadResult.IgnoreBaseDir,
+		Gitignore:     cfg.GitignoreEnabled(),
+		Jobs:          cfg.Jobs,
+		Config:        cfg,
+	}
+	if cfg.DefaultIgnoresEnabled() {
+		opts.SkipDirs = runner.DefaultSkipDirs()
+	}
+	return opts
+}
+
+// applyExplicitFlags gives flags the user set explicitly the last word over
+// the loaded configuration. The configuration merge only sees non-zero
+// values, so without this --fix=false or --jobs 0 could not override the
+// environment.
+func applyExplicitFlags(cmd *cobra.Command, flags *lintFlags, flagCfg, finalCfg *config.Config) {
+	changed := cmd.Flags().Changed
+	if changed("fix") {
+		finalCfg.Fix = flagCfg.Fix
+	}
+	if changed("dry-run") {
+		finalCfg.DryRun = flagCfg.DryRun
+	}
+	if changed("no-backups") {
+		finalCfg.NoBackups = flagCfg.NoBackups
+	}
+	if changed("jobs") {
+		finalCfg.Jobs = flagCfg.Jobs
+	}
+	if changed("no-gitignore") {
+		finalCfg.Gitignore = config.Bool(!flags.noGitignore)
+	}
+	if changed("no-default-ignores") {
+		finalCfg.DefaultIgnores = config.Bool(!flags.noDefaultIgnores)
+	}
+}
+
+// skipWarnings describes the files whose fixes the pipeline did not write,
+// with its reasons. They go to stderr, so every output format shows them.
+func skipWarnings(result *runner.Result) []string {
+	var warnings []string
+	for idx := range result.Files {
+		file := &result.Files[idx]
+		if file.Result != nil && file.Result.Skipped {
+			warnings = append(warnings, fmt.Sprintf("%s: fixes not written: %s", file.Path, file.Result.SkipReason))
+		}
+	}
+	return warnings
+}
+
+// resultError turns the outcome of a completed run into the command error
+// that carries its exit code.
+func resultError(result *runner.Result, strict bool) error {
+	code := ExitCodeFromResult(result, strict)
+	switch code {
+	case ExitSuccess:
+		return nil
+	case ExitIOError:
+		noun := "files"
+		if result.Stats.FilesErrored == 1 {
+			noun = "file"
+		}
+		return &ExitError{Code: code, Err: fmt.Errorf("%d %s could not be linted", result.Stats.FilesErrored, noun)}
+	default:
+		return &ExitError{Code: code, Err: ErrLintIssuesFound}
+	}
+}
+
+// failure classifies the error of a stage that also fails when the run is
+// interrupted. An interrupted run is an internal error, not a failure of the
+// stage's inputs.
+func failure(ctx context.Context, code int, err error) error {
+	if ctx.Err() != nil {
+		return withExitCode(ExitInternalError, err)
+	}
+	return withExitCode(code, err)
+}
+
+// validateLintFlags rejects invalid flag values before any work starts.
+func validateLintFlags(flags *lintFlags, jobs int) error {
+	if _, err := reporter.ParseFormat(flags.format); err != nil {
+		return withExitCode(ExitInvalidUsage, err)
+	}
+	if !configloader.IsValidFlavor(config.Flavor(flags.flavor)) {
+		return usageError("invalid flavor %q; valid flavors: commonmark, gfm", flags.flavor)
+	}
+	if !config.RuleFormat(flags.ruleFormat).IsValid() {
+		return usageError("invalid rule format %q; valid formats: name, id, combined", flags.ruleFormat)
+	}
+	if !config.SummaryOrder(flags.summaryOrder).IsValid() {
+		return usageError("invalid summary order %q; valid orders: rules, files", flags.summaryOrder)
+	}
+	if jobs < 0 {
+		return usageError("invalid jobs value %d; use 0 for one worker per CPU", jobs)
+	}
+	for _, pattern := range flags.ignore {
+		if err := ignore.ValidatePattern(pattern); err != nil {
+			return withExitCode(ExitInvalidUsage, fmt.Errorf("--ignore: %w", err))
+		}
+	}
+	return nil
+}
+
+// ruleLists holds the canonical rule IDs from --enable, --disable and
+// --fix-rules. A nil list means the flag was not given.
+type ruleLists struct {
+	enable  []string
+	disable []string
+	fix     []string
+}
+
+// resolveRuleListFlags resolves the rule IDs, names and aliases given to
+// --enable, --disable and --fix-rules, rejecting rules that do not exist.
+func resolveRuleListFlags(flags *lintFlags) (ruleLists, error) {
+	var lists ruleLists
+	var err error
+	if lists.enable, err = canonicalRuleIDs("--enable", flags.enable); err != nil {
+		return lists, err
+	}
+	if lists.disable, err = canonicalRuleIDs("--disable", flags.disable); err != nil {
+		return lists, err
+	}
+	if lists.fix, err = canonicalRuleIDs("--fix-rules", flags.fixRules); err != nil {
+		return lists, err
+	}
+	return lists, nil
+}
+
+// canonicalRuleIDs resolves keys given to flag through the rule registry.
+func canonicalRuleIDs(flag string, keys []string) ([]string, error) {
+	if keys == nil {
+		return nil, nil
 	}
 
+	ids := make([]string, 0, len(keys))
+	var unknown []string
+	for _, key := range keys {
+		id, ok := lint.LookupRuleID(lint.DefaultRegistry, key)
+		if !ok {
+			unknown = append(unknown, strconv.Quote(key))
+			continue
+		}
+		ids = append(ids, id)
+	}
+
+	switch len(unknown) {
+	case 0:
+		return ids, nil
+	case 1:
+		return nil, usageError("%s: unknown rule %s; run 'gomdlint rules' to list rules", flag, unknown[0])
+	default:
+		return nil, usageError("%s: unknown rules %s; run 'gomdlint rules' to list rules", flag, strings.Join(unknown, ", "))
+	}
+}
+
+// writeMemProfile writes a heap profile to path.
+func writeMemProfile(path string) error {
+	memFile, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create memory profile: %w", err)
+	}
+	defer memFile.Close()
+	runtime.GC() //nolint:revive // Intentional GC before heap profile for accurate stats.
+	if err := pprof.WriteHeapProfile(memFile); err != nil {
+		return fmt.Errorf("write memory profile: %w", err)
+	}
 	return nil
 }
 
 func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().BoolVar(&cfg.Fix, "fix", false, "automatically fix issues")
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "show fixes without applying them")
-	cmd.Flags().StringVar(&flags.format, "format", "text", "output format: text, table, json, sarif, diff, summary")
+	cmd.Flags().StringVar(&flags.format, "format", "text", "output format: text, table, json, sarif, diff (previews fixes without --fix), summary")
 	cmd.Flags().IntVar(&cfg.Jobs, "jobs", 0, "number of parallel workers (0 = auto)")
-	cmd.Flags().StringSliceVar(&flags.ignore, "ignore", nil, "glob patterns to ignore")
-	cmd.Flags().StringSliceVar(&flags.enable, "enable", nil, "rule IDs to enable")
-	cmd.Flags().StringSliceVar(&flags.disable, "disable", nil, "rule IDs to disable")
-	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to specific rule IDs")
+	cmd.Flags().StringSliceVar(&flags.ignore, "ignore", nil,
+		"glob patterns to ignore, relative to the current directory (replace config ignore patterns)")
+	cmd.Flags().BoolVar(&flags.noGitignore, "no-gitignore", false,
+		"lint files that .gitignore files ignore")
+	cmd.Flags().BoolVar(&flags.noDefaultIgnores, "no-default-ignores", false,
+		"lint files in node_modules and vendor directories")
+	cmd.Flags().StringSliceVar(&flags.enable, "enable", nil,
+		"rules to enable, by ID or name (overrides config files)")
+	cmd.Flags().StringSliceVar(&flags.disable, "disable", nil,
+		"rules to disable, by ID or name (overrides config files and --enable)")
+	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to these rules, by ID or name")
 	cmd.Flags().BoolVar(&cfg.NoBackups, "no-backups", false, "disable backup creation when fixing")
-	cmd.Flags().StringVar(&flags.flavor, "flavor", "commonmark", "Markdown flavor: commonmark, gfm")
+	cmd.Flags().StringVar(&flags.flavor, "flavor", string(config.FlavorGFM), "Markdown flavor: commonmark, gfm")
 	cmd.Flags().BoolVar(&flags.strict, "strict", false, "treat warnings as errors for exit code")
 	cmd.Flags().BoolVar(&flags.noContext, "no-context", false, "hide source line context in output")
 	cmd.Flags().BoolVar(&flags.compact, "compact", false, "use compact output format")

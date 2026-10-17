@@ -83,15 +83,21 @@ func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
 	}
 	paths.Project = projectConfig
 
-	// Find markdownlint config (for migration)
-	paths.Markdownlint = findMarkdownlintConfig(workDir)
+	// Find a markdownlint config, searching upward like the project config.
+	paths.Markdownlint, err = findUpward(ctx, workDir, markdownlintConfigFiles)
+	if err != nil {
+		return nil, err
+	}
 
 	return paths, nil
 }
 
+// goosWindows is runtime.GOOS on Windows.
+const goosWindows = "windows"
+
 // findSystemConfig returns the path to the system-wide config file, if it exists.
 func findSystemConfig() string {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		// On Windows, use ProgramData
 		programData := os.Getenv("ProgramData")
 		if programData == "" {
@@ -134,6 +140,13 @@ func findConfigInDir(dir string) string {
 // Returns the path to the first config file found, or empty string if none.
 // Stops at filesystem boundaries, VCS roots, or when reaching root.
 func FindProjectConfig(ctx context.Context, startDir string) (string, error) {
+	return findUpward(ctx, startDir, gomdlintConfigFiles)
+}
+
+// findUpward searches upward from startDir for a file with one of names,
+// preferring earlier names within a directory. It stops after a VCS root
+// or the home directory, and at the filesystem root.
+func findUpward(ctx context.Context, startDir string, names []string) (string, error) {
 	if startDir == "" {
 		var err error
 		startDir, err = os.Getwd()
@@ -162,8 +175,8 @@ func FindProjectConfig(ctx context.Context, startDir string) (string, error) {
 		default:
 		}
 
-		// Check for gomdlint config files in current directory
-		for _, name := range gomdlintConfigFiles {
+		// Check for config files in current directory
+		for _, name := range names {
 			path := filepath.Join(currentDir, name)
 			if fileExists(path) {
 				return path, nil
@@ -207,12 +220,12 @@ func FindMarkdownlintConfig(dir string) string {
 	return findMarkdownlintConfig(dir)
 }
 
-// isVCSRoot returns true if the directory contains a VCS root marker.
+// isVCSRoot returns true if the directory contains a VCS root marker. Git
+// worktrees and submodules mark their root with a .git file instead of a
+// directory, so any entry counts.
 func isVCSRoot(dir string) bool {
 	for _, marker := range vcsRootMarkers {
-		path := filepath.Join(dir, marker)
-		info, err := os.Stat(path)
-		if err == nil && info.IsDir() {
+		if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
 			return true
 		}
 	}

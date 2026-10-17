@@ -440,7 +440,11 @@ func (t *TableFormatter) formatLegend() string {
 func (t *TableFormatter) FormatTableSummary(stats runner.Stats, duration string) string {
 	var parts []string
 
-	parts = append(parts, fmt.Sprintf("%d files checked", stats.FilesProcessed))
+	parts = append(parts, fmt.Sprintf("%d %s checked", stats.FilesProcessed, filesNoun(stats.FilesProcessed)))
+
+	if stats.FilesErrored > 0 {
+		parts = append(parts, t.styles.formatErrored(stats))
+	}
 
 	if stats.DiagnosticsBySeverity["error"] > 0 {
 		errCount := t.styles.Error.Render(fmt.Sprintf("%d errors", stats.DiagnosticsBySeverity["error"]))

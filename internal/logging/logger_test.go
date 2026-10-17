@@ -1,6 +1,8 @@
 package logging_test
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/log"
@@ -85,6 +87,22 @@ func TestSetDefault(t *testing.T) {
 
 	if logging.Default() != newLogger {
 		t.Error("SetDefault did not change the default logger")
+	}
+}
+
+func TestNewWithWriter(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := logging.NewWithWriter(&buf, "info")
+	logger.Warn("careful")
+	logger.Debug("hidden")
+
+	if !strings.Contains(buf.String(), "careful") {
+		t.Errorf("expected the warning in the writer, got %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "hidden") {
+		t.Errorf("debug output leaked at info level: %q", buf.String())
 	}
 }
 

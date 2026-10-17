@@ -139,8 +139,9 @@ func TestVersionCommand(t *testing.T) {
 		t.Fatalf("version command failed: %v", err)
 	}
 
-	// Version command uses charmbracelet/log which writes to stdout directly,
-	// so we just verify it doesn't error.
+	if got, want := out.String(), "gomdlint 1.2.3 (commit abc123, built 2024-01-01)\n"; got != want {
+		t.Errorf("version output = %q, want %q", got, want)
+	}
 }
 
 func TestLintCommandAcceptsArbitraryArgs(t *testing.T) {

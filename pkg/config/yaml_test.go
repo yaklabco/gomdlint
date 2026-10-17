@@ -80,7 +80,7 @@ func TestConfigClone(t *testing.T) {
 				"MD001": {Enabled: &enabled},
 			},
 			Ignore:       []string{"*.bak"},
-			Backups:      config.BackupsConfig{Enabled: true, Mode: "sidecar"},
+			Backups:      config.BackupsConfig{Enabled: config.Bool(true), Mode: "sidecar"},
 			Fix:          true,
 			DryRun:       true,
 			Format:       config.FormatJSON,
@@ -109,7 +109,33 @@ func TestConfigClone(t *testing.T) {
 		assert.Equal(t, original.EnableRules, clone.EnableRules)
 		assert.Equal(t, original.DisableRules, clone.DisableRules)
 		assert.Equal(t, original.FixRules, clone.FixRules)
+
+		// The clone owns its backups setting.
+		*clone.Backups.Enabled = false
+		assert.True(t, original.Backups.IsEnabled())
 	})
+}
+
+func TestBackupsConfigIsEnabled(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, config.BackupsConfig{}.IsEnabled(), "unset")
+	assert.False(t, config.BackupsConfig{Enabled: config.Bool(false)}.IsEnabled())
+	assert.True(t, config.BackupsConfig{Enabled: config.Bool(true)}.IsEnabled())
+	assert.True(t, config.NewConfig().Backups.IsEnabled(), "default")
+}
+
+func TestBackupsDisabledSurvivesYAML(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.FromYAML([]byte("backups:\n  enabled: false\n"))
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Backups.Enabled)
+	assert.False(t, cfg.Backups.IsEnabled())
+
+	data, err := cfg.ToYAML()
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "enabled: false")
 }
 
 func TestConfigToYAML(t *testing.T) {

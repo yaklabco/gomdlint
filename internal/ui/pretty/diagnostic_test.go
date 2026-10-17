@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/clipperhouse/displaywidth"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
@@ -100,6 +101,60 @@ func TestFormatSourceContext_WithCaret(t *testing.T) {
 
 	// Check caret position
 	assert.Contains(t, result, "^")
+}
+
+// TestFormatSourceContext_CaretAlignment checks that the caret sits under
+// the character at the (1-based, character) column even after wide
+// characters and tabs, by comparing display cells of the printed lines.
+func TestFormatSourceContext_CaretAlignment(t *testing.T) {
+	styles := pretty.NewStyles(false)
+
+	tests := []struct {
+		name   string
+		line   string
+		column int
+		want   string // the printed source line, after the indent
+		under  string // the text from the caret's cell onward
+	}{
+		{name: "ascii", line: "# Title  ", column: 8, want: "# Title  ", under: "  "},
+		{name: "wide emoji", line: "\U0001F600 emoji   ", column: 8, want: "\U0001F600 emoji   ", under: "   "},
+		{name: "cjk", line: "中文 trailing ", column: 12, want: "中文 trailing ", under: " "},
+		{name: "tab", line: "\tcode", column: 2, want: "    code", under: "code"},
+		{name: "text then tab", line: "a\tb", column: 3, want: "a   b", under: "b"},
+		{name: "end of line", line: "abc", column: 4, want: "abc", under: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := styles.FormatSourceContext(tt.line, tt.column)
+			lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
+			if !assert.Len(t, lines, 2) {
+				return
+			}
+
+			const indent = "        "
+			printed := strings.TrimPrefix(lines[0], indent)
+			assert.Equal(t, tt.want, printed)
+
+			caretCell := displaywidth.String(lines[1]) - 1
+			prefixCells := caretCell - len(indent)
+			// The cells before the caret must hold exactly the printed
+			// text before the target character.
+			assert.Equal(t, tt.under, cellsFrom(printed, prefixCells))
+		})
+	}
+}
+
+// cellsFrom returns the part of text that starts at display cell offset.
+func cellsFrom(text string, offset int) string {
+	width := 0
+	for idx, char := range text {
+		if width == offset {
+			return text[idx:]
+		}
+		width += displaywidth.Rune(char)
+	}
+	return ""
 }
 
 func TestFormatSourceContext_ZeroColumn(t *testing.T) {

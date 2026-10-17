@@ -5,8 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -556,6 +560,11 @@ func TestRunner_Run_DryRun(t *testing.T) {
 		t.Errorf("FilesModified = %d, want 0 for dry-run", result.Stats.FilesModified)
 	}
 
+	// The fix is pending instead.
+	if result.Stats.FilesWithPendingFixes != 1 {
+		t.Errorf("FilesWithPendingFixes = %d, want 1 for dry-run", result.Stats.FilesWithPendingFixes)
+	}
+
 	// Verify file was NOT changed.
 	content, err := os.ReadFile(mdFile)
 	if err != nil {
@@ -573,6 +582,277 @@ func TestRunner_Run_DryRun(t *testing.T) {
 
 	if result.Files[0].Result == nil || result.Files[0].Result.Diff == nil {
 		t.Error("expected diff in dry-run mode")
+	}
+}
+
+// TestRunner_Run_PreviewFixes covers previews: the diff --fix would apply,
+// with diagnostics that still describe the unchanged file.
+func TestRunner_Run_PreviewFixes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(mdFile, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	registry := lint.NewRegistry()
+	registry.Register(&fixableRule{
+		BaseRule: lint.NewBaseRule("TEST001", "test-rule", "", nil, true),
+		diags: []lint.Diagnostic{{
+			RuleID:   "TEST001",
+			Message:  "fix needed",
+			FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "world"}},
+		}},
+	})
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:        []string{"."},
+		WorkingDir:   dir,
+		Config:       config.NewConfig(),
+		PreviewFixes: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	content, err := os.ReadFile(mdFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(content) != "hello" {
+		t.Errorf("preview modified the file: %q", content)
+	}
+	if result.Stats.FilesModified != 0 || result.Stats.DiagnosticsTotal != 1 {
+		t.Errorf("FilesModified = %d, DiagnosticsTotal = %d, want 0 and 1",
+			result.Stats.FilesModified, result.Stats.DiagnosticsTotal)
+	}
+	outcome := result.Files[0]
+	if outcome.Result == nil || outcome.Result.Diff == nil || !outcome.Result.Diff.HasChanges() {
+		t.Fatal("expected a preview diff")
+	}
+	if !strings.Contains(outcome.Result.Diff.String(), "+world") {
+		t.Errorf("diff does not show the fix:\n%s", outcome.Result.Diff.String())
+	}
+}
+
+// TestRunner_Run_FixesEveryHardLink covers a file with two hard links. Each
+// path is processed, so both end up fixed even when writing the fix to one
+// path splits the link.
+func TestRunner_Run_FixesEveryHardLink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "a.md"), filepath.Join(dir, "b.md")
+	if err := os.WriteFile(first, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Link(first, second); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	registry := lint.NewRegistry()
+	registry.Register(&fixableRule{
+		BaseRule: lint.NewBaseRule("TEST001", "test-rule", "", nil, true),
+		diags: []lint.Diagnostic{{
+			RuleID:   "TEST001",
+			Message:  "fix needed",
+			FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "world"}},
+		}},
+	})
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     cfg,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(result.Files) != 2 {
+		t.Errorf("got %d outcomes, want one per path", len(result.Files))
+	}
+	for _, path := range []string{first, second} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(content) != "world" {
+			t.Errorf("%s = %q, want the fix applied", filepath.Base(path), content)
+		}
+	}
+}
+
+// overlapParser records whether two paths naming one file were ever parsed
+// at the same time.
+type overlapParser struct {
+	mockParser
+
+	mu      sync.Mutex
+	active  []os.FileInfo
+	overlap bool
+}
+
+func (p *overlapParser) Parse(ctx context.Context, path string, content []byte) (*mdast.FileSnapshot, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	for _, other := range p.active {
+		if os.SameFile(info, other) {
+			p.overlap = true
+		}
+	}
+	p.active = append(p.active, info)
+	p.mu.Unlock()
+
+	time.Sleep(5 * time.Millisecond) // Widen the window for an overlap.
+
+	p.mu.Lock()
+	for idx, other := range p.active {
+		if other == info {
+			p.active = append(p.active[:idx], p.active[idx+1:]...)
+			break
+		}
+	}
+	p.mu.Unlock()
+
+	return p.mockParser.Parse(ctx, path, content)
+}
+
+// TestRunner_Run_HardLinksNeverOverlap covers the paths of one file: they go
+// to one worker in turn, so a write through one path never races a read or
+// write through another.
+func TestRunner_Run_HardLinksNeverOverlap(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	original := filepath.Join(dir, "link0.md")
+	if err := os.WriteFile(original, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	const links = 8
+	for idx := 1; idx < links; idx++ {
+		if err := os.Link(original, filepath.Join(dir, "link"+string(rune('0'+idx))+".md")); err != nil {
+			t.Skipf("hard links not supported: %v", err)
+		}
+		other := filepath.Join(dir, "other"+string(rune('0'+idx))+".md")
+		if err := os.WriteFile(other, []byte("# Test\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	parser := &overlapParser{}
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(parser, lint.NewRegistry())))
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     config.NewConfig(),
+		Jobs:       links,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if want := 2*links - 1; len(result.Files) != want {
+		t.Errorf("got %d outcomes, want %d", len(result.Files), want)
+	}
+	if parser.overlap {
+		t.Error("two paths naming one file were processed at the same time")
+	}
+}
+
+// panicRule is a rule that crashes.
+type panicRule struct {
+	lint.BaseRule
+}
+
+func (r *panicRule) Apply(_ *lint.RuleContext) ([]lint.Diagnostic, error) {
+	panic("rule crashed")
+}
+
+// TestRunner_Run_PanicFailsOnlyThatFile covers a crash while processing one
+// file: the file counts as errored and the others are still linted.
+func TestRunner_Run_PanicFailsOnlyThatFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# Test\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	registry := lint.NewRegistry()
+	registry.Register(&panicRule{BaseRule: lint.NewBaseRule("PANIC001", "panic-rule", "", nil, false)})
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     config.NewConfig(),
+		Jobs:       1,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Stats.FilesErrored != 2 {
+		t.Errorf("FilesErrored = %d, want 2", result.Stats.FilesErrored)
+	}
+	for idx := range result.Files {
+		if !result.Files[idx].Failed() {
+			t.Errorf("%s did not fail", result.Files[idx].Path)
+		}
+	}
+}
+
+func TestRunner_Run_UnreadableFileFails(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permission bits do not stop root or Windows from reading files")
+	}
+
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked.md")
+	for _, name := range []string{"ok.md", "locked.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# Test\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, lint.NewRegistry())))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     config.NewConfig(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Stats.FilesErrored != 1 || result.Stats.FilesProcessed != 1 {
+		t.Errorf("FilesErrored = %d, FilesProcessed = %d, want 1 and 1",
+			result.Stats.FilesErrored, result.Stats.FilesProcessed)
+	}
+	for idx := range result.Files {
+		outcome := &result.Files[idx]
+		if got, want := outcome.Failed(), outcome.Path == locked; got != want {
+			t.Errorf("%s: Failed() = %v, want %v", outcome.Path, got, want)
+		}
 	}
 }
 

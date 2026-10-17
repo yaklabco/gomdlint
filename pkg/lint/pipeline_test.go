@@ -629,7 +629,7 @@ func TestBackupConfigFromConfig(t *testing.T) {
 		t.Parallel()
 
 		cfg := config.NewConfig()
-		cfg.Backups.Enabled = true
+		cfg.Backups.Enabled = config.Bool(true)
 		cfg.Backups.Mode = "sidecar"
 
 		backup := lint.BackupConfigFromConfig(cfg)
@@ -646,7 +646,7 @@ func TestBackupConfigFromConfig(t *testing.T) {
 		t.Parallel()
 
 		cfg := config.NewConfig()
-		cfg.Backups.Enabled = true
+		cfg.Backups.Enabled = config.Bool(true)
 		cfg.NoBackups = true
 
 		backup := lint.BackupConfigFromConfig(cfg)

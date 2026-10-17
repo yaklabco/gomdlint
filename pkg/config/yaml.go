@@ -124,13 +124,23 @@ func (c *Config) deepCopy() *Config {
 	clone := &Config{
 		Flavor:          c.Flavor,
 		SeverityDefault: c.SeverityDefault,
-		Backups:         c.Backups, // BackupsConfig only has value types
+		Backups:         BackupsConfig{Mode: c.Backups.Mode},
 		Fix:             c.Fix,
 		DryRun:          c.DryRun,
 		Format:          c.Format,
 		RuleFormat:      c.RuleFormat,
 		Jobs:            c.Jobs,
 		NoBackups:       c.NoBackups,
+	}
+
+	if c.Backups.Enabled != nil {
+		clone.Backups.Enabled = Bool(*c.Backups.Enabled)
+	}
+	if c.Gitignore != nil {
+		clone.Gitignore = Bool(*c.Gitignore)
+	}
+	if c.DefaultIgnores != nil {
+		clone.DefaultIgnores = Bool(*c.DefaultIgnores)
 	}
 
 	// Deep copy Ignore slice

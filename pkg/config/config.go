@@ -21,8 +21,22 @@ type RuleConfig struct {
 
 // BackupsConfig controls backup behavior when fixing files.
 type BackupsConfig struct {
-	Enabled bool   `mapstructure:"enabled" yaml:"enabled"`
+	// Enabled turns backups on. Nil means the setting was not given, so a
+	// configuration layer can turn backups off without the zero value of a
+	// plain bool being mistaken for "not set". Use IsEnabled to read it.
+	Enabled *bool  `mapstructure:"enabled" yaml:"enabled,omitempty"`
 	Mode    string `mapstructure:"mode" yaml:"mode"` // "sidecar", "xdg", etc.
+}
+
+// IsEnabled reports whether backups are enabled. An unset value counts as
+// disabled; NewConfig enables backups explicitly.
+func (b BackupsConfig) IsEnabled() bool {
+	return b.Enabled != nil && *b.Enabled
+}
+
+// Bool returns a pointer to value, for optional boolean settings.
+func Bool(value bool) *bool {
+	return &value
 }
 
 // OutputFormat specifies the output format for diagnostics.
@@ -45,6 +59,16 @@ const (
 	RuleFormatID       RuleFormat = "id"       // "MD009"
 	RuleFormatCombined RuleFormat = "combined" // "MD009/no-trailing-spaces"
 )
+
+// IsValid returns true if the rule format is valid.
+func (f RuleFormat) IsValid() bool {
+	switch f {
+	case RuleFormatName, RuleFormatID, RuleFormatCombined:
+		return true
+	default:
+		return false
+	}
+}
 
 // SummaryOrder controls the order of tables in summary output.
 type SummaryOrder string
@@ -79,8 +103,9 @@ type Config struct {
 	// Flavor specifies the Markdown flavor ("commonmark" or "gfm").
 	Flavor Flavor `mapstructure:"flavor" yaml:"flavor"`
 
-	// SeverityDefault is the default severity for rules that don't specify one.
-	SeverityDefault string `mapstructure:"severity_default" yaml:"severity_default"`
+	// SeverityDefault is the severity for rules that don't specify one. It
+	// replaces each rule's built-in default severity; empty keeps them.
+	SeverityDefault string `mapstructure:"severity_default" yaml:"severity_default,omitempty"`
 
 	// Rules contains per-rule configuration keyed by rule ID.
 	Rules map[string]RuleConfig `mapstructure:"rules" yaml:"rules"`
@@ -89,8 +114,19 @@ type Config struct {
 	// Migration uses it to preserve markdownlint defaults and file directives.
 	RuleDefaults map[string]RuleConfig `mapstructure:"rule_defaults" yaml:"rule_defaults,omitempty"`
 
-	// Ignore contains glob patterns for files to ignore.
+	// Ignore contains glob patterns for files to ignore. Patterns from a
+	// project or explicit config file are relative to that file's directory.
 	Ignore []string `mapstructure:"ignore" yaml:"ignore"`
+
+	// Gitignore skips files ignored by .gitignore files when walking
+	// directories. Nil means unset; GitignoreEnabled treats it as disabled
+	// and NewConfig enables it.
+	Gitignore *bool `mapstructure:"gitignore" yaml:"gitignore,omitempty"`
+
+	// DefaultIgnores skips node_modules and vendor directories when walking
+	// directories. Nil means unset; DefaultIgnoresEnabled treats it as
+	// disabled and NewConfig enables it.
+	DefaultIgnores *bool `mapstructure:"default_ignores" yaml:"default_ignores,omitempty"`
 
 	// Backups configures backup behavior when fixing.
 	Backups BackupsConfig `mapstructure:"backups" yaml:"backups"`
@@ -128,16 +164,30 @@ type Config struct {
 // NewConfig returns a Config with sensible defaults.
 func NewConfig() *Config {
 	return &Config{
-		Flavor:          FlavorCommonMark,
-		SeverityDefault: string(SeverityWarning),
-		Rules:           make(map[string]RuleConfig),
-		Ignore:          nil,
+		Flavor: FlavorGFM,
+		// No SeverityDefault: rules keep their built-in severities.
+		Rules:          make(map[string]RuleConfig),
+		Ignore:         nil,
+		Gitignore:      Bool(true),
+		DefaultIgnores: Bool(true),
 		Backups: BackupsConfig{
-			Enabled: true,
+			Enabled: Bool(true),
 			Mode:    "sidecar",
 		},
 		Format:     FormatText,
 		RuleFormat: RuleFormatName,
 		Jobs:       0, // 0 means use GOMAXPROCS
 	}
+}
+
+// GitignoreEnabled reports whether directory walks skip files that
+// .gitignore files ignore.
+func (c *Config) GitignoreEnabled() bool {
+	return c.Gitignore != nil && *c.Gitignore
+}
+
+// DefaultIgnoresEnabled reports whether directory walks skip node_modules
+// and vendor directories.
+func (c *Config) DefaultIgnoresEnabled() bool {
+	return c.DefaultIgnores != nil && *c.DefaultIgnores
 }
