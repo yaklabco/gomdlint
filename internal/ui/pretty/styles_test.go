@@ -2,7 +2,6 @@ package pretty_test
 
 import (
 	"bytes"
-	"os"
 	"testing"
 
 	"github.com/muesli/termenv"
@@ -36,46 +35,6 @@ func TestNewStyles_ColorDisabled(t *testing.T) {
 
 	rendered = styles.Error.Render(text)
 	assert.Equal(t, text, rendered, "No-color Error should not add formatting")
-}
-
-func TestIsColorEnabled_AlwaysMode(t *testing.T) {
-	var buf bytes.Buffer
-	result := pretty.IsColorEnabled("always", &buf)
-	assert.True(t, result, "always mode should return true")
-}
-
-func TestIsColorEnabled_NeverMode(t *testing.T) {
-	result := pretty.IsColorEnabled("never", os.Stdout)
-	assert.False(t, result, "never mode should return false")
-}
-
-func TestIsColorEnabled_AutoMode_NonTTY(t *testing.T) {
-	// bytes.Buffer is not a TTY
-	var buf bytes.Buffer
-	result := pretty.IsColorEnabled("auto", &buf)
-	assert.False(t, result, "auto mode with non-TTY should return false")
-}
-
-func TestIsColorEnabled_AutoMode_NoColorEnv(t *testing.T) {
-	// Set NO_COLOR environment variable
-	t.Setenv("NO_COLOR", "1")
-
-	// Even with a TTY, NO_COLOR should disable colors
-	result := pretty.IsColorEnabled("auto", os.Stdout)
-	assert.False(t, result, "auto mode with NO_COLOR set should return false")
-}
-
-func TestIsColorEnabled_DefaultsToAuto(t *testing.T) {
-	// Clear NO_COLOR if set
-	t.Setenv("NO_COLOR", "")
-
-	// Empty or unknown mode should default to auto behavior
-	var buf bytes.Buffer
-	result := pretty.IsColorEnabled("", &buf)
-	assert.False(t, result, "empty mode with non-TTY should return false (auto behavior)")
-
-	result = pretty.IsColorEnabled("unknown", &buf)
-	assert.False(t, result, "unknown mode with non-TTY should return false (auto behavior)")
 }
 
 // clearColorEnv unsets the environment variables that choose a color
@@ -131,14 +90,13 @@ func TestNewStylesFor(t *testing.T) {
 	clearColorEnv(t)
 
 	always := pretty.NewStylesFor("always", &bytes.Buffer{})
-	assert.True(t, always.Colored())
 	assert.Equal(t, "\x1b[1;91mx\x1b[0m", always.Error.Render("x"), "bold bright red in basic ANSI")
 	assert.Equal(t, "\x1b[93mx\x1b[0m", always.TableWarnRow.Render("x"), "bright yellow in basic ANSI")
 
 	for _, mode := range []string{"never", "auto"} {
 		styles := pretty.NewStylesFor(mode, &bytes.Buffer{})
-		assert.False(t, styles.Colored(), mode)
 		assert.Equal(t, "x", styles.Error.Render("x"), mode)
+		assert.Equal(t, "x", styles.TableWarnRow.Render("x"), mode)
 	}
 }
 

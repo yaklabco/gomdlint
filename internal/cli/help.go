@@ -41,15 +41,6 @@ type HelpStyles struct {
 	Dim lipgloss.Style
 }
 
-// NewHelpStyles creates help styles that render color, in basic ANSI on
-// any writer, when colorEnabled, and plain text otherwise.
-func NewHelpStyles(colorEnabled bool) *HelpStyles {
-	if !colorEnabled {
-		return newNoColorHelpStyles()
-	}
-	return newColorHelpStyles(pretty.NewRenderer(io.Discard, termenv.ANSI))
-}
-
 // newColorHelpStyles creates help styles that render with renderer.
 func newColorHelpStyles(renderer *lipgloss.Renderer) *HelpStyles {
 	style := renderer.NewStyle
@@ -81,8 +72,7 @@ func newNoColorHelpStyles() *HelpStyles {
 
 // HelpFormatter provides styled help output for Cobra commands.
 type HelpFormatter struct {
-	styles       *HelpStyles
-	colorEnabled bool
+	styles *HelpStyles
 }
 
 // NewHelpFormatter creates a help formatter for output to writer under the
@@ -92,22 +82,20 @@ func NewHelpFormatter(colorMode string, writer io.Writer) *HelpFormatter {
 	if profile == termenv.Ascii {
 		return &HelpFormatter{styles: newNoColorHelpStyles()}
 	}
-	return &HelpFormatter{
-		styles:       newColorHelpStyles(pretty.NewRenderer(writer, profile)),
-		colorEnabled: true,
-	}
+	return &HelpFormatter{styles: newColorHelpStyles(pretty.NewRenderer(writer, profile))}
 }
 
 // forCommand returns the formatter for help on command: one for the
-// command's output and the --color flag as parsed. The formatter that
-// ApplyToCommand is called on is made before the flags are parsed, so it
-// only serves commands without the flag.
-func (h *HelpFormatter) forCommand(command *cobra.Command) *HelpFormatter {
-	flag := command.Flag("color")
-	if flag == nil {
-		return h
+// command's output and the --color flag as parsed, or auto detection for a
+// command without the flag. The formatter that ApplyToCommand is called on
+// is made before the flags are parsed, for the process's standard output,
+// so it styles no help.
+func (*HelpFormatter) forCommand(command *cobra.Command) *HelpFormatter {
+	mode := colorModeAuto
+	if flag := command.Flag("color"); flag != nil {
+		mode = flag.Value.String()
 	}
-	return NewHelpFormatter(flag.Value.String(), command.OutOrStdout())
+	return NewHelpFormatter(mode, command.OutOrStdout())
 }
 
 // templateFuncs returns template functions for styled help rendering.

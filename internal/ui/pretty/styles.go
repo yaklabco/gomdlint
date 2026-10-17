@@ -58,15 +58,6 @@ type Styles struct {
 	// Misc
 	Dim  lipgloss.Style
 	Bold lipgloss.Style
-
-	// colored is true when the styles render color.
-	colored bool
-}
-
-// Colored reports whether the styles render color. Output that marks
-// things only by color must mark them another way when it is false.
-func (s *Styles) Colored() bool {
-	return s.colored
 }
 
 // NewStyles creates styles that render color, in basic ANSI on any
@@ -115,6 +106,12 @@ func NewRenderer(writer io.Writer, profile termenv.Profile) *lipgloss.Renderer {
 //     terminal where NO_COLOR is not set: the profile its environment
 //     describes, which may be none, for example for TERM=dumb.
 func ColorProfile(mode string, writer io.Writer) termenv.Profile {
+	return colorProfile(mode, writer, isTerminal)
+}
+
+// colorProfile is ColorProfile with terminal deciding whether a writer is a
+// terminal, which tests fake.
+func colorProfile(mode string, writer io.Writer, terminal func(io.Writer) bool) termenv.Profile {
 	switch mode {
 	case colorNever:
 		return termenv.Ascii
@@ -125,10 +122,13 @@ func ColorProfile(mode string, writer io.Writer) termenv.Profile {
 		// Profiles with more colors have lower values.
 		return min(described, termenv.ANSI)
 	default:
-		if os.Getenv("NO_COLOR") != "" || !isTerminal(writer) {
+		if os.Getenv("NO_COLOR") != "" || !terminal(writer) {
 			return termenv.Ascii
 		}
-		return termenv.NewOutput(writer).EnvColorProfile()
+		// writer is a terminal: termenv must not decide otherwise, as its
+		// plain isatty check does for Cygwin and MSYS terminals, and its
+		// CI check does for any terminal in CI.
+		return termenv.NewOutput(writer, termenv.WithTTY(true)).EnvColorProfile()
 	}
 }
 
@@ -146,8 +146,6 @@ func isTerminal(writer io.Writer) bool {
 func newColorStyles(renderer *lipgloss.Renderer) *Styles {
 	style := renderer.NewStyle
 	return &Styles{
-		colored: true,
-
 		// Severity colors
 		Error:   style().Foreground(lipgloss.Color("9")).Bold(true),
 		Warning: style().Foreground(lipgloss.Color("11")).Bold(true),
@@ -225,10 +223,4 @@ func newNoColorStyles() *Styles {
 		Dim:            plain,
 		Bold:           plain,
 	}
-}
-
-// IsColorEnabled reports whether output to writer is colored under the
-// --color mode: "auto" (default), "always" or "never". See ColorProfile.
-func IsColorEnabled(mode string, writer io.Writer) bool {
-	return ColorProfile(mode, writer) != termenv.Ascii
 }
