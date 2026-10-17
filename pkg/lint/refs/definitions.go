@@ -165,7 +165,7 @@ func (c *collector) addDefinition(parsed parsedDefinition, lines []definitionLin
 			StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn,
 		},
 		Lines:     [2]int{first.number, last.number},
-		Removable: !first.marker && allNoMarker(lines),
+		Removable: allNoMarker(lines),
 	}
 	if _, exists := c.ctx.Definitions[normalized]; exists {
 		def.IsDuplicate = true
@@ -205,7 +205,11 @@ func parseDefinition(text string, pos int) (parsedDefinition, bool) {
 	if !ok {
 		return parsedDefinition{}, false
 	}
-	parsed.destination = strings.Trim(text[idx:destEnd], "<>")
+	parsed.destination = text[idx:destEnd]
+	if strings.HasPrefix(parsed.destination, "<") {
+		// A pointy destination is written inside one pair of angle brackets.
+		parsed.destination = strings.TrimSuffix(parsed.destination[1:], ">")
+	}
 
 	// The title is optional; without a valid one the destination must end the line.
 	if titleStart := skipDefinitionSpace(text, destEnd); titleStart > destEnd && titleStart < len(text) {
@@ -313,8 +317,13 @@ func scanDefinitionDestination(text string, idx int) (int, bool) {
 // scanDefinitionTitle returns the offset after a title in double quotes,
 // single quotes, or parentheses. A title cannot contain a blank line.
 func scanDefinitionTitle(text string, idx int) (int, bool) {
-	closing := map[byte]byte{'"': '"', '\'': '\'', '(': ')'}[text[idx]]
-	if closing == 0 {
+	var closing byte
+	switch text[idx] {
+	case '"', '\'':
+		closing = text[idx]
+	case '(':
+		closing = ')'
+	default:
 		return idx, false
 	}
 	for end := idx + 1; end < len(text); end++ {

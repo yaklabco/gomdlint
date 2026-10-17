@@ -374,6 +374,7 @@ func TestCollect_Definitions(t *testing.T) {
 		"- [listed]: </listed>\n\n" +
 		"[multi\nline]:\n  /multi\n  'Multi title'\n" +
 		"[next]: /next (Paren title)\n" +
+		"[raw]: https://x.example/a>\n" +
 		"[bad]: /dest trailing\n"
 	file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(markdown))
 	if err != nil {
@@ -389,6 +390,7 @@ func TestCollect_Definitions(t *testing.T) {
 		{"listed", "/listed", "", [2]int{5, 5}, false},
 		{"multi\nline", "/multi", "Multi title", [2]int{7, 10}, true},
 		{"next", "/next", "Paren title", [2]int{11, 11}, true},
+		{"raw", "https://x.example/a>", "", [2]int{12, 12}, true},
 	}
 	defs := Collect(file.Root, file).AllDefinitions
 	if len(defs) != len(expected) {
