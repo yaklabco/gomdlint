@@ -7,7 +7,6 @@ import (
 
 	"github.com/yuin/goldmark/util"
 
-	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -153,73 +152,44 @@ func extractLinkText(node *mdast.Node) string {
 	return buf.String()
 }
 
-// referenceLabel returns the label a collapsed or shortcut reference is
-// matched by: its link text as written in the source, such as "**foo**" for
-// "[**foo**][]", falling back to the rendered text.
-func referenceLabel(node *mdast.Node) string {
-	if label := node.Inline.Link.ReferenceLabel; label != "" {
-		return label
+// detectLinkStyle returns the reference syntax the parser recorded for a link
+// or image and the label it was resolved with. A collapsed or shortcut
+// reference's label is its link text as written; it is rebuilt from the
+// children's source so the container prefix of a continuation line, such as
+// "> " inside a blockquote, is not part of it.
+func (c *collector) detectLinkStyle(node *mdast.Node, _ bool) (ReferenceStyle, string) {
+	if node.Inline == nil || node.Inline.Link == nil {
+		return StyleInline, ""
 	}
-	return extractLinkText(node)
+	switch node.Inline.Link.ReferenceStyle {
+	case mdast.RefStyleAutolink:
+		return StyleAutolink, ""
+	case mdast.RefStyleFull:
+		return StyleFull, node.Inline.Link.ReferenceLabel
+	case mdast.RefStyleCollapsed:
+		return StyleCollapsed, c.linkTextSource(node)
+	case mdast.RefStyleShortcut:
+		return StyleShortcut, c.linkTextSource(node)
+	case mdast.RefStyleInline:
+	}
+	return StyleInline, ""
 }
 
-// detectLinkStyle examines the source to determine the link's syntax style.
-func (c *collector) detectLinkStyle(node *mdast.Node, isImage bool) (ReferenceStyle, string) {
-	// First check if the mapper already detected the style
-	if node.Inline != nil && node.Inline.Link != nil {
-		mdastStyle := node.Inline.Link.ReferenceStyle
-		switch mdastStyle {
-		case mdast.RefStyleAutolink:
-			return StyleAutolink, ""
-		case mdast.RefStyleFull:
-			return StyleFull, node.Inline.Link.ReferenceLabel
-		case mdast.RefStyleCollapsed:
-			return StyleCollapsed, referenceLabel(node)
-		case mdast.RefStyleShortcut:
-			return StyleShortcut, referenceLabel(node)
-		}
-	}
-
+// linkTextSource returns the source of a link's text, joining lines with a
+// space and leaving out the container prefix of each continuation line.
+func (c *collector) linkTextSource(node *mdast.Node) string {
 	if c.ctx.File == nil {
-		return StyleInline, ""
+		return extractLinkText(node)
 	}
-	return linkStyleFromSource(c.ctx.File.Content, node, isImage)
-}
-
-// linkStyleFromSource classifies a link or image by its own source text: the
-// bracketed link text followed by "(" (inline), "[]" (collapsed), "[label]"
-// (full), or nothing (shortcut). For collapsed and shortcut references the
-// label is the link text.
-func linkStyleFromSource(content []byte, node *mdast.Node, isImage bool) (ReferenceStyle, string) {
-	span := node.SourceRange()
-	if span.StartOffset < 0 || span.EndOffset > len(content) || span.IsEmpty() {
-		return StyleInline, ""
+	var buf strings.Builder
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if child.Kind == mdast.NodeSoftBreak || child.Kind == mdast.NodeHardBreak {
+			_ = buf.WriteByte(' ') // strings.Builder.WriteByte never fails
+			continue
+		}
+		buf.Write(child.Text())
 	}
-	src := content[:span.EndOffset]
-	open := span.StartOffset
-	if isImage && src[open] == '!' {
-		open++
-	}
-	closing, ok := mdscan.LinkTextEnd(src, open)
-	if !ok {
-		return StyleInline, ""
-	}
-	text := string(src[open+1 : closing])
-	after := closing + 1
-	switch {
-	case after >= len(src):
-		return StyleShortcut, text
-	case src[after] == '(':
-		return StyleInline, ""
-	case src[after] != '[':
-		return StyleShortcut, text
-	case after+1 < len(src) && src[after+1] == ']':
-		return StyleCollapsed, text
-	}
-	if labelEnd, found := mdscan.LinkLabelEnd(src, after); found {
-		return StyleFull, string(src[after+1 : labelEnd])
-	}
-	return StyleShortcut, text
+	return buf.String()
 }
 
 // collectHTMLAnchors extracts id and name attributes from HTML.

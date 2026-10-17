@@ -84,6 +84,7 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 		{"entity after url", "Go to https://example.com/q?a=1&amp; now\n", []position{{1, 7}},
 			"Go to <https://example.com/q?a=1>&amp; now\n"},
 		{"inside emphasis", "Read *https://example.com* now\n", []position{{1, 7}}, "Read *<https://example.com>* now\n"},
+		{"inside strikethrough", "Old ~~see https://example.com~~ now\n", []position{{1, 11}}, "Old ~~see <https://example.com>~~ now\n"},
 		{"blockquote", "> Visit https://example.com\n", []position{{1, 9}}, "> Visit <https://example.com>\n"},
 		{"multibyte text before url", "中文中文 https://example.com\n", []position{{1, 14}}, "中文中文 <https://example.com>\n"},
 		{"url in link text", "[https://example.com](https://example.com)\n", nil, ""},

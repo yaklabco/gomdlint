@@ -54,7 +54,8 @@ func isInlineContainer(node *mdast.Node) bool {
 }
 
 // flattenInline turns a container's inline children into characters.
-// Emphasis is transparent because brackets are matched before emphasis.
+// Emphasis, strong, and strikethrough are transparent because brackets are
+// matched before emphasis.
 func flattenInline(container *mdast.Node) []inlineChar {
 	var chars []inlineChar
 	var add func(parent *mdast.Node)
@@ -79,7 +80,7 @@ func flattenInline(container *mdast.Node) []inlineChar {
 				if child.Kind != mdast.NodeText {
 					chars = append(chars, inlineChar{ch: '\n', offset: -1, node: child})
 				}
-			case mdast.NodeEmphasis, mdast.NodeStrong:
+			case mdast.NodeEmphasis, mdast.NodeStrong, mdast.NodeStrikethrough:
 				add(child)
 			default:
 				chars = append(chars, inlineChar{offset: -1, opaque: true, node: child})

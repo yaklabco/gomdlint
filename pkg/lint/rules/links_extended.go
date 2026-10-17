@@ -119,7 +119,7 @@ func (s *bareURLScan) visit(parent *mdast.Node) {
 			}
 			s.scanText(children[idx].SourceRange().StartOffset, children[last].SourceRange().EndOffset)
 			idx = last
-		case child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong:
+		case child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong || child.Kind == mdast.NodeStrikethrough:
 			s.visit(child)
 		case child.Kind == mdast.NodeHTMLInline:
 			idx = skipHTMLElementContent(children, idx)

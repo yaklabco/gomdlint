@@ -369,6 +369,8 @@ func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
 		{name: "definition inside blockquote", markdown: "> [docs]: https://example.com\n\nSee [docs][] and [Docs][docs].\n"},
 		{name: "unicode case folding", markdown: "[Straße][]\n\n[STRASSE]: https://example.com\n"},
 		{name: "multi-line label", markdown: "See [multi\nline][]\n\n[multi line]: https://example.com\n"},
+		{name: "reference inside strikethrough", markdown: "Old ~~[text][gone]~~ note.\n",
+			want: []want{{1, 7, "Reference link uses undefined label [gone]"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -401,6 +403,8 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 		"[Straße][]\n\n[STRASSE]: https://example.com\n",
 		"See [alpha][] and [beta].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n",
 		"Undefined [text][used] still uses nothing, but [ref][kept] uses kept.\n\n[kept]: https://example.com\n",
+		"> See [multi\n> line][] here.\n\n[multi line]: https://example.com\n",
+		"Use [`code` label][] here.\n\n[`code` label]: https://example.com\n",
 	} {
 		if diags := testHelper(t, rule, markdown); len(diags) != 0 {
 			t.Errorf("%q: got %d diagnostics, want 0: %+v", markdown, len(diags), diags)
