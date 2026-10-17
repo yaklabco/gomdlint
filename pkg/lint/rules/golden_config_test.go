@@ -182,6 +182,51 @@ func newGoldenRun(tc GoldenTestCase) (goldenRun, error) {
 // and prepares the fix edits. Rule errors fail the case, and so does a
 // diagnostic that does not carry the ID and name of one of the case's rules.
 func (run goldenRun) lintFile(name string, content []byte) (*lint.FileResult, error) {
+	cfg := run.fixConfig()
+	result, err := lint.NewEngine(run.parser, run.registry).LintFile(context.Background(), name, content, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("lint %s: %w", name, err)
+	}
+	if len(result.RuleErrors) > 0 {
+		return nil, fmt.Errorf("lint %s: rule errors: %v", name, result.RuleErrors)
+	}
+	if err := checkDiagIdentity(run.rules, result.Diagnostics); err != nil {
+		return nil, fmt.Errorf("lint %s: %w", name, err)
+	}
+
+	return result, nil
+}
+
+// fixFile fixes content the way --fix does: through lint.Pipeline, which
+// applies the engine's fixes pass by pass and lints the fixed content
+// again after each pass, with the configuration and rules of lintFile. One
+// engine pass need not apply every fix, since the engine leaves some fixes
+// for a later pass. It returns the fixed content and the pipeline result,
+// whose diagnostics describe the fixed content. Rule errors and a refused
+// fix fail the case.
+func (run goldenRun) fixFile(name string, content []byte) ([]byte, *lint.PipelineResult, error) {
+	cfg := run.fixConfig()
+	result, err := lint.NewPipeline(lint.NewEngine(run.parser, run.registry)).ProcessContent(
+		context.Background(), name, content, cfg, lint.PipelineOptions{Fix: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("fix %s: %w", name, err)
+	}
+	if len(result.RuleErrors) > 0 {
+		return nil, nil, fmt.Errorf("fix %s: rule errors: %v", name, result.RuleErrors)
+	}
+	if result.Skipped {
+		return nil, nil, fmt.Errorf("fix %s: %s", name, result.SkipReason)
+	}
+
+	if !result.Modified {
+		return content, result, nil
+	}
+	return result.ModifiedContent, result, nil
+}
+
+// fixConfig returns the configuration of the case with fixes on and only
+// the case's rules enabled.
+func (run goldenRun) fixConfig() *config.Config {
 	enabled := make([]string, 0, len(run.rules))
 	for _, rule := range run.rules {
 		enabled = append(enabled, rule.ID())
@@ -197,19 +242,7 @@ func (run goldenRun) lintFile(name string, content []byte) (*lint.FileResult, er
 	cfg.Fix = true
 	cfg.EnableRules = enabled
 	cfg.DisableRules = disabled
-
-	result, err := lint.NewEngine(run.parser, run.registry).LintFile(context.Background(), name, content, &cfg)
-	if err != nil {
-		return nil, fmt.Errorf("lint %s: %w", name, err)
-	}
-	if len(result.RuleErrors) > 0 {
-		return nil, fmt.Errorf("lint %s: rule errors: %v", name, result.RuleErrors)
-	}
-	if err := checkDiagIdentity(run.rules, result.Diagnostics); err != nil {
-		return nil, fmt.Errorf("lint %s: %w", name, err)
-	}
-
-	return result, nil
+	return &cfg
 }
 
 // mustGoldenRun prepares a case, failing the test on error.
@@ -233,6 +266,16 @@ func (run goldenRun) mustLintFile(t *testing.T, name string, content []byte) *li
 	}
 
 	return result
+}
+
+// mustFixFile fixes content, failing the test on error.
+func (run goldenRun) mustFixFile(t *testing.T, name string, content []byte) ([]byte, *lint.PipelineResult) {
+	t.Helper()
+
+	fixed, result, err := run.fixFile(name, content)
+	require.NoError(t, err)
+
+	return fixed, result
 }
 
 // checkDiagIdentity returns an error when a diagnostic does not carry the ID
