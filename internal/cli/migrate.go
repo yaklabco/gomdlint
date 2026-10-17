@@ -109,9 +109,14 @@ func runMigrate(flags *migrateFlags) error {
 		logger.Warn(warning)
 	}
 
-	// Serialize to YAML
-	header := configloader.GenerateMigrationHeader(inputPath)
-	content, err := result.Config.ToYAMLWithHeader(header)
+	// Serialize to YAML, or to JSON for a .json file, which lint reads as
+	// JSON. JSON has no comments, so it goes without the header.
+	var content []byte
+	if configloader.HoldsJSON(absOutput) {
+		content, err = result.Config.ToJSON()
+	} else {
+		content, err = result.Config.ToYAMLWithHeader(configloader.GenerateMigrationHeader(inputPath))
+	}
 	if err != nil {
 		return withExitCode(ExitInternalError, fmt.Errorf("serialize configuration: %w", err))
 	}

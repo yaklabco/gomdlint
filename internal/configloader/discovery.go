@@ -16,7 +16,8 @@ type ConfigPaths struct {
 	// User is the user-level config path (e.g., ~/.config/gomdlint/config.yaml).
 	User string
 
-	// Project is the project-level config path (e.g., ./.gomdlint.yml).
+	// Project is the project-level config path (e.g., ./.gomdlint.yml or
+	// ./.gomdlint.json).
 	Project string
 
 	// Explicit is a config path provided via --config flag.
@@ -26,7 +27,11 @@ type ConfigPaths struct {
 	Markdownlint string
 }
 
-// gomdlintConfigFiles are the config file names we search for, in order of preference.
+// gomdlintConfigFiles are the project config file names, in order of
+// precedence: in a directory that holds several, the first one is used and
+// the others are ignored. "gomdlint init" writes the first, or the fifth
+// with --format json. YAML names come before JSON ones, so a project with a
+// YAML config keeps using it when a JSON one appears beside it.
 //
 //nolint:gochecknoglobals // Read-only lookup table.
 var gomdlintConfigFiles = []string{
@@ -34,6 +39,8 @@ var gomdlintConfigFiles = []string{
 	".gomdlint.yaml",
 	"gomdlint.yml",
 	"gomdlint.yaml",
+	".gomdlint.json",
+	"gomdlint.json",
 }
 
 // markdownlintConfigFiles are the markdownlint config files we detect for migration.
@@ -55,9 +62,10 @@ var vcsRootMarkers = []string{".git", ".hg", ".svn"}
 
 // DiscoverPaths finds configuration files in standard locations.
 // It searches for:
-//   - System config at /etc/gomdlint/config.{yaml,yml}
-//   - User config at $XDG_CONFIG_HOME/gomdlint/config.{yaml,yml}
-//   - Project config by searching upward from workDir for .gomdlint.{yaml,yml}
+//   - System config at /etc/gomdlint/config.{yaml,yml,json}
+//   - User config at $XDG_CONFIG_HOME/gomdlint/config.{yaml,yml,json}
+//   - Project config by searching upward from workDir for one of
+//     gomdlintConfigFiles, such as .gomdlint.yml or .gomdlint.json
 //   - Markdownlint config for migration purposes
 //
 // Missing files are represented as empty strings (not errors).
@@ -126,8 +134,9 @@ func findUserConfig() string {
 
 // findConfigInDir looks for config files in the given directory.
 // Returns the path to the first found file, or empty string if none.
+// YAML names come first, as they do for project configs.
 func findConfigInDir(dir string) string {
-	for _, name := range []string{"config.yaml", "config.yml"} {
+	for _, name := range []string{"config.yaml", "config.yml", "config.json"} {
 		path := filepath.Join(dir, name)
 		if fileExists(path) {
 			return path
@@ -138,7 +147,9 @@ func findConfigInDir(dir string) string {
 
 // FindProjectConfig searches upward from startDir for a project config file.
 // Returns the path to the first config file found, or empty string if none.
-// Stops at filesystem boundaries, VCS roots, or when reaching root.
+// The nearest directory with a config file wins, and within it the name
+// that comes first in gomdlintConfigFiles. Stops at filesystem boundaries,
+// VCS roots, or when reaching root.
 func FindProjectConfig(ctx context.Context, startDir string) (string, error) {
 	return findUpward(ctx, startDir, gomdlintConfigFiles)
 }

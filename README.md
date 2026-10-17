@@ -132,7 +132,29 @@ always carry both the ID and the name.
 
 ## Configuration
 
-Configure gomdlint via YAML files (`.gomdlint.yml` or `.gomdlint.yaml`). The tool searches project, user, and system directories, merging configurations hierarchically.
+Configure gomdlint with a YAML or JSON file. The tool searches project,
+user, and system directories, merging configurations hierarchically.
+
+For the project config, gomdlint looks in the current directory and then in
+each parent directory, up to the repository root or your home directory. It
+uses the first directory that holds one of these files. In that directory it
+reads the first name in this list and ignores the others:
+
+1. `.gomdlint.yml`
+2. `.gomdlint.yaml`
+3. `gomdlint.yml`
+4. `gomdlint.yaml`
+5. `.gomdlint.json`
+6. `gomdlint.json`
+
+`gomdlint init` writes `.gomdlint.yml`, or `.gomdlint.json` with
+`--format json`. A file whose name ends in `.json` must hold JSON, so
+`init --output` and `migrate --output` write JSON for such a name.
+
+The user config is `config.yaml`, `config.yml` or `config.json`, in that
+order of preference, in `$XDG_CONFIG_HOME/gomdlint` (by default
+`~/.config/gomdlint`). The system config uses the same names in
+`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows.
 
 ```yaml
 # .gomdlint.yaml

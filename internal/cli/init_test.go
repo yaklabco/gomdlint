@@ -156,3 +156,102 @@ func TestInit_MinimalYAMLTemplateChangesNothing(t *testing.T) {
 
 	requireDefaultResolution(t, loadTemplate(t, path))
 }
+
+// TestInit_LintReadsTheWrittenFile covers "gomdlint init" followed by
+// "gomdlint lint" without --config, in each format: lint reads the file
+// that init wrote. Disabling a rule in that file shows whether it did.
+func TestInit_LintReadsTheWrittenFile(t *testing.T) {
+	tests := []struct {
+		format  string
+		name    string
+		disable func(t *testing.T, content string) string
+	}{
+		{
+			format: "yaml",
+			name:   ".gomdlint.yml",
+			disable: func(_ *testing.T, content string) string {
+				return content + "rules:\n  no-trailing-spaces: false\n"
+			},
+		},
+		{
+			format: "json",
+			name:   ".gomdlint.json",
+			disable: func(t *testing.T, content string) string {
+				t.Helper()
+				var settings map[string]any
+				require.NoError(t, json.Unmarshal([]byte(content), &settings), content)
+				settings["rules"] = map[string]any{"no-trailing-spaces": false}
+				edited, err := json.MarshalIndent(settings, "", "  ")
+				require.NoError(t, err)
+				return string(edited) + "\n"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+			got := execute(t, "init", "--format", tt.format)
+			require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+			path := filepath.Join(dir, tt.name)
+			content := readFile(t, path)
+
+			// The template changes no rule, so the finding remains.
+			got = execute(t, "lint", "--color", "never", "doc.md")
+			assert.Contains(t, got.stdout, "no-trailing-spaces", "stderr: %s", got.stderr)
+
+			require.NoError(t, os.WriteFile(path, []byte(tt.disable(t, content)), 0o644))
+			got = execute(t, "lint", "--color", "never", "doc.md")
+			assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+			assert.Equal(t, "No issues found (1 file checked)\n", got.stdout)
+			assert.Empty(t, got.stderr)
+		})
+	}
+}
+
+// TestInit_OutputNameChoosesJSON covers "init --output" with a .json name.
+// A .json config must hold JSON, so without --format, init writes JSON, and
+// --format yaml is refused rather than writing a file lint cannot read.
+func TestInit_OutputNameChoosesJSON(t *testing.T) {
+	t.Run("without --format", func(t *testing.T) {
+		for _, name := range []string{".gomdlint.json", "lint.JSON"} {
+			path, content := initTemplate(t, name)
+
+			assert.True(t, json.Valid([]byte(content)), "%s holds JSON: %s", name, content)
+			requireDefaultResolution(t, loadTemplate(t, path))
+		}
+	})
+
+	t.Run("with --format yaml", func(t *testing.T) {
+		dir := inProject(t, nil)
+		path := filepath.Join(dir, ".gomdlint.json")
+
+		got := execute(t, "init", "--format", "yaml", "--output", path)
+
+		assert.Equal(t, cli.ExitInvalidUsage, got.code)
+		assert.Contains(t, got.stderr, "a .json file must hold JSON")
+		assert.NoFileExists(t, path)
+	})
+
+	t.Run("with --format json and another name", func(t *testing.T) {
+		path, content := initTemplate(t, "lint.yml", "--format", "json")
+
+		assert.True(t, json.Valid([]byte(content)), content)
+		requireDefaultResolution(t, loadTemplate(t, path))
+	})
+}
+
+// TestLint_YAMLConfigWinsOverJSON covers a directory that holds both
+// .gomdlint.yml and .gomdlint.json: lint reads the YAML file and ignores
+// the JSON one, as it prefers .gomdlint.yml over .gomdlint.yaml.
+func TestLint_YAMLConfigWinsOverJSON(t *testing.T) {
+	inProject(t, map[string]string{
+		"doc.md":         trailingDoc,
+		".gomdlint.yml":  "flavor: gfm\n",
+		".gomdlint.json": `{"rules": {"no-trailing-spaces": false}}` + "\n",
+	})
+
+	got := execute(t, "lint", "--color", "never", "doc.md")
+
+	assert.Contains(t, got.stdout, "no-trailing-spaces", "the JSON file must be ignored; stderr: %s", got.stderr)
+}

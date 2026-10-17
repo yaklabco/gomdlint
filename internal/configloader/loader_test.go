@@ -2,11 +2,13 @@ package configloader
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -300,8 +302,16 @@ rules:
 func loadProject(t *testing.T, content string) (*LoadResult, error) {
 	t.Helper()
 
+	return loadProjectFile(t, ".gomdlint.yml", content)
+}
+
+// loadProjectFile loads a project whose config file, named name, holds
+// content.
+func loadProjectFile(t *testing.T, name, content string) (*LoadResult, error) {
+	t.Helper()
+
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".gomdlint.yml"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -417,6 +427,7 @@ rule_defaults:
 func TestGeneratedTemplatesLoadCleanly(t *testing.T) {
 	t.Parallel()
 
+	// Each template loads under the name init writes it to.
 	for _, opts := range []config.TemplateOptions{
 		{Format: "yaml"},
 		{Format: "yaml", Full: true},
@@ -428,13 +439,204 @@ func TestGeneratedTemplatesLoadCleanly(t *testing.T) {
 			t.Fatalf("GenerateTemplate(%+v) error = %v", opts, err)
 		}
 
-		result, err := loadProject(t, string(content))
+		name := ".gomdlint.yml"
+		if opts.Format == "json" {
+			name = ".gomdlint.json"
+		}
+		result, err := loadProjectFile(t, name, string(content))
 		if err != nil {
 			t.Fatalf("template %+v does not load: %v", opts, err)
+		}
+		if len(result.LoadedFrom) != 1 || filepath.Base(result.LoadedFrom[0]) != name {
+			t.Errorf("template %+v: loaded from %v, want %s", opts, result.LoadedFrom, name)
 		}
 		if len(result.Warnings) != 0 {
 			t.Errorf("template %+v loads with warnings: %v", opts, result.Warnings)
 		}
+	}
+}
+
+// escapeUTF16 writes char as JSON escapes of its UTF-16 code units, the way
+// serializers that escape every non-ASCII character write characters
+// outside the Basic Multilingual Plane.
+func escapeUTF16(char rune) string {
+	high, low := utf16.EncodeRune(char)
+	return fmt.Sprintf(`\u%04x\u%04x`, high, low)
+}
+
+// TestLoad_JSONProjectConfig covers .gomdlint.json, which "gomdlint init
+// --format json" writes. It is read as JSON, including what the YAML
+// decoder rejects or reads differently.
+func TestLoad_JSONProjectConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		content    string
+		wantIgnore []string
+	}{
+		{
+			name: "tabs, escaped slashes and surrogate pairs",
+			content: "{\n" +
+				"\t\"flavor\": \"commonmark\",\n" +
+				"\t\"ignore\": [\"docs\\/drafts\\/**\", \"" + escapeUTF16('😀') + "/**\"],\n" +
+				"\t\"rules\": {\"MD009\": {\"enabled\": false}}\n" +
+				"}\n",
+			wantIgnore: []string{"docs/drafts/**", "😀/**"},
+		},
+		{
+			name:       "byte order mark",
+			content:    "\xef\xbb\xbf{\"flavor\": \"commonmark\", \"rules\": {\"MD009\": false}, \"ignore\": [\"a\"]}",
+			wantIgnore: []string{"a"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := loadProjectFile(t, ".gomdlint.json", tt.content)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if len(result.LoadedFrom) != 1 || filepath.Base(result.LoadedFrom[0]) != ".gomdlint.json" {
+				t.Errorf("loaded from %v, want the .gomdlint.json project config", result.LoadedFrom)
+			}
+			if result.Config.Flavor != config.FlavorCommonMark {
+				t.Errorf("flavor = %q, want %q", result.Config.Flavor, config.FlavorCommonMark)
+			}
+			if !slices.Equal(result.Config.Ignore, tt.wantIgnore) {
+				t.Errorf("ignore = %q, want %q", result.Config.Ignore, tt.wantIgnore)
+			}
+			if md009 := result.Config.Rules["MD009"]; md009.Enabled == nil || *md009.Enabled {
+				t.Errorf("MD009 must be disabled, got rules %v", result.Config.Rules)
+			}
+			if len(result.Warnings) != 0 {
+				t.Errorf("unexpected warnings: %v", result.Warnings)
+			}
+		})
+	}
+}
+
+// TestLoad_JSONNumbers covers numbers in a JSON config file, which load as
+// the same numbers in a YAML file do: integers as int, so rules read them
+// as they read YAML options, and numbers too large for a float64 as the
+// YAML decoder reads them, without failing the file.
+func TestLoad_JSONNumbers(t *testing.T) {
+	t.Parallel()
+
+	const options = `{"line_length": 100, "ratio": 0.5, "huge": 1e400}`
+	jsonResult, err := loadProjectFile(t, ".gomdlint.json", `{"rules": {"MD013": {"options": `+options+`}}}`)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	yamlResult, err := loadProject(t, "rules:\n  MD013:\n    options: "+options+"\n")
+	if err != nil {
+		t.Fatalf("Load() of the YAML equivalent error = %v", err)
+	}
+
+	got := jsonResult.Config.Rules["MD013"].Options
+	if lineLength, ok := got["line_length"].(int); !ok || lineLength != 100 {
+		t.Errorf("line_length = %#v, want int 100", got["line_length"])
+	}
+	if want := yamlResult.Config.Rules["MD013"].Options; fmt.Sprintf("%#v", got) != fmt.Sprintf("%#v", want) {
+		t.Errorf("options = %#v, want %#v as from YAML", got, want)
+	}
+}
+
+// TestLoad_JSONExplicitConfig covers --config with a .json file, which is
+// read as JSON like a discovered one.
+func TestLoad_JSONExplicitConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lint-settings.json")
+	if err := os.WriteFile(path, []byte(`{"ignore": ["build\/**"]}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := Load(context.Background(), LoadOptions{
+		WorkingDir:         dir,
+		ExplicitPath:       path,
+		IgnoreSystemConfig: true,
+		IgnoreUserConfig:   true,
+		IgnoreMarkdownlint: true,
+		IgnoreEnv:          true,
+		NonInteractive:     true,
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if want := []string{"build/**"}; !slices.Equal(result.Config.Ignore, want) {
+		t.Errorf("ignore = %q, want %q", result.Config.Ignore, want)
+	}
+}
+
+// TestLoad_RejectsMalformedJSON covers JSON config files that are not JSON.
+// The error names the line and column. The YAML decoder would load some of
+// them, such as a missing value, which it reads as null.
+func TestLoad_RejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{name: "missing value", content: "{\n  \"flavor\": \n}\n", want: []string{"line 3, column 1"}},
+		{name: "trailing comma", content: "{\n  \"flavor\": \"gfm\",\n}\n", want: []string{"line 3, column 1"}},
+		{name: "YAML", content: "flavor: gfm\n", want: []string{"line 1, column 2"}},
+		{name: "empty", content: "", want: []string{"unexpected end of JSON input"}},
+		{name: "duplicate key", content: `{"flavor": "gfm", "flavor": "commonmark"}`, want: []string{`"flavor" already defined`}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := loadProjectFile(t, ".gomdlint.json", tt.content)
+			if err == nil {
+				t.Fatal("Load() succeeded, want an error")
+			}
+			for _, fragment := range append([]string{".gomdlint.json: parse JSON: "}, tt.want...) {
+				if !strings.Contains(err.Error(), fragment) {
+					t.Errorf("error %q does not contain %q", err, fragment)
+				}
+			}
+		})
+	}
+}
+
+// TestLoad_WarnsAboutUnknownKeysInJSON covers the unknown key warnings of a
+// JSON config file, which name the line of the key like those of a YAML one.
+func TestLoad_WarnsAboutUnknownKeysInJSON(t *testing.T) {
+	t.Parallel()
+
+	content := "{\n" +
+		"  \"flavour\": \"gfm\",\n" +
+		"  \"rules\": {\n" +
+		"    \"MD013\": {\"line_length\": 100, \"note\": \"a\\/b\"}\n" +
+		"  }\n" +
+		"}\n"
+	result, err := loadProjectFile(t, ".gomdlint.json", content)
+	if err != nil {
+		t.Fatalf("unknown keys must not fail loading: %v", err)
+	}
+
+	want := []string{
+		`.gomdlint.json:2: unknown key "flavour" (did you mean "flavor"?)`,
+		`.gomdlint.json:4: unknown key "rules.MD013.line_length"; rule options belong under "rules.MD013.options"`,
+		`.gomdlint.json:4: unknown key "rules.MD013.note"; rule options belong under "rules.MD013.options"`,
+	}
+	joined := strings.Join(result.Warnings, "\n")
+	for _, fragment := range want {
+		if !strings.Contains(joined, fragment) {
+			t.Errorf("warnings do not contain %q:\n%s", fragment, joined)
+		}
+	}
+	if len(result.Warnings) != len(want) {
+		t.Errorf("expected %d warnings, got %d:\n%s", len(want), len(result.Warnings), joined)
 	}
 }
 

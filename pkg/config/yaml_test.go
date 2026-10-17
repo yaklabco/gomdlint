@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -156,6 +158,42 @@ func TestConfigToYAML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "flavor: gfm")
 		assert.Contains(t, string(data), "severity_default: warning")
+	})
+}
+
+// TestConfigToJSON covers the JSON form of a configuration: the settings
+// ToYAML writes, under the same keys, so the file reads back the same.
+func TestConfigToJSON(t *testing.T) {
+	enabled := false
+	cfg := &config.Config{
+		Flavor: config.FlavorCommonMark,
+		Ignore: []string{"vendor/**"},
+		Rules: map[string]config.RuleConfig{
+			"MD013": {Enabled: &enabled, Options: map[string]any{"line_length": 100, "tables": "no"}},
+		},
+	}
+
+	data, err := cfg.ToJSON()
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(data, &parsed), string(data))
+	assert.Equal(t, "commonmark", parsed["flavor"])
+	assert.Equal(t, []any{"vendor/**"}, parsed["ignore"])
+	rules, ok := parsed["rules"].(map[string]any)
+	require.True(t, ok, string(data))
+	rule, ok := rules["MD013"].(map[string]any)
+	require.True(t, ok, string(data))
+	assert.Equal(t, false, rule["enabled"])
+	assert.Equal(t, map[string]any{"line_length": float64(100), "tables": "no"}, rule["options"])
+	assert.Nil(t, rule["severity"], "an unset severity stays unset")
+	assert.True(t, strings.HasSuffix(string(data), "}\n"), "the file ends with a newline")
+
+	t.Run("nil config", func(t *testing.T) {
+		var empty *config.Config
+		data, err := empty.ToJSON()
+		require.NoError(t, err)
+		assert.Nil(t, data)
 	})
 }
 

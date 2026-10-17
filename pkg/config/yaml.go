@@ -31,6 +31,21 @@ func (c *Config) ToYAML() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// ToJSON serializes the configuration to indented JSON: the settings ToYAML
+// writes, under the same keys, so a JSON config file reads back the same.
+// JSON has no comments.
+func (c *Config) ToJSON() ([]byte, error) {
+	if c == nil {
+		return nil, nil
+	}
+
+	yamlBytes, err := c.ToYAML()
+	if err != nil {
+		return nil, err
+	}
+	return templateToJSON(yamlBytes)
+}
+
 // ToYAMLWithHeader serializes the configuration with a header comment.
 func (c *Config) ToYAMLWithHeader(header string) ([]byte, error) {
 	yamlBytes, err := c.ToYAML()

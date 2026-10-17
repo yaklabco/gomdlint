@@ -132,10 +132,11 @@ type LoadResult struct {
 //  1. CLI flags (opts.CLIConfig)
 //  2. Environment variables (GOMDLINT_*)
 //  3. Explicit config file (opts.ExplicitPath), which replaces the project config
-//  4. Project config (.gomdlint.yml upward search), or, without one, a
+//  4. Project config (.gomdlint.yml, .gomdlint.json or another name of
+//     gomdlintConfigFiles, searched upward), or, without one, a
 //     markdownlint config translated for the run
-//  5. User config ($XDG_CONFIG_HOME/gomdlint/config.yaml)
-//  6. System config (/etc/gomdlint/config.yaml)
+//  5. User config ($XDG_CONFIG_HOME/gomdlint/config.yaml, .yml or .json)
+//  6. System config (/etc/gomdlint/config.yaml, .yml or .json)
 //  7. Defaults
 func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 	result := &LoadResult{
@@ -279,17 +280,29 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 	return result, nil
 }
 
-// loadConfigFile loads a configuration from a YAML file. The warnings name
-// keys in the file that gomdlint does not read.
+// loadConfigFile loads a configuration from a file: JSON if its name ends
+// in .json, and YAML otherwise. The warnings name keys in the file that
+// gomdlint does not read.
 func loadConfigFile(path string) (*config.Config, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read file: %w", err)
 	}
 
+	format, parse := "YAML", parseYAMLDocument
+	if HoldsJSON(path) {
+		format, parse = "JSON", jsonDocument
+	}
+	doc, err := parse(content)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: parse %s: %w", path, format, err)
+	}
+
 	cfg := &config.Config{}
-	if err := yaml.Unmarshal(content, cfg); err != nil {
-		return nil, nil, fmt.Errorf("%s: parse YAML: %w", path, err)
+	if doc.Kind != 0 { // An empty YAML file holds no node and sets nothing.
+		if err := doc.Decode(cfg); err != nil {
+			return nil, nil, fmt.Errorf("%s: parse %s: %w", path, format, err)
+		}
 	}
 
 	// Ensure Rules map is initialized
@@ -302,7 +315,18 @@ func loadConfigFile(path string) (*config.Config, []string, error) {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
 
-	return cfg, unknownKeyWarnings(path, content), nil
+	return cfg, unknownKeyWarnings(path, doc), nil
+}
+
+// parseYAMLDocument parses content into a YAML document node. Decoding the
+// node gives the same result as decoding content directly. Empty content
+// gives a node of kind zero.
+func parseYAMLDocument(content []byte) (*yaml.Node, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return nil, err //nolint:wrapcheck // The caller names the file and the format.
+	}
+	return &doc, nil
 }
 
 // applyMarkdownlint translates the markdownlint config at path for this run,

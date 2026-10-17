@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -98,6 +100,22 @@ func TestLint_RuleShorthandAgreesWithMigration(t *testing.T) {
 		require.Equal(t, cli.ExitSuccess, migrated.code, migrated.stderr)
 		got := execute(t, "lint", "--config", "migrated.yml", "--format", "json", "doc.md")
 
+		assert.Equal(t, want, ruleStates(reportedRules(t, got.stdout)))
+	})
+
+	// A .json config must hold JSON, so migrate writes JSON for one.
+	t.Run("config migrated to a JSON file", func(t *testing.T) {
+		dir := inProject(t, map[string]string{"doc.md": shorthandDoc, ".markdownlint.yaml": shorthand})
+
+		migrated := execute(t, "migrate", ".markdownlint.yaml", "--output", ".gomdlint.json")
+		require.Equal(t, cli.ExitSuccess, migrated.code, migrated.stderr)
+		assert.True(t, json.Valid([]byte(readFile(t, filepath.Join(dir, ".gomdlint.json")))), "migrate writes JSON")
+		// As migrate advises, the markdownlint file goes, so only the
+		// JSON file can set the rules.
+		require.NoError(t, os.Remove(filepath.Join(dir, ".markdownlint.yaml")))
+		got := execute(t, "lint", "--format", "json", "doc.md")
+
+		require.Empty(t, got.stderr, "lint reads the JSON file without complaint")
 		assert.Equal(t, want, ruleStates(reportedRules(t, got.stdout)))
 	})
 
