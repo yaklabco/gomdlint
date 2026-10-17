@@ -136,6 +136,12 @@ func TestVerifyFixes(t *testing.T) {
 			kept:  []bool{false},
 		},
 		{
+			name:  "fixes that are only safe together are withheld",
+			input: "*a*\n",
+			diags: []lint.Diagnostic{edit(0, 1, "_"), edit(2, 3, "_")},
+			kept:  []bool{false, false},
+		},
+		{
 			name:  "front matter may not change",
 			input: "---\ntitle: x\n---\n\nText\n",
 			diags: []lint.Diagnostic{edit(11, 12, "y")},

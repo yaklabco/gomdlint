@@ -47,11 +47,12 @@ const (
 // beyond what allow permits, keeping the diagnostic itself. A fix is applied
 // to a copy of the content, which is parsed again with the configured flavor;
 // its outline (block structure, nesting, list tightness, and text) must equal
-// the original document's. All fixes are tried together first. When that
+// the original document's. When a rule has only a few fixes, each is first
+// checked on its own. The fixes left are then tried together. When that
 // fails, the set is split in halves until the failing fixes are found, and a
 // fix is kept, in document order, only if it passes together with the fixes
 // kept before it. The fixes kept are therefore always the last set checked
-// as a whole, so they are safe together as well as one by one.
+// as a whole, so they are safe together.
 func verifyFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, allow fixAllowance) []lint.Diagnostic {
 	var fixable []int
 	for idx := range diags {
@@ -62,9 +63,30 @@ func verifyFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, allow fixAllowa
 	if len(fixable) == 0 || ctx.File == nil {
 		return diags
 	}
-	newFixVerifier(ctx, allow).settle(nil, diags, fixable)
+	verifier := newFixVerifier(ctx, allow)
+	if len(fixable) <= maxSeparateChecks {
+		// Check each fix on its own first, so a fix that is only safe next
+		// to another one is withheld. Each check parses the whole document,
+		// so documents with many fixes rely on the checks of the set below.
+		alone := fixable[:0]
+		for _, idx := range fixable {
+			if verifier.accepts(diags[idx].FixEdits) {
+				alone = append(alone, idx)
+			} else {
+				diags[idx].FixEdits = nil
+			}
+		}
+		if fixable = alone; len(fixable) < 2 {
+			return diags
+		}
+	}
+	verifier.settle(nil, diags, fixable)
 	return diags
 }
+
+// maxSeparateChecks is the largest number of fixes from one rule that are
+// each checked on their own before they are checked together.
+const maxSeparateChecks = 8
 
 // fixVerifier compares the outline of the document with candidate fixes
 // applied against the original document's outline.
