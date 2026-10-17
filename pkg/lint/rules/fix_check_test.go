@@ -43,9 +43,7 @@ type fixCheckCase struct {
 	flavor   config.Flavor
 	input    string
 	old, new string
-	// codeTabSpaces is the number of spaces a tab in code may become.
-	codeTabSpaces int
-	want          bool
+	want     bool
 }
 
 // runFixCheckCases checks each edit on its own against its input.
@@ -58,7 +56,7 @@ func runFixCheckCases(t *testing.T, tests []fixCheckCase) {
 				flavor = config.FlavorGFM
 			}
 			snapshot := parseForCheckWith(t, flavor, tt.input)
-			check := newFixCheck(snapshot, flavor, fixCheckOptions{codeTabSpaces: tt.codeTabSpaces})
+			check := newFixCheck(snapshot, flavor)
 			assert.Equal(t, tt.want, check.keeps([]fix.TextEdit{replaceOnce(t, tt.input, tt.old, tt.new)}))
 		})
 	}
@@ -133,25 +131,23 @@ func TestFixCheckKeeps(t *testing.T) {
 			want: false,
 		},
 		{
-			name:  "replacing a tab in code where allowed",
-			input: "```\ncode\there\n```\n",
-			old:   "code\there", new: "code here",
-			codeTabSpaces: 1,
-			want:          true,
+			// The tabs of a Makefile recipe are significant.
+			name:  "replacing a tab in code",
+			input: "```makefile\nall:\n\tgo build\n```\n",
+			old:   "\tgo", new: " go",
+			want: false,
 		},
 		{
-			name:  "replacing a tab in a code span where allowed",
+			name:  "replacing a tab in a code span",
 			input: "Some `a\tb` code.\n",
 			old:   "a\tb", new: "a  b",
-			codeTabSpaces: 2,
-			want:          true,
+			want: false,
 		},
 		{
-			name:  "changing other code whitespace where tabs may change",
-			input: "```\ncode  here\n```\n",
-			old:   "code  here", new: "code here",
-			codeTabSpaces: 1,
-			want:          false,
+			name:  "replacing the tab that indents indented code",
+			input: "Para\n\n\tcode\n",
+			old:   "\tcode", new: "    code",
+			want: true,
 		},
 		{
 			name:  "spacing in a link title",
@@ -470,14 +466,14 @@ func TestFixCheckWholeDocument(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			snapshot := parseForCheck(t, tt.input)
-			check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
+			check := newFixCheck(snapshot, config.FlavorGFM)
 			assert.Equal(t, tt.want, check.keeps([]fix.TextEdit{replaceOnce(t, tt.input, tt.old, tt.new)}))
 		})
 	}
 
 	t.Run("overlapping edits", func(t *testing.T) {
 		snapshot := parseForCheck(t, "# One\n\ntext\n")
-		check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
+		check := newFixCheck(snapshot, config.FlavorGFM)
 		assert.False(t, check.keeps([]fix.TextEdit{
 			{StartOffset: 2, EndOffset: 5, NewText: "x"},
 			{StartOffset: 4, EndOffset: 6, NewText: "y"},
@@ -497,11 +493,11 @@ func TestKeepSafeFixesChecksTheirUnion(t *testing.T) {
 		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: len(input) - 4, EndOffset: len(input) - 1, NewText: "---"}}},
 	}
 	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
-	check := newFixCheck(snapshot, config.FlavorCommonMark, fixCheckOptions{})
+	check := newFixCheck(snapshot, config.FlavorCommonMark)
 	require.True(t, check.keeps(diags[0].FixEdits), "the first fix is safe on its own")
 	require.True(t, check.keeps(diags[1].FixEdits), "the second fix is safe on its own")
 
-	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	kept := keepSafeFixes(ctx, diags)
 	assert.True(t, kept[0].HasFix())
 	assert.False(t, kept[1].HasFix(), "the second fix would make front matter together with the first")
 }
@@ -515,7 +511,7 @@ func TestKeepSafeFixes(t *testing.T) {
 		{RuleID: "T3"},
 	}
 	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
-	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	kept := keepSafeFixes(ctx, diags)
 	require.Len(t, kept, 3)
 	assert.False(t, kept[0].HasFix(), "removing a hard break changes the rendering")
 	assert.True(t, kept[1].HasFix())
@@ -542,7 +538,7 @@ func TestKeepSafeFixesInBatches(t *testing.T) {
 	snapshot := parseForCheck(t, input.String())
 	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
 
-	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	kept := keepSafeFixes(ctx, diags)
 	for idx, diag := range kept {
 		assert.Equal(t, wantFix[idx], diag.HasFix(), "diagnostic %d", idx)
 	}
@@ -577,13 +573,13 @@ func TestKeepSafeFixesChecksDependentFixesAlone(t *testing.T) {
 	require.Greater(t, len(diags), individualFixChecks, "the batched path is taken")
 
 	snapshot := parseForCheck(t, input.String())
-	check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
+	check := newFixCheck(snapshot, config.FlavorGFM)
 	require.False(t, check.keeps(diags[0].FixEdits), "the opening fence alone breaks the document")
 	require.False(t, check.keeps(diags[1].FixEdits), "the closing fence alone breaks the document")
 	require.True(t, check.keepsTogether(diags, []int{0, 1}), "both fences together keep the document")
 
 	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
-	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	kept := keepSafeFixes(ctx, diags)
 	assert.False(t, kept[0].HasFix(), "the opening fence fix breaks the document alone")
 	assert.False(t, kept[1].HasFix(), "the closing fence fix breaks the document alone")
 	for idx := 2; idx < len(kept); idx++ {

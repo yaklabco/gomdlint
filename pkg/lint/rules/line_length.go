@@ -145,7 +145,7 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
+	return keepSafeFixes(ctx, diags), nil
 }
 
 // offsetRange is a half-open byte range of the file.

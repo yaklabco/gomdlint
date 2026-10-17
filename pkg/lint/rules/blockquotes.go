@@ -123,7 +123,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
+	return keepSafeFixes(ctx, diags), nil
 }
 
 // extraQuoteSpace finds the whitespace after a blockquote's prefix on a line.

@@ -21,15 +21,6 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
-// fixCheckOptions lists the changes a rule's fixes are meant to make beyond
-// whitespace in text, which renderers do not show.
-type fixCheckOptions struct {
-	// codeTabSpaces, when positive, lets a tab in a code block or code span
-	// become that many spaces, for MD010, which replaces tabs in code like
-	// markdownlint does.
-	codeTabSpaces int
-}
-
 // individualFixChecks is the number of fixes a rule may report in a file up
 // to which each fix is checked on its own before they are checked together.
 // Past it, only the fixes that share a top-level block with another fix are
@@ -54,7 +45,7 @@ const individualFixChecks = 16
 // way the fix engine applies them; if they change the document together,
 // they are kept one at a time in document order, each only when the fixes
 // kept before it and it still leave the document unchanged.
-func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, opts fixCheckOptions) []lint.Diagnostic {
+func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagnostic {
 	var candidates []int
 	for idx := range diags {
 		if len(diags[idx].FixEdits) > 0 {
@@ -68,7 +59,7 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, opts fixCheck
 	if ctx.Config != nil && ctx.Config.Flavor != "" {
 		flavor = ctx.Config.Flavor
 	}
-	check := newFixCheck(ctx.File, flavor, opts)
+	check := newFixCheck(ctx.File, flavor)
 
 	shared := check.sharedFixes(diags, candidates)
 	var kept, isolated []int
@@ -228,17 +219,16 @@ func (c *fixCheck) keptInBatches(diags []lint.Diagnostic, batch []int) []int {
 type fixCheck struct {
 	file      *mdast.FileSnapshot
 	content   []byte
-	opts      fixCheckOptions
 	markdowns []goldmark.Markdown
 	baseline  []string
 }
 
-func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor, opts fixCheckOptions) *fixCheck {
+func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
 	markdowns := []goldmark.Markdown{goldmark.New(goldmark.WithExtensions(gmext.GFM))}
 	if flavor != config.FlavorGFM {
 		markdowns = append(markdowns, goldmark.New())
 	}
-	return &fixCheck{file: file, content: file.Content, opts: opts, markdowns: markdowns}
+	return &fixCheck{file: file, content: file.Content, markdowns: markdowns}
 }
 
 // keeps reports whether applying edits leaves the render signatures of the
@@ -299,7 +289,7 @@ func (c *fixCheck) signatures(content []byte) []string {
 	signatures := make([]string, len(c.markdowns))
 	for idx, markdown := range c.markdowns {
 		doc := markdown.Parser().Parse(gmtext.NewReader(source))
-		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source, c.opts)
+		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source)
 	}
 	return signatures
 }
@@ -349,10 +339,10 @@ func frontMatterLength(content []byte) int {
 // strings and content, table cell alignment, and inline content with its
 // hard breaks, emphasis, links and images with their resolved destinations
 // and titles, code spans and task checkboxes. Raw HTML, code, link titles
-// and image descriptions are kept as written; runs of the whitespace HTML
-// collapses (spaces, tabs, line endings and form feeds) collapse to one
-// space in other text. Code may only differ in tabs that opts allow to
-// become spaces.
+// and image descriptions are kept as written: code is opaque, because its
+// whitespace can be significant, as the tabs of a Makefile are. Runs of the
+// whitespace HTML collapses (spaces, tabs, line endings and form feeds)
+// collapse to one space in other text.
 //
 // Whether whitespace shows inside an HTML element depends on the element,
 // its attributes and CSS, which the signature does not try to model. So the
@@ -363,9 +353,9 @@ func frontMatterLength(content []byte) int {
 // element around it, and when it follows raw HTML that opens a raw text or
 // preformatted element, such as a textarea or pre, that is not closed in the
 // same HTML block.
-func goldmarkSignature(doc gmast.Node, source []byte, opts fixCheckOptions) string {
+func goldmarkSignature(doc gmast.Node, source []byte) string {
 	var out strings.Builder
-	sig := signatureWriter{source: source, opts: opts, out: &out, anchors: make(map[string]int)}
+	sig := signatureWriter{source: source, out: &out, anchors: make(map[string]int)}
 	sig.blocks(doc)
 	return out.String()
 }
@@ -375,7 +365,6 @@ func goldmarkSignature(doc gmast.Node, source []byte, opts fixCheckOptions) stri
 // space.
 type signatureWriter struct {
 	source  []byte
-	opts    fixCheckOptions
 	out     *strings.Builder
 	text    []byte
 	anchors map[string]int
@@ -478,9 +467,9 @@ func (s *signatureWriter) block(node gmast.Node) {
 		if node.Info != nil {
 			info = string(node.Info.Segment.Value(s.source))
 		}
-		fmt.Fprintf(s.out, "C%q(%q", info, s.code(linesText(node.Lines(), s.source)))
+		fmt.Fprintf(s.out, "C%q(%q", info, linesText(node.Lines(), s.source))
 	case *gmast.CodeBlock:
-		fmt.Fprintf(s.out, "C(%q", s.code(linesText(node.Lines(), s.source)))
+		fmt.Fprintf(s.out, "C(%q", linesText(node.Lines(), s.source))
 	case *gmast.HTMLBlock:
 		raw := linesText(node.Lines(), s.source)
 		if node.HasClosure() {
@@ -563,15 +552,6 @@ func headingText(heading gmast.Node, source []byte) string {
 	return text.String()
 }
 
-// code returns the content of a code block or code span, with the tabs that
-// opts allow to change replaced by the spaces they may become.
-func (s *signatureWriter) code(code string) string {
-	if s.opts.codeTabSpaces > 0 {
-		return strings.ReplaceAll(code, "\t", strings.Repeat(" ", s.opts.codeTabSpaces))
-	}
-	return code
-}
-
 // linesText joins the text of block lines, including the spaces that stand
 // for the part of a tab that the indentation did not use. The line ending
 // of the last line is left out, because a block that ends the file has none
@@ -631,7 +611,7 @@ func (s *signatureWriter) inline(node gmast.Node) {
 			}
 		}
 		content := strings.NewReplacer("\r\n", " ", "\n", " ").Replace(code.String())
-		s.token(fmt.Sprintf("\x00code%q", s.code(content)))
+		s.token(fmt.Sprintf("\x00code%q", content))
 	case *gmast.RawHTML:
 		var raw strings.Builder
 		for idx := range node.Segments.Len() {

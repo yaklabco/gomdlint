@@ -160,7 +160,7 @@ func (r *UnorderedListStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 	}
 
-	return keepSafeFixes(ctx, r.bulletDiagnostics(ctx, mismatches), fixCheckOptions{}), nil
+	return keepSafeFixes(ctx, r.bulletDiagnostics(ctx, mismatches)), nil
 }
 
 // sublistStyle returns the style expected at a nesting level, fixing the
@@ -469,7 +469,7 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 		}
 		diags = append(diags, r.numberDiagnostic(ctx, mismatch, edit))
 	}
-	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
+	return keepSafeFixes(ctx, diags), nil
 }
 
 // numberEdit returns the edit that replaces the digits of an item's number.
