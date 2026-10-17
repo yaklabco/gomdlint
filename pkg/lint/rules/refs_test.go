@@ -408,6 +408,7 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 		"See [alpha][] and [beta].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n",
 		"Undefined [text][used] still uses nothing, but [ref][kept] uses kept.\n\n[kept]: https://example.com\n",
 		"> See [multi\n> line][] here.\n\n[multi line]: https://example.com\n",
+		"> [a\n> b][]\n\n[a b]: https://example.com\n",
 		"Use [`code` label][] here.\n\n[`code` label]: https://example.com\n",
 	} {
 		if diags := testHelper(t, rule, markdown); len(diags) != 0 {

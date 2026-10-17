@@ -459,6 +459,8 @@ func TestCodeFenceStyleRule_SafeFix(t *testing.T) {
 		{"shorter backtick run in content", "~~~~\n```\nnested\n```\n~~~~\n", true, "````\n```\nnested\n```\n````\n"},
 		{"backtick run with an info string in content", "~~~\n```js\nx\n~~~\n", true, "```\n```js\nx\n```\n"},
 		{"tab-indented backtick run in content", "~~~\n\t```\n~~~\n", true, "```\n\t```\n```\n"},
+		{"empty block with a longer closer", "~~~\n~~~~~\n\nText\n", true, "```\n`````\n\nText\n"},
+		{"backtick in info string without a space", "~~~foo`bar\n~~~\n\nText\n", false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -582,6 +584,12 @@ func TestCommandsShowOutputRule(t *testing.T) {
 			input: "> ```sh\n> $ ls\n> $ pwd\n> ```\n",
 			want:  []position{{2, 3}, {3, 3}},
 			fixed: "> ```sh\n> ls\n> pwd\n> ```\n",
+		},
+		{
+			name:  "fence on the first line of a list item",
+			input: "- ```sh\n  $ ls\n  ```\n",
+			want:  []position{{2, 3}},
+			fixed: "- ```sh\n  ls\n  ```\n",
 		},
 	}
 
