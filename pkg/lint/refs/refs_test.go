@@ -367,6 +367,48 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 	}
 }
 
+func TestCollect_Definitions(t *testing.T) {
+	markdown := "Para text\n[notadef]: /in-paragraph\n\n" +
+		"> [quoted]: /quoted \"Quoted title\"\n" +
+		"- [listed]: </listed>\n\n" +
+		"[multi\nline]:\n  /multi\n  'Multi title'\n" +
+		"[next]: /next (Paren title)\n" +
+		"[bad]: /dest trailing\n"
+	file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(markdown))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	type want struct {
+		label, destination, title string
+		lines                     [2]int
+		removable                 bool
+	}
+	expected := []want{
+		{"quoted", "/quoted", "Quoted title", [2]int{4, 4}, true},
+		{"listed", "/listed", "", [2]int{5, 5}, false},
+		{"multi\nline", "/multi", "Multi title", [2]int{7, 10}, true},
+		{"next", "/next", "Paren title", [2]int{11, 11}, true},
+	}
+	defs := Collect(file.Root, file).AllDefinitions
+	if len(defs) != len(expected) {
+		var labels []string
+		for _, def := range defs {
+			labels = append(labels, def.Label)
+		}
+		t.Fatalf("got definitions %q, want %d", labels, len(expected))
+	}
+	for idx, exp := range expected {
+		def := defs[idx]
+		got := want{def.Label, def.Destination, def.Title, def.Lines, def.Removable}
+		if got != exp {
+			t.Errorf("definition %d = %+v, want %+v", idx, got, exp)
+		}
+	}
+	if defs[2].NormalizedLabel != "multi line" {
+		t.Errorf("NormalizedLabel = %q, want %q", defs[2].NormalizedLabel, "multi line")
+	}
+}
+
 func TestNormalizeLabel_UnicodeCaseFolding(t *testing.T) {
 	if NormalizeLabel("Straße") != NormalizeLabel("STRASSE") {
 		t.Errorf("NormalizeLabel(%q) = %q, NormalizeLabel(%q) = %q, want equal",

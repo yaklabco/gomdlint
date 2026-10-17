@@ -8,4 +8,3 @@ A collapsed [gamma][] and a shortcut [delta] reference.
 [beta]: https://example.com/beta
 [gamma]: https://example.com/gamma
 [delta]: https://example.com/delta
-[unused]: https://example.com/unused

@@ -58,6 +58,14 @@ type ReferenceDefinition struct {
 
 	// UsageCount tracks how many times this definition is referenced.
 	UsageCount int
+
+	// Lines holds the first and last 1-based line of the definition.
+	Lines [2]int
+
+	// Removable reports whether deleting the definition's lines leaves the
+	// rest of the document's structure unchanged: the lines hold nothing but
+	// the definition and its container prefix, and no list item marker.
+	Removable bool
 }
 
 // ReferenceUsage represents a link or image in the document.

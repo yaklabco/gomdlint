@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -204,7 +205,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	// Build ignored set
 	ignoredSet := make(map[string]bool)
 	for _, def := range ignoredDefs {
-		ignoredSet[strings.ToLower(def)] = true
+		ignoredSet[refs.NormalizeLabel(def)] = true
 	}
 
 	var diags []lint.Diagnostic
@@ -219,29 +220,38 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 			continue
 		}
 
-		// Check for duplicates
-		if def.IsDuplicate {
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position,
-				fmt.Sprintf("Duplicate reference definition [%s]", def.Label)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Remove duplicate definition").
-				Build()
-			diags = append(diags, diag)
+		var msg, suggestion string
+		switch {
+		case def.IsDuplicate:
+			msg, suggestion = "Duplicate reference definition [%s]", "Remove duplicate definition"
+		case def.UsageCount == 0:
+			msg, suggestion = "Unused reference definition [%s]", "Remove unused definition or add a reference"
+		default:
 			continue
 		}
-
-		// Check for unused (only for non-duplicate first definitions)
-		if def.UsageCount == 0 {
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position,
-				fmt.Sprintf("Unused reference definition [%s]", def.Label)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Remove unused definition or add a reference").
-				Build()
-			diags = append(diags, diag)
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position, fmt.Sprintf(msg, def.Label)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(suggestion)
+		if builder := removeDefinitionFix(ctx.File, def); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
 		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
 	return diags, nil
+}
+
+// removeDefinitionFix deletes the lines of a definition, line endings
+// included, when nothing else on them would be lost. A byte order mark
+// before the first line stays.
+func removeDefinitionFix(file *mdast.FileSnapshot, def *refs.ReferenceDefinition) *fix.EditBuilder {
+	first, last := def.Lines[0], def.Lines[1]
+	if !def.Removable || first < 1 || last < first || last > len(file.Lines) {
+		return nil
+	}
+	builder := fix.NewEditBuilder()
+	builder.Delete(file.Lines[first-1].StartOffset+lint.LineTextOffset(file, first), file.Lines[last-1].EndOffset)
+	return builder
 }
 
 // LinkImageStyleRule enforces consistent link/image syntax styles (MD054).

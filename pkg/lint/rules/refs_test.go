@@ -4,7 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -413,6 +417,75 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 	diags := testHelper(t, rule, "See [one][alpha].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n")
 	if len(diags) != 1 || diags[0].Message != "Unused reference definition [beta]" {
 		t.Errorf("got %+v, want one unused [beta]", diags)
+	}
+}
+
+// TestLinkImageRefDefsRule_ParsedDefinitions finds definitions where the
+// parser does (inside blockquotes and list items, spread over several lines,
+// never inside a paragraph) and fixes unused or duplicate ones by deleting
+// their lines when that cannot change the document's structure.
+func TestLinkImageRefDefsRule_ParsedDefinitions(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		want     []string
+		fixed    string
+	}{
+		{
+			name:     "blockquote definitions",
+			markdown: "Use [quoted][].\n\n> [quoted]: https://a.example\n> [spare]: https://b.example\n",
+			want:     []string{"Unused reference definition [spare]"},
+			fixed:    "Use [quoted][].\n\n> [quoted]: https://a.example\n",
+		},
+		{
+			name:     "list item definition is reported without a fix",
+			markdown: "- [item]: https://a.example\n",
+			want:     []string{"Unused reference definition [item]"},
+			fixed:    "- [item]: https://a.example\n",
+		},
+		{
+			name:     "multi-line definition in use",
+			markdown: "Use [multi][].\n\n[multi]:\n  https://a.example\n  \"Title\"\n",
+		},
+		{
+			name:     "unused multi-line definition",
+			markdown: "Text.\n\n[multi]:\n  https://a.example\n  \"Title\"\n",
+			want:     []string{"Unused reference definition [multi]"},
+			fixed:    "Text.\n\n",
+		},
+		{
+			name:     "paragraph line is not a definition",
+			markdown: "Some text\n[notadef]: https://a.example\n",
+		},
+		{
+			name:     "unused and duplicate definitions",
+			markdown: "Use [used][].\n\n[used]: https://a.example\n[unused]: https://b.example\n[used]: https://c.example\n",
+			want:     []string{"Unused reference definition [unused]", "Duplicate reference definition [used]"},
+			fixed:    "Use [used][].\n\n[used]: https://a.example\n",
+		},
+		{
+			name:     "definition after front matter",
+			markdown: "---\ntitle: x\n---\n\n[spare]: https://a.example\n",
+			want:     []string{"Unused reference definition [spare]"},
+			fixed:    "---\ntitle: x\n---\n\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := testHelper(t, NewLinkImageRefDefsRule(), tt.markdown)
+			require.Len(t, diags, len(tt.want), "diagnostics: %+v", diags)
+			var edits []fix.TextEdit
+			for idx, message := range tt.want {
+				assert.Equal(t, message, diags[idx].Message)
+				edits = append(edits, diags[idx].FixEdits...)
+			}
+			if len(tt.want) == 0 {
+				return
+			}
+			prepared, err := fix.PrepareEdits(edits, len(tt.markdown))
+			require.NoError(t, err)
+			assert.Equal(t, tt.fixed, string(fix.ApplyEdits([]byte(tt.markdown), prepared)))
+		})
 	}
 }
 

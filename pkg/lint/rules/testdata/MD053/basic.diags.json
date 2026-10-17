@@ -6,7 +6,7 @@
     "column": 1,
     "message": "Unused reference definition [unused-one]",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD053",
@@ -15,6 +15,6 @@
     "column": 1,
     "message": "Unused reference definition [unused-two]",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   }
 ]
