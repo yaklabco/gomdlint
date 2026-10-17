@@ -28,36 +28,43 @@ func (c *collector) collectDefinitions() {
 	if file == nil || len(file.Content) == 0 {
 		return
 	}
-	covered := c.leafBlockLines()
+	covered, containers := c.blockLines()
 	var run []definitionLine
 	for number := file.FrontMatterLines + 1; number <= len(file.Lines); number++ {
 		line, blank := definitionLineAt(file, number)
 		if covered[number] || blank {
-			c.parseDefinitionRun(run)
+			c.parseDefinitionRun(run, containers)
 			run = run[:0]
 			continue
 		}
 		run = append(run, line)
 	}
-	c.parseDefinitionRun(run)
+	c.parseDefinitionRun(run, containers)
 }
 
-// leafBlockLines returns the lines covered by blocks that hold their own
-// content: paragraphs, headings, code, HTML, thematic breaks, and tables.
-func (c *collector) leafBlockLines() map[int]bool {
-	lines := make(map[int]bool)
+// blockLines returns the lines covered by blocks that hold their own
+// content (paragraphs, headings, code, HTML, thematic breaks, and tables)
+// and, for each line inside a blockquote or list item, the innermost one.
+func (c *collector) blockLines() (map[int]bool, map[int]*mdast.Node) {
+	covered := make(map[int]bool)
+	containers := make(map[int]*mdast.Node)
 	_ = mdast.Walk(c.root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		pos := node.SourcePosition()
 		switch node.Kind {
 		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeCodeBlock, mdast.NodeHTMLBlock,
 			mdast.NodeThematicBreak, mdast.NodeTable:
-			pos := node.SourcePosition()
 			for line := pos.StartLine; line <= pos.EndLine; line++ {
-				lines[line] = true
+				covered[line] = true
+			}
+		case mdast.NodeBlockquote, mdast.NodeListItem:
+			// The walk visits outer containers first, so inner ones win.
+			for line := pos.StartLine; line <= pos.EndLine; line++ {
+				containers[line] = node
 			}
 		}
 		return nil
 	})
-	return lines
+	return covered, containers
 }
 
 // definitionLineAt locates the definition text of a line: after blockquote
@@ -112,7 +119,8 @@ func orderedMarkerEnd(content []byte, pos, limit int) int {
 
 // parseDefinitionRun parses consecutive definitions from a run of lines.
 // Each definition starts at the start of a line and ends at a line ending.
-func (c *collector) parseDefinitionRun(run []definitionLine) {
+// containers maps lines to their innermost container (see blockLines).
+func (c *collector) parseDefinitionRun(run []definitionLine, containers map[int]*mdast.Node) {
 	text, offsets := joinDefinitionLines(c.ctx.File.Content, run)
 	for pos := 0; pos < len(text); {
 		parsed, ok := parseDefinition(text, pos)
@@ -121,9 +129,36 @@ func (c *collector) parseDefinitionRun(run []definitionLine) {
 		}
 		first := lineIndexAt(offsets, pos)
 		last := lineIndexAt(offsets, parsed.end-1)
+		label := c.definitionLabel(text, run, offsets, pos, parsed.labelEnd, containers[run[first].number])
+		if !validLabel(label) {
+			return
+		}
 		c.addDefinition(parsed, run[first:last+1])
 		pos = parsed.end
 	}
+}
+
+// definitionLabel returns the label between the brackets at text[open] and
+// text[closing] of a run's definition text as it is written in the source
+// (see sourceText). The definition text drops the indentation of each
+// continuation line, which counts toward the label's length, so it serves
+// only when container prefixes cannot be measured.
+func (c *collector) definitionLabel(
+	text string, run []definitionLine, offsets []int, open, closing int, container *mdast.Node,
+) string {
+	if c.prefix == nil {
+		return text[open+1 : closing]
+	}
+	// A definition has no node of its own, so prefixes are measured for a
+	// stand-in inside its innermost container.
+	inside := &mdast.Node{Kind: mdast.NodeParagraph, Parent: container}
+	return c.sourceText(inside, sourceOffset(run, offsets, open)+1, sourceOffset(run, offsets, closing))
+}
+
+// sourceOffset maps an offset in a run's definition text to the source.
+func sourceOffset(run []definitionLine, offsets []int, pos int) int {
+	idx := lineIndexAt(offsets, pos)
+	return run[idx].start + pos - offsets[idx]
 }
 
 // joinDefinitionLines concatenates the definition text of each line with
@@ -187,19 +222,21 @@ func allNoMarker(lines []definitionLine) bool {
 // parsedDefinition is a link reference definition read from definition text.
 type parsedDefinition struct {
 	label, destination, title string
+	labelEnd                  int // offset of the ']' closing the label
 	end                       int // offset after the definition's last line ending
 }
 
 // parseDefinition parses one link reference definition starting at
 // text[pos]: a label, a colon, a destination, and an optional title, each
 // separated by whitespace that may include one line ending, followed only by
-// spaces or tabs on its last line.
+// spaces or tabs on its last line. The caller checks the label's length,
+// which the definition text cannot tell (see definitionLabel).
 func parseDefinition(text string, pos int) (parsedDefinition, bool) {
 	labelEnd, ok := scanDefinitionLabel(text, pos)
 	if !ok || labelEnd+1 >= len(text) || text[labelEnd+1] != ':' {
 		return parsedDefinition{}, false
 	}
-	parsed := parsedDefinition{label: text[pos+1 : labelEnd]}
+	parsed := parsedDefinition{label: text[pos+1 : labelEnd], labelEnd: labelEnd}
 	idx := skipDefinitionSpace(text, labelEnd+2)
 	destEnd, ok := scanDefinitionDestination(text, idx)
 	if !ok {
@@ -230,20 +267,18 @@ func parseDefinition(text string, pos int) (parsedDefinition, bool) {
 }
 
 // scanDefinitionLabel returns the offset of the ']' closing the label opened
-// at text[pos]: no unescaped brackets, at most 999 characters, not blank.
+// at text[pos]: no unescaped brackets, not blank.
 func scanDefinitionLabel(text string, pos int) (int, bool) {
 	if pos >= len(text) || text[pos] != '[' {
 		return 0, false
 	}
 	blank := true
-	length := 0
 	for idx := pos + 1; idx < len(text); idx++ {
 		switch ch := text[idx]; ch {
 		case '\\':
 			blank = false
 			if idx+1 < len(text) && mdscan.IsASCIIPunct(text[idx+1]) {
 				idx++
-				length++
 			}
 		case '[':
 			return 0, false
@@ -252,11 +287,6 @@ func scanDefinitionLabel(text string, pos int) (int, bool) {
 		case ' ', '\t', '\n':
 		default:
 			blank = false
-		}
-		// Only the characters inside the brackets count toward the limit,
-		// in characters rather than bytes.
-		if length += runeStarts(text[idx]); length > maxLabelLength {
-			return 0, false
 		}
 	}
 	return 0, false

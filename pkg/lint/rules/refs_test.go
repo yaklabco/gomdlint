@@ -834,3 +834,49 @@ func TestReferenceLabelLengthLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestMultiLineLabelLengthLimit checks the limit on a label that spans two
+// lines, written as a code span like "` aaa\n `". The limit counts what
+// markdownlint counts: every character between the brackets except line
+// endings and the container prefix of the second line, so indentation after
+// the prefix counts. A full or collapsed reference reports an undefined
+// label only when the label fits, and text is a definition, and so can be
+// unused, only when its label fits.
+func TestMultiLineLabelLengthLimit(t *testing.T) {
+	containers := []struct {
+		name         string
+		first, later string // the container prefix of the label's first and second lines
+	}{
+		{"top level", "", ""},
+		{"blockquote", "> ", "> "},
+		{"list item", "- ", "  "},
+	}
+	for _, container := range containers {
+		for _, indent := range []string{"", " ", "   "} {
+			for _, tt := range []struct {
+				length int
+				label  bool
+			}{{998, true}, {999, true}, {1000, false}, {1001, false}} {
+				// Besides the line ending and the prefix, the label holds a
+				// backtick, a space, the code, the indentation, and a backtick.
+				code := strings.Repeat("a", tt.length-3-len(indent))
+				label := "` " + code + "\n" + container.later + indent + "`"
+				want := 0
+				if tt.label {
+					want = 1
+				}
+				name := fmt.Sprintf("%s indented %d with %d characters", container.name, len(indent), tt.length)
+				t.Run(name, func(t *testing.T) {
+					full := testHelper(t, NewReferenceLinkImagesRule(), container.first+"See [text]["+label+"] here.\n")
+					assert.Len(t, full, want, "full reference")
+					collapsed := testHelper(t, NewReferenceLinkImagesRule(), container.first+"See ["+label+"][] here.\n")
+					assert.Len(t, collapsed, want, "collapsed reference")
+					blank := strings.TrimRight(container.later, " ")
+					definition := testHelper(t, NewLinkImageRefDefsRule(),
+						container.first+"Text.\n"+blank+"\n"+container.later+"["+label+"]: /url\n")
+					assert.Len(t, definition, want, "unused definition")
+				})
+			}
+		}
+	}
+}

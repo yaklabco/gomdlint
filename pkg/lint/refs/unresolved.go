@@ -183,9 +183,10 @@ func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, o
 		return next + 1
 	case isChar(chars, next, '['):
 		if labelEnd, ok := labelEndIndex(chars, next); ok {
-			label := c.labelSource(container, chars, next, labelEnd)
-			c.addUnresolved(chars, opener, closing, labelEnd, StyleFull, label)
-			return labelEnd
+			if label := c.labelSource(container, chars, next, labelEnd); validLabel(label) {
+				c.addUnresolved(chars, opener, closing, labelEnd, StyleFull, label)
+				return labelEnd
+			}
 		}
 	}
 	if label, ok := c.linkTextLabel(container, chars, opener.index, closing); ok {
@@ -225,9 +226,10 @@ func (c *collector) addUnresolved(
 }
 
 // linkTextLabel returns the link text between two brackets as a label, as
-// written. It is not a label when it holds an unescaped bracket (a label is
-// raw text, so a bracket and the backslash before it count inside a code
-// span too) or a link, is blank, or is longer than CommonMark allows.
+// written. It is not a label when it holds a link or its source is not a
+// valid label (see validLabel). An unescaped bracket inside, which counts
+// inside a code span too since a label is raw text, rules it out before its
+// source is read, so nested brackets stay cheap.
 func (c *collector) linkTextLabel(container *mdast.Node, chars []inlineChar, open, closing int) (string, bool) {
 	for idx := open + 1; idx < closing; idx++ {
 		if chars[idx].opaque {
@@ -238,49 +240,85 @@ func (c *collector) linkTextLabel(container *mdast.Node, chars []inlineChar, ope
 		}
 	}
 	label := c.labelSource(container, chars, open, closing)
-	if len([]rune(label)) > maxLabelLength || strings.TrimSpace(label) == "" {
+	if !validLabel(label) {
 		return "", false
 	}
 	return label, true
 }
 
 // labelSource returns the label between the brackets at chars[open] and
-// chars[closing] as it is written in the source, the way CommonMark matches
-// labels: code span padding, backslashes, entities, and markup delimiters
-// stay, and only the container prefix of each continuation line is left
-// out. It falls back to the characters when a bracket has no offset.
+// chars[closing] as it is written in the source (see sourceText). It falls
+// back to the characters when a bracket has no offset.
 func (c *collector) labelSource(container *mdast.Node, chars []inlineChar, open, closing int) string {
-	file := c.ctx.File
 	start, end := chars[open].offset+1, chars[closing].offset
-	if file == nil || chars[open].offset < 0 || end < start || end > len(file.Content) {
+	if c.ctx.File == nil || chars[open].offset < 0 || end < start || end > len(c.ctx.File.Content) {
 		return charsText(chars, open+1, closing)
 	}
+	return c.sourceText(container, start, end)
+}
+
+// sourceText returns the source from start to end the way CommonMark reads a
+// label: code span padding, backslashes, entities, markup delimiters, and
+// indentation stay, the container prefix of each continuation line is left
+// out, and lines are joined by "\n". inside is a node within the containers
+// whose prefixes are left out.
+func (c *collector) sourceText(inside *mdast.Node, start, end int) string {
+	file := c.ctx.File
 	startLine, _ := file.LineAt(start)
 	endLine, _ := file.LineAt(end)
-	var label strings.Builder
+	var text strings.Builder
 	for line := startLine; line <= endLine && line <= len(file.Lines); line++ {
 		info := file.Lines[line-1]
 		from, to := max(start, info.StartOffset), min(end, info.NewlineStart)
 		if line > startLine {
-			_ = label.WriteByte('\n') // strings.Builder.WriteByte never fails
+			_ = text.WriteByte('\n') // strings.Builder.WriteByte never fails
 			if c.prefix != nil {
-				from = max(from, info.StartOffset+c.prefix(container, line))
+				from = max(from, info.StartOffset+c.prefix(inside, line))
 			}
 		}
 		if from < to {
-			label.Write(file.Content[from:to])
+			text.Write(file.Content[from:to])
 		}
 	}
-	return label.String()
+	return text.String()
+}
+
+// validLabel reports whether raw, the source between a label's brackets as
+// sourceText returns it, is a valid link label: it has a character besides
+// spaces, tabs, and line endings, every bracket in it is escaped, and it has
+// at most maxLabelLength characters (not bytes). As in markdownlint, line
+// endings do not count toward the limit and indentation does.
+func validLabel(raw string) bool {
+	blank := true
+	length := 0
+	for idx := 0; idx < len(raw); idx++ {
+		switch ch := raw[idx]; ch {
+		case '\n':
+			continue
+		case '\\':
+			blank = false
+			if idx+1 < len(raw) && mdscan.IsASCIIPunct(raw[idx+1]) {
+				idx++
+				length++
+			}
+		case '[', ']':
+			return false
+		case ' ', '\t':
+		default:
+			blank = false
+		}
+		if length += runeStarts(raw[idx]); length > maxLabelLength {
+			return false
+		}
+	}
+	return !blank
 }
 
 // labelEndIndex finds the ']' that closes the link label opened at
 // chars[open]. A label is raw text: a backslash escapes the next punctuation
-// character inside a code span too, an unescaped bracket ends the label or
-// makes it invalid, and no more than maxLabelLength characters (not bytes)
-// fit inside. A link or image inside makes it invalid.
+// character inside a code span too, and an unescaped '[' or a link or image
+// inside makes it invalid. validLabel checks the rest on the label's source.
 func labelEndIndex(chars []inlineChar, open int) (int, bool) {
-	length := 0
 	for idx := open + 1; idx < len(chars); idx++ {
 		char := chars[idx]
 		if char.opaque {
@@ -290,21 +328,16 @@ func labelEndIndex(chars []inlineChar, open int) (int, bool) {
 		case '\\':
 			if idx+1 < len(chars) && !chars[idx+1].opaque && mdscan.IsASCIIPunct(chars[idx+1].ch) {
 				idx++
-				length++
 			}
 		case '[':
 			return 0, false
 		case ']':
 			// An unescaped bracket inside a code span would end the label
 			// inside it, which no parser builds a reference from.
-			if char.literal || strings.TrimSpace(charsText(chars, open+1, idx)) == "" {
+			if char.literal {
 				return 0, false
 			}
 			return idx, true
-		}
-		// Only the characters inside the brackets count toward the limit.
-		if length += runeStarts(char.ch); length > maxLabelLength {
-			return 0, false
 		}
 	}
 	return 0, false
