@@ -395,11 +395,12 @@ func TestNoMissingSpaceClosedATXRule_MarkdownlintParity(t *testing.T) {
 		{name: "escaped trailing hash is content", input: "## Learn C\\#\n", wantLines: []int{}},
 		{
 			// markdownlint inserts the space before the escaped hash
-			// ("Learn C \# #"); keeping "C\#" intact preserves the text.
+			// ("Learn C \# #"). A fix that kept "C\#" whole would still change
+			// the heading text, and the escaped hash is a hash outside the
+			// heading markers, so no fix is offered.
 			name:      "escaped hash before a closing hash",
 			input:     "## Learn C\\##\n",
 			wantLines: []int{1},
-			wantFixed: "## Learn C\\# #\n",
 		},
 		{name: "hash inside closed heading content", input: "## C# ##\n", wantLines: []int{}},
 		{name: "inside an HTML comment", input: "<!--\n#x#\n-->\n", wantLines: []int{}},
@@ -1047,11 +1048,11 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 			wantFixed: "# Foo\n\n[jump](https://example.com/)\n",
 		},
 		{
-			name:      "anchor that stays the same",
+			// The link holds a hash, so no fix may change a heading's text,
+			// whatever its anchor.
+			name:      "heading text in a document with a fragment link",
 			input:     "# Foo.\n\n[jump](#foo)\n",
 			wantLines: []int{1},
-			wantFix:   true,
-			wantFixed: "# Foo\n\n[jump](#foo)\n",
 		},
 		{
 			// Deleting only the "!" would leave the backslash showing.
@@ -1137,7 +1138,7 @@ func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
 		{name: "comment opener in a code span before a tag", input: "# Foo !\n\n`<!--` <a href=\"#foo-\">jump</a>\n"},
 		{name: "escaped comment opener before a tag", input: "# Foo !\n\n\\<!-- <a href=\"#foo-\">jump</a>\n"},
 		{name: "tag in a code span", input: "# Foo !\n\n`<a href=\"#foo-\">`\n", wantFix: true},
-		{name: "escaped tag", input: "# Foo !\n\n\\<a href=\"#foo-\">jump\n", wantFix: true},
+		{name: "escaped tag", input: "# Foo !\n\n\\<a href=\"#foo-\">jump\n"},
 		// Raw HTML is not interpreted: a hash anywhere in it counts, in
 		// element text and comments too.
 		{name: "hash in element text", input: "# Foo !\n\n<div>\n#hashtag text\n</div>\n"},
@@ -1166,6 +1167,48 @@ func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
 		{name: "comment holding --", input: "# Foo !\n\n<!-- a -- b --> <a href=\"#foo-\">jump</a>\n"},
 		{name: "unterminated comment before a link", input: "# Foo !\n\n<!-- open\n<a href=\"#foo-\">jump</a>\n"},
 		{name: "empty inline comment before a link", input: "# Foo !\n\nText <!--> <a href=\"#foo-\">jump</a>\n"},
+	}
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		for _, tt := range tests {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				file, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(tt.input))
+				require.NoError(t, err)
+				cfg := config.NewConfig()
+				cfg.Flavor = flavor
+				diags, err := NewNoTrailingPunctuationRule().Apply(lint.NewRuleContext(context.Background(), file, cfg, nil))
+				require.NoError(t, err)
+				require.Len(t, diags, 1)
+				assert.Equal(t, tt.wantFix, diags[0].HasFix())
+			})
+		}
+	}
+}
+
+// TestNoTrailingPunctuationRule_PossibleAnchorReferences verifies that MD026
+// changes no heading text when the document holds a hash outside code and
+// heading markers, or any raw HTML, in both flavors, and keeps its fix
+// otherwise.
+func TestNoTrailingPunctuationRule_PossibleAnchorReferences(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantFix bool
+	}{
+		{name: "heading text after inline HTML", input: "# <b></b> !\n\n[jump](#-)\n"},
+		{name: "heading that holds only an image", input: "# ![logo](logo.png) !\n\n[jump](#-)\n"},
+		{name: "multi-line reference definition", input: "# Foo !\n\n[unused]:\n  #foo-\n"},
+		{name: "multi-line reference definition before text", input: "# Foo !\n\n[unused]:\n#foo-\ntext\n"},
+		{name: "link destination at the start of a line", input: "# Foo !\n\n[jump](\n#foo-)\n"},
+		{name: "reference definition in a blockquote", input: "# Foo !\n\n> [ref]: #foo-\n"},
+		{name: "reference definition in a list", input: "# Foo !\n\n- [ref]: #foo-\n"},
+		{name: "hash in prose", input: "# Foo !\n\nI like C#.\n"},
+		{name: "no hash outside headings and no raw HTML", input: "# Foo !\n\nPlain text.\n", wantFix: true},
+		{name: "closing hash sequence of another heading", input: "# Foo !\n\n## Bar ##\n\nText.\n", wantFix: true},
+		// MD018 and MD020 may make these hashes heading markers.
+		{name: "hashes around a paragraph line", input: "# Foo !\n\n#Bar#\n", wantFix: true},
+		{name: "hashes that end another heading", input: "# Foo !\n\n## Bar##\n", wantFix: true},
+		{name: "hash in a code block", input: "# Foo !\n\n```c#\nx #y\n```\n", wantFix: true},
+		{name: "hash in a code span", input: "# Foo !\n\nSee `#x` here.\n", wantFix: true},
 	}
 	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
 		for _, tt := range tests {

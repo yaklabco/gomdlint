@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -34,9 +33,10 @@ import (
 // references, and raw HTML byte for byte. The blocks must match, except for
 // each fix's target block, which must become what its rule says.
 //
-// Heading anchors are not emulated. When the document holds anything that
-// could be a fragment reference, a fix may not change what any heading's
-// anchor is made of, nor add or remove a heading (see anchorKey).
+// Heading anchors are not emulated. When the document may refer to them, as
+// it may when it holds any raw HTML or a "#", "&#" or "&num;" outside code
+// and heading markers, a fix may not change the rendered text of any
+// heading, nor add, remove or reorder headings.
 //
 // Each fix is first checked on its own. When its rule shows that it leaves
 // link labels alone and the fix cannot reach the front matter, that check
@@ -112,11 +112,9 @@ type fixChecker struct {
 	ctx     *lint.RuleContext
 	pending []pendingFix
 	// before is the outline of the document as it is, parsed when first
-	// needed; ready reports whether that parse worked, and fragments whether
-	// the document holds anything that could be a fragment reference.
-	before    *docOutline
-	ready     bool
-	fragments bool
+	// needed; ready reports whether that parse worked.
+	before *docOutline
+	ready  bool
 	// children caches the block children of containers for window searches.
 	children blockChildren
 }
@@ -189,16 +187,16 @@ func (c *fixChecker) localKept(pending pendingFix) bool {
 	if !ok || !slices.EqualFunc(window.want, window.after, sameBlock) {
 		return false
 	}
-	// The rest of the document is as it was, so its anchors stay the same
-	// when the window's headings make the same anchor keys.
-	return slices.Equal(anchorKeys(window.before), anchorKeys(window.after)) || !c.mayReferToAnchors()
+	// The rest of the document is as it was, so its headings stay the same
+	// when the window's do.
+	return slices.Equal(headingTexts(window.before), headingTexts(window.after)) || !c.mayReferToAnchors()
 }
 
-// mayReferToAnchors reports whether the document holds anything that could
-// be a fragment reference to a heading anchor.
+// mayReferToAnchors reports whether the document may refer to heading
+// anchors.
 func (c *fixChecker) mayReferToAnchors() bool {
-	_, ok := c.outline()
-	return !ok || c.fragments
+	before, ok := c.outline()
+	return !ok || before.anchorReferences
 }
 
 // safeTogether returns the fixes among candidates that the document check
@@ -246,7 +244,6 @@ func (c *fixChecker) outline() (docOutline, bool) {
 		if doc, ok := reparse(c.ctx, c.ctx.File.Content); ok {
 			*c.before = outlineOf(doc)
 			c.ready = true
-			c.fragments = c.before.fragments || definitionsMayReferToAnchors(c.ctx)
 		}
 	}
 	return *c.before, c.ready
@@ -277,7 +274,7 @@ func (c *fixChecker) documentKept(edits []fix.TextEdit, intents []fixIntent) boo
 	if !ok || !slices.EqualFunc(want, after.blocks, sameBlock) {
 		return false
 	}
-	return !c.fragments || slices.Equal(anchorKeys(before.blocks), anchorKeys(after.blocks))
+	return !before.anchorReferences || slices.Equal(headingTexts(before.blocks), headingTexts(after.blocks))
 }
 
 // editsKey identifies a fix by its edits.
@@ -606,8 +603,6 @@ type blockSummary struct {
 	// start is where the block starts in the document.
 	start int
 	atoms []textAtom
-	// plain is a heading's text content, from which its anchor is made.
-	plain string
 	// origin is the index, among the summaries of the document as it is,
 	// of the block this one is or comes from, or -1 for a heading that a fix
 	// makes of another kind of block.
@@ -645,7 +640,13 @@ type textAtom struct {
 	// linear is true when text is a copy of the source in rng, so that each
 	// byte has its own offset.
 	linear bool
+	// decoded is true when text is what a backslash escape or character
+	// reference in rng stands for.
+	decoded bool
 }
+
+// hardBreakToken is the summary token that stands for a hard line break.
+const hardBreakToken = "\x00br\x00"
 
 // summarizeBlocks lists the blocks of doc in document order. offset is
 // added to source offsets, to map them to the document a window comes from.
@@ -663,9 +664,6 @@ func summarizeBlocks(doc *mdast.FileSnapshot, offset int) []blockSummary {
 				attrs:  blockAttrs(doc, node),
 				start:  node.SourceRange().StartOffset + offset,
 				origin: len(blocks),
-			}
-			if node.Kind == mdast.NodeHeading {
-				summary.plain = headingPlainText(node)
 			}
 			render := &atomRenderer{doc: doc, offset: offset}
 			switch {
@@ -743,7 +741,7 @@ func (r *atomRenderer) inlines(parent *mdast.Node) {
 		case mdast.NodeSoftBreak:
 			r.token("\n", full.StartOffset, full.EndOffset)
 		case mdast.NodeHardBreak:
-			r.token("\x00br\x00", full.StartOffset, full.EndOffset)
+			r.token(hardBreakToken, full.StartOffset, full.EndOffset)
 		case mdast.NodeCodeSpan:
 			r.token("\x00code\x00", full.StartOffset, content.StartOffset)
 			r.literal(node.Inline, content)
@@ -835,6 +833,7 @@ func (r *atomRenderer) text(node *mdast.Node) {
 		}
 		flush(idx)
 		r.token(decoded, start+idx, start+idx+size)
+		r.atoms[len(r.atoms)-1].decoded = true
 		idx += size
 		runStart = idx
 	}
@@ -1066,10 +1065,13 @@ type docOutline struct {
 	// frontMatter is the source of the front matter, if any.
 	frontMatter string
 	blocks      []blockSummary
-	// fragments is true when the document holds anything that could be a
-	// fragment reference: a link or image whose destination holds "#", or
-	// any raw HTML at all, comments included.
-	fragments bool
+	// anchorReferences is true when the document may refer to heading
+	// anchors: it holds raw HTML, a link or image whose destination holds
+	// "#", or a "#", "&#" or "&num;" outside code blocks, code spans and the
+	// hash sequences of ATX headings. The hashes that start and end a line
+	// of a paragraph, which MD018 and MD020 may make the hash sequences of a
+	// heading, do not count either.
+	anchorReferences bool
 }
 
 // outlineOf returns the outline of doc.
@@ -1078,33 +1080,153 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 	if lines := doc.FrontMatterLines; lines > 0 && lines <= len(doc.Lines) {
 		outline.frontMatter = string(doc.Content[:doc.Lines[lines-1].EndOffset])
 	}
+	var outside []mdast.SourceRange
 	//nolint:errcheck // Walk visitor never returns error.
 	_ = mdast.Walk(doc.Root, func(node *mdast.Node) error {
-		rng := node.SourceRange()
-		if rng.StartOffset < 0 || rng.EndOffset > len(doc.Content) {
-			return nil
-		}
-		source := doc.Content[rng.StartOffset:rng.EndOffset]
 		switch node.Kind {
-		case mdast.NodeLink, mdast.NodeImage:
-			if strings.Contains(lint.LinkDestination(node), "#") || mayHoldHash(source) {
-				outline.fragments = true
-			}
 		case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
-			// Raw HTML can run on past the Markdown block that holds it, as a
-			// tag that a blank line cuts in two does, so any of it may refer
-			// to an anchor, wherever a hash is.
-			outline.fragments = true
+			// Raw HTML can run on past the Markdown block that holds it, so
+			// any of it may refer to an anchor.
+			outline.anchorReferences = true
 		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
 			// So may raw HTML that the parser did not read as such, such as
 			// an unterminated tag in text.
 			if textHasRawHTML(doc.Content, node) {
-				outline.fragments = true
+				outline.anchorReferences = true
+			}
+			if node.Kind == mdast.NodeParagraph {
+				outside = append(outside, lineHashRuns(doc, node)...)
+			}
+		case mdast.NodeLink, mdast.NodeImage:
+			// A destination can start a line, where its hash looks like the
+			// start of a heading.
+			if strings.Contains(lint.LinkDestination(node), "#") {
+				outline.anchorReferences = true
+			}
+		case mdast.NodeCodeBlock, mdast.NodeCodeSpan:
+			outside = append(outside, node.SourceRange())
+		}
+		if node.Kind == mdast.NodeHeading {
+			if parts, ok := atxHeadingParts(doc, node); ok {
+				outside = append(outside, parts.open, parts.close, trailingHashes(doc.Content, parts.content))
 			}
 		}
 		return nil
 	})
+	if !outline.anchorReferences {
+		outline.anchorReferences = hashOutside(doc.Content, outside)
+	}
 	return outline
+}
+
+// lineHashRuns returns the runs of hashes that start and end the lines of
+// a paragraph whose text starts with a hash, after the container prefix and
+// indentation: the runs that MD018 and MD020 may make the opening and
+// closing sequences of a heading. A hash that a backslash escapes is text.
+func lineHashRuns(doc *mdast.FileSnapshot, paragraph *mdast.Node) []mdast.SourceRange {
+	rng := paragraph.SourceRange()
+	first, _ := doc.LineAt(rng.StartOffset)
+	last, _ := doc.LineAt(max(rng.EndOffset-1, rng.StartOffset))
+	var runs []mdast.SourceRange
+	for lineNum := first; lineNum >= 1 && lineNum <= last && lineNum <= len(doc.Lines); lineNum++ {
+		line := doc.Lines[lineNum-1]
+		start := line.StartOffset + len(lint.ContainerPrefix(doc, paragraph, lineNum))
+		for start < line.NewlineStart && (doc.Content[start] == ' ' || doc.Content[start] == '\t') {
+			start++
+		}
+		if start >= line.NewlineStart || doc.Content[start] != '#' {
+			continue
+		}
+		openEnd := start
+		for openEnd < line.NewlineStart && doc.Content[openEnd] == '#' {
+			openEnd++
+		}
+		runs = append(runs, mdast.SourceRange{StartOffset: start, EndOffset: openEnd})
+		closeEnd := line.NewlineStart
+		for closeEnd > openEnd && (doc.Content[closeEnd-1] == ' ' || doc.Content[closeEnd-1] == '\t') {
+			closeEnd--
+		}
+		runs = append(runs, trailingHashes(doc.Content, mdast.SourceRange{StartOffset: openEnd, EndOffset: closeEnd}))
+	}
+	return runs
+}
+
+// trailingHashes returns the run of hashes that ends rng, without a hash
+// that a backslash escapes: the closing sequence MD020 may make of it.
+func trailingHashes(content []byte, rng mdast.SourceRange) mdast.SourceRange {
+	start := rng.EndOffset
+	for start > rng.StartOffset && content[start-1] == '#' && !escapedAt(content, rng.StartOffset, start-1) {
+		start--
+	}
+	return mdast.SourceRange{StartOffset: start, EndOffset: rng.EndOffset}
+}
+
+// hashOutside reports whether content holds a "#", "&#" or "&num;" outside
+// the ranges.
+func hashOutside(content []byte, ranges []mdast.SourceRange) bool {
+	slices.SortFunc(ranges, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
+	for idx, char := range content {
+		if char != '#' && !bytes.HasPrefix(content[idx:], []byte("&num;")) {
+			continue
+		}
+		if !insideSorted(ranges, idx) {
+			return true
+		}
+	}
+	return false
+}
+
+// headingTexts returns the rendered text of the headings among blocks, in
+// order.
+func headingTexts(blocks []blockSummary) []string {
+	var texts []string
+	for _, block := range blocks {
+		if block.kind == mdast.NodeHeading {
+			texts = append(texts, block.rendered())
+		}
+	}
+	return texts
+}
+
+// rendered returns the block's rendered text byte for byte. Of inline
+// content it leaves out only what CommonMark does not render: whitespace and
+// line breaks of the source at either end, which the parser can keep, as it
+// keeps a space before a closing sequence. Unlike text, it keeps whitespace
+// that a character reference stands for, which renders.
+func (b blockSummary) rendered() string {
+	parts := make([]string, len(b.atoms))
+	for idx, atom := range b.atoms {
+		parts[idx] = atom.text
+	}
+	if hasInlineContent(b.kind) {
+		for idx := range parts {
+			if !trimSourceSpace(&parts[idx], b.atoms[idx], strings.TrimLeft) {
+				break
+			}
+		}
+		for idx := len(parts) - 1; idx >= 0; idx-- {
+			if !trimSourceSpace(&parts[idx], b.atoms[idx], strings.TrimRight) {
+				break
+			}
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// trimSourceSpace trims, with trim, the source whitespace and line breaks
+// from part, the text of atom, and reports whether nothing is left of it, so
+// that trimming goes on past it. The text of a decoded atom is not source
+// whitespace, so it stays.
+func trimSourceSpace(part *string, atom textAtom, trim func(string, string) string) bool {
+	if atom.decoded {
+		return false
+	}
+	if *part == hardBreakToken {
+		*part = ""
+	} else {
+		*part = trim(*part, " \t\n")
+	}
+	return *part == ""
 }
 
 // textHasRawHTML reports whether the inline content of container holds, in
@@ -1156,106 +1278,6 @@ func insideSorted(ranges []mdast.SourceRange, offset int) bool {
 	return false
 }
 
-// mayHoldHash reports whether text holds "#", or a character reference that
-// could stand for it, without decoding anything.
-func mayHoldHash(text []byte) bool {
-	return bytes.ContainsRune(text, '#') || bytes.Contains(text, []byte("&#")) || bytes.Contains(text, []byte("&num;"))
-}
-
-// definitionsMayReferToAnchors reports whether a reference definition of
-// the document has a destination that could hold a fragment.
-func definitionsMayReferToAnchors(ctx *lint.RuleContext) bool {
-	for _, definition := range ctx.RefContext().AllDefinitions {
-		if mayHoldHash([]byte(definition.Destination)) {
-			return true
-		}
-	}
-	return false
-}
-
-// anchorKeys returns the anchor keys of the headings among blocks, in order.
-func anchorKeys(blocks []blockSummary) []string {
-	var keys []string
-	for _, block := range blocks {
-		if block.kind == mdast.NodeHeading {
-			keys = append(keys, anchorKey(block.plain))
-		}
-	}
-	return keys
-}
-
-// anchorKey returns what a heading's anchor is made of: the letters, marks,
-// numbers, connector punctuation, hyphens and spaces of its text, in order,
-// with ASCII letters lowercased and other letters as they are. GitHub and
-// others make an anchor by lowercasing those and turning spaces into
-// hyphens, so headings whose keys are the same in order get the same
-// anchors, duplicate numbering included, however other letters lowercase.
-func anchorKey(plain string) string {
-	var key strings.Builder
-	for _, char := range plain {
-		switch {
-		case char >= 'A' && char <= 'Z':
-			key.WriteRune(char + ('a' - 'A'))
-		case char == ' ' || char == '-' || unicode.In(char, unicode.L, unicode.M, unicode.N, unicode.Pc):
-			key.WriteRune(char)
-		}
-	}
-	return key.String()
-}
-
-// headingPlainText returns a heading's text content, as GitHub reads it to
-// make its anchor: text with escapes and character references decoded, code
-// span content, and the text inside emphasis and links, without images and
-// raw HTML.
-func headingPlainText(heading *mdast.Node) string {
-	var text strings.Builder
-	var visit func(parent *mdast.Node)
-	visit = func(parent *mdast.Node) {
-		for node := parent.FirstChild; node != nil; node = node.Next {
-			switch node.Kind {
-			case mdast.NodeText:
-				if node.Inline != nil {
-					text.WriteString(decodeInline(node.Inline.Text))
-				}
-			case mdast.NodeCodeSpan:
-				if node.Inline != nil {
-					text.Write(node.Inline.Text)
-				}
-			case mdast.NodeSoftBreak, mdast.NodeHardBreak:
-				text.WriteByte(' ')
-			case mdast.NodeImage, mdast.NodeHTMLInline, mdast.NodeTaskCheckbox:
-			default:
-				visit(node)
-			}
-		}
-	}
-	visit(heading)
-	return strings.TrimSpace(text.String())
-}
-
-// decodeInline returns raw inline text with backslash escapes and character
-// references decoded.
-func decodeInline(text []byte) string {
-	var decoded strings.Builder
-	for idx := 0; idx < len(text); {
-		if text[idx] == '\\' && idx+1 < len(text) && isASCIIPunctuation(text[idx+1]) {
-			decoded.WriteByte(text[idx+1])
-			idx += 2
-			continue
-		}
-		if text[idx] == '&' {
-			if loc := characterReferenceStart.FindIndex(text[idx:]); loc != nil {
-				decoded.WriteString(html.UnescapeString(string(text[idx : idx+loc[1]])))
-				idx += loc[1]
-				continue
-			}
-		}
-		decoded.WriteByte(text[idx])
-		idx++
-	}
-	return decoded.String()
-}
-
 // rangesOverlap reports whether two ranges share a byte.
 func rangesOverlap(a, b mdast.SourceRange) bool {
 	return a.StartOffset < b.EndOffset && b.StartOffset < a.EndOffset
@@ -1264,10 +1286,9 @@ func rangesOverlap(a, b mdast.SourceRange) bool {
 // trimRendered removes whitespace and line breaks at both ends of rendered
 // inline content.
 func trimRendered(text string) string {
-	const hardBreak = "\x00br\x00"
 	for {
 		trimmed := strings.Trim(text, " \t\n")
-		trimmed = strings.TrimPrefix(strings.TrimSuffix(trimmed, hardBreak), hardBreak)
+		trimmed = strings.TrimPrefix(strings.TrimSuffix(trimmed, hardBreakToken), hardBreakToken)
 		if trimmed == text {
 			return text
 		}

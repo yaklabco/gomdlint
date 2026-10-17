@@ -380,10 +380,33 @@ func TestDocumentKept(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "anchor that stays the same with fragment links",
+			name:   "heading text change with a fragment link",
 			input:  "# Foo.\n\n[jump](#foo)\n",
 			edits:  []string{".", ""},
 			intent: headingLoses("."),
+			want:   false,
+		},
+		{
+			name:   "heading text change without hashes or raw HTML",
+			input:  "# Foo.\n\nText.\n",
+			edits:  []string{".", ""},
+			intent: headingLoses("."),
+			want:   true,
+		},
+		{
+			// A space that a character reference stands for renders, unlike
+			// the source spaces at either end of a heading's content.
+			name:   "heading loses a space written as a character reference",
+			input:  "# Foo&#32;\n\n[jump](#foo)\n",
+			edits:  []string{"&#32;", ""},
+			intent: headingLoses("&#32;"),
+			want:   false,
+		},
+		{
+			name:   "spaces before a closing sequence with a fragment link",
+			input:  "# Foo  #\n\n[jump](#foo)\n",
+			edits:  []string{"  #", " #"},
+			intent: noChange,
 			want:   true,
 		},
 		{
