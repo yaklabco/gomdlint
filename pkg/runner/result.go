@@ -30,7 +30,8 @@ type FileOutcome struct {
 	// RuleErrors lists the rules that failed on this file, sorted by rule
 	// ID: errors returned by a rule, recovered panics (errors.Is
 	// lint.ErrRulePanic) and invalid fix edits (errors.Is lint.ErrInvalidFix).
-	// The file was processed, but its findings or fixes may be incomplete.
+	// The file was processed, but its findings or fixes may be incomplete,
+	// so the file counts as failed (see Failed).
 	RuleErrors []*lint.RuleError
 
 	// SkippedEdits lists the fix edits of the final lint pass that were not
@@ -45,7 +46,7 @@ type FileOutcome struct {
 // Every per-file failure belongs here, so that new kinds (for example errors
 // from individual rules) fail the run without changes elsewhere.
 func (o *FileOutcome) Failed() bool {
-	return o.Error != nil
+	return o.Error != nil || len(o.RuleErrors) > 0
 }
 
 // Stats captures aggregate information about a run.
@@ -87,7 +88,7 @@ type Stats struct {
 	DiagnosticsFixed int
 
 	// FilesWithRuleErrors is the number of processed files on which at least
-	// one rule failed. These files are not counted in FilesErrored.
+	// one rule failed. These files also count in FilesErrored.
 	FilesWithRuleErrors int
 
 	// RuleErrors is the total number of rule failures, at most one per rule

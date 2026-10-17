@@ -102,10 +102,15 @@ func TestRunner_Run_ReportsRuleErrorsPerFile(t *testing.T) {
 	require.Len(t, panicked.RuleErrors, 1)
 	require.ErrorIs(t, panicked.RuleErrors[0], lint.ErrRulePanic)
 
+	fine := outcomeFor(t, result, "b.md")
+	assert.True(t, failed.Failed(), "a file on which a rule failed was not linted completely")
+	assert.True(t, panicked.Failed())
+	assert.False(t, fine.Failed())
+
 	assert.Equal(t, 2, result.Stats.FilesWithRuleErrors)
 	assert.Equal(t, 2, result.Stats.RuleErrors)
 	assert.Equal(t, 3, result.Stats.FilesProcessed)
-	assert.Zero(t, result.Stats.FilesErrored, "FilesErrored still counts files that could not be processed at all")
+	assert.Equal(t, 2, result.Stats.FilesErrored, "rule failures fail the run")
 	assert.True(t, result.HasRuleErrors())
 }
 
