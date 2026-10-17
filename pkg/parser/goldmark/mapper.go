@@ -285,7 +285,7 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 	listAttrs := &mdast.ListAttrs{
 		Ordered:     list.IsOrdered(),
 		StartNumber: list.Start,
-		Tight:       listTight(list, m.source),
+		Tight:       ListTight(list, m.source),
 	}
 
 	// goldmark's Marker is the bullet character of a bullet list and the
@@ -302,17 +302,20 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 	return node
 }
 
-// listTight reports whether a list is tight as CommonMark reads it. goldmark
-// reads a list as loose when an item but the first, or a block of an item
-// but its first, follows a blank line, by the blocks' blank-line flags
-// (listParser.Close). It gives each link reference definition that starts a
-// paragraph a node of its own before the paragraph, and the first of them
-// takes the paragraph's flag. The text left after the definitions then
-// counts as a later block of the item, although no blank line separates it
-// from them, and keeps the flag that its first line got when the item
+// ListTight reports whether a list that goldmark parsed from source is tight
+// as CommonMark reads it. Use it instead of list.IsTight, which goldmark
+// gets wrong when an item starts with link reference definitions.
+//
+// goldmark reads a list as loose when an item but the first, or a block of
+// an item but its first, follows a blank line, by the blocks' blank-line
+// flags (listParser.Close). It gives each link reference definition that
+// starts a paragraph a node of its own before the paragraph, and the first
+// of them takes the paragraph's flag. The rest of the paragraph then counts
+// as a later block of the item, although no blank line separates it from the
+// definitions, and keeps the flag that its first line got when the item
 // followed a blank line, so goldmark reads the list as loose. Definitions
-// render nothing, so they and the text after them count as one block.
-func listTight(list *ast.List, source []byte) bool {
+// render nothing, so they and the rest of their paragraph count as one block.
+func ListTight(list *ast.List, source []byte) bool {
 	if list.IsTight {
 		return true
 	}
@@ -334,38 +337,33 @@ func listTight(list *ast.List, source []byte) bool {
 }
 
 // firstBlockEnd returns the last node of an item's first block, which starts
-// at node: the node itself, or, when it is a link reference definition, the
-// last definition of its run or the paragraph that holds the text after
-// them.
+// at node. That is node itself unless it is a link reference definition.
+// Then the block is the paragraph the definition started: it runs over the
+// definitions on the lines that follow and ends with the node that starts
+// on the line after the last of them, which holds the rest of the paragraph
+// (text or a setext heading) or a block that ended it. Definitions after a
+// blank line started another paragraph and are a block of their own.
 func firstBlockEnd(node ast.Node, source []byte) ast.Node {
 	if _, ok := node.(*ast.LinkReferenceDefinition); !ok {
 		return node
 	}
-	for {
-		next := node.NextSibling()
+	for next := node.NextSibling(); next != nil && startsOnNextLine(node, next, source); next = node.NextSibling() {
+		node = next
 		if _, ok := next.(*ast.LinkReferenceDefinition); !ok {
 			break
-		}
-		node = next
-	}
-	switch next := node.NextSibling().(type) {
-	case *ast.Paragraph, *ast.TextBlock:
-		if continuesDefinitions(node, next, source) {
-			return next
 		}
 	}
 	return node
 }
 
-// continuesDefinitions reports whether paragraph holds the text that
-// followed the definitions ending with def in one source paragraph: its
-// first line is the line after def's last line.
-func continuesDefinitions(def, paragraph ast.Node, source []byte) bool {
-	defLines, lines := def.Lines(), paragraph.Lines()
-	if defLines.Len() == 0 || lines.Len() == 0 {
+// startsOnNextLine reports whether the first line of next is the line after
+// the last line of prev. Blocks without lines never are.
+func startsOnNextLine(prev, next ast.Node, source []byte) bool {
+	prevLines, nextLines := prev.Lines(), next.Lines()
+	if prevLines.Len() == 0 || nextLines.Len() == 0 {
 		return false
 	}
-	end, start := defLines.At(defLines.Len()-1).Stop, lines.At(0).Start
+	end, start := prevLines.At(prevLines.Len()-1).Stop, nextLines.At(0).Start
 	if end > start || start > len(source) {
 		return false
 	}
