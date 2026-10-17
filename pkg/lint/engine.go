@@ -357,8 +357,9 @@ func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
 
 // mergeBlankLineInsertions combines formatting requirements at the same
 // boundary: of several single-edit fixes that insert only blank lines at
-// one offset, the longest is kept. It runs after suppression so disabled
-// findings cannot increase an enabled fix.
+// one offset, the one asking for the most blank lines is kept (see
+// moreBlankLines). It runs after suppression so disabled findings cannot
+// increase an enabled fix.
 func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
 	result := make([]pendingFix, 0, len(fixes))
 	boundaries := make(map[int]int)
@@ -366,7 +367,7 @@ func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
 		if len(pending.edits) == 1 && isBlankLineInsertion(pending.edits[0]) {
 			offset := pending.edits[0].StartOffset
 			if idx, ok := boundaries[offset]; ok {
-				if len(pending.edits[0].NewText) > len(result[idx].edits[0].NewText) {
+				if moreBlankLines(pending.edits[0].NewText, result[idx].edits[0].NewText) {
 					result[idx] = pending
 				}
 				continue
@@ -376,6 +377,16 @@ func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
 		result = append(result, pending)
 	}
 	return result
+}
+
+// moreBlankLines reports whether blank-line text a asks for more than b:
+// more line breaks, or as many with a longer container prefix (so ">\n"
+// wins over "\n" inside a blockquote).
+func moreBlankLines(a, b string) bool {
+	if linesA, linesB := strings.Count(a, "\n"), strings.Count(b, "\n"); linesA != linesB {
+		return linesA > linesB
+	}
+	return len(a) > len(b)
 }
 
 // isBlankLineInsertion reports whether edit only inserts blank lines: text

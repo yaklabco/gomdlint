@@ -307,6 +307,18 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 			want:  ">\n",
 		},
 		{
+			name:    "more blank lines win over a longer prefix",
+			content: quoted, offset: 6,
+			texts: []string{">\n", "\n\n"},
+			want:  "\n\n",
+		},
+		{
+			name:    "more blank lines win whatever the rule order",
+			content: quoted, offset: 6,
+			texts: []string{"  > >\n", "\n\n\n"},
+			want:  "\n\n\n",
+		},
+		{
 			name:    "nested containers with indentation",
 			content: "- item\n\n  > > # A\n  > > ## B\n", offset: 18,
 			texts: []string{"  > >\n", "  > >\n"},

@@ -198,6 +198,57 @@ func TestPipeline_NeverWritesFixedContentThatCannotBeParsed(t *testing.T) {
 	assert.Equal(t, "x and y", string(got))
 }
 
+func TestPipeline_UnparsableFixLeavesNoPendingEdits(t *testing.T) {
+	t.Parallel()
+
+	errUnparsable := errors.New("unparsable")
+	parser := &mockParser{}
+	strict := &mockParser{parseFunc: func(ctx context.Context, path string, content []byte) (*mdast.FileSnapshot, error) {
+		if bytes.Contains(content, []byte("BAD")) {
+			return nil, errUnparsable
+		}
+		return parser.Parse(ctx, path, content)
+	}}
+	registry := lint.NewRegistry()
+	registry.Register(replaceFirstRule("TEST001", "y", "z"))
+	registry.Register(replaceFirstRule("TEST002", "z", "BAD"))
+	// Conflicts with TEST001 on the first pass, so that pass skips it.
+	registry.Register(replaceFirstRule("TEST003", "y", "w"))
+	pipeline := lint.NewPipeline(lint.NewEngine(strict, registry))
+
+	result, err := pipeline.ProcessContent(context.Background(), "test.md", []byte("x and y"), fixConfig(),
+		lint.PipelineOptions{Fix: true})
+	require.NoError(t, err)
+
+	require.True(t, result.Skipped)
+	assert.Empty(t, result.Edits, "no fix will be applied to a skipped file")
+	assert.Empty(t, result.SkippedEdits, "skipped edits only describe a loop that stopped early")
+	assert.False(t, result.EditConflicts)
+	assert.Len(t, result.Diagnostics, 2, "the unchanged file's findings are still reported")
+}
+
+func TestPipeline_PanicErrorCarriesTheStack(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("parser bug")
+	parser := &mockParser{
+		parseFunc: func(context.Context, string, []byte) (*mdast.FileSnapshot, error) {
+			panic(sentinel)
+		},
+	}
+	pipeline := lint.NewPipeline(lint.NewEngine(parser, lint.NewRegistry()))
+
+	_, err := pipeline.ProcessContent(context.Background(), "doc.md", []byte("hello"), config.NewConfig(),
+		lint.DefaultPipelineOptions())
+
+	require.ErrorIs(t, err, lint.ErrInternal)
+	require.ErrorIs(t, err, sentinel, "an error panic value stays matchable")
+	var internalErr *lint.InternalError
+	require.ErrorAs(t, err, &internalErr)
+	assert.Equal(t, "doc.md", internalErr.Path)
+	assert.Contains(t, string(internalErr.Stack), "goroutine", "the stack is kept for library callers")
+}
+
 func TestPipeline_WritesSymlinkTargetsOnlyInsideTheRoots(t *testing.T) {
 	t.Parallel()
 

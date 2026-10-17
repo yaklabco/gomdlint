@@ -38,9 +38,38 @@ var (
 	ErrWriteFailure = errors.New("write failure")
 
 	// ErrInternal indicates a bug: processing the file panicked. The panic
-	// was recovered so other files are still processed.
+	// was recovered so other files are still processed. The error is an
+	// *InternalError.
 	ErrInternal = errors.New("internal error")
 )
+
+// InternalError records a panic recovered while processing one file. It
+// matches ErrInternal with errors.Is, and also the panic value when that is
+// an error.
+type InternalError struct {
+	// Path is the file being processed.
+	Path string
+
+	// Value is the value the code panicked with.
+	Value any
+
+	// Stack is the stack trace captured when the panic was recovered.
+	Stack []byte
+}
+
+// Error implements error.
+func (e *InternalError) Error() string {
+	return fmt.Sprintf("%s: panic while processing %s: %v", ErrInternal.Error(), e.Path, e.Value)
+}
+
+// Unwrap returns ErrInternal and, when the panic value is an error, that
+// error.
+func (e *InternalError) Unwrap() []error {
+	if err, ok := e.Value.(error); ok {
+		return []error{ErrInternal, err}
+	}
+	return []error{ErrInternal}
+}
 
 // PipelineResult contains the result of processing a single file through the safety pipeline.
 type PipelineResult struct {
@@ -132,9 +161,11 @@ type PipelineOptions struct {
 	// When false, only mod time and size are checked.
 	StrictRaceDetection bool
 
-	// ReParseAfterFix is kept for compatibility. Fixed content is always
-	// re-linted, and so re-parsed, after every fix pass, and a fix whose
-	// result cannot be parsed is never written, whatever this is set to.
+	// ReParseAfterFix has no effect. Fixed content is always re-linted, and so
+	// re-parsed, after every fix pass, and a fix whose result cannot be parsed
+	// is never written.
+	//
+	// Deprecated: The pipeline always re-parses fixed content.
 	ReParseAfterFix bool
 
 	// MaxFixPasses limits the number of fix iterations to prevent infinite loops.
@@ -227,7 +258,6 @@ func DefaultPipelineOptions() PipelineOptions {
 		DryRun:              false,
 		Backup:              fsutil.DefaultBackupConfig(),
 		StrictRaceDetection: true,
-		ReParseAfterFix:     false,
 	}
 }
 
@@ -472,6 +502,9 @@ func (p *Pipeline) lintAndFix(
 			result.FixPasses = 0
 			result.TotalEditsApplied = 0
 			fileResult = originalResult
+			fileResult.Edits = nil
+			fileResult.SkippedEdits = nil
+			fileResult.EditConflicts = false
 			break
 		}
 
@@ -503,19 +536,23 @@ func (p *Pipeline) lintAndFix(
 // recoverPanic runs process and turns a panic into an error wrapping
 // ErrInternal, writing the stack to the debug log.
 func recoverPanic(ctx context.Context, path string, process func()) error {
-	var panicErr error
+	var panicErr *InternalError
 	func() {
 		defer func() {
 			recovered := recover()
 			if recovered == nil {
 				return
 			}
+			stack := debug.Stack()
 			logging.FromContext(ctx).Debug("panic while processing file",
-				"path", path, "panic", recovered, "stack", string(debug.Stack()))
-			panicErr = fmt.Errorf("%w: panic while processing %s: %v", ErrInternal, path, recovered)
+				"path", path, "panic", recovered, "stack", string(stack))
+			panicErr = &InternalError{Path: path, Value: recovered, Stack: stack}
 		}()
 		process()
 	}()
+	if panicErr == nil {
+		return nil
+	}
 	return panicErr
 }
 
@@ -607,6 +644,5 @@ func PipelineOptionsFromConfig(cfg *config.Config) PipelineOptions {
 		DryRun:              cfg.DryRun,
 		Backup:              BackupConfigFromConfig(cfg),
 		StrictRaceDetection: true,
-		ReParseAfterFix:     false,
 	}
 }
