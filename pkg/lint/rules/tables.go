@@ -371,7 +371,7 @@ func (r *TableAlignmentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 			WithFix(builder).
 			Build())
 	}
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 // TableBlankLinesRule ensures blank lines around tables.
@@ -433,7 +433,7 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 			diags = append(diags, r.blankLineDiagnostic(ctx, rows[len(rows)-1].start, "after", builder))
 		}
 	}
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 func (r *TableBlankLinesRule) blankLineDiagnostic(

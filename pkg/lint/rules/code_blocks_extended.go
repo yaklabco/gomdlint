@@ -96,7 +96,7 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 func (r *BlanksAroundFencesRule) blankLineDiagnostic(
@@ -170,7 +170,7 @@ func (r *NoSpaceInCodeRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		}
 		diags = append(diags, r.checkCodeSpan(ctx, span)...)
 	}
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{codeSpanSpace: true}), nil
 }
 
 // checkCodeSpan reports the extra space at the start and at the end of a code

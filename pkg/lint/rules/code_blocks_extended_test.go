@@ -255,10 +255,18 @@ func TestBlanksAroundFencesRule_Containers(t *testing.T) {
 			input: "> ## Quoted\n>\n> ```\n> code\n> ```\n>\n> Para\n",
 		},
 		{
-			name:  "list item",
+			// Blank lines would make the tight list loose, which changes how
+			// it renders, so the lines are reported without a fix.
+			name:  "tight list item",
 			input: "- item\n  ```\n  code\n  ```\n- next\n",
 			lines: []int{2, 4},
-			fixed: "- item\n\n  ```\n  code\n  ```\n\n- next\n",
+			fixed: "- item\n  ```\n  code\n  ```\n- next\n",
+		},
+		{
+			name:  "loose list item",
+			input: "- item\n\n- other\n  ```\n  code\n  ```\n- next\n",
+			lines: []int{4, 6},
+			fixed: "- item\n\n- other\n\n  ```\n  code\n  ```\n\n- next\n",
 		},
 		{
 			name:  "comment line is blank",

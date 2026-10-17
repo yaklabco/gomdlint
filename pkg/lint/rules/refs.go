@@ -240,7 +240,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 // definitionRemoval builds the MD053 fix, which deletes a definition's lines.

@@ -91,7 +91,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		diags = append(diags, diagBuilder.Build())
 	}
 	sortDiagnosticsByPosition(diags)
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{autolinks: true}), nil
 }
 
 // emailAutolinkPattern is the CommonMark grammar for the address inside an

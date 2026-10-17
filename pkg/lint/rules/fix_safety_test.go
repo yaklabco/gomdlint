@@ -1,0 +1,139 @@
+package rules
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
+)
+
+// fixSafetyContext parses input with flavor and returns a rule context whose
+// configuration names the same flavor.
+func fixSafetyContext(t *testing.T, flavor config.Flavor, input string) *lint.RuleContext {
+	t.Helper()
+	snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	cfg := config.NewConfig()
+	cfg.Flavor = flavor
+	return lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
+}
+
+// edit returns a diagnostic whose fix replaces input[start:end] with text.
+func edit(start, end int, text string) lint.Diagnostic {
+	return lint.Diagnostic{RuleID: "TEST", FixEdits: []fix.TextEdit{{StartOffset: start, EndOffset: end, NewText: text}}}
+}
+
+func TestVerifyFixes(t *testing.T) {
+	tests := []struct {
+		name   string
+		flavor config.Flavor
+		input  string
+		allow  fixAllowance
+		diags  []lint.Diagnostic
+		kept   []bool
+	}{
+		{
+			name:  "blank line between paragraphs keeps the structure",
+			input: "One\n\nTwo\n",
+			diags: []lint.Diagnostic{edit(5, 5, "\n")},
+			kept:  []bool{true},
+		},
+		{
+			name:  "blank line in a tight list makes it loose",
+			input: "- a\n- b\n",
+			diags: []lint.Diagnostic{edit(4, 4, "\n")},
+			kept:  []bool{false},
+		},
+		{
+			name:  "only the fix that splits a paragraph is withheld",
+			input: "One\ntwo\n\nThree\nfour\n",
+			diags: []lint.Diagnostic{edit(9, 9, "\n"), edit(4, 4, "\n"), edit(15, 15, "\n")},
+			kept:  []bool{true, false, false},
+		},
+		{
+			name:  "changing a word changes the text",
+			input: "Hello world\n",
+			diags: []lint.Diagnostic{edit(6, 11, "there")},
+			kept:  []bool{false},
+		},
+		{
+			name:  "info string may change when allowed",
+			input: "```\ncode\n```\n",
+			allow: fixAllowance{codeInfo: true},
+			diags: []lint.Diagnostic{edit(3, 3, "go")},
+			kept:  []bool{true},
+		},
+		{
+			name:  "info string may not change otherwise",
+			input: "```\ncode\n```\n",
+			diags: []lint.Diagnostic{edit(3, 3, "go")},
+			kept:  []bool{false},
+		},
+		{
+			name:  "text may become an autolink to the same address",
+			input: "See https://example.com now.\n",
+			allow: fixAllowance{autolinks: true},
+			diags: []lint.Diagnostic{edit(4, 23, "<https://example.com>")},
+			kept:  []bool{true},
+		},
+		{
+			name:  "brackets that end the autolink early are withheld",
+			input: "See https://example.com/a>b now.\n",
+			allow: fixAllowance{autolinks: true},
+			diags: []lint.Diagnostic{edit(4, 27, "<https://example.com/a>b>")},
+			kept:  []bool{false},
+		},
+		{
+			name:   "table delimiter dashes do not change the table",
+			flavor: config.FlavorGFM,
+			input:  "| a | b |\n| - | :- |\n| 1 | 2 |\n",
+			diags:  []lint.Diagnostic{edit(12, 13, "---"), edit(16, 18, ":---")},
+			kept:   []bool{true, true},
+		},
+		{
+			name:   "table alignment may not change",
+			flavor: config.FlavorGFM,
+			input:  "| a | b |\n| - | - |\n| 1 | 2 |\n",
+			diags:  []lint.Diagnostic{edit(16, 17, "--:")},
+			kept:   []bool{false},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flavor := tt.flavor
+			if flavor == "" {
+				flavor = config.FlavorCommonMark
+			}
+			diags := verifyFixes(fixSafetyContext(t, flavor, tt.input), tt.diags, tt.allow)
+			require.Len(t, diags, len(tt.kept))
+			for idx, kept := range tt.kept {
+				assert.Equal(t, kept, diags[idx].HasFix(), "diagnostic %d", idx)
+			}
+		})
+	}
+}
+
+func TestStripColumns(t *testing.T) {
+	tests := []struct {
+		line    string
+		columns int
+		want    string
+	}{
+		{"    code", 4, "code"},
+		{"      code", 4, "  code"},
+		{"  code", 4, "code"},
+		{"\tcode", 4, "code"},
+		{"\tcode", 2, "  code"},
+		{"   ", 4, ""},
+		{"code", 0, "code"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, stripColumns(tt.line, tt.columns), "stripColumns(%q, %d)", tt.line, tt.columns)
+	}
+}

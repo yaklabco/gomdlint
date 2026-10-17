@@ -108,7 +108,7 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{reversedLinks: true}), nil
 }
 
 // LinkSpacesRule detects spaces inside link text: [ text ] instead of [text].
@@ -181,7 +181,7 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{linkTextSpace: true}), nil
 }
 
 // spaceDiagnostic reports spaces at offset at, with a fix that deletes

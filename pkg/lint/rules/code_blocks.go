@@ -102,7 +102,7 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{codeInfo: true}), nil
 }
 
 // buildLanguageFix detects the language and creates a fix to insert it.
@@ -345,7 +345,7 @@ func (r *CodeFenceStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 // CommandsShowOutputRule checks for unnecessary dollar signs in shell code blocks.
@@ -395,7 +395,7 @@ func (r *CommandsShowOutputRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		diags = append(diags, r.checkCodeBlock(ctx, cb)...)
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{prompts: true}), nil
 }
 
 func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast.Node) []lint.Diagnostic {
