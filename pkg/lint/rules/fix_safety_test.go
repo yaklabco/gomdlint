@@ -158,6 +158,12 @@ func TestVerifyFixes(t *testing.T) {
 			kept:  []bool{false, true},
 		},
 		{
+			name:  "a definition moved between paragraphs of one list is withheld",
+			input: "- [x]X /url\n\n  [x]X /url\n\n  [x]: /url\n",
+			diags: []lint.Diagnostic{edit(5, 6, ":"), edit(31, 32, "X")},
+			kept:  []bool{false, false},
+		},
+		{
 			name:  "front matter may not change",
 			input: "---\ntitle: x\n---\n\nText\n",
 			diags: []lint.Diagnostic{edit(11, 12, "y")},
@@ -205,14 +211,15 @@ func TestStripColumns(t *testing.T) {
 	}
 }
 
-// TestFixLayers groups fixes that can depend on each other. An edit that
-// stays on one line of one leaf block can only change that block, so it is
-// grouped with fixes in the same block; any other edit can change what a
-// top-level block shares, such as a list's tightness, so it is grouped with
-// fixes in the same top-level block.
+// TestFixLayers groups fixes that can depend on each other. An edit is
+// local when it cannot change block syntax: it stays on one line of a
+// paragraph, heading, code block, or table that does not start with "[",
+// after the first word of the line, adds and removes no line breaks, pipes,
+// or backslashes, and leaves the line with text. A local edit depends on the
+// other fixes in its leaf block; any other edit depends on every fix in the
+// top-level blocks it touches, local ones included.
 func TestFixLayers(t *testing.T) {
-	sixItems := "- one\n- two\n- three\n- four\n- five\n- six\n"
-	nested := "- a\n  sec\n  three\n- b\n- c\n"
+	multi := "- one more\n- two more\n- three more\n- four more\n- five more\n- six more\n"
 	tests := []struct {
 		name  string
 		input string
@@ -220,32 +227,61 @@ func TestFixLayers(t *testing.T) {
 		want  [][]int
 	}{
 		{
-			name:  "edits on lines of different items stay apart",
-			input: sixItems,
-			diags: []lint.Diagnostic{edit(9, 10, "W"), edit(23, 25, "U")},
+			name:  "local edits in different items stay apart",
+			input: multi,
+			diags: []lint.Diagnostic{edit(7, 8, "O"), edit(31, 32, "O")},
 		},
 		{
-			name:  "edits in one item depend on each other",
-			input: "- one two\n",
-			diags: []lint.Diagnostic{edit(3, 4, "N"), edit(7, 8, "W")},
+			name:  "local edits on one line depend on each other",
+			input: "- one two three\n",
+			diags: []lint.Diagnostic{edit(7, 8, "W"), edit(11, 12, "H")},
 			want:  [][]int{{0}, {1}},
 		},
 		{
-			name:  "line breaks far apart in one list depend on each other",
-			input: sixItems,
-			diags: []lint.Diagnostic{edit(6, 6, "\n"), edit(34, 34, "\n"), edit(15, 18, "x")},
+			name:  "a line break depends on every edit in its list",
+			input: multi,
+			diags: []lint.Diagnostic{edit(11, 11, "\n"), edit(59, 59, "\n"), edit(31, 32, "O")},
+			want:  [][]int{{0}, {1}, {2}},
+		},
+		{
+			name:  "an edit in the first word of a line is not local",
+			input: multi,
+			diags: []lint.Diagnostic{edit(3, 4, "N"), edit(31, 32, "O")},
 			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit that adds a pipe is not local",
+			input: multi,
+			diags: []lint.Diagnostic{edit(7, 7, "|"), edit(31, 32, "O")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit that removes a backslash is not local",
+			input: "- one \\*more\n- two more\n",
+			diags: []lint.Diagnostic{edit(6, 7, ""), edit(20, 21, "O")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit in a paragraph that starts with a bracket is not local",
+			input: "- [a] b c d\n- e f g\n",
+			diags: []lint.Diagnostic{edit(8, 9, "C"), edit(16, 17, "F")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "the same edits without the bracket stay apart",
+			input: "- a] b c d\n- e f g\n",
+			diags: []lint.Diagnostic{edit(7, 8, "C"), edit(15, 16, "F")},
 		},
 		{
 			name:  "an edit that empties its line is not local",
-			input: nested,
+			input: "- a\n  sec\n  three\n- b\n- c\n",
 			diags: []lint.Diagnostic{edit(6, 9, ""), edit(22, 22, "\n")},
 			want:  [][]int{{0}, {1}},
 		},
 		{
-			name:  "an edit that leaves its line with text is local",
-			input: nested,
-			diags: []lint.Diagnostic{edit(6, 8, ""), edit(22, 22, "\n")},
+			name:  "edits in different top-level blocks stay apart",
+			input: "One two three\nfour\n\nFive six seven\n",
+			diags: []lint.Diagnostic{edit(5, 6, "W\n"), edit(26, 27, "I")},
 		},
 	}
 	for _, tt := range tests {

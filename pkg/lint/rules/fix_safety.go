@@ -103,18 +103,22 @@ func (v *fixVerifier) keepSafeAlone(diags []lint.Diagnostic, idxs []int) {
 
 // fixLayers groups the fixes of diags[fixable] that can depend on each other
 // and returns layers of them: the nth layer holds the nth fix of every
-// group, so no two fixes in a layer can depend on each other. An edit that
-// stays on one line of one leaf block (a paragraph, heading, code block,
-// HTML block, thematic break, or table), adds and removes no line breaks,
-// and leaves its line with text can only change that block, so it depends
-// on the fixes that touch the same block. Any other edit can change what
-// the blocks of a top-level block (a direct child of the document) share,
-// such as a list's tightness, so it depends on every fix that touches the
-// same top-level block, or a leaf block it touches. An edit sits inside one
-// block, or else touches every block it overlaps or borders and the nearest
-// block on each side. Fixes that depend on no other fix are left out.
+// group, so no two fixes in a layer can depend on each other. A local edit
+// (see localLeaf) cannot change block syntax, so it depends only on the
+// fixes that touch its leaf block. Any other edit can change what the blocks
+// of a top-level block (a direct child of the document) share, such as a
+// list's tightness or which paragraph holds a reference definition, so it
+// depends on every fix in the top-level blocks it touches, local ones
+// included, and on the fixes in the leaf blocks it touches. An edit sits
+// inside one block, or else touches every block it overlaps or borders and
+// the nearest block on each side. Fixes that depend on no other fix are left
+// out.
 func fixLayers(file *mdast.FileSnapshot, root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int {
-	leaves := leafBlockSpans(root)
+	leaves := leafBlocks(root)
+	leafSpans := make([]mdast.SourceRange, len(leaves))
+	for idx, leaf := range leaves {
+		leafSpans[idx] = leaf.span
+	}
 	blocks := topLevelBlockSpans(root)
 	parent := make([]int, len(fixable))
 	for pos := range parent {
@@ -127,15 +131,36 @@ func fixLayers(file *mdast.FileSnapshot, root *mdast.Node, diags []lint.Diagnost
 		}
 		return pos
 	}
+	// Keys name blocks: leaf block n is n, and top-level block n is
+	// len(leaves)+n. owner holds the first fix that touched each key.
 	owner := make(map[int]int)
+	claim := func(pos, key int) {
+		if other, taken := owner[key]; taken {
+			parent[find(pos)] = find(other)
+		} else {
+			owner[key] = pos
+		}
+	}
+	localIn := make(map[int][]int) // top-level block -> fixes with a local edit in it
 	for pos, idx := range fixable {
 		for _, edit := range diags[idx].FixEdits {
-			for _, key := range editKeys(file, leaves, blocks, edit) {
-				if other, taken := owner[key]; taken {
-					parent[find(pos)] = find(other)
-				} else {
-					owner[key] = pos
-				}
+			if leaf, ok := localLeaf(file, leaves, edit); ok {
+				claim(pos, leaf)
+				localIn[leaves[leaf].top] = append(localIn[leaves[leaf].top], pos)
+				continue
+			}
+			for _, leaf := range touchedSpans(leafSpans, edit) {
+				claim(pos, leaf)
+			}
+			for _, block := range touchedSpans(blocks, edit) {
+				claim(pos, len(leaves)+block)
+			}
+		}
+	}
+	for block, positions := range localIn {
+		if other, touched := owner[len(leaves)+block]; touched {
+			for _, pos := range positions {
+				parent[find(pos)] = find(other)
 			}
 		}
 	}
@@ -164,32 +189,41 @@ func fixLayers(file *mdast.FileSnapshot, root *mdast.Node, diags []lint.Diagnost
 	return layers
 }
 
-// editKeys returns the blocks an edit can change, as keys: leaf block n is
-// n, and top-level block n is len(leaves)+n. A local edit has only the key
-// of its leaf block.
-func editKeys(file *mdast.FileSnapshot, leaves, blocks []mdast.SourceRange, edit fix.TextEdit) []int {
-	if leaf, ok := localLeaf(file, leaves, edit); ok {
-		return []int{leaf}
-	}
-	keys := touchedSpans(leaves, edit)
-	for _, block := range touchedSpans(blocks, edit) {
-		keys = append(keys, len(leaves)+block)
-	}
-	return keys
+// leafBlock is a block that holds content rather than other blocks, with
+// the index of the top-level block it belongs to.
+type leafBlock struct {
+	node *mdast.Node
+	span mdast.SourceRange
+	top  int
 }
 
-// localLeaf returns the leaf block an edit stays inside: strictly within its
-// span and on one of its lines, adding and removing no line breaks, and
-// leaving that line with something besides spaces, tabs, and blockquote
-// markers, so it cannot start, end, join, or split a block.
-func localLeaf(file *mdast.FileSnapshot, leaves []mdast.SourceRange, edit fix.TextEdit) (int, bool) {
+// localLeaf returns the leaf block an edit stays inside when the edit cannot
+// change block syntax. Block syntax is read at the start of a line (markers,
+// fences, headings, thematic breaks, indentation), from a paragraph that
+// starts with "[" (reference definitions, task list boxes), and from pipes
+// and the backslashes that escape them (tables). So the edit must sit
+// strictly inside a paragraph, heading, code block, or table that does not
+// start with "[", on one of its lines and after the first word of that line,
+// add and remove no line breaks, pipes, or backslashes, and leave the line
+// with something besides spaces, tabs, and blockquote markers. Anything else
+// is not local.
+func localLeaf(file *mdast.FileSnapshot, leaves []leafBlock, edit fix.TextEdit) (int, bool) {
 	start, end := edit.StartOffset, edit.EndOffset
-	idx := sort.Search(len(leaves), func(i int) bool { return leaves[i].EndOffset > start })
-	if idx == len(leaves) || leaves[idx].StartOffset >= start || end >= leaves[idx].EndOffset ||
-		end > len(file.Content) || start > end {
+	idx := sort.Search(len(leaves), func(i int) bool { return leaves[i].span.EndOffset > start })
+	if idx == len(leaves) || end > len(file.Content) || start > end {
 		return 0, false
 	}
-	if strings.ContainsAny(edit.NewText, "\r\n") || bytes.ContainsAny(file.Content[start:end], "\r\n") {
+	leaf := leaves[idx]
+	if leaf.span.StartOffset >= start || end >= leaf.span.EndOffset || file.Content[leaf.span.StartOffset] == '[' {
+		return 0, false
+	}
+	switch leaf.node.Kind {
+	case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeCodeBlock, mdast.NodeTable:
+	default:
+		return 0, false
+	}
+	const blockChars = "\r\n|\\"
+	if strings.ContainsAny(edit.NewText, blockChars) || bytes.ContainsAny(file.Content[start:end], blockChars) {
 		return 0, false
 	}
 	line, _ := file.LineAt(start)
@@ -197,6 +231,16 @@ func localLeaf(file *mdast.FileSnapshot, leaves []mdast.SourceRange, edit fix.Te
 		return 0, false
 	}
 	info := file.Lines[line-1]
+	word := min(info.StartOffset+len(lint.ContainerPrefix(file, leaf.node, line)), info.NewlineStart)
+	for word < info.NewlineStart && (file.Content[word] == ' ' || file.Content[word] == '\t') {
+		word++
+	}
+	for word < info.NewlineStart && file.Content[word] != ' ' && file.Content[word] != '\t' {
+		word++
+	}
+	if start <= word {
+		return 0, false
+	}
 	after := string(file.Content[info.StartOffset:start]) + edit.NewText + string(file.Content[end:info.NewlineStart])
 	if strings.Trim(after, " \t>") == "" {
 		return 0, false
@@ -204,12 +248,13 @@ func localLeaf(file *mdast.FileSnapshot, leaves []mdast.SourceRange, edit fix.Te
 	return idx, true
 }
 
-// leafBlockSpans returns the spans of the blocks that hold content rather
-// than other blocks, in document order. An empty container counts as one.
-func leafBlockSpans(root *mdast.Node) []mdast.SourceRange {
-	var spans []mdast.SourceRange
-	var walk func(node *mdast.Node)
-	walk = func(node *mdast.Node) {
+// leafBlocks returns the blocks that hold content rather than other blocks,
+// in document order, each with its top-level block. An empty container
+// counts as one.
+func leafBlocks(root *mdast.Node) []leafBlock {
+	var leaves []leafBlock
+	var walk func(node *mdast.Node, top int)
+	walk = func(node *mdast.Node, top int) {
 		for child := node.FirstChild; child != nil; child = child.Next {
 			if child.IsInline() {
 				continue
@@ -217,18 +262,33 @@ func leafBlockSpans(root *mdast.Node) []mdast.SourceRange {
 			switch child.Kind {
 			case mdast.NodeBlockquote, mdast.NodeList, mdast.NodeListItem:
 				if child.FirstChild != nil {
-					walk(child)
+					walk(child, top)
 					continue
 				}
 			}
-			spans = append(spans, child.SourceRange())
+			leaves = append(leaves, leafBlock{node: child, span: child.SourceRange(), top: top})
 		}
 	}
 	if root != nil {
-		walk(root)
+		top := 0
+		for child := root.FirstChild; child != nil; child = child.Next {
+			if child.IsInline() {
+				continue
+			}
+			switch child.Kind {
+			case mdast.NodeBlockquote, mdast.NodeList, mdast.NodeListItem:
+				if child.FirstChild != nil {
+					walk(child, top)
+					top++
+					continue
+				}
+			}
+			leaves = append(leaves, leafBlock{node: child, span: child.SourceRange(), top: top})
+			top++
+		}
 	}
-	sort.SliceStable(spans, func(i, j int) bool { return spans[i].StartOffset < spans[j].StartOffset })
-	return spans
+	sort.SliceStable(leaves, func(i, j int) bool { return leaves[i].span.StartOffset < leaves[j].span.StartOffset })
+	return leaves
 }
 
 // topLevelBlockSpans returns the spans of the document's direct children,
