@@ -1,6 +1,10 @@
 package runner
 
-import "github.com/yaklabco/gomdlint/pkg/lint"
+import (
+	"errors"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
+)
 
 // FileOutcome wraps PipelineResult with resolved path metadata.
 type FileOutcome struct {
@@ -66,6 +70,12 @@ type Stats struct {
 	// all, such as files that could not be read or written. Files on which
 	// a rule failed are counted in FilesWithRuleErrors instead.
 	FilesErrored int
+
+	// FilesWithInternalErrors is the number of the FilesErrored files whose
+	// processing failed because of a bug: it panicked, and the error
+	// matches lint.ErrInternal. The other errored files could not be read
+	// or written.
+	FilesWithInternalErrors int
 
 	// DiagnosticsTotal is the total number of diagnostics across all files.
 	DiagnosticsTotal int
@@ -155,6 +165,9 @@ func (r *Result) accumulate(outcome FileOutcome) {
 
 	if outcome.Error != nil {
 		r.Stats.FilesErrored++
+		if errors.Is(outcome.Error, lint.ErrInternal) {
+			r.Stats.FilesWithInternalErrors++
+		}
 	}
 
 	if outcome.Result == nil {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sync"
 
+	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -166,7 +168,8 @@ func (r *Runner) worker(
 }
 
 // processFile lints one file. A panic while processing it fails that file
-// instead of crashing the run, which would exit with Go's status 2.
+// with an internal error (lint.ErrInternal) instead of crashing the run,
+// which would exit with Go's status 2.
 func (r *Runner) processFile(
 	ctx context.Context,
 	path string,
@@ -179,7 +182,10 @@ func (r *Runner) processFile(
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				outcome = FileOutcome{Path: path, Error: fmt.Errorf("internal error: %v", recovered)}
+				stack := debug.Stack()
+				logging.FromContext(ctx).Debug("panic while processing file",
+					"path", path, "panic", recovered, "stack", string(stack))
+				outcome = FileOutcome{Path: path, Error: &lint.InternalError{Path: path, Value: recovered, Stack: stack}}
 			}
 		}()
 

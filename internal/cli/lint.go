@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -386,12 +387,26 @@ func resultError(result *runner.Result, strict bool) error {
 		return &ExitError{Code: code, Err: fmt.Errorf("%d %s could not be linted",
 			result.Stats.FilesErrored, plural(result.Stats.FilesErrored, "file", "files"))}
 	case ExitInternalError:
-		return &ExitError{Code: code, Err: fmt.Errorf("%d rule %s on %d %s",
-			result.Stats.RuleErrors, plural(result.Stats.RuleErrors, "failure", "failures"),
-			result.Stats.FilesWithRuleErrors, plural(result.Stats.FilesWithRuleErrors, "file", "files"))}
+		return &ExitError{Code: code, Err: errors.New(internalErrorSummary(result.Stats))}
 	default:
 		return &ExitError{Code: code, Err: ErrLintIssuesFound}
 	}
+}
+
+// internalErrorSummary describes the internal errors of a run: files whose
+// processing failed because of a bug, and rules that failed on files.
+func internalErrorSummary(stats runner.Stats) string {
+	var parts []string
+	if files := stats.FilesWithInternalErrors; files > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s could not be linted because of an internal error",
+			files, plural(files, "file", "files")))
+	}
+	if stats.RuleErrors > 0 {
+		parts = append(parts, fmt.Sprintf("%d rule %s on %d %s",
+			stats.RuleErrors, plural(stats.RuleErrors, "failure", "failures"),
+			stats.FilesWithRuleErrors, plural(stats.FilesWithRuleErrors, "file", "files")))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // plural returns one for a count of one and otherwise many.

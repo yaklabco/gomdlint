@@ -71,6 +71,15 @@ func TestExitCodeFromResult(t *testing.T) {
 		result.Stats.RuleErrors = 1
 		return result
 	}
+	// withInternalErrors marks one of the errored files as an internal
+	// error, adding it when there is none.
+	withInternalErrors := func(result *runner.Result) *runner.Result {
+		if result.Stats.FilesErrored == 0 {
+			result.Stats.FilesErrored = 1
+		}
+		result.Stats.FilesWithInternalErrors = 1
+		return result
+	}
 
 	tests := []struct {
 		name   string
@@ -89,6 +98,10 @@ func TestExitCodeFromResult(t *testing.T) {
 		{name: "rule failures alone", result: withRuleFailures(stats(0, 0, 0)), want: cli.ExitInternalError},
 		{name: "rule failures outrank findings", result: withRuleFailures(stats(0, 2, 3)), strict: true, want: cli.ExitInternalError},
 		{name: "file errors outrank rule failures", result: withRuleFailures(stats(1, 2, 3)), want: cli.ExitIOError},
+		{name: "internal errors alone", result: withInternalErrors(stats(0, 0, 0)), want: cli.ExitInternalError},
+		{name: "internal errors outrank findings", result: withInternalErrors(stats(0, 2, 3)), strict: true, want: cli.ExitInternalError},
+		{name: "internal errors with rule failures", result: withInternalErrors(withRuleFailures(stats(0, 0, 0))), want: cli.ExitInternalError},
+		{name: "unreadable files outrank internal errors", result: withInternalErrors(stats(2, 0, 0)), want: cli.ExitIOError},
 	}
 
 	for _, tt := range tests {
