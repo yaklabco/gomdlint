@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -209,6 +210,331 @@ func TestContainerPrefixAfterByteOrderMark(t *testing.T) {
 	assert.Equal(t, bom+"> # H\n>\n> Text\n", fixed)
 	refile := parseSource(t, fixed)
 	assert.Len(t, mdast.FindByKind(refile.Root, mdast.NodeBlockquote), 1, "the blockquote must not split")
+}
+
+// TestContainerPrefixAfterTabbedMarkers covers tabs after list and
+// blockquote markers. goldmark measures the tab after a list marker from
+// where the item starts, not from the start of the line, so the item's
+// content can start fewer columns after the marker than its content
+// indentation says.
+func TestContainerPrefixAfterTabbedMarkers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		input        string
+		quotes       int
+		firstPrefix  string
+		secondPrefix string
+		continuation string
+	}{
+		{
+			name:         "tab after a bullet in a blockquote",
+			input:        "> -\t> # H\n>     > Text\n",
+			quotes:       2,
+			firstPrefix:  "> -\t> ",
+			secondPrefix: ">     > ",
+			continuation: ">     > ",
+		},
+		{
+			name:         "tab after an ordered marker in a blockquote",
+			input:        "> 1.\t> # H\n>     > Text\n",
+			quotes:       2,
+			firstPrefix:  "> 1.\t> ",
+			secondPrefix: ">     > ",
+			continuation: ">     > ",
+		},
+		{
+			name:         "tab after a parenthesis marker in a blockquote",
+			input:        "> 1)\t> # H\n>     > Text\n",
+			quotes:       2,
+			firstPrefix:  "> 1)\t> ",
+			secondPrefix: ">     > ",
+			continuation: ">     > ",
+		},
+		{
+			name:         "tab after a bullet right after a blockquote marker",
+			input:        ">-\t# H\n>     Text\n",
+			quotes:       1,
+			firstPrefix:  ">-\t",
+			secondPrefix: ">     ",
+			continuation: ">     ",
+		},
+		{
+			name:         "bullet right after a blockquote marker",
+			input:        ">- # H\n>   Text\n",
+			quotes:       1,
+			firstPrefix:  ">- ",
+			secondPrefix: ">   ",
+			continuation: ">   ",
+		},
+		{
+			name:         "tab after a nested bullet",
+			input:        "- -\t# H\n      Text\n",
+			firstPrefix:  "- -\t",
+			secondPrefix: "      ",
+			continuation: "      ",
+		},
+		{
+			name:         "tab after a blockquote marker in a list item",
+			input:        "- >\t# H\n  >\tText\n",
+			quotes:       1,
+			firstPrefix:  "- >\t",
+			secondPrefix: "  >\t",
+			continuation: "  > ",
+		},
+		{
+			name:         "tab partly claimed after a blockquote marker in an ordered item",
+			input:        "1. >\t# H\n   >\tText\n",
+			quotes:       1,
+			firstPrefix:  "1. >",
+			secondPrefix: "   >",
+			continuation: "   > ",
+		},
+		{
+			name:         "tab after a blockquote marker before a nested item",
+			input:        "1. >\t- # H\n   >      Text\n",
+			quotes:       1,
+			firstPrefix:  "1. >\t- ",
+			secondPrefix: "   >      ",
+			continuation: "   >      ",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			file := parseSource(t, tt.input)
+			heading := lint.Headings(file.Root)[0]
+			require.Len(t, mdast.FindByKind(file.Root, mdast.NodeBlockquote), tt.quotes)
+			require.Len(t, lint.Paragraphs(file.Root), 1)
+			requireSameContainers(t, heading, lint.Paragraphs(file.Root)[0], len(containerChain(heading)), tt.input)
+
+			assert.Equal(t, tt.firstPrefix, string(lint.ContainerPrefix(file, heading, 1)))
+			assert.Equal(t, tt.secondPrefix, string(lint.ContainerPrefix(file, heading, 2)))
+			assert.Equal(t, tt.continuation, lint.ContinuationPrefix(file, heading))
+			assert.Equal(t, strings.TrimRight(tt.continuation, " ")+"\n", lint.BlankLineText(file, heading))
+			assert.False(t, lint.IsBlankLineInContainer(file, heading, 1))
+			assert.False(t, lint.IsBlankLineInContainer(file, heading, 2))
+
+			fixed := insertBlankLineAfter(file, heading)
+			refile := assertSameContainers(t, fixed, len(containerChain(heading)))
+			assert.Len(t, mdast.FindByKind(refile.Root, mdast.NodeBlockquote), tt.quotes, "the inserted line must not split a blockquote: %q", fixed)
+			assert.True(t, lint.IsBlankLineInContainer(refile, lint.Headings(refile.Root)[0], 2))
+		})
+	}
+}
+
+// TestContainerHelpersAcrossMarkerCombinations checks the container helpers
+// against the parser for every nesting of up to three containers drawn from
+// blockquote and list item openers with spaces and tabs after their
+// markers, with and without a byte order mark.
+func TestContainerHelpersAcrossMarkerCombinations(t *testing.T) {
+	t.Parallel()
+
+	openers := []string{
+		"> ", ">\t", ">", " >\t",
+		"- ", "-\t", "-   ", "- \t", "* ",
+		"1. ", "1.\t", "10)\t", "1.  ",
+	}
+	var combos [][]string
+	var build func(prefix []string)
+	build = func(prefix []string) {
+		if len(prefix) > 0 {
+			combos = append(combos, append([]string(nil), prefix...))
+		}
+		if len(prefix) == 3 {
+			return
+		}
+		for _, opener := range openers {
+			build(append(prefix, opener))
+		}
+	}
+	build(nil)
+
+	for _, combo := range combos {
+		for _, bom := range []string{"", mdast.ByteOrderMark} {
+			input := bom + strings.Join(combo, "") + "# H\n"
+			// Only a tab can keep a combination from nesting as written, by
+			// turning the heading into indented code.
+			if !checkContainerHelpers(t, input, len(combo)) {
+				require.Contains(t, input, "\t", "%q does not nest as written", input)
+			}
+		}
+	}
+}
+
+// checkContainerHelpers checks the container helpers on a heading that sits
+// behind depth containers opened on its own line. It reports false, without
+// checking anything, when the parser does not nest the heading that deep.
+func checkContainerHelpers(t *testing.T, first string, depth int) bool {
+	t.Helper()
+
+	file := parseSource(t, first)
+	headings := lint.Headings(file.Root)
+	if len(headings) != 1 || len(containerChain(headings[0])) != depth {
+		return false
+	}
+	heading := headings[0]
+	quotes := 0
+	for _, container := range containerChain(heading) {
+		if container.Kind == mdast.NodeBlockquote {
+			quotes++
+		}
+	}
+
+	// The prefix holds every container marker and ends where the heading
+	// starts, give or take indentation.
+	prefix := string(lint.ContainerPrefix(file, heading, 1))
+	start := heading.SourceRange().StartOffset
+	require.LessOrEqual(t, len(prefix), start, "the prefix of %q runs into the heading: %q", first, prefix)
+	require.Empty(t, strings.Trim(first[len(prefix):start], " \t"), "the prefix of %q stops before a marker: %q", first, prefix)
+	require.Equal(t, quotes, strings.Count(prefix, ">"), "the prefix of %q misses a blockquote marker: %q", first, prefix)
+	require.False(t, lint.IsBlankLineInContainer(file, heading, 1), "%q", first)
+
+	// A line written with the continuation prefix continues every container,
+	// and so does an inserted blank line.
+	continuation := lint.ContinuationPrefix(file, heading)
+	assertSameContainers(t, first+continuation+"Text\n", depth)
+	inserted := first + lint.BlankLineText(file, heading) + continuation + "Text\n"
+	refile := assertSameContainers(t, inserted, depth)
+	require.True(t, lint.IsBlankLineInContainer(refile, lint.Headings(refile.Root)[0], 2), "%q", inserted)
+	return true
+}
+
+// TestContainerHelpersOnContinuationLines checks the container helpers
+// against the parser on a heading that continues the containers of the
+// paragraph before it, for continuation prefixes built from blockquote
+// markers, spaces and tabs.
+func TestContainerHelpersOnContinuationLines(t *testing.T) {
+	t.Parallel()
+
+	openers := []string{"> ", ">\t", ">", "- ", "-\t", "1. ", "1.\t", "10)\t"}
+	pieces := []string{">", "> ", ">\t", " ", "  ", "\t"}
+	var firsts []string
+	for _, outer := range openers {
+		firsts = append(firsts, outer)
+		for _, inner := range openers {
+			firsts = append(firsts, outer+inner)
+		}
+	}
+	// Every sequence of up to three pieces, each written once.
+	seen := map[string]bool{"": true}
+	continuations := []string{""}
+	frontier := []string{""}
+	for range 3 {
+		var next []string
+		for _, prefix := range frontier {
+			for _, piece := range pieces {
+				if !seen[prefix+piece] {
+					seen[prefix+piece] = true
+					next = append(next, prefix+piece)
+				}
+			}
+		}
+		continuations = append(continuations, next...)
+		frontier = next
+	}
+
+	// Every opening line must be continued by at least one of the prefixes.
+	for _, first := range firsts {
+		checked := 0
+		for _, continuation := range continuations {
+			if checkContinuationLine(t, first+"P\n"+continuation+"# H\n") {
+				checked++
+			}
+		}
+		require.Positive(t, checked, "no prefix continues %q", first)
+	}
+}
+
+// checkContinuationLine checks the container helpers on the heading on line
+// 2 of input. It reports false, without checking anything, unless the
+// heading sits in the same containers as the paragraph on line 1.
+func checkContinuationLine(t *testing.T, input string) bool {
+	t.Helper()
+
+	file := parseSource(t, input)
+	headings := lint.Headings(file.Root)
+	paragraphs := lint.Paragraphs(file.Root)
+	if len(headings) != 1 || len(paragraphs) != 1 {
+		return false
+	}
+	heading := headings[0]
+	chain := containerChain(heading)
+	if len(chain) == 0 || heading.SourcePosition().StartLine != 2 {
+		return false
+	}
+	if paragraphChain := containerChain(paragraphs[0]); len(paragraphChain) != len(chain) || paragraphChain[0] != chain[0] {
+		return false
+	}
+	quotes := 0
+	for _, container := range chain {
+		if container.Kind == mdast.NodeBlockquote {
+			quotes++
+		}
+	}
+
+	line := string(lint.RawLineContent(file, 2))
+	prefix := string(lint.ContainerPrefix(file, heading, 2))
+	start := heading.SourceRange().StartOffset - file.Lines[1].StartOffset
+	require.LessOrEqual(t, len(prefix), start, "the prefix of %q runs into the heading: %q", input, prefix)
+	require.Empty(t, strings.Trim(line[len(prefix):start], " \t"), "the prefix of %q stops before a marker: %q", input, prefix)
+	require.Equal(t, quotes, strings.Count(prefix, ">"), "the prefix of %q misses a blockquote marker: %q", input, prefix)
+	require.False(t, lint.IsBlankLineInContainer(file, heading, 2), "%q", input)
+
+	continuation := lint.ContinuationPrefix(file, heading)
+	for _, extended := range []string{
+		input + continuation + "Text\n",
+		input + lint.BlankLineText(file, heading) + continuation + "Text\n",
+	} {
+		refile := parseSource(t, extended)
+		reheadings := lint.Headings(refile.Root)
+		reparagraphs := lint.Paragraphs(refile.Root)
+		require.Len(t, reheadings, 1, "%q", extended)
+		require.Len(t, reparagraphs, 2, "%q", extended)
+		requireSameContainers(t, reheadings[0], reparagraphs[1], len(chain), extended)
+	}
+	return true
+}
+
+// assertSameContainers parses input, which must hold one heading and one
+// paragraph, and requires both to sit in the same depth containers.
+func assertSameContainers(t *testing.T, input string, depth int) *mdast.FileSnapshot {
+	t.Helper()
+
+	file := parseSource(t, input)
+	headings := lint.Headings(file.Root)
+	paragraphs := lint.Paragraphs(file.Root)
+	require.Len(t, headings, 1, "%q", input)
+	require.Len(t, paragraphs, 1, "%q", input)
+	requireSameContainers(t, headings[0], paragraphs[0], depth, input)
+	return file
+}
+
+// requireSameContainers requires a heading and a paragraph to sit in the
+// same depth blockquotes and list items.
+func requireSameContainers(t *testing.T, heading, paragraph *mdast.Node, depth int, input string) {
+	t.Helper()
+
+	headingChain, paragraphChain := containerChain(heading), containerChain(paragraph)
+	require.Len(t, headingChain, depth, "the heading changed containers: %q", input)
+	require.Len(t, paragraphChain, depth, "the text left a container: %q", input)
+	if depth > 0 {
+		require.Same(t, headingChain[0], paragraphChain[0], "the text left a container: %q", input)
+	}
+}
+
+// containerChain returns the blockquotes and list items enclosing node,
+// innermost first.
+func containerChain(node *mdast.Node) []*mdast.Node {
+	var chain []*mdast.Node
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeBlockquote || parent.Kind == mdast.NodeListItem {
+			chain = append(chain, parent)
+		}
+	}
+	return chain
 }
 
 func TestTableHelpersFindTableNodes(t *testing.T) {

@@ -123,6 +123,19 @@ func (c *lineCursor) advance() {
 	}
 }
 
+// advanceTo consumes the line up to offset, or to its end when offset lies
+// past it. It reports false, consuming nothing, when offset lies before the
+// cursor.
+func (c *lineCursor) advanceTo(offset int) bool {
+	if offset < c.pos {
+		return false
+	}
+	for !c.atEnd() && c.pos < offset {
+		c.advance()
+	}
+	return true
+}
+
 // restIsBlank reports whether the line holds only whitespace from the cursor.
 func (c *lineCursor) restIsBlank() bool {
 	return len(bytes.TrimSpace(c.content[c.pos:])) == 0
@@ -158,12 +171,19 @@ func listItemIndent(item *mdast.Node) int {
 
 // scanPrefix splits the start of a line into the parts claimed by the
 // containers of node and returns them with the offset where the prefix
-// ends. It stops at the first container the line does not continue, such as
-// a lazy continuation line without a '>' marker. Columns follow CommonMark:
-// tabs advance to the next multiple of four, and a tab that is only partly
+// ends. content is the line and lineStart its offset in the file. It stops
+// at the first container the line does not continue, such as a lazy
+// continuation line without a '>' marker. Columns follow CommonMark: tabs
+// advance to the next multiple of four, and a tab that is only partly
 // claimed stays with the rest of the line. A byte order mark at the start of
 // the first line is skipped and counts as part of the prefix.
-func scanPrefix(content []byte, node *mdast.Node, lineNum int) ([]prefixPart, int) {
+//
+// On a list item's first line the item claims its marker and the spaces up
+// to where the parser found its content, which is where the item's content
+// span starts. Counting ContentIndent columns instead would go wrong after
+// a tab: goldmark measures that tab from where the item starts, not from
+// the start of the line.
+func scanPrefix(content []byte, lineStart int, node *mdast.Node, lineNum int) ([]prefixPart, int) {
 	cursor := &lineCursor{content: content}
 	if lineNum == 1 && bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
 		cursor.pos = len(mdast.ByteOrderMark)
@@ -192,9 +212,10 @@ func scanPrefix(content []byte, node *mdast.Node, lineNum int) ([]prefixPart, in
 		case mdast.NodeListItem:
 			width := listItemIndent(container)
 			if lineNum == container.SourcePosition().StartLine {
-				// The item's first line: the marker and the spaces after it.
-				for consumed := 0; consumed < width && !cursor.atEnd(); consumed++ {
-					cursor.advance()
+				// The item's first line: the marker and the spaces after it,
+				// or the whole line when the content starts on a later one.
+				if !cursor.advanceTo(container.ContentRange().StartOffset - lineStart) {
+					return parts, cursor.pos
 				}
 				parts = append(parts, prefixPart{kind: mdast.NodeListItem, width: width})
 				continue
@@ -219,20 +240,29 @@ func scanPrefix(content []byte, node *mdast.Node, lineNum int) ([]prefixPart, in
 // ContainerPrefix returns the bytes at the start of a 1-based line that
 // belong to the blockquotes and list items enclosing node: for each
 // blockquote, up to three spaces, '>' and one optional space; for each list
-// item, its marker and the spaces after it on the item's first line, or its
-// content indentation on later lines. It stops at the first container the
-// line does not continue, so a lazy continuation line or a line outside the
-// containers gets a shorter prefix. Columns are measured with tab stops of
-// four; a tab that the containers claim only in part is left out. A byte
-// order mark at the start of the first line is included, so the prefix
-// length is an offset into the line.
+// item, its marker and the spaces after it on the item's first line, up to
+// where its content starts, or its content indentation on later lines. It
+// stops at the first container the line does not continue, so a lazy
+// continuation line or a line outside the containers gets a shorter prefix.
+// Columns are measured with tab stops of four; a tab that the containers
+// claim only in part is left out. A byte order mark at the start of the
+// first line is included, so the prefix length is an offset into the line.
 func ContainerPrefix(file *mdast.FileSnapshot, node *mdast.Node, lineNum int) []byte {
 	content := RawLineContent(file, lineNum)
 	if content == nil || node == nil {
 		return nil
 	}
-	_, end := scanPrefix(content, node, lineNum)
+	_, end := scanPrefix(content, lineStartOffset(file, lineNum), node, lineNum)
 	return content[:end]
+}
+
+// lineStartOffset returns the offset where a 1-based line starts, or 0 when
+// the line does not exist.
+func lineStartOffset(file *mdast.FileSnapshot, lineNum int) int {
+	if file == nil || lineNum < 1 || lineNum > len(file.Lines) {
+		return 0
+	}
+	return file.Lines[lineNum-1].StartOffset
 }
 
 // IsBlankLineInContainer reports whether a 1-based line is blank once the
@@ -244,7 +274,7 @@ func IsBlankLineInContainer(file *mdast.FileSnapshot, node *mdast.Node, lineNum 
 	if node == nil {
 		return len(bytes.TrimSpace(content)) == 0
 	}
-	_, end := scanPrefix(content, node, lineNum)
+	_, end := scanPrefix(content, lineStartOffset(file, lineNum), node, lineNum)
 	return len(bytes.TrimSpace(content[end:])) == 0
 }
 
@@ -289,20 +319,22 @@ func lastContentLine(file *mdast.FileSnapshot) int {
 // the containers of node, as they stand on the node's first line: each
 // blockquote's indentation, '>' and optional space, and each list item's
 // content indentation, all written with spaces. Tabs and a byte order mark
-// are not reproduced.
+// are not reproduced. A blockquote followed by a list item always gets its
+// space: on a later line the space after '>' belongs to the blockquote, and
+// the item's indentation is counted after it.
 func ContinuationPrefix(file *mdast.FileSnapshot, node *mdast.Node) string {
 	if file == nil || node == nil {
 		return ""
 	}
 	lineNum := node.SourcePosition().StartLine
-	parts, _ := scanPrefix(RawLineContent(file, lineNum), node, lineNum)
+	parts, _ := scanPrefix(RawLineContent(file, lineNum), lineStartOffset(file, lineNum), node, lineNum)
 	var prefix strings.Builder
-	for _, part := range parts {
+	for idx, part := range parts {
 		switch part.kind {
 		case mdast.NodeBlockquote:
 			prefix.WriteString(strings.Repeat(" ", part.indent))
 			prefix.WriteByte('>')
-			if part.space {
+			if part.space || (idx+1 < len(parts) && parts[idx+1].kind == mdast.NodeListItem) {
 				prefix.WriteByte(' ')
 			}
 		default:
