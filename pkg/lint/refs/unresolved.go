@@ -2,6 +2,7 @@ package refs
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -311,10 +312,10 @@ func labelEndIndex(chars []inlineChar, open int) (int, bool) {
 // runeStarts returns 1 when ch starts a UTF-8 character and 0 when it
 // continues one, so summing it over bytes counts characters.
 func runeStarts(ch byte) int {
-	if ch&0xC0 == 0x80 {
-		return 0
+	if utf8.RuneStart(ch) {
+		return 1
 	}
-	return 1
+	return 0
 }
 
 // charsText concatenates the characters in chars[from:to], skipping opaque nodes.
