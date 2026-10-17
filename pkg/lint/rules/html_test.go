@@ -197,6 +197,16 @@ func TestInlineHTMLRule_EachElement(t *testing.T) {
 			want:  []htmlDiagWant{{1, 3, "div"}},
 		},
 		{
+			name:  "quoted inline tag spanning lines keeps its attributes",
+			input: "> Quote has <span\n> title=\"<b>\">x</span> text.\n",
+			want:  []htmlDiagWant{{1, 13, "span"}},
+		},
+		{
+			name:  "quoted inline tags spanning lines in one paragraph",
+			input: "> a <span\n> title=\"<b>\">x</span> and <em\n> class=\"<i>\">z</em>\n",
+			want:  []htmlDiagWant{{1, 5, "span"}, {2, 28, "em"}},
+		},
+		{
 			name:  "inline element position",
 			input: "Text with <span>inline</span> html.\n",
 			want:  []htmlDiagWant{{1, 11, "span"}},
@@ -244,4 +254,38 @@ func TestInlineHTMLRule_TableAllowedElements(t *testing.T) {
 	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
 		"table_allowed_elements": []any{"br"},
 	}), []htmlDiagWant{{1, 5, "br"}})
+}
+
+// TestTableLineRanges checks the table line lookup that MD033 builds once
+// per file: unsorted and overlapping ranges are joined, and a line is in a
+// table from the table's first line to its last.
+func TestTableLineRanges(t *testing.T) {
+	ranges := tableLineRanges{{20, 22}, {3, 5}, {4, 9}, {30, 30}, {6, 7}}.merged()
+	assert.Equal(t, tableLineRanges{{3, 9}, {20, 22}, {30, 30}}, ranges)
+
+	for line, want := range map[int]bool{
+		1: false, 2: false, 3: true, 7: true, 9: true, 10: false,
+		19: false, 20: true, 22: true, 23: false, 29: false, 30: true, 31: false,
+	} {
+		assert.Equal(t, want, ranges.contains(line), "line %d", line)
+	}
+	assert.False(t, tableLineRanges(nil).merged().contains(1))
+}
+
+// TestInlineHTMLRule_TableAllowedElementsSeveralTables tells the lines of
+// each table apart from the text before, between and after the tables,
+// including a table inside a blockquote.
+func TestInlineHTMLRule_TableAllowedElementsSeveralTables(t *testing.T) {
+	input := "Para<br>one.\n\n" +
+		"| A | B |\n| --- | --- |\n| x<br>y | z |\n\n" +
+		"Between<br>tables.\n\n" +
+		"> | C | D |\n> | --- | --- |\n> | p<br>q | r |\n\n" +
+		"After<br>all.\n"
+	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
+		"allowed_elements":       []any{"br"},
+		"table_allowed_elements": []any{},
+	}), []htmlDiagWant{{5, 4, "br"}, {11, 6, "br"}})
+	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
+		"table_allowed_elements": []any{"br"},
+	}), []htmlDiagWant{{1, 5, "br"}, {7, 8, "br"}, {13, 6, "br"}})
 }

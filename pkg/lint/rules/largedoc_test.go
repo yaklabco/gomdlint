@@ -107,3 +107,60 @@ func TestRulesOnLargeDocument(t *testing.T) {
 		}
 	}
 }
+
+// largeHTMLDocument returns a document of sections that each hold inline
+// HTML in a paragraph, in a table cell and in a blockquote, where one tag
+// spans two lines, and an HTML block in a blockquote that spans four lines.
+func largeHTMLDocument(sections int) string {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range sections {
+		fmt.Fprintf(&doc, "Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy %d.<br> Version<sup>%d</sup>.\n\n", idx, idx)
+		fmt.Fprintf(&doc, "| a | b |\n| - | - |\n| x<br>y | %d |\n\n", idx)
+		fmt.Fprintf(&doc, "> Quote %d has <span\n> title=\"item\">a tag</span> here.\n\n", idx)
+		fmt.Fprintf(&doc, "> <div\n> class=\"note\">\n> text %d\n> </div>\n\n", idx)
+	}
+	return doc.String()
+}
+
+// TestInlineHTMLRuleOnLargeDocument verifies that MD033 runs in time that
+// grows about linearly with the document. Looking up the tables or copying
+// the file for each HTML element would take minutes on a document with tens
+// of thousands of elements, far past the generous limit.
+func TestInlineHTMLRuleOnLargeDocument(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large document")
+	}
+	const limit = 30 * time.Second
+	// The race detector slows the rule down several times, so it gets a
+	// smaller document; a quadratic rule still runs far past the limit.
+	sections := 8000
+	if raceEnabled {
+		sections = 4000
+	}
+	input := []byte(largeHTMLDocument(sections))
+	file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "large.md", input)
+	require.NoError(t, err)
+	cfg := config.NewConfig()
+	cfg.Flavor = config.FlavorGFM
+
+	type outcome struct {
+		diags []lint.Diagnostic
+		err   error
+	}
+	done := make(chan outcome, 1)
+	start := time.Now()
+	go func() {
+		diags, err := NewInlineHTMLRule().Apply(lint.NewRuleContext(context.Background(), file, cfg, nil))
+		done <- outcome{diags, err}
+	}()
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		t.Logf("MD033: %v", time.Since(start))
+		// kbd twice, br, sup, br in the table, span, and div per section.
+		require.Len(t, got.diags, 7*sections)
+	case <-time.After(limit):
+		t.Fatalf("MD033 took longer than %v on a %d byte document", limit, len(input))
+	}
+}
