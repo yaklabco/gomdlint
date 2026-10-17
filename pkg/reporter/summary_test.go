@@ -224,6 +224,7 @@ func TestSummaryRenderer_FitsRuleColumnToLongestIdentifier(t *testing.T) {
 			{RuleID: "XX1", RuleName: longName, Issues: 2, Warnings: 2},
 			{RuleID: "XX2", RuleName: shortName, Issues: 1, Warnings: 1},
 		},
+		ByFile: []analysis.FileAnalysis{{Path: "doc.md", Issues: 3, Warnings: 3}},
 		Totals: analysis.Totals{Issues: 3, Warnings: 3, Files: 1, FilesWithIssues: 1},
 	}
 
@@ -234,7 +235,7 @@ func TestSummaryRenderer_FitsRuleColumnToLongestIdentifier(t *testing.T) {
 	assert.NotContains(t, output, ellipsis, "no rule name is cut")
 
 	lines := strings.Split(output, "\n")
-	require.Greater(t, len(lines), 5)
+	require.Greater(t, len(lines), 12)
 	header := lines[2]
 	assert.True(t, strings.HasPrefix(header, "Rule"+strings.Repeat(" ", displaywidth.String(longName)-len("Rule"))+"   Count"),
 		"the rule column is as wide as the longest name, got %q", header)
@@ -243,8 +244,12 @@ func TestSummaryRenderer_FitsRuleColumnToLongestIdentifier(t *testing.T) {
 	for _, row := range lines[4:6] {
 		assert.Equal(t, displaywidth.String(header), displaywidth.String(row), "row %q is not aligned with the header", row)
 	}
-	for _, separator := range []string{lines[1], lines[3]} {
-		assert.GreaterOrEqual(t, displaywidth.String(separator), displaywidth.String(header), "the separator spans the table")
+
+	// The separators of both tables span the rules table, the wider one.
+	require.Equal(t, "Files Summary", lines[7])
+	for _, separator := range []string{lines[1], lines[3], lines[8], lines[10]} {
+		assert.True(t, strings.HasPrefix(separator, "─"), "unexpected separator %q", separator)
+		assert.Equal(t, displaywidth.String(header), displaywidth.String(separator), "separator %q", separator)
 	}
 }
 
