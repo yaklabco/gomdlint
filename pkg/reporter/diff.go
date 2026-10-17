@@ -79,16 +79,28 @@ func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 	fmt.Fprintln(r.out, r.styles.DiffRemove.Render("--- a/"+displayPath))
 	fmt.Fprintln(r.out, r.styles.DiffAdd.Render("+++ b/"+displayPath))
 
-	// Parse and colorize the hunk content (skip the --- and +++ lines from String()).
-	lines := strings.Split(diff.String(), "\n")
-	for _, line := range lines {
-		if line == "" || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
-			continue
-		}
+	// Colorize the hunks. Every line after the file headers of String() is
+	// hunk content, even one that starts with "---" or "+++".
+	for _, line := range hunkLines(diff.String()) {
 		r.writeDiffLine(line)
 	}
 
 	fmt.Fprintln(r.out) // Blank line between files
+}
+
+// hunkLines returns the lines of a unified diff that follow its "--- " and
+// "+++ " file header lines, without the final newline.
+func hunkLines(unified string) []string {
+	if unified == "" {
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSuffix(unified, "\n"), "\n")
+	if len(lines) >= 2 && strings.HasPrefix(lines[0], "--- ") && strings.HasPrefix(lines[1], "+++ ") {
+		lines = lines[2:]
+	}
+
+	return lines
 }
 
 // displayPath returns the path shown in the diff headers: relative to the
@@ -109,10 +121,6 @@ func (r *DiffReporter) writeDiffLine(line string) {
 	switch {
 	case strings.HasPrefix(line, "@@"):
 		styled = r.styles.DiffHunk.Render(line)
-	case strings.HasPrefix(line, "+++"):
-		styled = r.styles.DiffAdd.Render(line)
-	case strings.HasPrefix(line, "---"):
-		styled = r.styles.DiffRemove.Render(line)
 	case strings.HasPrefix(line, "+"):
 		styled = r.styles.DiffAdd.Render(line)
 	case strings.HasPrefix(line, "-"):

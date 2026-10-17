@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -187,6 +188,37 @@ func TestDiffReporter_EmptyWorkingDir(t *testing.T) {
 	// With no WorkingDir, should use the path as-is (minus leading slash for diff prefix).
 	assert.Contains(t, output, "some/absolute/path/file.md",
 		"with empty WorkingDir, should preserve the full path")
+}
+
+func TestDiffReporter_KeepsHunkLinesThatLookLikeFileHeaders(t *testing.T) {
+	t.Parallel()
+
+	// A thematic break "---" removed and a line starting with "++" added: in
+	// the hunk they become "----" and "+++ plus", which look like the file
+	// header lines but are content.
+	original := []byte("# Title\n\n---\n\ntext\n")
+	modified := []byte("# Title\n\n***\n\n++ plus\n")
+	diff := fix.GenerateDiff("doc.md", original, modified)
+	require.NotNil(t, diff)
+
+	var buf bytes.Buffer
+	rep := reporter.NewDiffReporter(reporter.Options{Writer: &buf, Color: "never"})
+
+	_, err := rep.Report(context.Background(), &runner.Result{
+		Files: []runner.FileOutcome{{
+			Path:   "doc.md",
+			Result: &lint.PipelineResult{FileResult: &lint.FileResult{}, Diff: diff},
+		}},
+	})
+	require.NoError(t, err)
+
+	lines := strings.Split(buf.String(), "\n")
+	assert.Contains(t, lines, "----", "the removed thematic break is part of the patch")
+	assert.Contains(t, lines, "+***")
+	assert.Contains(t, lines, "-text")
+	assert.Contains(t, lines, "+++ plus", "the added line is part of the patch")
+	assert.Equal(t, 1, strings.Count(buf.String(), "--- a/doc.md\n"), "the file header appears once")
+	assert.Equal(t, 1, strings.Count(buf.String(), "+++ b/doc.md\n"), "the file header appears once")
 }
 
 func TestDiffReporter_RelativePath(t *testing.T) {
