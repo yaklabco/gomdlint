@@ -687,7 +687,7 @@ func TestLoad_WarnsAboutUnknownRules(t *testing.T) {
   MD009:
     severity: error
 rule_defaults:
-  line-lenght:
+  linelength:
     enabled: false
 `
 	result, err := loadProject(t, content)
@@ -700,7 +700,7 @@ rule_defaults:
 		`.gomdlint.yml:4: unknown rule "blockquote" (it is a tag; configure its rules instead: ` +
 			`no-multiple-space-blockquote, no-blanks-blockquote); it is ignored`,
 		`.gomdlint.yml:5: unknown rule "tables" (did you mean "blanks-around-tables"?); it is ignored`,
-		`.gomdlint.yml:9: unknown rule "line-lenght" (did you mean "line-length"?); it is ignored`,
+		`.gomdlint.yml:9: unknown rule "linelength" (did you mean "line-length"?); it is ignored`,
 	}
 	assert.Equal(t, want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
 }
