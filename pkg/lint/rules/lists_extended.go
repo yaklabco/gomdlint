@@ -61,7 +61,7 @@ func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
 		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
 	}
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
 }
 
 // indentMismatch is a list item whose marker is not in the expected column.
@@ -287,7 +287,7 @@ func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
 		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
 	}
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
 }
 
 // unorderedListNesting counts the lists enclosing a list up to the nearest
@@ -434,7 +434,7 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
 }
 
 // listItemsAreSingleLines reports whether every item of a list occupies one
@@ -504,7 +504,7 @@ func (r *BlanksAroundListsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
 }
 
 // hasListAncestor reports whether a node is nested inside a list.

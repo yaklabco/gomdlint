@@ -106,7 +106,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{codeWhitespace: true}), nil
 }
 
 // trailingLineEnd says how the parser reads the line ending after trailing
@@ -272,7 +272,7 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			WithSuggestion("Add a newline at end of file").
 			WithFix(builder).
 			Build()
-		return []lint.Diagnostic{diag}, nil
+		return keepSafeFixes(ctx, []lint.Diagnostic{diag}, fixCheckOptions{}), nil
 	}
 
 	// The trailing blank line limit is a gomdlint extension that markdownlint
@@ -316,7 +316,7 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			WithSuggestion(fmt.Sprintf("Remove %d trailing blank line(s)", excessCount)).
 			WithFix(builder).
 			Build()
-		return []lint.Diagnostic{diag}, nil
+		return keepSafeFixes(ctx, []lint.Diagnostic{diag}, fixCheckOptions{}), nil
 	}
 
 	return nil, nil
@@ -418,7 +418,7 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
 }
 
 func (r *MultipleBlankLinesRule) createDiagnostic(

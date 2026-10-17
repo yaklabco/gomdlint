@@ -135,7 +135,7 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{codeWhitespace: true}), nil
 }
 
 // tabStructureEnd returns the byte index where the part of a line that
