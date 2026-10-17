@@ -24,6 +24,6 @@
     "column": 3,
     "message": "Unordered list bullet '*' does not match expected '-'",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   }
 ]

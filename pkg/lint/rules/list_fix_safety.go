@@ -2,10 +2,14 @@ package rules
 
 import (
 	"bytes"
+	"cmp"
 	"math"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -41,13 +45,18 @@ type listShift struct {
 }
 
 // listShiftPlan collects the column changes one rule wants to make to list
-// items in a single pass, and keeps only those that preserve the document
-// structure when they are applied together.
+// items in a single pass, keeps only those that preserve the document
+// structure, and turns them into fixes that stay safe whichever of them are
+// applied.
 type listShiftPlan struct {
 	file    *mdast.FileSnapshot
 	layouts map[*mdast.Node]listItemLayout
 	missing map[*mdast.Node]bool
 	shifts  map[*mdast.Node]listShift
+
+	// independent is true when every accepted shift must be safe on its own,
+	// whatever happens to the others. It is set by resolve.
+	independent bool
 }
 
 func newListShiftPlan(file *mdast.FileSnapshot) *listShiftPlan {
@@ -89,6 +98,11 @@ func (p *listShiftPlan) final(item *mdast.Node) (listShift, bool) {
 	if shift, ok := p.shifts[item]; ok {
 		return shift, true
 	}
+	return p.current(item)
+}
+
+// current returns an item's marker and content columns before any shift.
+func (p *listShiftPlan) current(item *mdast.Node) (listShift, bool) {
 	layout, ok := p.layout(item)
 	if !ok {
 		return listShift{}, false
@@ -97,20 +111,189 @@ func (p *listShiftPlan) final(item *mdast.Node) (listShift, bool) {
 }
 
 // resolve drops every proposed shift that would change the document structure
-// and returns the shifts that are safe to apply together. Shifts are checked
-// in document order, repeatedly, because dropping one shift changes the
-// final columns the others are checked against.
+// and returns the accepted shifts. Shifts are checked in document order,
+// repeatedly, because dropping one shift changes the final columns the
+// others are checked against.
+//
+// Every shift is checked against the final columns of the other items, and
+// fixes then apply the shifts of related items together. When a directive
+// can suppress some of the rule's diagnostics but not others, a shift must
+// also be safe while every other item keeps its current columns, because the
+// shifts it was checked with may never be applied.
 func (p *listShiftPlan) resolve() map[*mdast.Node]listShift {
+	p.independent = hasLineDirectives(p.file)
 	for changed := true; changed; {
 		changed = false
 		for _, item := range p.orderedShiftItems() {
-			if !p.keepsStructure(item, p.shifts[item]) {
+			shift := p.shifts[item]
+			if !p.keepsStructure(item, shift, p.final) ||
+				(p.independent && !p.keepsStructure(item, shift, p.current)) {
 				delete(p.shifts, item)
 				changed = true
 			}
 		}
 	}
 	return p.shifts
+}
+
+// fixes turns the edits that make the accepted shifts, one per item, into
+// the edits the diagnostics carry. Any fix may be dropped while others are
+// applied: a directive can suppress a diagnostic, and a conflict with another
+// rule's edit can skip a fix. So shifts that are only safe together form a
+// group whose changes are made by a single edit, on the diagnostic of the
+// group's first item, and the other items of the group get no fix. Shifts
+// that are safe on their own keep one fix each. A group with an item that has
+// no edit gets no fix at all.
+func (p *listShiftPlan) fixes(edits map[*mdast.Node]fix.TextEdit) map[*mdast.Node]fix.TextEdit {
+	result := make(map[*mdast.Node]fix.TextEdit)
+	for _, group := range p.groups() {
+		groupEdits := make([]fix.TextEdit, 0, len(group))
+		for _, item := range group {
+			if edit, ok := edits[item]; ok {
+				groupEdits = append(groupEdits, edit)
+			}
+		}
+		if len(groupEdits) != len(group) {
+			continue
+		}
+		if combined, ok := combineEdits(p.file.Content, groupEdits); ok {
+			result[group[0]] = combined
+		}
+	}
+	return result
+}
+
+// groups partitions the items with accepted shifts into groups that must be
+// applied together, each in document order. An item joins the group of a
+// related item, one whose columns its check reads, when its shift is only
+// safe if that item moves too. Every check reads one other item at a time,
+// so items in different groups are safe whether or not the other group is
+// applied: each is safe with the other at its current columns and, as
+// resolve checked, at its final ones. When shifts are independent every item
+// is a group of its own.
+func (p *listShiftPlan) groups() [][]*mdast.Node {
+	items := p.orderedShiftItems()
+	order := make(map[*mdast.Node]int, len(items))
+	leader := make(map[*mdast.Node]*mdast.Node, len(items))
+	for idx, item := range items {
+		order[item] = idx
+		leader[item] = item
+	}
+	find := func(item *mdast.Node) *mdast.Node {
+		for leader[item] != item {
+			leader[item] = leader[leader[item]]
+			item = leader[item]
+		}
+		return item
+	}
+	if !p.independent {
+		for _, item := range items {
+			for _, other := range checkedItems(item) {
+				if _, ok := leader[other]; !ok || p.keepsStructure(item, p.shifts[item], p.finalExcept(other)) {
+					continue
+				}
+				first, second := find(item), find(other)
+				if order[second] < order[first] {
+					first, second = second, first
+				}
+				leader[second] = first
+			}
+		}
+	}
+	var groups [][]*mdast.Node
+	index := make(map[*mdast.Node]int)
+	for _, item := range items {
+		root := find(item)
+		idx, ok := index[root]
+		if !ok {
+			idx = len(groups)
+			index[root] = idx
+			groups = append(groups, nil)
+		}
+		groups[idx] = append(groups[idx], item)
+	}
+	return groups
+}
+
+// finalExcept returns the final columns of every item but kept, which keeps
+// its current columns.
+func (p *listShiftPlan) finalExcept(kept *mdast.Node) func(*mdast.Node) (listShift, bool) {
+	return func(item *mdast.Node) (listShift, bool) {
+		if item == kept {
+			return p.current(item)
+		}
+		return p.final(item)
+	}
+}
+
+// checkedItems returns the items whose columns the structure check of item
+// reads: its parent item, its neighbours in its list, the items of its
+// nested lists and, for a first item, the last item of a list right before
+// its own.
+func checkedItems(item *mdast.Node) []*mdast.Node {
+	var checked []*mdast.Node
+	list := item.Parent
+	if parent := list.Parent; parent != nil && parent.Kind == mdast.NodeListItem {
+		checked = append(checked, parent)
+	}
+	if prev := previousListItem(item); prev != nil {
+		checked = append(checked, prev)
+	} else if before := list.Prev; before != nil && before.Kind == mdast.NodeList {
+		if last := lastListItem(before); last != nil {
+			checked = append(checked, last)
+		}
+	}
+	if next := nextListItem(item); next != nil {
+		checked = append(checked, next)
+	}
+	for child := item.FirstChild; child != nil; child = child.Next {
+		if child.Kind == mdast.NodeList {
+			checked = append(checked, lint.ListItems(child)...)
+		}
+	}
+	return checked
+}
+
+// combineEdits merges edits that do not overlap into one edit that also
+// rewrites the text between them unchanged, so that they are applied
+// together or not at all.
+func combineEdits(content []byte, edits []fix.TextEdit) (fix.TextEdit, bool) {
+	if len(edits) == 0 {
+		return fix.TextEdit{}, false
+	}
+	sorted := slices.Clone(edits)
+	slices.SortFunc(sorted, func(a, b fix.TextEdit) int { return cmp.Compare(a.StartOffset, b.StartOffset) })
+	var text strings.Builder
+	for idx, edit := range sorted {
+		if idx > 0 {
+			prev := sorted[idx-1]
+			if edit.StartOffset < prev.EndOffset {
+				return fix.TextEdit{}, false
+			}
+			text.Write(content[prev.EndOffset:edit.StartOffset])
+		}
+		text.WriteString(edit.NewText)
+	}
+	return fix.TextEdit{
+		StartOffset: sorted[0].StartOffset,
+		EndOffset:   sorted[len(sorted)-1].EndOffset,
+		NewText:     text.String(),
+	}, true
+}
+
+// lineDirectivePattern matches the start of an inline directive that turns
+// rules on or off for part of a file.
+var lineDirectivePattern = regexp.MustCompile(`(?i)<!--\s*markdownlint-(?:disable|enable|capture|restore)`)
+
+// hasLineDirectives reports whether a file holds an inline directive that
+// can turn rules on or off for some lines only, so that some diagnostics of
+// a rule may be suppressed while others are kept. It looks where the engine
+// looks for directives, in HTML blocks and inline HTML.
+func hasLineDirectives(file *mdast.FileSnapshot) bool {
+	return mdast.FindFirst(file.Root, func(node *mdast.Node) bool {
+		return (node.Kind == mdast.NodeHTMLBlock || node.Kind == mdast.NodeHTMLInline) &&
+			lineDirectivePattern.Match(node.Text())
+	}) != nil
 }
 
 func (p *listShiftPlan) orderedShiftItems() []*mdast.Node {
@@ -125,14 +308,19 @@ func (p *listShiftPlan) orderedShiftItems() []*mdast.Node {
 }
 
 // keepsStructure reports whether moving an item's marker and content to the
-// shifted columns, together with the other accepted shifts, leaves the item
-// in the same list at the same depth and keeps every surrounding line where
-// it is. Only items whose content is a paragraph on the marker line followed
-// by nested lists are moved; anything else may depend on the content column
-// in ways this check does not model. A paragraph line that looks like the
-// start of a block is paragraph text only because of where it sits, so an
-// item holding one keeps its content column.
-func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
+// shifted columns, with every other item at the columns that columns
+// returns, leaves the item in the same list at the same depth and keeps
+// every surrounding line where it is. Only items whose content is a
+// paragraph on the marker line followed by nested lists are moved; anything
+// else may depend on the content column in ways this check does not model.
+// A paragraph line that looks like the start of a block is paragraph text
+// only because of where it sits, so an item holding one keeps its content
+// column.
+func (p *listShiftPlan) keepsStructure(
+	item *mdast.Node,
+	shift listShift,
+	columns func(*mdast.Node) (listShift, bool),
+) bool {
 	layout, ok := p.layout(item)
 	if !ok || !isSimpleListItem(item, layout.marker.Line) {
 		return false
@@ -149,7 +337,7 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 
 	list := item.Parent
 	if parent := list.Parent; parent != nil && parent.Kind == mdast.NodeListItem {
-		parentShift, ok := p.final(parent)
+		parentShift, ok := columns(parent)
 		if !ok || !sameBlockquote(parent, item) ||
 			shift.markerCol < parentShift.contentCol || shift.markerCol > parentShift.contentCol+maxBlockIndent {
 			return false
@@ -159,21 +347,21 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 	}
 
 	if prev := previousListItem(item); prev != nil {
-		prevShift, ok := p.final(prev)
+		prevShift, ok := columns(prev)
 		if !ok || shift.markerCol >= prevShift.contentCol {
 			return false
 		}
 	} else if before := list.Prev; before != nil && before.Kind == mdast.NodeList {
 		// The first item must not move under the last item of the list
 		// before it, which would take it in.
-		lastShift, ok := p.final(lastListItem(before))
+		lastShift, ok := columns(lastListItem(before))
 		if !ok || shift.markerCol >= lastShift.contentCol {
 			return false
 		}
 	}
 	next := nextListItem(item)
 	if next != nil {
-		nextShift, ok := p.final(next)
+		nextShift, ok := columns(next)
 		if !ok || nextShift.markerCol >= shift.contentCol {
 			return false
 		}
@@ -184,7 +372,7 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 			continue
 		}
 		for _, nested := range lint.ListItems(child) {
-			nestedShift, ok := p.final(nested)
+			nestedShift, ok := columns(nested)
 			if !ok || nestedShift.markerCol < shift.contentCol || nestedShift.markerCol > shift.contentCol+maxBlockIndent {
 				return false
 			}

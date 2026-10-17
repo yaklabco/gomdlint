@@ -50,13 +50,13 @@ func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		}
 		mismatches = append(mismatches, listIndentMismatches(ctx.File, plan, list)...)
 	}
-	safeShifts := plan.resolve()
+	fixes := plan.fixes(indentEdits(ctx.File, mismatches, plan.resolve()))
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		msg := fmt.Sprintf("List item indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
 		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
-		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, safeShifts, msg, suggestion))
+		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
 	}
 	return diags, nil
 }
@@ -147,15 +147,38 @@ func proposeIndentShift(plan *listShiftPlan, mismatch indentMismatch) {
 	})
 }
 
+// indentEdits returns, for every mismatch whose move the plan accepted, the
+// edit that rewrites the indentation between the blockquote content and the
+// marker. The edit covers the marker too, so that no other list rule changes
+// this marker in the same pass.
+func indentEdits(
+	file *mdast.FileSnapshot,
+	mismatches []indentMismatch,
+	safeShifts map[*mdast.Node]listShift,
+) map[*mdast.Node]fix.TextEdit {
+	edits := make(map[*mdast.Node]fix.TextEdit)
+	for _, mismatch := range mismatches {
+		if shift, ok := safeShifts[mismatch.item]; !ok || shift.markerCol != mismatch.expected {
+			continue
+		}
+		marker := mismatch.marker
+		edits[mismatch.item] = fix.TextEdit{
+			StartOffset: marker.LineStart + mismatch.base,
+			EndOffset:   marker.End,
+			NewText:     strings.Repeat(" ", mismatch.expected) + string(file.Content[marker.Start:marker.End]),
+		}
+	}
+	return edits
+}
+
 // indentDiagnostic reports a misaligned marker. Like markdownlint, the range
-// covers the line from its start through the marker. A fix rewrites the
-// indentation between the blockquote content and the marker when the plan
-// accepted the move.
+// covers the line from its start through the marker. It carries the fix the
+// plan gave its item, if any.
 func indentDiagnostic(
 	ctx *lint.RuleContext,
 	ruleID string,
 	mismatch indentMismatch,
-	safeShifts map[*mdast.Node]listShift,
+	fixes map[*mdast.Node]fix.TextEdit,
 	msg, suggestion string,
 ) lint.Diagnostic {
 	marker := mismatch.marker
@@ -168,13 +191,17 @@ func indentDiagnostic(
 	diagBuilder := lint.NewDiagnosticAt(ruleID, ctx.File.Path, pos, msg).
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(suggestion)
-	if shift, ok := safeShifts[mismatch.item]; ok && shift.markerCol == mismatch.expected {
-		builder := fix.NewEditBuilder()
-		builder.ReplaceRange(marker.LineStart+mismatch.base, marker.End,
-			strings.Repeat(" ", mismatch.expected)+string(ctx.File.Content[marker.Start:marker.End]))
-		diagBuilder = diagBuilder.WithFix(builder)
+	if edit, ok := fixes[mismatch.item]; ok {
+		diagBuilder = diagBuilder.WithFix(editFix(edit))
 	}
 	return diagBuilder.Build()
+}
+
+// editFix wraps one edit in a fix builder.
+func editFix(edit fix.TextEdit) *fix.EditBuilder {
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(edit.StartOffset, edit.EndOffset, edit.NewText)
+	return builder
 }
 
 // ULIndentRule checks unordered list indentation.
@@ -201,7 +228,7 @@ func NewULIndentRule() *ULIndentRule {
 // up to the nearest blockquote, are all unordered; the nesting depth restarts
 // inside each blockquote and columns count from the blockquote content. All
 // moves are planned together, and only those that keep every item under the
-// same parent are fixed.
+// same parent are fixed, with moves that depend on each other in one fix.
 func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -237,7 +264,7 @@ func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			proposeIndentShift(plan, mismatch)
 		}
 	}
-	safeShifts := plan.resolve()
+	fixes := plan.fixes(indentEdits(ctx.File, mismatches, plan.resolve()))
 
 	sort.Slice(mismatches, func(i, j int) bool {
 		return mismatches[i].marker.Start < mismatches[j].marker.Start
@@ -246,7 +273,7 @@ func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	for _, mismatch := range mismatches {
 		msg := fmt.Sprintf("Unordered list indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
 		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
-		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, safeShifts, msg, suggestion))
+		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
 	}
 	return diags, nil
 }
@@ -361,6 +388,20 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		}
 	}
 	safeShifts := plan.resolve()
+	edits := make(map[*mdast.Node]fix.TextEdit)
+	for _, mismatch := range mismatches {
+		if _, safe := safeShifts[mismatch.item]; safe {
+			// The edit covers the marker too, so that no other list rule
+			// changes this marker in the same pass.
+			marker := mismatch.marker
+			edits[mismatch.item] = fix.TextEdit{
+				StartOffset: marker.Start,
+				EndOffset:   marker.ContentStart,
+				NewText:     string(ctx.File.Content[marker.Start:marker.End]) + strings.Repeat(" ", mismatch.expected),
+			}
+		}
+	}
+	fixes := plan.fixes(edits)
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
 	for _, mismatch := range mismatches {
@@ -375,13 +416,8 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 			fmt.Sprintf("List marker space %d does not match expected %d", mismatch.actual, mismatch.expected)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(fmt.Sprintf("Use %d space(s) after the list marker", mismatch.expected))
-		if _, safe := safeShifts[mismatch.item]; safe {
-			// The edit covers the marker too, so that no other list rule
-			// changes this marker in the same pass.
-			builder := fix.NewEditBuilder()
-			builder.ReplaceRange(marker.Start, marker.ContentStart,
-				string(ctx.File.Content[marker.Start:marker.End])+strings.Repeat(" ", mismatch.expected))
-			diagBuilder = diagBuilder.WithFix(builder)
+		if edit, ok := fixes[mismatch.item]; ok {
+			diagBuilder = diagBuilder.WithFix(editFix(edit))
 		}
 		diags = append(diags, diagBuilder.Build())
 	}

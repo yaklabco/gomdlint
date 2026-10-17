@@ -94,7 +94,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 			findings = append(findings, finding)
 		}
 	}
-	safeShifts := plan.resolve()
+	fixes := plan.fixes(quoteSpaceItemEdits(ctx.File, plan, findings, plan.resolve()))
 
 	sort.Slice(findings, func(i, j int) bool { return findings[i].start < findings[j].start })
 	diags := make([]lint.Diagnostic, 0, len(findings))
@@ -110,7 +110,12 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 			fmt.Sprintf("Multiple spaces (%d) after blockquote symbol", finding.spaces)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the blockquote symbol")
-		if quoteSpaceFixable(finding, safeShifts) {
+		switch {
+		case finding.item != nil:
+			if edit, ok := fixes[finding.item]; ok {
+				diagBuilder = diagBuilder.WithFix(editFix(edit))
+			}
+		case !finding.unsafe:
 			builder := fix.NewEditBuilder()
 			builder.Delete(finding.start, finding.end)
 			diagBuilder = diagBuilder.WithFix(builder)
@@ -244,15 +249,36 @@ func quoteVerbatimLines(quote *mdast.Node) map[int]bool {
 	return lines
 }
 
-// quoteSpaceFixable reports whether removing the whitespace keeps the
-// document structure: a list item must have been accepted by the shift plan,
-// and the whitespace must not indent a code fence or an HTML block.
-func quoteSpaceFixable(finding quoteSpace, safeShifts map[*mdast.Node]listShift) bool {
-	if finding.item != nil {
-		_, ok := safeShifts[finding.item]
-		return ok
+// quoteSpaceItemEdits returns, for every finding before a list item whose
+// move the plan accepted, the edit that removes the whitespace. The edit
+// covers the marker too, so that no other list rule changes the marker in
+// the same pass and the item cannot be moved twice.
+func quoteSpaceItemEdits(
+	file *mdast.FileSnapshot,
+	plan *listShiftPlan,
+	findings []quoteSpace,
+	safeShifts map[*mdast.Node]listShift,
+) map[*mdast.Node]fix.TextEdit {
+	edits := make(map[*mdast.Node]fix.TextEdit)
+	for _, finding := range findings {
+		if finding.item == nil {
+			continue
+		}
+		if _, ok := safeShifts[finding.item]; !ok {
+			continue
+		}
+		layout, ok := plan.layout(finding.item)
+		if !ok {
+			continue
+		}
+		marker := layout.marker
+		edits[finding.item] = fix.TextEdit{
+			StartOffset: finding.start,
+			EndOffset:   marker.End,
+			NewText:     string(file.Content[marker.Start:marker.End]),
+		}
 	}
-	return !finding.unsafe
+	return edits
 }
 
 // NoBlanksBlockquoteRule checks for blank lines inside blockquotes.

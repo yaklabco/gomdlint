@@ -1041,9 +1041,9 @@ func listShape(t *testing.T, input string) string {
 	return shape.String()
 }
 
-// TestListIndentationFixesPreserveStructure applies the MD005, MD007 and
-// MD030 fixes together, the way one fix pass does, and checks that the lists
-// keep their structure.
+// TestListIndentationFixesPreserveStructure applies the MD004, MD005, MD007,
+// MD027, MD029 and MD030 fixes together, the way one fix pass does, and
+// checks that the lists keep their structure.
 func TestListIndentationFixesPreserveStructure(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1079,6 +1079,18 @@ func TestListIndentationFixesPreserveStructure(t *testing.T) {
 			name:  "blockquoted list followed by a lazy line",
 			input: "> -  item\nlazy text\n",
 		},
+		{
+			// Removing the quote space and the marker space in one pass
+			// would move the content column two ways at once.
+			name:  "quote space and marker space on the same item",
+			input: ">   -   a\n>       - b\n",
+		},
+		{
+			// A bullet left unchanged because another rule edits its
+			// marker would split the nested list.
+			name:  "bullet and indentation fixes in one list",
+			input: "- first\n  * second\n   * third\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1087,7 +1099,11 @@ func TestListIndentationFixesPreserveStructure(t *testing.T) {
 			require.NoError(t, err)
 
 			var edits []fix.TextEdit
-			for _, rule := range []lint.Rule{NewListIndentRule(), NewULIndentRule(), NewListMarkerSpaceRule()} {
+			rules := []lint.Rule{
+				NewUnorderedListStyleRule(), NewListIndentRule(), NewULIndentRule(),
+				NewNoMultipleSpaceBlockquoteRule(), NewOrderedListIncrementRule(), NewListMarkerSpaceRule(),
+			}
+			for _, rule := range rules {
 				ruleCtx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
 				diags, err := rule.Apply(ruleCtx)
 				require.NoError(t, err)
