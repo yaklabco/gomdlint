@@ -113,6 +113,21 @@ func TestFixCheckKeeps(t *testing.T) {
 			want: false,
 		},
 		{
+			// CommonMark reads the list as tight before and after, though
+			// goldmark 1.8 reads it as loose once a blank line comes before it.
+			name:  "adding a blank line before a list that starts with a definition",
+			input: "Intro\n- [x]: /url\n  text\n- b\n",
+			old:   "Intro\n", new: "Intro\n\n",
+			want: true,
+		},
+		{
+			// CommonMark reads the list as tight, goldmark 1.8 as loose.
+			name:  "making a list that starts with a definition loose",
+			input: "- [x]: /url\n  text\n- b\n",
+			old:   "text\n", new: "text\n\n",
+			want: false,
+		},
+		{
 			name:  "nesting an item",
 			input: "- a\n- b\n",
 			old:   "- b", new: "  - b",
