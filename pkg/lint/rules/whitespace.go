@@ -391,8 +391,11 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		return nil, nil
 	}
 
+	// markdownlint reads its maximum as Number(maximum || 1), so 0 counts as
+	// 1. A negative maximum counts as 1 too. With no blank line allowed, the
+	// fix would remove the final line ending that MD047 puts back.
 	maxConsecutive := ctx.OptionInt("max_consecutive", 1)
-	if maxConsecutive < 0 {
+	if maxConsecutive < 1 {
 		maxConsecutive = 1
 	}
 

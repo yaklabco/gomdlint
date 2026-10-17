@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -438,6 +439,33 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 			config:    map[string]any{"max_consecutive": 2},
 		},
 		{
+			// Like markdownlint, a maximum of 0 counts as 1.
+			name:      "max consecutive 0 allows one blank line",
+			input:     "A\n\nB\n",
+			wantDiags: 0,
+			config:    map[string]any{"max_consecutive": 0},
+		},
+		{
+			name:      "max consecutive 0 reports two blank lines",
+			input:     "A\n\n\nB\n",
+			wantDiags: 1,
+			wantFix:   "A\n\nB\n",
+			config:    map[string]any{"max_consecutive": 0},
+		},
+		{
+			name:      "max consecutive 0 keeps the final line ending",
+			input:     "A\n",
+			wantDiags: 0,
+			config:    map[string]any{"max_consecutive": 0},
+		},
+		{
+			name:      "negative max consecutive counts as 1",
+			input:     "A\n\nB\n\n\n",
+			wantDiags: 1,
+			wantFix:   "A\n\nB\n",
+			config:    map[string]any{"max_consecutive": -2},
+		},
+		{
 			name:      "no blank lines",
 			input:     "Line one\nLine two\n",
 			wantDiags: 0,
@@ -535,6 +563,56 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMultipleBlankLinesRule_ConvergesWithFinalNewline checks that the fixes
+// of MD012 and MD047 settle in one or two passes on a file that ends in extra
+// blank lines, whatever the maximum, given natively or as markdownlint's
+// maximum. With a maximum of 0 counting as 0, MD012 removed the final line
+// ending that MD047 then put back, pass after pass.
+func TestMultipleBlankLinesRule_ConvergesWithFinalNewline(t *testing.T) {
+	configs := map[string]config.RuleConfig{
+		"max_consecutive 0":        {Options: map[string]any{"max_consecutive": 0}},
+		"max_consecutive 1":        {Options: map[string]any{"max_consecutive": 1}},
+		"max_consecutive -1":       {Options: map[string]any{"max_consecutive": -1}},
+		"markdownlint maximum 0":   config.MarkdownlintRuleConfig("MD012", map[string]any{"maximum": 0}),
+		"markdownlint maximum nil": config.MarkdownlintRuleConfig("MD012", map[string]any{}),
+	}
+	for name, ruleCfg := range configs {
+		for _, input := range []string{"Text\n\n", "Text\n\n\n\n", "Text\r\n\r\n\r\n", "Text"} {
+			t.Run(fmt.Sprintf("%s %q", name, input), func(t *testing.T) {
+				registry := lint.NewRegistry()
+				registry.Register(NewMultipleBlankLinesRule())
+				registry.Register(NewFinalNewlineRule())
+				engine := lint.NewEngine(goldmark.New(goldmark.FlavorCommonMark), registry)
+				cfg := config.NewConfig()
+				cfg.Fix = true
+				cfg.Rules = map[string]config.RuleConfig{"MD012": ruleCfg}
+
+				content := []byte(input)
+				passes := 0
+				for range lint.DefaultMaxFixPasses {
+					result, err := engine.LintFile(context.Background(), "test.md", content, cfg)
+					require.NoError(t, err)
+					if len(result.Edits) == 0 {
+						break
+					}
+					content = fix.ApplyEdits(content, result.Edits)
+					passes++
+				}
+				assert.LessOrEqual(t, passes, 2, "the fixes settle in one or two passes")
+				assert.Equal(t, strings.TrimRight(input, "\r\n")+lineEnding(input), string(content))
+			})
+		}
+	}
+}
+
+// lineEnding returns the line ending a test input uses, LF when it has none.
+func lineEnding(input string) string {
+	if strings.Contains(input, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
 }
 
 // TestMultipleBlankLinesRule_FixesChangeContent checks that every fix MD012
