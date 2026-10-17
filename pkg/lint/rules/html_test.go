@@ -256,6 +256,33 @@ func TestInlineHTMLRule_TableAllowedElements(t *testing.T) {
 	}), []htmlDiagWant{{1, 5, "br"}})
 }
 
+// TestHTMLSourcesMaskOneNodeAtATime checks that htmlSources masks the
+// quoted continuation lines of the node it is given and of no other node:
+// the shared copy is restored after each call, and a node that needs no
+// masking reads the file itself.
+func TestHTMLSourcesMaskOneNodeAtATime(t *testing.T) {
+	input := "> a <b\n> c=\"d\">e</b> and <i\n> j=\"k\">l</i>\n"
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	inlines := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil).HTMLInlines()
+	require.Len(t, inlines, 4, "<b ...>, </b>, <i ...> and </i>")
+	line2, line3 := snapshot.Lines[1].StartOffset, snapshot.Lines[2].StartOffset
+	sources := htmlSources{file: snapshot}
+
+	sources.with(inlines[0], func(source []byte) {
+		assert.Equal(t, "  ", string(source[line2:line2+2]), "<b continues on line 2")
+		assert.Equal(t, "> ", string(source[line3:line3+2]), "only <i continues on line 3")
+	})
+	sources.with(inlines[2], func(source []byte) {
+		assert.Equal(t, "> ", string(source[line2:line2+2]), "line 2 is restored")
+		assert.Equal(t, "  ", string(source[line3:line3+2]), "<i continues on line 3")
+	})
+	sources.with(inlines[1], func(source []byte) {
+		assert.Equal(t, input, string(source), "</b> needs no masking")
+	})
+	assert.Equal(t, input, string(snapshot.Content), "the file is never masked")
+}
+
 // TestTableLineRanges checks the table line lookup that MD033 builds once
 // per file: unsorted and overlapping ranges are joined, and a line is in a
 // table from the table's first line to its last.

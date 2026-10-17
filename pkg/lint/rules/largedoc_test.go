@@ -11,6 +11,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -123,6 +124,49 @@ func largeHTMLDocument(sections int) string {
 	return doc.String()
 }
 
+// largeDocumentLimit is how long a rule may take on a large document. A rule
+// that grows about linearly with the document takes a small fraction of it,
+// and one that does work proportional to the document for each element runs
+// far past it.
+const largeDocumentLimit = 30 * time.Second
+
+// parseLargeDocument parses input as GFM and returns it with a matching
+// configuration.
+func parseLargeDocument(t *testing.T, input string) (*mdast.FileSnapshot, *config.Config) {
+	t.Helper()
+	file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "large.md", []byte(input))
+	require.NoError(t, err)
+	cfg := config.NewConfig()
+	cfg.Flavor = config.FlavorGFM
+	return file, cfg
+}
+
+// applyWithinLimit runs rule with its default options on file and fails the
+// test when it takes longer than largeDocumentLimit. A rule that runs past
+// the limit keeps running in the background until the test binary exits.
+func applyWithinLimit(t *testing.T, rule lint.Rule, file *mdast.FileSnapshot, cfg *config.Config) []lint.Diagnostic {
+	t.Helper()
+	type outcome struct {
+		diags []lint.Diagnostic
+		err   error
+	}
+	done := make(chan outcome, 1)
+	start := time.Now()
+	go func() {
+		diags, err := rule.Apply(lint.NewRuleContext(context.Background(), file, cfg, nil))
+		done <- outcome{diags, err}
+	}()
+	select {
+	case got := <-done:
+		require.NoError(t, got.err, rule.ID())
+		t.Logf("%s: %v", rule.ID(), time.Since(start))
+		return got.diags
+	case <-time.After(largeDocumentLimit):
+		t.Fatalf("%s took longer than %v on a %d byte document", rule.ID(), largeDocumentLimit, len(file.Content))
+		return nil
+	}
+}
+
 // TestInlineHTMLRuleOnLargeDocument verifies that MD033 runs in time that
 // grows about linearly with the document. Looking up the tables or copying
 // the file for each HTML element would take minutes on a document with tens
@@ -131,36 +175,47 @@ func TestInlineHTMLRuleOnLargeDocument(t *testing.T) {
 	if testing.Short() {
 		t.Skip("large document")
 	}
-	const limit = 30 * time.Second
 	// The race detector slows the rule down several times, so it gets a
 	// smaller document; a quadratic rule still runs far past the limit.
 	sections := 8000
 	if raceEnabled {
 		sections = 4000
 	}
-	input := []byte(largeHTMLDocument(sections))
-	file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "large.md", input)
-	require.NoError(t, err)
-	cfg := config.NewConfig()
-	cfg.Flavor = config.FlavorGFM
+	file, cfg := parseLargeDocument(t, largeHTMLDocument(sections))
 
-	type outcome struct {
-		diags []lint.Diagnostic
-		err   error
+	diags := applyWithinLimit(t, NewInlineHTMLRule(), file, cfg)
+
+	// kbd twice, br, sup, br in the table, span, and div per section.
+	require.Len(t, diags, 7*sections)
+}
+
+// largeQuotedImageDocument returns a document of blockquotes that each hold
+// a paragraph with four img elements spanning two lines, two of them
+// without alt text.
+func largeQuotedImageDocument(sections int) string {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range sections {
+		fmt.Fprintf(&doc, "> Item %d <img\n> src=\"1.png\" alt=\"one\"> and <img\n> src=\"2.png\"> and <img\n"+
+			"> src=\"3.png\" alt=\"three\"> and <img\n> src=\"4.png\"> end.\n\n", idx)
 	}
-	done := make(chan outcome, 1)
-	start := time.Now()
-	go func() {
-		diags, err := NewInlineHTMLRule().Apply(lint.NewRuleContext(context.Background(), file, cfg, nil))
-		done <- outcome{diags, err}
-	}()
-	select {
-	case got := <-done:
-		require.NoError(t, got.err)
-		t.Logf("MD033: %v", time.Since(start))
-		// kbd twice, br, sup, br in the table, span, and div per section.
-		require.Len(t, got.diags, 7*sections)
-	case <-time.After(limit):
-		t.Fatalf("MD033 took longer than %v on a %d byte document", limit, len(input))
+	return doc.String()
+}
+
+// TestImageAltTextRuleOnLargeDocument verifies that MD045 runs in time that
+// grows about linearly with the document. Copying the file for each img
+// element that spans lines in a blockquote would take minutes on a document
+// with tens of thousands of them, far past the generous limit.
+func TestImageAltTextRuleOnLargeDocument(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large document")
 	}
+	// Copying memory costs about as much with the race detector as without
+	// it, so both use the same document.
+	const sections = 15000
+	file, cfg := parseLargeDocument(t, largeQuotedImageDocument(sections))
+
+	diags := applyWithinLimit(t, NewImageAltTextRule(), file, cfg)
+
+	require.Len(t, diags, 2*sections)
 }

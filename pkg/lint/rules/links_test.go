@@ -401,6 +401,11 @@ func TestImageAltTextRule_HTMLImages(t *testing.T) {
 		{name: "quoted HTML block img spanning lines", input: "> <img src=\"a.png\"\n> alt=\"x\">\n"},
 		{name: "quoted inline img spanning lines", input: "> Text <img src=\"a.png\"\n> alt=\"x\"> more.\n"},
 		{name: "quoted img without alt spanning lines", input: "> <img src=\"a.png\"\n> title=\"x\">\n", want: []position{{1, 3}}},
+		{
+			name:  "quoted imgs spanning lines in one paragraph",
+			input: "> a <img src=\"a.png\"\n> alt=\"x\"> b <img src=\"b.png\"\n> title=\"y\"> c\n",
+			want:  []position{{2, 14}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -575,6 +580,23 @@ func TestLinkDestinationStyleRule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestImageAltTextRule_HTMLImagesKeepMaskedTags checks that MD045 keeps the
+// tag of an img element that spans lines in a blockquote with the quote
+// markers of its later lines replaced by spaces, as the parser read it. The
+// rule reads the masked tag from a copy of the file that is restored after
+// each element, so it must keep its own copy of the tag.
+func TestImageAltTextRule_HTMLImagesKeepMaskedTags(t *testing.T) {
+	input := "> a <img src=\"a.png\"\n> alt=\"x\"> b <img\n> src=\"b.png\">\n"
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+
+	images := NewImageAltTextRule().htmlImages(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+
+	require.Len(t, images, 2)
+	assert.Equal(t, "<img src=\"a.png\"\n  alt=\"x\">", string(images[0].tag))
+	assert.Equal(t, "<img\n  src=\"b.png\">", string(images[1].tag))
 }
 
 // TestLinkDestinationStyleRule_GFMAutolinkLiterals checks that GFM autolink

@@ -383,7 +383,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		construct, tag := image.construct, image.construct.Text(image.source)
+		construct, tag := image.construct, image.tag
 		if imgAltAttributePattern.Match(tag) {
 			continue
 		}
@@ -415,33 +415,41 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 }
 
 // htmlImages returns the opening img tags in HTML blocks and inline HTML.
+// The sources come from htmlSources, so the file is not copied for each
+// element.
 func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 	var images []htmlImage
+	sources := htmlSources{file: ctx.File}
 	keep := func(source []byte, construct mdscan.HTMLConstruct) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
-			images = append(images, htmlImage{construct: construct, source: source})
+			// The source is valid only while it is read, so the image keeps
+			// its own copy of the tag.
+			images = append(images, htmlImage{construct: construct, tag: bytes.Clone(construct.Text(source))})
 		}
 	}
 	for _, block := range ctx.HTMLBlocks() {
 		span := block.SourceRange()
-		source := htmlSource(ctx.File, block)
-		for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
-			keep(source, construct)
-		}
+		sources.with(block, func(source []byte) {
+			for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
+				keep(source, construct)
+			}
+		})
 	}
 	for _, inline := range ctx.HTMLInlines() {
-		source := htmlSource(ctx.File, inline)
-		if construct, ok := htmlNodeConstruct(source, inline); ok {
-			keep(source, construct)
-		}
+		sources.with(inline, func(source []byte) {
+			if construct, ok := htmlNodeConstruct(source, inline); ok {
+				keep(source, construct)
+			}
+		})
 	}
 	return images
 }
 
-// htmlImage is an img element and the source its attributes are read from.
+// htmlImage is an img element and its tag, read as htmlSource gives it, with
+// the attributes that decide whether the image has alt text.
 type htmlImage struct {
 	construct mdscan.HTMLConstruct
-	source    []byte
+	tag       []byte
 }
 
 // LinkDestinationStyleRule enforces link destination style (relative vs absolute).
