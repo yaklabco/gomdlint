@@ -238,10 +238,6 @@ func scanDefinitionLabel(text string, pos int) (int, bool) {
 	blank := true
 	length := 0
 	for idx := pos + 1; idx < len(text); idx++ {
-		// The limit counts characters, not bytes.
-		if length += runeStarts(text[idx]); length > maxLabelLength {
-			return 0, false
-		}
 		switch ch := text[idx]; ch {
 		case '\\':
 			blank = false
@@ -256,6 +252,11 @@ func scanDefinitionLabel(text string, pos int) (int, bool) {
 		case ' ', '\t', '\n':
 		default:
 			blank = false
+		}
+		// Only the characters inside the brackets count toward the limit,
+		// in characters rather than bytes.
+		if length += runeStarts(text[idx]); length > maxLabelLength {
+			return 0, false
 		}
 	}
 	return 0, false

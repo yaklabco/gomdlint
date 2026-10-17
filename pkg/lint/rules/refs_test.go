@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -804,5 +805,32 @@ func TestLinkImageRefDefsRule_ByteOrderMark(t *testing.T) {
 			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, input, plain),
 				applyAllFixEdits(t, mdast.ByteOrderMark+input, marked))
 		})
+	}
+}
+
+// TestReferenceLabelLengthLimit checks the CommonMark limit of 999
+// characters inside a label's brackets, counted in characters, for full and
+// collapsed references and for definitions.
+func TestReferenceLabelLengthLimit(t *testing.T) {
+	for _, char := range []string{"a", "\u4e2d"} {
+		for _, tt := range []struct {
+			length int
+			label  bool
+		}{{998, true}, {999, true}, {1000, false}} {
+			label := strings.Repeat(char, tt.length)
+			name := fmt.Sprintf("%d of %q", tt.length, char)
+			want := 0
+			if tt.label {
+				want = 1
+			}
+			t.Run(name, func(t *testing.T) {
+				full := testHelper(t, NewReferenceLinkImagesRule(), "See [text]["+label+"] here.\n")
+				assert.Len(t, full, want, "full reference")
+				collapsed := testHelper(t, NewReferenceLinkImagesRule(), "See ["+label+"][] here.\n")
+				assert.Len(t, collapsed, want, "collapsed reference")
+				definition := testHelper(t, NewLinkImageRefDefsRule(), "Text.\n\n["+label+"]: /url\n")
+				assert.Len(t, definition, want, "unused definition")
+			})
+		}
 	}
 }

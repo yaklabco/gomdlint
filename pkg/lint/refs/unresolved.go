@@ -286,9 +286,6 @@ func labelEndIndex(chars []inlineChar, open int) (int, bool) {
 		if char.opaque {
 			return 0, false
 		}
-		if length += runeStarts(char.ch); length > maxLabelLength {
-			return 0, false
-		}
 		switch char.ch {
 		case '\\':
 			if idx+1 < len(chars) && !chars[idx+1].opaque && mdscan.IsASCIIPunct(chars[idx+1].ch) {
@@ -304,6 +301,10 @@ func labelEndIndex(chars []inlineChar, open int) (int, bool) {
 				return 0, false
 			}
 			return idx, true
+		}
+		// Only the characters inside the brackets count toward the limit.
+		if length += runeStarts(char.ch); length > maxLabelLength {
+			return 0, false
 		}
 	}
 	return 0, false
