@@ -106,7 +106,8 @@ func (fr *FileResult) HasRuleErrors() bool {
 	return len(fr.RuleErrors) > 0
 }
 
-// RuleErrorList returns the rule errors sorted by rule ID.
+// RuleErrorList returns the rule errors sorted by rule ID, skipping rules
+// recorded without an error.
 func (fr *FileResult) RuleErrorList() []*RuleError {
 	if len(fr.RuleErrors) == 0 {
 		return nil
@@ -115,9 +116,13 @@ func (fr *FileResult) RuleErrorList() []*RuleError {
 	ids := slices.Sorted(maps.Keys(fr.RuleErrors))
 	list := make([]*RuleError, 0, len(ids))
 	for _, id := range ids {
+		err := fr.RuleErrors[id]
+		if err == nil {
+			continue
+		}
 		var ruleErr *RuleError
-		if !errors.As(fr.RuleErrors[id], &ruleErr) {
-			ruleErr = &RuleError{RuleID: id, Err: fr.RuleErrors[id]}
+		if !errors.As(err, &ruleErr) {
+			ruleErr = &RuleError{RuleID: id, Err: err}
 		}
 		list = append(list, ruleErr)
 	}

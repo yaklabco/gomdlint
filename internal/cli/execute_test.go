@@ -66,6 +66,11 @@ func TestExitCodeFromResult(t *testing.T) {
 			DiagnosticsBySeverity: map[string]int{"error": errs, "warning": warnings},
 		}}
 	}
+	withRuleFailures := func(result *runner.Result) *runner.Result {
+		result.Stats.FilesWithRuleErrors = 1
+		result.Stats.RuleErrors = 1
+		return result
+	}
 
 	tests := []struct {
 		name   string
@@ -81,6 +86,9 @@ func TestExitCodeFromResult(t *testing.T) {
 		{name: "errors outrank strict warnings", result: stats(0, 2, 3), strict: true, want: cli.ExitLintErrors},
 		{name: "file errors outrank findings", result: stats(1, 2, 3), strict: true, want: cli.ExitIOError},
 		{name: "file errors alone", result: stats(1, 0, 0), want: cli.ExitIOError},
+		{name: "rule failures alone", result: withRuleFailures(stats(0, 0, 0)), want: cli.ExitInternalError},
+		{name: "rule failures outrank findings", result: withRuleFailures(stats(0, 2, 3)), strict: true, want: cli.ExitInternalError},
+		{name: "file errors outrank rule failures", result: withRuleFailures(stats(1, 2, 3)), want: cli.ExitIOError},
 	}
 
 	for _, tt := range tests {

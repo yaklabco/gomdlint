@@ -28,7 +28,22 @@ type JSONFileResult struct {
 	Path        string           `json:"path"`
 	Diagnostics []JSONDiagnostic `json:"diagnostics"`
 	Modified    bool             `json:"modified,omitempty"`
-	Error       string           `json:"error,omitempty"`
+
+	// Error is set when the file could not be linted at all, for example
+	// because it could not be read.
+	Error string `json:"error,omitempty"`
+
+	// RuleErrors lists the rules that failed on the file, in rule ID order.
+	// The file was linted, but its findings or fixes may be incomplete.
+	RuleErrors []JSONRuleError `json:"ruleErrors,omitempty"`
+}
+
+// JSONRuleError describes a rule that failed on a file: it returned an
+// error, panicked, or proposed an invalid fix.
+type JSONRuleError struct {
+	RuleID   string `json:"ruleId"`
+	RuleName string `json:"ruleName,omitempty"`
+	Message  string `json:"message"`
 }
 
 // JSONDiagnostic represents a single diagnostic.
@@ -58,12 +73,20 @@ type JSONFix struct {
 
 // JSONSummary contains aggregate statistics.
 type JSONSummary struct {
-	FilesChecked    int            `json:"filesChecked"`
-	FilesWithIssues int            `json:"filesWithIssues"`
-	FilesModified   int            `json:"filesModified"`
-	FilesErrored    int            `json:"filesErrored"`
-	TotalIssues     int            `json:"totalIssues"`
-	BySeverity      map[string]int `json:"bySeverity"`
+	FilesChecked    int `json:"filesChecked"`
+	FilesWithIssues int `json:"filesWithIssues"`
+	FilesModified   int `json:"filesModified"`
+
+	// FilesErrored counts the files that could not be linted at all (the
+	// files with an error). Files on which a rule failed count in
+	// RuleErrors instead.
+	FilesErrored int `json:"filesErrored"`
+
+	// RuleErrors counts the rules that failed, once per rule and file.
+	RuleErrors int `json:"ruleErrors"`
+
+	TotalIssues int            `json:"totalIssues"`
+	BySeverity  map[string]int `json:"bySeverity"`
 }
 
 // JSONReporter formats results as JSON.
@@ -131,6 +154,16 @@ func (r *JSONReporter) buildOutput(result *runner.Result) *JSONOutput {
 			fileResult.Modified = file.Result.Written
 
 			if file.Result.FileResult != nil {
+				// The same failures SARIF reports as notifications.
+				for _, ruleErr := range file.Result.RuleErrorList() {
+					fileResult.RuleErrors = append(fileResult.RuleErrors, JSONRuleError{
+						RuleID:   ruleErr.RuleID,
+						RuleName: ruleErr.RuleName,
+						Message:  ruleFailureCause(ruleErr).Error(),
+					})
+					output.Summary.RuleErrors++
+				}
+
 				for _, diag := range file.Result.Diagnostics {
 					jsonDiag := JSONDiagnostic{
 						RuleID:      diag.RuleID,

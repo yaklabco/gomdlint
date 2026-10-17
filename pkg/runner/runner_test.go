@@ -805,8 +805,11 @@ func TestRunner_Run_PanicFailsOnlyThatFile(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if result.Stats.FilesErrored != 2 {
-		t.Errorf("FilesErrored = %d, want 2", result.Stats.FilesErrored)
+	// The engine isolates the panic as a rule failure: each file was still
+	// read, so it fails as a file with a rule error.
+	if result.Stats.FilesWithRuleErrors != 2 || result.Stats.FilesErrored != 0 {
+		t.Errorf("FilesWithRuleErrors = %d, FilesErrored = %d, want 2 and 0",
+			result.Stats.FilesWithRuleErrors, result.Stats.FilesErrored)
 	}
 	for idx := range result.Files {
 		if !result.Files[idx].Failed() {

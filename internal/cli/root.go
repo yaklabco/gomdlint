@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // BuildInfo holds build-time version information.
@@ -18,6 +19,12 @@ type BuildInfo struct {
 
 // NewRootCommand creates the root gomdlint command with all subcommands.
 func NewRootCommand(info BuildInfo) *cobra.Command {
+	return newRootCommand(info, lint.DefaultRegistry)
+}
+
+// newRootCommand creates the root command, whose lint command checks the
+// rules in registry.
+func newRootCommand(info BuildInfo, registry *lint.Registry) *cobra.Command {
 	var debug bool
 	var configPath string
 	var color string
@@ -56,7 +63,7 @@ and optional backups.`,
 		"colorize output: auto, always, never")
 
 	// Add subcommands.
-	rootCmd.AddCommand(newLintCommand(info))
+	rootCmd.AddCommand(newLintCommand(info, registry))
 	rootCmd.AddCommand(newRulesCommand())
 	rootCmd.AddCommand(newInitCommand())
 	rootCmd.AddCommand(newMigrateCommand())

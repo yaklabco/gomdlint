@@ -40,11 +40,13 @@ type FileOutcome struct {
 	SkippedEdits []lint.SkippedEdit
 }
 
-// Failed reports whether the file could not be linted completely. Failed
-// files count toward Stats.FilesErrored, which fails the run.
+// Failed reports whether the file could not be linted completely, which
+// fails the run: it could not be processed at all (Error, counted in
+// Stats.FilesErrored), or a rule failed on it (RuleErrors, counted in
+// Stats.FilesWithRuleErrors).
 //
-// Every per-file failure belongs here, so that new kinds (for example errors
-// from individual rules) fail the run without changes elsewhere.
+// Every per-file failure belongs here, so that new kinds fail the run
+// without changes elsewhere.
 func (o *FileOutcome) Failed() bool {
 	return o.Error != nil || len(o.RuleErrors) > 0
 }
@@ -60,7 +62,9 @@ type Stats struct {
 	// FilesSkipped is the number of files skipped (e.g., due to concurrent modification).
 	FilesSkipped int
 
-	// FilesErrored is the number of files that encountered errors.
+	// FilesErrored is the number of files that could not be processed at
+	// all, such as files that could not be read or written. Files on which
+	// a rule failed are counted in FilesWithRuleErrors instead.
 	FilesErrored int
 
 	// DiagnosticsTotal is the total number of diagnostics across all files.
@@ -88,7 +92,7 @@ type Stats struct {
 	DiagnosticsFixed int
 
 	// FilesWithRuleErrors is the number of processed files on which at least
-	// one rule failed. These files also count in FilesErrored.
+	// one rule failed. These files are not counted in FilesErrored.
 	FilesWithRuleErrors int
 
 	// RuleErrors is the total number of rule failures, at most one per rule
@@ -148,7 +152,7 @@ func newStats() Stats {
 func (r *Result) accumulate(outcome FileOutcome) {
 	r.Files = append(r.Files, outcome)
 
-	if outcome.Failed() {
+	if outcome.Error != nil {
 		r.Stats.FilesErrored++
 	}
 

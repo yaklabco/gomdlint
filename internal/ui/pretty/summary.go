@@ -27,13 +27,36 @@ func (s *Styles) formatErrored(stats runner.Stats) string {
 	return s.Failure.Render(fmt.Sprintf("%d %s could not be linted", stats.FilesErrored, filesNoun(stats.FilesErrored)))
 }
 
+// formatRuleFailures counts the rules that failed on files of a run, once
+// per rule and file.
+func (s *Styles) formatRuleFailures(stats runner.Stats) string {
+	noun := "failures"
+	if stats.RuleErrors == 1 {
+		noun = "failure"
+	}
+	return s.Failure.Render(fmt.Sprintf("%d rule %s", stats.RuleErrors, noun))
+}
+
+// formatFailures describes what kept a run from linting its files
+// completely: files it could not lint, and rules that failed.
+func (s *Styles) formatFailures(stats runner.Stats) []string {
+	var parts []string
+	if stats.FilesErrored > 0 {
+		parts = append(parts, s.formatErrored(stats))
+	}
+	if stats.RuleErrors > 0 {
+		parts = append(parts, s.formatRuleFailures(stats))
+	}
+	return parts
+}
+
 // FormatSummaryOneLine formats run statistics as a single line.
 // Example: "12 issues (8 errors, 4 warnings) in 3 files, 6 fixable".
 func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 	checked := fmt.Sprintf("%d %s checked", stats.FilesProcessed, filesNoun(stats.FilesProcessed))
 
-	if stats.DiagnosticsTotal == 0 && stats.FilesErrored > 0 {
-		return s.formatErrored(stats) + s.Dim.Render(" ("+checked+", no issues found)") + "\n"
+	if failures := s.formatFailures(stats); stats.DiagnosticsTotal == 0 && len(failures) > 0 {
+		return strings.Join(failures, ", ") + s.Dim.Render(" ("+checked+", no issues found)") + "\n"
 	}
 
 	if stats.DiagnosticsTotal == 0 {
@@ -101,9 +124,7 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 		parts = append(parts, s.formatSkipped(stats))
 	}
 
-	if stats.FilesErrored > 0 {
-		parts = append(parts, s.formatErrored(stats))
-	}
+	parts = append(parts, s.formatFailures(stats)...)
 
 	return strings.Join(parts, ", ") + "\n"
 }

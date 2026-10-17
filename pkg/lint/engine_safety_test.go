@@ -232,6 +232,15 @@ func TestEngine_ReturnedRuleErrorIsWrapped(t *testing.T) {
 	assert.True(t, result.HasRuleErrors())
 }
 
+func TestFileResult_RuleErrorListSkipsRulesWithoutAnError(t *testing.T) {
+	t.Parallel()
+
+	plain := errors.New("plain failure")
+	result := &lint.FileResult{RuleErrors: map[string]error{"TEST002": plain, "TEST001": nil}}
+
+	assert.Equal(t, []*lint.RuleError{{RuleID: "TEST002", Err: plain}}, result.RuleErrorList())
+}
+
 func TestEngine_ConvertsFixNewlinesToTheFileLineEnding(t *testing.T) {
 	t.Parallel()
 

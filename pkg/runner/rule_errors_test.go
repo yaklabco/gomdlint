@@ -110,7 +110,7 @@ func TestRunner_Run_ReportsRuleErrorsPerFile(t *testing.T) {
 	assert.Equal(t, 2, result.Stats.FilesWithRuleErrors)
 	assert.Equal(t, 2, result.Stats.RuleErrors)
 	assert.Equal(t, 3, result.Stats.FilesProcessed)
-	assert.Equal(t, 2, result.Stats.FilesErrored, "rule failures fail the run")
+	assert.Zero(t, result.Stats.FilesErrored, "a file on which a rule failed could still be read")
 	assert.True(t, result.HasRuleErrors())
 }
 

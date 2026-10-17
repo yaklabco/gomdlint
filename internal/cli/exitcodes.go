@@ -38,7 +38,7 @@ const exitCodeHelp = `Exit codes:
   2   warnings found with --strict
   64  invalid command-line usage
   65  invalid configuration
-  70  internal error or interrupted run
+  70  internal error, a rule that failed, or an interrupted run
   74  a file could not be read or written`
 
 // ErrLintIssuesFound is returned when lint issues are found.
@@ -102,8 +102,11 @@ func ExitCode(err error) int {
 // ExitCodeFromResult determines the exit code based on result and strict mode.
 //
 // Files that could not be linted outrank findings, because the findings of an
-// incomplete run understate the problems. Error findings outrank warnings, and
-// warnings only fail the run in strict mode.
+// incomplete run understate the problems. So do rules that failed on a file,
+// which are internal errors: the file was read, but its findings or fixes may
+// be incomplete. A file that could not be read or written outranks a rule
+// failure. Error findings outrank warnings, and warnings only fail the run in
+// strict mode.
 func ExitCodeFromResult(result *runner.Result, strict bool) int {
 	if result == nil {
 		return ExitSuccess
@@ -111,6 +114,10 @@ func ExitCodeFromResult(result *runner.Result, strict bool) int {
 
 	if result.Stats.FilesErrored > 0 {
 		return ExitIOError
+	}
+
+	if result.Stats.FilesWithRuleErrors > 0 {
+		return ExitInternalError
 	}
 
 	if result.Stats.DiagnosticsBySeverity["error"] > 0 {

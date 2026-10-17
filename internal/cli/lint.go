@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yaklabco/gomdlint/internal/configloader"
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -47,7 +48,7 @@ type lintFlags struct {
 	toolVersion string
 }
 
-func newLintCommand(info BuildInfo) *cobra.Command {
+func newLintCommand(info BuildInfo, registry *lint.Registry) *cobra.Command {
 	var cfg config.Config
 	flags := &lintFlags{toolVersion: info.Version}
 
@@ -57,7 +58,7 @@ func newLintCommand(info BuildInfo) *cobra.Command {
 		Long:  lintLongDescription,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLint(cmd, args, &cfg, flags)
+			return runLint(cmd, args, &cfg, flags, registry)
 		},
 	}
 
@@ -133,7 +134,7 @@ func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
 	return cleanup, nil
 }
 
-func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags) error {
+func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags, registry *lint.Registry) error {
 	logger := logging.FromContext(cmd.Context())
 
 	if err := validateLintFlags(flags, cfg.Jobs); err != nil {
@@ -219,9 +220,6 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Create the parser based on flavor.
 	parser := goldmarkparser.New(string(finalCfg.Flavor))
 
-	// Use the default registry which has all built-in rules registered.
-	registry := lint.DefaultRegistry
-
 	// Create the lint engine.
 	engine := lint.NewEngine(parser, registry)
 
@@ -287,6 +285,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 	for _, warning := range skipWarnings(result) {
 		logger.Warn(warning)
+	}
+	for _, ruleFailure := range ruleFailures(result, workDir) {
+		logger.Error(ruleFailure)
 	}
 
 	// Write memory profile if requested.
@@ -357,6 +358,21 @@ func skipWarnings(result *runner.Result) []string {
 	return warnings
 }
 
+// ruleFailures describes each rule that failed on a file, with its cause.
+// They go to stderr, so every output format shows them. The stack of a rule
+// that panicked is in the debug log.
+func ruleFailures(result *runner.Result, workDir string) []string {
+	var failures []string
+	for idx := range result.Files {
+		file := &result.Files[idx]
+		for _, ruleErr := range file.RuleErrors {
+			failures = append(failures, fmt.Sprintf("rule %s failed on %s: %v",
+				ruleErr.RuleID, display.Path(file.Path, workDir), ruleErr.Err))
+		}
+	}
+	return failures
+}
+
 // resultError turns the outcome of a completed run into the command error
 // that carries its exit code.
 func resultError(result *runner.Result, strict bool) error {
@@ -365,14 +381,23 @@ func resultError(result *runner.Result, strict bool) error {
 	case ExitSuccess:
 		return nil
 	case ExitIOError:
-		noun := "files"
-		if result.Stats.FilesErrored == 1 {
-			noun = "file"
-		}
-		return &ExitError{Code: code, Err: fmt.Errorf("%d %s could not be linted", result.Stats.FilesErrored, noun)}
+		return &ExitError{Code: code, Err: fmt.Errorf("%d %s could not be linted",
+			result.Stats.FilesErrored, plural(result.Stats.FilesErrored, "file", "files"))}
+	case ExitInternalError:
+		return &ExitError{Code: code, Err: fmt.Errorf("%d rule %s on %d %s",
+			result.Stats.RuleErrors, plural(result.Stats.RuleErrors, "failure", "failures"),
+			result.Stats.FilesWithRuleErrors, plural(result.Stats.FilesWithRuleErrors, "file", "files"))}
 	default:
 		return &ExitError{Code: code, Err: ErrLintIssuesFound}
 	}
+}
+
+// plural returns one for a count of one and otherwise many.
+func plural(count int, one, many string) string {
+	if count == 1 {
+		return one
+	}
+	return many
 }
 
 // failure classifies the error of a stage that also fails when the run is
