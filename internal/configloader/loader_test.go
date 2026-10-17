@@ -669,6 +669,73 @@ func TestLoad_EnvDisablesBackups(t *testing.T) {
 	}
 }
 
+// TestLoad_EnvRuleFormat covers GOMDLINT_RULE_FORMAT, which sets how output
+// names rules unless the command line sets it. Config files cannot set it.
+func TestLoad_EnvRuleFormat(t *testing.T) {
+	load := func(t *testing.T, cli *config.Config) (*LoadResult, error) {
+		t.Helper()
+
+		return Load(context.Background(), LoadOptions{
+			WorkingDir:         t.TempDir(),
+			IgnoreSystemConfig: true,
+			IgnoreUserConfig:   true,
+			IgnoreMarkdownlint: true,
+			NonInteractive:     true,
+			CLIConfig:          cli,
+		})
+	}
+
+	t.Run("defaults to name", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "")
+
+		result, err := load(t, nil)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.RuleFormat != config.RuleFormatName {
+			t.Errorf("rule format = %q, want %q", result.Config.RuleFormat, config.RuleFormatName)
+		}
+	})
+
+	t.Run("selects the format", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+		result, err := load(t, nil)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.RuleFormat != config.RuleFormatID {
+			t.Errorf("rule format = %q, want %q", result.Config.RuleFormat, config.RuleFormatID)
+		}
+	})
+
+	t.Run("loses to the command line", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+		result, err := load(t, &config.Config{RuleFormat: config.RuleFormatCombined})
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.RuleFormat != config.RuleFormatCombined {
+			t.Errorf("rule format = %q, want %q", result.Config.RuleFormat, config.RuleFormatCombined)
+		}
+	})
+
+	t.Run("rejects an invalid value", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "ids")
+
+		_, err := load(t, nil)
+		if err == nil {
+			t.Fatal("Load() succeeded with an invalid rule format")
+		}
+		for _, want := range []string{`invalid rule format "ids"`, "name, id, combined"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err, want)
+			}
+		}
+	})
+}
+
 // TestLoader_RejectsDuplicateRules covers one file configuring a rule under
 // two keys. Map order would pick a winner at random, so loading fails and
 // names both keys.

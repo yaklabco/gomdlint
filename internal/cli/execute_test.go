@@ -125,12 +125,22 @@ func TestExecuteUsageErrors(t *testing.T) {
 		{name: "unknown command", args: []string{"bogus"}, wantStderr: `unknown command "bogus"`},
 		{name: "unknown flag", args: []string{"lint", "--bogus"}, wantStderr: "unknown flag: --bogus"},
 		{name: "invalid flavor", args: []string{"lint", "--flavor", "bogus"}, wantStderr: `invalid flavor "bogus"`},
-		{name: "invalid rule format", args: []string{"lint", "--rule-format", "bogus"}, wantStderr: `invalid rule format "bogus"`},
+		{
+			name: "invalid rule format", args: []string{"lint", "--rule-format", "bogus"},
+			wantStderr: `invalid rule format "bogus"; valid formats: name, id, combined`,
+		},
+		{
+			name: "rule format in the wrong case", args: []string{"lint", "--rule-format", "ID"},
+			wantStderr: `invalid rule format "ID"; valid formats: name, id, combined`,
+		},
 		{name: "invalid summary order", args: []string{"lint", "--summary-order", "bogus"}, wantStderr: `invalid summary order "bogus"`},
 		{name: "negative jobs", args: []string{"lint", "--jobs", "-1"}, wantStderr: "invalid jobs value -1"},
 		{name: "malformed ignore pattern", args: []string{"lint", "--ignore", "docs/[a-"}, wantStderr: `"docs/[a-"`},
 		{name: "invalid color", args: []string{"lint", "--color", "bogus"}, wantStderr: `invalid color mode "bogus"`},
-		{name: "rules with invalid rule format", args: []string{"rules", "--rule-format", "bogus"}, wantStderr: `invalid rule format "bogus"`},
+		{
+			name: "rules with invalid rule format", args: []string{"rules", "--rule-format", "bogus"},
+			wantStderr: `invalid rule format "bogus"; valid formats: name, id, combined`,
+		},
 		{name: "migrate with two inputs", args: []string{"migrate", "a.json", "b.json"}, wantStderr: "accepts at most 1 arg"},
 		{name: "init with invalid format", args: []string{"init", "--format", "toml"}, wantStderr: `invalid format "toml"`},
 	}

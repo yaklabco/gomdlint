@@ -33,6 +33,9 @@ func merge(base, override *config.Config) *config.Config {
 	if override.Format != "" {
 		result.Format = override.Format
 	}
+	if override.RuleFormat != "" {
+		result.RuleFormat = override.RuleFormat
+	}
 	if override.Jobs != 0 {
 		result.Jobs = override.Jobs
 	}

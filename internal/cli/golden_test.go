@@ -107,3 +107,85 @@ func TestLintRuleFormatDefaultsToName(t *testing.T) {
 	assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
 	assert.Equal(t, want, got.stdout)
 }
+
+// TestLintRuleFormatFromEnvironment covers GOMDLINT_RULE_FORMAT, which sets
+// the rule format of every human output format when --rule-format is not
+// given. Like GOMDLINT_FORMAT, an invalid value is a configuration error,
+// and the flag wins over the environment, even over an invalid value.
+func TestLintRuleFormatFromEnvironment(t *testing.T) {
+	project := readProject(t, testdataPath(t, "project"))
+	golden := func(t *testing.T, name string) string {
+		t.Helper()
+		return readFile(t, testdataPath(t, "golden", name+".golden"))
+	}
+
+	for _, format := range []string{"text", "table", "summary"} {
+		t.Run("selects the format of "+format+" output", func(t *testing.T) {
+			want := golden(t, "lint-"+format+"-id")
+			inProject(t, project)
+			t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+			got := execute(t, "lint", "--color", "never", "--format", format)
+
+			assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
+			assert.Equal(t, want, got.stdout)
+		})
+	}
+
+	t.Run("loses to the flag", func(t *testing.T) {
+		want := golden(t, "lint-text-combined")
+		inProject(t, project)
+		t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+		got := execute(t, "lint", "--color", "never", "--rule-format", "combined")
+
+		assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
+		assert.Equal(t, want, got.stdout)
+	})
+
+	t.Run("invalid value is a configuration error", func(t *testing.T) {
+		inProject(t, project)
+		t.Setenv("GOMDLINT_RULE_FORMAT", "ids")
+
+		got := execute(t, "lint", "--color", "never")
+
+		assert.Equal(t, cli.ExitConfigError, got.code)
+		assert.Contains(t, got.stderr, `invalid rule format "ids"; must be one of: name, id, combined`)
+		assert.Empty(t, got.stdout, "no file is linted with an invalid configuration")
+	})
+
+	t.Run("flag wins over an invalid value", func(t *testing.T) {
+		want := golden(t, "lint-text-name")
+		inProject(t, project)
+		t.Setenv("GOMDLINT_RULE_FORMAT", "ids")
+
+		got := execute(t, "lint", "--color", "never", "--rule-format", "name")
+
+		assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
+		assert.Equal(t, want, got.stdout)
+	})
+}
+
+// TestLintMachineFormatsIgnoreRuleFormat covers JSON, SARIF and diff
+// output, which do not change with --rule-format or GOMDLINT_RULE_FORMAT:
+// JSON and SARIF always carry both the rule ID and the rule name, and a
+// diff names no rules.
+func TestLintMachineFormatsIgnoreRuleFormat(t *testing.T) {
+	project := readProject(t, testdataPath(t, "project"))
+
+	for _, format := range []string{"json", "sarif", "diff"} {
+		t.Run(format, func(t *testing.T) {
+			inProject(t, project)
+			want := execute(t, "lint", "--color", "never", "--format", format)
+			require.NotEmpty(t, want.stdout)
+
+			for _, ruleFormat := range []string{"name", "id", "combined"} {
+				got := execute(t, "lint", "--color", "never", "--format", format, "--rule-format", ruleFormat)
+				assert.Equal(t, want, got, "--rule-format %s", ruleFormat)
+			}
+
+			t.Setenv("GOMDLINT_RULE_FORMAT", "combined")
+			assert.Equal(t, want, execute(t, "lint", "--color", "never", "--format", format), "GOMDLINT_RULE_FORMAT=combined")
+		})
+	}
+}

@@ -38,6 +38,7 @@ var envMappings = map[string]envMapping{
 	"DRY_RUN":          {field: "dry_run", typ: envTypeBool},
 	"JOBS":             {field: "jobs", typ: envTypeInt},
 	"FORMAT":           {field: "format", typ: envTypeString},
+	"RULE_FORMAT":      {field: "rule_format", typ: envTypeString},
 	"BACKUPS_ENABLED":  {field: "backups.enabled", typ: envTypeBool},
 	"BACKUPS_MODE":     {field: "backups.mode", typ: envTypeString},
 	"IGNORE":           {field: "ignore", typ: envTypeSlice},
@@ -120,6 +121,8 @@ func setStringField(cfg *config.Config, field, value string) error {
 		cfg.SeverityDefault = value
 	case "format":
 		cfg.Format = config.OutputFormat(value)
+	case "rule_format":
+		cfg.RuleFormat = config.RuleFormat(value)
 	case "backups.mode":
 		cfg.Backups.Mode = value
 	default:
@@ -190,6 +193,7 @@ func ListEnvVars() map[string]string {
 		"GOMDLINT_DRY_RUN":          "Dry-run mode: true or false",
 		"GOMDLINT_JOBS":             "Number of parallel workers (0 = auto)",
 		"GOMDLINT_FORMAT":           "Output format: text, table, json, sarif, diff, or summary",
+		"GOMDLINT_RULE_FORMAT":      "How lint text, table and summary output name rules: name, id, or combined",
 		"GOMDLINT_BACKUPS_ENABLED":  "Enable backups when fixing: true or false",
 		"GOMDLINT_BACKUPS_MODE":     "Backup mode: sidecar or none",
 		"GOMDLINT_IGNORE":           "Comma-separated list of ignore patterns",
