@@ -3,8 +3,10 @@ package pretty
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/clipperhouse/displaywidth"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -25,6 +27,22 @@ const (
 	heavySeparator     = "="
 	lightSeparator     = "-"
 	defaultTermWidth   = 100
+	truncationMarker   = "..." // Ends text cut to fit its column.
+
+	// A table wider than the terminal narrows MESSAGE and FILE past their
+	// minimum widths above, down to these floors, before it cuts rule
+	// identifiers (see fitWidths).
+	fitMessageWidth    = 20
+	fitMinMessageWidth = 10
+	fitMinFileWidth    = 10
+)
+
+// Column headers.
+const (
+	fileHeader    = "FILE"
+	locHeader     = "LOC"
+	messageHeader = "MESSAGE"
+	ruleHeader    = "RULE"
 )
 
 // TableRow represents a single row in the diagnostic table.
@@ -72,7 +90,7 @@ func (t *TableFormatter) FormatTable(result *runner.Result) string {
 	}
 
 	// Calculate column widths
-	colWidths := t.calculateColumnWidths(fileGroups)
+	colWidths := t.fitWidths(fileGroups, true)
 
 	var builder strings.Builder
 
@@ -108,6 +126,12 @@ func (t *TableFormatter) FormatTable(result *runner.Result) string {
 	return builder.String()
 }
 
+// FormatFileTitle formats the path that heads a per-file table, shortened
+// from its start to the terminal width.
+func (t *TableFormatter) FormatFileTitle(path string) string {
+	return t.styles.Bold.Render(TruncateStart(cellText(path), t.termWidth, truncationMarker))
+}
+
 // FormatFileTable formats a single file's diagnostics as a standalone table.
 func (t *TableFormatter) FormatFileTable(file runner.FileOutcome) string {
 	if file.Result == nil || file.Result.FileResult == nil {
@@ -126,7 +150,7 @@ func (t *TableFormatter) FormatFileTable(file runner.FileOutcome) string {
 	}
 
 	// Calculate column widths for this file (without FILE column since it's shown in header)
-	colWidths := t.calculateColumnWidthsForRows(rows)
+	colWidths := t.fitWidths([][]TableRow{rows}, false)
 
 	var builder strings.Builder
 
@@ -153,76 +177,31 @@ func (t *TableFormatter) FormatFileTable(file runner.FileOutcome) string {
 	return builder.String()
 }
 
-// calculateColumnWidthsForRows calculates widths for per-file table (no FILE column).
-func (t *TableFormatter) calculateColumnWidthsForRows(rows []TableRow) perFileColumnWidths {
-	widths := perFileColumnWidths{
-		loc:     minLocWidth,
-		message: minMessageWidth,
-		rule:    minRuleWidth,
-	}
-
-	for _, row := range rows {
-		if len(row.Location) > widths.loc {
-			widths.loc = len(row.Location)
-		}
-		if len(row.Message) > widths.message {
-			widths.message = len(row.Message)
-		}
-		if len(row.Rule) > widths.rule {
-			widths.rule = len(row.Rule)
-		}
-	}
-
-	// Constrain to terminal width (allowing more space for message without FILE column)
-	totalWidth := widths.loc + widths.message + widths.rule + (tablePadding * perFileColumnCount) + fixableColumnWidth
-	if totalWidth > t.termWidth {
-		excess := totalWidth - t.termWidth
-		widths.message = max(minMessageWidth, widths.message-excess)
-	}
-
-	return widths
-}
-
-type perFileColumnWidths struct {
-	loc     int
-	message int
-	rule    int
-}
-
 // formatPerFileHeader formats the header for per-file tables.
-func (t *TableFormatter) formatPerFileHeader(widths perFileColumnWidths) string {
-	header := fmt.Sprintf(" %-*s  %-*s  %-*s   ",
-		widths.loc, "LOC",
-		widths.message, "MESSAGE",
-		widths.rule, "RULE",
-	)
+func (t *TableFormatter) formatPerFileHeader(widths columnWidths) string {
+	header := " " + fitCell(locHeader, widths.loc) +
+		"  " + fitCell(messageHeader, widths.message) +
+		"  " + fitCell(ruleHeader, widths.rule) + "   "
 	return t.styles.TableHeader.Render(header)
 }
 
 // formatPerFileSeparator formats a separator line for per-file tables.
-func (t *TableFormatter) formatPerFileSeparator(widths perFileColumnWidths, char string) string {
-	totalWidth := widths.loc + widths.message + widths.rule + (tablePadding * perFileColumnCount) + fixableColumnWidth
-	sep := strings.Repeat(char, totalWidth)
+func (t *TableFormatter) formatPerFileSeparator(widths columnWidths, char string) string {
+	sep := strings.Repeat(char, separatorWidth(widths, false))
 	return t.styles.TableSeparator.Render(sep)
 }
 
 // formatPerFileRow formats a single row in the per-file table.
-func (t *TableFormatter) formatPerFileRow(row TableRow, widths perFileColumnWidths) string {
-	loc := truncateString(row.Location, widths.loc)
-	message := truncateString(row.Message, widths.message)
-	rule := truncateString(row.Rule, widths.rule)
-
+func (t *TableFormatter) formatPerFileRow(row TableRow, widths columnWidths) string {
 	fixable := " "
 	if row.Fixable {
 		fixable = t.styles.TableFixable.Render(fixableSymbol)
 	}
 
-	content := fmt.Sprintf(" %-*s  %-*s  %-*s  %s",
-		widths.loc, loc,
-		widths.message, message,
-		widths.rule, rule,
-		fixable,
-	)
+	content := " " + fitCell(row.Location, widths.loc) +
+		"  " + fitCell(row.Message, widths.message) +
+		"  " + fitCell(row.Rule, widths.rule) +
+		"  " + fixable
 
 	rowStyle := t.getRowStyle(row.Severity)
 	return rowStyle.Render(content)
@@ -290,51 +269,8 @@ func (t *TableFormatter) collectRows(result *runner.Result) [][]TableRow {
 	return groups
 }
 
-// calculateColumnWidths determines optimal column widths based on content.
-func (t *TableFormatter) calculateColumnWidths(groups [][]TableRow) columnWidths {
-	widths := columnWidths{
-		file:    minFileWidth,
-		loc:     minLocWidth,
-		message: minMessageWidth,
-		rule:    minRuleWidth,
-	}
-
-	// Scan all rows to find max widths
-	for _, group := range groups {
-		for _, row := range group {
-			if len(row.File) > widths.file {
-				widths.file = len(row.File)
-			}
-			if len(row.Location) > widths.loc {
-				widths.loc = len(row.Location)
-			}
-			if len(row.Message) > widths.message {
-				widths.message = len(row.Message)
-			}
-			if len(row.Rule) > widths.rule {
-				widths.rule = len(row.Rule)
-			}
-		}
-	}
-
-	// Constrain to terminal width
-	totalWidth := t.calculateTotalWidth(widths)
-	if totalWidth > t.termWidth {
-		// Reduce message width first
-		excess := totalWidth - t.termWidth
-		widths.message = max(minMessageWidth, widths.message-excess)
-
-		// If still too wide, reduce file width
-		totalWidth = t.calculateTotalWidth(widths)
-		if totalWidth > t.termWidth {
-			excess = totalWidth - t.termWidth
-			widths.file = max(minFileWidth, widths.file-excess)
-		}
-	}
-
-	return widths
-}
-
+// columnWidths holds the widths of the table's columns, in terminal cells.
+// Per-file tables have no FILE column.
 type columnWidths struct {
 	file    int
 	loc     int
@@ -342,51 +278,132 @@ type columnWidths struct {
 	rule    int
 }
 
-// formatHeader formats the table header row.
-func (t *TableFormatter) formatHeader(widths columnWidths) string {
-	header := fmt.Sprintf(" %-*s  %-*s  %-*s  %-*s   ",
-		widths.file, "FILE",
-		widths.loc, "LOC",
-		widths.message, "MESSAGE",
-		widths.rule, "RULE",
+// fitWidths returns the column widths of a table of the rows in groups,
+// with a FILE column if withFile. Each column is as wide as its widest cell
+// and at least its minimum width. When that is wider than the terminal, the
+// columns narrow in this order until the table fits: each column down to
+// its widest cell, MESSAGE and FILE down to their minimum widths, then
+// further down to their floors, and RULE last, so only a narrow terminal
+// cuts rule identifiers. A terminal narrower than every floor leaves the
+// table wider than itself.
+func (t *TableFormatter) fitWidths(groups [][]TableRow, withFile bool) columnWidths {
+	content := columnWidths{
+		file:    displaywidth.String(fileHeader),
+		loc:     displaywidth.String(locHeader),
+		message: displaywidth.String(messageHeader),
+		rule:    displaywidth.String(ruleHeader),
+	}
+	for _, group := range groups {
+		for idx := range group {
+			row := &group[idx]
+			content.file = max(content.file, displaywidth.String(row.File))
+			content.loc = max(content.loc, displaywidth.String(row.Location))
+			content.message = max(content.message, displaywidth.String(row.Message))
+			content.rule = max(content.rule, displaywidth.String(row.Rule))
+		}
+	}
+	if !withFile {
+		content.file = 0
+	}
+
+	widths := columnWidths{
+		loc:     max(minLocWidth, content.loc),
+		message: max(minMessageWidth, content.message),
+		rule:    max(minRuleWidth, content.rule),
+	}
+	if withFile {
+		widths.file = max(minFileWidth, content.file)
+	}
+
+	shrinkToFit(t.termWidth, func() int { return separatorWidth(widths, withFile) },
+		shrinkStep{&widths.loc, content.loc},
+		shrinkStep{&widths.file, content.file},
+		shrinkStep{&widths.message, content.message},
+		shrinkStep{&widths.rule, content.rule},
+		shrinkStep{&widths.message, minMessageWidth},
+		shrinkStep{&widths.file, minFileWidth},
+		shrinkStep{&widths.message, fitMessageWidth},
+		shrinkStep{&widths.file, fitMinFileWidth},
+		shrinkStep{&widths.message, fitMinMessageWidth},
+		shrinkStep{&widths.rule, minRuleWidth},
 	)
-	return t.styles.TableHeader.Render(header)
+
+	return widths
 }
 
-// calculateTotalWidth calculates the total table width from column widths.
-func (t *TableFormatter) calculateTotalWidth(widths columnWidths) int {
-	return widths.file + widths.loc + widths.message + widths.rule +
-		(tablePadding * tableColumnCount) + fixableColumnWidth
+// shrinkStep narrows one column, at most down to floor.
+type shrinkStep struct {
+	width *int
+	floor int
+}
+
+// shrinkToFit takes steps in order, each narrowing its column by as much
+// as the table is wider than limit, until total, the width of the table,
+// is at most limit or the steps run out.
+func shrinkToFit(limit int, total func() int, steps ...shrinkStep) {
+	for _, step := range steps {
+		excess := total() - limit
+		if excess <= 0 {
+			return
+		}
+		if *step.width > step.floor {
+			*step.width -= min(excess, *step.width-step.floor)
+		}
+	}
+}
+
+// separatorWidth returns the width of the separators of a table with
+// columns of widths, its widest lines.
+func separatorWidth(widths columnWidths, withFile bool) int {
+	total := widths.loc + widths.message + widths.rule + fixableColumnWidth
+	if withFile {
+		return total + widths.file + tablePadding*tableColumnCount
+	}
+	return total + tablePadding*perFileColumnCount
+}
+
+// fitCell cuts text to width terminal cells at its end and pads it with
+// spaces to width.
+func fitCell(text string, width int) string {
+	text = TruncateEnd(text, width, truncationMarker)
+	return text + fillTo(text, width)
+}
+
+// fitPathCell cuts a path to width terminal cells at its start, so the
+// file name stays visible, and pads it with spaces to width.
+func fitPathCell(path string, width int) string {
+	path = TruncateStart(path, width, truncationMarker)
+	return path + fillTo(path, width)
+}
+
+// formatHeader formats the table header row.
+func (t *TableFormatter) formatHeader(widths columnWidths) string {
+	header := " " + fitCell(fileHeader, widths.file) +
+		"  " + fitCell(locHeader, widths.loc) +
+		"  " + fitCell(messageHeader, widths.message) +
+		"  " + fitCell(ruleHeader, widths.rule) + "   "
+	return t.styles.TableHeader.Render(header)
 }
 
 // formatSeparator formats a separator line.
 func (t *TableFormatter) formatSeparator(widths columnWidths, char string) string {
-	totalWidth := t.calculateTotalWidth(widths)
-	sep := strings.Repeat(char, totalWidth)
+	sep := strings.Repeat(char, separatorWidth(widths, true))
 	return t.styles.TableSeparator.Render(sep)
 }
 
 // formatRow formats a single table row with severity-based styling.
 func (t *TableFormatter) formatRow(row TableRow, widths columnWidths) string {
-	// Truncate fields if necessary - use special truncation for file paths
-	file := truncateFilePath(row.File, widths.file)
-	loc := truncateString(row.Location, widths.loc)
-	message := truncateString(row.Message, widths.message)
-	rule := truncateString(row.Rule, widths.rule)
-
 	// Build the row content
 	fixable := " "
 	if row.Fixable {
 		fixable = t.styles.TableFixable.Render(fixableSymbol)
 	}
 
-	content := fmt.Sprintf(" %-*s  %-*s  %-*s  %-*s  %s",
-		widths.file, file,
-		widths.loc, loc,
-		widths.message, message,
-		widths.rule, rule,
-		fixable,
-	)
+	content := " " + fitPathCell(row.File, widths.file) +
+		"  " + fitCell(row.Location, widths.loc) +
+		"  " + fitCell(row.Message, widths.message) +
+		"  " + fitCell(row.Rule, widths.rule) +
+		"  " + fixable
 
 	// Apply row background based on severity
 	rowStyle := t.getRowStyle(row.Severity)
@@ -469,36 +486,27 @@ func countFixable(_ runner.Stats) int {
 	return 0
 }
 
-// truncateString truncates a string to maxLen, adding "..." if truncated.
-func truncateString(str string, maxLen int) string {
-	if len(str) <= maxLen {
-		return str
-	}
-	if maxLen <= 3 {
-		return str[:maxLen]
-	}
-	return str[:maxLen-3] + "..."
-}
-
-// truncateFilePath truncates a file path, preserving the end (filename) rather than beginning.
-func truncateFilePath(path string, maxLen int) string {
-	if len(path) <= maxLen {
-		return path
-	}
-	if maxLen <= 3 {
-		return path[len(path)-maxLen:]
-	}
-	return "..." + path[len(path)-maxLen+3:]
+// cellText makes text printable on one line of a table: invalid UTF-8
+// becomes the replacement character, and control characters, such as tabs
+// and newlines, become spaces. Tabs and newlines would otherwise widen or
+// break a row, and invalid bytes would make the output invalid UTF-8.
+func cellText(text string) string {
+	return strings.Map(func(char rune) rune {
+		if unicode.IsControl(char) {
+			return ' '
+		}
+		return char
+	}, strings.ToValidUTF8(text, string(unicode.ReplacementChar)))
 }
 
 // DiagnosticToTableRow converts a lint diagnostic to a table row, naming its
-// rule in ruleFormat.
+// rule in ruleFormat. Each cell holds one line of valid UTF-8 (see cellText).
 func DiagnosticToTableRow(path string, diag *lint.Diagnostic, ruleFormat config.RuleFormat) TableRow {
 	return TableRow{
-		File:     path,
+		File:     cellText(path),
 		Location: fmt.Sprintf("%d:%d", diag.StartLine, diag.StartColumn),
-		Message:  diag.Message,
-		Rule:     config.FormatRuleID(ruleFormat, diag.RuleID, diag.RuleName),
+		Message:  cellText(diag.Message),
+		Rule:     cellText(config.FormatRuleID(ruleFormat, diag.RuleID, diag.RuleName)),
 		Severity: diag.Severity,
 		Fixable:  len(diag.FixEdits) > 0,
 	}
