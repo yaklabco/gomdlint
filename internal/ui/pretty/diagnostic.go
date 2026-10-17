@@ -61,11 +61,11 @@ func (s *Styles) FormatDiagnosticWithLayout(diag *lint.Diagnostic, showContext b
 
 	// Columns are padded by the width of their plain text, outside the
 	// styles, whose escape sequences take no cells.
-	line := "  " + s.FilePath.Render(diag.FilePath) + position + padding(diag.FilePath+position, layout.LocationWidth) +
-		"  " + s.FormatSeverity(diag.Severity) + padding(severity, layout.SeverityWidth) +
+	line := "  " + s.FilePath.Render(diag.FilePath) + position + fillTo(diag.FilePath+position, layout.LocationWidth) +
+		"  " + s.FormatSeverity(diag.Severity) + fillTo(severity, layout.SeverityWidth) +
 		"  " + s.RuleID.Render(rule)
 	if diag.Message != "" {
-		line += padding(rule, layout.RuleWidth) + "  " + s.Message.Render(diag.Message)
+		line += fillTo(rule, layout.RuleWidth) + "  " + s.Message.Render(diag.Message)
 	}
 	builder.WriteString(line + "\n")
 
@@ -89,8 +89,8 @@ func diagnosticPosition(diag *lint.Diagnostic) string {
 	return fmt.Sprintf(":%d:%d", diag.StartLine, diag.StartColumn)
 }
 
-// padding returns the spaces that widen text to width terminal cells.
-func padding(text string, width int) string {
+// fillTo returns the spaces that widen text to width terminal cells.
+func fillTo(text string, width int) string {
 	return strings.Repeat(" ", max(width-displaywidth.String(text), 0))
 }
 
