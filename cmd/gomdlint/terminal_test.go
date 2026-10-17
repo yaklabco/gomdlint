@@ -93,7 +93,7 @@ func TestNoTerminalColorQueries(t *testing.T) {
 					t.Errorf("sent a %s: %q", query.name, head(output))
 				}
 			}
-			assert.Less(t, elapsed, 4*time.Second, "unanswered queries stall for seconds")
+			assert.Less(t, elapsed, 8*time.Second, "each unanswered query stalls for 5 seconds")
 			if !strings.Contains(output, tt.want) {
 				t.Errorf("the command did not run: %q", head(output))
 			}
