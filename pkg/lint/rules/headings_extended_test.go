@@ -1115,3 +1115,39 @@ func TestNoTrailingPunctuationRule_Metadata(t *testing.T) {
 	assert.True(t, rule.CanFix())
 	assert.True(t, rule.DefaultEnabled())
 }
+
+// TestNoTrailingPunctuationRule_FragmentsInRawHTML verifies that MD026 keeps
+// a heading anchor that a raw HTML tag could refer to, however the tag is
+// written, in both flavors, and still fixes headings when raw HTML holds a
+// hash only in element text or a comment.
+func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantFix bool
+	}{
+		{name: "unquoted value with a character reference after an equals sign", input: "# Foo !\n\n<div>\n<a href=?q=&#35;foo->jump</a>\n</div>\n"},
+		{name: "unquoted value with a hash after an equals sign", input: "# Foo !\n\n<div>\n<a href=?q==#foo->jump</a>\n</div>\n"},
+		{name: "unterminated tag in an HTML block", input: "# Foo !\n\n<div>\n<a href=#foo-\n"},
+		{name: "unterminated tag in a paragraph", input: "# Foo !\n\nSee <a href=#foo-\n"},
+		{name: "tag spanning lines in an HTML block", input: "# Foo !\n\n<div>\n<a\nhref=\"#foo-\">jump</a>\n</div>\n"},
+		{name: "tag spanning lines in a paragraph", input: "# Foo !\n\nSee <a\nhref=\"#foo-\">jump</a>.\n"},
+		{name: "quoted greater-than sign before the hash", input: "# Foo !\n\n<div>\n<a title=\">\" href=\"#foo-\">jump</a>\n</div>\n"},
+		{name: "hash in element text", input: "# Foo !\n\n<div>\n#hashtag text\n</div>\n", wantFix: true},
+		{name: "hash in a comment", input: "# Foo !\n\n<!-- #note -->\n", wantFix: true},
+	}
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		for _, tt := range tests {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				file, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(tt.input))
+				require.NoError(t, err)
+				cfg := config.NewConfig()
+				cfg.Flavor = flavor
+				diags, err := NewNoTrailingPunctuationRule().Apply(lint.NewRuleContext(context.Background(), file, cfg, nil))
+				require.NoError(t, err)
+				require.Len(t, diags, 1)
+				assert.Equal(t, tt.wantFix, diags[0].HasFix())
+			})
+		}
+	}
+}

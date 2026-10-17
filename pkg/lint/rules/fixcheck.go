@@ -1068,13 +1068,9 @@ type docOutline struct {
 	blocks      []blockSummary
 	// fragments is true when the document holds anything that could be a
 	// fragment reference: a link or image whose destination holds "#", or
-	// an attribute value in raw HTML that holds "#" or a character reference.
+	// a raw HTML tag that holds "#" or a character reference.
 	fragments bool
 }
-
-// htmlAttributeValuePattern matches an attribute and its value in raw HTML.
-var htmlAttributeValuePattern = regexp.MustCompile(
-	`[^\s"'<>/=]+\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>` + "`" + `]+)`)
 
 // outlineOf returns the outline of doc.
 func outlineOf(doc *mdast.FileSnapshot) docOutline {
@@ -1094,16 +1090,64 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 			if strings.Contains(lint.LinkDestination(node), "#") || mayHoldHash(source) {
 				outline.fragments = true
 			}
-		case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
-			for _, match := range htmlAttributeValuePattern.FindAllSubmatch(source, -1) {
-				if mayHoldHash(match[1]) {
-					outline.fragments = true
-				}
+		case mdast.NodeHTMLBlock, mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
+			// Raw HTML is in HTML blocks and in inline content.
+			if tagsMayHoldHash(source) {
+				outline.fragments = true
 			}
 		}
 		return nil
 	})
 	return outline
+}
+
+// tagsMayHoldHash reports whether a tag in text, raw HTML or Markdown with
+// inline HTML, holds "#" or a character reference that could stand for it.
+// Attributes are not parsed: a tag runs from "<" and a letter, "/", "!" or
+// "?" to the first ">" outside quotes, or to the end of text, and is taken
+// whole. Comments and the text between tags are left out.
+func tagsMayHoldHash(text []byte) bool {
+	for idx := 0; idx+1 < len(text); idx++ {
+		if text[idx] != '<' {
+			continue
+		}
+		if bytes.HasPrefix(text[idx:], []byte("<!--")) {
+			end := bytes.Index(text[idx+len("<!--"):], []byte("-->"))
+			if end < 0 {
+				return false
+			}
+			idx += len("<!--") + end + len("-->") - 1
+			continue
+		}
+		if next := text[idx+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {
+			continue
+		}
+		end := tagEnd(text, idx)
+		if mayHoldHash(text[idx:end]) {
+			return true
+		}
+		idx = end - 1
+	}
+	return false
+}
+
+// tagEnd returns the offset after the ">" that ends the tag starting at
+// start, stepping over quoted strings, or the end of text when there is
+// none.
+func tagEnd(text []byte, start int) int {
+	for pos := start + 1; pos < len(text); pos++ {
+		switch text[pos] {
+		case '"', '\'':
+			closing := bytes.IndexByte(text[pos+1:], text[pos])
+			if closing < 0 {
+				return len(text)
+			}
+			pos += 1 + closing
+		case '>':
+			return pos + 1
+		}
+	}
+	return len(text)
 }
 
 // mayHoldHash reports whether text holds "#", or a character reference that
