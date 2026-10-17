@@ -168,7 +168,7 @@ The codebase employs several well-established patterns:
 
 `pkg/lint/registry.go`
 
-`DefaultRegistry` is a thread-safe singleton (protected by `sync.RWMutex`). Rules self-register via `init()` functions, each with a catalog entry from `pkg/lint/rules/catalog_<category>.go` that records its markdownlint aliases, category and markdownlint tags. `Lookup` finds a rule by ID (`MD001`), name (`heading-increment`), or alias, in any case. `RulesByTag` resolves the tags of inline directives, and `Suggest` offers the closest rules and tags for a key that names none.
+`DefaultRegistry` is a thread-safe singleton (protected by `sync.RWMutex`). Rules self-register via `init()` functions, each with a catalog entry from `pkg/lint/rules/catalog_<category>.go` that records its markdownlint aliases, category and markdownlint tags. `Lookup` finds a rule by ID (`MD001`), name (`heading-increment`), or alias, in any case. `RulesByTag` resolves the tags of inline directives, and `Suggest` offers the closest rules and tags for a key that names none. `Closest` picks the best of them for error and warning messages, which name a rule by name, then ID, as in `no-trailing-spaces (MD009)`.
 
 ### Strategy Pattern
 
@@ -518,7 +518,7 @@ For each rule, the final configuration is computed:
 | `autoFix` | `rule.CanFix()` | `rules.X.auto_fix` | `--fix-rules` filter |
 | `options` | Rule-specific | `rules.X.options.*` | — |
 
-**Rule Identification:** Config files accept a rule's ID (`MD001`), name (`heading-increment`), or markdownlint alias (`ul-style` for MD004) interchangeably, in any case, through `Registry.Lookup`.
+**Rule Identification:** Config files accept a rule's ID (`MD001`), name (`heading-increment`), or markdownlint alias (`ul-style` for MD004) interchangeably, in any case, through `Registry.Lookup`. The `--enable`, `--disable` and `--fix-rules` flags also accept markdownlint tags (`whitespace`), which stand for every rule they cover, and the shell completes all of these for them. A key or flag value that names no rule gets a warning or error that suggests the closest rules.
 
 ## Design Principles
 
