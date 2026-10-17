@@ -235,6 +235,22 @@ func TestMaxLineLengthRule_MarkdownlintOptions(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
+			name:      "label line of a reference definition is not reported",
+			input:     "[id\n " + strings.Repeat("long label ", 10) + "]: /url\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "label of 999 characters at most makes a definition",
+			input:     "[x\n" + strings.Repeat(" "+strings.Repeat("long label ", 10)+"\n", 8) + "]: /url\n",
+			wantDiags: 0,
+		},
+		{
+			// A longer label is not a label, so the lines are paragraph text.
+			name:      "label of more than 999 characters makes no definition",
+			input:     "[x\n" + strings.Repeat(" "+strings.Repeat("long label ", 10)+"\n", 10) + "]: /url\n",
+			wantDiags: 10,
+		},
+		{
 			name:      "reference definition in a blockquote is not reported",
 			input:     "> [id]: /target\n>     \"" + spacedLine(90) + "\"\n>\n> See [id].\n",
 			wantDiags: 0,

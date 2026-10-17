@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -302,9 +303,9 @@ func markdownlintLinkOnlyLines(ctx *lint.RuleContext) map[int]bool {
 }
 
 // definitionStartPattern matches the start of a link reference definition
-// once the container markers of its line are removed: a label in brackets
-// and a colon.
-var definitionStartPattern = regexp.MustCompile(`^ {0,3}\[(?:[^\]\\]|\\.)+\]:`)
+// once the container markers of its line are removed: the bracket that opens
+// its label, which may go on over the next lines.
+var definitionStartPattern = regexp.MustCompile(`^ {0,3}\[`)
 
 // containerMarkersPattern matches the blockquote markers and list markers at
 // the start of a line, with the whitespace around them.
@@ -313,28 +314,88 @@ var containerMarkersPattern = regexp.MustCompile(`^(?:[ \t]*(?:>[ \t]?|(?:[-+*]|
 // markdownlintDefinitionLines returns every line of each link reference
 // definition, which markdownlint never reports. The parser keeps no node for
 // a definition, so its lines are the ones that no leaf block covers: a line
-// whose text starts with "[label]:" after its container markers, and the
-// lines that continue it, such as a title on the next line, up to a blank
-// line or a line that a block covers.
+// whose text starts with the "[" of a label after its container markers,
+// and the lines that continue it, such as the rest of a long label, the
+// destination or the title, up to a blank line or a line that a block
+// covers. The label must close with "]:" within 999 characters, as
+// CommonMark and markdownlint require; goldmark also accepts longer labels,
+// which markdownlint reads as paragraph text.
 func markdownlintDefinitionLines(ctx *lint.RuleContext) map[int]bool {
 	covered := leafBlockLines(ctx.Root)
+	var rests [][]byte
+	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+		var rest []byte
+		if lineNum > ctx.File.FrontMatterLines && !covered[lineNum] {
+			text := lint.LineText(ctx.File, lineNum)
+			rest = text[len(containerMarkersPattern.Find(text)):]
+			if len(bytes.TrimSpace(rest)) == 0 {
+				rest = nil
+			}
+		}
+		rests = append(rests, rest)
+	}
+
 	lines := make(map[int]bool)
 	inDefinition := false
-	for lineNum := ctx.File.FrontMatterLines + 1; lineNum <= len(ctx.File.Lines); lineNum++ {
-		text := lint.LineText(ctx.File, lineNum)
-		rest := text[len(containerMarkersPattern.Find(text)):]
-		if covered[lineNum] || len(bytes.TrimSpace(rest)) == 0 {
+	for idx, rest := range rests {
+		if rest == nil {
 			inDefinition = false
 			continue
 		}
-		if definitionStartPattern.Match(rest) {
+		if definitionStartPattern.Match(rest) && definitionLabelCloses(rests[idx:]) {
 			inDefinition = true
 		}
 		if inDefinition {
-			lines[lineNum] = true
+			lines[idx+1] = true
 		}
 	}
 	return lines
+}
+
+// maxLinkLabelLength is the CommonMark limit on the characters between the
+// brackets of a link label.
+const maxLinkLabelLength = 999
+
+// definitionLabelCloses reports whether the label that opens on the first of
+// the given lines closes with "]:" within the label length limit, before a
+// line that is blank or that a block covers (nil). The lines are the text
+// after the container markers. A paragraph drops the indentation of the
+// lines that continue it, and each line ending counts as a character.
+func definitionLabelCloses(rests [][]byte) bool {
+	length := 0
+	blank := true
+	for idx, rest := range rests {
+		if rest == nil {
+			return false
+		}
+		text := bytes.TrimLeft(rest, " \t")
+		if idx == 0 {
+			text = text[1:]
+		} else {
+			length++
+		}
+		for pos := 0; pos < len(text); pos++ {
+			switch char := text[pos]; {
+			case char == '\\' && pos+1 < len(text):
+				pos++
+				length++
+				blank = false
+			case char == '[':
+				return false
+			case char == ']':
+				return !blank && length <= maxLinkLabelLength && pos+1 < len(text) && text[pos+1] == ':'
+			case char != ' ' && char != '\t':
+				blank = false
+			}
+			if utf8.RuneStart(text[pos]) {
+				length++
+			}
+		}
+		if length > maxLinkLabelLength {
+			return false
+		}
+	}
+	return false
 }
 
 // leafBlockLines returns the lines that leaf blocks cover: paragraphs,
