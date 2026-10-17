@@ -1,6 +1,6 @@
 # Table Column Style
 
-<!-- NOTE: MD060 is opt-in. Configure with style: "compact" or "tight". -->
+<!-- NOTE: MD060 defaults to style "any". Configure "compact" or "tight". -->
 
 | Name | Value |
 | --- | --- |
