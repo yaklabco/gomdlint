@@ -65,6 +65,34 @@ func TestBlockSpans(t *testing.T) {
 			},
 		},
 		{
+			name:  "closed atx heading with a tab before the closing sequence",
+			input: "## Title\t##\n",
+			expect: []spanExpectation{
+				{mdast.NodeHeading, 0, "## Title\t##", "Title\t"},
+			},
+		},
+		{
+			name:  "closed atx heading with several words and spaces in a blockquote",
+			input: "> # A b  #\n",
+			expect: []spanExpectation{
+				{mdast.NodeHeading, 0, "# A b  #", "A b  "},
+			},
+		},
+		{
+			name:  "atx heading whose last hash is escaped has no closing sequence",
+			input: "# Title \\#\n",
+			expect: []spanExpectation{
+				{mdast.NodeHeading, 0, "# Title \\#", "Title \\#"},
+			},
+		},
+		{
+			name:  "atx heading whose hashes are not after a space has no closing sequence",
+			input: "# Title #b\n",
+			expect: []spanExpectation{
+				{mdast.NodeHeading, 0, "# Title #b", "Title #b"},
+			},
+		},
+		{
 			name:  "indented atx heading",
 			input: "   # Title\n",
 			expect: []spanExpectation{
@@ -490,6 +518,125 @@ func TestReferenceDefinitionsLeaveNoEmptyNodes(t *testing.T) {
 	require.Equal(t, []mdast.NodeKind{mdast.NodeList, mdast.NodeParagraph}, kinds)
 }
 
+// childKinds returns the kinds of a node's children in order.
+func childKinds(node *mdast.Node) []mdast.NodeKind {
+	var kinds []mdast.NodeKind
+	for child := node.FirstChild; child != nil; child = child.Next {
+		kinds = append(kinds, child.Kind)
+	}
+	return kinds
+}
+
+// TestReferenceDefinitionsLeaveNoNodes checks that link reference
+// definitions, which render nothing, leave no node wherever they stand: the
+// text after them keeps its paragraph, and the blocks around them are
+// siblings, whether goldmark drops the definitions or gives them nodes.
+func TestReferenceDefinitionsLeaveNoNodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		flavor string
+		input  string
+		// top holds the kinds of the document's children, and item those of
+		// the first list item's children when the document has a list.
+		top, item []mdast.NodeKind
+		// paragraph is the full text of the first paragraph, if any.
+		paragraph string
+	}{
+		{
+			name: "definition then text", flavor: FlavorCommonMark, input: "[a]: /url\ntext [a]\n",
+			top: []mdast.NodeKind{mdast.NodeParagraph}, paragraph: "text [a]",
+		},
+		{
+			name: "definitions then heading", flavor: FlavorCommonMark, input: "[a]: /url\n[b]: /url\n\n# H\n",
+			top: []mdast.NodeKind{mdast.NodeHeading},
+		},
+		{
+			name: "definition right before a heading", flavor: FlavorCommonMark, input: "[a]: /url\n# H\n",
+			top: []mdast.NodeKind{mdast.NodeHeading},
+		},
+		{
+			name: "definition between paragraphs", flavor: FlavorCommonMark, input: "a\n\n[x]: /url\n\nb\n",
+			top: []mdast.NodeKind{mdast.NodeParagraph, mdast.NodeParagraph}, paragraph: "a",
+		},
+		{
+			name: "definition then text in a blockquote", flavor: FlavorCommonMark, input: "> [a]: /url\n> text\n",
+			top: []mdast.NodeKind{mdast.NodeBlockquote}, paragraph: "text",
+		},
+		{
+			name: "definition then text in a list item", flavor: FlavorCommonMark, input: "- [x]: /url\n  text\n- b\n",
+			top: []mdast.NodeKind{mdast.NodeList}, item: []mdast.NodeKind{mdast.NodeParagraph}, paragraph: "text",
+		},
+		{
+			name: "two definitions then text in a list item", flavor: FlavorCommonMark, input: "- [x]: /url\n  [y]: /url\n  text\n- b\n",
+			top: []mdast.NodeKind{mdast.NodeList}, item: []mdast.NodeKind{mdast.NodeParagraph}, paragraph: "text",
+		},
+		{
+			name: "definition after a blank line in a list item", flavor: FlavorCommonMark, input: "- a\n\n  [x]: /url\n- b\n",
+			top: []mdast.NodeKind{mdast.NodeList}, item: []mdast.NodeKind{mdast.NodeParagraph}, paragraph: "a",
+		},
+		{
+			name: "definition then table", flavor: FlavorGFM, input: "[a]: /url\n| a | b |\n| - | - |\n",
+			top: []mdast.NodeKind{mdast.NodeTable},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := parseForSpans(t, tt.flavor, tt.input)
+			require.Empty(t, mdast.FindByKind(file.Root, mdast.NodeRaw))
+			require.Equal(t, tt.top, childKinds(file.Root))
+			if tt.item != nil {
+				require.Equal(t, tt.item, childKinds(nthNode(file.Root, mdast.NodeListItem, 0)))
+			}
+			if tt.paragraph != "" {
+				require.Equal(t, tt.paragraph, string(nthNode(file.Root, mdast.NodeParagraph, 0).Text()))
+			}
+		})
+	}
+}
+
+// TestListTightnessFollowsCommonMark checks the tightness of lists whose
+// items hold link reference definitions against CommonMark: a definition
+// renders nothing, so text right after it is the item's first block, and
+// only blank lines make a list loose. Lists are listed in document order.
+func TestListTightnessFollowsCommonMark(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		tight []bool
+	}{
+		{"definition then text in the first item", "- [x]: /url\n  text\n- b\n", []bool{true}},
+		{"definition then text in the only item", "- [x]: /url\n  text\n", []bool{true}},
+		{"two definitions then text in the first item", "- [x]: /url\n  [y]: /url\n  text\n- b\n", []bool{true}},
+		{"definition then text in an ordered list", "1. [a]: /u\n   text\n2. b\n", []bool{true}},
+		{"definition then text after a paragraph", "Intro\n\n- [x]: /url\n  text\n- b\n", []bool{true}},
+		{"definition then text in a blockquote", "> - [x]: /url\n>   text\n> - b\n", []bool{true}},
+		{"definition then text in a nested list", "- a\n  - [x]: /url\n    text\n  - c\n", []bool{true, true}},
+		{"definition then text in the second item", "- a\n- [x]: /url\n  text\n", []bool{true}},
+		{"definition alone in the first item", "- [x]: /url\n- b\n", []bool{true}},
+		{"definition then a setext heading in the first item", "- [x]: /url\n  H\n  ===\n- b\n", []bool{true}},
+		{"definition then a dash setext heading in the first item", "- [x]: /url\n  H\n  ---\n- b\n", []bool{true}},
+		{"definition then a fence in the first item", "- [x]: /url\n  ```\n  code\n  ```\n- b\n", []bool{true}},
+		{"definitions in two paragraphs", "- [x]: /url\n\n  [y]: /url\n- b\n", []bool{false}},
+		{"definitions in two paragraphs then text", "- [x]: /url\n\n  [y]: /url\n  text\n- b\n", []bool{false}},
+		{"blank line between definition and text", "- [x]: /url\n\n  text\n- b\n", []bool{false}},
+		{"blank line between text and definition", "- a\n\n  [x]: /url\n- b\n", []bool{false}},
+		{"blank line after the text that follows a definition", "- [x]: /url\n  text\n\n  more\n- b\n", []bool{false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			lists := mdast.FindByKind(file.Root, mdast.NodeList)
+			tight := make([]bool, 0, len(lists))
+			for _, list := range lists {
+				require.NotNil(t, list.Block)
+				require.NotNil(t, list.Block.List)
+				tight = append(tight, list.Block.List.Tight)
+			}
+			require.Equal(t, tt.tight, tight)
+		})
+	}
+}
+
 func TestTableNodes(t *testing.T) {
 	input := "Lead\n\n| a | b | c |\n| :- | :-: | -: |\n| 1 | 2 |\n\n> | q |\n> |---|\n> | r |\n"
 	file := parseForSpans(t, FlavorGFM, input)
@@ -534,6 +681,17 @@ func TestTaskCheckboxNodes(t *testing.T) {
 		require.Equal(t, want, box.Inline.Checked)
 		require.Equal(t, mdast.NodeParagraph, box.Parent.Kind)
 	}
+}
+
+// TestTaskMarkerAfterDefinitionIsText checks that a task marker on the line
+// after a link reference definition that starts an item is text: the item
+// does not start with it, so GitHub and micromark make no checkbox of it.
+func TestTaskMarkerAfterDefinitionIsText(t *testing.T) {
+	file := parseForSpans(t, FlavorGFM, "- [c]: /url\n  [x] done\n- [ ] b\n")
+	boxes := mdast.FindByKind(file.Root, mdast.NodeTaskCheckbox)
+	require.Len(t, boxes, 1)
+	require.Equal(t, "[ ]", string(boxes[0].Text()))
+	require.Equal(t, "[x] done", string(nthNode(file.Root, mdast.NodeParagraph, 0).Text()))
 }
 
 func TestStrikethroughNode(t *testing.T) {

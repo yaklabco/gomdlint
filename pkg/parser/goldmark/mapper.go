@@ -1,6 +1,7 @@
 package goldmark
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
@@ -125,14 +126,20 @@ func (m *mapper) mapNode(gmNode ast.Node) *mdast.Node {
 
 	case *ast.Paragraph, *ast.TextBlock:
 		// A tight list item holds its text in a TextBlock: a paragraph
-		// rendered without <p>. A TextBlock with no lines stands for link
-		// reference definitions that goldmark removed; it has no source.
+		// rendered without <p>. A block with no lines has no source.
 		if gmNode.Lines().Len() == 0 && !gmNode.HasChildren() {
 			return nil
 		}
 		node = mdast.NewNode(mdast.NodeParagraph)
 		m.mapChildren(gmNode, node)
 		m.setParagraphSpans(node, gmNode)
+
+	case *ast.LinkReferenceDefinition:
+		// A definition renders nothing, and the tree records no node for
+		// it: the refs package finds definitions on the lines that no leaf
+		// block covers. goldmark gives each definition a node of its own,
+		// placed before the paragraph it started, if any text is left.
+		return nil
 
 	case *ast.List:
 		node = m.mapList(gmn)
@@ -228,17 +235,47 @@ func (m *mapper) mapHeading(heading *ast.Heading) *mdast.Node {
 
 	first, last := lines.At(0), lines.At(lines.Len()-1)
 	content := mdast.SourceRange{StartOffset: m.abs(first.Start), EndOffset: m.abs(last.Stop)}
-	// goldmark keeps the spaces before a closing sequence in the text segment.
 	content.EndOffset = m.trimLineEnding(content.StartOffset, content.EndOffset)
 	if extent == nil {
 		setSpans(node, content, content)
 		return node
 	}
 	full := m.extentRange(extent)
+	if full.StartOffset < len(m.content) && m.content[full.StartOffset] == '#' {
+		// The content keeps the spaces before a closing sequence, which
+		// goldmark leaves out of the text segment.
+		content.EndOffset = m.closingSequenceStart(content.EndOffset)
+	}
 	// A setext heading opens on its underline; its text lines come first.
 	full.StartOffset = min(full.StartOffset, content.StartOffset)
 	setSpans(node, full, clampTo(content, full))
 	return node
+}
+
+// closingSequenceStart returns where the closing sequence of an ATX heading
+// whose text ends at end starts, when only spaces and tabs come between
+// them, and end otherwise. A closing sequence is a run of '#' that only
+// spaces and tabs follow on its line.
+func (m *mapper) closingSequenceStart(end int) int {
+	isBlank := func(ch byte) bool { return ch == ' ' || ch == '\t' }
+	start := end
+	for start < len(m.content) && isBlank(m.content[start]) {
+		start++
+	}
+	if start == end || start == len(m.content) || m.content[start] != '#' {
+		return end
+	}
+	rest := start
+	for rest < len(m.content) && m.content[rest] == '#' {
+		rest++
+	}
+	for rest < len(m.content) && isBlank(m.content[rest]) {
+		rest++
+	}
+	if rest < len(m.content) && m.content[rest] != '\n' && m.content[rest] != '\r' {
+		return end
+	}
+	return start
 }
 
 // mapList converts a goldmark List to an mdast node.
@@ -248,7 +285,7 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 	listAttrs := &mdast.ListAttrs{
 		Ordered:     list.IsOrdered(),
 		StartNumber: list.Start,
-		Tight:       list.IsTight,
+		Tight:       ListTight(list, m.source),
 	}
 
 	// goldmark's Marker is the bullet character of a bullet list and the
@@ -263,6 +300,74 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 	m.mapChildren(list, node)
 	m.setContainerSpans(node, list, false)
 	return node
+}
+
+// ListTight reports whether a list that goldmark parsed from source is tight
+// as CommonMark reads it. Use it instead of list.IsTight, which goldmark
+// gets wrong when an item starts with link reference definitions.
+//
+// goldmark reads a list as loose when an item but the first, or a block of
+// an item but its first, follows a blank line, by the blocks' blank-line
+// flags (listParser.Close). It gives each link reference definition that
+// starts a paragraph a node of its own before the paragraph, and the first
+// of them takes the paragraph's flag. The rest of the paragraph then counts
+// as a later block of the item, although no blank line separates it from the
+// definitions, and keeps the flag that its first line got when the item
+// followed a blank line, so goldmark reads the list as loose. Definitions
+// render nothing, so they and the rest of their paragraph count as one block.
+func ListTight(list *ast.List, source []byte) bool {
+	if list.IsTight {
+		return true
+	}
+	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+		if item != list.FirstChild() && item.HasBlankPreviousLines() {
+			return false
+		}
+		first := firstBlockEnd(item.FirstChild(), source)
+		if first == nil {
+			continue
+		}
+		for block := first.NextSibling(); block != nil; block = block.NextSibling() {
+			if block.HasBlankPreviousLines() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// firstBlockEnd returns the last node of an item's first block, which starts
+// at node. That is node itself unless it is a link reference definition.
+// Then the block is the paragraph the definition started: it runs over the
+// definitions on the lines that follow and ends with the node that starts
+// on the line after the last of them, which holds the rest of the paragraph
+// (text or a setext heading) or a block that ended it. Definitions after a
+// blank line started another paragraph and are a block of their own.
+func firstBlockEnd(node ast.Node, source []byte) ast.Node {
+	if _, ok := node.(*ast.LinkReferenceDefinition); !ok {
+		return node
+	}
+	for next := node.NextSibling(); next != nil && startsOnNextLine(node, next, source); next = node.NextSibling() {
+		node = next
+		if _, ok := next.(*ast.LinkReferenceDefinition); !ok {
+			break
+		}
+	}
+	return node
+}
+
+// startsOnNextLine reports whether the first line of next is the line after
+// the last line of prev. Blocks without lines never are.
+func startsOnNextLine(prev, next ast.Node, source []byte) bool {
+	prevLines, nextLines := prev.Lines(), next.Lines()
+	if prevLines.Len() == 0 || nextLines.Len() == 0 {
+		return false
+	}
+	end, start := prevLines.At(prevLines.Len()-1).Stop, nextLines.At(0).Start
+	if end > start || start > len(source) {
+		return false
+	}
+	return bytes.Count(source[end:start], []byte{'\n'}) == 1
 }
 
 // mapFencedCodeBlock converts a goldmark FencedCodeBlock to an mdast node.

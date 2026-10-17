@@ -24,7 +24,7 @@
     "column": 46,
     "message": "Bare URL used",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD034",

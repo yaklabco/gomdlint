@@ -18,6 +18,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
+	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // individualFixChecks is the number of fixes a rule may report in a file up
@@ -638,7 +639,7 @@ func (s *signatureWriter) block(node gmast.Node) {
 		if node.IsOrdered() {
 			kind = fmt.Sprintf("OL%d", node.Start)
 		}
-		fmt.Fprintf(s.out, "%s%t(", kind, node.IsTight)
+		fmt.Fprintf(s.out, "%s%t(", kind, gmparser.ListTight(node, s.source))
 		s.blocks(node)
 	case *gmast.FencedCodeBlock:
 		info := ""
