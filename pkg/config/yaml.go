@@ -54,6 +54,45 @@ func (c *Config) ToYAMLWithHeader(header string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// UnmarshalYAML decodes the settings of one rule: a mapping of enabled,
+// severity, auto_fix and options, or markdownlint's shorthand of a bare
+// boolean, which enables (true) or disables (false) the rule and leaves its
+// other settings alone. Strings such as "yes" are not booleans here, as in
+// markdownlint. YAML is a superset of JSON, so JSON config files get the
+// shorthand too.
+func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
+	switch {
+	case value.Kind == yaml.ScalarNode && value.ShortTag() == "!!bool":
+		var enabled bool
+		if err := value.Decode(&enabled); err != nil {
+			return fmt.Errorf("decode rule shorthand: %w", err)
+		}
+		*rc = RuleConfig{Enabled: &enabled}
+		return nil
+	case value.Kind == yaml.MappingNode:
+		// The settings type without this method decodes the mapping as
+		// usual, field by field.
+		type settings RuleConfig
+		var decoded settings
+		if err := value.Decode(&decoded); err != nil {
+			return err //nolint:wrapcheck // A *yaml.TypeError keeps its line numbers only when returned as is.
+		}
+		*rc = RuleConfig(decoded)
+		return nil
+	default:
+		return &yaml.TypeError{Errors: []string{fmt.Sprintf(
+			"line %d: rule settings must be true, false or a mapping, not %s", value.Line, describeNode(value))}}
+	}
+}
+
+// describeNode names the value of a YAML node for an error message.
+func describeNode(node *yaml.Node) string {
+	if node.Kind == yaml.ScalarNode {
+		return fmt.Sprintf("%s %q", node.ShortTag(), node.Value)
+	}
+	return node.ShortTag()
+}
+
 // FromYAML parses a configuration from YAML bytes.
 func FromYAML(data []byte) (*Config, error) {
 	cfg := &Config{}
