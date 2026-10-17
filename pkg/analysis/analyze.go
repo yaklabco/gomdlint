@@ -168,9 +168,13 @@ func Analyze(result *runner.Result, opts Options) *Report {
 
 	for _, file := range result.Files {
 		report.Totals.Files++
+		if file.Error != nil {
+			report.Totals.FilesErrored++
+		}
 		if file.Result == nil || file.Result.FileResult == nil {
 			continue
 		}
+		report.Totals.RuleErrors += len(file.Result.RuleErrorList())
 		if len(file.Result.Diagnostics) > 0 {
 			report.Totals.FilesWithIssues++
 		}

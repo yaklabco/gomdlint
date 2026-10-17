@@ -1,0 +1,304 @@
+package runner_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/runner"
+)
+
+// contentRule runs a function of the file content.
+type contentRule struct {
+	lint.BaseRule
+
+	apply func(content []byte) ([]lint.Diagnostic, error)
+}
+
+func (r *contentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+	return r.apply(ctx.File.Content)
+}
+
+func newContentRule(id string, apply func(content []byte) ([]lint.Diagnostic, error)) *contentRule {
+	return &contentRule{BaseRule: lint.NewBaseRule(id, "rule-"+id, "", nil, true), apply: apply}
+}
+
+func runFiles(t *testing.T, cfg *config.Config, files map[string]string, rules ...lint.Rule) *runner.Result {
+	t.Helper()
+
+	dir := t.TempDir()
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
+	}
+
+	registry := lint.NewRegistry()
+	for _, rule := range rules {
+		registry.Register(rule)
+	}
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Jobs:       2,
+		Config:     cfg,
+	})
+	require.NoError(t, err)
+	return result
+}
+
+func outcomeFor(t *testing.T, result *runner.Result, name string) runner.FileOutcome {
+	t.Helper()
+	for _, outcome := range result.Files {
+		if filepath.Base(outcome.Path) == name {
+			return outcome
+		}
+	}
+	t.Fatalf("no outcome for %s", name)
+	return runner.FileOutcome{}
+}
+
+func TestRunner_Run_ReportsRuleErrorsPerFile(t *testing.T) {
+	t.Parallel()
+
+	errBoom := errors.New("boom")
+	failing := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		if bytes.Contains(content, []byte("boom")) {
+			return nil, errBoom
+		}
+		return nil, nil
+	})
+	panicking := newContentRule("TEST002", func(content []byte) ([]lint.Diagnostic, error) {
+		if bytes.Contains(content, []byte("panic")) {
+			panic("rule bug")
+		}
+		return nil, nil
+	})
+
+	result := runFiles(t, config.NewConfig(), map[string]string{
+		"a.md": "boom\n",
+		"b.md": "fine\n",
+		"c.md": "panic\n",
+	}, failing, panicking)
+
+	failed := outcomeFor(t, result, "a.md")
+	require.NoError(t, failed.Error, "a rule error does not stop the file from being processed")
+	require.Len(t, failed.RuleErrors, 1)
+	assert.Equal(t, "TEST001", failed.RuleErrors[0].RuleID)
+	require.ErrorIs(t, failed.RuleErrors[0], errBoom)
+
+	assert.Empty(t, outcomeFor(t, result, "b.md").RuleErrors)
+
+	panicked := outcomeFor(t, result, "c.md")
+	require.Len(t, panicked.RuleErrors, 1)
+	require.ErrorIs(t, panicked.RuleErrors[0], lint.ErrRulePanic)
+
+	fine := outcomeFor(t, result, "b.md")
+	assert.True(t, failed.Failed(), "a file on which a rule failed was not linted completely")
+	assert.True(t, panicked.Failed())
+	assert.False(t, fine.Failed())
+
+	assert.Equal(t, 2, result.Stats.FilesWithRuleErrors)
+	assert.Equal(t, 2, result.Stats.RuleErrors)
+	assert.Equal(t, 3, result.Stats.FilesProcessed)
+	assert.Zero(t, result.Stats.FilesErrored, "a file on which a rule failed could still be read")
+	assert.True(t, result.HasRuleErrors())
+}
+
+func TestRunner_Run_PreviewKeepsRuleFailuresOfTheFixedContent(t *testing.T) {
+	t.Parallel()
+
+	// TEST001 fixes "x" to "y"; TEST002 fails only on the fixed content, so
+	// only the preview, which applies the fixes, sees it fail. TEST003
+	// fails on every content and must be reported once.
+	fixer := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		idx := bytes.IndexByte(content, 'x')
+		if idx < 0 {
+			return nil, nil
+		}
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "x", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}}}}, nil
+	})
+	picky := newContentRule("TEST002", func(content []byte) ([]lint.Diagnostic, error) {
+		if bytes.Contains(content, []byte("y")) {
+			panic("cannot handle y")
+		}
+		return nil, nil
+	})
+	errBroken := errors.New("always broken")
+	broken := newContentRule("TEST003", func([]byte) ([]lint.Diagnostic, error) {
+		return nil, errBroken
+	})
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("x\n"), 0o644))
+	registry := lint.NewRegistry()
+	for _, rule := range []lint.Rule{fixer, picky, broken} {
+		registry.Register(rule)
+	}
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:        []string{"."},
+		WorkingDir:   dir,
+		Config:       config.NewConfig(),
+		PreviewFixes: true,
+	})
+	require.NoError(t, err)
+
+	outcome := outcomeFor(t, result, "a.md")
+	require.NoError(t, outcome.Error)
+	require.NotNil(t, outcome.Result.Diff, "the preview diff is attached")
+	require.Len(t, outcome.RuleErrors, 2, "each failing rule is reported once")
+	assert.Equal(t, "TEST002", outcome.RuleErrors[0].RuleID)
+	require.ErrorIs(t, outcome.RuleErrors[0], lint.ErrRulePanic)
+	assert.Equal(t, "TEST003", outcome.RuleErrors[1].RuleID)
+	require.ErrorIs(t, outcome.RuleErrors[1], errBroken)
+	assert.Contains(t, outcome.Result.RuleErrors, "TEST002", "reporters that read the pipeline result see the failure too")
+	assert.Equal(t, 1, result.Stats.FilesWithRuleErrors)
+	assert.Equal(t, 2, result.Stats.RuleErrors)
+	assert.Zero(t, result.Stats.FilesErrored)
+	content, err := os.ReadFile(filepath.Join(dir, "a.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(content), "a preview never writes")
+}
+
+func TestRunner_Run_ReportsSkippedEditsAndOscillation(t *testing.T) {
+	t.Parallel()
+
+	// Both rules always propose their fix, and the fixes overlap: the first
+	// is applied, then reproposed as a no-op, so the loop stops with the
+	// second fix still skipped.
+	first := newContentRule("TEST001", func([]byte) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "one", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "HELLO"}}}}, nil
+	})
+	second := newContentRule("TEST002", func([]byte) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{{RuleID: "TEST002", Message: "two", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: 3, EndOffset: 8, NewText: "xx"}}}}, nil
+	})
+
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+	result := runFiles(t, cfg, map[string]string{"a.md": "hello world\n"}, first, second)
+
+	outcome := outcomeFor(t, result, "a.md")
+	require.NoError(t, outcome.Error)
+	assert.True(t, outcome.Oscillated)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 3, EndOffset: 8, NewText: "xx"},
+	}}, outcome.SkippedEdits)
+	assert.Equal(t, 1, result.Stats.EditsSkipped)
+	assert.False(t, result.HasRuleErrors())
+}
+
+func TestRunner_Run_FixesSymlinkTargetsOnlyInsideTheLintedPaths(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.md")
+	require.NoError(t, os.WriteFile(target, []byte("x\n"), 0o644))
+	link := filepath.Join(dir, "link.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	xToY := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		idx := bytes.IndexByte(content, 'x')
+		if idx < 0 {
+			return nil, nil
+		}
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "x", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}}}}, nil
+	})
+	registry := lint.NewRegistry()
+	registry.Register(xToY)
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+
+	// Linting the directory must not write a file outside it through a link.
+	result, err := lintRunner.Run(context.Background(), runner.Options{Paths: []string{"."}, WorkingDir: dir, Config: cfg})
+	require.NoError(t, err)
+	outcome := outcomeFor(t, result, "link.md")
+	require.NotNil(t, outcome.Result)
+	assert.True(t, outcome.Result.Skipped)
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(got))
+	assert.Zero(t, result.Stats.DiagnosticsFixed, "a refused write fixes nothing")
+	assert.Equal(t, 1, result.Stats.DiagnosticsTotal, "the unfixed finding is still counted")
+
+	// Naming the link explicitly allows writing its target.
+	result, err = lintRunner.Run(context.Background(), runner.Options{Paths: []string{"link.md"}, WorkingDir: dir, Config: cfg})
+	require.NoError(t, err)
+	outcome = outcomeFor(t, result, "link.md")
+	require.NotNil(t, outcome.Result)
+	assert.True(t, outcome.Result.Written)
+	got, err = os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "y\n", string(got))
+}
+
+func TestRunner_Run_DoesNotFixThroughFollowedDirectoryLinks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "doc.md")
+	require.NoError(t, os.WriteFile(target, []byte("x\n"), 0o644))
+	if err := os.Symlink(outside, filepath.Join(dir, "sub")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	xToY := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		idx := bytes.IndexByte(content, 'x')
+		if idx < 0 {
+			return nil, nil
+		}
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "x", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}}}}, nil
+	})
+	registry := lint.NewRegistry()
+	registry.Register(xToY)
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths: []string{"."}, WorkingDir: dir, FollowSymlinks: true, Config: cfg,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, result.Files, 1, "the linked directory is followed for linting")
+	require.NotNil(t, result.Files[0].Result)
+	assert.True(t, result.Files[0].Result.Skipped)
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(got), "a followed directory link must not lead a fix outside the linted paths")
+}
+
+func TestResult_HasRuleErrors(t *testing.T) {
+	t.Parallel()
+
+	var nilResult *runner.Result
+	assert.False(t, nilResult.HasRuleErrors())
+	assert.False(t, (&runner.Result{}).HasRuleErrors())
+	assert.True(t, (&runner.Result{Stats: runner.Stats{FilesWithRuleErrors: 1}}).HasRuleErrors())
+}

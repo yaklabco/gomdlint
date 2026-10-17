@@ -24,10 +24,20 @@ func NewRegistry() *Registry {
 }
 
 // Register adds a rule to the registry.
-// If a rule with the same ID already exists, it is replaced.
+// If a rule with the same ID already exists, it is replaced, and the name
+// of the replaced rule no longer resolves unless the new rule uses it too.
 func (r *Registry) Register(rule Rule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if old, ok := r.byID[rule.ID()]; ok {
+		// Only drop the old name if it still points at the replaced rule;
+		// another rule may have registered the same name since.
+		if named, ok := r.byName[old.Name()]; ok && named.ID() == old.ID() {
+			delete(r.byName, old.Name())
+		}
+	}
+
 	r.byID[rule.ID()] = rule
 	r.byName[rule.Name()] = rule
 }

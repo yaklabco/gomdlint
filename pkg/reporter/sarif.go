@@ -3,6 +3,7 @@ package reporter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -374,10 +375,20 @@ func (b *sarifRunBuilder) addRuleFailures(path string, ruleErrors map[string]err
 		}
 
 		index := b.ruleReference(ruleID, "")
-		notification := b.failure(fmt.Sprintf("rule %s failed: %v", ruleID, err), path)
+		notification := b.failure(fmt.Sprintf("rule %s failed: %v", ruleID, ruleFailureCause(err)), path)
 		notification.AssociatedRule = &SARIFRuleReference{ID: ruleID, Index: &index}
 		b.notify(notification)
 	}
+}
+
+// ruleFailureCause returns the cause of a rule failure. A *lint.RuleError
+// names its rule in its message, which the reports name already.
+func ruleFailureCause(err error) error {
+	var ruleErr *lint.RuleError
+	if errors.As(err, &ruleErr) && ruleErr.Err != nil {
+		return ruleErr.Err
+	}
+	return err
 }
 
 // failure returns an error notification with message, located at path when

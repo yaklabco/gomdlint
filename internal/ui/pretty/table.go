@@ -442,9 +442,7 @@ func (t *TableFormatter) FormatTableSummary(stats runner.Stats, duration string)
 
 	parts = append(parts, fmt.Sprintf("%d %s checked", stats.FilesProcessed, filesNoun(stats.FilesProcessed)))
 
-	if stats.FilesErrored > 0 {
-		parts = append(parts, t.styles.formatErrored(stats))
-	}
+	parts = append(parts, t.styles.formatFailures(stats)...)
 
 	if stats.DiagnosticsBySeverity["error"] > 0 {
 		errCount := t.styles.Error.Render(fmt.Sprintf("%d errors", stats.DiagnosticsBySeverity["error"]))

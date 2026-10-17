@@ -291,9 +291,8 @@ func TestGenerateDiff_EdgeCases(t *testing.T) {
 	t.Run("handles content without trailing newline", func(t *testing.T) {
 		t.Parallel()
 
-		// Note: line-based diff treats "line1\nline2" and "line1\nline2\n"
-		// as equivalent since both split to the same lines.
-		// This test verifies actual content changes are detected.
+		// Content changes on a last line without a newline are detected.
+		// Newline-only changes are covered in diff_unified_test.go.
 		original := []byte("line1\nline2")
 		modified := []byte("line1\nline3")
 

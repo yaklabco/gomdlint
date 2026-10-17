@@ -1,12 +1,18 @@
 package lint
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/fsutil"
@@ -30,12 +36,47 @@ var (
 
 	// ErrWriteFailure indicates a write error.
 	ErrWriteFailure = errors.New("write failure")
+
+	// ErrInternal indicates a bug: processing the file panicked. The panic
+	// was recovered so other files are still processed. The error is an
+	// *InternalError.
+	ErrInternal = errors.New("internal error")
 )
+
+// InternalError records a panic recovered while processing one file. It
+// matches ErrInternal with errors.Is, and also the panic value when that is
+// an error.
+type InternalError struct {
+	// Path is the file being processed.
+	Path string
+
+	// Value is the value the code panicked with.
+	Value any
+
+	// Stack is the stack trace captured when the panic was recovered.
+	Stack []byte
+}
+
+// Error implements error.
+func (e *InternalError) Error() string {
+	return fmt.Sprintf("%s: panic while processing %s: %v", ErrInternal.Error(), e.Path, e.Value)
+}
+
+// Unwrap returns ErrInternal and, when the panic value is an error, that
+// error.
+func (e *InternalError) Unwrap() []error {
+	if err, ok := e.Value.(error); ok {
+		return []error{ErrInternal, err}
+	}
+	return []error{ErrInternal}
+}
 
 // PipelineResult contains the result of processing a single file through the safety pipeline.
 type PipelineResult struct {
-	// FileResult contains lint diagnostics and edits from the FINAL pass.
-	// For multi-pass fixing, this reflects the state after all passes.
+	// FileResult contains lint diagnostics and edits for the final content:
+	// after fixing, the fixed content is linted once more, so diagnostics
+	// describe what is left. RuleErrors also includes failures from earlier
+	// fix passes.
 	*FileResult
 
 	// Path is the file path that was processed.
@@ -44,7 +85,7 @@ type PipelineResult struct {
 	// OriginalInfo is the file state before processing.
 	OriginalInfo *fsutil.FileInfo
 
-	// Modified is true if the file content was changed.
+	// Modified is true if fixing changed the file's bytes.
 	Modified bool
 
 	// ModifiedContent is the new content after applying edits (nil if not modified).
@@ -65,16 +106,23 @@ type PipelineResult struct {
 	// Written is true if the file was written to disk.
 	Written bool
 
-	// FixPasses is the number of fix passes performed (for multi-pass fixing).
+	// FixPasses is the number of fix passes that changed the content.
 	FixPasses int
 
 	// TotalEditsApplied is the total number of edits applied across all passes.
 	TotalEditsApplied int
 
-	// Exhausted is true if the fix loop hit MaxFixPasses with edits remaining.
+	// Exhausted is true if the fix loop hit MaxFixPasses while the fixed
+	// content still had fixes to apply.
 	Exhausted bool
 
-	// RemainingEdits is the count of edits that could not be applied due to exhaustion.
+	// Oscillated is true if the fix loop stopped because applying the
+	// remaining fixes would only recreate content from an earlier pass: the
+	// fixes undo each other, or change nothing.
+	Oscillated bool
+
+	// RemainingEdits is the number of edits still proposed for the final
+	// content when the loop stopped early (Exhausted or Oscillated).
 	RemainingEdits int
 }
 
@@ -113,13 +161,114 @@ type PipelineOptions struct {
 	// When false, only mod time and size are checked.
 	StrictRaceDetection bool
 
-	// ReParseAfterFix re-parses the modified content to validate fixes.
+	// ReParseAfterFix has no effect. Fixed content is always re-linted, and so
+	// re-parsed, after every fix pass, and a fix whose result cannot be parsed
+	// is never written.
+	//
+	// Deprecated: The pipeline always re-parses fixed content.
 	ReParseAfterFix bool
 
 	// MaxFixPasses limits the number of fix iterations to prevent infinite loops.
 	// When conflicting edits are skipped, a subsequent pass may be able to fix them.
 	// Set to 0 to use DefaultMaxFixPasses.
 	MaxFixPasses int
+
+	// WriteRoots limits where fixes are written: a file is fixed only if its
+	// fully resolved path (every symbolic link along it followed, whether
+	// the file itself or a directory above it) lies inside one of these
+	// paths, directories or files (see WriteRoots). Otherwise the file is
+	// linted but not fixed and is marked Skipped, so linting a tree never
+	// changes a file outside it through a link. Empty means no restriction.
+	// Hard links are not affected: they are the same file under another name.
+	WriteRoots []string
+}
+
+// WriteRoots returns the paths that PipelineOptions.WriteRoots should hold
+// for a run over paths: each path made absolute (relative paths start from
+// workingDir, or the current directory when it is empty) with symbolic links
+// resolved, so a link named on the command line allows its target.
+func WriteRoots(workingDir string, paths []string) []string {
+	if workingDir == "" {
+		if wd, err := os.Getwd(); err == nil {
+			workingDir = wd
+		}
+	}
+
+	roots := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		roots = append(roots, resolvePath(path))
+	}
+	return roots
+}
+
+// resolvePath returns path as an absolute path with symbolic links resolved,
+// or as clean an approximation as possible when it cannot be resolved.
+func resolvePath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
+}
+
+// resolveFile resolves every symbolic link in path and returns the absolute
+// path of the file that path names. A missing or unreadable path fails with
+// the fsutil error that reading it would give, so it is categorized alike.
+func resolveFile(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "", fmt.Errorf("%w: %s: %w", fsutil.ErrNotFound, path, err)
+	case errors.Is(err, fs.ErrPermission):
+		return "", fmt.Errorf("%w: %s: %w", fsutil.ErrPermissionDenied, path, err)
+	case err != nil:
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	target, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	return target, nil
+}
+
+// writeRoot picks the directory that every operation on target is confined
+// to, and target's path relative to it: the write root that contains
+// target, or target's own directory when that root is the file itself or
+// no roots are set. It reports false when roots are set and none contains
+// target.
+func writeRoot(target string, roots []string) (string, string, bool) {
+	dir, name := filepath.Dir(target), filepath.Base(target)
+	if len(roots) == 0 {
+		return dir, name, true
+	}
+	for _, root := range roots {
+		resolved := resolvePath(root)
+		if !pathWithin(target, resolved) {
+			continue
+		}
+		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+			if rel, err := filepath.Rel(resolved, target); err == nil {
+				return resolved, rel, true
+			}
+		}
+		return dir, name, true
+	}
+	return dir, name, false
+}
+
+// pathWithin reports whether path is root or lies below it. Both must be
+// absolute and clean.
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // DefaultPipelineOptions returns sensible defaults.
@@ -129,7 +278,6 @@ func DefaultPipelineOptions() PipelineOptions {
 		DryRun:              false,
 		Backup:              fsutil.DefaultBackupConfig(),
 		StrictRaceDetection: true,
-		ReParseAfterFix:     false,
 	}
 }
 
@@ -137,6 +285,10 @@ func DefaultPipelineOptions() PipelineOptions {
 type Pipeline struct {
 	// Engine is the lint engine used for parsing and rule execution.
 	Engine *Engine
+
+	// beforeWrite, when set, runs after every check and right before the
+	// backup and write. Tests use it to change the file system at that point.
+	beforeWrite func()
 }
 
 // NewPipeline creates a new safety pipeline with the given engine.
@@ -148,17 +300,35 @@ func NewPipeline(engine *Engine) *Pipeline {
 //
 // The pipeline performs the following steps:
 //  1. Read and hash the original file.
-//  2. Multi-pass fix loop (if fix mode enabled):
-//     a. Run the lint engine.
-//     b. If no edits, exit loop.
-//     c. Apply edits in memory.
-//     d. Repeat with modified content until stable or max passes.
-//  3. Optionally re-parse to validate fixes.
-//  4. Generate diff (if dry-run mode).
-//  5. Check for concurrent modifications.
-//  6. Create backup (if enabled).
-//  7. Write the modified content atomically.
+//  2. Lint the file and, in fix mode, apply fixes pass by pass, re-linting
+//     the fixed content after each pass, until no fix remains, the fixes
+//     start repeating earlier content, or MaxFixPasses is reached.
+//  3. Generate diff (if dry-run mode).
+//  4. Check for concurrent modifications.
+//  5. Create backup (if enabled).
+//  6. Write the modified content (see fsutil.WriteAtomic).
+//
+// A panic while processing the file is recovered and returned as an error
+// wrapping ErrInternal.
 func (p *Pipeline) ProcessFile(
+	ctx context.Context,
+	path string,
+	cfg *config.Config,
+	opts PipelineOptions,
+) (*PipelineResult, error) {
+	var (
+		result *PipelineResult
+		err    error
+	)
+	if panicErr := recoverPanic(ctx, path, func() {
+		result, err = p.processFile(ctx, path, cfg, opts)
+	}); panicErr != nil {
+		return nil, panicErr
+	}
+	return result, err
+}
+
+func (p *Pipeline) processFile(
 	ctx context.Context,
 	path string,
 	cfg *config.Config,
@@ -168,113 +338,139 @@ func (p *Pipeline) ProcessFile(
 		Path: path,
 	}
 
-	// Step 1: Read and hash the original file.
-	originalContent, info, err := fsutil.ReadFile(ctx, path)
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("processing cancelled: %w", ctx.Err())
+	default:
+	}
+
+	// Step 1: Resolve the file and pin it inside the write root that
+	// contains it. The pinned file holds the root directory and the file it
+	// read: every later check, backup and write goes through that directory
+	// handle and verifies that the name still refers to the same file, so
+	// neither a moved link nor a replaced directory or file can redirect
+	// the write.
+	target, err := resolveFile(path)
 	if err != nil {
 		return nil, categorizeError(err)
 	}
-	result.OriginalInfo = info
+	rootDir, name, inside := writeRoot(target, opts.WriteRoots)
+	pinned, err := fsutil.Pin(rootDir, name)
+	if err != nil {
+		return nil, categorizeError(err)
+	}
+	defer pinned.Close()
 
-	// Determine max passes (use default if not set).
-	maxPasses := opts.MaxFixPasses
-	if maxPasses <= 0 {
-		maxPasses = DefaultMaxFixPasses
+	originalContent := pinned.Content()
+	result.OriginalInfo = pinned.Info()
+
+	// A fix may only write inside the linted paths. A file outside them is
+	// linted without fixing (in dry runs too, so a preview never shows a
+	// change that a real run would refuse).
+	outside := opts.Fix && !inside
+	lintOpts := opts
+	if outside {
+		lintOpts.Fix = false
 	}
 
-	// Working content starts as original.
-	content := originalContent
-	var fileResult *FileResult
-
-	// Step 2: Multi-pass fix loop.
-	for range maxPasses {
-		// Check for cancellation.
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("processing cancelled: %w", ctx.Err())
-		default:
-		}
-
-		// Run the lint engine on current content.
-		var lintErr error
-		fileResult, lintErr = p.Engine.LintFile(ctx, path, content, cfg)
-		if lintErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrParseFailure, lintErr)
-		}
-
-		// If not in fix mode or no edits available, we're done.
-		if !opts.Fix || len(fileResult.Edits) == 0 {
-			break
-		}
-
-		// Apply edits in memory.
-		content = fix.ApplyEdits(content, fileResult.Edits)
-		result.FixPasses++
-		result.TotalEditsApplied += len(fileResult.Edits)
-		result.Modified = true
+	// Step 3: Lint, and fix pass by pass.
+	content, original, err := p.lintAndFix(ctx, path, originalContent, cfg, lintOpts, result)
+	if err != nil {
+		return nil, err
 	}
-
-	// Check if we exhausted passes with edits remaining.
-	if result.FixPasses >= maxPasses && len(fileResult.Edits) > 0 {
-		result.Exhausted = true
-		result.RemainingEdits = len(fileResult.Edits)
-	}
-
-	// Store the final lint result.
-	result.FileResult = fileResult
-	result.ModifiedContent = content
-
-	// If no modifications were made, clear ModifiedContent.
-	if !result.Modified {
-		result.ModifiedContent = nil
+	if outside {
+		if len(original.Edits) > 0 {
+			refuseWrite(result, original,
+				fmt.Sprintf("not fixed: %s resolves to %s, outside the linted paths", path, target))
+		}
 		return result, nil
 	}
-
-	// Step 3: Optional re-parse to validate fixes.
-	if opts.ReParseAfterFix {
-		_, err := p.Engine.Parser.Parse(ctx, path, content)
-		if err != nil {
-			// Re-parse failed; abort fix.
-			result.Skipped = true
-			result.SkipReason = fmt.Sprintf("re-parse failed: %v", err)
-			result.Modified = false
-			result.ModifiedContent = nil
-			return result, nil
-		}
+	if !result.Modified {
+		return result, nil
 	}
+	result.ModifiedContent = content
 
-	// Step 4: Handle dry-run mode.
+	// Step 2: Handle dry-run mode.
 	if opts.DryRun {
 		result.Diff = fix.GenerateDiff(path, originalContent, content)
 		return result, nil
 	}
 
-	// Step 5: Check for concurrent modifications before writing.
-	modified, err := p.checkModified(ctx, info, opts.StrictRaceDetection)
-	if err != nil {
-		return nil, fmt.Errorf("check modified: %w", err)
-	}
-	if modified {
-		result.Skipped = true
-		result.SkipReason = "file modified during processing"
+	// Step 3: Make sure the path given still leads to the pinned file (a
+	// link retargeted meanwhile makes it unclear which file was meant), that
+	// the name still refers to the file that was read, and that nobody
+	// changed it meanwhile.
+	if current, err := resolveFile(path); err != nil || current != target {
+		refuseWrite(result, original, fmt.Sprintf("not fixed: %s no longer leads to %s", path, target))
 		return result, nil
 	}
+	if err := pinned.Check(opts.StrictRaceDetection); err != nil {
+		if errors.Is(err, fsutil.ErrFileChanged) {
+			refuseWrite(result, original, "not fixed: "+err.Error())
+			return result, nil
+		}
+		return nil, fmt.Errorf("check modified: %w", err)
+	}
 
-	// Step 6: Create backup if enabled.
+	if p.beforeWrite != nil {
+		p.beforeWrite()
+	}
+
+	// Step 4: Back up the content that was read, if enabled. The backup
+	// checks again that the file is unchanged and stays in its directory.
 	if opts.Backup.Enabled {
-		created, err := fsutil.CreateBackup(ctx, path, opts.Backup)
+		created, err := pinned.Backup(opts.Backup.Mode)
 		if err != nil {
+			if errors.Is(err, fsutil.ErrFileChanged) {
+				refuseWrite(result, original, "not fixed: "+err.Error())
+				return result, nil
+			}
 			return nil, fmt.Errorf("create backup: %w", err)
 		}
 		result.BackupCreated = created
 	}
 
-	// Step 7: Write the modified content atomically.
-	if err := fsutil.WriteAtomic(ctx, path, content, info.Mode); err != nil {
+	// Step 5: Write the fixed content. The write checks again, at commit
+	// time, that the name still refers to the pinned file.
+	if err := pinned.Write(content); err != nil {
+		if errors.Is(err, fsutil.ErrFileChanged) {
+			refuseWrite(result, original, "not fixed: "+err.Error())
+			return result, nil
+		}
 		return nil, fmt.Errorf("%w: %w", ErrWriteFailure, err)
 	}
 	result.Written = true
 
 	return result, nil
+}
+
+// refuseWrite marks a file as skipped without writing it. The result then
+// describes the file as it is: the lint result of the original content,
+// with no pending edits and no fix passes counted, and with the rule
+// failures of every pass.
+func refuseWrite(result *PipelineResult, original *FileResult, reason string) {
+	if result.FileResult != nil && result.FileResult != original {
+		for id, ruleErr := range result.RuleErrors {
+			if _, ok := original.RuleErrors[id]; !ok {
+				original.RuleErrors[id] = ruleErr
+			}
+		}
+	}
+	original.Edits = nil
+	original.SkippedEdits = nil
+	original.EditConflicts = false
+
+	result.FileResult = original
+	result.Skipped = true
+	result.SkipReason = reason
+	result.Modified = false
+	result.ModifiedContent = nil
+	result.Diff = nil
+	result.FixPasses = 0
+	result.TotalEditsApplied = 0
+	result.Exhausted = false
+	result.Oscillated = false
+	result.RemainingEdits = 0
 }
 
 // ProcessContent processes in-memory content without file I/O.
@@ -287,75 +483,37 @@ func (p *Pipeline) ProcessContent(
 	cfg *config.Config,
 	opts PipelineOptions,
 ) (*PipelineResult, error) {
+	var (
+		result *PipelineResult
+		err    error
+	)
+	if panicErr := recoverPanic(ctx, path, func() {
+		result, err = p.processContent(ctx, path, originalContent, cfg, opts)
+	}); panicErr != nil {
+		return nil, panicErr
+	}
+	return result, err
+}
+
+func (p *Pipeline) processContent(
+	ctx context.Context,
+	path string,
+	originalContent []byte,
+	cfg *config.Config,
+	opts PipelineOptions,
+) (*PipelineResult, error) {
 	result := &PipelineResult{
 		Path: path,
 	}
 
-	// Determine max passes (use default if not set).
-	maxPasses := opts.MaxFixPasses
-	if maxPasses <= 0 {
-		maxPasses = DefaultMaxFixPasses
+	content, _, err := p.lintAndFix(ctx, path, originalContent, cfg, opts, result)
+	if err != nil {
+		return nil, err
 	}
-
-	// Working content starts as original.
-	content := originalContent
-	var fileResult *FileResult
-
-	// Multi-pass fix loop.
-	for range maxPasses {
-		// Check for cancellation.
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("processing cancelled: %w", ctx.Err())
-		default:
-		}
-
-		// Run the lint engine on current content.
-		var lintErr error
-		fileResult, lintErr = p.Engine.LintFile(ctx, path, content, cfg)
-		if lintErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrParseFailure, lintErr)
-		}
-
-		// If not in fix mode or no edits available, we're done.
-		if !opts.Fix || len(fileResult.Edits) == 0 {
-			break
-		}
-
-		// Apply edits in memory.
-		content = fix.ApplyEdits(content, fileResult.Edits)
-		result.FixPasses++
-		result.TotalEditsApplied += len(fileResult.Edits)
-		result.Modified = true
-	}
-
-	// Check if we exhausted passes with edits remaining.
-	if result.FixPasses >= maxPasses && len(fileResult.Edits) > 0 {
-		result.Exhausted = true
-		result.RemainingEdits = len(fileResult.Edits)
-	}
-
-	// Store the final lint result.
-	result.FileResult = fileResult
-	result.ModifiedContent = content
-
-	// If no modifications were made, clear ModifiedContent.
 	if !result.Modified {
-		result.ModifiedContent = nil
 		return result, nil
 	}
-
-	// Optional re-parse to validate fixes.
-	if opts.ReParseAfterFix {
-		_, err := p.Engine.Parser.Parse(ctx, path, content)
-		if err != nil {
-			result.Skipped = true
-			result.SkipReason = fmt.Sprintf("re-parse failed: %v", err)
-			result.Modified = false
-			result.ModifiedContent = nil
-			return result, nil
-		}
-	}
+	result.ModifiedContent = content
 
 	// Generate diff for review.
 	if opts.DryRun {
@@ -365,21 +523,131 @@ func (p *Pipeline) ProcessContent(
 	return result, nil
 }
 
-// checkModified checks if a file has been modified since it was read.
-func (p *Pipeline) checkModified(ctx context.Context, info *fsutil.FileInfo, strict bool) (bool, error) {
-	var modified bool
-	var err error
-
-	if strict {
-		modified, err = fsutil.CheckModified(ctx, info)
-	} else {
-		modified, err = fsutil.CheckModifiedQuick(ctx, info)
+// lintAndFix lints original and, in fix mode, applies the accepted fixes
+// pass by pass. After every pass the fixed content is linted again, so the
+// final FileResult always describes the returned content. The loop stops
+// when no fix remains, when applying the remaining fixes would recreate
+// content seen before (Oscillated), or after MaxFixPasses passes
+// (Exhausted). Rule errors from every pass are kept. It also returns the
+// lint result of the original content.
+//
+// If the fixed content cannot be linted (a fix produced content the parser
+// rejects), the file is marked skipped and the original content is kept.
+func (p *Pipeline) lintAndFix(
+	ctx context.Context,
+	path string,
+	original []byte,
+	cfg *config.Config,
+	opts PipelineOptions,
+	result *PipelineResult,
+) ([]byte, *FileResult, error) {
+	maxPasses := opts.MaxFixPasses
+	if maxPasses <= 0 {
+		maxPasses = DefaultMaxFixPasses
 	}
 
+	// Use the original file's line ending for every pass.
+	lineEnding := fix.DetectLineEnding(original)
+	ruleErrors := make(map[string]error)
+	lintContent := func(content []byte) (*FileResult, error) {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("processing cancelled: %w", ctx.Err())
+		default:
+		}
+		fileResult, err := p.Engine.lintFile(ctx, path, content, cfg, lineEnding)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrParseFailure, err)
+		}
+		for id, ruleErr := range fileResult.RuleErrors {
+			if _, seen := ruleErrors[id]; !seen {
+				ruleErrors[id] = ruleErr
+			}
+		}
+		return fileResult, nil
+	}
+
+	content := original
+	fileResult, err := lintContent(content)
 	if err != nil {
-		return false, fmt.Errorf("check modified: %w", err)
+		return nil, nil, err
 	}
-	return modified, nil
+	originalResult := fileResult
+
+	var reparseErr error
+	seen := map[[sha256.Size]byte]struct{}{sha256.Sum256(content): {}}
+	for opts.Fix && len(fileResult.Edits) > 0 {
+		if result.FixPasses >= maxPasses {
+			result.Exhausted = true
+			break
+		}
+
+		next := fix.ApplyEdits(content, fileResult.Edits)
+		digest := sha256.Sum256(next)
+		if _, repeated := seen[digest]; repeated {
+			result.Oscillated = true
+			break
+		}
+		seen[digest] = struct{}{}
+
+		nextResult, err := lintContent(next)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, nil, err
+			}
+			reparseErr = err
+			break
+		}
+
+		content = next
+		result.FixPasses++
+		result.TotalEditsApplied += len(fileResult.Edits)
+		fileResult = nextResult
+	}
+
+	if result.Exhausted || result.Oscillated {
+		result.RemainingEdits = len(fileResult.Edits)
+	}
+
+	// Report rule failures from every pass, preferring the final one.
+	for id, ruleErr := range ruleErrors {
+		if _, ok := fileResult.RuleErrors[id]; !ok {
+			fileResult.RuleErrors[id] = ruleErr
+		}
+	}
+	result.FileResult = fileResult
+
+	if reparseErr != nil {
+		// Never write content that cannot be linted: keep the file as it is
+		// and report on it.
+		refuseWrite(result, originalResult, fmt.Sprintf("re-parse failed: %v", reparseErr))
+		return original, originalResult, nil
+	}
+	result.Modified = !bytes.Equal(content, original)
+	return content, originalResult, nil
+}
+
+// recoverPanic runs process and turns a panic into an error wrapping
+// ErrInternal, writing the stack to the debug log.
+func recoverPanic(ctx context.Context, path string, process func()) error {
+	var panicErr *InternalError
+	func() {
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			stack := debug.Stack()
+			logging.FromContext(ctx).Debug("panic while processing file",
+				"path", path, "panic", recovered, "stack", string(stack))
+			panicErr = &InternalError{Path: path, Value: recovered, Stack: stack}
+		}()
+		process()
+	}()
+	if panicErr == nil {
+		return nil
+	}
+	return panicErr
 }
 
 // categorizeError wraps an error with the appropriate pipeline error type.
@@ -428,7 +696,8 @@ func IsPipelineError(err error) bool {
 	return errors.Is(err, ErrFileNotFound) ||
 		errors.Is(err, ErrPermissionDenied) ||
 		errors.Is(err, ErrParseFailure) ||
-		errors.Is(err, ErrWriteFailure)
+		errors.Is(err, ErrWriteFailure) ||
+		errors.Is(err, ErrInternal)
 }
 
 // BackupConfigFromConfig creates an fsutil.BackupConfig from config.Config.
@@ -452,6 +721,5 @@ func PipelineOptionsFromConfig(cfg *config.Config) PipelineOptions {
 		DryRun:              cfg.DryRun,
 		Backup:              BackupConfigFromConfig(cfg),
 		StrictRaceDetection: true,
-		ReParseAfterFix:     false,
 	}
 }

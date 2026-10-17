@@ -32,11 +32,12 @@ type RuleContext struct {
 	// RuleConfig is the rule-specific configuration (may be nil).
 	RuleConfig *config.RuleConfig
 
-	// Builder accumulates text edits for auto-fix.
-	Builder *fix.EditBuilder
-
 	// Registry provides access to the rule registry for name lookups.
 	Registry *Registry
+
+	// lineEnding is the file's dominant line ending, set by the engine or
+	// detected lazily by LineEnding.
+	lineEnding string
 
 	// refCtx is the cached reference context, lazily initialized.
 	refCtx *refs.Context
@@ -68,8 +69,22 @@ func NewRuleContext(
 		Root:       root,
 		Config:     cfg,
 		RuleConfig: ruleCfg,
-		Builder:    fix.NewEditBuilder(),
 	}
+}
+
+// LineEnding returns the file's dominant line ending, fix.LineEndingLF or
+// fix.LineEndingCRLF. Rules build fix text with "\n" and the engine converts
+// it to this ending; rules only need it to compute lengths or offsets of
+// text they insert.
+func (rc *RuleContext) LineEnding() string {
+	if rc.lineEnding == "" {
+		var content []byte
+		if rc.File != nil {
+			content = rc.File.Content
+		}
+		rc.lineEnding = fix.DetectLineEnding(content)
+	}
+	return rc.lineEnding
 }
 
 // Cancelled returns true if the context has been cancelled.

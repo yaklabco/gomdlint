@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -297,4 +298,29 @@ func TestAnalyze_PathsRelativeOnlyInsideWorkingDir(t *testing.T) {
 	require.Len(t, report.Diagnostics, 2)
 	assert.Equal(t, filepath.Join("docs", "in.md"), report.Diagnostics[0].FilePath)
 	assert.Equal(t, outside, report.Diagnostics[1].FilePath, "files outside the working directory keep absolute paths")
+}
+
+func TestAnalyze_CountsFilesThatCouldNotBeLintedAndRuleFailures(t *testing.T) {
+	t.Parallel()
+
+	result := &runner.Result{
+		Files: []runner.FileOutcome{
+			{Path: "unreadable.md", Error: errors.New("permission denied")},
+			{
+				Path: "failed.md",
+				Result: &lint.PipelineResult{FileResult: &lint.FileResult{RuleErrors: map[string]error{
+					"MD001": errors.New("boom"),
+					"MD009": &lint.RuleError{RuleID: "MD009", Err: lint.ErrRulePanic},
+					"MD010": nil,
+				}}},
+			},
+		},
+	}
+
+	report := Analyze(result, DefaultOptions())
+
+	assert.Equal(t, 2, report.Totals.Files)
+	assert.Equal(t, 1, report.Totals.FilesErrored)
+	assert.Equal(t, 2, report.Totals.RuleErrors, "rules recorded without an error do not count")
+	assert.Zero(t, report.Totals.Issues)
 }

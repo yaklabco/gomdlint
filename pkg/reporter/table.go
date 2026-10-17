@@ -54,10 +54,16 @@ func (r *TableReporter) Report(_ context.Context, result *runner.Result) (int, e
 	if totalIssues == 0 {
 		if r.opts.ShowSummary {
 			fmt.Fprintln(r.out)
-			fmt.Fprintln(r.out, r.styles.Success.Render("All files passed!"))
-			fmt.Fprintln(r.out, r.styles.Dim.Render(
-				fmt.Sprintf("%d files checked", result.Stats.FilesProcessed),
-			))
+			if hasFailures(result.Stats) {
+				// No findings, but the run was incomplete: no table, only
+				// the summary that names the failures.
+				fmt.Fprintln(r.out, r.formatter.FormatTableSummary(result.Stats, ""))
+			} else {
+				fmt.Fprintln(r.out, r.styles.Success.Render("All files passed!"))
+				fmt.Fprintln(r.out, r.styles.Dim.Render(
+					fmt.Sprintf("%d files checked", result.Stats.FilesProcessed),
+				))
+			}
 		}
 		return 0, nil
 	}
@@ -134,6 +140,12 @@ func (r *TableReporter) reportPerFile(result *runner.Result) {
 			fmt.Fprintln(r.out, r.styles.Dim.Render("Run with --fix to auto-repair fixable issues"))
 		}
 	}
+}
+
+// hasFailures reports whether the run could not lint every file
+// completely: a file could not be linted, or a rule failed.
+func hasFailures(stats runner.Stats) bool {
+	return stats.FilesErrored > 0 || stats.RuleErrors > 0
 }
 
 // countTotalIssues counts all diagnostics in the result.

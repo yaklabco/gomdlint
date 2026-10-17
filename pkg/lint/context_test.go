@@ -43,9 +43,6 @@ func TestNewRuleContext(t *testing.T) {
 	if rc.RuleConfig != ruleCfg {
 		t.Error("RuleConfig mismatch")
 	}
-	if rc.Builder == nil {
-		t.Error("Builder should be initialized")
-	}
 }
 
 func TestNewRuleContext_NilFile(t *testing.T) {

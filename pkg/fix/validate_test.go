@@ -2,6 +2,7 @@ package fix_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -167,6 +168,36 @@ func TestSortEdits(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSortEdits_KeepsInputOrderForEqualRanges(t *testing.T) {
+	t.Parallel()
+
+	// Interleave many insertions that share a handful of offsets. The engine
+	// passes edits in rule order, so equal ranges must keep that order or two
+	// insertions at the same point come out in an arbitrary sequence.
+	const total = 64
+	edits := make([]fix.TextEdit, 0, total)
+	for idx := range total {
+		offset := (idx * 5) % 4
+		edits = append(edits, fix.TextEdit{
+			StartOffset: offset,
+			EndOffset:   offset,
+			NewText:     fmt.Sprintf("%02d", idx),
+		})
+	}
+
+	fix.SortEdits(edits)
+
+	for idx := 1; idx < len(edits); idx++ {
+		prev, curr := edits[idx-1], edits[idx]
+		if curr.StartOffset < prev.StartOffset {
+			t.Fatalf("edit %d starts at %d before previous start %d", idx, curr.StartOffset, prev.StartOffset)
+		}
+		if curr.StartOffset == prev.StartOffset && curr.NewText < prev.NewText {
+			t.Fatalf("equal ranges reordered at %d: %q came after %q", idx, curr.NewText, prev.NewText)
+		}
 	}
 }
 

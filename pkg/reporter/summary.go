@@ -96,6 +96,12 @@ func NewSummaryRenderer(opts Options) *SummaryRenderer {
 // Render implements Renderer.
 func (r *SummaryRenderer) Render(_ context.Context, report *analysis.Report) error {
 	if report.Totals.Issues == 0 {
+		failures := r.styles.FormatFailures(report.Totals.FilesErrored, report.Totals.RuleErrors)
+		if len(failures) > 0 {
+			// The findings of an incomplete run are no success.
+			fmt.Fprintln(r.out, strings.Join(failures, ", ")+r.styles.Dim.Render(" (no issues found)"))
+			return nil
+		}
 		fmt.Fprintln(r.out, r.styles.Success.Render("No issues found"))
 		return nil
 	}
@@ -243,5 +249,9 @@ func (r *SummaryRenderer) renderTotals(totals analysis.Totals) {
 	}
 	parts = append(parts, fmt.Sprintf("in %d %s", totals.FilesWithIssues, fileWord))
 
-	fmt.Fprintln(r.out, r.styles.Bold.Render("Total: ")+strings.Join(parts, " "))
+	line := strings.Join(parts, " ")
+	if failures := r.styles.FormatFailures(totals.FilesErrored, totals.RuleErrors); len(failures) > 0 {
+		line += ", " + strings.Join(failures, ", ")
+	}
+	fmt.Fprintln(r.out, r.styles.Bold.Render("Total: ")+line)
 }

@@ -55,11 +55,18 @@ type FixEntry struct {
 type Totals struct {
 	Files           int `json:"filesChecked"`
 	FilesWithIssues int `json:"filesWithIssues"`
-	Issues          int `json:"totalIssues"`
-	Errors          int `json:"errors"`
-	Warnings        int `json:"warnings"`
-	Infos           int `json:"infos"`
-	Fixable         int `json:"fixable"`
+
+	// FilesErrored counts the files that could not be linted at all.
+	FilesErrored int `json:"filesErrored"`
+
+	// RuleErrors counts the rules that failed, once per rule and file.
+	RuleErrors int `json:"ruleErrors"`
+
+	Issues   int `json:"totalIssues"`
+	Errors   int `json:"errors"`
+	Warnings int `json:"warnings"`
+	Infos    int `json:"infos"`
+	Fixable  int `json:"fixable"`
 }
 
 // HasIssues returns true if there are any issues.

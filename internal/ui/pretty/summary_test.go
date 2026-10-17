@@ -304,6 +304,53 @@ func TestFormatTableSummary_ErroredFiles(t *testing.T) {
 	assert.Contains(t, result, "1 file could not be linted")
 }
 
+func TestFormatSummaryOneLine_RuleFailures(t *testing.T) {
+	styles := pretty.NewStyles(false)
+
+	t.Run("without findings", func(t *testing.T) {
+		result := styles.FormatSummaryOneLine(runner.Stats{
+			FilesProcessed:        2,
+			FilesWithRuleErrors:   1,
+			RuleErrors:            1,
+			DiagnosticsBySeverity: map[string]int{},
+		})
+
+		assert.Contains(t, result, "1 rule failure")
+		assert.Contains(t, result, "2 files checked")
+		assert.NotContains(t, result, "No issues found", "the findings may be incomplete")
+		assert.NotContains(t, result, "could not be linted", "the files were read")
+	})
+
+	t.Run("with findings and a file that could not be linted", func(t *testing.T) {
+		result := styles.FormatSummaryOneLine(runner.Stats{
+			FilesProcessed:        2,
+			FilesErrored:          1,
+			FilesWithRuleErrors:   1,
+			RuleErrors:            2,
+			FilesWithIssues:       1,
+			DiagnosticsTotal:      1,
+			DiagnosticsBySeverity: map[string]int{"warning": 1},
+		})
+
+		assert.Contains(t, result, "1 issue")
+		assert.Contains(t, result, "1 file could not be linted, 2 rule failures")
+	})
+}
+
+func TestFormatTableSummary_RuleFailures(t *testing.T) {
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80)
+
+	result := formatter.FormatTableSummary(runner.Stats{
+		FilesProcessed:        1,
+		FilesWithRuleErrors:   1,
+		RuleErrors:            1,
+		DiagnosticsBySeverity: map[string]int{},
+	}, "")
+
+	assert.Contains(t, result, "1 file checked")
+	assert.Contains(t, result, "1 rule failure")
+}
+
 func TestFormatSummaryOneLine_SingleFileChecked(t *testing.T) {
 	styles := pretty.NewStyles(false)
 

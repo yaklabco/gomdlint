@@ -1,8 +1,9 @@
 package fix
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 )
 
 // ValidationError describes an invalid edit.
@@ -48,14 +49,20 @@ func ValidateEdits(edits []TextEdit, contentLen int) error {
 }
 
 // SortEdits sorts edits by start offset, then by end offset.
-// This produces a deterministic order for edit application.
+// The sort is stable: edits with equal ranges keep their input order, so the
+// caller decides how ties break (the lint engine passes edits in rule order).
+// This matters for insertions at the same offset, whose texts are applied in
+// the sorted order.
 func SortEdits(edits []TextEdit) {
-	sort.Slice(edits, func(i, j int) bool {
-		if edits[i].StartOffset != edits[j].StartOffset {
-			return edits[i].StartOffset < edits[j].StartOffset
-		}
-		return edits[i].EndOffset < edits[j].EndOffset
-	})
+	slices.SortStableFunc(edits, compareRanges)
+}
+
+// compareRanges orders edits by start offset, then by end offset.
+func compareRanges(a, b TextEdit) int {
+	if c := cmp.Compare(a.StartOffset, b.StartOffset); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.EndOffset, b.EndOffset)
 }
 
 // DetectConflicts checks for overlapping edits in a sorted slice.

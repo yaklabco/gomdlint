@@ -22,9 +22,29 @@ func filesNoun(count int) string {
 	return wordFiles
 }
 
-// formatErrored describes the files a run could not lint.
-func (s *Styles) formatErrored(stats runner.Stats) string {
-	return s.Failure.Render(fmt.Sprintf("%d %s could not be linted", stats.FilesErrored, filesNoun(stats.FilesErrored)))
+// FormatFailures describes what kept a run from linting its files
+// completely: filesErrored files it could not lint, and ruleErrors rule
+// failures, counted once per rule and file. It returns nothing when
+// neither happened, so a report claims success only then.
+func (s *Styles) FormatFailures(filesErrored, ruleErrors int) []string {
+	var parts []string
+	if filesErrored > 0 {
+		parts = append(parts, s.Failure.Render(fmt.Sprintf("%d %s could not be linted",
+			filesErrored, filesNoun(filesErrored))))
+	}
+	if ruleErrors > 0 {
+		noun := "failures"
+		if ruleErrors == 1 {
+			noun = "failure"
+		}
+		parts = append(parts, s.Failure.Render(fmt.Sprintf("%d rule %s", ruleErrors, noun)))
+	}
+	return parts
+}
+
+// formatFailures describes the failures of a run (see FormatFailures).
+func (s *Styles) formatFailures(stats runner.Stats) []string {
+	return s.FormatFailures(stats.FilesErrored, stats.RuleErrors)
 }
 
 // FormatSummaryOneLine formats run statistics as a single line.
@@ -32,17 +52,17 @@ func (s *Styles) formatErrored(stats runner.Stats) string {
 func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 	checked := fmt.Sprintf("%d %s checked", stats.FilesProcessed, filesNoun(stats.FilesProcessed))
 
-	if stats.DiagnosticsTotal == 0 && stats.FilesErrored > 0 {
-		return s.formatErrored(stats) + s.Dim.Render(" ("+checked+", no issues found)") + "\n"
-	}
-
 	if stats.DiagnosticsTotal == 0 {
-		head := "No issues found"
+		head, detail := "No issues found", "no issues found"
 		if stats.FilesWithPendingFixes > 0 {
 			// A dry run: the issues are still in the files.
-			head = "No issues would remain"
+			head, detail = "No issues would remain", "no issues would remain"
 		}
 		msg := s.Success.Render(head) + s.Dim.Render(" ("+checked+")")
+		if failures := s.formatFailures(stats); len(failures) > 0 {
+			// The findings of an incomplete run are no success.
+			msg = strings.Join(failures, ", ") + s.Dim.Render(" ("+checked+", "+detail+")")
+		}
 		// Show fixes applied even when no issues remain
 		if stats.DiagnosticsFixed > 0 {
 			msg += ", " + s.formatFixed(stats)
@@ -101,9 +121,7 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 		parts = append(parts, s.formatSkipped(stats))
 	}
 
-	if stats.FilesErrored > 0 {
-		parts = append(parts, s.formatErrored(stats))
-	}
+	parts = append(parts, s.formatFailures(stats)...)
 
 	return strings.Join(parts, ", ") + "\n"
 }

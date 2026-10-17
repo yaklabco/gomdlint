@@ -73,13 +73,6 @@ func ReadFile(ctx context.Context, path string) ([]byte, *FileInfo, error) {
 	return content, info, nil
 }
 
-// CheckModified returns true if the file has been modified since the given FileInfo.
-// This is used to detect concurrent external modifications.
-//
-// The check uses a two-tier approach:
-//  1. Quick check: compare mod time and size (fast, catches most cases)
-//  2. Hash check: re-read and hash content (paranoid, catches all changes)
-//
 // Sentinel errors for error categorization via errors.Is.
 var (
 	// ErrNilFileInfo is returned when a nil FileInfo is passed.
@@ -93,8 +86,19 @@ var (
 
 	// ErrIsDirectory indicates the path is a directory, not a file.
 	ErrIsDirectory = errors.New("path is a directory")
+
+	// ErrFileChanged indicates that a PinnedFile was replaced, moved or
+	// modified after it was read, or that its name now leads outside the
+	// directory it was pinned in, so it was not written.
+	ErrFileChanged = errors.New("file changed since it was read")
 )
 
+// CheckModified returns true if the file has been modified since the given FileInfo.
+// This is used to detect concurrent external modifications.
+//
+// The check uses a two-tier approach:
+//  1. Quick check: compare mod time and size (fast, catches most cases)
+//  2. Hash check: re-read and hash content (paranoid, catches all changes)
 func CheckModified(ctx context.Context, info *FileInfo) (bool, error) {
 	if info == nil {
 		return false, ErrNilFileInfo
