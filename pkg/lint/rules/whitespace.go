@@ -175,7 +175,7 @@ func trailingWhitespaceFix(trailing []byte, start, end int, lineEnd trailingLine
 		builder.Delete(start, end)
 	case lineEndCode:
 		return nil
-	default:
+	case lineEndPlain:
 		builder.Delete(start, end)
 	}
 	return builder
