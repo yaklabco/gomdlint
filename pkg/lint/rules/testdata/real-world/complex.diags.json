@@ -99,6 +99,60 @@
     "fixable": true
   },
   {
+    "rule": "MD060",
+    "name": "table-column-style",
+    "line": 215,
+    "column": 1,
+    "message": "Table pipe spacing does not match style compact",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD060",
+    "name": "table-column-style",
+    "line": 215,
+    "column": 11,
+    "message": "Table pipe spacing does not match style compact",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD060",
+    "name": "table-column-style",
+    "line": 215,
+    "column": 11,
+    "message": "Table pipe spacing does not match style compact",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD060",
+    "name": "table-column-style",
+    "line": 215,
+    "column": 25,
+    "message": "Table pipe spacing does not match style compact",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD060",
+    "name": "table-column-style",
+    "line": 215,
+    "column": 25,
+    "message": "Table pipe spacing does not match style compact",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD060",
+    "name": "table-column-style",
+    "line": 215,
+    "column": 37,
+    "message": "Table pipe spacing does not match style compact",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
     "rule": "MD013",
     "name": "line-length",
     "line": 278,
