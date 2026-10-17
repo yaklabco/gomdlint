@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sync"
 
+	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -67,6 +69,11 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	pipelineOpts := lint.PipelineOptionsFromConfig(opts.Config)
 	pipelineOpts.WriteRoots = lint.WriteRoots(opts.WorkingDir, opts.effectivePaths())
 
+	// A run that fixes files records the diff of what it writes; a run that
+	// does not previews the fixes in a dry run.
+	pipelineOpts.Diff = opts.PreviewFixes
+	preview := opts.PreviewFixes && !pipelineOpts.Fix
+
 	// Create channels. Each unit of work is the paths naming one file.
 	workCh := make(chan []string)
 	outCh := make(chan FileOutcome)
@@ -78,7 +85,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts, opts.PreviewFixes)
+			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts, preview)
 		}()
 	}
 
@@ -161,7 +168,8 @@ func (r *Runner) worker(
 }
 
 // processFile lints one file. A panic while processing it fails that file
-// instead of crashing the run, which would exit with Go's status 2.
+// with an internal error (lint.ErrInternal) instead of crashing the run,
+// which would exit with Go's status 2.
 func (r *Runner) processFile(
 	ctx context.Context,
 	path string,
@@ -174,7 +182,10 @@ func (r *Runner) processFile(
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				outcome = FileOutcome{Path: path, Error: fmt.Errorf("internal error: %v", recovered)}
+				stack := debug.Stack()
+				logging.FromContext(ctx).Debug("panic while processing file",
+					"path", path, "panic", recovered, "stack", string(stack))
+				outcome = FileOutcome{Path: path, Error: &lint.InternalError{Path: path, Value: recovered, Stack: stack}}
 			}
 		}()
 

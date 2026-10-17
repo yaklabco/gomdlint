@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -73,14 +74,15 @@ By default, lints all .md and .markdown files in the current directory
 and subdirectories. Specify paths to lint specific files or directories.
 
 Examples:
-  gomdlint lint                    # Lint current directory
-  gomdlint lint docs/              # Lint docs directory
-  gomdlint lint README.md          # Lint single file
-  gomdlint lint --fix              # Lint and auto-fix issues
-  gomdlint lint --fix --dry-run    # Show fixes without applying
-  gomdlint lint --format diff      # Preview fixes as a diff
-  gomdlint lint --format json      # Output as JSON for CI
-  gomdlint lint --strict           # Treat warnings as errors
+  gomdlint lint                      # Lint current directory
+  gomdlint lint docs/                # Lint docs directory
+  gomdlint lint README.md            # Lint single file
+  gomdlint lint --fix                # Lint and auto-fix issues
+  gomdlint lint --fix --dry-run      # Show fixes without applying
+  gomdlint lint --format diff        # Preview fixes as a diff
+  gomdlint lint --fix --format diff  # Apply fixes and show them as a diff
+  gomdlint lint --format json        # Output as JSON for CI
+  gomdlint lint --strict             # Treat warnings as errors
 
 ` + exitCodeHelp
 
@@ -237,8 +239,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 
 	runOpts := runnerOptions(args, workDir, loadResult)
-	// Without --fix, the diff format previews what --fix would change.
-	runOpts.PreviewFixes = format == reporter.FormatDiff && !finalCfg.Fix
+	// The diff format shows the changes --fix makes: those it writes, or,
+	// without --fix or with --dry-run, those it would write.
+	runOpts.PreviewFixes = format == reporter.FormatDiff
 
 	logger.Debug("starting lint run",
 		"paths", runOpts.Paths,
@@ -384,12 +387,26 @@ func resultError(result *runner.Result, strict bool) error {
 		return &ExitError{Code: code, Err: fmt.Errorf("%d %s could not be linted",
 			result.Stats.FilesErrored, plural(result.Stats.FilesErrored, "file", "files"))}
 	case ExitInternalError:
-		return &ExitError{Code: code, Err: fmt.Errorf("%d rule %s on %d %s",
-			result.Stats.RuleErrors, plural(result.Stats.RuleErrors, "failure", "failures"),
-			result.Stats.FilesWithRuleErrors, plural(result.Stats.FilesWithRuleErrors, "file", "files"))}
+		return &ExitError{Code: code, Err: errors.New(internalErrorSummary(result.Stats))}
 	default:
 		return &ExitError{Code: code, Err: ErrLintIssuesFound}
 	}
+}
+
+// internalErrorSummary describes the internal errors of a run: files whose
+// processing failed because of a bug, and rules that failed on files.
+func internalErrorSummary(stats runner.Stats) string {
+	var parts []string
+	if files := stats.FilesWithInternalErrors; files > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s could not be linted because of an internal error",
+			files, plural(files, "file", "files")))
+	}
+	if stats.RuleErrors > 0 {
+		parts = append(parts, fmt.Sprintf("%d rule %s on %d %s",
+			stats.RuleErrors, plural(stats.RuleErrors, "failure", "failures"),
+			stats.FilesWithRuleErrors, plural(stats.FilesWithRuleErrors, "file", "files")))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // plural returns one for a count of one and otherwise many.
@@ -504,7 +521,8 @@ func writeMemProfile(path string) error {
 func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().BoolVar(&cfg.Fix, "fix", false, "automatically fix issues")
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "show fixes without applying them")
-	cmd.Flags().StringVar(&flags.format, "format", "text", "output format: text, table, json, sarif, diff (previews fixes without --fix), summary")
+	cmd.Flags().StringVar(&flags.format, "format", "text",
+		"output format: text, table, json, sarif, diff (the changes --fix makes, previewed without --fix), summary")
 	cmd.Flags().IntVar(&cfg.Jobs, "jobs", 0, "number of parallel workers (0 = auto)")
 	cmd.Flags().StringSliceVar(&flags.ignore, "ignore", nil,
 		"glob patterns to ignore, relative to the current directory (replace config ignore patterns)")

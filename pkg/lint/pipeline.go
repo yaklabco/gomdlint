@@ -91,7 +91,10 @@ type PipelineResult struct {
 	// ModifiedContent is the new content after applying edits (nil if not modified).
 	ModifiedContent []byte
 
-	// Diff is the unified diff for dry-run mode (nil if not in dry-run).
+	// Diff is the unified diff of the fixes, from the content that was read
+	// to the fixed content. It is computed in dry-run mode and, when
+	// PipelineOptions.Diff is set, for a file that was written or content
+	// fixed by ProcessContent. It is nil otherwise.
 	Diff *fix.Diff
 
 	// Skipped is true if the file was skipped (e.g., due to concurrent modification).
@@ -111,6 +114,11 @@ type PipelineResult struct {
 
 	// TotalEditsApplied is the total number of edits applied across all passes.
 	TotalEditsApplied int
+
+	// TotalFixesApplied is the total number of fixes applied across all
+	// passes, one for each diagnostic whose fix was applied (see
+	// FileResult.AcceptedFixes).
+	TotalFixesApplied int
 
 	// Exhausted is true if the fix loop hit MaxFixPasses while the fixed
 	// content still had fixes to apply.
@@ -153,6 +161,12 @@ type PipelineOptions struct {
 
 	// DryRun generates diffs without writing files.
 	DryRun bool
+
+	// Diff records in PipelineResult.Diff the diff of the fixes that are
+	// written (or, for ProcessContent, applied in memory), from the content
+	// that was read to the fixed content. Dry runs always record the diff
+	// of the fixes they compute.
+	Diff bool
 
 	// Backup configures backup behavior.
 	Backup fsutil.BackupConfig
@@ -306,7 +320,8 @@ func NewPipeline(engine *Engine) *Pipeline {
 //  3. Generate diff (if dry-run mode).
 //  4. Check for concurrent modifications.
 //  5. Create backup (if enabled).
-//  6. Write the modified content (see fsutil.WriteAtomic).
+//  6. Write the modified content (see fsutil.WriteAtomic), and record its
+//     diff when PipelineOptions.Diff is set.
 //
 // A panic while processing the file is recovered and returned as an error
 // wrapping ErrInternal.
@@ -440,6 +455,9 @@ func (p *Pipeline) processFile(
 		return nil, fmt.Errorf("%w: %w", ErrWriteFailure, err)
 	}
 	result.Written = true
+	if opts.Diff {
+		result.Diff = fix.GenerateDiff(path, originalContent, content)
+	}
 
 	return result, nil
 }
@@ -457,6 +475,7 @@ func refuseWrite(result *PipelineResult, original *FileResult, reason string) {
 		}
 	}
 	original.Edits = nil
+	original.AcceptedFixes = 0
 	original.SkippedEdits = nil
 	original.EditConflicts = false
 
@@ -468,6 +487,7 @@ func refuseWrite(result *PipelineResult, original *FileResult, reason string) {
 	result.Diff = nil
 	result.FixPasses = 0
 	result.TotalEditsApplied = 0
+	result.TotalFixesApplied = 0
 	result.Exhausted = false
 	result.Oscillated = false
 	result.RemainingEdits = 0
@@ -516,7 +536,7 @@ func (p *Pipeline) processContent(
 	result.ModifiedContent = content
 
 	// Generate diff for review.
-	if opts.DryRun {
+	if opts.DryRun || opts.Diff {
 		result.Diff = fix.GenerateDiff(path, originalContent, content)
 	}
 
@@ -602,6 +622,7 @@ func (p *Pipeline) lintAndFix(
 		content = next
 		result.FixPasses++
 		result.TotalEditsApplied += len(fileResult.Edits)
+		result.TotalFixesApplied += fileResult.AcceptedFixes
 		fileResult = nextResult
 	}
 

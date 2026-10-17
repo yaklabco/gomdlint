@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // commentWrapWidth is the maximum width for wrapped comments in templates.
@@ -136,8 +138,8 @@ default_ignores: true
 #   - "docs/drafts/**"
 #   - "CHANGELOG.md"
 
-# Rule-specific configuration
-rules:
+# Rule-specific configuration. Each rule shows its default severity in a
+# comment. A severity set here overrides severity_default for that rule.
 `)
 
 	// Get rule information
@@ -163,7 +165,14 @@ rules:
 		return rules[i].ID < rules[j].ID
 	})
 
-	// Write each rule
+	// Write each rule with its default settings. The severity stays a
+	// comment, so the file changes nothing until it is edited and
+	// severity_default applies to every rule.
+	if len(rules) == 0 {
+		buf.WriteString("rules: {}\n")
+	} else {
+		buf.WriteString("rules:\n")
+	}
 	for _, rule := range rules {
 		buf.WriteString("\n  # " + rule.ID + ": " + rule.Name + "\n")
 		buf.WriteString("  # " + wrapComment(rule.Description, commentWrapWidth) + "\n")
@@ -175,7 +184,7 @@ rules:
 		}
 		buf.WriteString("  " + rule.ID + ":\n")
 		buf.WriteString("    enabled: " + strconv.FormatBool(rule.Enabled) + "\n")
-		buf.WriteString("    severity: " + string(rule.Severity) + "\n")
+		buf.WriteString("    # severity: " + string(rule.Severity) + "\n")
 		buf.WriteString("    # options:\n")
 		buf.WriteString("    #   key: value\n")
 	}
@@ -187,70 +196,13 @@ rules:
 	return buf.Bytes(), nil
 }
 
-// getRuleInfos returns information about all registered rules.
+// getRuleInfos returns information about all registered rules, or nothing
+// when no provider is set because the lint package is not linked in.
 func getRuleInfos() []RuleInfo {
-	if DefaultRuleInfoProvider != nil {
-		return DefaultRuleInfoProvider()
+	if DefaultRuleInfoProvider == nil {
+		return nil
 	}
-
-	// Fallback to a static list of known rules
-	return []RuleInfo{
-		{
-			ID: "MD001", Name: "heading-increment", Enabled: true, Severity: SeverityError,
-			Description: "Heading levels should only increment by one level at a time",
-			Tags:        []string{"headings"},
-		},
-		{
-			ID: "MD003", Name: "heading-style", Enabled: true, Severity: SeverityError,
-			Description: "Enforce a consistent heading style (atx, atx_closed, or setext)",
-			Tags:        []string{"headings"},
-		},
-		{
-			ID: "MD004", Name: "ul-style", Enabled: true, Severity: SeverityError,
-			Description: "Enforce a consistent unordered list style",
-			Tags:        []string{"bullet", "ul"},
-		},
-		{
-			ID: "MD005", Name: "list-indent", Enabled: true, Severity: SeverityError,
-			Description: "Inconsistent indentation for list items at the same level",
-			Tags:        []string{"bullet", "ul", "indentation"},
-		},
-		{
-			ID: "MD009", Name: "no-trailing-spaces", Enabled: true, Severity: SeverityError,
-			Description: "Trailing spaces at the end of lines",
-			Tags:        []string{"whitespace"}, CanFix: true,
-		},
-		{
-			ID: "MD010", Name: "no-hard-tabs", Enabled: true, Severity: SeverityError,
-			Description: "Hard tabs in the file",
-			Tags:        []string{"whitespace", "hard_tab"}, CanFix: true,
-		},
-		{
-			ID: "MD012", Name: "no-multiple-blanks", Enabled: true, Severity: SeverityError,
-			Description: "Multiple consecutive blank lines",
-			Tags:        []string{"whitespace", "blank_lines"}, CanFix: true,
-		},
-		{
-			ID: "MD013", Name: "line-length", Enabled: true, Severity: SeverityError,
-			Description: "Line length exceeds the configured maximum",
-			Tags:        []string{"line_length"},
-		},
-		{
-			ID: "MD025", Name: "single-h1", Enabled: true, Severity: SeverityError,
-			Description: "Multiple top-level headings in the same document",
-			Tags:        []string{"headings"},
-		},
-		{
-			ID: "MD029", Name: "ol-prefix", Enabled: true, Severity: SeverityError,
-			Description: "Ordered list item prefix style",
-			Tags:        []string{"ol"},
-		},
-		{
-			ID: "MD047", Name: "single-trailing-newline", Enabled: true, Severity: SeverityError,
-			Description: "Files should end with a single newline character",
-			Tags:        []string{"blank_lines"}, CanFix: true,
-		},
-	}
+	return DefaultRuleInfoProvider()
 }
 
 // wrapComment wraps a comment to fit within maxWidth characters.
@@ -281,47 +233,21 @@ func wrapComment(text string, maxWidth int) string {
 	return strings.Join(lines, "\n  # ")
 }
 
-// templateToJSON converts a YAML template to JSON format.
+// templateToJSON converts a YAML template to JSON format. JSON has no
+// comments, so the JSON template holds exactly the settings that the YAML
+// template sets, and the settings it documents in comments are left out.
 func templateToJSON(yamlContent []byte) ([]byte, error) {
-	// Parse the YAML (skipping comments)
-	lines := strings.Split(string(yamlContent), "\n")
-	var jsonLines []string
-
-	// Build a simple config for JSON. Run-time settings such as fix and
-	// format are command-line flags, so the file does not carry them.
-	cfg := map[string]any{
-		"flavor": "gfm",
-		"backups": map[string]any{
-			"enabled": true,
-			"mode":    "sidecar",
-		},
-		"gitignore":       true,
-		"default_ignores": true,
-		"ignore":          []string{},
-		"rules":           map[string]any{},
+	settings := map[string]any{}
+	if err := yaml.Unmarshal(yamlContent, &settings); err != nil {
+		return nil, fmt.Errorf("parse template: %w", err)
 	}
 
-	// Parse rules from YAML content (simplified)
-	rules := getRuleInfos()
-	rulesMap := make(map[string]any)
-	for _, r := range rules {
-		rulesMap[r.ID] = map[string]any{
-			"enabled":  r.Enabled,
-			"severity": string(r.Severity),
-		}
-	}
-	cfg["rules"] = rulesMap
-
-	jsonBytes, err := json.MarshalIndent(cfg, "", "  ")
+	jsonBytes, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal JSON: %w", err)
 	}
 
-	// Keep the lines slice usage for future expansion
-	_ = jsonLines
-	_ = lines
-
-	return jsonBytes, nil
+	return append(jsonBytes, '\n'), nil
 }
 
 // DefaultTemplateHeader returns the default header for generated configs.

@@ -1,6 +1,10 @@
 package runner
 
-import "github.com/yaklabco/gomdlint/pkg/lint"
+import (
+	"errors"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
+)
 
 // FileOutcome wraps PipelineResult with resolved path metadata.
 type FileOutcome struct {
@@ -67,10 +71,17 @@ type Stats struct {
 	// a rule failed are counted in FilesWithRuleErrors instead.
 	FilesErrored int
 
+	// FilesWithInternalErrors is the number of the FilesErrored files whose
+	// processing failed because of a bug: it panicked, and the error
+	// matches lint.ErrInternal. The other errored files could not be read
+	// or written.
+	FilesWithInternalErrors int
+
 	// DiagnosticsTotal is the total number of diagnostics across all files.
 	DiagnosticsTotal int
 
-	// DiagnosticsFixable is the number of diagnostics that have auto-fixes.
+	// DiagnosticsFixable is the number of diagnostics that --fix would fix:
+	// those with a fix whose rule auto_fix and --fix-rules do not exclude.
 	DiagnosticsFixable int
 
 	// DiagnosticsBySeverity maps severity levels to counts.
@@ -86,9 +97,9 @@ type Stats struct {
 	// computed but not written, as in a dry run.
 	FilesWithPendingFixes int
 
-	// DiagnosticsFixed is the number of fix edits applied across all files,
-	// in memory for a dry run. The pipeline reports edits, not the
-	// diagnostics they fixed, so one diagnostic may count more than once.
+	// DiagnosticsFixed is the number of diagnostics whose fixes were applied
+	// across all files and fix passes, in memory for a dry run. A fix counts
+	// once however many edits it took (see lint.PipelineResult.TotalFixesApplied).
 	DiagnosticsFixed int
 
 	// FilesWithRuleErrors is the number of processed files on which at least
@@ -154,6 +165,9 @@ func (r *Result) accumulate(outcome FileOutcome) {
 
 	if outcome.Error != nil {
 		r.Stats.FilesErrored++
+		if errors.Is(outcome.Error, lint.ErrInternal) {
+			r.Stats.FilesWithInternalErrors++
+		}
 	}
 
 	if outcome.Result == nil {
@@ -177,10 +191,10 @@ func (r *Result) accumulate(outcome FileOutcome) {
 	switch {
 	case outcome.Result.Written:
 		r.Stats.FilesModified++
-		r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
+		r.Stats.DiagnosticsFixed += outcome.Result.TotalFixesApplied
 	case outcome.Result.Modified && !outcome.Result.Skipped:
 		r.Stats.FilesWithPendingFixes++
-		r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
+		r.Stats.DiagnosticsFixed += outcome.Result.TotalFixesApplied
 	}
 
 	if outcome.Result.FileResult != nil {

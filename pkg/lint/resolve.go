@@ -18,7 +18,13 @@ type ResolvedRule struct {
 	// Severity is the resolved severity for diagnostics from this rule.
 	Severity config.Severity
 
-	// AutoFix indicates whether auto-fix is enabled for this rule.
+	// Fixable reports whether --fix would apply this rule's fixes: the rule
+	// declares fixes (Rule.CanFix), and neither auto_fix nor --fix-rules
+	// excludes it. It does not depend on whether this run fixes files.
+	Fixable bool
+
+	// AutoFix indicates whether this run applies the rule's fixes: the rule
+	// is Fixable and the configuration has Fix set.
 	AutoFix bool
 
 	// Config is the rule-specific configuration (may be nil).
@@ -77,6 +83,7 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 		Rule:     rule,
 		Enabled:  rule.DefaultEnabled(),
 		Severity: rule.DefaultSeverity(),
+		Fixable:  rule.CanFix(),
 		AutoFix:  rule.CanFix(),
 		Config:   nil,
 	}
@@ -100,7 +107,7 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 			rr.Severity = config.Severity(*baseline.Severity)
 		}
 		if baseline.AutoFix != nil {
-			rr.AutoFix = *baseline.AutoFix && rule.CanFix()
+			rr.Fixable = *baseline.AutoFix && rule.CanFix()
 		}
 	}
 
@@ -120,7 +127,7 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 			rr.Severity = config.Severity(*ruleCfg.Severity)
 		}
 		if ruleCfg.AutoFix != nil {
-			rr.AutoFix = *ruleCfg.AutoFix && rule.CanFix()
+			rr.Fixable = *ruleCfg.AutoFix && rule.CanFix()
 		}
 	}
 
@@ -135,13 +142,11 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 
 	// Apply fix-rules filter from CLI.
 	if len(cfg.FixRules) > 0 {
-		rr.AutoFix = rule.CanFix() && ruleListed(cfg.FixRules, rule)
+		rr.Fixable = rule.CanFix() && ruleListed(cfg.FixRules, rule)
 	}
 
-	// Disable auto-fix if --fix is not set.
-	if !cfg.Fix {
-		rr.AutoFix = false
-	}
+	// Fixes are only applied with --fix.
+	rr.AutoFix = rr.Fixable && cfg.Fix
 
 	return rr
 }

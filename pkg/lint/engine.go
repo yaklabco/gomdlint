@@ -76,6 +76,11 @@ type FileResult struct {
 	// Empty if no fixes are available or --fix was not requested.
 	Edits []fix.TextEdit
 
+	// AcceptedFixes is the number of diagnostics whose fixes Edits holds. It
+	// can differ from len(Edits): one fix may take several edits, and the
+	// blank-line fixes of several diagnostics at one boundary share one.
+	AcceptedFixes int
+
 	// SkippedEdits contains the edits of fixes that were not applied because
 	// they conflicted with an earlier fix. A fix is applied whole or not at
 	// all, so every edit of a skipped fix is listed. The multi-pass pipeline
@@ -168,6 +173,10 @@ func NewEngine(parser Parser, registry *Registry) *Engine {
 // not stop the others: the failure is recorded in FileResult.RuleErrors and
 // only that rule's results (or only the invalid fix) are dropped. The
 // newlines in fix text are written with the file's dominant line ending.
+//
+// A diagnostic keeps its fix edits only when --fix would apply them (see
+// ResolvedRule.Fixable), whether or not cfg has Fix set, so FixableCount
+// counts the findings that --fix would fix.
 func (e *Engine) LintFile(
 	ctx context.Context,
 	path string,
@@ -250,6 +259,13 @@ func (e *Engine) lintFile(
 				diag.RuleName = rule.Name()
 			}
 
+			// A fix that --fix would not apply (auto_fix: false, --fix-rules,
+			// or a rule that declares no fixes) is not offered, so the finding
+			// does not count as fixable.
+			if !rr.Fixable {
+				diag.FixEdits = nil
+			}
+
 			if len(diag.FixEdits) > 0 {
 				edits, err := validator.Validate(diag.FixEdits)
 				if err != nil {
@@ -260,7 +276,7 @@ func (e *Engine) lintFile(
 					diag.FixEdits = convertNewlines(edits, lineEnding)
 					// Collect the fix if auto-fix is enabled for this rule.
 					if rr.AutoFix {
-						fixes = append(fixes, pendingFix{ruleID: rule.ID(), edits: diag.FixEdits})
+						fixes = append(fixes, pendingFix{ruleID: rule.ID(), edits: diag.FixEdits, diagnostics: 1})
 					}
 				}
 			}
@@ -277,7 +293,7 @@ func (e *Engine) lintFile(
 	}
 
 	merged, conflicting := mergeBlankLineInsertions(fixes)
-	result.Edits, result.SkippedEdits = resolveFixes(merged)
+	result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(merged)
 	for _, pending := range conflicting {
 		for _, edit := range pending.edits {
 			result.SkippedEdits = append(result.SkippedEdits, SkippedEdit{RuleID: pending.ruleID, Edit: edit})
@@ -334,27 +350,35 @@ func applyRule(ctx context.Context, rule Rule, ruleCtx *RuleContext, path string
 type pendingFix struct {
 	ruleID string
 	edits  []fix.TextEdit
+
+	// diagnostics is the number of diagnostics the fix fixes: one, or more
+	// for blank-line insertions merged into one fix.
+	diagnostics int
 }
 
 // resolveFixes picks the fixes to apply and lists the edits of the others.
-func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit) {
+// It also returns the number of diagnostics the accepted fixes fix.
+func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit, int) {
 	if len(fixes) == 0 {
-		return nil, nil
+		return nil, nil, 0
 	}
 
 	groups := make([][]fix.TextEdit, len(fixes))
+	fixed := 0
 	for idx, pending := range fixes {
 		groups[idx] = pending.edits
+		fixed += pending.diagnostics
 	}
 	accepted, skippedFixes := fix.ResolveFixes(groups)
 
 	var skipped []SkippedEdit
 	for _, idx := range skippedFixes {
+		fixed -= fixes[idx].diagnostics
 		for _, edit := range fixes[idx].edits {
 			skipped = append(skipped, SkippedEdit{RuleID: fixes[idx].ruleID, Edit: edit})
 		}
 	}
-	return accepted, skipped
+	return accepted, skipped, fixed
 }
 
 // convertNewlines writes the newlines in the text of edits as lineEnding, in
@@ -385,11 +409,11 @@ func mergeBlankLineInsertions(fixes []pendingFix) ([]pendingFix, []pendingFix) {
 					conflicting = append(conflicting, pending)
 					continue
 				}
+				// The merged fix fixes both diagnostics. A changed edit is
+				// replaced, not changed in place: it belongs to a diagnostic.
+				result[idx].diagnostics += pending.diagnostics
 				if text != result[idx].edits[0].NewText {
-					result[idx] = pendingFix{
-						ruleID: result[idx].ruleID,
-						edits:  []fix.TextEdit{{StartOffset: offset, EndOffset: offset, NewText: text}},
-					}
+					result[idx].edits = []fix.TextEdit{{StartOffset: offset, EndOffset: offset, NewText: text}}
 				}
 				continue
 			}

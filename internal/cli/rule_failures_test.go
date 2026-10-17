@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -246,6 +247,68 @@ func TestLint_EveryFormatReportsARuleFailureWithoutFindings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// crashingRule is a rule whose metadata panics. The engine reads it outside
+// the rule's Apply, where rule panics are isolated, so the panic aborts the
+// processing of the whole file: the pipeline recovers it as an internal
+// error (lint.ErrInternal).
+type crashingRule struct {
+	lint.BaseRule
+}
+
+func (r *crashingRule) DefaultSeverity() config.Severity {
+	panic("cannot resolve the severity")
+}
+
+func executeWithCrashingRule(t *testing.T, args ...string) execution {
+	t.Helper()
+
+	registry := lint.NewRegistry()
+	registry.Register(&crashingRule{BaseRule: lint.NewBaseRule("TEST009", "crashing-rule", "", nil, false)})
+
+	var stdout, stderr bytes.Buffer
+	code := cli.ExecuteWithRegistry(context.Background(), registry, args, &stdout, &stderr)
+	return execution{code: code, stdout: stdout.String(), stderr: stderr.String()}
+}
+
+// TestLint_ProcessingPanicIsAnInternalError covers a panic that aborts the
+// processing of a file, as opposed to a rule panic: the exit code contract
+// gives internal errors 70, while 74 is for files that could not be read
+// or written.
+func TestLint_ProcessingPanicIsAnInternalError(t *testing.T) {
+	for _, format := range []string{"text", "json", "sarif", "diff"} {
+		t.Run(format, func(t *testing.T) {
+			inProject(t, map[string]string{"a.md": "# Title\n"})
+
+			got := executeWithCrashingRule(t, "lint", "--format", format, "a.md")
+
+			assert.Equal(t, cli.ExitInternalError, got.code, "stdout: %s\nstderr: %s", got.stdout, got.stderr)
+			assert.Contains(t, got.stderr, "Error: 1 file could not be linted because of an internal error")
+		})
+	}
+
+	t.Run("the report names the panic", func(t *testing.T) {
+		inProject(t, map[string]string{"a.md": "# Title\n"})
+
+		got := executeWithCrashingRule(t, "lint", "--color", "never", "a.md")
+
+		assert.Contains(t, got.stdout, "internal error: panic while processing")
+		assert.Contains(t, got.stdout, "cannot resolve the severity")
+		assert.Contains(t, got.stdout, "1 file could not be linted")
+	})
+}
+
+func TestLint_UnreadableFileOutranksProcessingPanic(t *testing.T) {
+	skipWithoutFilePermissions(t)
+
+	dir := inProject(t, map[string]string{"a.md": "# Title\n", "locked.md": "# Locked\n"})
+	require.NoError(t, os.Chmod(filepath.Join(dir, "locked.md"), 0))
+
+	got := executeWithCrashingRule(t, "lint", "a.md", "locked.md")
+
+	assert.Equal(t, cli.ExitIOError, got.code, "stderr: %s", got.stderr)
+	assert.Contains(t, got.stderr, "Error: 2 files could not be linted")
 }
 
 func TestLint_EveryFormatReportsAnUnreadableFileWithoutFindings(t *testing.T) {

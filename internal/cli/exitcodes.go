@@ -102,21 +102,21 @@ func ExitCode(err error) int {
 // ExitCodeFromResult determines the exit code based on result and strict mode.
 //
 // Files that could not be linted outrank findings, because the findings of an
-// incomplete run understate the problems. So do rules that failed on a file,
-// which are internal errors: the file was read, but its findings or fixes may
-// be incomplete. A file that could not be read or written outranks a rule
-// failure. Error findings outrank warnings, and warnings only fail the run in
-// strict mode.
+// incomplete run understate the problems. So do internal errors: files whose
+// processing panicked, and rules that failed on a file, whose findings or
+// fixes may be incomplete. A file that could not be read or written outranks
+// an internal error. Error findings outrank warnings, and warnings only fail
+// the run in strict mode.
 func ExitCodeFromResult(result *runner.Result, strict bool) int {
 	if result == nil {
 		return ExitSuccess
 	}
 
-	if result.Stats.FilesErrored > 0 {
+	if result.Stats.FilesErrored > result.Stats.FilesWithInternalErrors {
 		return ExitIOError
 	}
 
-	if result.Stats.FilesWithRuleErrors > 0 {
+	if result.Stats.FilesWithInternalErrors > 0 || result.Stats.FilesWithRuleErrors > 0 {
 		return ExitInternalError
 	}
 
