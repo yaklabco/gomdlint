@@ -137,6 +137,9 @@ func (r *NoBlanksBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	var diags []lint.Diagnostic
 	var inBlockquote bool
 	var lastBlockquoteLine int
+	// The fence lines of quoted code start with '>' too, so only the code
+	// itself is skipped.
+	codeLines := lint.CodeContentLines(ctx.CodeBlocks())
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
@@ -145,8 +148,8 @@ func (r *NoBlanksBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 
 		lineContent := lint.LineContent(ctx.File, lineNum)
 
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		// Skip lines of code.
+		if codeLines[lineNum] {
 			continue
 		}
 

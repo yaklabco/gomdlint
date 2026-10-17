@@ -127,6 +127,18 @@ func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
 	require.Equal(t, "# Title\n\n1) one\n2) two\n3) three\n", applyAllFixEdits(t, input, diags))
 }
 
+func TestBlanksBetweenBlockquotesAroundQuotedCode(t *testing.T) {
+	// The fence lines of quoted code are blockquote lines; only the code
+	// itself is skipped.
+	input := "# Title\n\n> Some quoted text.\n\n> ```bash\n> echo hi\n> ```\n\n> More quoted text.\n"
+	diags := applyCompatibilityRule(t, NewNoBlanksBlockquoteRule(), input)
+	lines := make([]int, 0, len(diags))
+	for _, diag := range diags {
+		lines = append(lines, diag.StartLine)
+	}
+	require.Equal(t, []int{4, 8}, lines)
+}
+
 func TestTrailingWhitespaceIgnoreCodeBlocksChecksFences(t *testing.T) {
 	input := "# Title\n\n```sh  \necho hi  \n```  \n"
 	diags := applyRuleWithOptions(t, NewTrailingWhitespaceRule(), input, map[string]any{"ignore_code_blocks": true})
