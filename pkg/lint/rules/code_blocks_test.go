@@ -591,6 +591,32 @@ func TestCommandsShowOutputRule(t *testing.T) {
 			want:  []position{{2, 3}},
 			fixed: "- ```sh\n  ls\n  ```\n",
 		},
+		{
+			name:  "whitespace-only line is output",
+			input: "```sh\n$ ls\n   \n$ pwd\n```\n",
+		},
+		{
+			name:  "fence indentation is not content",
+			input: " ```sh\n $ ls\n \n $ pwd\n ```\n",
+			want:  []position{{2, 2}, {4, 2}},
+			fixed: " ```sh\n ls\n \n pwd\n ```\n",
+		},
+		{
+			name:  "indented code whitespace beyond the indent is output",
+			input: "    $ ls\n      \n    $ pwd\n",
+		},
+		{
+			name:  "indented code line of only its indent is blank",
+			input: "    $ ls\n    \n    $ pwd\n",
+			want:  []position{{1, 5}, {3, 5}},
+			fixed: "    ls\n    \n    pwd\n",
+		},
+		{
+			name:  "indented code short whitespace line is blank",
+			input: "    $ ls\n  \n    $ pwd\n",
+			want:  []position{{1, 5}, {3, 5}},
+			fixed: "    ls\n  \n    pwd\n",
+		},
 	}
 
 	for _, tt := range tests {

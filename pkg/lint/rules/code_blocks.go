@@ -373,10 +373,15 @@ var dollarCommandPattern = regexp.MustCompile(`^(\s*)(\$\s+)`)
 // dollarCommandIndices is the number of submatch indices dollarCommandPattern produces.
 const dollarCommandIndices = 6
 
+// codeTabWidth is the tab stop CommonMark uses to measure indentation.
+const codeTabWidth = 4
+
 // Apply reports dollar-sign prompts in code blocks that show no output. Like
 // markdownlint, every fenced and indented code block is checked whatever its
 // info string, a block is reported only when every non-blank line starts with
 // "$" and whitespace, and each of those lines gets its own diagnostic and fix.
+// A line is blank when nothing is left once the block's own indentation is
+// removed; whitespace beyond it is code, which counts as output.
 func (r *CommandsShowOutputRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -399,8 +404,9 @@ func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast
 		indices []int
 	}
 	var commands []dollarLine
+	indent := codeIndent(ctx.File, cb)
 	for _, line := range codeBlockContentLines(ctx.File, cb) {
-		if strings.TrimSpace(line.content) == "" {
+		if isBlankCodeLine(line.content, indent) {
 			continue
 		}
 		indices := dollarCommandPattern.FindStringSubmatchIndex(line.content)
@@ -427,6 +433,51 @@ func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast
 			Build())
 	}
 	return diags
+}
+
+// codeBlockIndent is the indentation that makes an indented code block.
+const codeBlockIndent = 4
+
+// codeIndent returns how many columns of indentation belong to a code block
+// rather than to its code: four for an indented block, or the indentation of
+// a fenced block's opening fence after its container prefix.
+func codeIndent(file *mdast.FileSnapshot, cb *mdast.Node) int {
+	if lint.IsIndentedCodeBlock(cb) {
+		return codeBlockIndent
+	}
+	pos := cb.SourcePosition()
+	line := lint.RawLineContent(file, pos.StartLine)
+	if !pos.IsValid() || line == nil {
+		return 0
+	}
+	indent := 0
+	for _, ch := range line[min(len(lint.ContainerPrefix(file, cb, pos.StartLine)), len(line)):] {
+		if ch != ' ' {
+			break
+		}
+		indent++
+	}
+	return indent
+}
+
+// isBlankCodeLine reports whether a code line, read after its container
+// prefix, holds nothing beyond indent columns of spaces and tabs.
+func isBlankCodeLine(content string, indent int) bool {
+	column := 0
+	for idx := 0; idx < len(content); idx++ {
+		switch content[idx] {
+		case ' ':
+			column++
+		case '\t':
+			column += codeTabWidth - column%codeTabWidth
+		default:
+			return false
+		}
+		if column > indent {
+			return false
+		}
+	}
+	return true
 }
 
 type codeLineInfo struct {
