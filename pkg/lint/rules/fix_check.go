@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -151,11 +152,12 @@ func (c *fixCheck) sharedFixes(diags []lint.Diagnostic, candidates []int) map[in
 		}
 		return shared
 	}
+	ordered := blocksOrdered(blocks, len(c.file.Lines))
 	owners := make(map[int][]int)
 	for _, idx := range candidates {
 		slots := make(map[int]bool)
 		for _, edit := range diags[idx].FixEdits {
-			for _, slot := range editSlots(c.file, blocks, edit) {
+			for _, slot := range editSlots(c.file, blocks, ordered, edit) {
 				slots[slot] = true
 			}
 		}
@@ -190,12 +192,67 @@ func topLevelBlockLines(file *mdast.FileSnapshot) ([][2]int, bool) {
 	return blocks, true
 }
 
+// blocksOrdered reports whether the line spans of top-level blocks lie
+// within the file's lines, in order and apart: each starts no later than it
+// ends and ends before the next starts. Then the blocks and the gaps between
+// them that a range of lines touches can be found by binary search.
+func blocksOrdered(blocks [][2]int, lines int) bool {
+	previousEnd := 0
+	for _, block := range blocks {
+		if block[0] <= previousEnd || block[0] > block[1] || block[1] > lines {
+			return false
+		}
+		previousEnd = block[1]
+	}
+	return true
+}
+
+// orderedEditSlots returns the slots of editSlots for the lines first to
+// last, given ordered blocks in a file of the given number of lines. The
+// ends of the blocks and of the gaps grow with their index, and so do their
+// starts, so the blocks and gaps that the lines touch are consecutive.
+func orderedEditSlots(lines int, blocks [][2]int, first, last int) []int {
+	var slots []int
+	for idx := sort.Search(len(blocks), func(i int) bool { return blocks[i][1] >= first }); idx < len(blocks) &&
+		blocks[idx][0] <= last; idx++ {
+		slots = append(slots, 2*idx+1)
+	}
+	gapFirst := func(idx int) int {
+		if idx == 0 {
+			return 1
+		}
+		return blocks[idx-1][1] + 1
+	}
+	gapLast := func(idx int) int {
+		if idx == len(blocks) {
+			return lines
+		}
+		return blocks[idx][0] - 1
+	}
+	for idx := sort.Search(len(blocks)+1, func(i int) bool { return gapLast(i) >= first }); idx <= len(blocks) &&
+		gapFirst(idx) <= last; idx++ {
+		if gapFirst(idx) > gapLast(idx) {
+			continue
+		}
+		slots = append(slots, 2*idx)
+		if idx > 0 {
+			slots = append(slots, 2*idx-1)
+		}
+		if idx < len(blocks) {
+			slots = append(slots, 2*idx+1)
+		}
+	}
+	return slots
+}
+
 // editSlots returns the places an edit touches: slot 2i+1 for the top-level
 // block i, and slot 2i for the lines between blocks i-1 and i, together with
 // the slots of those two blocks, since an edit there can join or split them.
 // An insertion at the start of a line touches the line before it too. An edit
 // whose lines cannot be found touches slot -1, which every such edit shares.
-func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []int {
+// With ordered blocks (see blocksOrdered), the blocks and gaps are found by
+// binary search, which finds the slots that scanning them all finds.
+func editSlots(file *mdast.FileSnapshot, blocks [][2]int, ordered bool, edit fix.TextEdit) []int {
 	first, _ := file.LineAt(edit.StartOffset)
 	last, _ := file.LineAt(max(edit.StartOffset, edit.EndOffset-1))
 	if first < 1 || last < 1 {
@@ -203,6 +260,9 @@ func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []i
 	}
 	if edit.StartOffset == edit.EndOffset && first > 1 && file.Lines[first-1].StartOffset == edit.StartOffset {
 		first--
+	}
+	if ordered {
+		return orderedEditSlots(len(file.Lines), blocks, first, last)
 	}
 	var slots []int
 	for idx, block := range blocks {
