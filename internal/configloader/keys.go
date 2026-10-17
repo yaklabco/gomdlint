@@ -13,9 +13,14 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
-// maxSuggestionDistance is the largest edit distance at which an unknown key
-// is reported as a likely typo of a known one.
-const maxSuggestionDistance = 2
+const (
+	// maxSuggestionDistance is the largest edit distance at which an unknown
+	// key is reported as a likely typo of a known one.
+	maxSuggestionDistance = 2
+
+	// mergeTag is the YAML tag of a merge key (<<).
+	mergeTag = "!!merge"
+)
 
 // commandLineOnlyKeys maps settings that exist only as command-line flags to
 // those flags. Config files cannot set them, but users often try.
@@ -136,13 +141,17 @@ func unknownKeyMessage(prefix, name string, known []string) string {
 }
 
 // forEachKey calls visit for each key and value of a YAML mapping node.
-// Other node kinds have no keys.
+// Other node kinds have no keys. A merge key (<<) is skipped: it is not a
+// key of its own but brings in the keys of an anchored mapping, which are
+// checked where the anchor is defined.
 func forEachKey(node *yaml.Node, visit func(key, value *yaml.Node)) {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return
 	}
 	for idx := 0; idx+1 < len(node.Content); idx += 2 {
-		visit(node.Content[idx], node.Content[idx+1])
+		if key := node.Content[idx]; key.ShortTag() != mergeTag {
+			visit(key, node.Content[idx+1])
+		}
 	}
 }
 

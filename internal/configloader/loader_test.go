@@ -705,6 +705,39 @@ rule_defaults:
 	assert.Equal(t, want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
 }
 
+// TestLoad_RuleKeysFromYAMLMergeKeys covers YAML merge keys, which bring in
+// the keys of an anchored mapping: under rules, the rules of another
+// section, and under a rule, the settings of another rule. A merge key is
+// not a rule or a setting, so it must not be reported as unknown, and the
+// merged keys apply.
+func TestLoad_RuleKeysFromYAMLMergeKeys(t *testing.T) {
+	t.Parallel()
+
+	content := `rule_defaults: &base
+  MD013:
+    enabled: false
+rules:
+  <<: *base
+  MD009: &off
+    enabled: false
+  MD010:
+    <<: *off
+    severity: error
+`
+	result, err := loadProject(t, content)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	assert.Empty(t, result.Warnings)
+	for _, ruleID := range []string{"MD009", "MD010", "MD013"} {
+		rule, ok := result.Config.Rules[ruleID]
+		if assert.True(t, ok, "%s is configured: %v", ruleID, result.Config.Rules) && assert.NotNil(t, rule.Enabled, ruleID) {
+			assert.False(t, *rule.Enabled, ruleID)
+		}
+	}
+}
+
 func TestLoad_WarnsAboutUnknownRulesInJSON(t *testing.T) {
 	t.Parallel()
 
