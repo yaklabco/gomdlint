@@ -366,10 +366,46 @@ func TestDocumentKept(t *testing.T) {
 			want:   false,
 		},
 		{
-			name:   "new heading that no fragment link uses",
+			name:   "new heading in a document with fragment links",
 			input:  "**Heading**\n\nFiller.\n\n## Other\n\n[jump](#other)\n",
 			edits:  []string{"**Heading**", "## Heading"},
 			intent: strongBecomesHeading,
+			want:   false,
+		},
+		{
+			name:   "new heading in a document without fragment links",
+			input:  "**Heading**\n\nFiller.\n\n## Other\n\nText.\n",
+			edits:  []string{"**Heading**", "## Heading"},
+			intent: strongBecomesHeading,
+			want:   true,
+		},
+		{
+			name:   "anchor that stays the same with fragment links",
+			input:  "# Foo.\n\n[jump](#foo)\n",
+			edits:  []string{".", ""},
+			intent: headingLoses("."),
+			want:   true,
+		},
+		{
+			name:   "anchor change with a fragment in a reference definition",
+			input:  "# Foo !\n\nText.\n\n[unused]: #somewhere\n",
+			edits:  []string{" !", ""},
+			intent: headingLoses(" !"),
+			want:   false,
+		},
+		{
+			name:   "anchor change with a character reference in an HTML attribute",
+			input:  "# Foo !\n\n<p data-x=\"&#x23;y\">text</p>\n",
+			edits:  []string{" !", ""},
+			intent: headingLoses(" !"),
+			want:   false,
+		},
+		{
+			// A hash in an HTML comment is not an attribute value.
+			name:   "anchor change with a hash in an HTML comment",
+			input:  "# Foo !\n\n<!-- # note -->\n",
+			edits:  []string{" !", ""},
+			intent: headingLoses(" !"),
 			want:   true,
 		},
 		{
@@ -387,11 +423,11 @@ func TestDocumentKept(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "fragment link that starts to resolve",
+			name:   "fragment link that would start to resolve",
 			input:  "# Foo !\n\n[jump](#foo)\n",
 			edits:  []string{" !", ""},
 			intent: headingLoses(" !"),
-			want:   true,
+			want:   false,
 		},
 	}
 	for _, tt := range tests {

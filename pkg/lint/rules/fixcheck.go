@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"math"
-	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -28,21 +27,21 @@ import (
 //
 // The document check parses the whole document with the fixes applied, with
 // the document's flavor, and compares it with the document as it is: its
-// front matter; its blocks, summarized by kind, attributes (heading level
-// and style, list type and tightness, code fence info, table alignment),
-// nesting and rendered text, with inline markup, the destinations and
-// titles links resolve to, decoded escapes and character references, and
-// raw HTML byte for byte; and the heading or HTML anchor that each fragment
-// link resolves to, with heading anchors made as GitHub makes them. The
-// blocks must match, except for each fix's target block, which must become
-// what its rule says, and a fragment link that resolved must resolve to the
-// same heading or anchor.
+// front matter, and its blocks, summarized by kind, attributes (heading
+// level and style, list type and tightness, code fence info, table
+// alignment), nesting and rendered text, with inline markup, the
+// destinations and titles links resolve to, decoded escapes and character
+// references, and raw HTML byte for byte. The blocks must match, except for
+// each fix's target block, which must become what its rule says.
+//
+// Heading anchors are not emulated. When the document holds anything that
+// could be a fragment reference, a fix may not change what any heading's
+// anchor is made of, nor add or remove a heading (see anchorKey).
 //
 // Each fix is first checked on its own. When its rule shows that it leaves
 // link labels alone and the fix cannot reach the front matter, that check
-// parses only the blocks around the fix (fixesKeepDocument) and recomputes
-// the document's heading anchors with the headings it leaves there, so that
-// a long document with many fixes is not parsed whole for each of them.
+// parses only the blocks around the fix (fixesKeepDocument), so that a long
+// document with many fixes is not parsed whole for each of them.
 // Other fixes are checked on their own against the whole document. Then the
 // fixes that pass are checked together against the whole document, and
 // fixes are dropped until those left pass together.
@@ -59,7 +58,7 @@ type fixIntent struct {
 	into []blockWant
 	// local is true when the rule shows that the fix leaves link labels
 	// alone, so that, unless it can reach the front matter, its effects
-	// other than on heading anchors stay among the blocks around it.
+	// stay among the blocks around it, but for the headings' anchors.
 	local bool
 }
 
@@ -113,13 +112,11 @@ type fixChecker struct {
 	ctx     *lint.RuleContext
 	pending []pendingFix
 	// before is the outline of the document as it is, parsed when first
-	// needed; ready reports whether that parse worked. index finds a block
-	// of it by kind and start, and targets holds where its fragment links
-	// resolve.
-	before  *docOutline
-	ready   bool
-	index   map[blockKey]int
-	targets map[string]string
+	// needed; ready reports whether that parse worked, and fragments whether
+	// the document holds anything that could be a fragment reference.
+	before    *docOutline
+	ready     bool
+	fragments bool
 	// children caches the block children of containers for window searches.
 	children blockChildren
 }
@@ -185,85 +182,23 @@ func (c *fixChecker) safeAlone(pending pendingFix) bool {
 }
 
 // localKept reports whether a local fix changes the blocks around it only as
-// its intent says, and leaves every fragment link of the document resolving
-// as it did, with the headings around the fix as the fix leaves them.
+// its intent says, and leaves the headings' anchors alone when the document
+// could refer to them.
 func (c *fixChecker) localKept(pending pendingFix) bool {
 	window, ok := checkWindow(c.ctx, pending.edits, []fixIntent{pending.intent}, c.children)
 	if !ok || !slices.EqualFunc(window.want, window.after, sameBlock) {
 		return false
 	}
-	return c.anchorsKept(window)
+	// The rest of the document is as it was, so its anchors stay the same
+	// when the window's headings make the same anchor keys.
+	return slices.Equal(anchorKeys(window.before), anchorKeys(window.after)) || !c.mayReferToAnchors()
 }
 
-// anchorsKept reports whether every fragment link of the document resolves
-// as it did when the headings in window are replaced with the headings the
-// fix leaves there.
-func (c *fixChecker) anchorsKept(window windowCheck) bool {
-	before, ok := c.outline()
-	if !ok {
-		return false
-	}
-	var beforeHeadings, afterHeadings []anchorHeading
-	for _, block := range window.before {
-		if block.kind == mdast.NodeHeading {
-			beforeHeadings = append(beforeHeadings, anchorHeading{target: c.headingTarget(block.kind, block.start, -1), plain: block.plain})
-		}
-	}
-	for idx, block := range window.after {
-		if block.kind != mdast.NodeHeading {
-			continue
-		}
-		target := fmt.Sprintf("new heading %d", idx)
-		if origin := window.want[idx].origin; origin >= 0 {
-			target = c.headingTarget(window.before[origin].kind, window.before[origin].start, idx)
-		}
-		afterHeadings = append(afterHeadings, anchorHeading{target: target, plain: block.plain})
-	}
-	// Anchors depend only on the order of the headings and the anchors their
-	// texts make, so the document's anchors stay the same when the window's
-	// do.
-	sameAnchors := slices.EqualFunc(beforeHeadings, afterHeadings, func(a, b anchorHeading) bool {
-		return a.target == b.target && githubAnchor(a.plain) == githubAnchor(b.plain)
-	})
-	if sameAnchors {
-		return true
-	}
-
-	// Splice the window's headings after the fix into the document's.
-	var headings []anchorHeading
-	spliced := false
-	for idx, block := range before.blocks {
-		if block.kind != mdast.NodeHeading {
-			continue
-		}
-		inside := block.start >= window.start && block.start < window.end
-		if !spliced && (inside || block.start >= window.end) {
-			headings = append(headings, afterHeadings...)
-			spliced = true
-		}
-		if !inside {
-			headings = append(headings, anchorHeading{target: fmt.Sprintf("heading %d", idx), plain: block.plain})
-		}
-	}
-	if !spliced {
-		headings = append(headings, afterHeadings...)
-	}
-	targets := anchorTargets(headings, before.anchors)
-	for _, fragment := range before.fragments {
-		if target, resolved := c.targets[fragment]; resolved && targets[fragment] != target {
-			return false
-		}
-	}
-	return true
-}
-
-// headingTarget names the heading of the document that starts at start, or
-// a new heading at idx when there is none.
-func (c *fixChecker) headingTarget(kind mdast.NodeKind, start, idx int) string {
-	if global, found := c.index[blockKey{kind, start}]; found {
-		return fmt.Sprintf("heading %d", global)
-	}
-	return fmt.Sprintf("new heading %d", idx)
+// mayReferToAnchors reports whether the document holds anything that could
+// be a fragment reference to a heading anchor.
+func (c *fixChecker) mayReferToAnchors() bool {
+	_, ok := c.outline()
+	return !ok || c.fragments
 }
 
 // safeTogether returns the fixes among candidates that the document check
@@ -311,13 +246,7 @@ func (c *fixChecker) outline() (docOutline, bool) {
 		if doc, ok := reparse(c.ctx, c.ctx.File.Content); ok {
 			*c.before = outlineOf(doc)
 			c.ready = true
-			c.index = make(map[blockKey]int, len(c.before.blocks))
-			for idx, block := range c.before.blocks {
-				if _, seen := c.index[blockKey{block.kind, block.start}]; !seen {
-					c.index[blockKey{block.kind, block.start}] = idx
-				}
-			}
-			c.targets = fragmentTargets(c.before.blocks, nil, c.before.anchors)
+			c.fragments = c.before.fragments || definitionsMayReferToAnchors(c.ctx)
 		}
 	}
 	return *c.before, c.ready
@@ -325,7 +254,8 @@ func (c *fixChecker) outline() (docOutline, bool) {
 
 // documentKept reports whether applying edits changes the whole document
 // only as the intents say: the same front matter, the same blocks except
-// for the intents' targets, and fragment links that resolve as they did.
+// for the intents' targets, and the same heading anchors when the document
+// could refer to them.
 func (c *fixChecker) documentKept(edits []fix.TextEdit, intents []fixIntent) bool {
 	before, ok := c.outline()
 	if !ok || len(edits) == 0 {
@@ -347,7 +277,7 @@ func (c *fixChecker) documentKept(edits []fix.TextEdit, intents []fixIntent) boo
 	if !ok || !slices.EqualFunc(want, after.blocks, sameBlock) {
 		return false
 	}
-	return fragmentsKept(before, want, after)
+	return !c.fragments || slices.Equal(anchorKeys(before.blocks), anchorKeys(after.blocks))
 }
 
 // editsKey identifies a fix by its edits.
@@ -1136,15 +1066,15 @@ type docOutline struct {
 	// frontMatter is the source of the front matter, if any.
 	frontMatter string
 	blocks      []blockSummary
-	// fragments holds the fragments of the document's links, and anchors
-	// the id and name attributes of its raw HTML.
-	fragments []string
-	anchors   []string
+	// fragments is true when the document holds anything that could be a
+	// fragment reference: a link or image whose destination holds "#", or
+	// an attribute value in raw HTML that holds "#" or a character reference.
+	fragments bool
 }
 
-// htmlAttributePattern matches an href, id or name attribute and its value.
-var htmlAttributePattern = regexp.MustCompile(
-	`(?i)\b(href|id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>` + "`" + `]+))`)
+// htmlAttributeValuePattern matches an attribute and its value in raw HTML.
+var htmlAttributeValuePattern = regexp.MustCompile(
+	`[^\s"'<>/=]+\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>` + "`" + `]+)`)
 
 // outlineOf returns the outline of doc.
 func outlineOf(doc *mdast.FileSnapshot) docOutline {
@@ -1154,25 +1084,20 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 	}
 	//nolint:errcheck // Walk visitor never returns error.
 	_ = mdast.Walk(doc.Root, func(node *mdast.Node) error {
+		rng := node.SourceRange()
+		if rng.StartOffset < 0 || rng.EndOffset > len(doc.Content) {
+			return nil
+		}
+		source := doc.Content[rng.StartOffset:rng.EndOffset]
 		switch node.Kind {
-		case mdast.NodeLink:
-			if destination := lint.LinkDestination(node); strings.HasPrefix(destination, "#") {
-				outline.fragments = append(outline.fragments, fragmentName(destination[1:]))
+		case mdast.NodeLink, mdast.NodeImage:
+			if strings.Contains(lint.LinkDestination(node), "#") || mayHoldHash(source) {
+				outline.fragments = true
 			}
 		case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
-			rng := node.SourceRange()
-			if rng.StartOffset < 0 || rng.EndOffset > len(doc.Content) {
-				return nil
-			}
-			for _, match := range htmlAttributePattern.FindAllSubmatch(doc.Content[rng.StartOffset:rng.EndOffset], -1) {
-				value := string(match[2]) + string(match[3]) + string(match[4])
-				switch strings.ToLower(string(match[1])) {
-				case "href":
-					if strings.HasPrefix(value, "#") {
-						outline.fragments = append(outline.fragments, fragmentName(value[1:]))
-					}
-				default:
-					outline.anchors = append(outline.anchors, value)
+			for _, match := range htmlAttributeValuePattern.FindAllSubmatch(source, -1) {
+				if mayHoldHash(match[1]) {
+					outline.fragments = true
 				}
 			}
 		}
@@ -1181,107 +1106,51 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 	return outline
 }
 
-// fragmentName returns a link fragment with percent escapes decoded.
-func fragmentName(fragment string) string {
-	if decoded, err := url.PathUnescape(fragment); err == nil {
-		return decoded
-	}
-	return fragment
+// mayHoldHash reports whether text holds "#", or a character reference that
+// could stand for it, without decoding anything.
+func mayHoldHash(text []byte) bool {
+	return bytes.ContainsRune(text, '#') || bytes.Contains(text, []byte("&#")) || bytes.Contains(text, []byte("&num;"))
 }
 
-// fragmentsKept reports whether every fragment link of the document that
-// resolved before the fixes resolves to the same heading or HTML anchor
-// after them. Headings after the fixes are known by the origin of the block
-// in want that they match.
-func fragmentsKept(before docOutline, want []blockSummary, after docOutline) bool {
-	resolvedBefore := fragmentTargets(before.blocks, nil, before.anchors)
-	resolvedAfter := fragmentTargets(after.blocks, want, after.anchors)
-	for _, fragment := range slices.Concat(before.fragments, after.fragments) {
-		if target, resolved := resolvedBefore[fragment]; resolved && resolvedAfter[fragment] != target {
-			return false
+// definitionsMayReferToAnchors reports whether a reference definition of
+// the document has a destination that could hold a fragment.
+func definitionsMayReferToAnchors(ctx *lint.RuleContext) bool {
+	for _, definition := range ctx.RefContext().AllDefinitions {
+		if mayHoldHash([]byte(definition.Destination)) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
-// fragmentTargets maps the anchors of the headings in blocks, made as GitHub
-// makes them, and the HTML anchors to what they point to. A heading is
-// named by its origin, taken from origins at the same index when given.
-func fragmentTargets(blocks, origins []blockSummary, anchors []string) map[string]string {
-	var headings []anchorHeading
-	for idx, block := range blocks {
-		if block.kind != mdast.NodeHeading {
-			continue
-		}
-		origin := block.origin
-		if origins != nil {
-			origin = origins[idx].origin
-		}
-		target := fmt.Sprintf("heading %d", origin)
-		if origin < 0 {
-			target = fmt.Sprintf("new heading %d", idx)
-		}
-		headings = append(headings, anchorHeading{target: target, plain: block.plain})
-	}
-	return anchorTargets(headings, anchors)
-}
-
-// anchorHeading is a heading as anchors see it: what it is, and its text.
-type anchorHeading struct {
-	target string
-	plain  string
-}
-
-// anchorTargets maps the anchors of headings, in document order, and the
-// HTML anchors to what they point to.
-func anchorTargets(headings []anchorHeading, anchors []string) map[string]string {
-	targets := make(map[string]string, len(headings)+len(anchors))
-	slugs := slugger{}
-	for _, heading := range headings {
-		targets[slugs.slug(heading.plain)] = heading.target
-	}
-	for _, anchor := range anchors {
-		if _, taken := targets[anchor]; !taken {
-			targets[anchor] = "anchor " + anchor
+// anchorKeys returns the anchor keys of the headings among blocks, in order.
+func anchorKeys(blocks []blockSummary) []string {
+	var keys []string
+	for _, block := range blocks {
+		if block.kind == mdast.NodeHeading {
+			keys = append(keys, anchorKey(block.plain))
 		}
 	}
-	return targets
+	return keys
 }
 
-// slugger makes unique heading anchors as github-slugger does, counting the
-// anchors it has made.
-type slugger map[string]int
-
-// slug returns the anchor of a heading with text: the GitHub anchor of the
-// text, with "-1", "-2" and so on added when it is taken.
-func (s slugger) slug(text string) string {
-	base := githubAnchor(text)
-	result := base
-	for {
-		if _, taken := s[result]; !taken {
-			break
-		}
-		s[base]++
-		result = fmt.Sprintf("%s-%d", base, s[base])
-	}
-	s[result] = 0
-	return result
-}
-
-// githubAnchor returns the anchor GitHub makes of heading text: lowercase,
-// without characters other than letters, marks, numbers, connector
-// punctuation, hyphens and spaces, and with spaces turned into hyphens.
-func githubAnchor(text string) string {
-	var anchor strings.Builder
-	for _, char := range strings.ToLower(text) {
+// anchorKey returns what a heading's anchor is made of: the letters, marks,
+// numbers, connector punctuation, hyphens and spaces of its text, in order,
+// with ASCII letters lowercased and other letters as they are. GitHub and
+// others make an anchor by lowercasing those and turning spaces into
+// hyphens, so headings whose keys are the same in order get the same
+// anchors, duplicate numbering included, however other letters lowercase.
+func anchorKey(plain string) string {
+	var key strings.Builder
+	for _, char := range plain {
 		switch {
-		case char == ' ':
-			anchor.WriteByte('-')
-		case char == '-' || unicode.In(char, unicode.L, unicode.M, unicode.N, unicode.Pc):
-			anchor.WriteRune(char)
+		case char >= 'A' && char <= 'Z':
+			key.WriteRune(char + ('a' - 'A'))
+		case char == ' ' || char == '-' || unicode.In(char, unicode.L, unicode.M, unicode.N, unicode.Pc):
+			key.WriteRune(char)
 		}
 	}
-	return anchor.String()
+	return key.String()
 }
 
 // headingPlainText returns a heading's text content, as GitHub reads it to

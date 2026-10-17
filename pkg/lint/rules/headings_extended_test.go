@@ -1015,6 +1015,37 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 			wantLines: []int{1},
 		},
 		{
+			// A fragment written with a character reference still points to
+			// "foo-", so the anchor must stay.
+			name:      "fragment link written with a character reference",
+			input:     "# Foo !\n\n[jump](#fo&#111;-)\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "raw HTML link written with a character reference",
+			input:     "# Foo !\n\n<a href=\"&#35;foo-\">jump</a>\n",
+			wantLines: []int{1},
+		},
+		{
+			// GitHub lowercases U+0130 to "i" and U+0307, unlike Go.
+			name:      "anchor of a dotted capital I",
+			input:     "# \u0130 !\n\n[jump](#i%CC%87-)\n",
+			wantLines: []int{1},
+		},
+		{
+			// GitHub lowercases a final capital sigma to a final sigma.
+			name:      "anchor that ends in a capital sigma",
+			input:     "# \u039f\u0394\u039f\u03a3 !\n\n[jump](#\u03bf\u03b4\u03bf\u03c2-)\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "anchor change in a document without fragment links",
+			input:     "# Foo !\n\n[jump](https://example.com/)\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Foo\n\n[jump](https://example.com/)\n",
+		},
+		{
 			name:      "anchor that stays the same",
 			input:     "# Foo.\n\n[jump](#foo)\n",
 			wantLines: []int{1},

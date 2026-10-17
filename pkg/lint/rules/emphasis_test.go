@@ -95,6 +95,13 @@ func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
 		},
 		{name: "italic paragraph is reported without a fix", input: "_Another section_\n", wantLines: []int{1}},
 		{
+			// Any new heading changes the anchors, and a fragment link might
+			// point to one of them.
+			name:      "no fix that adds an anchor while fragment links exist",
+			input:     "**Heading**\n\nFiller.\n\n[jump](#other)\n",
+			wantLines: []int{1},
+		},
+		{
 			// A heading "Heading" before the existing one would take its
 			// anchor, so the link would point to the new heading.
 			name:      "no fix that takes the anchor of a later heading",
