@@ -1,6 +1,7 @@
 # Blanks Around Tables
 
 Some text before the table.
+
 | Name | Value |
 | --- | --- |
 | Alice | 100 |
