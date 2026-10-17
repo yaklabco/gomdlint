@@ -93,7 +93,10 @@ type Node struct {
 	// Inline holds attributes for inline-level nodes.
 	Inline *InlineAttrs
 
-	// Ext holds extension-specific attributes (e.g., GFM).
+	// Ext holds attributes for node kinds defined outside this package. The
+	// goldmark parser does not set it: GFM constructs have typed kinds
+	// (NodeStrikethrough, NodeTable, NodeTableRow, NodeTableCell,
+	// NodeTaskCheckbox) and typed attributes.
 	Ext map[string]any
 }
 
