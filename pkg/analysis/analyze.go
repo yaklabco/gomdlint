@@ -220,12 +220,16 @@ func Analyze(result *runner.Result, opts Options) *Report {
 	return report
 }
 
+// sortRuleAnalysis orders rules by sortBy. Rules that sort equal stay in
+// rule ID order: they come from a map, whose iteration order changes from
+// run to run.
 func sortRuleAnalysis(rules []RuleAnalysis, sortBy SortField, desc bool) {
 	slices.SortFunc(rules, func(left, right RuleAnalysis) int {
+		byID := cmp.Compare(left.RuleID, right.RuleID)
 		switch sortBy {
 		case SortByAlpha:
 			// Alphabetical sorting is always ascending (A-Z)
-			return cmp.Compare(left.RuleID, right.RuleID)
+			return byID
 		case SortBySeverity:
 			// Errors first, then warnings, then infos (always descending by severity)
 			result := cmp.Compare(right.Errors, left.Errors)
@@ -235,23 +239,27 @@ func sortRuleAnalysis(rules []RuleAnalysis, sortBy SortField, desc bool) {
 			if result == 0 {
 				result = cmp.Compare(right.Issues, left.Issues)
 			}
-			return result
+			return cmp.Or(result, byID)
 		default: // SortByCount
 			result := cmp.Compare(left.Issues, right.Issues)
 			if desc {
 				result = -result
 			}
-			return result
+			return cmp.Or(result, byID)
 		}
 	})
 }
 
+// sortFileAnalysis orders files by sortBy. Files that sort equal stay in
+// path order: they come from a map, whose iteration order changes from run
+// to run.
 func sortFileAnalysis(files []FileAnalysis, sortBy SortField, desc bool) {
 	slices.SortFunc(files, func(left, right FileAnalysis) int {
+		byPath := cmp.Compare(left.Path, right.Path)
 		switch sortBy {
 		case SortByAlpha:
 			// Alphabetical sorting is always ascending (A-Z)
-			return cmp.Compare(left.Path, right.Path)
+			return byPath
 		case SortBySeverity:
 			// Errors first, then warnings, then infos (always descending by severity)
 			result := cmp.Compare(right.Errors, left.Errors)
@@ -261,13 +269,13 @@ func sortFileAnalysis(files []FileAnalysis, sortBy SortField, desc bool) {
 			if result == 0 {
 				result = cmp.Compare(right.Issues, left.Issues)
 			}
-			return result
+			return cmp.Or(result, byPath)
 		default: // SortByCount
 			result := cmp.Compare(left.Issues, right.Issues)
 			if desc {
 				result = -result
 			}
-			return result
+			return cmp.Or(result, byPath)
 		}
 	})
 }
