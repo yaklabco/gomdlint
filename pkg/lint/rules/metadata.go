@@ -617,8 +617,10 @@ func (r *ProperNamesRule) DefaultEnabled() bool {
 var literalLinkPattern = regexp.MustCompile(
 	`(?i)(?:https?://|www\.)[^\s<>]*|[\w.+-]+@[\w-]+(?:\.[\w-]+)+`)
 
-// htmlTagPattern matches an HTML tag or comment.
-var htmlTagPattern = regexp.MustCompile(`(?s)<!--.*?-->|<[^>]*>`)
+// autolinkPattern matches a CommonMark URI or e-mail autolink.
+var autolinkPattern = regexp.MustCompile("^<(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\\x00-\\x20\\x7f<>]*|" +
+	"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?" +
+	"(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>")
 
 // properNameRegion is a range of source text that MD044 checks.
 type properNameRegion struct {
@@ -751,65 +753,317 @@ func (r *ProperNamesRule) nameDiagnostic(
 		Build()
 }
 
-// regions returns the source text MD044 checks, in document order.
+// properNameScan collects the source text MD044 checks.
+type properNameScan struct {
+	ctx         *lint.RuleContext
+	includeCode bool
+	includeHTML bool
+	regions     []properNameRegion
+}
+
+// regions returns the source text MD044 checks.
 func (r *ProperNamesRule) regions(ctx *lint.RuleContext, includeCode, includeHTML bool) []properNameRegion {
-	var regions []properNameRegion
-	add := func(rng mdast.SourceRange, links bool) {
-		if rng.StartOffset >= 0 && rng.StartOffset < rng.EndOffset && rng.EndOffset <= len(ctx.File.Content) {
-			regions = append(regions, properNameRegion{rng: rng, links: links})
+	scan := &properNameScan{ctx: ctx, includeCode: includeCode, includeHTML: includeHTML}
+	scan.collect(ctx.File, 0, nil, false)
+	return scan.regions
+}
+
+// addRegion records the document range from start to end.
+func (s *properNameScan) addRegion(start, end int, links bool) {
+	if start < end {
+		s.regions = append(s.regions, properNameRegion{
+			rng:   mdast.SourceRange{StartOffset: start, EndOffset: end},
+			links: links,
+		})
+	}
+}
+
+// collect adds the regions of file. For the content of an HTML block parsed
+// again, nested is true, base is the block's offset in the document and tags
+// holds the masked tags, sorted, which are cut out of the prose around them.
+func (s *properNameScan) collect(file *mdast.FileSnapshot, base int, tags []mdast.SourceRange, nested bool) {
+	add := func(rng mdast.SourceRange, links bool, cuts []mdast.SourceRange) {
+		if rng.StartOffset < 0 || rng.StartOffset >= rng.EndOffset || rng.EndOffset > len(file.Content) {
+			return
 		}
+		start := rng.StartOffset
+		for _, cut := range cuts {
+			if cut.EndOffset <= start || cut.StartOffset >= rng.EndOffset {
+				continue
+			}
+			s.addRegion(base+start, base+cut.StartOffset, links)
+			start = cut.EndOffset
+		}
+		s.addRegion(base+start, base+rng.EndOffset, links)
 	}
 	//nolint:errcheck // Walk visitor never returns error.
-	_ = mdast.Walk(ctx.Root, func(node *mdast.Node) error {
+	_ = mdast.Walk(file.Root, func(node *mdast.Node) error {
 		switch node.Kind {
 		case mdast.NodeText, mdast.NodeSoftBreak, mdast.NodeHardBreak:
 			if insideAutolink(node) {
 				return nil
 			}
-			if start, ok := textPrefixStart(ctx.File, node); ok {
-				add(mdast.SourceRange{StartOffset: start, EndOffset: start + len(node.Inline.Text)}, true)
+			if start, ok := textPrefixStart(file, node); ok {
+				add(mdast.SourceRange{StartOffset: start, EndOffset: start + len(node.Inline.Text)}, true, tags)
 			}
 		case mdast.NodeCodeSpan, mdast.NodeCodeBlock:
-			if includeCode {
-				add(node.ContentRange(), true)
+			if s.includeCode {
+				add(node.ContentRange(), true, nil)
 			}
 		case mdast.NodeHTMLInline:
-			if includeHTML {
-				add(node.SourceRange(), false)
+			if s.includeHTML {
+				add(node.SourceRange(), false, nil)
 			}
 		case mdast.NodeHTMLBlock:
-			r.addHTMLBlockRegions(node, includeHTML, add)
+			// Content parsed again has no HTML blocks, as maskHTML masks
+			// every '<' that could start one.
+			if !nested {
+				s.collectHTMLBlock(file, node)
+			}
 		}
 		return nil
 	})
-	return regions
 }
 
-// addHTMLBlockRegions adds an HTML block's text. markdownlint reads the
-// block as Markdown: text between the tags is prose and is always checked,
-// while the tags (and comment blocks) are checked only with html_elements.
-func (r *ProperNamesRule) addHTMLBlockRegions(
-	block *mdast.Node,
-	includeHTML bool,
-	add func(mdast.SourceRange, bool),
-) {
+// collectHTMLBlock adds the regions of an HTML block. A comment block is
+// HTML throughout. Any other block is read as Markdown without HTML blocks or
+// indented code, as markdownlint does: its tags are HTML, checked only with
+// html_elements, and the rest is parsed again, so that its prose is checked,
+// its code, tags included, follows code_blocks, and fence info strings and
+// link destinations are skipped.
+func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast.Node) {
 	rng := block.SourceRange()
+	if rng.IsEmpty() || rng.EndOffset > len(file.Content) {
+		return
+	}
 	if lint.IsHTMLComment(block) {
-		if includeHTML {
-			add(rng, false)
+		if s.includeHTML {
+			s.addRegion(rng.StartOffset, rng.EndOffset, false)
 		}
 		return
 	}
-	text := block.Text()
-	prev := 0
-	for _, tag := range htmlTagPattern.FindAllIndex(text, -1) {
-		add(mdast.SourceRange{StartOffset: rng.StartOffset + prev, EndOffset: rng.StartOffset + tag[0]}, true)
-		if includeHTML {
-			add(mdast.SourceRange{StartOffset: rng.StartOffset + tag[0], EndOffset: rng.StartOffset + tag[1]}, false)
-		}
-		prev = tag[1]
+
+	masked, tags := maskHTML(file.Content[rng.StartOffset:rng.EndOffset])
+	maskCodeIndentation(masked)
+	snapshot, ok := reparse(s.ctx, masked)
+	if !ok {
+		return
 	}
-	add(mdast.SourceRange{StartOffset: rng.StartOffset + prev, EndOffset: rng.EndOffset}, true)
+	if s.includeHTML {
+		code := codeRanges(snapshot)
+		for _, tag := range tags {
+			if !overlapsAny(code, tag) {
+				s.addRegion(rng.StartOffset+tag.StartOffset, rng.StartOffset+tag.EndOffset, false)
+			}
+		}
+	}
+	s.collect(snapshot, rng.StartOffset, tags, true)
+}
+
+// maskHTML returns a copy of text, the content of an HTML block, in which
+// every tag, comment, processing instruction, declaration and CDATA section
+// is replaced with commas, keeping line breaks, so that offsets hold and the
+// tags neither form HTML blocks nor join the words around them. Any other '<'
+// outside an autolink is replaced as well, as it might still start an HTML
+// block. It also returns the ranges of the replaced constructs, in order.
+func maskHTML(text []byte) ([]byte, []mdast.SourceRange) {
+	masked := slices.Clone(text)
+	var tags []mdast.SourceRange
+	for idx := 0; idx < len(text); idx++ {
+		if text[idx] != '<' {
+			continue
+		}
+		end := htmlConstructEnd(text, idx)
+		if end < 0 {
+			if loc := autolinkPattern.FindIndex(text[idx:]); loc != nil {
+				idx += loc[1] - 1
+			} else {
+				masked[idx] = ','
+			}
+			continue
+		}
+		tags = append(tags, mdast.SourceRange{StartOffset: idx, EndOffset: end})
+		for pos := idx; pos < end; pos++ {
+			if masked[pos] != '\n' && masked[pos] != '\r' {
+				masked[pos] = ','
+			}
+		}
+		idx = end - 1
+	}
+	return masked, tags
+}
+
+// codeRanges returns the ranges of the code spans and code blocks of file,
+// fences included.
+func codeRanges(file *mdast.FileSnapshot) []mdast.SourceRange {
+	var ranges []mdast.SourceRange
+	//nolint:errcheck // Walk visitor never returns error.
+	_ = mdast.Walk(file.Root, func(node *mdast.Node) error {
+		if node.Kind == mdast.NodeCodeSpan || node.Kind == mdast.NodeCodeBlock {
+			ranges = append(ranges, node.SourceRange())
+		}
+		return nil
+	})
+	return ranges
+}
+
+// maskCodeIndentation replaces the indentation of lines indented by four or
+// more columns with commas: markdownlint reads HTML block content without
+// indented code blocks, so such lines are prose.
+func maskCodeIndentation(text []byte) {
+	const codeIndent = 4
+	for lineStart := 0; lineStart < len(text); {
+		col, pos := 0, lineStart
+		for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t') {
+			if text[pos] == '\t' {
+				col += codeIndent - col%codeIndent
+			} else {
+				col++
+			}
+			pos++
+		}
+		if col >= codeIndent {
+			for idx := lineStart; idx < pos; idx++ {
+				text[idx] = ','
+			}
+		}
+		next := bytes.IndexByte(text[lineStart:], '\n')
+		if next < 0 {
+			break
+		}
+		lineStart += next + 1
+	}
+}
+
+// htmlConstructEnd returns the end of the HTML tag, comment, processing
+// instruction, declaration or CDATA section that starts with the '<' at
+// text[start], following CommonMark's raw HTML grammar, or -1 when none does.
+// Quoted attribute values may hold '>'.
+func htmlConstructEnd(text []byte, start int) int {
+	rest := text[start:]
+	switch {
+	case bytes.HasPrefix(rest, []byte("<!-->")):
+		return start + len("<!-->")
+	case bytes.HasPrefix(rest, []byte("<!--->")):
+		return start + len("<!--->")
+	case bytes.HasPrefix(rest, []byte("<!--")):
+		return indexAfter(text, start+len("<!--"), "-->")
+	case bytes.HasPrefix(rest, []byte("<?")):
+		return indexAfter(text, start+len("<?"), "?>")
+	case bytes.HasPrefix(rest, []byte("<![CDATA[")):
+		return indexAfter(text, start+len("<![CDATA["), "]]>")
+	case len(rest) > 2 && rest[1] == '!' && isASCIILetter(rest[2]):
+		return indexAfter(text, start+2, ">")
+	case len(rest) > 2 && rest[1] == '/' && isASCIILetter(rest[2]):
+		pos := skipTagName(text, start+2)
+		pos = skipHTMLSpace(text, pos)
+		if pos < len(text) && text[pos] == '>' {
+			return pos + 1
+		}
+		return -1
+	case len(rest) > 1 && isASCIILetter(rest[1]):
+		return openTagEnd(text, skipTagName(text, start+1))
+	default:
+		return -1
+	}
+}
+
+// openTagEnd scans the attributes of an open tag from pos, just after the tag
+// name, and returns the end of the tag or -1.
+func openTagEnd(text []byte, pos int) int {
+	for {
+		spaceEnd := skipHTMLSpace(text, pos)
+		switch {
+		case spaceEnd >= len(text):
+			return -1
+		case text[spaceEnd] == '>':
+			return spaceEnd + 1
+		case text[spaceEnd] == '/':
+			if spaceEnd+1 < len(text) && text[spaceEnd+1] == '>' {
+				return spaceEnd + 2
+			}
+			return -1
+		case spaceEnd == pos || !isAttributeNameStart(text[spaceEnd]):
+			// Attributes must be separated by whitespace.
+			return -1
+		}
+		pos = spaceEnd + 1
+		for pos < len(text) && isAttributeNameChar(text[pos]) {
+			pos++
+		}
+		valueStart := skipHTMLSpace(text, pos)
+		if valueStart >= len(text) || text[valueStart] != '=' {
+			continue
+		}
+		pos = attributeValueEnd(text, skipHTMLSpace(text, valueStart+1))
+		if pos < 0 {
+			return -1
+		}
+	}
+}
+
+// attributeValueEnd returns the end of the attribute value at pos: quoted
+// with ' or ", or unquoted. It returns -1 when there is no valid value.
+func attributeValueEnd(text []byte, pos int) int {
+	if pos >= len(text) {
+		return -1
+	}
+	if quote := text[pos]; quote == '"' || quote == '\'' {
+		end := bytes.IndexByte(text[pos+1:], quote)
+		if end < 0 {
+			return -1
+		}
+		return pos + 1 + end + 1
+	}
+	end := pos
+	for end < len(text) && strings.IndexByte(" \t\r\n\"'=<>`", text[end]) < 0 {
+		end++
+	}
+	if end == pos {
+		return -1
+	}
+	return end
+}
+
+// indexAfter returns the offset just past the first marker at or after pos,
+// or -1.
+func indexAfter(text []byte, pos int, marker string) int {
+	idx := bytes.Index(text[pos:], []byte(marker))
+	if idx < 0 {
+		return -1
+	}
+	return pos + idx + len(marker)
+}
+
+// skipTagName skips the letters, digits and hyphens of a tag name.
+func skipTagName(text []byte, pos int) int {
+	for pos < len(text) && (isASCIILetter(text[pos]) || (text[pos] >= '0' && text[pos] <= '9') || text[pos] == '-') {
+		pos++
+	}
+	return pos
+}
+
+// skipHTMLSpace skips spaces, tabs and line endings.
+func skipHTMLSpace(text []byte, pos int) int {
+	for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\n' || text[pos] == '\r') {
+		pos++
+	}
+	return pos
+}
+
+// isASCIILetter reports whether b is an ASCII letter.
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// isAttributeNameStart reports whether b can start an HTML attribute name.
+func isAttributeNameStart(b byte) bool {
+	return isASCIILetter(b) || b == '_' || b == ':'
+}
+
+// isAttributeNameChar reports whether b can continue an HTML attribute name.
+func isAttributeNameChar(b byte) bool {
+	return isAttributeNameStart(b) || (b >= '0' && b <= '9') || b == '.' || b == '-'
 }
 
 // insideAutolink reports whether node is inside an autolink.
