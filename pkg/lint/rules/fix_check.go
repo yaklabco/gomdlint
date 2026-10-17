@@ -35,14 +35,13 @@ const individualFixChecks = 16
 // A fix that changes no byte at all, such as an empty deletion, is no fix and
 // is removed first.
 //
-// From the first raw HTML that may open an element with content (see
-// opensElement) to the end of the file, every byte must stay as it is, so a
-// fix with an edit there is removed too. Whether whitespace, line endings,
-// blank lines and container markers show inside an element depends on the
-// element, its attributes and CSS, and where it ends depends on how a
-// browser reads the HTML, which no signature models: a final line ending,
-// for one, joins the value of a textarea left open. Fixes before that HTML
-// are judged as usual.
+// A document whose raw HTML is not benign (see benignHTML) keeps no fix at
+// all. A style sheet, or an element left open, can change how a browser
+// shows whitespace, tabs and line breaks anywhere in the document, before
+// the HTML as well as after it, which no signature models: a final line
+// ending, for one, joins the value of a textarea left open. Whitespace,
+// well-formed comments such as markdownlint directives, and br, wbr, hr and
+// img tags leave the fixes to the signature.
 //
 // The engine may apply only some of the fixes, after a directive, a conflict
 // or the last pass, so every fix must be safe on its own. When a rule reports
@@ -74,14 +73,10 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 		flavor = ctx.Config.Flavor
 	}
 	check := newFixCheck(ctx.File, flavor)
-	candidates = slices.DeleteFunc(candidates, func(idx int) bool {
-		if check.reachesElement(diags[idx].FixEdits) {
+	if !check.htmlBenign() {
+		for _, idx := range candidates {
 			diags[idx].FixEdits = nil
-			return true
 		}
-		return false
-	})
-	if len(candidates) == 0 {
 		return diags
 	}
 
@@ -266,10 +261,9 @@ type fixCheck struct {
 	content   []byte
 	markdowns []goldmark.Markdown
 	// baseline holds the render signatures of the original content, and
-	// elementFrom the offset in it of the first raw HTML that may open an
-	// element with content, or -1. Both are set on first use.
-	baseline    []string
-	elementFrom int
+	// benign whether all its raw HTML is benign. Both are set on first use.
+	baseline []string
+	benign   bool
 }
 
 func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
@@ -281,10 +275,10 @@ func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
 }
 
 // keeps reports whether applying edits leaves the render signatures of the
-// document unchanged and the bytes from the first raw HTML that may open an
-// element to the end of the file as they are. The edits must not overlap.
+// document unchanged, in a document whose raw HTML is benign. The edits must
+// not overlap.
 func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
-	if len(edits) == 0 || c.reachesElement(edits) {
+	if len(edits) == 0 || !c.htmlBenign() {
 		return false
 	}
 	prepared, err := fix.PrepareEdits(edits, len(c.content))
@@ -294,20 +288,11 @@ func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
 	return c.unchanged(fix.ApplyEdits(c.content, prepared))
 }
 
-// reachesElement reports whether an edit lies at or after the start of the
-// first raw HTML that may open an element with content, from where the file
-// must stay byte for byte the same.
-func (c *fixCheck) reachesElement(edits []fix.TextEdit) bool {
+// htmlBenign reports whether all raw HTML of the original content is
+// benign, so that its fixes can be judged by the render signature.
+func (c *fixCheck) htmlBenign() bool {
 	c.ensureBaseline()
-	if c.elementFrom < 0 {
-		return false
-	}
-	for _, edit := range edits {
-		if edit.StartOffset >= c.elementFrom || edit.EndOffset > c.elementFrom {
-			return true
-		}
-	}
-	return false
+	return c.benign
 }
 
 // keepsTogether reports whether the fixes of the given diagnostics, applied
@@ -319,17 +304,17 @@ func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
 		edits = append(edits, diags[idx].FixEdits...)
 	}
 	accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(c.content))
-	if err != nil || c.reachesElement(accepted) {
+	if err != nil || !c.htmlBenign() {
 		return false
 	}
 	return c.unchanged(fix.ApplyEdits(c.content, accepted))
 }
 
 // ensureBaseline parses the original content once, for its render
-// signatures and the start of the first raw HTML that may open an element.
+// signatures and whether its raw HTML is benign.
 func (c *fixCheck) ensureBaseline() {
 	if c.baseline == nil {
-		c.baseline, c.elementFrom = c.signatures(c.content)
+		c.baseline, c.benign = c.signatures(c.content)
 	}
 }
 
@@ -349,14 +334,9 @@ func (c *fixCheck) unchanged(changed []byte) bool {
 // front matter, kept as written, and the signature of the Markdown after it
 // (see goldmarkSignature). A byte order mark is left out, as the parser
 // leaves it out, and the front matter lines are blanked before parsing. It
-// also returns the offset in content of the first raw HTML that may open an
-// element with content for any of the parsers, or -1.
-func (c *fixCheck) signatures(content []byte) ([]string, int) {
-	bom := 0
-	if bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
-		bom = len(mdast.ByteOrderMark)
-	}
-	content = content[bom:]
+// also reports whether every raw HTML region is benign for every parser.
+func (c *fixCheck) signatures(content []byte) ([]string, bool) {
+	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
 	frontMatter := frontMatterLength(content)
 	source := bytes.Clone(content)
 	for idx := range frontMatter {
@@ -365,15 +345,13 @@ func (c *fixCheck) signatures(content []byte) ([]string, int) {
 		}
 	}
 	signatures := make([]string, len(c.markdowns))
-	elementFrom := -1
+	benign := true
 	for idx, markdown := range c.markdowns {
 		doc := markdown.Parser().Parse(gmtext.NewReader(source))
 		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source)
-		if start := elementStart(doc, source); start >= 0 && (elementFrom < 0 || bom+start < elementFrom) {
-			elementFrom = bom + start
-		}
+		benign = benign && htmlRegionsBenign(doc, source)
 	}
-	return signatures, elementFrom
+	return signatures, benign
 }
 
 // The lines that open and close YAML and TOML front matter.
@@ -426,9 +404,9 @@ func frontMatterLength(content []byte) int {
 // whitespace HTML collapses (spaces, tabs, line endings and form feeds)
 // collapse to one space in other text.
 //
-// The signature does not model how HTML elements show whitespace, so the
-// fix check keeps the file byte for byte the same from the first raw HTML
-// that may open an element with content (see fixCheck.reachesElement).
+// The signature does not model how HTML and CSS show whitespace, so the fix
+// check keeps no fix in a document whose raw HTML is not benign (see
+// benignHTML).
 func goldmarkSignature(doc gmast.Node, source []byte) string {
 	var out strings.Builder
 	sig := signatureWriter{source: source, out: &out, anchors: make(map[string]int)}
@@ -453,77 +431,166 @@ func (s *signatureWriter) blocks(parent gmast.Node) {
 	}
 }
 
-// isVoidElement reports whether a tag name names an HTML element that has
-// no content and no end tag.
-func isVoidElement(name string) bool {
-	switch strings.ToLower(name) {
-	case "area", "base", "br", "col", "embed", "hr", "img", "input", "keygen", "link", "meta", "param", "source",
-		"track", "wbr":
-		return true
-	default:
-		return false
-	}
-}
-
-// opensElement reports whether raw HTML may open an element with content: it
-// holds "<" followed by an ASCII letter, and the tag name that starts there,
-// which runs to whitespace, "/" or ">", is not a void element. Comments are
-// not skipped, because browsers end a malformed comment where CommonMark
-// does not, which can reveal a tag inside it, and nothing tells whether the
-// element is closed later.
-func opensElement(raw []byte) bool {
-	for idx := 0; idx+1 < len(raw); idx++ {
-		if raw[idx] != '<' || !isASCIILetter(raw[idx+1]) {
-			continue
-		}
-		end := idx + 1
-		for end < len(raw) && !strings.ContainsRune(" \t\n\r\f/>", rune(raw[end])) {
-			end++
-		}
-		if !isVoidElement(string(raw[idx+1 : end])) {
-			return true
-		}
-	}
-	return false
-}
-
-// elementStart returns the offset where the first raw HTML, an HTML block or
-// inline HTML, that may open an element with content starts, or -1.
-func elementStart(doc gmast.Node, source []byte) int {
-	start := -1
+// htmlRegionsBenign reports whether every raw HTML region of a document,
+// each HTML block and each inline HTML node, is benign.
+func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
+	benign := true
 	_ = gmast.Walk(doc, func(node gmast.Node, entering bool) (gmast.WalkStatus, error) { //nolint:errcheck // Visitor never returns an error.
 		if !entering {
 			return gmast.WalkContinue, nil
 		}
-		var segments []gmtext.Segment
+		var raw []byte
 		switch node := node.(type) {
 		case *gmast.HTMLBlock:
 			for idx := range node.Lines().Len() {
-				segments = append(segments, node.Lines().At(idx))
+				segment := node.Lines().At(idx)
+				raw = append(raw, segment.Value(source)...)
 			}
 			if node.HasClosure() {
-				segments = append(segments, node.ClosureLine)
+				raw = append(raw, node.ClosureLine.Value(source)...)
 			}
 		case *gmast.RawHTML:
 			for idx := range node.Segments.Len() {
-				segments = append(segments, node.Segments.At(idx))
+				segment := node.Segments.At(idx)
+				raw = append(raw, segment.Value(source)...)
 			}
 		default:
 			return gmast.WalkContinue, nil
 		}
-		if len(segments) == 0 || (start >= 0 && segments[0].Start >= start) {
-			return gmast.WalkSkipChildren, nil
-		}
-		var raw []byte
-		for _, segment := range segments {
-			raw = append(raw, segment.Value(source)...)
-		}
-		if opensElement(raw) {
-			start = segments[0].Start
+		if !benignHTML(raw) {
+			benign = false
+			return gmast.WalkStop, nil
 		}
 		return gmast.WalkSkipChildren, nil
 	})
-	return start
+	return benign
+}
+
+// benignHTML reports whether raw HTML can show nothing that the render
+// signature does not compare: it is a run of whitespace, well-formed
+// comments, and start tags of br, wbr, hr and img, named in any ASCII case,
+// with attributes as CommonMark defines them and quoted values on one line.
+// Any other HTML, including any other tag, an end tag, a tag name with other
+// than ASCII letters, a malformed comment, a processing instruction, a
+// declaration or CDATA, may bring a style sheet or open an element, which
+// changes how a browser shows the text before or after it.
+func benignHTML(raw []byte) bool {
+	for pos := 0; pos < len(raw); {
+		end := -1
+		switch {
+		case isHTMLSpace(raw[pos]):
+			end = pos + 1
+		case bytes.HasPrefix(raw[pos:], []byte("<!--")):
+			end = htmlCommentEnd(raw, pos)
+		case raw[pos] == '<':
+			end = benignTagEnd(raw, pos)
+		}
+		if end < 0 {
+			return false
+		}
+		pos = end
+	}
+	return true
+}
+
+// isHTMLSpace reports whether a byte is whitespace in an HTML tag.
+func isHTMLSpace(char byte) bool {
+	return char == ' ' || char == '\t' || char == '\n' || char == '\r' || char == '\f'
+}
+
+// htmlCommentEnd returns the offset after the well-formed comment that starts
+// at pos, or -1. Its text runs to the first "-->", does not start with ">"
+// or "->", and holds no "--".
+func htmlCommentEnd(raw []byte, pos int) int {
+	start := pos + len("<!--")
+	length := bytes.Index(raw[start:], []byte("-->"))
+	if length < 0 {
+		return -1
+	}
+	text := raw[start : start+length]
+	if bytes.HasPrefix(text, []byte(">")) || bytes.HasPrefix(text, []byte("->")) || bytes.Contains(text, []byte("--")) {
+		return -1
+	}
+	return start + length + len("-->")
+}
+
+// benignTagEnd returns the offset after the start tag of br, wbr, hr or img
+// that starts at pos, or -1. The name is matched in ASCII case only, so a
+// letter that folds to an ASCII one, such as the Kelvin sign, does not
+// match, as it does not for browsers.
+func benignTagEnd(raw []byte, pos int) int {
+	idx := pos + 1
+	for idx < len(raw) && (isASCIILetter(raw[idx]) || isASCIIDigit(raw[idx]) || raw[idx] == '-') {
+		idx++
+	}
+	switch string(bytes.ToLower(raw[pos+1 : idx])) {
+	case "br", "wbr", "hr", "img":
+	default:
+		return -1
+	}
+	for {
+		spaces := idx
+		for idx < len(raw) && isHTMLSpace(raw[idx]) {
+			idx++
+		}
+		switch {
+		case idx == len(raw):
+			return -1
+		case raw[idx] == '>':
+			return idx + 1
+		case raw[idx] == '/':
+			if idx+1 < len(raw) && raw[idx+1] == '>' {
+				return idx + 2
+			}
+			return -1
+		case idx == spaces || !isAttributeNameStart(raw[idx]):
+			// Attributes are separated by whitespace.
+			return -1
+		}
+		if idx = htmlAttributeEnd(raw, idx); idx < 0 {
+			return -1
+		}
+	}
+}
+
+// htmlAttributeEnd returns the offset after the attribute that starts at
+// pos: a name, and optionally "=" and a value, which is either quoted, with
+// no line ending inside, or unquoted, without whitespace, quotes, "=", "<",
+// ">" or "`". It returns -1 when the value is malformed.
+func htmlAttributeEnd(raw []byte, pos int) int {
+	idx := pos + 1
+	for idx < len(raw) && isAttributeNameChar(raw[idx]) {
+		idx++
+	}
+	value := idx
+	for value < len(raw) && isHTMLSpace(raw[value]) {
+		value++
+	}
+	if value == len(raw) || raw[value] != '=' {
+		return idx
+	}
+	value++
+	for value < len(raw) && isHTMLSpace(raw[value]) {
+		value++
+	}
+	if value == len(raw) {
+		return -1
+	}
+	if quote := raw[value]; quote == '"' || quote == '\'' {
+		length := bytes.IndexByte(raw[value+1:], quote)
+		if length < 0 || bytes.ContainsAny(raw[value+1:value+1+length], "\r\n") {
+			return -1
+		}
+		return value + 1 + length + 1
+	}
+	end := value
+	for end < len(raw) && !isHTMLSpace(raw[end]) && !strings.ContainsRune("\"'=<>`", rune(raw[end])) {
+		end++
+	}
+	if end == value {
+		return -1
+	}
+	return end
 }
 
 func (s *signatureWriter) block(node gmast.Node) {

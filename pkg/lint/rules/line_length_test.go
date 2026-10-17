@@ -622,13 +622,35 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Before <textarea/>alpha beta gamma delta epsilon zeta eta theta.</textarea> after.\n",
 		},
 		{
-			name: "only the paragraph before inline HTML is wrapped",
+			name: "no fix for a paragraph before inline HTML",
 			input: "Some words come first and fill the line with plain words after.\n\n" +
 				"Some words come first and fill the line <b>bold words here</b> after.\n",
 			maxLen:  50,
-			wantFix: true,
-			wantText: "Some words come first and fill the line with plain\nwords after.\n\n" +
+			wantFix: false,
+			wantText: "Some words come first and fill the line with plain words after.\n\n" +
 				"Some words come first and fill the line <b>bold words here</b> after.\n",
+		},
+		{
+			// A style sheet can make line breaks show anywhere.
+			name:     "no fix before a style element",
+			input:    "alpha beta gamma delta epsilon\n\n<style>p { white-space: pre }</style>\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "alpha beta gamma delta epsilon\n\n<style>p { white-space: pre }</style>\n",
+		},
+		{
+			name:     "no fix with a style sheet link",
+			input:    "alpha beta gamma delta epsilon\n\n<link rel=stylesheet href=\"a.css\">\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "alpha beta gamma delta epsilon\n\n<link rel=stylesheet href=\"a.css\">\n",
+		},
+		{
+			name:     "wraps next to a directive comment and an image",
+			input:    "<!-- markdownlint-disable MD033 -->\n<img src=\"x.png\" alt=\"a b\">\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  true,
+			wantText: "<!-- markdownlint-disable MD033 -->\n<img src=\"x.png\" alt=\"a b\">\n\nalpha beta gamma\ndelta epsilon\n",
 		},
 		{
 			name: "no fix for a paragraph after inline HTML",
@@ -706,69 +728,6 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Unbreakable - - - - - - - - - - - - - - - - - - - - - - end.\n",
 		},
 	})
-}
-
-// TestMaxLineLengthRule_SkipsParagraphsFromTheFirstElement checks that the
-// wrap fix is never offered for a paragraph that holds or follows raw HTML
-// opening an element with content, which may show the line breaks of the
-// text in it, while paragraphs before that HTML, and paragraphs of documents
-// whose HTML holds only void elements, stay wrappable.
-func TestMaxLineLengthRule_SkipsParagraphsFromTheFirstElement(t *testing.T) {
-	tests := []struct {
-		name            string
-		input           string
-		wrappable, kept []int
-	}{
-		{
-			name:      "inline element",
-			input:     "Plain text first.\n\nText with <span>an element</span> in it.\n\nPlain text after.\n",
-			wrappable: []int{1},
-			kept:      []int{3, 5},
-		},
-		{
-			name:  "styled div left open",
-			input: "<div style=\"white-space: pre\">\n\nalpha beta gamma delta epsilon\n",
-			kept:  []int{3},
-		},
-		{
-			name:  "lookalike end tag",
-			input: "Open <textarea>here </textareax>\n\nalpha beta\n",
-			kept:  []int{1, 3},
-		},
-		{
-			name:  "end tag in an attribute value",
-			input: "<pre title=\"</pre>\">\n\nalpha beta\n",
-			kept:  []int{3},
-		},
-		{
-			name:  "tag in a malformed comment",
-			input: "<!-- a --!> <pre> -->\n\nalpha beta\n",
-			kept:  []int{3},
-		},
-		{
-			name:      "comment without tags",
-			input:     "<!-- markdownlint-disable-next-line MD013 -->\n\nalpha beta\n",
-			wrappable: []int{3},
-		},
-		{
-			name:      "void elements only",
-			input:     "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta\n",
-			wrappable: []int{1, 5},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			snapshot, err := goldmark.New(goldmark.FlavorCommonMark).Parse(context.Background(), "test.md", []byte(tt.input))
-			require.NoError(t, err)
-			lines := wrappableLines(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
-			for _, line := range tt.wrappable {
-				assert.Contains(t, lines, line, "line %d is wrappable", line)
-			}
-			for _, line := range tt.kept {
-				assert.NotContains(t, lines, line, "line %d is kept as written", line)
-			}
-		})
-	}
 }
 
 // TestMaxLineLengthRule_ProtectsTaskCheckboxes checks that the wrap fix never

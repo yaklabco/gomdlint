@@ -17,14 +17,18 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
+// trailingWhitespaceCase is an MD009 input, the number of diagnostics it
+// gets and the text its fixes give.
+type trailingWhitespaceCase struct {
+	name      string
+	input     string
+	wantDiags int
+	wantFix   string
+	config    map[string]any
+}
+
 func TestTrailingWhitespaceRule(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantDiags int
-		wantFix   string
-		config    map[string]any
-	}{
+	runTrailingWhitespaceCases(t, []trailingWhitespaceCase{
 		{
 			name:      "no trailing whitespace",
 			input:     "Hello world\nSecond line\n",
@@ -223,14 +227,26 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			wantFix:   "```\ncode   \n```\n",
 			config:    map[string]any{"ignore_code_blocks": false},
 		},
+	})
+}
+
+// TestTrailingWhitespaceRule_HTML covers MD009 fixes in documents with raw
+// HTML.
+func TestTrailingWhitespaceRule_HTML(t *testing.T) {
+	runTrailingWhitespaceCases(t, []trailingWhitespaceCase{
 		{
-			// The paragraph holding the first inline HTML that opens an
-			// element, and every one after it, must stay byte for byte the
-			// same; the one before it keeps its fix.
-			name:      "fix only in the paragraph before inline HTML",
+			// HTML other than br, wbr, hr, img and comments can change how
+			// any text shows, so no fix is kept anywhere.
+			name:      "no fix before inline HTML",
 			input:     "plain   \nmore\n\nText <b>x</b>   \nmore\n",
 			wantDiags: 2,
-			wantFix:   "plain  \nmore\n\nText <b>x</b>   \nmore\n",
+			wantFix:   "plain   \nmore\n\nText <b>x</b>   \nmore\n",
+		},
+		{
+			name:      "fix with only a line break element",
+			input:     "plain   \nmore\n\nText<br> more\n",
+			wantDiags: 1,
+			wantFix:   "plain  \nmore\n\nText<br> more\n",
 		},
 		{
 			name:      "no fix in a paragraph after inline HTML",
@@ -246,8 +262,13 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			wantDiags: 1,
 			wantFix:   "<pre>\nalpha   \nbeta\n</pre>\n",
 		},
-	}
+	})
+}
 
+// runTrailingWhitespaceCases runs MD009 on each input, applies its fixes and
+// checks that no fixable diagnostic is left.
+func runTrailingWhitespaceCases(t *testing.T, tests []trailingWhitespaceCase) {
+	t.Helper()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parser := goldmark.New(string(config.FlavorCommonMark))
@@ -385,10 +406,18 @@ func TestFinalNewlineRule(t *testing.T) {
 			wantFix:   "<div>\n\nhello </div>",
 		},
 		{
+			// The HTML block holds text besides the comment, which is not
+			// benign HTML, so the fix is not kept.
 			name:      "text after comment on last line is not blank",
 			input:     "Text\n<!-- note --> more",
 			wantDiags: 1,
-			wantFix:   "Text\n<!-- note --> more\n",
+			wantFix:   "Text\n<!-- note --> more",
+		},
+		{
+			name:      "comment after text on last line is not blank",
+			input:     "Text\nmore <!-- note -->",
+			wantDiags: 1,
+			wantFix:   "Text\nmore <!-- note -->\n",
 		},
 		{
 			name:      "explicit max_trailing_blank_lines still limits blank lines",

@@ -440,16 +440,13 @@ func nodeLineSet(nodes []*mdast.Node) map[int]bool {
 
 // wrappableLines maps the lines of paragraph text that the wrap fix may
 // break to their paragraph. Paragraphs holding a table delimiter row are left
-// alone: wrapping them would break the table for GFM renderers. So are the
-// paragraph holding the first raw HTML that may open an element with content
-// and every paragraph after it, because the element may show the line breaks
-// of their text (see opensElement); the fix check keeps them as written.
+// alone: wrapping them would break the table for GFM renderers. In a document
+// whose raw HTML is not benign, the fix check keeps no wrap (see benignHTML).
 func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
 	lines := make(map[int]*mdast.Node)
-	elementFrom := elementStartOffset(ctx)
 	for _, paragraph := range ctx.Paragraphs() {
 		pos := paragraph.SourcePosition()
-		if !pos.IsValid() || (elementFrom >= 0 && paragraph.SourceRange().EndOffset > elementFrom) {
+		if !pos.IsValid() {
 			continue
 		}
 		last := nodeLastLine(paragraph)
@@ -469,25 +466,6 @@ func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
 		}
 	}
 	return lines
-}
-
-// elementStartOffset returns the offset where the first raw HTML, an HTML
-// block or inline HTML, that may open an element with content starts, or -1.
-func elementStartOffset(ctx *lint.RuleContext) int {
-	start := -1
-	for _, nodes := range [][]*mdast.Node{ctx.HTMLBlocks(), ctx.HTMLInlines()} {
-		for _, node := range nodes {
-			rng := node.SourceRange()
-			if rng.StartOffset < 0 || rng.EndOffset > len(ctx.File.Content) || rng.EndOffset <= rng.StartOffset ||
-				(start >= 0 && rng.StartOffset >= start) {
-				continue
-			}
-			if opensElement(ctx.File.Content[rng.StartOffset:rng.EndOffset]) {
-				start = rng.StartOffset
-			}
-		}
-	}
-	return start
 }
 
 // taskMarkerPattern matches a GFM task list checkbox at the start of the

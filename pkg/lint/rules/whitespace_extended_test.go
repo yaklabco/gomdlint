@@ -109,6 +109,31 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   ">   quote\n",
 		},
 		{
+			// A style sheet can make the text before it keep its tabs.
+			name:      "tab before a style element is reported but not fixed",
+			input:     "alpha\tbeta\n\n<style>p { white-space: pre }</style>\n",
+			wantDiags: 1,
+			wantFix:   "alpha\tbeta\n\n<style>p { white-space: pre }</style>\n",
+		},
+		{
+			name:      "tab before a style sheet link is reported but not fixed",
+			input:     "alpha\tbeta\n\n<link rel=stylesheet href=\"a.css\">\n",
+			wantDiags: 1,
+			wantFix:   "alpha\tbeta\n\n<link rel=stylesheet href=\"a.css\">\n",
+		},
+		{
+			name:      "tab after a tag named with a Kelvin sign is not fixed",
+			input:     "<hr><lin\u212a>\n\nalpha\tbeta\n",
+			wantDiags: 1,
+			wantFix:   "<hr><lin\u212a>\n\nalpha\tbeta\n",
+		},
+		{
+			name:      "tab next to line breaks and comments is fixed",
+			input:     "alpha\tbeta\n\n<br>\n<!-- markdownlint-disable MD013 -->\n",
+			wantDiags: 1,
+			wantFix:   "alpha beta\n\n<br>\n<!-- markdownlint-disable MD013 -->\n",
+		},
+		{
 			name:      "tabs in a Makefile block are reported but not fixed",
 			input:     "```makefile\nall:\n\tgo build ./...\n\tgo test ./...\n```\n",
 			wantDiags: 2,

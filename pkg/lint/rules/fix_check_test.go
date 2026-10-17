@@ -304,10 +304,12 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: false,
 		},
 		{
+			// HTML other than br, wbr, hr, img and comments can change how
+			// the text before it shows too, so no fix is kept anywhere.
 			name:  "wrapping a paragraph without HTML before one with HTML",
 			input: "alpha beta\n\nBefore <b>bold</b> after.\n",
 			old:   "alpha beta", new: "alpha\nbeta",
-			want: true,
+			want: false,
 		},
 		{
 			// Whether the bold element was closed is not decided.
@@ -387,6 +389,15 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			old:   "alpha beta", new: "alpha\nbeta",
 			want: false,
 		},
+	})
+}
+
+// TestFixCheckKeepsNoFixWithOtherHTML checks that a document with raw HTML
+// other than whitespace, well-formed comments and br, wbr, hr and img tags
+// keeps no fix, wherever the fix is, while one with only those keeps its
+// fixes.
+func TestFixCheckKeepsNoFixWithOtherHTML(t *testing.T) {
+	runFixCheckCases(t, []fixCheckCase{
 		{
 			// Nothing after the div closes it.
 			name:  "wrapping Markdown inside a styled div left open",
@@ -420,7 +431,7 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			name:  "wrapping before an element opens",
 			input: "alpha beta\n\n<div style=\"white-space: pre\">\n\ntext\n",
 			old:   "alpha beta", new: "alpha\nbeta",
-			want: true,
+			want: false,
 		},
 		{
 			name:  "wrapping after a comment without tags",
@@ -469,67 +480,149 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: false,
 		},
 		{
-			// The parser does not see the byte order mark, so the offsets
-			// it reports start after it.
-			name:  "wrapping before an element after a byte order mark",
-			input: "\uFEFFalpha beta\n\n<textarea>x\n",
+			name:  "wrapping after a byte order mark with a line break element",
+			input: "\uFEFFalpha beta\n\n<br>\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			// A style sheet can make the text before it keep its tabs.
+			name:  "replacing a tab before a style element",
+			input: "alpha\tbeta\n\n<style>p { white-space: pre }</style>\n",
+			old:   "alpha\tbeta", new: "alpha beta",
+			want: false,
+		},
+		{
+			name:  "wrapping before a style element",
+			input: "alpha beta\n\n<style>p { white-space: pre }</style>\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping before a style sheet link",
+			input: "alpha beta\n\n<link rel=stylesheet href=\"a.css\">\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping after a style sheet link",
+			input: "<link rel=stylesheet href=\"a.css\">\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// Browsers fold only ASCII letters, so the Kelvin sign makes
+			// an unknown element, not a link.
+			name:  "wrapping after a tag named with a Kelvin sign",
+			input: "<hr><lin\u212a>\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping after a comment holding two hyphens",
+			input: "<!-- a -- b -->\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping after the end tag of a line break",
+			input: "</br>\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping after an image whose quoted value spans lines",
+			input: "Text <img alt=\"a\nb\"> here\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping with only line breaks, images and comments",
+			input: "<br>\n\n<img src=\"x.png\" alt=\"a b\">\n\n<!-- markdownlint-disable MD013 -->\n\nalpha beta\n",
 			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
 		},
 	})
 }
 
-// TestKeepSafeFixesLeavesTheRestAfterAnElement checks that from the first raw
-// HTML that may open an element to the end of the file no fix is kept, while
-// fixes before it are judged as usual.
-func TestKeepSafeFixesLeavesTheRestAfterAnElement(t *testing.T) {
-	input := "alpha \nbeta\n\n<div style=\"white-space: pre\">\n\ngamma \ndelta"
-	diags := []lint.Diagnostic{
-		{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "alpha \n", "alpha\n")}},
-		{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "gamma \n", "gamma\n")}},
-		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: len(input), EndOffset: len(input), NewText: "\n"}}},
+// TestKeepSafeFixesKeepsNoFixWithOtherHTML checks that a document with raw
+// HTML other than whitespace, well-formed comments and br, wbr, hr and img
+// tags keeps no fix at all, before or after the HTML, while a document with
+// only those keeps its fixes.
+func TestKeepSafeFixesKeepsNoFixWithOtherHTML(t *testing.T) {
+	tests := []struct {
+		html string
+		keep bool
+	}{
+		{html: "<div style=\"white-space: pre\">", keep: false},
+		{html: "<link rel=stylesheet href=\"a.css\">", keep: false},
+		{html: "<br>\n<img src=\"x.png\" alt=\"a b\">\n<!-- markdownlint-disable MD013 -->", keep: true},
 	}
-	snapshot := parseForCheck(t, input)
-	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+	for _, tt := range tests {
+		input := "alpha \nbeta\n\n" + tt.html + "\n\ngamma \ndelta"
+		diags := []lint.Diagnostic{
+			{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "alpha \n", "alpha\n")}},
+			{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "gamma \n", "gamma\n")}},
+			{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: len(input), EndOffset: len(input), NewText: "\n"}}},
+		}
+		snapshot := parseForCheck(t, input)
+		ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
 
-	kept := keepSafeFixes(ctx, diags)
-	require.Len(t, kept, len(diags))
-	assert.True(t, kept[0].HasFix(), "the fix before the div is judged as usual")
-	assert.False(t, kept[1].HasFix(), "the fix inside the div is not kept")
-	assert.False(t, kept[2].HasFix(), "the final line ending after the div is not kept")
+		kept := keepSafeFixes(ctx, diags)
+		require.Len(t, kept, len(diags))
+		for idx, diag := range kept {
+			assert.Equal(t, tt.keep, diag.HasFix(), "%q fix %d", tt.html, idx)
+		}
+	}
 }
 
-// TestOpensElement checks which raw HTML holds the start tag of an element
-// with content, which could keep the whitespace of the text after it.
-func TestOpensElement(t *testing.T) {
+// TestBenignHTML checks which raw HTML can only show what the render
+// signature compares.
+func TestBenignHTML(t *testing.T) {
 	tests := map[string]bool{
-		"<br>":                      false,
-		"<BR/>":                     false,
-		"<img src=\"a.png\">":       false,
-		"<hr>":                      false,
-		"<input type=\"checkbox\">": false,
-		"<wbr>":                     false,
-		"<param name=\"x\">":        false,
-		"<keygen>":                  false,
-		"</div>":                    false,
-		"<!-- comment -->":          false,
-		"<!DOCTYPE html>":           false,
-		"<?php echo 1; ?>":          false,
-		"a < b":                     false,
-		"<1>":                       false,
-		"<div>":                     true,
-		"<span>":                    true,
-		"<textarea/>":               true,
-		"<pre title=\"</pre>\">":    true,
-		"<!-- <pre> -->":            true,
-		"<!-- a --!> <pre> -->":     true,
-		"<br-x>":                    true,
-		"<brx>":                     true,
-		"<img alt=\"<b>\">":         true,
-		"<div":                      true,
+		"":                                      true,
+		" \t\n":                                 true,
+		"<br>":                                  true,
+		"<BR/>":                                 true,
+		"<br />":                                true,
+		"<Wbr>":                                 true,
+		"<hr>":                                  true,
+		"<img src=\"x.png\" alt=\"a b\">":       true,
+		"<img src='x.png' alt=x>":               true,
+		"<img\nsrc=\"x.png\"\n/>":               true,
+		"<img data-x_y.z:w=\"1\" hidden>":       true,
+		"<!-- markdownlint-disable MD013 -->":   true,
+		"<!---->":                               true,
+		"<!--\nmulti\nline\n-->":                true,
+		"<br>\n<!-- c -->\n<img src=x>\n":       true,
+		"<link rel=stylesheet>":                 false,
+		"<style>p { white-space: pre }</style>": false,
+		"</br>":                                 false,
+		"<b>":                                   false,
+		"<div>":                                 false,
+		"<textarea/>":                           false,
+		"<lin\u212a>":                           false,
+		"<hr><lin\u212a>":                       false,
+		"<img alt=\"a\nb\">":                    false,
+		"<img alt=a\"b>":                        false,
+		"<img alt=a`b>":                         false,
+		"<img =x>":                              false,
+		"<img src=x":                            false,
+		"<imgx>":                                false,
+		"<br\v>":                                false,
+		"<br> text":                             false,
+		"<!-- a -- b -->":                       false,
+		"<!-->":                                 false,
+		"<!--->":                                false,
+		"<!--->-->":                             false,
+		"<!-- a --!> <pre> -->":                 false,
+		"<!-- open":                             false,
+		"<?php echo 1; ?>":                      false,
+		"<!DOCTYPE html>":                       false,
+		"<![CDATA[x]]>":                         false,
 	}
 	for raw, want := range tests {
-		assert.Equal(t, want, opensElement([]byte(raw)), "%q", raw)
+		assert.Equal(t, want, benignHTML([]byte(raw)), "%q", raw)
 	}
 }
 
