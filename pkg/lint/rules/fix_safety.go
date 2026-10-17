@@ -14,6 +14,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
@@ -198,15 +199,19 @@ type leafBlock struct {
 }
 
 // localLeaf returns the leaf block an edit stays inside when the edit cannot
-// change block syntax. Block syntax is read at the start of a line (markers,
-// fences, headings, thematic breaks, indentation), from a paragraph that
-// starts with "[" (reference definitions, task list boxes), and from pipes
-// and the backslashes that escape them (tables). So the edit must sit
-// strictly inside a paragraph, heading, code block, or table that does not
-// start with "[", on one of its lines and after the first word of that line,
-// add and remove no line breaks, pipes, or backslashes, and leave the line
-// with something besides spaces, tabs, and blockquote markers. Anything else
-// is not local.
+// change block syntax. Block syntax is read from the start of each line: the
+// container markers, the indentation, and the first word, which holds every
+// block marker. A line whose first word starts with ASCII punctuation or a
+// digit can also change meaning further along, as a closing fence, a setext
+// underline, a thematic break, an empty list item, an HTML block, or a table
+// delimiter row does, and so can any line of a paragraph or heading that
+// starts with one, as a reference definition or its title does. Pipes, and
+// the backslashes that escape them, split table rows. So the edit must sit
+// strictly inside a paragraph, heading, code block, or table, on one line
+// and after the first word of that line; neither that word nor the paragraph
+// or heading may start with ASCII punctuation or a digit; and the edit must
+// add and remove no line breaks, pipes, or backslashes and must not follow a
+// backslash. Anything else is not local.
 func localLeaf(file *mdast.FileSnapshot, leaves []leafBlock, edit fix.TextEdit) (int, bool) {
 	start, end := edit.StartOffset, edit.EndOffset
 	idx := sort.Search(len(leaves), func(i int) bool { return leaves[i].span.EndOffset > start })
@@ -214,16 +219,22 @@ func localLeaf(file *mdast.FileSnapshot, leaves []leafBlock, edit fix.TextEdit) 
 		return 0, false
 	}
 	leaf := leaves[idx]
-	if leaf.span.StartOffset >= start || end >= leaf.span.EndOffset || file.Content[leaf.span.StartOffset] == '[' {
+	if leaf.span.StartOffset >= start || end >= leaf.span.EndOffset {
 		return 0, false
 	}
 	switch leaf.node.Kind {
-	case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeCodeBlock, mdast.NodeTable:
+	case mdast.NodeParagraph, mdast.NodeHeading:
+		text := bytes.TrimLeft(file.Content[leaf.span.StartOffset:leaf.span.EndOffset], " \t")
+		if len(text) == 0 || mayStartBlockSyntax(text[0]) {
+			return 0, false
+		}
+	case mdast.NodeCodeBlock, mdast.NodeTable:
 	default:
 		return 0, false
 	}
 	const blockChars = "\r\n|\\"
-	if strings.ContainsAny(edit.NewText, blockChars) || bytes.ContainsAny(file.Content[start:end], blockChars) {
+	if strings.ContainsAny(edit.NewText, blockChars) || bytes.ContainsAny(file.Content[start:end], blockChars) ||
+		file.Content[start-1] == '\\' {
 		return 0, false
 	}
 	line, _ := file.LineAt(start)
@@ -231,21 +242,26 @@ func localLeaf(file *mdast.FileSnapshot, leaves []leafBlock, edit fix.TextEdit) 
 		return 0, false
 	}
 	info := file.Lines[line-1]
-	word := min(info.StartOffset+len(lint.ContainerPrefix(file, leaf.node, line)), info.NewlineStart)
-	for word < info.NewlineStart && (file.Content[word] == ' ' || file.Content[word] == '\t') {
-		word++
+	// The container prefix includes a byte order mark on the first line.
+	first := min(info.StartOffset+len(lint.ContainerPrefix(file, leaf.node, line)), info.NewlineStart)
+	for first < info.NewlineStart && (file.Content[first] == ' ' || file.Content[first] == '\t') {
+		first++
 	}
+	word := first
 	for word < info.NewlineStart && file.Content[word] != ' ' && file.Content[word] != '\t' {
 		word++
 	}
-	if start <= word {
-		return 0, false
-	}
-	after := string(file.Content[info.StartOffset:start]) + edit.NewText + string(file.Content[end:info.NewlineStart])
-	if strings.Trim(after, " \t>") == "" {
+	if start <= word || end > info.NewlineStart || mayStartBlockSyntax(file.Content[first]) {
 		return 0, false
 	}
 	return idx, true
+}
+
+// mayStartBlockSyntax reports whether a line or block that starts with ch can
+// hold block syntax past its first word. Every block marker, reference
+// definition, and definition title starts with ASCII punctuation or a digit.
+func mayStartBlockSyntax(ch byte) bool {
+	return mdscan.IsASCIIPunct(ch) || (ch >= '0' && ch <= '9')
 }
 
 // leafBlocks returns the blocks that hold content rather than other blocks,

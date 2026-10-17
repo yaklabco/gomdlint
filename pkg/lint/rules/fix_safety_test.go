@@ -213,9 +213,10 @@ func TestStripColumns(t *testing.T) {
 
 // TestFixLayers groups fixes that can depend on each other. An edit is
 // local when it cannot change block syntax: it stays on one line of a
-// paragraph, heading, code block, or table that does not start with "[",
-// after the first word of the line, adds and removes no line breaks, pipes,
-// or backslashes, and leaves the line with text. A local edit depends on the
+// paragraph, heading, code block, or table, after the first word of the
+// line; neither that word nor the paragraph or heading starts with ASCII
+// punctuation or a digit; and it adds and removes no line breaks, pipes, or
+// backslashes and does not follow a backslash. A local edit depends on the
 // other fixes in its leaf block; any other edit depends on every fix in the
 // top-level blocks it touches, local ones included.
 func TestFixLayers(t *testing.T) {
@@ -271,6 +272,48 @@ func TestFixLayers(t *testing.T) {
 			name:  "the same edits without the bracket stay apart",
 			input: "- a] b c d\n- e f g\n",
 			diags: []lint.Diagnostic{edit(7, 8, "C"), edit(15, 16, "F")},
+		},
+		{
+			name:  "an edit on a code line that starts like a fence is not local",
+			input: "- text one two\n\n  ```\n  ``` x\n  ```\n",
+			diags: []lint.Diagnostic{edit(28, 29, ""), edit(12, 13, "W")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit on a line that starts like a setext underline is not local",
+			input: "- a b\n  === x\n  more\n- c d e\n",
+			diags: []lint.Diagnostic{edit(12, 13, ""), edit(25, 26, "D")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit after an empty list marker is not local",
+			input: "- a b\n  1. \n  more\n- c d e\n",
+			diags: []lint.Diagnostic{edit(11, 11, "x"), edit(23, 24, "D")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "a line after a byte order mark is read after the mark",
+			input: "\ufeff> _ _ _ x\n> more\n>\n> c d e\n",
+			diags: []lint.Diagnostic{edit(11, 12, ""), edit(26, 27, "D")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit in a paragraph that could finish a definition title is not local",
+			input: "- [x]: /url\n  'my title\n  more stuff' x\n  last line\n- b c d\n",
+			diags: []lint.Diagnostic{edit(38, 39, ""), edit(56, 57, "C")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit after a backslash is not local",
+			input: "- one \\x| two three\n- four five six\n",
+			diags: []lint.Diagnostic{edit(7, 8, ""), edit(28, 29, "I")},
+			want:  [][]int{{0}, {1}},
+		},
+		{
+			name:  "an edit inside a line ending is not local",
+			input: "- one two three\r\n  four five\r\n- six seven eight\r\n",
+			diags: []lint.Diagnostic{edit(16, 16, "x"), edit(37, 38, "E")},
+			want:  [][]int{{0}, {1}},
 		},
 		{
 			name:  "an edit that empties its line is not local",
