@@ -100,6 +100,57 @@ func TestTextReporter_CharacterColumnsAndRelativePath(t *testing.T) {
 		"caret sits under the first trailing space")
 }
 
+// TestTextReporter_CaretAfterWideCharactersAndTabs covers a context line
+// whose text before the column holds a two-byte, a three-byte and a
+// four-byte character, two of them wide, and a tab: the caret must still sit
+// under the first trailing space once the column counts characters and the
+// tab is expanded.
+func TestTextReporter_CaretAfterWideCharactersAndTabs(t *testing.T) {
+	t.Parallel()
+
+	// The trailing spaces start at byte column 15 and character column 9.
+	// On screen "é中😀" takes 5 cells, the tab pads to cell 8, and "word"
+	// ends at cell 12.
+	content := "# Title\n\né中😀\tword  \n"
+	path := "wide.md"
+	result := &runner.Result{
+		Files: []runner.FileOutcome{{
+			Path: path,
+			Result: &lint.PipelineResult{
+				FileResult: &lint.FileResult{
+					Snapshot: mdast.NewFileSnapshot(path, []byte(content)),
+					Diagnostics: []lint.Diagnostic{{
+						RuleID:      "MD009",
+						RuleName:    "no-trailing-spaces",
+						Message:     "Trailing whitespace",
+						Severity:    config.SeverityWarning,
+						FilePath:    path,
+						StartLine:   3,
+						StartColumn: 15,
+						EndLine:     3,
+						EndColumn:   17,
+					}},
+				},
+			},
+		}},
+	}
+
+	var buf bytes.Buffer
+	rep := reporter.NewTextReporter(reporter.Options{
+		Writer:      &buf,
+		Color:       "never",
+		ShowContext: true,
+		GroupByFile: true,
+	})
+
+	_, err := rep.Report(context.Background(), result)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "wide.md:3:9 ")
+	assert.Contains(t, output, contextIndent+"é中😀   word  \n"+contextIndent+strings.Repeat(" ", 12)+"^\n")
+}
+
 func TestTextReporter_FlatModeUsesDisplayPaths(t *testing.T) {
 	t.Parallel()
 
