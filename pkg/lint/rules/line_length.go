@@ -280,7 +280,7 @@ func markdownlintLinkOnlyLines(ctx *lint.RuleContext) map[int]bool {
 			lines[line] = true
 		}
 	}
-	for _, paragraph := range paragraphLikeNodes(ctx) {
+	for _, paragraph := range ctx.Paragraphs() {
 		_ = mdast.Walk(paragraph, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
 			if node.Inline == nil || len(node.Inline.Text) == 0 || node.Kind == mdast.NodeCodeSpan {
 				return nil
@@ -324,7 +324,7 @@ func nodeLineSet(nodes []*mdast.Node) map[int]bool {
 // alone: wrapping them would break the table for GFM renderers.
 func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
 	lines := make(map[int]*mdast.Node)
-	for _, paragraph := range paragraphLikeNodes(ctx) {
+	for _, paragraph := range ctx.Paragraphs() {
 		pos := paragraph.SourcePosition()
 		if !pos.IsValid() {
 			continue

@@ -286,7 +286,7 @@ func nearestBlockquote(node *mdast.Node) *mdast.Node {
 // the marker line, optionally followed by nested lists and nothing else.
 func isSimpleListItem(item *mdast.Node, markerLine int) bool {
 	first := item.FirstChild
-	if !isParagraphLike(first) || first.SourcePosition().StartLine != markerLine {
+	if first == nil || first.Kind != mdast.NodeParagraph || first.SourcePosition().StartLine != markerLine {
 		return false
 	}
 	for child := first.Next; child != nil; child = child.Next {

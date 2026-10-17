@@ -1006,7 +1006,7 @@ func listShape(t *testing.T, input string) string {
 				shape.WriteString("(")
 				walk(child)
 				shape.WriteString(")")
-			case isParagraphLike(child):
+			case child.Kind == mdast.NodeParagraph:
 				shape.WriteString("p")
 			case child.IsBlock():
 				shape.WriteString(child.Kind.String())

@@ -130,7 +130,7 @@ func trailingWhitespaceFix(trailing []byte, start, end int, canBreak bool, break
 // outside code spans that continue onto the next line.
 func hardBreakLines(ctx *lint.RuleContext) map[int]bool {
 	lines := make(map[int]bool)
-	for _, paragraph := range paragraphLikeNodes(ctx) {
+	for _, paragraph := range ctx.Paragraphs() {
 		pos := paragraph.SourcePosition()
 		if !pos.IsValid() {
 			continue
@@ -151,33 +151,6 @@ func hardBreakLines(ctx *lint.RuleContext) map[int]bool {
 		}
 	}
 	return lines
-}
-
-// paragraphLikeNodes returns the paragraphs of the document, including the
-// text blocks of tight list items, which the parser currently maps to raw nodes.
-func paragraphLikeNodes(ctx *lint.RuleContext) []*mdast.Node {
-	nodes := append([]*mdast.Node(nil), ctx.Paragraphs()...)
-	for _, item := range ctx.ListItems() {
-		for child := item.FirstChild; child != nil; child = child.Next {
-			if isParagraphLike(child) && child.Kind != mdast.NodeParagraph {
-				nodes = append(nodes, child)
-			}
-		}
-	}
-	return nodes
-}
-
-// isParagraphLike reports whether a node is a paragraph or the text block of a
-// tight list item.
-func isParagraphLike(node *mdast.Node) bool {
-	if node == nil {
-		return false
-	}
-	if node.Kind == mdast.NodeParagraph {
-		return true
-	}
-	return node.Kind == mdast.NodeRaw && node.Ext == nil &&
-		node.Parent != nil && node.Parent.Kind == mdast.NodeListItem
 }
 
 func isListBlankLine(ctx *lint.RuleContext, lineNum int) bool {
