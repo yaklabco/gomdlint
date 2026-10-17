@@ -437,6 +437,60 @@ func TestCodeFenceStyleRule(t *testing.T) {
 	}
 }
 
+// TestCodeFenceStyleRule_SafeFix rewrites the whole opening and closing fence
+// runs and refuses (reports without a fix) when the new fence would change
+// where the code block ends or would not be a fence.
+func TestCodeFenceStyleRule_SafeFix(t *testing.T) {
+	options := map[string]any{"style": "backtick"}
+	tests := []struct {
+		name    string
+		input   string
+		wantFix bool
+		fixed   string
+	}{
+		{"simple", "~~~\nx\n~~~\n", true, "```\nx\n```\n"},
+		{"longer closing run", "~~~~~ js\ny\n~~~~~~~~\n", true, "````` js\ny\n````````\n"},
+		{"inside list item", "- item\n\n  ~~~\n  in list\n  ~~~\n", true, "- item\n\n  ```\n  in list\n  ```\n"},
+		{"inside blockquote", "> ~~~\n> quoted\n> ~~~\n", true, "> ```\n> quoted\n> ```\n"},
+		{"unclosed fence", "~~~\nrest of file\n", true, "```\nrest of file\n"},
+		{"empty block", "~~~\n~~~\n", true, "```\n```\n"},
+		{"content holds a backtick fence", "~~~\n```\nnested\n```\n~~~\n", false, ""},
+		{"backtick in info string", "~~~ a`b\nx\n~~~\n", false, ""},
+		{"shorter backtick run in content", "~~~~\n```\nnested\n```\n~~~~\n", true, "````\n```\nnested\n```\n````\n"},
+		{"backtick run with an info string in content", "~~~\n```js\nx\n~~~\n", true, "```\n```js\nx\n```\n"},
+		{"tab-indented backtick run in content", "~~~\n\t```\n~~~\n", true, "```\n\t```\n```\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), &config.RuleConfig{Options: options})
+			diags, err := NewCodeFenceStyleRule().Apply(ctx)
+			if err != nil {
+				t.Fatalf("Apply error: %v", err)
+			}
+			if len(diags) != 1 {
+				t.Fatalf("got %d diagnostics, want 1: %+v", len(diags), diags)
+			}
+			if diags[0].HasFix() != tt.wantFix {
+				t.Fatalf("HasFix = %v, want %v", diags[0].HasFix(), tt.wantFix)
+			}
+			if !tt.wantFix {
+				return
+			}
+			prepared, err := fix.PrepareEdits(diags[0].FixEdits, len(tt.input))
+			if err != nil {
+				t.Fatalf("PrepareEdits error: %v", err)
+			}
+			if got := string(fix.ApplyEdits([]byte(tt.input), prepared)); got != tt.fixed {
+				t.Errorf("fixed = %q, want %q", got, tt.fixed)
+			}
+		})
+	}
+}
+
 // TestCommandsShowOutputRule follows markdownlint MD014: every code block is
 // checked regardless of its info string, the block is reported only when every
 // non-blank line starts with "$" and whitespace, and each such line gets its
