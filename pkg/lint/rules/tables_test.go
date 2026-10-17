@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -607,6 +609,36 @@ func TestTableColumnStyleRule(t *testing.T) {
 			if len(diags) != tt.wantN {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
 			}
+		})
+	}
+}
+
+// TestTableRulesIgnoreByteOrderMark checks that a byte order mark before a
+// table on the first line changes neither the diagnostics nor the fixes of
+// the table rules: the parser skips the mark, so rows start after it.
+func TestTableRulesIgnoreByteOrderMark(t *testing.T) {
+	tests := []struct {
+		name  string
+		rule  lint.Rule
+		input string
+		count int
+	}{
+		{"MD055 pipes on every row", NewTablePipeStyleRule(), "| a | b |\n| - | - |\n| 1 | 2 |\n", 0},
+		{"MD055 header without pipes", NewTablePipeStyleRule(), "a | b\n| - | - |\n| 1 | 2 |\n", 4},
+		{"MD055 header without a trailing pipe", NewTablePipeStyleRule(), "| a | b\n| - | - |\n| 1 | 2 |\n", 2},
+		{"MD056 matching cells", NewTableColumnCountRule(), "| a | b |\n| - | - |\n| 1 | 2 |\n", 0},
+		{"MD056 extra cell", NewTableColumnCountRule(), "| a | b |\n| - | - |\n| 1 | 2 | 3 |\n", 1},
+		{"MDL003 short delimiter", NewTableAlignmentRule(), "| a | b |\n| - | - |\n| 1 | 2 |\n", 1},
+		{"MD058 heading after the table", NewTableBlankLinesRule(), "| a | b |\n| - | - |\n# Next\n", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plain := applyRuleWithOptions(t, tt.rule, tt.input, nil)
+			require.Len(t, plain, tt.count, "without a byte order mark")
+			marked := applyRuleWithOptions(t, tt.rule, mdast.ByteOrderMark+tt.input, nil)
+			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
+			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, tt.input, plain),
+				applyAllFixEdits(t, mdast.ByteOrderMark+tt.input, marked))
 		})
 	}
 }
