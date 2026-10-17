@@ -74,6 +74,14 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   "1.  Item\n",
 		},
 		{
+			// The fence and its content stay in the list item: every tab
+			// becomes the spaces that reach the column it reached.
+			name:      "tabs that put a fenced code block in a list item",
+			input:     "-\t~~~\n\t$ ls\n\t~~~\n",
+			wantDiags: 3,
+			wantFix:   "-   ~~~\n    $ ls\n    ~~~\n",
+		},
+		{
 			name:      "tab after a blockquote marker",
 			input:     ">\tquote\n",
 			wantDiags: 1,

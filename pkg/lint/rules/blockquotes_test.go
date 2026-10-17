@@ -101,6 +101,21 @@ func TestNoMultipleSpaceBlockquoteRule(t *testing.T) {
 			config:    map[string]any{"list_items": false},
 		},
 		{
+			// The indentation of the table rows is the content indentation
+			// of the list item, not extra space after the blockquote marker.
+			name:      "table in a quoted list item",
+			input:     "> - | a |\n>   | - |\n",
+			wantDiags: 0,
+		},
+		{
+			// An item holding a table is not moved, because its rows depend
+			// on its content column.
+			name:      "indented quoted list item holding a table",
+			input:     ">  - | a |\n>    | - |\n",
+			wantDiags: 1,
+			wantFix:   ">  - | a |\n>    | - |\n",
+		},
+		{
 			name:      "lazy line in a quoted list",
 			input:     "> - item\n>  lazy text\n",
 			wantDiags: 1,
