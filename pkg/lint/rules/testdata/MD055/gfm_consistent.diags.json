@@ -3,8 +3,8 @@
     "rule": "MD055",
     "name": "table-pipe-style",
     "line": 8,
-    "column": 1,
-    "message": "Table row pipe style 'trailing_only' does not match expected 'leading_and_trailing'",
+    "column": 3,
+    "message": "Missing leading pipe: expected leading_and_trailing, found trailing_only",
     "severity": "warning",
     "fixable": false
   },
@@ -12,8 +12,8 @@
     "rule": "MD055",
     "name": "table-pipe-style",
     "line": 9,
-    "column": 1,
-    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "column": 13,
+    "message": "Missing trailing pipe: expected leading_and_trailing, found leading_only",
     "severity": "warning",
     "fixable": false
   },
@@ -21,8 +21,8 @@
     "rule": "MD055",
     "name": "table-pipe-style",
     "line": 13,
-    "column": 1,
-    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "column": 13,
+    "message": "Missing trailing pipe: expected leading_and_trailing, found leading_only",
     "severity": "warning",
     "fixable": false
   },
@@ -30,8 +30,8 @@
     "rule": "MD055",
     "name": "table-pipe-style",
     "line": 14,
-    "column": 1,
-    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "column": 13,
+    "message": "Missing trailing pipe: expected leading_and_trailing, found leading_only",
     "severity": "warning",
     "fixable": false
   },
@@ -39,8 +39,8 @@
     "rule": "MD055",
     "name": "table-pipe-style",
     "line": 15,
-    "column": 1,
-    "message": "Table row pipe style 'leading_only' does not match expected 'leading_and_trailing'",
+    "column": 9,
+    "message": "Missing trailing pipe: expected leading_and_trailing, found leading_only",
     "severity": "warning",
     "fixable": false
   }

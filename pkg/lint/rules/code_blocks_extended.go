@@ -2,7 +2,6 @@ package rules
 
 import (
 	"bytes"
-	"strings"
 	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -70,7 +69,7 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 		blankLine := lint.BlankLineText(ctx.File, cb)
 
-		if fenceOpenLine > 1 && !isFenceBlankLine(ctx.File, fenceOpenLine-1) {
+		if fenceOpenLine > 1 && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, fenceOpenLine-1)) {
 			at := ctx.File.Lines[fenceOpenLine-1].StartOffset
 			diagPos := mdast.SourcePosition{
 				StartLine: fenceOpenLine, StartColumn: pos.StartColumn, EndLine: fenceOpenLine, EndColumn: pos.StartColumn,
@@ -79,8 +78,8 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 
 		// Like markdownlint, a block whose last line is blank needs no blank after it.
-		if fenceCloseLine < len(ctx.File.Lines) && !isFenceBlankLine(ctx.File, fenceCloseLine+1) &&
-			!isFenceBlankLine(ctx.File, fenceCloseLine) {
+		if fenceCloseLine < len(ctx.File.Lines) && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, fenceCloseLine+1)) &&
+			!isMarkdownlintBlankLine(lint.LineContent(ctx.File, fenceCloseLine)) {
 			column := 1
 			var builder *fix.EditBuilder
 			// After an unclosed fence, an inserted line would become code.
@@ -124,39 +123,6 @@ func (inserts blankLineInserts) insert(offset int, text string) *fix.EditBuilder
 	builder := fix.NewEditBuilder()
 	builder.Insert(offset, text)
 	return builder
-}
-
-// isFenceBlankLine reports whether a line counts as blank next to a fence,
-// as markdownlint's isBlankLine decides: nothing but whitespace remains once
-// HTML comments and blockquote markers are removed. Lines outside the file
-// are blank.
-func isFenceBlankLine(file *mdast.FileSnapshot, lineNum int) bool {
-	if lineNum < 1 || lineNum > len(file.Lines) {
-		return true
-	}
-	line := string(lint.LineContent(file, lineNum))
-	return strings.TrimSpace(strings.ReplaceAll(removeHTMLComments(line), ">", "")) == ""
-}
-
-// removeHTMLComments removes HTML comments from a line the way markdownlint
-// does, including an unmatched "-->" before any "<!--" and an unmatched
-// "<!--" at the end.
-func removeHTMLComments(line string) string {
-	const startComment, endComment = "<!--", "-->"
-	for {
-		start := strings.Index(line, startComment)
-		end := strings.Index(line, endComment)
-		switch {
-		case end != -1 && (start == -1 || end < start):
-			line = line[end+len(endComment):]
-		case start != -1 && end != -1:
-			line = line[:start] + line[end+len(endComment):]
-		case start != -1:
-			line = line[:start]
-		default:
-			return line
-		}
-	}
 }
 
 func (r *BlanksAroundFencesRule) isInListItem(node *mdast.Node) bool {

@@ -3,8 +3,8 @@
     "rule": "MD056",
     "name": "table-column-count",
     "line": 6,
-    "column": 1,
-    "message": "Table row has 2 columns, expected 3",
+    "column": 18,
+    "message": "Too few cells, row will be missing data: expected 3, found 2",
     "severity": "warning",
     "fixable": false
   },
@@ -12,8 +12,8 @@
     "rule": "MD056",
     "name": "table-column-count",
     "line": 7,
-    "column": 1,
-    "message": "Table row has 4 columns, expected 3",
+    "column": 26,
+    "message": "Too many cells, extra data will be missing: expected 3, found 4",
     "severity": "warning",
     "fixable": false
   },
@@ -21,8 +21,8 @@
     "rule": "MD056",
     "name": "table-column-count",
     "line": 15,
-    "column": 1,
-    "message": "Table row has 3 columns, expected 4",
+    "column": 22,
+    "message": "Too few cells, row will be missing data: expected 4, found 3",
     "severity": "warning",
     "fixable": false
   }
