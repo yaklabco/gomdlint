@@ -363,8 +363,8 @@ func TestKeepSafeFixes(t *testing.T) {
 }
 
 // TestKeepSafeFixesInBatches checks the batched path for a rule with many
-// fixes: removing the spaces of a hard break is dropped, removing a single
-// space before a soft break is kept.
+// fixes, each alone in its paragraph: removing the spaces of a hard break is
+// dropped, removing a single space before a soft break is kept.
 func TestKeepSafeFixesInBatches(t *testing.T) {
 	var input strings.Builder
 	var diags []lint.Diagnostic
@@ -373,8 +373,8 @@ func TestKeepSafeFixesInBatches(t *testing.T) {
 	for idx := range pairs {
 		for _, line := range []string{"soft" + strconv.Itoa(idx) + " ", "hard" + strconv.Itoa(idx) + "  "} {
 			start := input.Len() + len(strings.TrimRight(line, " "))
-			input.WriteString(line + "\n")
-			diags = append(diags, lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: start, EndOffset: input.Len() - 1}}})
+			input.WriteString(line + "\nnext\n\n")
+			diags = append(diags, lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: start, EndOffset: start + len(line) - len(strings.TrimRight(line, " "))}}})
 			wantFix = append(wantFix, strings.HasPrefix(line, "soft"))
 		}
 	}
@@ -384,8 +384,49 @@ func TestKeepSafeFixesInBatches(t *testing.T) {
 
 	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
 	for idx, diag := range kept {
-		// The last line ends the paragraph, so its spaces make no break.
-		want := wantFix[idx] || idx == len(kept)-1
-		assert.Equal(t, want, diag.HasFix(), "diagnostic %d", idx)
+		assert.Equal(t, wantFix[idx], diag.HasFix(), "diagnostic %d", idx)
+	}
+}
+
+// TestKeepSafeFixesChecksDependentFixesAlone checks that a batch that passes
+// as a whole cannot carry a fix that breaks the document on its own: the
+// engine may apply only some fixes, after a directive, a conflict or the
+// last pass. Changing only the opening or only the closing fence of a code
+// block leaves it unclosed, so it swallows the rest of the document, but
+// changing both keeps it.
+func TestKeepSafeFixesChecksDependentFixesAlone(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("# Title\n\n")
+	opening := input.Len()
+	input.WriteString("```\ncode\n")
+	closing := input.Len()
+	input.WriteString("```\n")
+	diags := []lint.Diagnostic{
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: opening, EndOffset: opening + 3, NewText: "~~~"}}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: closing, EndOffset: closing + 3, NewText: "~~~"}}},
+	}
+	// Each harmless fix removes the single space before a soft break in a
+	// paragraph of its own.
+	const harmless = 18
+	for idx := range harmless {
+		input.WriteString("\nline" + strconv.Itoa(idx))
+		start := input.Len()
+		input.WriteString(" \nmore\n")
+		diags = append(diags, lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: start, EndOffset: start + 1}}})
+	}
+	require.Greater(t, len(diags), individualFixChecks, "the batched path is taken")
+
+	snapshot := parseForCheck(t, input.String())
+	check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
+	require.False(t, check.keeps(diags[0].FixEdits), "the opening fence alone breaks the document")
+	require.False(t, check.keeps(diags[1].FixEdits), "the closing fence alone breaks the document")
+	require.True(t, check.keepsTogether(diags, []int{0, 1}), "both fences together keep the document")
+
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	assert.False(t, kept[0].HasFix(), "the opening fence fix breaks the document alone")
+	assert.False(t, kept[1].HasFix(), "the closing fence fix breaks the document alone")
+	for idx := 2; idx < len(kept); idx++ {
+		assert.True(t, kept[idx].HasFix(), "harmless fix %d", idx)
 	}
 }

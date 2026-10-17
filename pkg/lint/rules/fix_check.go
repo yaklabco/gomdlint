@@ -31,9 +31,10 @@ type fixCheckOptions struct {
 
 // individualFixChecks is the number of fixes a rule may report in a file up
 // to which each fix is checked on its own before they are checked together.
-// Past it, fixes are checked in batches that are split until each batch
-// keeps the document unchanged, which keeps the cost of a file with many
-// fixes close to one parse per batch.
+// Past it, only the fixes that share a top-level block with another fix are
+// checked on their own; the others are checked in batches that are split
+// until each batch keeps the document unchanged, which keeps the cost of a
+// file with many fixes close to one parse per batch.
 const individualFixChecks = 16
 
 // keepSafeFixes removes the fix from every diagnostic whose fix would change
@@ -41,12 +42,17 @@ const individualFixChecks = 16
 // fixes the rule keeps. It is the last step of every fixing rule in this file
 // set, so that a gap in a rule's own safety checks cannot corrupt a document.
 //
-// When a rule reports few fixes, each is checked on its own; with many, they
-// are checked in batches, halved until a batch passes or holds one fix. Then
-// the kept fixes are checked together, applied the way the fix engine applies
-// them; if they change the document together, they are kept one at a time
-// in document order, each only when the fixes kept before it and it still
-// leave the document unchanged.
+// The engine may apply only some of the fixes, after a directive, a conflict
+// or the last pass, so every fix must be safe on its own. When a rule reports
+// few fixes, each is checked on its own. With many, each fix that shares a
+// top-level block with another fix, or lies between blocks next to one, is
+// checked on its own, because the two could depend on each other. A fix
+// alone in its block is checked in batches, halved until a batch passes or
+// holds one fix: nothing a fix in another block changes can put back what it
+// changed in its block. Then the kept fixes are checked together, applied the
+// way the fix engine applies them; if they change the document together,
+// they are kept one at a time in document order, each only when the fixes
+// kept before it and it still leave the document unchanged.
 func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, opts fixCheckOptions) []lint.Diagnostic {
 	var candidates []int
 	for idx := range diags {
@@ -63,15 +69,19 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, opts fixCheck
 	}
 	check := newFixCheck(ctx.File, flavor, opts)
 
-	var kept []int
-	if len(candidates) <= individualFixChecks {
-		for _, idx := range candidates {
-			if check.keeps(diags[idx].FixEdits) {
-				kept = append(kept, idx)
-			}
+	shared := check.sharedFixes(diags, candidates)
+	var kept, isolated []int
+	for _, idx := range candidates {
+		switch {
+		case len(candidates) > individualFixChecks && !shared[idx]:
+			isolated = append(isolated, idx)
+		case check.keeps(diags[idx].FixEdits):
+			kept = append(kept, idx)
 		}
-	} else {
-		kept = check.keptInBatches(diags, candidates)
+	}
+	if len(isolated) > 0 {
+		kept = append(kept, check.keptInBatches(diags, isolated)...)
+		slices.Sort(kept)
 	}
 	if len(kept) > 1 && !check.keepsTogether(diags, kept) {
 		var together []int
@@ -93,6 +103,100 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, opts fixCheck
 		}
 	}
 	return diags
+}
+
+// sharedFixes returns the fixes whose edits share a top-level block of the
+// original document with the edits of another fix, or lie between blocks
+// next to such edits or next to a block another fix changes. Fixes that do
+// not are alone in their block.
+func (c *fixCheck) sharedFixes(diags []lint.Diagnostic, candidates []int) map[int]bool {
+	shared := make(map[int]bool)
+	blocks, ok := topLevelBlockLines(c.file)
+	if !ok {
+		for _, idx := range candidates {
+			shared[idx] = true
+		}
+		return shared
+	}
+	owners := make(map[int][]int)
+	for _, idx := range candidates {
+		slots := make(map[int]bool)
+		for _, edit := range diags[idx].FixEdits {
+			for _, slot := range editSlots(c.file, blocks, edit) {
+				slots[slot] = true
+			}
+		}
+		for slot := range slots {
+			owners[slot] = append(owners[slot], idx)
+		}
+	}
+	for _, fixes := range owners {
+		if len(fixes) > 1 {
+			for _, idx := range fixes {
+				shared[idx] = true
+			}
+		}
+	}
+	return shared
+}
+
+// topLevelBlockLines returns the first and last line of each top-level block,
+// in document order, or false when a block has no position.
+func topLevelBlockLines(file *mdast.FileSnapshot) ([][2]int, bool) {
+	if file == nil || file.Root == nil {
+		return nil, false
+	}
+	var blocks [][2]int
+	for block := file.Root.FirstChild; block != nil; block = block.Next {
+		pos := block.SourcePosition()
+		if !pos.IsValid() {
+			return nil, false
+		}
+		blocks = append(blocks, [2]int{pos.StartLine, nodeLastLine(block)})
+	}
+	return blocks, true
+}
+
+// editSlots returns the places an edit touches: slot 2i+1 for the top-level
+// block i, and slot 2i for the lines between blocks i-1 and i, together with
+// the slots of those two blocks, since an edit there can join or split them.
+// An insertion at the start of a line touches the line before it too. An edit
+// whose lines cannot be found touches slot -1, which every such edit shares.
+func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []int {
+	first, _ := file.LineAt(edit.StartOffset)
+	last, _ := file.LineAt(max(edit.StartOffset, edit.EndOffset-1))
+	if first < 1 || last < 1 {
+		return []int{-1}
+	}
+	if edit.StartOffset == edit.EndOffset && first > 1 && file.Lines[first-1].StartOffset == edit.StartOffset {
+		first--
+	}
+	var slots []int
+	for idx, block := range blocks {
+		if block[1] >= first && block[0] <= last {
+			slots = append(slots, 2*idx+1)
+		}
+	}
+	for idx := 0; idx <= len(blocks); idx++ {
+		gapFirst, gapLast := 1, len(file.Lines)
+		if idx > 0 {
+			gapFirst = blocks[idx-1][1] + 1
+		}
+		if idx < len(blocks) {
+			gapLast = blocks[idx][0] - 1
+		}
+		if gapFirst > gapLast || gapLast < first || gapFirst > last {
+			continue
+		}
+		slots = append(slots, 2*idx)
+		if idx > 0 {
+			slots = append(slots, 2*idx-1)
+		}
+		if idx < len(blocks) {
+			slots = append(slots, 2*idx+1)
+		}
+	}
+	return slots
 }
 
 // keptInBatches returns the fixes of a batch of diagnostics that keep the
@@ -121,6 +225,7 @@ func (c *fixCheck) keptInBatches(diags []lint.Diagnostic, batch []int) []int {
 // elsewhere use, the anchor of a heading that a fragment link points to,
 // front matter that starts or ends.
 type fixCheck struct {
+	file      *mdast.FileSnapshot
 	content   []byte
 	opts      fixCheckOptions
 	markdowns []goldmark.Markdown
@@ -132,7 +237,7 @@ func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor, opts fixCheckOp
 	if flavor != config.FlavorGFM {
 		markdowns = append(markdowns, goldmark.New())
 	}
-	return &fixCheck{content: file.Content, opts: opts, markdowns: markdowns}
+	return &fixCheck{file: file, content: file.Content, opts: opts, markdowns: markdowns}
 }
 
 // keeps reports whether applying edits leaves the render signatures of the
