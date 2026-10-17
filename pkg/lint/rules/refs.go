@@ -165,7 +165,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			}
 
 			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, usage.Position,
-				fmt.Sprintf("Reference %s uses undefined label [%s]", kind, usage.Label)).
+				fmt.Sprintf("Reference %s uses undefined label [%s]", kind, displayLabel(usage.Label))).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion("Define the reference or use inline syntax").
 				Build()
@@ -174,6 +174,12 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	return diags, nil
+}
+
+// displayLabel returns a label for a message, with each run of whitespace,
+// line breaks included, shown as one space.
+func displayLabel(label string) string {
+	return strings.Join(strings.Fields(label), " ")
 }
 
 // LinkImageRefDefsRule detects unused/duplicate reference definitions (MD053).
@@ -231,7 +237,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		default:
 			continue
 		}
-		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position, fmt.Sprintf(msg, def.Label)).
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position, fmt.Sprintf(msg, displayLabel(def.Label))).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion)
 		if builder := removal.fix(def); builder != nil {

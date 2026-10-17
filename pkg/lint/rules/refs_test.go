@@ -377,6 +377,12 @@ func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
 		{name: "reference inside strikethrough", markdown: "Old ~~[text][gone]~~ note.\n",
 			want: []want{{1, 7, "Reference link uses undefined label [gone]"}}},
 		{name: "brackets inside an autolink", markdown: "<https://example.com/[a][b]>\n"},
+		{name: "multi-line code span keeps its padding", markdown: "[a ` x\ny `][]\n\n[a `x y`]: /url\n",
+			want: []want{{1, 1, "Reference link uses undefined label [a ` x y `]"}}},
+		{name: "hard break backslash stays in the label", markdown: "[a\\\nb][]\n\n[a b]: /url\n",
+			want: []want{{1, 1, "Reference link uses undefined label [a\\ b]"}}},
+		{name: "quoted label continues without the prefix", markdown: "> See [a\n> b][] here.\n",
+			want: []want{{1, 7, "Reference link uses undefined label [a b]"}}},
 		{name: "code span in a collapsed label", markdown: "See [a `code`][] here.\n",
 			want: []want{{1, 5, "Reference link uses undefined label [a `code`]"}}},
 		{name: "strikethrough in a full label", markdown: "See [text][~~missing~~] here.\n\n[missing]: /exists\n",
@@ -432,6 +438,16 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 	diags := testHelper(t, rule, "See [one][alpha].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n")
 	if len(diags) != 1 || diags[0].Message != "Unused reference definition [beta]" {
 		t.Errorf("got %+v, want one unused [beta]", diags)
+	}
+	// Labels are read from the source across lines, so code span padding and a
+	// hard break backslash keep the definition without them unused.
+	for _, markdown := range []string{
+		"[a ` x\ny `][]\n\n[a `x y`]: /url\n",
+		"[a\\\nb][]\n\n[a b]: /url\n",
+	} {
+		if diags := testHelper(t, rule, markdown); len(diags) != 1 {
+			t.Errorf("%q: got %+v, want one unused definition", markdown, diags)
+		}
 	}
 	// The strikethrough markers are part of the label, so the definition of
 	// a label without them is not used.

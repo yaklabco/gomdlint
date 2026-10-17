@@ -343,6 +343,8 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 		{"emphasis in a full label", "[t][*x*]\n", []found{{StyleFull, "*x*", false}}},
 		{"bracket inside a code span makes no label", "[a `]` b][]\n", nil},
 		{"raw HTML in a shortcut label", "[a <b>x</b>]\n", []found{{StyleShortcut, "a <b>x</b>", false}}},
+		{"multi-line code span keeps its padding", "[a ` x\ny `][]\n", []found{{StyleCollapsed, "a ` x\ny `", false}}},
+		{"hard break backslash stays in the label", "[a\\\nb][]\n", []found{{StyleCollapsed, "a\\\nb", false}}},
 		{"failed inline link falls back to a shortcut", "[text](\n", []found{{StyleShortcut, "text", false}}},
 		{"autolink text is not searched", "<https://example.com/[a][b]>\n", nil},
 		{"code span", "`[text][label]`\n", nil},

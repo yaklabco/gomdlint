@@ -10,15 +10,30 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
-// Collect walks the AST and source to build a reference Context.
+// LinePrefix returns the length of the container prefix at the start of a
+// 1-based line, for content inside node: the blockquote markers and list
+// item indentation that belong to the containers, not to the content.
+type LinePrefix func(node *mdast.Node, line int) int
+
+// Collect walks the AST and source to build a reference Context. A label
+// read from the source keeps whole continuation lines; CollectWithPrefix
+// leaves out their container prefixes.
 func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
+	return CollectWithPrefix(root, file, nil)
+}
+
+// CollectWithPrefix builds a reference Context like Collect, using prefix
+// (which may be nil) to leave the container prefix of each continuation
+// line out of labels read from the source.
+func CollectWithPrefix(root *mdast.Node, file *mdast.FileSnapshot, prefix LinePrefix) *Context {
 	if root == nil || file == nil {
 		return NewContext(file)
 	}
 
 	coll := &collector{
-		ctx:  NewContext(file),
-		root: root,
+		ctx:    NewContext(file),
+		root:   root,
+		prefix: prefix,
 	}
 	coll.collect(root)
 	coll.collectUnresolvedReferences()
@@ -30,8 +45,9 @@ func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
 
 // collector builds a Context by walking the AST and source.
 type collector struct {
-	ctx  *Context
-	root *mdast.Node
+	ctx    *Context
+	root   *mdast.Node
+	prefix LinePrefix
 }
 
 // collect walks the AST to collect anchors and usages.

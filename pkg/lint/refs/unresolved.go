@@ -32,7 +32,7 @@ type inlineChar struct {
 func (c *collector) collectUnresolvedReferences() {
 	_ = mdast.Walk(c.root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
 		if isInlineContainer(node) {
-			c.scanUnresolved(flattenInline(node))
+			c.scanUnresolved(node, flattenInline(node))
 		}
 		return nil
 	})
@@ -140,7 +140,7 @@ type bracketOpener struct {
 
 // scanUnresolved matches brackets in one container's characters and records
 // each reference whose syntax is complete.
-func (c *collector) scanUnresolved(chars []inlineChar) {
+func (c *collector) scanUnresolved(container *mdast.Node, chars []inlineChar) {
 	var openers []bracketOpener
 	for idx := 0; idx < len(chars); idx++ {
 		char := chars[idx]
@@ -161,7 +161,7 @@ func (c *collector) scanUnresolved(chars []inlineChar) {
 			}
 			opener := openers[len(openers)-1]
 			openers = openers[:len(openers)-1]
-			idx = c.recordReference(chars, opener, idx)
+			idx = c.recordReference(container, chars, opener, idx)
 		}
 	}
 }
@@ -171,23 +171,23 @@ func (c *collector) scanUnresolved(chars []inlineChar) {
 // continues from. A "(" after the pair began an inline link the parser
 // rejected, since a valid one would be a link node, so the pair falls back
 // to a reference as in CommonMark.
-func (c *collector) recordReference(chars []inlineChar, opener bracketOpener, closing int) int {
+func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, opener bracketOpener, closing int) int {
 	next := closing + 1
 	switch {
 	case isChar(chars, next, '[') && isChar(chars, next+1, ']'):
-		label, ok := linkTextLabel(chars, opener.index, closing)
+		label, ok := c.linkTextLabel(container, chars, opener.index, closing)
 		if ok {
 			c.addUnresolved(chars, opener, closing, next+1, StyleCollapsed, label)
 		}
 		return next + 1
 	case isChar(chars, next, '['):
 		if labelEnd, ok := labelEndIndex(chars, next); ok {
-			label := charsText(chars, next+1, labelEnd)
+			label := c.labelSource(container, chars, next, labelEnd)
 			c.addUnresolved(chars, opener, closing, labelEnd, StyleFull, label)
 			return labelEnd
 		}
 	}
-	if label, ok := linkTextLabel(chars, opener.index, closing); ok {
+	if label, ok := c.linkTextLabel(container, chars, opener.index, closing); ok {
 		c.addUnresolved(chars, opener, closing, closing, StyleShortcut, label)
 	}
 	return closing
@@ -227,7 +227,7 @@ func (c *collector) addUnresolved(
 // written. It is not a label when it holds an unescaped bracket (a bracket
 // inside a code span counts, since a label is raw text) or a link, is
 // blank, or is longer than CommonMark allows.
-func linkTextLabel(chars []inlineChar, open, closing int) (string, bool) {
+func (c *collector) linkTextLabel(container *mdast.Node, chars []inlineChar, open, closing int) (string, bool) {
 	for idx := open + 1; idx < closing; idx++ {
 		if chars[idx].opaque {
 			return "", false
@@ -236,11 +236,41 @@ func linkTextLabel(chars []inlineChar, open, closing int) (string, bool) {
 			return "", false
 		}
 	}
-	label := charsText(chars, open+1, closing)
-	if len(label) > maxLabelLength || strings.TrimSpace(label) == "" {
+	label := c.labelSource(container, chars, open, closing)
+	if len([]rune(label)) > maxLabelLength || strings.TrimSpace(label) == "" {
 		return "", false
 	}
 	return label, true
+}
+
+// labelSource returns the label between the brackets at chars[open] and
+// chars[closing] as it is written in the source, the way CommonMark matches
+// labels: code span padding, backslashes, entities, and markup delimiters
+// stay, and only the container prefix of each continuation line is left
+// out. It falls back to the characters when a bracket has no offset.
+func (c *collector) labelSource(container *mdast.Node, chars []inlineChar, open, closing int) string {
+	file := c.ctx.File
+	start, end := chars[open].offset+1, chars[closing].offset
+	if file == nil || chars[open].offset < 0 || end < start || end > len(file.Content) {
+		return charsText(chars, open+1, closing)
+	}
+	startLine, _ := file.LineAt(start)
+	endLine, _ := file.LineAt(end)
+	var label strings.Builder
+	for line := startLine; line <= endLine && line <= len(file.Lines); line++ {
+		info := file.Lines[line-1]
+		from, to := max(start, info.StartOffset), min(end, info.NewlineStart)
+		if line > startLine {
+			_ = label.WriteByte('\n') // strings.Builder.WriteByte never fails
+			if c.prefix != nil {
+				from = max(from, info.StartOffset+c.prefix(container, line))
+			}
+		}
+		if from < to {
+			label.Write(file.Content[from:to])
+		}
+	}
+	return label.String()
 }
 
 // labelEndIndex finds the ']' that closes the link label opened at
