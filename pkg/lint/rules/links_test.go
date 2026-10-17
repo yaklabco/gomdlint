@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -467,6 +468,84 @@ func TestLinkDestinationStyleRule(t *testing.T) {
 			style: "relative",
 			wantN: 0,
 		},
+		{
+			// An email autolink is a mailto: URI, which is absolute.
+			name:  "email autolink is absolute",
+			input: "[a](https://example.com) and <user@example.com>",
+			style: "consistent",
+			wantN: 0,
+		},
+		{
+			name:  "email autolink sets the absolute style",
+			input: "<user@example.com> and [b](docs/guide.md)",
+			style: "consistent",
+			wantN: 1,
+		},
+		{
+			name:  "autolink under relative style",
+			input: "[a](a.md) and <https://example.com>",
+			style: "relative",
+			wantN: 1,
+		},
+		// A destination with a URI scheme is absolute whatever the link
+		// syntax, so an autolink and an inline link to it agree, in either
+		// order.
+		{name: "sms autolink then inline link", input: "<sms:+15551234567> and [text us](sms:+15551234567)", style: "consistent"},
+		{name: "sms inline link then autolink", input: "[text us](sms:+15551234567) and <sms:+15551234567>", style: "consistent"},
+		{name: "urn autolink then inline link", input: "<urn:isbn:0451450523> and [book](urn:isbn:0451450523)", style: "consistent"},
+		{name: "urn inline link then autolink", input: "[book](urn:isbn:0451450523) and <urn:isbn:0451450523>", style: "consistent"},
+		{
+			name:  "vscode autolink then inline link",
+			input: "<vscode:extension/ms-python.python> and [extension](vscode:extension/ms-python.python)",
+			style: "consistent",
+		},
+		{
+			name:  "vscode inline link then autolink",
+			input: "[extension](vscode:extension/ms-python.python) and <vscode:extension/ms-python.python>",
+			style: "consistent",
+		},
+		{name: "mailto autolink then inline link", input: "<mailto:team@example.com> and [mail us](mailto:team@example.com)", style: "consistent"},
+		{name: "mailto inline link then autolink", input: "[mail us](mailto:team@example.com) and <mailto:team@example.com>", style: "consistent"},
+		// A single letter before the colon is a Windows drive, so the
+		// destination is a relative path.
+		{name: "drive letter after an autolink", input: "<https://example.com> and [file](C:/docs/a.md)", style: "consistent", wantN: 1},
+		{name: "drive letter before an autolink", input: "[file](C:/docs/a.md) and <https://example.com>", style: "consistent", wantN: 1},
+		{name: "backslash drive letter after an autolink", input: "<https://example.com> and [file](C:\\docs\\a.md)", style: "consistent", wantN: 1},
+		{name: "relative path after an autolink", input: "<https://example.com> and [guide](docs/guide.md)", style: "consistent", wantN: 1},
+		{name: "relative path before an autolink", input: "[guide](docs/guide.md) and <https://example.com>", style: "consistent", wantN: 1},
+		{name: "url in the query of a relative path", input: "<https://example.com> and [go](./a?u=https://b.example)", style: "consistent", wantN: 1},
+		// A network-path reference names its own host, so it is absolute.
+		{name: "protocol-relative after an autolink", input: "<https://example.com> and [cdn](//cdn.example.com/a.js)", style: "consistent"},
+		{name: "protocol-relative before an autolink", input: "[cdn](//cdn.example.com/a.js) and <https://example.com>", style: "consistent"},
+		// localhost:8080 starts with the scheme "localhost", as browsers and
+		// CommonMark autolinks read it.
+		{name: "host and port read as a scheme", input: "<https://example.com> and [dev](localhost:8080)", style: "consistent"},
+		// The destination is classified as the renderer reads it, with
+		// backslash escapes and character references resolved, in inline
+		// links and in reference definitions alike.
+		{name: "escaped colon after an autolink", input: "<https://example.com> and [site](https\\://example.com)", style: "consistent"},
+		{name: "escaped colon before an autolink", input: "[site](https\\://example.com) and <https://example.com>", style: "consistent"},
+		{name: "named reference after an autolink", input: "<sms:+15551234567> and [text us](sms&colon;+15551234567)", style: "consistent"},
+		{name: "named reference before an autolink", input: "[text us](sms&colon;+15551234567) and <sms:+15551234567>", style: "consistent"},
+		{name: "numeric reference after an autolink", input: "<sms:+15551234567> and [text us](sms&#58;+15551234567)", style: "consistent"},
+		{name: "numeric reference before an autolink", input: "[text us](sms&#58;+15551234567) and <sms:+15551234567>", style: "consistent"},
+		{
+			name:  "escaped definition after an autolink",
+			input: "<https://example.com> and [site][ref]\n\n[ref]: https\\://example.com",
+			style: "consistent",
+		},
+		{
+			name:  "escaped definition before an autolink",
+			input: "[site][ref] and <https://example.com>\n\n[ref]: https\\://example.com",
+			style: "consistent",
+		},
+		// Percent-encoding stays as written, so an encoded colon starts no
+		// scheme.
+		{name: "percent-encoded colon after an autolink", input: "<https://example.com> and [x](https%3A//example.com)", style: "consistent", wantN: 1},
+		{name: "percent-encoded colon before an autolink", input: "[x](https%3A//example.com) and <https://example.com>", style: "consistent", wantN: 1},
+		// A resolved "#" makes a fragment-only link, which sets no style.
+		{name: "escaped fragment before an autolink", input: "[top](\\#top) and <https://example.com>", style: "consistent"},
+		{name: "numeric fragment before an autolink", input: "[top](&#35;top) and <https://example.com>", style: "consistent"},
 	}
 
 	for _, tt := range tests {
@@ -494,6 +573,28 @@ func TestLinkDestinationStyleRule(t *testing.T) {
 			if len(diags) != tt.wantN {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
 			}
+		})
+	}
+}
+
+// TestLinkDestinationStyleRule_GFMAutolinkLiterals checks that GFM autolink
+// literals count as absolute links. The parser gives a bare email address
+// without its mailto: scheme, but it renders as a mailto: link.
+func TestLinkDestinationStyleRule_GFMAutolinkLiterals(t *testing.T) {
+	for _, input := range []string{
+		"See [docs](https://example.com) or mail user@example.com today.\n",
+		"See [docs](https://example.com) or visit www.example.com today.\n",
+	} {
+		t.Run(input, func(t *testing.T) {
+			snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			require.Len(t, lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil).Links(), 2,
+				"the literal is parsed as a link")
+
+			diags, err := NewLinkDestinationStyleRule().Apply(
+				lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			require.NoError(t, err)
+			assert.Empty(t, diags)
 		})
 	}
 }
@@ -550,4 +651,42 @@ func TestLinkSpacesRule_FixKeepsAnchors(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
 	assert.False(t, diags[0].HasFix())
+}
+
+// TestIsAbsoluteDestination checks how MDL001 classifies a destination. It
+// is absolute when it starts with a URI scheme as CommonMark defines one for
+// autolinks, 2 to 32 characters long, or with "//". A single letter before
+// the colon is a Windows drive, so those destinations stay relative.
+func TestIsAbsoluteDestination(t *testing.T) {
+	tests := map[string]bool{
+		"https://example.com/a":             true,
+		"HTTPS://EXAMPLE.COM":               true,
+		"sms:+15551234567":                  true,
+		"urn:isbn:0451450523":               true,
+		"vscode:extension/ms-python.python": true,
+		"mailto:team@example.com":           true,
+		"tel:+15551234567":                  true,
+		"localhost:8080":                    true,
+		"ab:x":                              true,
+		"a+b.c-d:x":                         true,
+		strings.Repeat("a", 32) + ":x":      true,
+		"//cdn.example.com/a.js":            true,
+		"C:/docs/a.md":                      false,
+		"C:\\docs\\a.md":                    false,
+		"c:x":                               false,
+		strings.Repeat("a", 33) + ":x":      false,
+		"1ab:x":                             false,
+		"a_b:x":                             false,
+		":x":                                false,
+		"docs/guide.md":                     false,
+		"./a?u=https://b.example":           false,
+		"/root/path.md":                     false,
+		"../up.md":                          false,
+		"a.md#section":                      false,
+		"user@example.com":                  false,
+		"/":                                 false,
+	}
+	for dest, want := range tests {
+		assert.Equal(t, want, isAbsoluteDestination(dest), dest)
+	}
 }

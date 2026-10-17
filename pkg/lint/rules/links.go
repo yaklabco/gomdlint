@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 
+	gmutil "github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -497,7 +499,7 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 			return diags, ctx.Ctx.Err()
 		}
 
-		dest := lint.LinkDestination(link)
+		dest := resolvedDestination(link)
 		if dest == "" {
 			continue
 		}
@@ -507,7 +509,11 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 			continue
 		}
 
-		isAbsolute := isAbsoluteURL(dest)
+		// An autolink is always absolute: CommonMark autolinks need a scheme,
+		// and email autolinks, which the parser gives without one, render
+		// as mailto: links. Other links are classified by their destination,
+		// so an autolink and an inline link to the same URI agree.
+		isAbsolute := isAutolinkNode(link) || isAbsoluteDestination(dest)
 		detectedStyle := LinkDestRelative
 		if isAbsolute {
 			detectedStyle = LinkDestAbsolute
@@ -549,4 +555,34 @@ func isAbsoluteURL(url string) bool {
 		strings.HasPrefix(url, "tel:") ||
 		strings.HasPrefix(url, "file://") ||
 		strings.Contains(url, "://")
+}
+
+// uriSchemePattern matches a URI scheme and its colon at the start of a link
+// destination, as CommonMark defines a scheme for autolinks: an ASCII letter
+// followed by 1 to 31 letters, digits, "+", "." or "-".
+var uriSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]{1,31}:`)
+
+// isAbsoluteDestination reports whether MDL001 counts a link destination as
+// absolute. A destination is absolute when it starts with a URI scheme, such
+// as https:, mailto:, sms: or urn:, or when it starts with "//", a
+// network-path reference that names its own host and keeps the page's
+// scheme. A scheme has at least two characters, so a Windows drive letter,
+// as in C:\docs or C:/docs, starts a relative path. A destination such as
+// localhost:8080 starts with the scheme "localhost", as browsers and
+// CommonMark autolinks read it, so it is absolute; a local server's address
+// written with http:// reads the same way.
+func isAbsoluteDestination(dest string) bool {
+	return strings.HasPrefix(dest, "//") || uriSchemePattern.MatchString(dest)
+}
+
+// resolvedDestination returns a link's destination as the renderer reads
+// it. The parser keeps a destination as written, so backslash escapes and
+// entity and numeric character references are resolved here with
+// goldmark's own functions, in the order its HTML renderer applies them.
+// Percent-encoding stays as written, so https%3A//x starts no scheme.
+func resolvedDestination(link *mdast.Node) string {
+	dest := []byte(lint.LinkDestination(link))
+	dest = gmutil.UnescapePunctuations(dest)
+	dest = gmutil.ResolveNumericReferences(dest)
+	return string(gmutil.ResolveEntityNames(dest))
 }
