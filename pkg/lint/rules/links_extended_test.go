@@ -231,6 +231,8 @@ func TestNoBareURLsRule_FixesAgreeWithTheParser(t *testing.T) {
 		"| %s | b |\n| - | - |\n", "Read *%s* now\n", "Docs (%s) here\n", "Say \"%s\" now\n",
 		mdast.ByteOrderMark + "%s here\n", "See\u00a0%s here\n", "(%s) here\n", ">%s here\n",
 		"|%s|b|\n|-|-|\n", "See %s\u00e9 here\n",
+		"|x|%s |\n|-|-|-|\n", "| %s | b |\n|-|-|-|\n", "> | a | b |\n> |---|---|\n|%s|x |\n",
+		"See %s here\n:--\n", "Intro %s\n|a|b|\n|-|-|-|\n",
 	}
 	fixes := 0
 	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
@@ -348,6 +350,25 @@ func checkFixConditions(t *testing.T, label, doc string, lineStart, ls, le int, 
 	if len(trail) > 0 && strings.IndexByte("*_~", trail[0]) >= 0 {
 		require.Equal(t, len(trail), bytes.Count(trail, trail[:1]), "%s: a delimiter that could open", label)
 	}
+	// No line of the run around the literal, up to a line of nothing but
+	// spaces, tabs, and blockquote markers, holds a pipe or could be a
+	// delimiter row, so no renderer reads a table there.
+	lines := strings.Split(doc, "\n")
+	first := strings.Count(doc[:ls], "\n")
+	last := first
+	isBreak := func(line string) bool { return strings.Trim(line, " \t>\r") == "" }
+	for first > 0 && !isBreak(lines[first-1]) {
+		first--
+	}
+	for last+1 < len(lines) && !isBreak(lines[last+1]) {
+		last++
+	}
+	for _, line := range lines[first : last+1] {
+		rest := strings.TrimLeft(strings.TrimPrefix(line, mdast.ByteOrderMark), " \t>")
+		require.NotContains(t, line, "|", "%s: a pipe in the run of lines", label)
+		require.False(t, strings.Contains(rest, "-") && strings.Trim(rest, "-:| \t\v\f\r") == "",
+			"%s: a line that could be a delimiter row", label)
+	}
 	if kind != mdscan.LiteralEmail {
 		return
 	}
@@ -462,6 +483,87 @@ func TestNoBareURLsRule_WWWLiterals(t *testing.T) {
 			}
 			assert.Equal(t, 1+len("www.example.com/path"), diags[0].EndColumn-diags[0].StartColumn+1)
 		})
+	}
+}
+
+// TestNoBareURLsRule_Tables covers literals in and next to text that a parser
+// may read as a table. GitHub splits cells only where it reads a table, which
+// needs a delimiter row right after the header row, with as many cells, in
+// the same paragraph; goldmark accepts more. So MD034 attaches no fix in a
+// table or in a run of lines that holds a pipe or a line that could be a
+// delimiter row.
+//
+// Detection follows goldmark's blocks, as every rule does: with GFM, MD034
+// reads the cells of every table goldmark reads. Where goldmark reads a table
+// that micromark refuses (a header row with fewer cells than the delimiter
+// row) or takes a lazy row into a table, markdownlint reads those lines as a
+// paragraph, so the rows named "known difference" pin gomdlint's result
+// against markdownlint's. With CommonMark there are no tables, so the lines
+// are paragraph text, where markdownlint, which always reads GFM tables, can
+// differ too.
+func TestNoBareURLsRule_Tables(t *testing.T) {
+	type position struct{ line, column, length int }
+	tests := []struct {
+		name       string
+		input      string
+		gfm        []position
+		commonMark []position
+	}{
+		// markdownlint: 1:2 length 27, the lines as one paragraph.
+		{"known difference: goldmark reads a table whose header row has fewer cells",
+			"|https://a.com|https://b.com |\n|-|-|-|\n",
+			[]position{{1, 2, 13}, {1, 16, 13}}, []position{{1, 2, 27}}},
+		{"literal across the cells of a table", "| https://a.com|https://b.com |\n|-|-|\n",
+			[]position{{1, 3, 13}, {1, 17, 13}}, []position{{1, 3, 27}}},
+		// markdownlint: 3:2 length 27, the lazy row as a paragraph after the blockquote.
+		{"known difference: goldmark takes a lazy row into a table in a blockquote",
+			"> | a | b |\n> |---|---|\n|https://a.com|https://b.com |\n",
+			[]position{{3, 2, 13}, {3, 16, 13}}, []position{{3, 2, 27}}},
+		{"padded cell of a table", "| https://example.com | b |\n| - | - |\n",
+			[]position{{1, 3, 19}}, []position{{1, 3, 19}}},
+		{"line before a delimiter-like line", "See https://example.com here\n:--\n",
+			[]position{{1, 5, 19}}, []position{{1, 5, 19}}},
+		{"paragraph line before a header line", "Intro https://example.com\nheader\n|-|\n",
+			[]position{{1, 7, 19}}, []position{{1, 7, 19}}},
+		{"paragraph before a table that GFM refuses", "Intro https://example.com\n|a|b|\n|-|-|-|\n",
+			[]position{{1, 7, 19}}, []position{{1, 7, 19}}},
+		// goldmark's table parse makes the "www." literal start a cell, where
+		// micromark, which refuses the table, reads it after a pipe and
+		// markdownlint reports nothing.
+		{"known difference: a www literal starts a cell of a table that GFM refuses",
+			"|x|www.example.com |\n|-|-|-|\n", []position{{1, 4, 15}}, nil},
+		// markdownlint: 1:6 length 15 only, the lazy row as a paragraph.
+		{"known difference: a www literal starts a cell of a lazy row",
+			"> |x|www.example.com|\n> |-|-|\n|y|www.example.org|\n",
+			[]position{{1, 6, 15}, {3, 4, 15}}, nil},
+		// markdownlint reports the same three as gomdlint with GFM.
+		{"valid table after a table that GFM refuses", "|a|b|\n|-|-|-|\n|x|www.example.com|\n|-|-|\n",
+			[]position{{3, 4, 15}}, nil},
+		{"code span that a lazy row opens", "> |a|b|\n> |-|-|\n`open\n> https://example.com |b|`\n",
+			[]position{{4, 3, 19}}, nil},
+		{"tabbed list item in a blockquote", "> -\t|a|b|\n>\t|-|-|\n>\t|x|www.example.com|\n",
+			[]position{{3, 6, 15}}, nil},
+	}
+	for _, tt := range tests {
+		for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				diags, err := NewNoBareURLsRule().Apply(fixSafetyContext(t, flavor, tt.input))
+				require.NoError(t, err)
+				want := tt.gfm
+				if flavor == config.FlavorCommonMark {
+					want = tt.commonMark
+				}
+				got := make([]position, 0, len(diags))
+				for _, diag := range diags {
+					got = append(got, position{diag.StartLine, diag.StartColumn, diag.EndColumn - diag.StartColumn})
+					assert.False(t, diag.HasFix(), "fix at %d:%d", diag.StartLine, diag.StartColumn)
+				}
+				if want == nil {
+					want = []position{}
+				}
+				assert.Equal(t, want, got)
+			})
+		}
 	}
 }
 

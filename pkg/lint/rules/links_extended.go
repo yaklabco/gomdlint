@@ -46,22 +46,28 @@ type bareURL struct {
 // text, with trailing punctuation and unbalanced parentheses left out. URLs in
 // link text, code spans, autolinks, raw HTML, the content of inline HTML
 // elements, HTML blocks, code blocks, and reference definitions are not bare.
-// The fix wraps a URL or email address in angle brackets. It is attached only
-// where GitHub, markdownlint, and the parser that the fix check uses must all
-// link the same address before and after it (see fixEligible); every other
-// literal, and every "www." address, which without a scheme would not become
-// an autolink, is reported without a fix.
+// Like every rule, MD034 follows the parser's blocks, so it reads the cells of
+// every table goldmark reads, including tables that micromark refuses and
+// rows that goldmark takes in lazily. The fix wraps a URL or email address in
+// angle brackets. It is attached only where GitHub, markdownlint, and the
+// parser that the fix check uses must all link the same address before and
+// after it (see fixEligible), and never in a table or in a run of lines that
+// could hold one (see tableRuns); every other literal, and every "www."
+// address, which without a scheme would not become an autolink, is reported
+// without a fix.
 func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
+	runs := newTableRuns(ctx.File)
 	var urls []bareURL
 	for _, container := range mdast.FindAll(ctx.Root, isTextContainer) {
 		if ctx.Cancelled() {
 			return nil, ctx.Ctx.Err()
 		}
 		scan := newBareURLScan(ctx.File, container)
+		scan.fixesAllowed = container.Kind != mdast.NodeTableCell && !runs.touch(container)
 		scan.visit(container)
 		urls = append(urls, scan.found...)
 	}
@@ -164,8 +170,11 @@ type bareURLScan struct {
 	// break. micromark starts its text there, whatever container marker
 	// the source holds before it.
 	lineStarts map[int]bool
-	brackets   int
-	found      []bareURL
+	// fixesAllowed reports whether the container may get fixes at all: it is
+	// no table cell and its run of lines could hold no table.
+	fixesAllowed bool
+	brackets     int
+	found        []bareURL
 }
 
 // newBareURLScan prepares a scan of a container's inline content.
@@ -293,7 +302,8 @@ func (s *bareURLScan) scanText(start, end int) {
 		if kind == mdscan.LiteralNone {
 			continue
 		}
-		fixable := literalEnd <= end && s.parsedAgrees(pos, literalEnd) && s.fixEligible(pos, literalEnd, kind)
+		fixable := s.fixesAllowed && literalEnd <= end && s.parsedAgrees(pos, literalEnd) &&
+			s.fixEligible(pos, literalEnd, kind)
 		s.add(pos, literalEnd, kind, fixable)
 		s.consumed = literalEnd
 		pos = literalEnd - 1
@@ -330,8 +340,8 @@ const strippedTrail = ".,:;!?*_~\"')"
 // differ, the fix is attached only where none of their differences can
 // reach the literal, which every condition below secures:
 //
-//   - The literal is printable ASCII without "&", "\", "<", ">", quotes, or
-//     backticks. So cmark_clean_autolink, which decodes the character
+//   - The literal is printable ASCII without "&", "\", "<", ">", quotes,
+//     backticks, or "|". So cmark_clean_autolink, which decodes the character
 //     references inside an autolink, leaves its address as written; no
 //     Unicode table (cmark-gfm's is_valid_hostchar, micromark's
 //     unicodeWhitespace and unicodePunctuation) applies to it; and nothing
@@ -362,6 +372,13 @@ const strippedTrail = ".,:;!?*_~\"')"
 //     strikethrough. A URL that ends with its domain is followed by no "_",
 //     which check_domain would count in the domain's last segment and
 //     refuse the link for.
+//   - No table is involved (checked through fixesAllowed): the literal is in
+//     no table cell, and no line of its run of lines (see tableRuns) holds a
+//     pipe or could be a delimiter row. GitHub splits a row into cells only
+//     at pipes, and it reads a table only where a delimiter row follows the
+//     header row in the same run, so outside such runs every parser gives
+//     the literal the same inline content, whatever goldmark made of tables
+//     elsewhere.
 //   - An email also makes a CommonMark email autolink (checked in Apply).
 //     Every "_" in it sits between letters or digits, so the emphasis that
 //     cmark-gfm parses before postprocess_text cannot split it, and no
@@ -379,10 +396,10 @@ func (s *bareURLScan) fixEligible(start, end int, kind mdscan.LiteralKind) bool 
 }
 
 // isPlainLiteral reports whether a literal is printable ASCII without
-// characters that decoding or other syntax reads.
+// characters that decoding or other syntax reads, a table's pipe among them.
 func isPlainLiteral(literal []byte) bool {
 	for _, ch := range literal {
-		if ch <= ' ' || ch >= 0x7f || strings.IndexByte("&\\<>\"'`", ch) >= 0 {
+		if ch <= ' ' || ch >= 0x7f || strings.IndexByte("&\\<>\"'`|", ch) >= 0 {
 			return false
 		}
 	}
@@ -478,4 +495,61 @@ func (s *bareURLScan) add(start, end int, kind mdscan.LiteralKind, fixable bool)
 		return
 	}
 	s.found = append(s.found, bareURL{start: start, end: end, kind: kind, fixable: fixable})
+}
+
+// tableRuns splits the lines of a file into runs: maximal sequences of lines
+// that hold something besides spaces, tabs, and blockquote markers. Every
+// other line ends a paragraph in every container, so each paragraph, and
+// each table with the paragraph its header row comes from, lies inside one
+// run, as cmark-gfm's try_opening_table_header (which reads the header row
+// from the last line of the paragraph above the delimiter row) and matches
+// (which continues a table only with lines inside its containers) build
+// them. A run could hold a table when one of its lines holds a pipe or could
+// be a delimiter row (see couldHoldTableSyntax).
+type tableRuns struct {
+	run      []int  // run[line] numbers the run of a 1-based line; -1 between runs
+	tableish []bool // tableish[run] reports whether the run could hold a table
+}
+
+func newTableRuns(file *mdast.FileSnapshot) tableRuns {
+	runs := tableRuns{run: make([]int, len(file.Lines)+1)}
+	current := -1
+	for line := 1; line <= len(file.Lines); line++ {
+		text := lint.LineText(file, line)
+		if len(bytes.Trim(text, " \t>")) == 0 {
+			runs.run[line], current = -1, -1
+			continue
+		}
+		if current < 0 {
+			current = len(runs.tableish)
+			runs.tableish = append(runs.tableish, false)
+		}
+		runs.run[line] = current
+		runs.tableish[current] = runs.tableish[current] || couldHoldTableSyntax(text)
+	}
+	return runs
+}
+
+// touch reports whether a line of node lies in a run that could hold a table.
+func (runs tableRuns) touch(node *mdast.Node) bool {
+	pos := node.SourcePosition()
+	for line := max(pos.StartLine, 1); line <= pos.EndLine && line < len(runs.run); line++ {
+		if run := runs.run[line]; run >= 0 && runs.tableish[run] {
+			return true
+		}
+	}
+	return false
+}
+
+// couldHoldTableSyntax reports whether a line holds a pipe, which splits a
+// table row into cells, or could be a GFM delimiter row once blockquote
+// markers and indentation are left out: nothing but "-", ":", "|", and
+// cmark-gfm's spacechar (space, tab, vertical tab, form feed), with at least
+// one "-", as scan_table_start reads it.
+func couldHoldTableSyntax(line []byte) bool {
+	if bytes.IndexByte(line, '|') >= 0 {
+		return true
+	}
+	rest := bytes.TrimLeft(line, " \t>")
+	return bytes.IndexByte(rest, '-') >= 0 && len(bytes.Trim(rest, "-: \t\v\f")) == 0
 }

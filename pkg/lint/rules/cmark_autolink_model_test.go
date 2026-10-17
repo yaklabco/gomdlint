@@ -62,7 +62,9 @@ func (c *cmarkText) unput(from int) {
 // character references, and not while a "[" is open. postprocess_text then
 // finds emails in the decoded text outside those constructs and links.
 // Emphasis does not split the text here: unpaired delimiters stay text, and
-// the sweep attaches no fix where paired ones would split a literal.
+// the sweep attaches no fix where paired ones would split a literal. Tables
+// are not modelled either: MD034 attaches no fix in a run of lines that could
+// hold one, and the sweep checks that on its own.
 func cmarkAutolinks(content []byte) []cmarkLink {
 	var links []cmarkLink
 	var texts []cmarkText
