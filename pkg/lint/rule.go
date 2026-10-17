@@ -75,7 +75,12 @@ type Rule interface {
 	// DefaultSeverity returns the default severity for this rule.
 	DefaultSeverity() config.Severity
 
-	// Tags returns categorization tags for this rule (e.g., ["style", "heading"]).
+	// Tags returns the rule's own tags (e.g., ["headings", "style"]). Inline
+	// directives and migrated markdownlint configs resolve tags through the
+	// rule's catalog entry instead (RuleMeta.Tags), which carries
+	// markdownlint's tags. Directives fall back to these tags only for a
+	// word that names no registered rule and that no catalog entry uses as
+	// an identifier or a tag.
 	Tags() []string
 
 	// CanFix returns whether this rule can auto-fix issues.

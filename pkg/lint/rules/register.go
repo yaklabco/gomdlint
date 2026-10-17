@@ -2,7 +2,9 @@ package rules
 
 import "github.com/yaklabco/gomdlint/pkg/lint"
 
-// RegisterAll registers all built-in rules with the given registry.
+// RegisterAll registers all built-in rules with the given registry, with
+// their catalog entries, so that the registry resolves each rule's aliases
+// and tags.
 func RegisterAll(registry *lint.Registry) {
 	// Whitespace rules
 	registry.Register(NewTrailingWhitespaceRule()) // MD009
@@ -84,25 +86,10 @@ func RegisterAll(registry *lint.Registry) {
 	registry.Register(NewLinkImageRefDefsRule())    // MD053
 	registry.Register(NewLinkImageStyleRule())      // MD054
 	registry.Register(NewDescriptiveLinkTextRule()) // MD059
-}
 
-// RegisterLegacyAliases registers legacy markdownlint alias names that differ
-// from the rule's canonical Name(). These aliases provide backwards compatibility
-// with markdownlint configuration files that use alternate names.
-//
-// Only true legacy aliases are registered here - aliases where the name differs
-// from the canonical rule Name(). For example:
-//   - "single-title" -> MD025 (canonical: "single-h1")
-//   - "first-line-h1" -> MD041 (canonical: "first-line-heading").
-func RegisterLegacyAliases(registry *lint.Registry) {
-	registry.RegisterAlias("blanks-around-headings", "MD022")
-	registry.RegisterAlias("ul-style", "MD004")
-	registry.RegisterAlias("no-multiple-blanks", "MD012")
-	// MD025: single-h1 (canonical) also known as single-title
-	registry.RegisterAlias("single-title", "MD025")
-
-	// MD041: first-line-heading (canonical) also known as first-line-h1
-	registry.RegisterAlias("first-line-h1", "MD041")
+	for _, meta := range Catalog() {
+		registry.Describe(meta)
+	}
 }
 
 // init registers all built-in rules with the default registry.
@@ -110,5 +97,4 @@ func RegisterLegacyAliases(registry *lint.Registry) {
 //nolint:gochecknoinits // Init is intentional for automatic rule registration
 func init() {
 	RegisterAll(lint.DefaultRegistry)
-	RegisterLegacyAliases(lint.DefaultRegistry)
 }

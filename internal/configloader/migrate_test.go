@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -32,7 +33,6 @@ func lintMigratedMarkdown(t *testing.T, settings, input string) []lint.Diagnosti
 	require.NoError(t, err)
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
-	rules.RegisterLegacyAliases(registry)
 	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 		context.Background(), "test.md", []byte(input), loaded.Config)
 	require.NoError(t, err)
@@ -504,8 +504,8 @@ func TestConvertMarkdownlintConfig_Tags(t *testing.T) {
 		t.Fatalf("ConvertMarkdownlintConfig() error = %v", err)
 	}
 
-	// All whitespace rules should be disabled
-	whitespaceRules := GetTagRules("whitespace")
+	// All whitespace rules should be disabled: markdownlint's whitespace tag.
+	whitespaceRules := []string{"MD009", "MD010", "MD012", "MD027", "MD028", "MD030", "MD037", "MD038", "MD039"}
 	for _, ruleID := range whitespaceRules {
 		rule, ok := result.Config.Rules[ruleID]
 		if !ok {
@@ -515,6 +515,82 @@ func TestConvertMarkdownlintConfig_Tags(t *testing.T) {
 		if rule.Enabled == nil || *rule.Enabled {
 			t.Errorf("expected %s to be disabled (from whitespace tag)", ruleID)
 		}
+	}
+	if len(result.Config.Rules) != len(whitespaceRules) {
+		t.Errorf("the whitespace tag configured %d rules, want %d", len(result.Config.Rules), len(whitespaceRules))
+	}
+}
+
+// convertSettings converts markdownlint settings written to a
+// .markdownlint.json file.
+func convertSettings(t *testing.T, settings string) *MigrationResult {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".markdownlint.json")
+	require.NoError(t, os.WriteFile(path, []byte(settings), 0o600))
+	result, err := ConvertMarkdownlintConfig(path)
+	require.NoError(t, err)
+	return result
+}
+
+// requireRuleEnabled checks that converted settings set the rule's enabled state.
+func requireRuleEnabled(t *testing.T, result *MigrationResult, ruleID string, want bool) {
+	t.Helper()
+	rule, ok := result.Config.Rules[ruleID]
+	require.True(t, ok, "%s is configured", ruleID)
+	require.NotNil(t, rule.Enabled, ruleID)
+	require.Equal(t, want, *rule.Enabled, ruleID)
+}
+
+func TestConvertMarkdownlintConfig_KeysIgnoreCase(t *testing.T) {
+	t.Parallel()
+
+	// markdownlint matches names, aliases and tags in any case.
+	result := convertSettings(t, `{"UL-STYLE": false, "Blank_Lines": false, "md009": false, "No-Hard-Tabs": false}`)
+
+	for _, ruleID := range []string{"MD004", "MD009", "MD010", "MD012", "MD022", "MD031", "MD032", "MD047"} {
+		requireRuleEnabled(t, result, ruleID, false)
+	}
+	assert.Empty(t, result.Warnings)
+}
+
+func TestConvertMarkdownlintConfig_GomdlintNames(t *testing.T) {
+	t.Parallel()
+
+	result := convertSettings(t, `{"heading-blank-lines": false, "table-alignment": true}`)
+
+	requireRuleEnabled(t, result, "MD022", false)
+	requireRuleEnabled(t, result, "MDL003", true)
+	assert.Empty(t, result.Warnings)
+}
+
+func TestConvertMarkdownlintConfig_UnknownRuleIDs(t *testing.T) {
+	t.Parallel()
+
+	// markdownlint removed MD002 and never had MD999.
+	result := convertSettings(t, `{"MD002": false, "MD999": true}`)
+
+	assert.NotContains(t, result.Config.Rules, "MD002")
+	assert.NotContains(t, result.Config.Rules, "MD999")
+	assert.Equal(t, []string{`unknown key "MD002"; skipping`, `unknown key "MD999"; skipping`}, result.Warnings)
+}
+
+func TestConvertMarkdownlintConfig_TagsCoverMarkdownlintRulesOnly(t *testing.T) {
+	t.Parallel()
+
+	// gomdlint files its own rules under markdownlint tags, but a
+	// markdownlint tag in a markdownlint config means markdownlint's rules.
+	result := convertSettings(t, `{"links": true, "url": true, "table": true}`)
+
+	assert.NotContains(t, result.Config.Rules, "MDL001")
+	assert.NotContains(t, result.Config.Rules, "MDL003")
+	for _, ruleID := range []string{"MD011", "MD034", "MD042", "MD055", "MD058", "MD059"} {
+		requireRuleEnabled(t, result, ruleID, true)
+	}
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	for _, resolved := range lint.ResolveRules(registry, result.Config) {
+		assert.NotContains(t, []string{"MDL001", "MDL003"}, resolved.Rule.ID(), "migration must not enable gomdlint's own rules")
 	}
 }
 

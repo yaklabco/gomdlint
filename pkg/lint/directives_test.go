@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -79,10 +80,18 @@ func TestSuppressedHeadingFixDoesNotLeak(t *testing.T) {
 	require.Equal(t, "# Document\n\n<!-- markdownlint-disable MD022 -->\n## Suppressed\ntext\n<!-- markdownlint-enable MD022 -->\n\n## Checked\n\ntext\n", string(output))
 }
 
+// describeCatalog gives registry the catalog entries of the built-in rules,
+// so that it resolves their aliases and tags as the product does.
+func describeCatalog(registry *lint.Registry) {
+	for _, meta := range rules.Catalog() {
+		registry.Describe(meta)
+	}
+}
+
 func TestEngineMarkdownlintHeadingAlias(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewHeadingBlankLinesRule())
-	rules.RegisterLegacyAliases(registry)
+	describeCatalog(registry)
 	input := "<!-- markdownlint-disable blanks-around-headings -->\n# Document\ntext\n"
 	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 		context.Background(), "test.md", []byte(input), config.NewConfig())
@@ -102,12 +111,140 @@ func TestEngineAdditionalMarkdownlintAliases(t *testing.T) {
 		t.Run(tt.alias, func(t *testing.T) {
 			registry := lint.NewRegistry()
 			registry.Register(tt.rule)
-			rules.RegisterLegacyAliases(registry)
+			describeCatalog(registry)
 			input := "<!-- markdownlint-disable " + tt.alias + " -->\n" + tt.input
 			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 				context.Background(), "test.md", []byte(input), config.NewConfig())
 			require.NoError(t, err)
 			require.Empty(t, result.Diagnostics)
+		})
+	}
+}
+
+// reportedLines lints input with every built-in rule at its default
+// settings, plus the rules in enable, and returns the lines ruleID reports.
+func reportedLines(t *testing.T, input, ruleID string, enable ...string) []int {
+	t.Helper()
+	cfg := config.NewConfig()
+	cfg.EnableRules = enable
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+		context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	var lines []int
+	for _, diag := range result.Diagnostics {
+		if diag.RuleID == ruleID {
+			lines = append(lines, diag.StartLine)
+		}
+	}
+	return lines
+}
+
+func TestEngineDirectiveTagsFollowMarkdownlint(t *testing.T) {
+	const (
+		mixedBullets = "- one\n\n* two\n"
+		extraBlank   = "Text.\n\n\nMore.\n"
+		bareFence    = "```\ncode\n```\n"
+		shortTable   = "| A | B |\n| - | - |\n| 1 | 2 |\n"
+		mixedLinks   = "[a](https://example.com/a) and [b](docs/b.md)\n"
+	)
+	tests := []struct {
+		tag, ruleID, body string
+		enable            []string
+		silenced          bool
+	}{
+		// markdownlint v0.41's tags.
+		{tag: "bullet", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "ul", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "Bullet", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "blank_lines", ruleID: "MD012", body: extraBlank, silenced: true},
+		{tag: "language", ruleID: "MD040", body: bareFence, silenced: true},
+		{tag: "whitespace", ruleID: "MD022", body: "## Section\ntext\n"},
+		{tag: "links", ruleID: "MD045", body: "![](image.png)\n"},
+		// Rules that markdownlint lacks take tags from its vocabulary.
+		{tag: "table", ruleID: "MDL003", body: shortTable, silenced: true},
+		{tag: "links", ruleID: "MDL001", body: mixedLinks, enable: []string{"MDL001"}, silenced: true},
+		{tag: "url", ruleID: "MDL001", body: mixedLinks, enable: []string{"MDL001"}, silenced: true},
+		// gomdlint's former tags keep working for now.
+		{tag: "style", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "lists", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "layout", ruleID: "MD012", body: extraBlank, silenced: true},
+		{tag: "metadata", ruleID: "MD041", body: "Text.\n", enable: []string{"MD041"}, silenced: true},
+		{tag: "tables", ruleID: "MDL003", body: shortTable, silenced: true},
+		{tag: "gfm", ruleID: "MDL003", body: shortTable, silenced: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag+" "+tt.ruleID, func(t *testing.T) {
+			reported := reportedLines(t, tt.body, tt.ruleID, tt.enable...)
+			require.NotEmpty(t, reported, "the body must make %s report", tt.ruleID)
+
+			directed := reportedLines(t, "<!-- markdownlint-disable "+tt.tag+" -->\n\n"+tt.body, tt.ruleID, tt.enable...)
+			if tt.silenced {
+				assert.Empty(t, directed, "markdownlint-disable %s must silence %s", tt.tag, tt.ruleID)
+			} else {
+				assert.Len(t, directed, len(reported), "markdownlint-disable %s must not silence %s", tt.tag, tt.ruleID)
+			}
+		})
+	}
+}
+
+func TestEngineConfigureFileTagsFollowMarkdownlint(t *testing.T) {
+	const mixedBullets = "- one\n\n* two\n"
+	require.NotEmpty(t, reportedLines(t, mixedBullets, "MD004"))
+
+	assert.Empty(t, reportedLines(t, "<!-- markdownlint-configure-file {\"bullet\": false} -->\n\n"+mixedBullets, "MD004"))
+	assert.NotEmpty(t, reportedLines(t, "<!-- markdownlint-configure-file {\"whitespace\": false} -->\n\n## Section\ntext\n", "MD022"))
+}
+
+// TestEngineDirectiveTagsInPartialRegistries lints with a registry that
+// holds the whole catalog but only one rule. A word that the catalog knows,
+// as a tag or a rule identifier, must resolve as in the full registry,
+// covering only its registered rules even when it has none. Only other
+// words fall back to the rules' own tags.
+func TestEngineDirectiveTagsInPartialRegistries(t *testing.T) {
+	const (
+		looseHeading = "# Document\ntext\n"
+		missingAlt   = "![](image.png)\n"
+		mixedBullets = "- one\n\n* two\n"
+	)
+	tests := []struct {
+		name, directive, body string
+		rule                  lint.Rule
+		want                  int
+	}{
+		// MD022 tags itself whitespace and MD045 tags itself links, but
+		// markdownlint's tags leave them out.
+		{"disable whitespace", "markdownlint-disable whitespace", looseHeading, rules.NewHeadingBlankLinesRule(), 1},
+		{"disable links", "markdownlint-disable links", missingAlt, rules.NewImageAltTextRule(), 1},
+		{"configure-file whitespace", `markdownlint-configure-file {"whitespace": false}`, looseHeading, rules.NewHeadingBlankLinesRule(), 1},
+		{"configure-file links", `markdownlint-configure-file {"links": false}`, missingAlt, rules.NewImageAltTextRule(), 1},
+		// Catalog words whose rules are not registered configure nothing.
+		{
+			"configure-file without registered rules",
+			`markdownlint-configure-file {"bullet": false, "MD004": false, "ul-style": false}`,
+			looseHeading, rules.NewHeadingBlankLinesRule(), 1,
+		},
+		// A catalog tag still covers its registered rules.
+		{"disable blank_lines", "markdownlint-disable blank_lines", looseHeading, rules.NewHeadingBlankLinesRule(), 0},
+		{"configure-file blank_lines", `markdownlint-configure-file {"blank_lines": false}`, looseHeading, rules.NewHeadingBlankLinesRule(), 0},
+		// gomdlint's former tags are not catalog words, so they fall back.
+		{"disable style", "markdownlint-disable style", mixedBullets, rules.NewUnorderedListStyleRule(), 0},
+		{"configure-file style", `markdownlint-configure-file {"style": false}`, mixedBullets, rules.NewUnorderedListStyleRule(), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := lint.NewRegistry()
+			registry.Register(tt.rule)
+			describeCatalog(registry)
+			engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(tt.body), config.NewConfig())
+			require.NoError(t, err)
+			require.Len(t, result.Diagnostics, 1, "the body must make %s report once", tt.rule.ID())
+
+			input := "<!-- " + tt.directive + " -->\n\n" + tt.body
+			result, err = engine.LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
+			require.NoError(t, err)
+			assert.Len(t, result.Diagnostics, tt.want)
 		})
 	}
 }

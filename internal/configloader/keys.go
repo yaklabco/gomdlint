@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/yaklabco/gomdlint/internal/editdistance"
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
@@ -128,30 +129,9 @@ func forEachKey(node *yaml.Node, visit func(key, value *yaml.Node)) {
 func closestKey(name string, known []string) (string, bool) {
 	best, bestDistance := "", maxSuggestionDistance+1
 	for _, candidate := range known {
-		if distance := editDistance(name, candidate); distance < bestDistance {
+		if distance := editdistance.Levenshtein(name, candidate); distance < bestDistance {
 			best, bestDistance = candidate, distance
 		}
 	}
 	return best, best != ""
-}
-
-// editDistance returns the Levenshtein distance between two strings.
-func editDistance(left, right string) int {
-	previous := make([]int, len(right)+1)
-	current := make([]int, len(right)+1)
-	for col := range previous {
-		previous[col] = col
-	}
-	for row := 1; row <= len(left); row++ {
-		current[0] = row
-		for col := 1; col <= len(right); col++ {
-			cost := 1
-			if left[row-1] == right[col-1] {
-				cost = 0
-			}
-			current[col] = min(previous[col]+1, current[col-1]+1, previous[col-1]+cost)
-		}
-		previous, current = current, previous
-	}
-	return previous[len(right)]
 }

@@ -63,12 +63,11 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
-	standardIDs := GetAllRuleIDs()
 	cfg.RuleDefaults = make(map[string]config.RuleConfig)
 	for _, id := range registry.IDs() {
 		value := defaultValue
-		if !slices.Contains(standardIDs, id) {
-			value = false
+		if lint.IsGomdlintOnlyRule(id) {
+			value = false // markdownlint does not run gomdlint's own rules.
 		}
 		cfg.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, value)
 	}
@@ -83,13 +82,13 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
-		if IsTag(key) {
-			processRuleKey(cfg, key, raw[key], result)
+		if isMarkdownlintTag(registry, key) {
+			processRuleKey(registry, cfg, key, raw[key], result)
 		}
 	}
 	for _, key := range keys {
-		if !IsTag(key) {
-			processRuleKey(cfg, key, raw[key], result)
+		if !isMarkdownlintTag(registry, key) {
+			processRuleKey(registry, cfg, key, raw[key], result)
 		}
 	}
 
@@ -193,19 +192,15 @@ func processSpecialKeys(raw map[string]any, result *MigrationResult) {
 	delete(raw, "$schema")
 }
 
-// processRuleKey processes a single key from the markdownlint config.
-func processRuleKey(cfg *config.Config, key string, value any, result *MigrationResult) {
-	// Try to normalize as a rule ID
-	ruleID := NormalizeRuleID(key)
-	if ruleID != "" {
-		ruleCfg := config.MarkdownlintRuleConfig(ruleID, value)
-		cfg.Rules[ruleID] = ruleCfg
+// processRuleKey processes a single key from the markdownlint config: a rule
+// ID, name or alias, or a markdownlint tag, in any case.
+func processRuleKey(registry *lint.Registry, cfg *config.Config, key string, value any, result *MigrationResult) {
+	if rule, ok := registry.Lookup(key); ok {
+		cfg.Rules[rule.ID()] = config.MarkdownlintRuleConfig(rule.ID(), value)
 		return
 	}
 
-	// Check if it's a tag
-	if IsTag(key) {
-		ruleIDs := GetTagRules(key)
+	if ruleIDs := markdownlintTagRuleIDs(registry, key); len(ruleIDs) > 0 {
 		for _, rid := range ruleIDs {
 			cfg.Rules[rid] = config.MarkdownlintRuleConfig(rid, value)
 		}
@@ -215,6 +210,25 @@ func processRuleKey(cfg *config.Config, key string, value any, result *Migration
 	// Unknown key
 	result.Warnings = append(result.Warnings,
 		fmt.Sprintf("unknown key %q; skipping", key))
+}
+
+// isMarkdownlintTag reports whether key is a markdownlint tag.
+func isMarkdownlintTag(registry *lint.Registry, key string) bool {
+	return len(markdownlintTagRuleIDs(registry, key)) > 0
+}
+
+// markdownlintTagRuleIDs returns the IDs of the markdownlint rules that the
+// markdownlint tag covers, in ID order. gomdlint files its own rules under
+// markdownlint's tags too, but in a markdownlint config a tag means only
+// markdownlint's rules, because markdownlint never runs gomdlint's.
+func markdownlintTagRuleIDs(registry *lint.Registry, tag string) []string {
+	var ruleIDs []string
+	for _, rule := range registry.RulesByTag(tag) {
+		if !lint.IsGomdlintOnlyRule(rule.ID()) {
+			ruleIDs = append(ruleIDs, rule.ID())
+		}
+	}
+	return ruleIDs
 }
 
 // GenerateMigrationHeader returns a header comment for migrated configs.

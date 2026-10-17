@@ -2,24 +2,82 @@ package lint
 
 import (
 	"cmp"
+	"maps"
 	"slices"
+	"strings"
 	"sync"
+
+	"github.com/yaklabco/gomdlint/internal/editdistance"
 )
 
-// Registry holds all registered lint rules.
+const (
+	// maxSuggestionDistance is the largest edit distance at which Suggest
+	// offers a rule or tag as a likely typo of a key.
+	maxSuggestionDistance = 2
+
+	// substringRank ranks a substring match after every typo.
+	substringRank = maxSuggestionDistance + 1
+
+	// noMatch is the rank of a word that a key does not match.
+	noMatch = -1
+
+	// minSubstringLength is the shortest key that Suggest looks for within
+	// names, aliases and tags.
+	minSubstringLength = 3
+)
+
+// Registry holds the registered lint rules and their catalog entries, and
+// resolves the identifiers and tags that name them.
 type Registry struct {
-	mu      sync.RWMutex
-	byID    map[string]Rule
-	byName  map[string]Rule
-	aliases map[string]string // alias -> canonical ID
+	mu     sync.RWMutex
+	byID   map[string]Rule
+	byName map[string]Rule
+	meta   map[string]RuleMeta // rule ID -> catalog entry
+
+	// index serves Lookup, RulesByTag and Suggest. Every change sets it to
+	// nil, and the next lookup builds a new one. A built index never
+	// changes, so a reader may use it after releasing the lock.
+	index *ruleIndex
+}
+
+// ruleIndex maps lower-cased identifiers and tags to the registered rules.
+type ruleIndex struct {
+	// keys maps the IDs, names and aliases of the rules to the rules. An ID
+	// takes precedence over a name, and a name over an alias.
+	keys map[string]Rule
+
+	// tags maps the tags of the rules' catalog entries to the rules.
+	tags map[string][]Rule
+
+	// ownTags maps the tags that the rules report themselves, through
+	// Rule.Tags, to the rules.
+	ownTags map[string][]Rule
+
+	// catalog holds the IDs, names, aliases and tags of every catalog
+	// entry, whether or not its rule is registered.
+	catalog map[string]bool
+
+	// tagNames lists the keys of tags in order.
+	tagNames []string
+
+	// rules lists the rules with their identifiers, for Suggest.
+	rules []indexedRule
+}
+
+// indexedRule is a registered rule with its lower-cased identifiers.
+type indexedRule struct {
+	rule Rule
+	id   string
+	// names holds the rule's name and aliases.
+	names []string
 }
 
 // NewRegistry creates an empty rule registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		byID:    make(map[string]Rule),
-		byName:  make(map[string]Rule),
-		aliases: make(map[string]string),
+		byID:   make(map[string]Rule),
+		byName: make(map[string]Rule),
+		meta:   make(map[string]RuleMeta),
 	}
 }
 
@@ -40,14 +98,36 @@ func (r *Registry) Register(rule Rule) {
 
 	r.byID[rule.ID()] = rule
 	r.byName[rule.Name()] = rule
+	r.index = nil
 }
 
-// RegisterAlias maps an alias to a canonical rule ID.
-// Used for legacy markdownlint compatibility (e.g., "single-h1" -> "MD041").
-func (r *Registry) RegisterAlias(alias, ruleID string) {
+// Describe records meta as the catalog entry of the rule with ID meta.ID,
+// replacing any earlier entry for that rule. Lookup resolves the entry's
+// aliases, and RulesByTag its tags, while a rule with that ID is
+// registered. The registry keeps its own copy of meta.
+func (r *Registry) Describe(meta RuleMeta) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.aliases[alias] = ruleID
+
+	r.meta[meta.ID] = meta.clone()
+	r.index = nil
+}
+
+// Meta returns a copy of the catalog entry of the registered rule with the
+// given ID. It reports false for an ID that no registered rule has, given
+// exactly as registered, and for a rule without an entry.
+func (r *Registry) Meta(id string) (RuleMeta, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if _, registered := r.byID[id]; !registered {
+		return RuleMeta{}, false
+	}
+	meta, ok := r.meta[id]
+	if !ok {
+		return RuleMeta{}, false
+	}
+	return meta.clone(), true
 }
 
 // Get retrieves a rule by ID or name.
@@ -83,28 +163,118 @@ func (r *Registry) GetByName(name string) (Rule, bool) {
 	return rule, ok
 }
 
-// Resolve returns the canonical ID and rule for a given key.
-// The key can be a rule ID, name, or legacy alias.
-// Returns (id, rule, found).
-func (r *Registry) Resolve(key string) (string, Rule, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+// Lookup returns the registered rule that key identifies: its ID, its name
+// or one of the aliases in its catalog entry. Matching ignores case, as
+// markdownlint's does, and surrounding whitespace, so "md009" and
+// " No-Trailing-Spaces " both find MD009. An ID takes precedence over a
+// name, and a name over an alias. Tags do not resolve; see RulesByTag.
+func (r *Registry) Lookup(key string) (Rule, bool) {
+	rule, ok := r.lookups().keys[foldKey(key)]
+	return rule, ok
+}
 
-	// Try ID first
-	if rule, ok := r.byID[key]; ok {
-		return rule.ID(), rule, true
+// Resolve returns the ID of the registered rule that key identifies,
+// together with the rule, as Lookup finds it.
+func (r *Registry) Resolve(key string) (string, Rule, bool) {
+	rule, ok := r.Lookup(key)
+	if !ok {
+		return "", nil, false
 	}
-	// Try name
-	if rule, ok := r.byName[key]; ok {
-		return rule.ID(), rule, true
+	return rule.ID(), rule, true
+}
+
+// RulesByTag returns the registered rules whose catalog entries list tag,
+// in rule ID order. Matching ignores case and surrounding whitespace. The
+// tags that rules report themselves through Rule.Tags do not count.
+func (r *Registry) RulesByTag(tag string) []Rule {
+	return slices.Clone(r.lookups().tags[foldKey(tag)])
+}
+
+// rulesByOwnTag returns the registered rules that list tag among the tags
+// they report themselves through Rule.Tags, in rule ID order.
+func (r *Registry) rulesByOwnTag(tag string) []Rule {
+	return slices.Clone(r.lookups().ownTags[foldKey(tag)])
+}
+
+// inCatalog reports whether word is the ID, name, an alias or a tag of any
+// catalog entry the registry holds, whether or not that entry's rule is
+// registered. Matching ignores case and surrounding whitespace.
+func (r *Registry) inCatalog(word string) bool {
+	return r.lookups().catalog[foldKey(word)]
+}
+
+// Suggestion is a rule or a tag that Suggest offers in place of a key.
+type Suggestion struct {
+	// Name is the canonical name of the rule, or the tag.
+	Name string
+
+	// RuleID is the ID of the suggested rule. It is empty for a tag.
+	RuleID string
+}
+
+// IsTag reports whether the suggestion is a tag rather than a rule.
+func (s Suggestion) IsTag() bool {
+	return s.RuleID == ""
+}
+
+// Suggest returns the registered rules and the catalog tags that key most
+// likely means, best first, for a key that names neither. Matching ignores
+// case and surrounding whitespace. A rule or tag qualifies when key is at
+// most two edits from its ID, name, an alias or the tag, and needs fewer
+// edits than that word has characters, or when key, at least three
+// characters long, appears within its name, an alias or the tag. Typos come
+// first, closest first, then substring matches; matches of equal rank are
+// in order of name. A rule is offered by its canonical name, whichever
+// identifier matched.
+func (r *Registry) Suggest(key string) []Suggestion {
+	key = foldKey(key)
+	if key == "" {
+		return nil
 	}
-	// Try alias
-	if targetID, ok := r.aliases[key]; ok {
-		if rule, ok := r.byID[targetID]; ok {
-			return rule.ID(), rule, true
+	index := r.lookups()
+
+	ranks := make(map[Suggestion]int)
+	offer := func(suggestion Suggestion, rank int) {
+		if previous, seen := ranks[suggestion]; rank != noMatch && (!seen || rank < previous) {
+			ranks[suggestion] = rank
 		}
 	}
-	return "", nil, false
+	for _, entry := range index.rules {
+		suggestion := Suggestion{Name: entry.rule.Name(), RuleID: entry.rule.ID()}
+		offer(suggestion, matchRank(key, entry.id, false))
+		for _, name := range entry.names {
+			offer(suggestion, matchRank(key, name, true))
+		}
+	}
+	for _, tag := range index.tagNames {
+		offer(Suggestion{Name: tag}, matchRank(key, tag, true))
+	}
+
+	suggestions := slices.Collect(maps.Keys(ranks))
+	slices.SortFunc(suggestions, func(left, right Suggestion) int {
+		return cmp.Or(
+			cmp.Compare(ranks[left], ranks[right]),
+			cmp.Compare(left.Name, right.Name),
+			cmp.Compare(left.RuleID, right.RuleID),
+		)
+	})
+	return suggestions
+}
+
+// matchRank ranks how well key matches word, both lower-cased: by edit
+// distance when key is close enough to be a typo of word, which must be
+// longer than the distance, or with substringRank when substrings is set
+// and key appears within word. It returns noMatch otherwise.
+func matchRank(key, word string, substrings bool) int {
+	if lengthGap := len(key) - len(word); lengthGap <= maxSuggestionDistance && -lengthGap <= maxSuggestionDistance {
+		if distance := editdistance.Levenshtein(key, word); distance <= maxSuggestionDistance && distance < len(word) {
+			return distance
+		}
+	}
+	if substrings && len(key) >= minSubstringLength && strings.Contains(word, key) {
+		return substringRank
+	}
+	return noMatch
 }
 
 // Rules returns all registered rules.
@@ -137,6 +307,101 @@ func (r *Registry) IDs() []string {
 
 	slices.Sort(result)
 	return result
+}
+
+// lookups returns the index of the registered rules, building it first if
+// a change has made it stale.
+func (r *Registry) lookups() *ruleIndex {
+	r.mu.RLock()
+	index := r.index
+	r.mu.RUnlock()
+	if index != nil {
+		return index
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.index == nil {
+		r.index = r.buildIndex()
+	}
+	return r.index
+}
+
+// buildIndex indexes the registered rules. The caller holds the write lock.
+func (r *Registry) buildIndex() *ruleIndex {
+	ids := slices.Sorted(maps.Keys(r.byID))
+	index := &ruleIndex{
+		keys:    make(map[string]Rule, 2*len(ids)), // An ID and a name per rule, before aliases.
+		tags:    make(map[string][]Rule),
+		ownTags: make(map[string][]Rule),
+		catalog: make(map[string]bool),
+		rules:   make([]indexedRule, 0, len(ids)),
+	}
+
+	// The catalog's words come from every entry, registered or not, so that
+	// a word means the same in a registry that holds only some of the rules.
+	for _, meta := range r.meta {
+		for _, words := range [][]string{{meta.ID, meta.Name}, meta.Aliases, meta.Tags} {
+			for _, word := range words {
+				if key := foldKey(word); key != "" {
+					index.catalog[key] = true
+				}
+			}
+		}
+	}
+
+	// The first claim on a key wins, so claim IDs, then names, then aliases.
+	claim := func(identifier string, rule Rule) {
+		if key := foldKey(identifier); key != "" {
+			if _, taken := index.keys[key]; !taken {
+				index.keys[key] = rule
+			}
+		}
+	}
+	for _, id := range ids {
+		claim(id, r.byID[id])
+	}
+	for _, name := range slices.Sorted(maps.Keys(r.byName)) {
+		claim(name, r.byName[name])
+	}
+
+	for _, id := range ids {
+		rule := r.byID[id]
+		meta := r.meta[id]
+		entry := indexedRule{rule: rule, id: foldKey(id), names: []string{foldKey(rule.Name())}}
+		for _, alias := range meta.Aliases {
+			claim(alias, rule)
+			entry.names = append(entry.names, foldKey(alias))
+		}
+		index.rules = append(index.rules, entry)
+		addTagged(index.tags, meta.Tags, rule)
+		addTagged(index.ownTags, rule.Tags(), rule)
+	}
+
+	index.tagNames = slices.Sorted(maps.Keys(index.tags))
+	return index
+}
+
+// addTagged adds rule to the list of each of its tags in byTag, once.
+// Rules arrive in ID order, so each list stays in ID order.
+func addTagged(byTag map[string][]Rule, tags []string, rule Rule) {
+	for _, tag := range tags {
+		key := foldKey(tag)
+		if key == "" {
+			continue
+		}
+		tagged := byTag[key]
+		if last := len(tagged) - 1; last >= 0 && tagged[last].ID() == rule.ID() {
+			continue // The rule lists the tag twice.
+		}
+		byTag[key] = append(tagged, rule)
+	}
+}
+
+// foldKey normalizes a rule identifier or tag for matching: lower case,
+// without surrounding whitespace.
+func foldKey(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
 }
 
 // DefaultRegistry is the global registry for built-in rules.

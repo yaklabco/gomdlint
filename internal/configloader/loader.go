@@ -484,12 +484,13 @@ func normalizeRuleMap(
 
 	// Sorted keys keep the error message stable.
 	for _, key := range slices.Sorted(maps.Keys(rules)) {
-		canonicalID, found := lint.LookupRuleID(registry, key)
+		rule, found := registry.Lookup(key)
 		if !found {
 			// Unknown rule: keep it as-is; validation warns about it.
 			normalized[key] = rules[key]
 			continue
 		}
+		canonicalID := rule.ID()
 
 		if previous, duplicate := seen[canonicalID]; duplicate {
 			return nil, fmt.Errorf("%s: %q and %q both configure %s; keep one of them",

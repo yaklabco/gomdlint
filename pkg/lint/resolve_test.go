@@ -184,21 +184,22 @@ func TestResolveRules_CLIListsMatchNames(t *testing.T) {
 	})
 }
 
-func TestLookupRuleID(t *testing.T) {
+func TestRegistryLookupResolvesRuleKeys(t *testing.T) {
 	t.Parallel()
 
 	registry := lint.NewRegistry()
 	registry.Register(&testRule{BaseRule: lint.NewBaseRule("MD009", "no-trailing-spaces", "", nil, true)})
-	registry.RegisterAlias("trailing-spaces", "MD009")
+	registry.Describe(lint.RuleMeta{ID: "MD009", Name: "no-trailing-spaces", Aliases: []string{"trailing-spaces"}})
 
 	for _, key := range []string{"MD009", "md009", "no-trailing-spaces", "No-Trailing-Spaces", "trailing-spaces", " MD009 "} {
-		id, ok := lint.LookupRuleID(registry, key)
-		assert.True(t, ok, key)
-		assert.Equal(t, "MD009", id, key)
+		rule, ok := registry.Lookup(key)
+		if assert.True(t, ok, key) {
+			assert.Equal(t, "MD009", rule.ID(), key)
+		}
 	}
 
 	for _, key := range []string{"MD999", "", "no-such-rule"} {
-		_, ok := lint.LookupRuleID(registry, key)
+		_, ok := registry.Lookup(key)
 		assert.False(t, ok, key)
 	}
 }
