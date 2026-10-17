@@ -81,6 +81,53 @@ func TestCodeFenceStyleFixRewritesBothFences(t *testing.T) {
 	require.Equal(t, "# Title\n\n```\na\n```\n\n```\nb\n```\n", applyAllFixEdits(t, input, diags))
 }
 
+func TestCodeFenceStyleFixReplacesWholeClosingRun(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "empty block with a longer closer",
+			input: "# Title\n\n~~~\n~~~~~\n\nText\n",
+			want:  "# Title\n\n```\n`````\n\nText\n",
+		},
+		{
+			name:  "longer opener and closer with info",
+			input: "# Title\n\n~~~~~ js\nx\n~~~~~~~~\n\nText\n",
+			want:  "# Title\n\n````` js\nx\n````````\n\nText\n",
+		},
+		{
+			name:  "quoted block",
+			input: "# Title\n\n> ~~~\n> x\n> ~~~~\n\nText\n",
+			want:  "# Title\n\n> ```\n> x\n> ````\n\nText\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeFenceStyleRule(), tt.input, map[string]any{"style": "backtick"})
+			require.Len(t, diags, 1)
+			fixed := applyAllFixEdits(t, tt.input, diags)
+			require.Equal(t, tt.want, fixed)
+			require.Empty(t, applyRuleWithOptions(t, NewCodeFenceStyleRule(), fixed, map[string]any{"style": "backtick"}))
+		})
+	}
+}
+
+func TestCodeFenceStyleWithholdsUnsafeFixes(t *testing.T) {
+	for name, input := range map[string]string{
+		"backtick in info string":           "# Title\n\n~~~foo`bar\n~~~\n\nText\n",
+		"backtick fence inside tilde fence": "# Title\n\n~~~\n```\n~~~\n\nText\n",
+		"quoted backtick fence inside":      "# Title\n\n> ~~~\n>   ````\n> ~~~\n\nText\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeFenceStyleRule(), input, map[string]any{"style": "backtick"})
+			require.Len(t, diags, 1, "the style mismatch is still reported")
+			require.False(t, diags[0].HasFix(), "converting would break the document")
+		})
+	}
+}
+
 func TestFirstLineHeadingSeesLeadingThematicBreak(t *testing.T) {
 	input := "***\n\n# Title\n"
 	diags := applyCompatibilityRule(t, NewFirstLineHeadingRule(), input)
