@@ -96,9 +96,69 @@ func discover(ctx context.Context, opts Options) (*discovery, error) {
 
 	// Sort for deterministic ordering.
 	sort.Strings(found.files)
+	found.files = uniqueFiles(found.files)
 	found.unreadable = finder.unreadable
 
 	return found, nil
+}
+
+// fileKey groups paths that might name the same file. Hard links and a
+// symlink's target share size and modification time, so os.SameFile only
+// compares paths within a group.
+type fileKey struct {
+	size    int64
+	modTime int64
+}
+
+// uniqueFiles drops paths that name a file already listed, such as a hard
+// link or a symlink to it, so two workers never process one file at once.
+// Of the paths naming one file it keeps the first that is not a symlink.
+// paths must be sorted; the result is too.
+func uniqueFiles(paths []string) []string {
+	type seenFile struct {
+		info  fs.FileInfo
+		index int // into kept
+	}
+	groups := make(map[fileKey][]seenFile)
+	kept := make([]string, 0, len(paths))
+	replaced := false
+
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			kept = append(kept, path) // Processing reports the error.
+			continue
+		}
+
+		key := fileKey{size: info.Size(), modTime: info.ModTime().UnixNano()}
+		duplicate := -1
+		for _, seen := range groups[key] {
+			if os.SameFile(info, seen.info) {
+				duplicate = seen.index
+				break
+			}
+		}
+		if duplicate < 0 {
+			groups[key] = append(groups[key], seenFile{info: info, index: len(kept)})
+			kept = append(kept, path)
+			continue
+		}
+		if isSymlink(kept[duplicate]) && !isSymlink(path) {
+			kept[duplicate] = path
+			replaced = true
+		}
+	}
+
+	if replaced {
+		sort.Strings(kept)
+	}
+	return kept
+}
+
+// isSymlink reports whether path itself is a symbolic link.
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&fs.ModeSymlink != 0
 }
 
 // resolveWorkDir resolves the working directory, defaulting to os.Getwd().

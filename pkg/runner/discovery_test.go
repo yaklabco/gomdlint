@@ -499,9 +499,10 @@ func TestDiscover_Symlinks(t *testing.T) {
 		t.Fatalf("Discover() error = %v", err)
 	}
 
-	// Should find both the real file and the symlink.
-	if len(discovered) != 2 {
-		t.Errorf("expected 2 files, got %d: %v", len(discovered), discovered)
+	// The symlink names the same file, which must be processed once, under
+	// its real path.
+	if len(discovered) != 1 || discovered[0] != realFile {
+		t.Errorf("expected only %s, got %v", realFile, discovered)
 	}
 }
 

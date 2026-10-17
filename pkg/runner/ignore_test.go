@@ -238,6 +238,38 @@ func TestDiscover_SkipDirs(t *testing.T) {
 	assert.Equal(t, []string{"node_modules/pkg/readme.md"}, got)
 }
 
+// TestDiscover_ListsEachFileOnce covers paths that name the same file. Two
+// workers fixing one file at once would race, so each file is listed once.
+func TestDiscover_ListsEachFileOnce(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hard links", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		makeTree(t, dir, map[string]string{"a.md": "# A\n", "other.md": "# A\n"})
+		if err := os.Link(filepath.Join(dir, "a.md"), filepath.Join(dir, "b.md")); err != nil {
+			t.Skipf("hard links not supported: %v", err)
+		}
+
+		got := discoverRel(t, dir, runner.Options{Paths: []string{"."}, WorkingDir: dir})
+		assert.Equal(t, []string{"a.md", "other.md"}, got)
+	})
+
+	t.Run("symlink named with its target", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		makeTree(t, dir, map[string]string{"real.md": "# A\n"})
+		if err := os.Symlink("real.md", filepath.Join(dir, "alias.md")); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+
+		got := discoverRel(t, dir, runner.Options{Paths: []string{"alias.md", "real.md"}, WorkingDir: dir})
+		assert.Equal(t, []string{"real.md"}, got)
+	})
+}
+
 func TestRunner_Run_UnreadableDirectoryFails(t *testing.T) {
 	t.Parallel()
 
