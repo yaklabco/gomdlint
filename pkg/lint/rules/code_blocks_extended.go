@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -186,12 +187,16 @@ func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Nod
 	content := ctx.File.Content
 	hasPadding := len(paddings) == 2
 
+	// A space that separates a backtick in the content from the delimiter
+	// is kept. It may be a multibyte space such as a no-break space, so the
+	// kept character's whole encoding is left out of the count.
 	startData := datas[0]
 	startSpaces, startNext := leadingSpaceRun(content[startData.start:startData.end])
 	startBacktick := startNext == '`'
 	startCount := startSpaces
 	if startBacktick && !hasPadding {
-		startCount--
+		_, kept := utf8.DecodeLastRune(content[startData.start : startData.start+startSpaces])
+		startCount -= kept
 	}
 
 	endData := datas[len(datas)-1]
@@ -199,7 +204,8 @@ func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Nod
 	endBacktick := endPrev == '`'
 	endCount := endSpaces
 	if endBacktick && !hasPadding {
-		endCount--
+		_, kept := utf8.DecodeRune(content[endData.end-endSpaces : endData.end])
+		endCount -= kept
 	}
 
 	removePadding := startCount > 0 && endCount > 0 && hasPadding && !startBacktick && !endBacktick

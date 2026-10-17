@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -333,6 +334,8 @@ func TestNoSpaceInCodeRule_MarkdownlintSemantics(t *testing.T) {
 		{"only spaces", "A `   ` b\n", 0, ""},
 		{"trailing space on a later line", "A `foo\nbar ` b\n", 1, "A `foo\nbar` b\n"},
 		{"blockquote", "> A `  quoted` b\n", 1, "> A `quoted` b\n"},
+		{"no-break space kept before a backtick", "A `` \u00a0`foo`` b\n", 1, "A ``\u00a0`foo`` b\n"},
+		{"no-break space kept after a backtick", "A ``foo`\u00a0 `` b\n", 1, "A ``foo`\u00a0`` b\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -350,7 +353,9 @@ func TestNoSpaceInCodeRule_MarkdownlintSemantics(t *testing.T) {
 			}
 			prepared, err := fix.PrepareEdits(edits, len(tt.input))
 			require.NoError(t, err)
-			assert.Equal(t, tt.fixed, string(fix.ApplyEdits([]byte(tt.input), prepared)))
+			fixed := string(fix.ApplyEdits([]byte(tt.input), prepared))
+			assert.Equal(t, tt.fixed, fixed)
+			assert.True(t, utf8.ValidString(fixed), "the fix must delete whole characters")
 		})
 	}
 }
