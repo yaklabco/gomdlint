@@ -284,6 +284,27 @@ func TestKeptInOrderMatchesWholeDocument(t *testing.T) {
 	assert.Greater(t, decided, steps/2, "region states decide most steps")
 }
 
+// TestKeptInOrderWithRegionsThatOffset checks a fix whose edits fall in two
+// regions that offset each other: it adds a paragraph at the top and deletes
+// a paragraph with the same text at the bottom, so the signature stays the
+// same though each region's part changes.
+func TestKeptInOrderWithRegionsThatOffset(t *testing.T) {
+	const paragraph = "Same text.\n\n"
+	head := strings.Repeat(paragraph, 2)
+	input := head + "Same text.\n"
+	diags := []lint.Diagnostic{{RuleID: "T1", FixEdits: []fix.TextEdit{
+		{StartOffset: 0, EndOffset: 0, NewText: paragraph},
+		{StartOffset: len(head), EndOffset: len(input)},
+	}}}
+	for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+		snapshot := parseForCheckWith(t, flavor, input)
+		want := wholeKeptInOrder(newFixCheck(snapshot, flavor), diags, []int{0})
+		require.Equal(t, []int{0}, want, "the fix keeps the document")
+		got, _ := newFixCheck(snapshot, flavor).keptInOrder(diags, []int{0})
+		assert.Equal(t, want, got, "flavor %s", flavor)
+	}
+}
+
 // TestRegionChecksOnLongLists checks list regions against the whole-document
 // check on edits inside long lists: edits that loosen or tighten the list,
 // split or join items, nest them, end the list early or leave its items as

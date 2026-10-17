@@ -402,18 +402,24 @@ func (m *regionModel) compare(regions []region, outcomes []*regionOutcome) (bool
 			})
 		}
 	}
+	return decideReplacements(m.sig, reps)
+}
+
+// decideReplacements reports whether orig with reps replaced, which do not
+// overlap, equals orig. decided is false when a replacement leaves the rest
+// unknown and the part up to its end does not already differ: the anchors
+// after a region whose anchor counts changed are not known.
+func decideReplacements(orig string, reps []replacement) (bool, bool) {
 	slices.SortFunc(reps, func(a, b replacement) int { return a.start - b.start })
-	// The anchors after a region whose anchor counts changed are not known,
-	// so the signature is known up to the end of that region.
 	for idx, rep := range reps {
 		if rep.unknownAfter {
-			if replacedDiffers(m.sig, reps[:idx+1], false) {
+			if replacedDiffers(orig, reps[:idx+1], false) {
 				return true, false
 			}
 			return false, false
 		}
 	}
-	return true, sameAfterReplacements(m.sig, reps)
+	return true, sameAfterReplacements(orig, reps)
 }
 
 // tightAfter reports whether a list is tight after edits, given the
@@ -612,17 +618,6 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 			return false, false, nil
 		}
 	}
-	// The regions before a region keep their parts and the anchor counts,
-	// so its signature is right, and when it differs from its part, so
-	// does the document's.
-	for _, outcome := range outcomes {
-		switch {
-		case !outcome.same:
-			return true, false, nil
-		case !outcome.countsSame:
-			return false, false, nil
-		}
-	}
 	type change struct{ inside, loosening int }
 	changes := make(map[int]change)
 	for _, idx := range absorbed {
@@ -645,10 +640,33 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 			changes[reg.list] = c
 		}
 	}
+	// The state's other regions keep their parts, so the signature after the
+	// edits is the original's with the parts of the new regions replaced, and
+	// the token of each list whose tightness changes.
+	reps := make([]replacement, 0, len(outcomes))
+	clean := true
+	for _, outcome := range outcomes {
+		reps = append(reps, replacement{
+			start: outcome.start, end: outcome.end, text: outcome.text, unknownAfter: !outcome.countsSame,
+		})
+		clean = clean && outcome.same
+	}
 	for list, c := range changes {
-		if m.tightWith(list, state.inside[list]+c.inside, state.loosening[list]+c.loosening) != m.listSigs[list].tight {
-			return true, false, nil
+		sig := m.listSigs[list]
+		if tight := m.tightWith(list, state.inside[list]+c.inside, state.loosening[list]+c.loosening); tight != sig.tight {
+			reps = append(reps, replacement{
+				start: sig.tokenStart, end: sig.tokenEnd, text: listToken(sig.ordered, sig.start, tight),
+			})
+			clean = false
 		}
+	}
+	if decided, unchanged := decideReplacements(m.sig, reps); !decided || !unchanged {
+		return decided, unchanged, nil
+	}
+	// Regions that keep the signature only together, by parts that offset
+	// each other, cannot join the state; the whole check decides them.
+	if !clean {
+		return false, false, nil
 	}
 	commit := func() {
 		for idx := len(absorbed) - 1; idx >= 0; idx-- {
