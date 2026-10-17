@@ -17,16 +17,22 @@ import (
 // Table layout constants for summary output.
 // Both tables use the same width for visual consistency.
 const (
-	tableWidth         = 90 // Width of table separators (same for both tables).
-	ruleColWidth       = 30 // Width of the rule name column.
+	tableWidth         = 90 // Width of table separators, unless the rules table is wider.
 	fileColWidth       = 60 // Width of the file path column (wider for relative paths).
 	numColWidth        = 7  // Width of numeric columns.
 	warnColWidth       = 8  // Width of warnings column.
 	fixableColWidth    = 8  // Width of fixable column.
-	maxRuleNameLength  = 28 // Maximum characters for rule name before truncation.
 	maxFilePathLength  = 58 // Maximum display width for file path before truncation.
 	totalPartsCapacity = 2  // Expected number of parts in total summary line.
 )
+
+// ruleHeader heads the rule column of the rules table. The column is as wide
+// as the header or the longest rule identifier, so no identifier is cut.
+const ruleHeader = "Rule"
+
+// ruleCountsWidth is the width of the rules table after its rule column: the
+// count, errors, warnings and fixable columns, each after a space.
+const ruleCountsWidth = 1 + numColWidth + 1 + numColWidth + 1 + warnColWidth + 1 + fixableColWidth
 
 // ellipsis marks text shortened to fit a column.
 const ellipsis = "…"
@@ -49,31 +55,6 @@ func padLeft(s string, width int) string {
 		return s
 	}
 	return strings.Repeat(" ", width-shown) + s
-}
-
-// truncateLeft shortens text to at most maxWidth display cells by replacing
-// its beginning with an ellipsis, so the end of a path (the file name) stays
-// visible. It drops whole grapheme clusters and never splits a character.
-func truncateLeft(text string, maxWidth int) string {
-	if displaywidth.String(text) <= maxWidth {
-		return text
-	}
-
-	var starts, widths []int
-	graphemes := displaywidth.StringGraphemes(text)
-	for offset := 0; graphemes.Next(); offset += len(graphemes.Value()) {
-		starts = append(starts, offset)
-		widths = append(widths, graphemes.Width())
-	}
-
-	budget := maxWidth - displaywidth.String(ellipsis)
-	keepFrom := len(text)
-	for idx := len(starts) - 1; idx >= 0 && widths[idx] <= budget; idx-- {
-		budget -= widths[idx]
-		keepFrom = starts[idx]
-	}
-
-	return ellipsis + text[keepFrom:]
 }
 
 // SummaryRenderer formats results as aggregated summary tables.
@@ -106,15 +87,20 @@ func (r *SummaryRenderer) Render(_ context.Context, report *analysis.Report) err
 		return nil
 	}
 
+	// Both tables share one separator width: tableWidth, or the width of the
+	// rules table when its rule column needs more.
+	column := r.newRuleColumn(report.ByRule)
+	separator := r.styles.TableSeparator.Render(strings.Repeat("─", max(tableWidth, column.width+ruleCountsWidth)))
+
 	// Determine order
 	if r.opts.SummaryOrder == config.SummaryOrderFiles {
-		r.renderFileTable(report.ByFile)
+		r.renderFileTable(report.ByFile, separator)
 		fmt.Fprintln(r.out)
-		r.renderRuleTable(report.ByRule)
+		r.renderRuleTable(report.ByRule, column, separator)
 	} else {
-		r.renderRuleTable(report.ByRule)
+		r.renderRuleTable(report.ByRule, column, separator)
 		fmt.Fprintln(r.out)
-		r.renderFileTable(report.ByFile)
+		r.renderFileTable(report.ByFile, separator)
 	}
 
 	fmt.Fprintln(r.out)
@@ -123,36 +109,45 @@ func (r *SummaryRenderer) Render(_ context.Context, report *analysis.Report) err
 	return nil
 }
 
-func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
+// ruleColumn is the rule column of the rules table: the identifier of each
+// rule, and the column width, which fits the header and every identifier.
+type ruleColumn struct {
+	identifiers []string
+	width       int
+}
+
+// newRuleColumn names rules the way --rule-format asks.
+func (r *SummaryRenderer) newRuleColumn(rules []analysis.RuleAnalysis) ruleColumn {
+	column := ruleColumn{identifiers: make([]string, len(rules)), width: displaywidth.String(ruleHeader)}
+	for idx := range rules {
+		column.identifiers[idx] = config.FormatRuleID(r.opts.RuleFormat, rules[idx].RuleID, rules[idx].RuleName)
+		column.width = max(column.width, displaywidth.String(column.identifiers[idx]))
+	}
+	return column
+}
+
+func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis, column ruleColumn, separator string) {
 	if len(rules) == 0 {
 		return
 	}
 
 	fmt.Fprintln(r.out, r.styles.Bold.Render("Rules Summary"))
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.out, separator)
 
 	// Header - pad first, then style
 	fmt.Fprintf(r.out, "%s %s %s %s %s\n",
-		r.styles.TableHeader.Render(padRight("Rule", ruleColWidth)),
+		r.styles.TableHeader.Render(padRight(ruleHeader, column.width)),
 		r.styles.TableHeader.Render(padLeft("Count", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Errors", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Warnings", warnColWidth)),
 		r.styles.TableHeader.Render(padLeft("Fixable", fixableColWidth)),
 	)
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.out, separator)
 
 	// Rows
-	for _, rule := range rules {
-		ruleName := rule.RuleName
-		if ruleName == "" {
-			ruleName = rule.RuleID
-		}
-		if displaywidth.String(ruleName) > maxRuleNameLength {
-			ruleName = displaywidth.TruncateString(ruleName, maxRuleNameLength+displaywidth.String(ellipsis), ellipsis)
-		}
-
+	for idx, rule := range rules {
 		// Pad first, then style
-		paddedName := padRight(ruleName, ruleColWidth)
+		paddedName := padRight(column.identifiers[idx], column.width)
 		var styledName string
 		switch {
 		case rule.Errors > 0:
@@ -178,13 +173,13 @@ func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
 	}
 }
 
-func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis) {
+func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis, separator string) {
 	if len(files) == 0 {
 		return
 	}
 
 	fmt.Fprintln(r.out, r.styles.Bold.Render("Files Summary"))
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.out, separator)
 
 	// Header - pad first, then style
 	fmt.Fprintf(r.out, "%s %s %s %s\n",
@@ -193,11 +188,11 @@ func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis) {
 		r.styles.TableHeader.Render(padLeft("Errors", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Warnings", warnColWidth)),
 	)
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.out, separator)
 
 	// Rows
 	for _, file := range files {
-		path := truncateLeft(file.Path, maxFilePathLength)
+		path := pretty.TruncateStart(file.Path, maxFilePathLength, ellipsis)
 
 		// Pad first, then style
 		paddedPath := padRight(path, fileColWidth)

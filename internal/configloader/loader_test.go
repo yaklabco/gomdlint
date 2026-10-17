@@ -340,7 +340,7 @@ unknown_section: 1
 	want := []string{
 		`:1: unknown key "flavour" (did you mean "flavor"?)`,
 		`:2: unknown key "ignor" (did you mean "ignore"?)`,
-		`:4: "format" cannot be set in a config file; use the --format flag`,
+		`:4: "format" cannot be set in a config file; use the --format flag or the GOMDLINT_FORMAT environment variable`,
 		`:6: unknown key "backups.enable" (did you mean "backups.enabled"?)`,
 		`:9: unknown key "rules.MD013.line_length"; rule options belong under "rules.MD013.options"`,
 		`:13: unknown key "unknown_section"`,
@@ -353,6 +353,32 @@ unknown_section: 1
 	}
 	if len(result.Warnings) != len(want) {
 		t.Errorf("expected %d warnings, got %d:\n%s", len(want), len(result.Warnings), joined)
+	}
+}
+
+// TestLoad_CommandLineOnlyKeysPointAtTheirSettings covers settings that
+// config files cannot hold. The warning names the flag, and the environment
+// variable that sets a lasting default where there is one.
+func TestLoad_CommandLineOnlyKeysPointAtTheirSettings(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "rule_format: id\nenable_rules: [MD001]\n")
+	if err != nil {
+		t.Fatalf("command-line-only keys must not fail loading: %v", err)
+	}
+
+	want := []string{
+		`:1: "rule_format" cannot be set in a config file; use the --rule-format flag or the GOMDLINT_RULE_FORMAT environment variable`,
+		`:2: "enable_rules" cannot be set in a config file; use the --enable flag` + "\n",
+	}
+	joined := strings.Join(result.Warnings, "\n") + "\n"
+	for _, fragment := range want {
+		if !strings.Contains(joined, fragment) {
+			t.Errorf("warnings do not contain %q:\n%s", fragment, joined)
+		}
+	}
+	if result.Config.RuleFormat != config.RuleFormatName {
+		t.Errorf("rule format = %q, want the default %q", result.Config.RuleFormat, config.RuleFormatName)
 	}
 }
 
@@ -667,6 +693,73 @@ func TestLoad_EnvDisablesBackups(t *testing.T) {
 	if lint.BackupConfigFromConfig(result.Config).Enabled {
 		t.Error("GOMDLINT_BACKUPS_ENABLED=false must disable backups")
 	}
+}
+
+// TestLoad_EnvRuleFormat covers GOMDLINT_RULE_FORMAT, which sets how output
+// names rules unless the command line sets it. Config files cannot set it.
+func TestLoad_EnvRuleFormat(t *testing.T) {
+	load := func(t *testing.T, cli *config.Config) (*LoadResult, error) {
+		t.Helper()
+
+		return Load(context.Background(), LoadOptions{
+			WorkingDir:         t.TempDir(),
+			IgnoreSystemConfig: true,
+			IgnoreUserConfig:   true,
+			IgnoreMarkdownlint: true,
+			NonInteractive:     true,
+			CLIConfig:          cli,
+		})
+	}
+
+	t.Run("defaults to name", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "")
+
+		result, err := load(t, nil)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.RuleFormat != config.RuleFormatName {
+			t.Errorf("rule format = %q, want %q", result.Config.RuleFormat, config.RuleFormatName)
+		}
+	})
+
+	t.Run("selects the format", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+		result, err := load(t, nil)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.RuleFormat != config.RuleFormatID {
+			t.Errorf("rule format = %q, want %q", result.Config.RuleFormat, config.RuleFormatID)
+		}
+	})
+
+	t.Run("loses to the command line", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+		result, err := load(t, &config.Config{RuleFormat: config.RuleFormatCombined})
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if result.Config.RuleFormat != config.RuleFormatCombined {
+			t.Errorf("rule format = %q, want %q", result.Config.RuleFormat, config.RuleFormatCombined)
+		}
+	})
+
+	t.Run("rejects an invalid value", func(t *testing.T) {
+		t.Setenv("GOMDLINT_RULE_FORMAT", "ids")
+
+		_, err := load(t, nil)
+		if err == nil {
+			t.Fatal("Load() succeeded with an invalid rule format")
+		}
+		for _, want := range []string{`invalid rule format "ids"`, "name, id, combined"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err, want)
+			}
+		}
+	})
 }
 
 // TestLoader_RejectsDuplicateRules covers one file configuring a rule under

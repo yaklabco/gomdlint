@@ -159,6 +159,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	if cmd.Flags().Changed("format") {
 		cfg.Format = config.OutputFormat(flags.format)
 	}
+	if cmd.Flags().Changed("rule-format") {
+		cfg.RuleFormat = config.RuleFormat(flags.ruleFormat)
+	}
 	if cmd.Flags().Changed("flavor") {
 		cfg.Flavor = config.Flavor(flags.flavor)
 	}
@@ -272,7 +275,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		GroupByFile:  true,
 		Compact:      flags.compact,
 		PerFile:      flags.perFile,
-		RuleFormat:   config.RuleFormat(flags.ruleFormat),
+		RuleFormat:   finalCfg.RuleFormat, // The flag, GOMDLINT_RULE_FORMAT or the default.
 		SummaryOrder: config.SummaryOrder(flags.summaryOrder),
 		WorkingDir:   workDir,
 		ToolVersion:  flags.toolVersion,
@@ -542,7 +545,7 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().BoolVar(&flags.compact, "compact", false, "use compact output format")
 	cmd.Flags().BoolVar(&flags.perFile, "per-file", false, "output separate report for each file (table format)")
 	cmd.Flags().StringVar(&flags.ruleFormat, "rule-format", "name",
-		"rule identifier format in output: name, id, or combined")
+		"how text, table and summary output name rules: name, id, or combined")
 	cmd.Flags().StringVar(&flags.summaryOrder, "summary-order", "rules",
 		"order of tables in summary output: rules, files")
 

@@ -192,6 +192,66 @@ func TestAnalyze_SortByAlpha(t *testing.T) {
 	assert.Equal(t, "z.md", report.ByFile[1].Path)
 }
 
+// TestAnalyze_BreaksTiesByRuleIDAndPath covers rules and files that sort
+// equal, which map iteration would otherwise put in a different order on
+// each run. Ties go in rule ID and path order under every sort field.
+func TestAnalyze_BreaksTiesByRuleIDAndPath(t *testing.T) {
+	t.Parallel()
+
+	ruleIDs := []string{"MD001", "MD003", "MD009", "MD010", "MD012", "MD013", "MD022", "MD026", "MD053", "MDL001"}
+	paths := []string{"README.md", "a.md", "b.md", "c.md", "docs/a.md", "docs/b.md", "e.md", "f.md", "g.md", "z.md"}
+
+	// Each file has one warning from one rule, so every rule and every file
+	// counts one issue and one warning.
+	result := &runner.Result{}
+	for idx := len(paths) - 1; idx >= 0; idx-- {
+		result.Files = append(result.Files, runner.FileOutcome{
+			Path: paths[idx],
+			Result: &lint.PipelineResult{FileResult: &lint.FileResult{
+				Diagnostics: []lint.Diagnostic{{RuleID: ruleIDs[idx], Severity: config.SeverityWarning}},
+			}},
+		})
+	}
+
+	sorts := []struct {
+		name string
+		by   SortField
+		desc bool
+	}{
+		{name: "count descending", by: SortByCount, desc: true},
+		{name: "count ascending", by: SortByCount},
+		{name: "severity", by: SortBySeverity},
+		{name: "alpha", by: SortByAlpha},
+	}
+
+	for _, tt := range sorts {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := DefaultOptions()
+			opts.SortBy, opts.SortDesc = tt.by, tt.desc
+
+			// Map iteration order varies between runs, so one lucky run
+			// proves nothing.
+			for range 20 {
+				report := Analyze(result, opts)
+
+				gotRules := make([]string, 0, len(report.ByRule))
+				for _, rule := range report.ByRule {
+					gotRules = append(gotRules, rule.RuleID)
+				}
+				gotPaths := make([]string, 0, len(report.ByFile))
+				for _, file := range report.ByFile {
+					gotPaths = append(gotPaths, file.Path)
+				}
+
+				require.Equal(t, ruleIDs, gotRules)
+				require.Equal(t, paths, gotPaths)
+			}
+		})
+	}
+}
+
 func TestAnalyze_ExcludeViews(t *testing.T) {
 	t.Parallel()
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 
 	"golang.org/x/term"
 
@@ -15,12 +16,17 @@ import (
 // defaultTermWidth is used when terminal width cannot be determined.
 const defaultTermWidth = 100
 
+// overallRuleWidth is the width of the rule above the overall summary of
+// per-file tables, on a terminal at least that wide.
+const overallRuleWidth = 80
+
 // TableReporter formats results as a styled table with color-coded rows.
 type TableReporter struct {
 	opts      Options
 	styles    *pretty.Styles
 	formatter *pretty.TableFormatter
 	out       io.Writer
+	termWidth int
 }
 
 // NewTableReporter creates a new table reporter.
@@ -34,8 +40,9 @@ func NewTableReporter(opts Options) *TableReporter {
 	return &TableReporter{
 		opts:      opts,
 		styles:    styles,
-		formatter: pretty.NewTableFormatter(styles, colorEnabled, termWidth),
+		formatter: pretty.NewTableFormatter(styles, colorEnabled, termWidth, opts.RuleFormat),
 		out:       opts.Writer,
+		termWidth: termWidth,
 	}
 }
 
@@ -119,7 +126,7 @@ func (r *TableReporter) reportPerFile(result *runner.Result) {
 
 		// Print file header
 		fmt.Fprintln(r.out)
-		fmt.Fprintln(r.out, r.styles.Bold.Render(file.Path))
+		fmt.Fprintln(r.out, r.formatter.FormatFileTitle(file.Path))
 
 		// Format and print this file's table
 		table := r.formatter.FormatFileTable(file)
@@ -129,7 +136,7 @@ func (r *TableReporter) reportPerFile(result *runner.Result) {
 	// Print overall summary
 	if r.opts.ShowSummary && filesWithIssues > 0 {
 		fmt.Fprintln(r.out)
-		fmt.Fprintln(r.out, r.styles.TableSeparator.Render("════════════════════════════════════════════════════════════════════════════════"))
+		fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("═", min(overallRuleWidth, r.termWidth))))
 		fmt.Fprintln(r.out, r.styles.Bold.Render("Overall Summary"))
 		summary := r.formatter.FormatTableSummary(result.Stats, "")
 		fmt.Fprintln(r.out, summary)

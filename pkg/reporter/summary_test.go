@@ -205,23 +205,26 @@ func TestSummaryRenderer_TruncatesLongPathsOnCharacterBoundary(t *testing.T) {
 	assert.Contains(t, output, "文/readme.md", "the end of the path is kept")
 }
 
-func TestSummaryRenderer_TruncatesLongRuleNamesOnCharacterBoundary(t *testing.T) {
+// TestSummaryRenderer_FitsRuleColumnToLongestIdentifier covers rule names of
+// any width, which the rules table shows whole. The rule column is as wide
+// as the widest identifier, measured in display cells, so every row lines
+// up with the header, and the separators span the widest row.
+func TestSummaryRenderer_FitsRuleColumnToLongestIdentifier(t *testing.T) {
 	t.Parallel()
 
-	// Wider than the column, and cutting it after 28 bytes would split a letter.
-	longName := "x" + strings.Repeat("é", 40)
-	require.Greater(t, displaywidth.String(longName), maxRuleNameLength)
-	require.False(t, utf8.ValidString(longName[:maxRuleNameLength]), "fixture must make a byte cut split a letter")
-	// Longer than the column in bytes but not in display width.
-	fittingName := "x" + strings.Repeat("é", 20)
+	// Wider than the table separators, with two-byte letters, so counting
+	// bytes instead of cells would misalign the rows.
+	longName := "x" + strings.Repeat("é", 70)
+	shortName := "short"
 
 	var buf bytes.Buffer
 	renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never"})
 	report := &analysis.Report{
 		ByRule: []analysis.RuleAnalysis{
 			{RuleID: "XX1", RuleName: longName, Issues: 2, Warnings: 2},
-			{RuleID: "XX2", RuleName: fittingName, Issues: 1, Warnings: 1},
+			{RuleID: "XX2", RuleName: shortName, Issues: 1, Warnings: 1},
 		},
+		ByFile: []analysis.FileAnalysis{{Path: "doc.md", Issues: 3, Warnings: 3}},
 		Totals: analysis.Totals{Issues: 3, Warnings: 3, Files: 1, FilesWithIssues: 1},
 	}
 
@@ -229,27 +232,71 @@ func TestSummaryRenderer_TruncatesLongRuleNamesOnCharacterBoundary(t *testing.T)
 
 	output := buf.String()
 	assert.True(t, utf8.ValidString(output), "summary output must stay valid UTF-8")
+	assert.NotContains(t, output, ellipsis, "no rule name is cut")
 
 	lines := strings.Split(output, "\n")
-	require.Greater(t, len(lines), 5)
+	require.Greater(t, len(lines), 12)
 	header := lines[2]
-	assert.True(t, strings.HasPrefix(lines[4], "x"+strings.Repeat("é", 27)+ellipsis+" "), "unexpected row %q", lines[4])
-	assert.True(t, strings.HasPrefix(lines[5], fittingName+" "), "a name that fits is shown whole, got %q", lines[5])
+	assert.True(t, strings.HasPrefix(header, "Rule"+strings.Repeat(" ", displaywidth.String(longName)-len("Rule"))+"   Count"),
+		"the rule column is as wide as the longest name, got %q", header)
+	assert.True(t, strings.HasPrefix(lines[4], longName+" "), "unexpected row %q", lines[4])
+	assert.True(t, strings.HasPrefix(lines[5], shortName+" "), "unexpected row %q", lines[5])
 	for _, row := range lines[4:6] {
 		assert.Equal(t, displaywidth.String(header), displaywidth.String(row), "row %q is not aligned with the header", row)
 	}
+
+	// The separators of both tables span the rules table, the wider one.
+	require.Equal(t, "Files Summary", lines[7])
+	for _, separator := range []string{lines[1], lines[3], lines[8], lines[10]} {
+		assert.True(t, strings.HasPrefix(separator, "─"), "unexpected separator %q", separator)
+		assert.Equal(t, displaywidth.String(header), displaywidth.String(separator), "separator %q", separator)
+	}
 }
 
-func TestTruncateLeft(t *testing.T) {
+// TestSummaryRenderer_RuleFormat covers the rules table, which names rules
+// the way --rule-format asks: by name unless the option says otherwise.
+func TestSummaryRenderer_RuleFormat(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "short.md", truncateLeft("short.md", 10), "text that fits is unchanged")
-	assert.Equal(t, "…cdef.md", truncateLeft("abcdef.md", 8))
-	assert.Equal(t, "…文档.md", truncateLeft("长长文档.md", 8), "wide characters take two cells")
-	assert.Equal(t, "…档.md", truncateLeft("长长文档.md", 7), "a wide character that does not fit is dropped whole")
-	for width := 1; width <= 12; width++ {
-		got := truncateLeft("/srv/文档/résumé.md", width)
-		assert.LessOrEqual(t, displaywidth.String(got), max(width, 1), "width %d gave %q", width, got)
-		assert.True(t, utf8.ValidString(got), "width %d gave %q", width, got)
+	report := &analysis.Report{
+		ByRule: []analysis.RuleAnalysis{
+			{RuleID: "MD053", RuleName: "link-image-reference-definitions", Issues: 2, Warnings: 2},
+			{RuleID: "MD009", RuleName: "no-trailing-spaces", Issues: 1, Warnings: 1, Fixable: true},
+			{RuleID: "XX1", Issues: 1, Warnings: 1}, // A rule without a name is named by its ID.
+		},
+		Totals: analysis.Totals{Issues: 4, Warnings: 4, Files: 1, FilesWithIssues: 1},
+	}
+
+	tests := []struct {
+		name   string
+		format config.RuleFormat
+		want   []string
+	}{
+		{name: "default", want: []string{"link-image-reference-definitions", "no-trailing-spaces", "XX1"}},
+		{name: "name", format: config.RuleFormatName, want: []string{"link-image-reference-definitions", "no-trailing-spaces", "XX1"}},
+		{name: "id", format: config.RuleFormatID, want: []string{"MD053", "MD009", "XX1"}},
+		{
+			name:   "combined",
+			format: config.RuleFormatCombined,
+			want:   []string{"MD053/link-image-reference-definitions", "MD009/no-trailing-spaces", "XX1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never", RuleFormat: tt.format})
+			require.NoError(t, renderer.Render(context.Background(), report))
+
+			lines := strings.Split(buf.String(), "\n")
+			require.Greater(t, len(lines), 6)
+			got := make([]string, 0, len(tt.want))
+			for _, row := range lines[4:7] {
+				got = append(got, strings.Fields(row)[0])
+			}
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

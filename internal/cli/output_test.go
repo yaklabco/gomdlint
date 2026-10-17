@@ -5,7 +5,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/clipperhouse/displaywidth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -77,4 +79,49 @@ func TestLintHelpNamesGomdlint(t *testing.T) {
 	assert.NotContains(t, got.stdout, " mdlint ")
 	assert.Contains(t, got.stdout, "gomdlint lint docs/")
 	assert.Contains(t, got.stdout, "instead of the project config")
+}
+
+// TestLintTableKeepsCharactersWhole covers table output for a path of wide
+// characters and for a message of two-byte letters too long for its
+// column. Both used to be cut by bytes, in the middle of a character, which
+// made the output invalid UTF-8. A writer that is not a terminal gets a
+// table 100 columns wide.
+func TestLintTableKeepsCharactersWhole(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		content string
+		want    string
+	}{
+		{
+			name:    "wide path",
+			path:    "docs/开发使用指南.md",
+			content: "# Title\n\n[unused]: https://example.com\n",
+			want:    " docs/开发使用指南.md ",
+		},
+		{
+			name:    "long message",
+			path:    "doc.md",
+			content: "# Title\n\nText.\n\n[" + strings.Repeat("äöü", 30) + "]: https://example.com\n",
+			want:    "Unused reference definition [äöü",
+		},
+	}
+
+	for _, tt := range tests {
+		for _, ruleFormat := range []string{"name", "id", "combined"} {
+			t.Run(tt.name+" "+ruleFormat, func(t *testing.T) {
+				inProject(t, map[string]string{tt.path: tt.content})
+
+				got := execute(t, "lint", "--color", "never", "--format", "table", "--rule-format", ruleFormat, tt.path)
+
+				require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+				assert.Contains(t, got.stdout, tt.want)
+				for _, line := range strings.Split(got.stdout, "\n") {
+					if assert.True(t, utf8.ValidString(line), "line %q is not valid UTF-8", line) {
+						assert.LessOrEqual(t, displaywidth.String(line), 100, "line %q is wider than the table", line)
+					}
+				}
+			})
+		}
+	}
 }

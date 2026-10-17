@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
@@ -292,7 +293,7 @@ func TestFormatSummaryOneLine_SkippedFixes(t *testing.T) {
 }
 
 func TestFormatTableSummary_ErroredFiles(t *testing.T) {
-	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80)
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80, config.RuleFormatName)
 
 	result := formatter.FormatTableSummary(runner.Stats{
 		FilesProcessed:        1,
@@ -338,7 +339,7 @@ func TestFormatSummaryOneLine_RuleFailures(t *testing.T) {
 }
 
 func TestFormatTableSummary_RuleFailures(t *testing.T) {
-	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80)
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80, config.RuleFormatName)
 
 	result := formatter.FormatTableSummary(runner.Stats{
 		FilesProcessed:        1,

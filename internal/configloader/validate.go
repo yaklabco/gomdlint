@@ -151,6 +151,15 @@ func Validate(cfg *config.Config) *ValidationResult {
 		})
 	}
 
+	// Validate rule_format
+	if cfg.RuleFormat != "" && !cfg.RuleFormat.IsValid() {
+		result.Errors = append(result.Errors, ValidationError{
+			Field:   "rule_format",
+			Value:   cfg.RuleFormat,
+			Message: fmt.Sprintf("invalid rule format %q; must be one of: name, id, combined", cfg.RuleFormat),
+		})
+	}
+
 	// Validate jobs
 	if cfg.Jobs < 0 {
 		result.Errors = append(result.Errors, ValidationError{

@@ -1,0 +1,17 @@
+Rules Summary
+──────────────────────────────────────────────────────────────────────────────────────────
+Rule                               Count  Errors Warnings  Fixable
+──────────────────────────────────────────────────────────────────────────────────────────
+no-trailing-spaces                     5       0        5        ✓
+no-trailing-punctuation                3       0        3        ✓
+heading-increment                      1       1        0         
+link-image-reference-definitions       1       0        1         
+
+Files Summary
+──────────────────────────────────────────────────────────────────────────────────────────
+File                                                           Count  Errors Warnings
+──────────────────────────────────────────────────────────────────────────────────────────
+docs/guide.md                                                      7       1        6
+README.md                                                          3       0        3
+
+Total: 10 issues (1 errors, 9 warnings) in 2 files

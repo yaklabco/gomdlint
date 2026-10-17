@@ -66,7 +66,12 @@ func unknownKeyWarnings(path string, content []byte) []string {
 	forEachKey(doc.Content[0], func(key, value *yaml.Node) {
 		name := key.Value
 		if flag, ok := commandLineOnlyKeys[name]; ok {
-			warn(key, fmt.Sprintf("%q cannot be set in a config file; use the %s flag", name, flag))
+			hint := "use the " + flag + " flag"
+			if envVar := GetEnvVarName(name); envVar != "" {
+				// The environment sets a lasting default, as a config file would.
+				hint += " or the " + envVar + " environment variable"
+			}
+			warn(key, fmt.Sprintf("%q cannot be set in a config file; %s", name, hint))
 			return
 		}
 		if !slices.Contains(topKeys, name) {

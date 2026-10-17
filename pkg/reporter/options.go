@@ -38,7 +38,9 @@ type Options struct {
 	// PerFile outputs a separate report for each file (table format only).
 	PerFile bool
 
-	// RuleFormat controls how rule identifiers appear in output.
+	// RuleFormat controls how text, table and summary output name rules: by
+	// name, the default, by ID, or both. JSON and SARIF output always carry
+	// both the ID and the name, and diff output names no rules.
 	RuleFormat config.RuleFormat
 
 	// SummaryOrder controls the order of tables in summary output.

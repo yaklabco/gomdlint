@@ -1,0 +1,18 @@
+ FILE           LOC    MESSAGE                          RULE                                     
+====================================================================================================
+ README.md      3:22   Trailing whitespace              MD009/no-trailing-spaces                +
+ README.md      8:19   Trailing whitespace              MD009/no-trailing-spaces                +
+ README.md      6:11   Heading ends with trailing p...  MD026/no-trailing-punctuation           +
+----------------------------------------------------------------------------------------------------
+ docs/guide.md  3:1    Heading level jumped from H1...  MD001/heading-increment                  
+ docs/guide.md  5:18   Trailing whitespace              MD009/no-trailing-spaces                +
+ docs/guide.md  13:14  Trailing whitespace              MD009/no-trailing-spaces                +
+ docs/guide.md  14:12  Trailing whitespace              MD009/no-trailing-spaces                +
+ docs/guide.md  7:10   Heading ends with trailing p...  MD026/no-trailing-punctuation           +
+ docs/guide.md  11:9   Heading ends with trailing p...  MD026/no-trailing-punctuation           +
+ docs/guide.md  17:1   Unused reference definition ...  MD053/link-image-reference-definitions   
+====================================================================================================
+ Legend: E = error | W = warning | + = fixable
+ 2 files checked | 1 errors | 9 warnings
+
+Run with --fix to auto-repair fixable issues
