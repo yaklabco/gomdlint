@@ -181,39 +181,19 @@ func (r *NoEmphasisAsHeadingRule) inferHeadingLevel(ctx *lint.RuleContext, para 
 		maxLevel     = 6
 	)
 
-	paraPos := para.SourcePosition()
-	if !paraPos.IsValid() {
-		return defaultLevel
-	}
-
+	// The headings are in document order, so the nearest one before the
+	// paragraph is found by binary search.
 	headings := ctx.Headings()
-	if len(headings) == 0 {
-		return defaultLevel
-	}
-
-	// Find the nearest heading that appears before this paragraph.
-	var nearestHeading *mdast.Node
-	nearestLine := 0
-
-	for _, heading := range headings {
-		headingPos := heading.SourcePosition()
-		if !headingPos.IsValid() {
-			continue
-		}
-
-		// Only consider headings that come before this paragraph.
-		if headingPos.StartLine < paraPos.StartLine && headingPos.StartLine > nearestLine {
-			nearestHeading = heading
-			nearestLine = headingPos.StartLine
-		}
-	}
-
-	if nearestHeading == nil {
+	paraStart := para.SourceRange().StartOffset
+	nearest := sort.Search(len(headings), func(i int) bool {
+		return headings[i].SourceRange().StartOffset >= paraStart
+	}) - 1
+	if nearest < 0 {
 		return defaultLevel
 	}
 
 	// Use the nearest heading's level + 1, capped at maxLevel.
-	level := lint.HeadingLevel(nearestHeading) + 1
+	level := lint.HeadingLevel(headings[nearest]) + 1
 	if level > maxLevel {
 		level = maxLevel
 	}

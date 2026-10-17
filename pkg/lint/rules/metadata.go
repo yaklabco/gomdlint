@@ -250,6 +250,16 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	var diags []lint.Diagnostic
 	checker := newFixChecker(ctx)
 
+	// The lines that start and end headings, found once rather than for
+	// every heading.
+	startLines := make(map[int]bool, len(headings))
+	endLines := make(map[int]bool, len(headings))
+	for _, heading := range headings {
+		pos := heading.SourcePosition()
+		startLines[pos.StartLine] = true
+		endLines[pos.EndLine] = true
+	}
+
 	for _, heading := range headings {
 		if ctx.Cancelled() {
 			return checker.filter(diags), ctx.Ctx.Err()
@@ -276,7 +286,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			}
 			if blanksBefore < linesAbove {
 				// Check if previous line is also a heading (allow no blank between headings).
-				if compatible || !r.isPreviousLineHeading(ctx, heading, pos.StartLine) {
+				if compatible || !r.isPreviousLineHeading(ctx, heading, pos.StartLine, endLines) {
 					diag := r.createBlankBeforeDiagnostic(ctx, checker, heading, pos, blanksBefore, linesAbove)
 					diags = append(diags, diag)
 				}
@@ -288,7 +298,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			blanksAfter := lint.CountBlankLinesAfterInContainer(ctx.File, heading, pos.EndLine)
 			if blanksAfter < linesBelow && pos.EndLine+blanksAfter < lastLine {
 				// Check if next non-blank line is also a heading.
-				if compatible || !r.isNextLineHeading(ctx, heading, pos.EndLine) {
+				if compatible || !r.isNextLineHeading(ctx, heading, pos.EndLine, startLines) {
 					diag := r.createBlankAfterDiagnostic(ctx, checker, heading, pos, blanksAfter, linesBelow)
 					diags = append(diags, diag)
 				}
@@ -337,35 +347,35 @@ func headingIsFirstContent(ctx *lint.RuleContext, heading *mdast.Node) bool {
 }
 
 // isPreviousLineHeading reports whether the last non-blank line (within the
-// heading's containers) before lineNum ends a heading.
-func (r *HeadingBlankLinesRule) isPreviousLineHeading(ctx *lint.RuleContext, heading *mdast.Node, lineNum int) bool {
+// heading's containers) before lineNum ends a heading, given the lines that
+// end headings.
+func (r *HeadingBlankLinesRule) isPreviousLineHeading(
+	ctx *lint.RuleContext,
+	heading *mdast.Node,
+	lineNum int,
+	endLines map[int]bool,
+) bool {
 	for ln := lineNum - 1; ln >= 1; ln-- {
-		if lint.IsBlankLineInContainer(ctx.File, heading, ln) {
-			continue
+		if !lint.IsBlankLineInContainer(ctx.File, heading, ln) {
+			return endLines[ln]
 		}
-		for _, h := range ctx.Headings() {
-			if h.SourcePosition().EndLine == ln {
-				return true
-			}
-		}
-		return false
 	}
 	return false
 }
 
 // isNextLineHeading reports whether the next non-blank line (within the
-// heading's containers) after lineNum starts a heading.
-func (r *HeadingBlankLinesRule) isNextLineHeading(ctx *lint.RuleContext, heading *mdast.Node, lineNum int) bool {
+// heading's containers) after lineNum starts a heading, given the lines that
+// start headings.
+func (r *HeadingBlankLinesRule) isNextLineHeading(
+	ctx *lint.RuleContext,
+	heading *mdast.Node,
+	lineNum int,
+	startLines map[int]bool,
+) bool {
 	for ln := lineNum + 1; ln <= len(ctx.File.Lines); ln++ {
-		if lint.IsBlankLineInContainer(ctx.File, heading, ln) {
-			continue
+		if !lint.IsBlankLineInContainer(ctx.File, heading, ln) {
+			return startLines[ln]
 		}
-		for _, h := range ctx.Headings() {
-			if h.SourcePosition().StartLine == ln {
-				return true
-			}
-		}
-		return false
 	}
 	return false
 }
