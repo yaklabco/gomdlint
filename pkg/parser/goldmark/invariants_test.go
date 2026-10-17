@@ -30,11 +30,13 @@ var invariantInputs = map[string]string{
 	"links":      "[a](b) [c][d] [d][] [d] ![e][d] <https://x.y> [multi\nline][]\n\n[d]: https://x.y\n[multi line]: /m\n",
 	"defs":       "- [a]: https://example.com\n- b\n\n[x]: https://x.y\nText after\n",
 	"inline":     "*a* **b** ***c*** _d_ `e` `` f`g `` <b>h</b> \\*i\\*\n",
-	"gfm":        "| a | b |\n| - | - |\n| 1 |\n\n- [ ] task\n- [x] done\n\n~~gone~~ www.example.com and https://x.y/z.\n",
-	"tables":     "Lead line\n| a | b |\n|---|---|\n| `x\\|y` | 2 |\n\n> | q |\n> |---|\n> | r |\n",
-	"bom":        "\xEF\xBB\xBF# Title\n\nText\n",
-	"tabs":       "-\tone\n\n\tcode\n>\tquote\n",
-	"crlf":       "# Title\r\n\r\n- a\r\n- b\r\n\r\n```\r\nx\r\n```\r\n",
+	"residuals": "*foo**\n\n**foo***\n\n*foo****\n\n__foo___\n\n_foo____\n\na *b** c\n\n" +
+		"*foo**bar\n\n**foo*\n\n***foo**\n\n*foo **bar***\n\n[*x**](u) and ~~y~~~ and *a**b*c**\n",
+	"gfm":    "| a | b |\n| - | - |\n| 1 |\n\n- [ ] task\n- [x] done\n\n~~gone~~ www.example.com and https://x.y/z.\n",
+	"tables": "Lead line\n| a | b |\n|---|---|\n| `x\\|y` | 2 |\n\n> | q |\n> |---|\n> | r |\n",
+	"bom":    "\xEF\xBB\xBF# Title\n\nText\n",
+	"tabs":   "-\tone\n\n\tcode\n>\tquote\n",
+	"crlf":   "# Title\r\n\r\n- a\r\n- b\r\n\r\n```\r\nx\r\n```\r\n",
 }
 
 func TestSpanInvariants(t *testing.T) {
@@ -216,9 +218,33 @@ func checkTextSegmentsAgree(t *testing.T, flavor string, file *mdast.FileSnapsho
 			return ast.WalkContinue, nil
 		}
 		want := mdast.SourceRange{StartOffset: textNode.Segment.Start + base, EndOffset: textNode.Segment.Stop + base}
-		require.True(t, spans[want], "no Text node spans goldmark segment %q at %v", source[textNode.Segment.Start:textNode.Segment.Stop], want)
+		require.True(t, spans[want] || movedResidual(file.Content, spans, want),
+			"no Text node spans goldmark segment %q at %v", source[textNode.Segment.Start:textNode.Segment.Stop], want)
 		return ast.WalkContinue, nil
 	})
+}
+
+// movedResidual reports whether the goldmark segment want is the leftover
+// part of a closing delimiter run that the mapper moved to the end of its
+// run: goldmark leaves such segments at the start of the run.
+func movedResidual(content []byte, spans map[mdast.SourceRange]bool, want mdast.SourceRange) bool {
+	if want.IsEmpty() || strings.IndexByte("*_~", content[want.StartOffset]) < 0 {
+		return false
+	}
+	char := content[want.StartOffset]
+	runEnd := want.StartOffset
+	for runEnd < len(content) && content[runEnd] == char {
+		runEnd++
+	}
+	if runEnd < want.EndOffset {
+		return false
+	}
+	for start := want.StartOffset + 1; start+want.Len() <= runEnd; start++ {
+		if spans[mdast.SourceRange{StartOffset: start, EndOffset: start + want.Len()}] {
+			return true
+		}
+	}
+	return false
 }
 
 // blankedSource returns the content goldmark parses: front matter blanked.

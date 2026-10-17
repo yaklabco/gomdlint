@@ -60,6 +60,54 @@ func (m *mapper) mapChildren(gmParent ast.Node, parent *mdast.Node) {
 			mdast.AppendChild(parent, mdNode)
 		}
 	}
+	m.moveResidualDelimiters(parent)
+}
+
+// moveResidualDelimiters puts the leftover characters of a closing
+// delimiter run where they are. When emphasis uses part of a run, goldmark
+// keeps the start of the run's segment. That is right for an opener, whose
+// leftover characters come first, but a closer's leftover characters come
+// after the ones that closed the emphasis: in "*foo**" the literal star is
+// the last one. Such a Text node overlaps the emphasis before it; it moves
+// to start where that emphasis ends.
+func (m *mapper) moveResidualDelimiters(parent *mdast.Node) {
+	for child := parent.FirstChild; child != nil; child = child.Next {
+		prev := child.Prev
+		if child.Kind != mdast.NodeText || child.SourceSpan == nil || prev == nil || prev.SourceSpan == nil {
+			continue
+		}
+		span := *child.SourceSpan
+		if span.StartOffset >= prev.SourceSpan.EndOffset || !m.isDelimiterRun(span) {
+			continue
+		}
+		moved := mdast.SourceRange{StartOffset: prev.SourceSpan.EndOffset, EndOffset: prev.SourceSpan.EndOffset + span.Len()}
+		if moved.EndOffset > len(m.content) ||
+			string(m.content[moved.StartOffset:moved.EndOffset]) != string(m.content[span.StartOffset:span.EndOffset]) {
+			continue
+		}
+		if next := child.Next; next != nil && next.SourceSpan != nil && moved.EndOffset > next.SourceSpan.StartOffset {
+			continue
+		}
+		setSpans(child, moved, moved)
+	}
+}
+
+// isDelimiterRun reports whether span holds one emphasis or strikethrough
+// delimiter character repeated.
+func (m *mapper) isDelimiterRun(span mdast.SourceRange) bool {
+	if span.IsEmpty() || span.EndOffset > len(m.content) {
+		return false
+	}
+	first := m.content[span.StartOffset]
+	if first != '*' && first != '_' && first != '~' {
+		return false
+	}
+	for idx := span.StartOffset; idx < span.EndOffset; idx++ {
+		if m.content[idx] != first {
+			return false
+		}
+	}
+	return true
 }
 
 // mapNode converts a single goldmark node to an mdast.Node with its spans.

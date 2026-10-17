@@ -385,6 +385,46 @@ func TestLineBreakAfterInlineNode(t *testing.T) {
 	require.Equal(t, "\n", string(para.Children()[1].Text()))
 }
 
+func TestResidualDelimitersFollowTheirEmphasis(t *testing.T) {
+	// goldmark leaves the unused characters of a closing delimiter run
+	// pointing at the start of the run; they belong after the closer.
+	tests := []struct {
+		input    string
+		emphasis string
+		residual string
+		start    int
+	}{
+		{"*foo**\n", "*foo*", "*", 5},
+		{"**foo***\n", "**foo**", "*", 7},
+		{"*foo****\n", "*foo*", "***", 5},
+		{"__foo___\n", "__foo__", "_", 7},
+		{"_foo____\n", "_foo_", "___", 5},
+		{"a *b** c\n", "*b*", "*", 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			para := nthNode(file.Root, mdast.NodeParagraph, 0)
+			require.NotNil(t, para)
+			var emphasis, residual *mdast.Node
+			for child := para.FirstChild; child != nil; child = child.Next {
+				if child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong {
+					emphasis = child
+					residual = child.Next
+					break
+				}
+			}
+			require.NotNil(t, emphasis)
+			require.Equal(t, tt.emphasis, string(emphasis.Text()))
+			require.NotNil(t, residual)
+			require.Equal(t, mdast.NodeText, residual.Kind)
+			require.Equal(t, tt.residual, string(residual.Text()))
+			require.Equal(t, tt.start, residual.SourceRange().StartOffset)
+			require.LessOrEqual(t, emphasis.SourceRange().EndOffset, residual.SourceRange().StartOffset)
+		})
+	}
+}
+
 func TestLinkReferenceStyles(t *testing.T) {
 	input := "[inline](https://x.y) [full][Ref] [ref][] [ref] [multi\nline][] ![img][ref] <https://a.b>\n\n" +
 		"[ref]: https://x.y\n[multi line]: https://x.y\n"
