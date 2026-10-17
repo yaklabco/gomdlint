@@ -82,7 +82,8 @@ type FileResult struct {
 
 	// AcceptedFixes is the number of diagnostics whose fixes Edits holds. It
 	// can differ from len(Edits): one fix may take several edits, and the
-	// blank-line fixes of several diagnostics at one boundary share one.
+	// blank-line fixes of several diagnostics of one rule at one boundary
+	// share one.
 	AcceptedFixes int
 
 	// SkippedEdits contains the edits of fixes that were not applied because
@@ -311,10 +312,10 @@ func (e *Engine) lintFile(
 }
 
 // selectEdits decides which fixes this pass applies to content and records
-// the outcome in result. Blank-line insertions at one boundary are merged
-// first. Then each top-level block keeps the fixes of one rule, and the
-// other rules' fixes there are deferred (see selectFixes). Finally the
-// fixes taken are resolved against each other, so a fix that overlaps
+// the outcome in result. Each rule's blank-line insertions at one boundary
+// are merged first. Then each top-level block keeps the fixes of one rule,
+// and the other rules' fixes there are deferred (see selectFixes). Finally
+// the fixes taken are resolved against each other, so a fix that overlaps
 // another fix of the same rule is skipped.
 //
 // Fixes that change nothing must not keep another rule's fixes out of a
@@ -504,7 +505,7 @@ type pendingFix struct {
 	edits  []fix.TextEdit
 
 	// diagnostics is the number of diagnostics the fix fixes: one, or more
-	// for blank-line insertions merged into one fix.
+	// for one rule's blank-line insertions merged into one fix.
 	diagnostics int
 
 	// mergeConflict marks a blank-line insertion for a different container
@@ -544,20 +545,28 @@ func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
 	return edits
 }
 
-// mergeBlankLineInsertions combines formatting requirements at the same
-// boundary: several single-edit fixes that insert only blank lines at one
-// offset become one insertion (see mergeBlankLines). It runs after
-// suppression so disabled findings cannot increase an enabled fix. Fixes
-// whose blank lines belong to a different container than an earlier fix at
-// the same offset are returned separately, as conflicts.
+// mergeBlankLineInsertions combines one rule's formatting requirements at
+// the same boundary: several single-edit fixes of that rule that insert
+// only blank lines at one offset become one insertion (see
+// mergeBlankLines), which would otherwise insert the blank lines twice. It
+// runs after suppression so disabled findings cannot increase an enabled
+// fix. Fixes whose blank lines belong to a different container than an
+// earlier fix of the rule at the same offset are returned separately, as
+// conflicts.
+//
+// Insertions of different rules are not merged. Two insertions at one
+// offset touch the same top-level blocks, so selectFixes applies one
+// rule's and defers the other's, and the next pass lints the content with
+// the blank line in place.
 func mergeBlankLineInsertions(fixes []pendingFix) ([]pendingFix, []pendingFix) {
 	result := make([]pendingFix, 0, len(fixes))
 	var conflicting []pendingFix
-	boundaries := make(map[int]int)
+	boundaries := make(map[blankLineBoundary]int)
 	for _, pending := range fixes {
 		if len(pending.edits) == 1 && isBlankLineInsertion(pending.edits[0]) {
 			offset := pending.edits[0].StartOffset
-			if idx, ok := boundaries[offset]; ok {
+			key := blankLineBoundary{ruleID: pending.ruleID, offset: offset}
+			if idx, ok := boundaries[key]; ok {
 				text, ok := mergeBlankLines(result[idx].edits[0].NewText, pending.edits[0].NewText)
 				if !ok {
 					conflicting = append(conflicting, pending)
@@ -571,11 +580,17 @@ func mergeBlankLineInsertions(fixes []pendingFix) ([]pendingFix, []pendingFix) {
 				}
 				continue
 			}
-			boundaries[offset] = len(result)
+			boundaries[key] = len(result)
 		}
 		result = append(result, pending)
 	}
 	return result, conflicting
+}
+
+// blankLineBoundary is the offset at which a rule inserts blank lines.
+type blankLineBoundary struct {
+	ruleID string
+	offset int
 }
 
 // blankLines is a blank-line insertion: count lines, each the container

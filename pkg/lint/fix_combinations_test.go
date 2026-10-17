@@ -230,6 +230,55 @@ func TestEngine_FixesThatCancelOutInOneBlockFreeItWhileTheRulesOtherFixesApply(t
 	assert.Empty(t, result.DeferredEdits)
 }
 
+// putBackLineEnding is AA001 on "# H\ntext\n": it deletes the line ending
+// after the heading and inserts one again at the start of the next line.
+// Each fix changes the text, but together they change nothing.
+func putBackLineEnding() lint.Rule {
+	return fixedRule("AA001",
+		[]fix.TextEdit{{StartOffset: 3, EndOffset: 4}},
+		[]fix.TextEdit{{StartOffset: 4, EndOffset: 4, NewText: "\n"}})
+}
+
+func TestEngine_AnotherRulesBlankLineIsNotAbsorbedByFixesThatCancelOut(t *testing.T) {
+	t.Parallel()
+
+	// MD022 inserts a blank line at the boundary where AA001 inserts its
+	// line ending.
+	const content = "# H\ntext\n"
+	result := lintOnce(t, content, putBackLineEnding(), productRules(t, "MD022")[0])
+
+	assert.Equal(t, "# H\n\ntext\n", string(fix.ApplyEdits([]byte(content), result.Edits)), "MD022 inserts its blank line")
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Empty(t, result.DeferredEdits)
+}
+
+func TestPipeline_AnotherRulesBlankLineIsNotAbsorbedByFixesThatCancelOut(t *testing.T) {
+	t.Parallel()
+
+	const content = "# H\ntext\n"
+	result := fixWithRules(t, content, config.NewConfig(), putBackLineEnding(), productRules(t, "MD022")[0])
+
+	assert.Equal(t, "# H\n\ntext\n", fixedContent(result, content))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 1, result.TotalFixesApplied)
+}
+
+func TestPipeline_TwoRulesThatWantOneBlankLineInsertOne(t *testing.T) {
+	t.Parallel()
+
+	// MD022 wants a blank line after the heading and MD032 one before the
+	// list, at the same boundary. Applied together, the two insertions
+	// would leave two blank lines. MD032's waits for MD022's, and once the
+	// blank line is there MD032 no longer reports.
+	const content = "# H\n- item\n"
+	result := fixWithRules(t, content, config.NewConfig(), productRules(t, "MD022", "MD032")...)
+
+	assert.Equal(t, "# H\n\n- item\n", fixedContent(result, content))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 1, result.TotalFixesApplied, "MD032's finding is gone, not fixed")
+	assert.Empty(t, result.Diagnostics)
+}
+
 func TestPipeline_FixesABlockWithManyRulesWithinThePassLimit(t *testing.T) {
 	t.Parallel()
 

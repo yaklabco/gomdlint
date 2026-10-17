@@ -48,13 +48,23 @@ func TestEngine_AcceptedFixesCountsFindings(t *testing.T) {
 		assert.Equal(t, 1, result.AcceptedFixes)
 	})
 
-	t.Run("blank-line fixes sharing an edit are two fixes", func(t *testing.T) {
+	t.Run("one rule's blank-line fixes sharing an edit are two fixes", func(t *testing.T) {
+		t.Parallel()
+
+		result := lintWithRules(t, "# Title\n- item\n", true, insertionsRule("TEST001", 8, "\n", "\n"))
+
+		assert.Len(t, result.Edits, 1)
+		assert.Equal(t, 2, result.AcceptedFixes)
+	})
+
+	t.Run("two rules' blank-line fixes at one boundary are one fix and a deferred one", func(t *testing.T) {
 		t.Parallel()
 
 		result := lintWithRules(t, "# Title\n- item\n", true, insertRule("TEST001", 8, "\n"), insertRule("TEST002", 8, "\n"))
 
 		assert.Len(t, result.Edits, 1)
-		assert.Equal(t, 2, result.AcceptedFixes)
+		assert.Equal(t, 1, result.AcceptedFixes)
+		assert.Len(t, result.DeferredEdits, 1)
 	})
 
 	t.Run("a skipped fix is not accepted", func(t *testing.T) {
@@ -94,11 +104,11 @@ func TestEngine_AcceptedFixesCountsFindings(t *testing.T) {
 	t.Run("deferred blank-line fixes are not accepted", func(t *testing.T) {
 		t.Parallel()
 
-		// The two insertions at one boundary merge into one fix of two
+		// TEST002's two insertions at one boundary merge into one fix of two
 		// findings, which waits for TEST001's fix in the same blocks.
 		result := lintWithRules(t, "# Title\n- item\n", true,
 			fixedRule("TEST001", []fix.TextEdit{{StartOffset: 2, EndOffset: 7, NewText: "TITLE"}}),
-			insertRule("TEST002", 8, "\n"), insertRule("TEST003", 8, "\n"))
+			insertionsRule("TEST002", 8, "\n", "\n"))
 
 		assert.Len(t, result.Edits, 1)
 		assert.Equal(t, 1, result.AcceptedFixes)
@@ -108,10 +118,12 @@ func TestEngine_AcceptedFixesCountsFindings(t *testing.T) {
 	t.Run("a conflicting blank-line fix is not accepted", func(t *testing.T) {
 		t.Parallel()
 
-		result := lintWithRules(t, "> # A\n> ## B\n", true, insertRule("TEST001", 6, ">\n"), insertRule("TEST002", 6, "> >\n"))
+		// The rule's insertions are for different containers.
+		result := lintWithRules(t, "> # A\n> ## B\n", true, insertionsRule("TEST001", 6, ">\n", "> >\n"))
 
 		assert.Len(t, result.Edits, 1)
 		assert.Equal(t, 1, result.AcceptedFixes)
+		assert.Len(t, result.SkippedEdits, 1)
 	})
 
 	t.Run("nothing is accepted without fix mode", func(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/log"
@@ -314,10 +313,24 @@ func insertRule(id string, offset int, text string) *funcRule {
 	})
 }
 
+// insertionsRule returns a rule that reports one finding for each text,
+// each fixed by inserting that text at offset, the way a blank-line rule
+// reports both headings around one boundary.
+func insertionsRule(id string, offset int, texts ...string) *funcRule {
+	return newFuncRule(id, func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		diags := make([]lint.Diagnostic, 0, len(texts))
+		for _, text := range texts {
+			diags = append(diags, fixDiag(id, fix.TextEdit{StartOffset: offset, EndOffset: offset, NewText: text}))
+		}
+		return diags, nil
+	})
+}
+
 func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 	t.Parallel()
 
-	// Offset 6 is the boundary between the two quoted headings.
+	// Offset 6 is the boundary between the two quoted headings. One rule
+	// reports a finding for each text.
 	const quoted = "> # A\n> ## B\n"
 
 	tests := []struct {
@@ -328,7 +341,7 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "the same quoted blank line from two rules",
+			name:    "the same quoted blank line twice",
 			content: quoted, offset: 6,
 			texts: []string{">\n", ">\n"},
 			want:  ">\n",
@@ -354,7 +367,7 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 			want:  ">\n>\n",
 		},
 		{
-			name:    "the container prefix survives whatever the rule order",
+			name:    "the container prefix survives whatever the order of the findings",
 			content: quoted, offset: 6,
 			texts: []string{"\n\n\n", "  > >\n"},
 			want:  "  > >\n  > >\n  > >\n",
@@ -390,17 +403,28 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var rules []lint.Rule
-			for idx, text := range tt.texts {
-				rules = append(rules, insertRule(fmt.Sprintf("TEST%03d", idx+1), tt.offset, text))
-			}
-
-			result := lintWithRules(t, tt.content, true, rules...)
+			result := lintWithRules(t, tt.content, true, insertionsRule("TEST001", tt.offset, tt.texts...))
 
 			assert.Equal(t, []fix.TextEdit{{StartOffset: tt.offset, EndOffset: tt.offset, NewText: tt.want}}, result.Edits,
 				"blank-line insertions at one boundary must insert one blank line")
+			assert.Equal(t, len(tt.texts), result.AcceptedFixes, "the merged insertion fixes every finding")
 		})
 	}
+}
+
+func TestEngine_DoesNotMergeBlankLineInsertionsOfTwoRules(t *testing.T) {
+	t.Parallel()
+
+	// Both insertions touch the same blocks, so TEST002's waits for the
+	// next pass, which lints the content with TEST001's blank line in place.
+	result := lintWithRules(t, "> # A\n> ## B\n", true, insertRule("TEST001", 6, ">\n"), insertRule("TEST002", 6, ">\n>\n"))
+
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 6, EndOffset: 6, NewText: ">\n"}}, result.Edits)
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 6, EndOffset: 6, NewText: ">\n>\n"},
+	}}, result.DeferredEdits)
 }
 
 func TestEngine_DifferentContainerBlankLinesWaitForTheNextPass(t *testing.T) {
