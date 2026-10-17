@@ -371,6 +371,29 @@ func TestHeadingBlankLinesRule_Containers(t *testing.T) {
 			wantFixed: "> ## Quoted\n>\nlazy text\n",
 		},
 		{name: "heading at the end of the file", input: "Text\n\n# Heading\n", wantLines: []int{}},
+		{
+			// A blank line between the items would make the list loose.
+			name:      "heading item in a tight list",
+			input:     "- Text\n- # Heading\n",
+			wantLines: []int{2},
+		},
+		{
+			name:      "heading followed by text in a tight list item",
+			input:     "- # Heading\n  Text\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "heading in a loose list",
+			input:     "- Text\n\n- # Heading\n  More\n",
+			wantLines: []int{3},
+			wantFixed: "- Text\n\n- # Heading\n\n  More\n",
+		},
+		{
+			name:      "heading at the end of a list",
+			input:     "- # Heading\nText\n",
+			wantLines: []int{1},
+			wantFixed: "- # Heading\n\nText\n",
+		},
 		{name: "heading at the end without a newline", input: "Text\n\n# Heading", wantLines: []int{}},
 		{
 			// The underline belongs to the heading: count from below it and

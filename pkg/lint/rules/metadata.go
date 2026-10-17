@@ -381,14 +381,15 @@ func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
 	insertion := strings.Repeat(lint.BlankLineText(ctx.File, heading), blanksNeeded)
 
 	line := ctx.File.Lines[pos.StartLine-1]
-	builder := fix.NewEditBuilder()
-	builder.Insert(line.StartOffset, insertion)
-
-	return lint.NewDiagnostic(r.ID(), heading, msg).
+	diag := lint.NewDiagnostic(r.ID(), heading, msg).
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Add %d blank line(s) before the heading", blanksNeeded)).
-		WithFix(builder).
-		Build()
+		WithSuggestion(fmt.Sprintf("Add %d blank line(s) before the heading", blanksNeeded))
+	if !loosensList(heading, line.StartOffset) {
+		builder := fix.NewEditBuilder()
+		builder.Insert(line.StartOffset, insertion)
+		diag = diag.WithFix(builder)
+	}
+	return diag.Build()
 }
 
 func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
@@ -404,14 +405,42 @@ func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
 	insertion := strings.Repeat(lint.BlankLineText(ctx.File, heading), blanksNeeded)
 
 	line := ctx.File.Lines[pos.EndLine-1]
-	builder := fix.NewEditBuilder()
-	builder.Insert(line.EndOffset, insertion)
-
-	return lint.NewDiagnostic(r.ID(), heading, msg).
+	diag := lint.NewDiagnostic(r.ID(), heading, msg).
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Add %d blank line(s) after the heading", blanksNeeded)).
-		WithFix(builder).
-		Build()
+		WithSuggestion(fmt.Sprintf("Add %d blank line(s) after the heading", blanksNeeded))
+	if !loosensList(heading, line.EndOffset) {
+		builder := fix.NewEditBuilder()
+		builder.Insert(line.EndOffset, insertion)
+		diag = diag.WithFix(builder)
+	}
+	return diag.Build()
+}
+
+// loosensList reports whether a blank line inserted at offset would make a
+// tight list around node loose, which changes how the list renders: the
+// offset falls between two items of the list, or between two blocks of one
+// of its items.
+func loosensList(node *mdast.Node, offset int) bool {
+	for item := node.Parent; item != nil; item = item.Parent {
+		if item.Kind != mdast.NodeListItem || item.Parent == nil || !lint.IsTightList(item.Parent) {
+			continue
+		}
+		if separatesChildren(item.Parent, offset) || separatesChildren(item, offset) {
+			return true
+		}
+	}
+	return false
+}
+
+// separatesChildren reports whether offset lies between two consecutive
+// children of parent.
+func separatesChildren(parent *mdast.Node, offset int) bool {
+	for child := parent.FirstChild; child != nil && child.Next != nil; child = child.Next {
+		if child.SourceRange().EndOffset <= offset && offset <= child.Next.SourceRange().StartOffset {
+			return true
+		}
+	}
+	return false
 }
 
 // RequiredHeadingsRule checks that document follows required heading structure.
