@@ -835,6 +835,63 @@ func TestReferenceLabelLengthLimit(t *testing.T) {
 	}
 }
 
+// TestLinkImageRefDefsRule_AfterOverlongLabel checks what follows a
+// definition whose label is over the limit, at 1,001 characters. CommonMark
+// leaves its paragraph as text, so a definition later in that paragraph is
+// text too. A blockquote or list item that follows starts a new block whose
+// definitions count, and so does a paragraph after a blank line. Every case
+// matches markdownlint 0.41.1.
+func TestLinkImageRefDefsRule_AfterOverlongLabel(t *testing.T) {
+	long := strings.Repeat("a", 997)
+	unused := func(line int) []string {
+		return []string{fmt.Sprintf("%d: Unused reference definition [unused]", line)}
+	}
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"blockquote after", "[" + long + "\n   b]: /long\n> [unused]: /url\n", unused(3)},
+		{"list item after", "[" + long + "\n   b]: /long\n- [unused]: /url\n", unused(3)},
+		{"next list item", "- [" + long + "\n     b]: /long\n- [unused]: /url\n", unused(3)},
+		{"next nested list item", "- a\n  - [" + long + "\n       b]: /long\n  - [unused]: /url\n", unused(4)},
+		{
+			"duplicate in a blockquote after",
+			"See [x].\n\n[x]: /a\n[" + long + "\n   b]: /long\n> [x]: /dup\n",
+			[]string{"6: Duplicate reference definition [x]"},
+		},
+		{"blockquote paragraph after a blank line", "> [" + long + "\n>    b]: /long\n>\n> [unused]: /url\n", unused(4)},
+		{"same paragraph", "[" + long + "\n   b]: /long\n[unused]: /url\n", []string{}},
+		{"same blockquote paragraph", "> [" + long + "\n>    b]: /long\n> [unused]: /url\n", []string{}},
+		{"same list item paragraph", "- [" + long + "\n     b]: /long\n  [unused]: /url\n", []string{}},
+		{"duplicate in the same paragraph", "See [x].\n\n[x]: /a\n[" + long + "\n   b]: /long\n[x]: /dup\n", []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := testHelper(t, NewLinkImageRefDefsRule(), tt.input)
+			assert.Equal(t, tt.want, diagnosticLines(diags))
+		})
+	}
+}
+
+// TestLinkImageRefDefsRule_MarkerOnlyItem checks a definition after the
+// first line of a list item that holds only its marker: inside the item,
+// whose content starts on the next line, or after it when the item is empty.
+func TestLinkImageRefDefsRule_MarkerOnlyItem(t *testing.T) {
+	for _, input := range []string{
+		"-\n  [unused]: /url\n",
+		"1.\n   [unused]: /url\n",
+		"> -\n>   [unused]: /url\n",
+		"-\n[unused]: /url\n",
+		"1)\n[unused]: /url\n",
+	} {
+		t.Run(input, func(t *testing.T) {
+			diags := testHelper(t, NewLinkImageRefDefsRule(), input)
+			assert.Equal(t, []string{"2: Unused reference definition [unused]"}, diagnosticLines(diags))
+		})
+	}
+}
+
 // TestMultiLineLabelLengthLimit checks the limit on a label that spans two
 // lines, written as a code span like "` aaa\n `". The limit counts what
 // markdownlint counts: every character between the brackets except line

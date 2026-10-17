@@ -23,48 +23,71 @@ type definitionLine struct {
 }
 
 // collectDefinitions records every link reference definition in the file.
+// The definitions of one run of lines come from one paragraph, so a label
+// rejected there leaves the paragraph as text, as in CommonMark, and the
+// next block starts a new run.
 func (c *collector) collectDefinitions() {
 	file := c.ctx.File
 	if file == nil || len(file.Content) == 0 {
 		return
 	}
-	covered, containers := c.blockLines()
+	blocks := c.blockLines()
 	var run []definitionLine
 	for number := file.FrontMatterLines + 1; number <= len(file.Lines); number++ {
 		line, blank := definitionLineAt(file, number)
-		if covered[number] || blank {
-			c.parseDefinitionRun(run, containers)
-			run = run[:0]
-			continue
+		start := blocks.starts[number]
+		if start != nil && start.Kind == mdast.NodeListItem && isListMarker(file.Content[line.start:line.end]) {
+			blank = true // The item is empty or its content starts on a later line.
 		}
-		run = append(run, line)
+		// A paragraph ends at a covered or blank line, and a blockquote or
+		// list item that starts on a line interrupts it.
+		if blocks.covered[number] || blank || start != nil {
+			c.parseDefinitionRun(run, blocks.containers)
+			run = run[:0]
+		}
+		if !blocks.covered[number] && !blank {
+			run = append(run, line)
+		}
 	}
-	c.parseDefinitionRun(run, containers)
+	c.parseDefinitionRun(run, blocks.containers)
 }
 
-// blockLines returns the lines covered by blocks that hold their own
-// content (paragraphs, headings, code, HTML, thematic breaks, and tables)
-// and, for each line inside a blockquote or list item, the innermost one.
-func (c *collector) blockLines() (map[int]bool, map[int]*mdast.Node) {
-	covered := make(map[int]bool)
-	containers := make(map[int]*mdast.Node)
+// blockMap places the lines of a file in the blocks that hold them.
+type blockMap struct {
+	// covered holds the lines of blocks with content of their own:
+	// paragraphs, headings, code, HTML, thematic breaks, and tables.
+	covered map[int]bool
+	// containers maps each line inside a blockquote or list item to the
+	// innermost one, and starts maps each line where one starts to the
+	// innermost one starting there.
+	containers, starts map[int]*mdast.Node
+}
+
+// blockLines maps the lines of the file to the blocks that hold them.
+func (c *collector) blockLines() blockMap {
+	blocks := blockMap{
+		covered:    make(map[int]bool),
+		containers: make(map[int]*mdast.Node),
+		starts:     make(map[int]*mdast.Node),
+	}
 	_ = mdast.Walk(c.root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
 		pos := node.SourcePosition()
 		switch node.Kind {
 		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeCodeBlock, mdast.NodeHTMLBlock,
 			mdast.NodeThematicBreak, mdast.NodeTable:
 			for line := pos.StartLine; line <= pos.EndLine; line++ {
-				covered[line] = true
+				blocks.covered[line] = true
 			}
 		case mdast.NodeBlockquote, mdast.NodeListItem:
 			// The walk visits outer containers first, so inner ones win.
+			blocks.starts[pos.StartLine] = node
 			for line := pos.StartLine; line <= pos.EndLine; line++ {
-				containers[line] = node
+				blocks.containers[line] = node
 			}
 		}
 		return nil
 	})
-	return covered, containers
+	return blocks
 }
 
 // definitionLineAt locates the definition text of a line: after blockquote
@@ -117,9 +140,30 @@ func orderedMarkerEnd(content []byte, pos, limit int) int {
 	return end + 2
 }
 
+// isListMarker reports whether text is a list item marker and nothing
+// else: a bullet, or one to nine digits followed by '.' or ')'.
+func isListMarker(text []byte) bool {
+	if len(text) == 1 && (text[0] == '-' || text[0] == '+' || text[0] == '*') {
+		return true
+	}
+	digits := len(text) - 1
+	if digits < 1 || digits > 9 || (text[digits] != '.' && text[digits] != ')') {
+		return false
+	}
+	for _, ch := range text[:digits] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // parseDefinitionRun parses consecutive definitions from a run of lines.
 // Each definition starts at the start of a line and ends at a line ending.
-// containers maps lines to their innermost container (see blockLines).
+// A definition that fails ends the run, since CommonMark leaves the rest of
+// the paragraph as text, even where goldmark, which sets no limit on a
+// definition's label, reads on. containers maps lines to their innermost
+// container (see blockLines).
 func (c *collector) parseDefinitionRun(run []definitionLine, containers map[int]*mdast.Node) {
 	text, offsets := joinDefinitionLines(c.ctx.File.Content, run)
 	for pos := 0; pos < len(text); {
