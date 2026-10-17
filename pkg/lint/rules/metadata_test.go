@@ -350,7 +350,7 @@ func TestHeadingBlankLinesRule_Containers(t *testing.T) {
 			name:      "nested blockquote",
 			input:     "> Para\n> > ## Nested\n",
 			wantLines: []int{2},
-			wantFixed: "> Para\n> >\n> > ## Nested\n",
+			wantFixed: "> Para\n>\n> > ## Nested\n",
 		},
 		{
 			name:      "setext heading in a blockquote",
@@ -368,9 +368,29 @@ func TestHeadingBlankLinesRule_Containers(t *testing.T) {
 			name:      "lazy line after a quoted heading",
 			input:     "> ## Quoted\nlazy text\n",
 			wantLines: []int{1},
-			wantFixed: "> ## Quoted\n>\nlazy text\n",
+			wantFixed: "> ## Quoted\n\nlazy text\n",
 		},
 		{name: "heading at the end of the file", input: "Text\n\n# Heading\n", wantLines: []int{}},
+		{
+			// The item and the blockquote start on the heading's line, so
+			// the blank line before it goes between the items, without a
+			// prefix; "  >" would add a blockquote to the previous item.
+			name:      "heading that starts an item and a blockquote in a loose list",
+			input:     "- First\n\n- Text\n- > # Heading\n",
+			wantLines: []int{4},
+			wantFixed: "- First\n\n- Text\n\n- > # Heading\n",
+		},
+		{
+			name:      "heading that starts an item and a blockquote in a tight list",
+			input:     "- Text\n- > # Heading\n",
+			wantLines: []int{2},
+		},
+		{
+			name:      "quoted heading followed by quoted text in a list item",
+			input:     "- a\n  > # Heading\n  > text\n",
+			wantLines: []int{2, 2},
+			wantFixed: "- a\n  > # Heading\n  >\n  > text\n",
+		},
 		{
 			// A blank line between the items would make the list loose.
 			name:      "heading item in a tight list",
@@ -722,6 +742,31 @@ func TestProperNamesRule(t *testing.T) {
 // as markdownlint 0.41: prose, code (code_blocks) and HTML (html_elements),
 // but never link destinations, URLs, e-mail addresses or fence info strings,
 // and that a longer configured name shields the names inside it.
+// TestProperNamesRule_AddressSplitByMarkup verifies that MD044 skips names in
+// an address that emphasis splits, in both flavors: markdownlint reads the
+// whole address as a link.
+func TestProperNamesRule_AddressSplitByMarkup(t *testing.T) {
+	input := "Visit https://example.com/docs/*github* and www.example.com/_github_ or **https://github.com/x**\n"
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run(string(flavor), func(t *testing.T) {
+			file, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.NewConfig()
+			cfg.Flavor = flavor
+			ruleCfg := &config.RuleConfig{Options: map[string]any{"names": []any{"GitHub"}}}
+			diags, err := NewProperNamesRule().Apply(lint.NewRuleContext(context.Background(), file, cfg, ruleCfg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(diags) != 0 {
+				t.Errorf("diagnostic lines = %v, want none", diagLines(diags))
+			}
+		})
+	}
+}
+
 func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 	github := []any{"GitHub"}
 	javascript := []any{"JavaScript"}
@@ -788,11 +833,19 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			wantFixed: "<div>\nJavaScript text\n</div>\n",
 		},
 		{
+			// The name in the attribute is reported without a fix: a change
+			// of case can break a URL or file name.
 			name:      "HTML attributes are checked with html_elements",
 			input:     "<a href=\"https://github.com/x\">github</a>\n",
 			options:   map[string]any{"names": github},
 			wantLines: []int{1, 1},
-			wantFixed: "<a href=\"https://GitHub.com/x\">GitHub</a>\n",
+			wantFixed: "<a href=\"https://github.com/x\">GitHub</a>\n",
+		},
+		{
+			name:      "attributes of a tag on its own line in an HTML block",
+			input:     "<div>\n<img src=\"github.png\" alt=\"github logo\">\n</div>\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{2, 2},
 		},
 		{
 			name:      "HTML attributes are skipped without html_elements",
@@ -885,6 +938,27 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			options:   map[string]any{"names": github},
 			wantLines: []int{2},
 			wantFixed: "<div>\n<https://github.com/x> GitHub\n</div>\n",
+		},
+		{
+			name:      "URL split by emphasis",
+			input:     "Visit https://example.com/docs/*github*\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{},
+		},
+		{
+			name:      "fenced code in a list in an HTML block without code_blocks",
+			input:     "<div>\n- text\n  ```\n    github\n  ```\n</div>\n",
+			options:   map[string]any{"names": github, "code_blocks": false},
+			wantLines: []int{},
+		},
+		{
+			// The code span ends at the backtick inside the apparent tag,
+			// so the tag is code and "github" after it is prose.
+			name:      "code span that ends inside an apparent tag",
+			input:     "<div>\n`<a title=\"`\">github`\n</div>\n",
+			options:   map[string]any{"names": github, "code_blocks": false},
+			wantLines: []int{2},
+			wantFixed: "<div>\n`<a title=\"`\">GitHub`\n</div>\n",
 		},
 		{
 			name:      "image description",

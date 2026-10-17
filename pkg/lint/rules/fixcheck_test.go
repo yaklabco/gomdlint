@@ -292,3 +292,19 @@ func TestFixWindow(t *testing.T) {
 	}
 }
 
+// TestFixChecker verifies that a rule keeps the fixes that pass the check
+// when another of its fixes fails, and that the fixes it keeps apply.
+func TestFixChecker(t *testing.T) {
+	input := "# A\nText\n\n- a\n- # B\n\n# C\nMore\n"
+	ctx := fixCheckContext(t, input)
+	diags, err := NewHeadingBlankLinesRule().Apply(ctx)
+	require.NoError(t, err)
+
+	fixable := map[int]bool{}
+	for _, diag := range diags {
+		fixable[diag.StartLine] = diag.HasFix()
+	}
+	// The blank line above "# B" would make the list loose.
+	assert.Equal(t, map[int]bool{1: true, 5: false, 7: true}, fixable)
+	assert.Equal(t, "# A\n\nText\n\n- a\n- # B\n\n# C\n\nMore\n", applyAllEdits(t, input, diags))
+}

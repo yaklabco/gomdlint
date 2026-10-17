@@ -247,10 +247,11 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	lastLine := lastSourceLine(ctx.File)
 	headings := ctx.Headings()
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
 		pos := heading.SourcePosition()
@@ -275,7 +276,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			if blanksBefore < linesAbove {
 				// Check if previous line is also a heading (allow no blank between headings).
 				if compatible || !r.isPreviousLineHeading(ctx, heading, pos.StartLine) {
-					diag := r.createBlankBeforeDiagnostic(ctx, heading, pos, blanksBefore, linesAbove)
+					diag := r.createBlankBeforeDiagnostic(ctx, checker, heading, pos, blanksBefore, linesAbove)
 					diags = append(diags, diag)
 				}
 			}
@@ -287,14 +288,14 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			if blanksAfter < linesBelow && pos.EndLine+blanksAfter < lastLine {
 				// Check if next non-blank line is also a heading.
 				if compatible || !r.isNextLineHeading(ctx, heading, pos.EndLine) {
-					diag := r.createBlankAfterDiagnostic(ctx, heading, pos, blanksAfter, linesBelow)
+					diag := r.createBlankAfterDiagnostic(ctx, checker, heading, pos, blanksAfter, linesBelow)
 					diags = append(diags, diag)
 				}
 			}
 		}
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // lastSourceLine returns the number of the last line, not counting the empty
@@ -370,6 +371,7 @@ func (r *HeadingBlankLinesRule) isNextLineHeading(ctx *lint.RuleContext, heading
 
 func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
 	ctx *lint.RuleContext,
+	checker *fixChecker,
 	heading *mdast.Node,
 	pos mdast.SourcePosition,
 	current, required int,
@@ -378,22 +380,21 @@ func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
 
 	// Build fix: insert blank lines, with the container prefix, before the heading.
 	blanksNeeded := required - current
-	insertion := strings.Repeat(lint.BlankLineText(ctx.File, heading), blanksNeeded)
+	insertion := strings.Repeat(blankLineBefore(ctx.File, heading, pos.StartLine), blanksNeeded)
 
 	line := ctx.File.Lines[pos.StartLine-1]
-	diag := lint.NewDiagnostic(r.ID(), heading, msg).
+	builder := fix.NewEditBuilder()
+	builder.Insert(line.StartOffset, insertion)
+	return lint.NewDiagnostic(r.ID(), heading, msg).
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Add %d blank line(s) before the heading", blanksNeeded))
-	if !loosensList(heading, line.StartOffset) {
-		builder := fix.NewEditBuilder()
-		builder.Insert(line.StartOffset, insertion)
-		diag = diag.WithFix(builder)
-	}
-	return diag.Build()
+		WithSuggestion(fmt.Sprintf("Add %d blank line(s) before the heading", blanksNeeded)).
+		WithFix(checker.offer(builder, fixIntent{})).
+		Build()
 }
 
 func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
 	ctx *lint.RuleContext,
+	checker *fixChecker,
 	heading *mdast.Node,
 	pos mdast.SourcePosition,
 	current, required int,
@@ -402,45 +403,45 @@ func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
 
 	// Build fix: insert blank lines, with the container prefix, after the heading.
 	blanksNeeded := required - current
-	insertion := strings.Repeat(lint.BlankLineText(ctx.File, heading), blanksNeeded)
+	insertion := strings.Repeat(blankLineAfter(ctx.File, heading, pos.EndLine), blanksNeeded)
 
 	line := ctx.File.Lines[pos.EndLine-1]
-	diag := lint.NewDiagnostic(r.ID(), heading, msg).
+	builder := fix.NewEditBuilder()
+	builder.Insert(line.EndOffset, insertion)
+	return lint.NewDiagnostic(r.ID(), heading, msg).
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Add %d blank line(s) after the heading", blanksNeeded))
-	if !loosensList(heading, line.EndOffset) {
-		builder := fix.NewEditBuilder()
-		builder.Insert(line.EndOffset, insertion)
-		diag = diag.WithFix(builder)
-	}
-	return diag.Build()
+		WithSuggestion(fmt.Sprintf("Add %d blank line(s) after the heading", blanksNeeded)).
+		WithFix(checker.offer(builder, fixIntent{})).
+		Build()
 }
 
-// loosensList reports whether a blank line inserted at offset would make a
-// tight list around node loose, which changes how the list renders: the
-// offset falls between two items of the list, or between two blocks of one
-// of its items.
-func loosensList(node *mdast.Node, offset int) bool {
-	for item := node.Parent; item != nil; item = item.Parent {
-		if item.Kind != mdast.NodeListItem || item.Parent == nil || !lint.IsTightList(item.Parent) {
-			continue
-		}
-		if separatesChildren(item.Parent, offset) || separatesChildren(item, offset) {
-			return true
+// blankLineBefore returns the text of a blank line inserted before the
+// heading's first line, lineNum: the prefix of the heading's containers that
+// started on an earlier line. A container that starts on the heading's line,
+// such as a list item that the heading begins, is not open where the blank
+// line goes, so its prefix would add a block to the line before.
+func blankLineBefore(file *mdast.FileSnapshot, heading *mdast.Node, lineNum int) string {
+	node := heading
+	for parent := heading.Parent; parent != nil; parent = parent.Parent {
+		if (parent.Kind == mdast.NodeBlockquote || parent.Kind == mdast.NodeListItem) &&
+			parent.SourcePosition().StartLine == lineNum {
+			node = parent
 		}
 	}
-	return false
+	return blankLineText(lint.ContainerPrefix(file, node, lineNum))
 }
 
-// separatesChildren reports whether offset lies between two consecutive
-// children of parent.
-func separatesChildren(parent *mdast.Node, offset int) bool {
-	for child := parent.FirstChild; child != nil && child.Next != nil; child = child.Next {
-		if child.SourceRange().EndOffset <= offset && offset <= child.Next.SourceRange().StartOffset {
-			return true
-		}
-	}
-	return false
+// blankLineAfter returns the text of a blank line inserted after the
+// heading's last line, lineNum: the prefix of the heading's containers that
+// the next line continues, so that it stays in them.
+func blankLineAfter(file *mdast.FileSnapshot, heading *mdast.Node, lineNum int) string {
+	return blankLineText(lint.ContainerPrefix(file, heading, lineNum+1))
+}
+
+// blankLineText returns a blank line with a container prefix: the prefix
+// without trailing whitespace, then a newline.
+func blankLineText(prefix []byte) string {
+	return strings.TrimRight(string(prefix), " \t") + "\n"
 }
 
 // RequiredHeadingsRule checks that document follows required heading structure.
@@ -628,6 +629,10 @@ type properNameRegion struct {
 	// links is true when addresses in the region are links whose names are
 	// not checked (prose and code, but not raw HTML).
 	links bool
+	// tag is true for an HTML tag. Its names are reported without a fix:
+	// they sit in attribute values, such as file names and URLs, which a
+	// change of case can break.
+	tag bool
 }
 
 // Apply checks for incorrect capitalization of proper names.
@@ -637,6 +642,9 @@ type properNameRegion struct {
 // default true). Link destinations, reference definitions, fence info
 // strings, URLs and e-mail addresses are never checked. Text between the tags
 // of an HTML block is prose, so it is checked even without html_elements.
+// Names inside HTML tags are reported without a fix, as their attribute
+// values can be file names or URLs, and every fix is offered only when the
+// block that holds the name changes in nothing but its text.
 // Longer names are matched first, and text matching one configured name is
 // not checked against the names it contains, so "github.com" stays as written
 // when both "GitHub" and "github.com" are listed.
@@ -657,27 +665,16 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 		return names[i] < names[j]
 	})
 
-	regions := r.regions(ctx, ctx.OptionBool("code_blocks", true), ctx.OptionBool("html_elements", true))
+	scan := r.scan(ctx, ctx.OptionBool("code_blocks", true), ctx.OptionBool("html_elements", true))
+	regions := scan.regions
 	content := ctx.File.Content
-
-	// Addresses are excluded like matches of earlier (longer) names.
-	var exclusions []mdast.SourceRange
-	for _, region := range regions {
-		if !region.links {
-			continue
-		}
-		for _, match := range literalLinkPattern.FindAllIndex(content[region.rng.StartOffset:region.rng.EndOffset], -1) {
-			exclusions = append(exclusions, mdast.SourceRange{
-				StartOffset: region.rng.StartOffset + match[0],
-				EndOffset:   region.rng.StartOffset + match[1],
-			})
-		}
-	}
+	exclusions := scan.addresses(content)
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 	for _, name := range names {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 		pattern := properNamePattern(name)
 		if pattern == nil {
@@ -692,7 +689,7 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 				}
 				foundText := string(content[found.StartOffset:found.EndOffset])
 				if !slices.Contains(properNames, foundText) && !overlapsAny(exclusions, found) {
-					diags = append(diags, r.nameDiagnostic(ctx, found, foundText, name))
+					diags = append(diags, r.nameDiagnostic(ctx, checker, found, foundText, name, !region.tag))
 				}
 				exclusions = append(exclusions, found)
 			}
@@ -705,7 +702,7 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 		}
 		return diags[i].StartColumn < diags[j].StartColumn
 	})
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // properNamePattern matches name case-insensitively as a whole word, allowing
@@ -738,18 +735,27 @@ func overlapsAny(ranges []mdast.SourceRange, rng mdast.SourceRange) bool {
 	return false
 }
 
+// nameDiagnostic reports foundText at found, which should be name. When
+// fixable, the fix replaces it and is offered when the block that holds it
+// changes in nothing but that text.
 func (r *ProperNamesRule) nameDiagnostic(
 	ctx *lint.RuleContext,
+	checker *fixChecker,
 	found mdast.SourceRange,
 	foundText, name string,
+	fixable bool,
 ) lint.Diagnostic {
-	builder := fix.NewEditBuilder()
-	builder.ReplaceRange(found.StartOffset, found.EndOffset, name)
+	var checked *fix.EditBuilder
+	if leaf := leafBlockAt(ctx.Root, found.StartOffset); fixable && leaf != nil {
+		builder := fix.NewEditBuilder()
+		builder.ReplaceRange(found.StartOffset, found.EndOffset, name)
+		checked = checker.offer(builder, changeText(leaf, textSub{rng: found, text: name}))
+	}
 	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, found),
 		fmt.Sprintf("Proper name %q should be %q", foundText, name)).
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(fmt.Sprintf("Use %q", name)).
-		WithFix(builder).
+		WithFix(checked).
 		Build()
 }
 
@@ -759,13 +765,54 @@ type properNameScan struct {
 	includeCode bool
 	includeHTML bool
 	regions     []properNameRegion
+	// inline holds the source of the inline content of each paragraph,
+	// heading and table cell.
+	inline []mdast.SourceRange
+	// autolinks holds the source of each autolink.
+	autolinks []mdast.SourceRange
 }
 
-// regions returns the source text MD044 checks.
-func (r *ProperNamesRule) regions(ctx *lint.RuleContext, includeCode, includeHTML bool) []properNameRegion {
+// scan collects the source text MD044 checks.
+func (r *ProperNamesRule) scan(ctx *lint.RuleContext, includeCode, includeHTML bool) *properNameScan {
 	scan := &properNameScan{ctx: ctx, includeCode: includeCode, includeHTML: includeHTML}
 	scan.collect(ctx.File, 0, nil, false)
-	return scan.regions
+	return scan
+}
+
+// addresses returns the URLs and e-mail addresses whose names MD044 does not
+// check. Like the links GFM makes of them, they are found in the complete
+// source of a block's inline content, so that markup inside an address, as
+// in "https://example.com/*docs*", does not split it, and count when they
+// start in prose, code or an autolink. Code blocks are searched on their own.
+func (s *properNameScan) addresses(content []byte) []mdast.SourceRange {
+	links := make([]mdast.SourceRange, 0, len(s.regions))
+	for _, region := range s.regions {
+		if region.links {
+			links = append(links, region.rng)
+		}
+	}
+	starts := append(slices.Clone(links), s.autolinks...)
+	slices.SortFunc(starts, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
+	inLinks := func(offset int) bool {
+		idx := sort.Search(len(starts), func(i int) bool { return starts[i].StartOffset > offset }) - 1
+		return idx >= 0 && offset < starts[idx].EndOffset
+	}
+
+	var addresses []mdast.SourceRange
+	search := func(rng mdast.SourceRange) {
+		for _, match := range literalLinkPattern.FindAllIndex(content[rng.StartOffset:rng.EndOffset], -1) {
+			if start := rng.StartOffset + match[0]; inLinks(start) {
+				addresses = append(addresses, mdast.SourceRange{StartOffset: start, EndOffset: rng.StartOffset + match[1]})
+			}
+		}
+	}
+	for _, rng := range s.inline {
+		search(rng)
+	}
+	for _, rng := range links {
+		search(rng)
+	}
+	return addresses
 }
 
 // addRegion records the document range from start to end.
@@ -774,6 +821,18 @@ func (s *properNameScan) addRegion(start, end int, links bool) {
 		s.regions = append(s.regions, properNameRegion{
 			rng:   mdast.SourceRange{StartOffset: start, EndOffset: end},
 			links: links,
+		})
+	}
+}
+
+// addHTMLRegion records the raw HTML from start to end in the document: a
+// tag, or a comment, processing instruction, declaration or CDATA section.
+func (s *properNameScan) addHTMLRegion(start, end int) {
+	if start < end {
+		text := s.ctx.File.Content[start:end]
+		s.regions = append(s.regions, properNameRegion{
+			rng: mdast.SourceRange{StartOffset: start, EndOffset: end},
+			tag: len(text) > 1 && (isASCIILetter(text[1]) || text[1] == '/'),
 		})
 	}
 }
@@ -798,6 +857,15 @@ func (s *properNameScan) collect(file *mdast.FileSnapshot, base int, tags []mdas
 	}
 	//nolint:errcheck // Walk visitor never returns error.
 	_ = mdast.Walk(file.Root, func(node *mdast.Node) error {
+		if hasInlineContent(node.Kind) {
+			if rng := node.SourceRange(); rng.StartOffset >= 0 && rng.EndOffset <= len(file.Content) {
+				s.inline = append(s.inline, mdast.SourceRange{StartOffset: base + rng.StartOffset, EndOffset: base + rng.EndOffset})
+			}
+		}
+		if isAutolink(node) {
+			rng := node.SourceRange()
+			s.autolinks = append(s.autolinks, mdast.SourceRange{StartOffset: base + rng.StartOffset, EndOffset: base + rng.EndOffset})
+		}
 		switch node.Kind {
 		case mdast.NodeText, mdast.NodeSoftBreak, mdast.NodeHardBreak:
 			if insideAutolink(node) {
@@ -811,12 +879,12 @@ func (s *properNameScan) collect(file *mdast.FileSnapshot, base int, tags []mdas
 				add(node.ContentRange(), true, nil)
 			}
 		case mdast.NodeHTMLInline:
-			if s.includeHTML {
-				add(node.SourceRange(), false, nil)
+			if rng := node.SourceRange(); s.includeHTML && rng.StartOffset >= 0 && rng.EndOffset <= len(file.Content) {
+				s.addHTMLRegion(base+rng.StartOffset, base+rng.EndOffset)
 			}
 		case mdast.NodeHTMLBlock:
-			// Content parsed again has no HTML blocks, as maskHTML masks
-			// every '<' that could start one.
+			// Content parsed again has no HTML blocks, as maskHTMLBlockStarts
+			// masks every '<' that could start one.
 			if !nested {
 				s.collectHTMLBlock(file, node)
 			}
@@ -827,10 +895,11 @@ func (s *properNameScan) collect(file *mdast.FileSnapshot, base int, tags []mdas
 
 // collectHTMLBlock adds the regions of an HTML block. A comment block is
 // HTML throughout. Any other block is read as Markdown without HTML blocks or
-// indented code, as markdownlint does: its tags are HTML, checked only with
-// html_elements, and the rest is parsed again, so that its prose is checked,
-// its code, tags included, follows code_blocks, and fence info strings and
-// link destinations are skipped.
+// indented code, as markdownlint does: it is parsed again, so that its tags
+// are HTML, checked only with html_elements, its prose is checked, its code,
+// tags included, follows code_blocks, and fence info strings and link
+// destinations are skipped. The parser reads tags inside lines as inline
+// HTML, after code spans that start before them.
 func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast.Node) {
 	rng := block.SourceRange()
 	if rng.IsEmpty() || rng.EndOffset > len(file.Content) {
@@ -843,9 +912,8 @@ func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast
 		return
 	}
 
-	masked, tags := maskHTML(file.Content[rng.StartOffset:rng.EndOffset])
-	maskCodeIndentation(masked)
-	snapshot, ok := reparse(s.ctx, masked)
+	masked, tags := maskHTMLBlockStarts(file.Content[rng.StartOffset:rng.EndOffset])
+	snapshot, ok := reparseWithoutIndentedCode(s.ctx, masked)
 	if !ok {
 		return
 	}
@@ -853,44 +921,124 @@ func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast
 		code := codeRanges(snapshot)
 		for _, tag := range tags {
 			if !overlapsAny(code, tag) {
-				s.addRegion(rng.StartOffset+tag.StartOffset, rng.StartOffset+tag.EndOffset, false)
+				s.addHTMLRegion(rng.StartOffset+tag.StartOffset, rng.StartOffset+tag.EndOffset)
 			}
 		}
 	}
 	s.collect(snapshot, rng.StartOffset, tags, true)
 }
 
-// maskHTML returns a copy of text, the content of an HTML block, in which
-// every tag, comment, processing instruction, declaration and CDATA section
-// is replaced with commas, keeping line breaks, so that offsets hold and the
-// tags neither form HTML blocks nor join the words around them. Any other '<'
-// outside an autolink is replaced as well, as it might still start an HTML
-// block. It also returns the ranges of the replaced constructs, in order.
-func maskHTML(text []byte) ([]byte, []mdast.SourceRange) {
+// maskHTMLBlockStarts returns a copy of text, the content of an HTML block,
+// in which every '<' that could start an HTML block is masked with commas, so
+// that the content parses as Markdown without HTML blocks: a tag, comment,
+// processing instruction, declaration or CDATA section that starts a line,
+// after indentation and container markers, is replaced whole, keeping line
+// breaks so that offsets hold, and any other '<' there outside an autolink
+// is replaced on its own. It also returns the ranges of the replaced
+// constructs, in order. Tags inside lines are left to the parser.
+func maskHTMLBlockStarts(text []byte) ([]byte, []mdast.SourceRange) {
 	masked := slices.Clone(text)
 	var tags []mdast.SourceRange
-	for idx := 0; idx < len(text); idx++ {
-		if text[idx] != '<' {
-			continue
-		}
-		end := htmlConstructEnd(text, idx)
-		if end < 0 {
-			if loc := autolinkPattern.FindIndex(text[idx:]); loc != nil {
-				idx += loc[1] - 1
-			} else {
-				masked[idx] = ','
-			}
-			continue
-		}
-		tags = append(tags, mdast.SourceRange{StartOffset: idx, EndOffset: end})
-		for pos := idx; pos < end; pos++ {
-			if masked[pos] != '\n' && masked[pos] != '\r' {
+	for lineStart := 0; lineStart < len(text); {
+		next := lineStart
+		if pos := blockStartAfterMarkers(text, lineStart); pos < len(text) && text[pos] == '<' {
+			switch end := htmlConstructEnd(text, pos); {
+			case end >= 0:
+				tags = append(tags, mdast.SourceRange{StartOffset: pos, EndOffset: end})
+				for idx := pos; idx < end; idx++ {
+					if masked[idx] != '\n' && masked[idx] != '\r' {
+						masked[idx] = ','
+					}
+				}
+				next = end
+			case autolinkPattern.Match(text[pos:]):
+			default:
 				masked[pos] = ','
 			}
 		}
-		idx = end - 1
+		newline := bytes.IndexByte(text[next:], '\n')
+		if newline < 0 {
+			break
+		}
+		lineStart = next + newline + 1
 	}
 	return masked, tags
+}
+
+// blockStartAfterMarkers returns the offset where a block could start on the
+// line at pos: after its indentation, blockquote markers and list markers.
+func blockStartAfterMarkers(text []byte, pos int) int {
+	const maxOrderedDigits = 9
+	for pos < len(text) {
+		char := text[pos]
+		switch {
+		case char == ' ' || char == '\t' || char == '>':
+			pos++
+		case (char == '-' || char == '+' || char == '*') && isSpaceOrTab(text, pos+1):
+			pos += 2
+		case char >= '0' && char <= '9':
+			end := pos
+			for end < len(text) && end-pos < maxOrderedDigits && text[end] >= '0' && text[end] <= '9' {
+				end++
+			}
+			if end >= len(text) || (text[end] != '.' && text[end] != ')') || !isSpaceOrTab(text, end+1) {
+				return pos
+			}
+			pos = end + 2
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+// isSpaceOrTab reports whether text holds a space or tab at pos.
+func isSpaceOrTab(text []byte, pos int) bool {
+	return pos < len(text) && (text[pos] == ' ' || text[pos] == '\t')
+}
+
+// reparseWithoutIndentedCode parses text, the masked content of an HTML
+// block. markdownlint parses such content without indented code blocks, so
+// the lines of each indented code block are parsed again with their
+// indentation after the container prefix masked with commas, which makes
+// them text and keeps them in their containers.
+func reparseWithoutIndentedCode(ctx *lint.RuleContext, text []byte) (*mdast.FileSnapshot, bool) {
+	const maxPasses = 4
+	for pass := 0; ; pass++ {
+		snapshot, ok := reparse(ctx, text)
+		if !ok {
+			return nil, false
+		}
+		var blocks []*mdast.Node
+		//nolint:errcheck // Walk visitor never returns error.
+		_ = mdast.Walk(snapshot.Root, func(node *mdast.Node) error {
+			if node.Kind == mdast.NodeCodeBlock && node.Block != nil && node.Block.CodeBlock != nil &&
+				node.Block.CodeBlock.Indented {
+				blocks = append(blocks, node)
+			}
+			return nil
+		})
+		if len(blocks) == 0 || pass == maxPasses {
+			return snapshot, true
+		}
+		for _, block := range blocks {
+			pos := block.SourcePosition()
+			for lineNum := pos.StartLine; lineNum <= pos.EndLine && lineNum <= len(snapshot.Lines); lineNum++ {
+				line := snapshot.Lines[lineNum-1]
+				start := line.StartOffset + len(lint.ContainerPrefix(snapshot, block, lineNum))
+				end := start
+				for end < line.NewlineStart && (text[end] == ' ' || text[end] == '\t') {
+					end++
+				}
+				if end == line.NewlineStart {
+					continue // A blank line stays blank.
+				}
+				for idx := start; idx < end; idx++ {
+					text[idx] = ','
+				}
+			}
+		}
+	}
 }
 
 // codeRanges returns the ranges of the code spans and code blocks of file,
@@ -905,34 +1053,6 @@ func codeRanges(file *mdast.FileSnapshot) []mdast.SourceRange {
 		return nil
 	})
 	return ranges
-}
-
-// maskCodeIndentation replaces the indentation of lines indented by four or
-// more columns with commas: markdownlint reads HTML block content without
-// indented code blocks, so such lines are prose.
-func maskCodeIndentation(text []byte) {
-	const codeIndent = 4
-	for lineStart := 0; lineStart < len(text); {
-		col, pos := 0, lineStart
-		for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t') {
-			if text[pos] == '\t' {
-				col += codeIndent - col%codeIndent
-			} else {
-				col++
-			}
-			pos++
-		}
-		if col >= codeIndent {
-			for idx := lineStart; idx < pos; idx++ {
-				text[idx] = ','
-			}
-		}
-		next := bytes.IndexByte(text[lineStart:], '\n')
-		if next < 0 {
-			break
-		}
-		lineStart += next + 1
-	}
 }
 
 // htmlConstructEnd returns the end of the HTML tag, comment, processing
@@ -1069,12 +1189,17 @@ func isAttributeNameChar(b byte) bool {
 // insideAutolink reports whether node is inside an autolink.
 func insideAutolink(node *mdast.Node) bool {
 	for parent := node.Parent; parent != nil; parent = parent.Parent {
-		if parent.Kind == mdast.NodeLink && parent.Inline != nil && parent.Inline.Link != nil &&
-			parent.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink {
+		if isAutolink(parent) {
 			return true
 		}
 	}
 	return false
+}
+
+// isAutolink reports whether node is an autolink.
+func isAutolink(node *mdast.Node) bool {
+	return node.Kind == mdast.NodeLink && node.Inline != nil && node.Inline.Link != nil &&
+		node.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink
 }
 
 // textPrefixStart returns where a node's raw inline text starts in the
