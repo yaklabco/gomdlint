@@ -331,7 +331,7 @@ func (p *listShiftPlan) keepsStructure(
 	if shift.markerCol < 0 || shift.contentCol <= shift.markerCol {
 		return false
 	}
-	if shift.contentCol != layout.contentCol && hasDormantBlockStart(p.file, item.FirstChild, layout.marker.Line) {
+	if shift.contentCol != layout.contentCol && hasDormantBlockStart(p.file, item) {
 		return false
 	}
 
@@ -526,19 +526,26 @@ func lastListItem(list *mdast.Node) *mdast.Node {
 	return nil
 }
 
-// hasDormantBlockStart reports whether a paragraph line after the first, on
-// the lines that follow startLine, begins like a block (a list item, heading,
+// hasDormantBlockStart reports whether a paragraph anywhere in an item has a
+// line after its first that begins like a block (a list item, heading,
 // quote, fence, thematic break or HTML block) once its container prefix and
-// indentation are removed.
-func hasDormantBlockStart(file *mdast.FileSnapshot, paragraph *mdast.Node, startLine int) bool {
-	for lineNum := startLine + 1; lineNum <= nodeLastLine(paragraph); lineNum++ {
-		content := lint.RawLineContent(file, lineNum)
-		rest := bytes.TrimLeft(content[len(lint.ContainerPrefix(file, paragraph, lineNum)):], " \t")
-		if len(rest) > 0 && wrapContinuationStartsBlock(string(rest)) {
-			return true
+// indentation are removed. Such a line is paragraph text only because of the
+// columns around it; a lazy continuation line of a nested item, for one,
+// starts a block when the item's content column moves past it.
+func hasDormantBlockStart(file *mdast.FileSnapshot, item *mdast.Node) bool {
+	return mdast.FindFirst(item, func(node *mdast.Node) bool {
+		if node.Kind != mdast.NodeParagraph {
+			return false
 		}
-	}
-	return false
+		for lineNum := node.SourcePosition().StartLine + 1; lineNum <= nodeLastLine(node); lineNum++ {
+			content := lint.RawLineContent(file, lineNum)
+			rest := bytes.TrimLeft(content[len(lint.ContainerPrefix(file, node, lineNum)):], " \t")
+			if len(rest) > 0 && wrapContinuationStartsBlock(string(rest)) {
+				return true
+			}
+		}
+		return false
+	}) != nil
 }
 
 // nextListItem returns the list item after item in its list.

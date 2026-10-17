@@ -1091,6 +1091,12 @@ func TestListIndentationFixesPreserveStructure(t *testing.T) {
 			name:  "bullet and indentation fixes in one list",
 			input: "- first\n  * second\n   * third\n",
 		},
+		{
+			// Aligning third with second while the quote space before
+			// second is removed would nest third inside second.
+			name:  "alignment with a first item behind extra quote space",
+			input: "> -   first\n>    1. second\n> 1. third\n",
+		},
 	}
 
 	for _, tt := range tests {

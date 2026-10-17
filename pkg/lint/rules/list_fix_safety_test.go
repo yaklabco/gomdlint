@@ -146,6 +146,9 @@ func TestListFixesAreSafeInAnySubset(t *testing.T) {
 		rule    lint.Rule
 		input   string
 		options map[string]any
+		// noFix is true when the only safe choice is to report without a
+		// fix.
+		noFix bool
 	}{
 		{name: "MD007 nested levels", rule: NewULIndentRule(), input: "- Top\n    - Nested\n        - Third\n"},
 		{name: "MD007 siblings", rule: NewULIndentRule(), input: "- A\n    - B\n    - C\n"},
@@ -171,7 +174,21 @@ func TestListFixesAreSafeInAnySubset(t *testing.T) {
 		{name: "MD005 ordered", rule: NewListIndentRule(), input: "1. a\n 2. b\n  3. c\n"},
 		{name: "MD005 nested ordered", rule: NewListIndentRule(), input: "1. a\n   1. b\n    2. c\n     3. d\n"},
 		{name: "MD030 spacing", rule: NewListMarkerSpaceRule(), input: "-   A\n    -   B\n        - C\n"},
+		{
+			// "- third" is a lazy continuation of the paragraph of second
+			// only while the content column of first stays to its right.
+			name:  "MD030 lazy line in a nested item",
+			rule:  NewListMarkerSpaceRule(),
+			input: ">  -   first\n>      - second\n>     - third\n",
+			noFix: true,
+		},
 		{name: "MD027 quoted list", rule: NewNoMultipleSpaceBlockquoteRule(), input: ">   - a\n>     - b\n>   - c\n"},
+		{
+			name:  "MD027 lazy line in a nested item",
+			rule:  NewNoMultipleSpaceBlockquoteRule(),
+			input: ">  -   first\n>      - second\n>     - third\n",
+			noFix: true,
+		},
 		{
 			name:    "MD029 widened numbers",
 			rule:    NewOrderedListIncrementRule(),
@@ -191,6 +208,10 @@ func TestListFixesAreSafeInAnySubset(t *testing.T) {
 			diags, err := tt.rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
 			require.NoError(t, err)
 			fixable := filterFixableDiags(diags)
+			if tt.noFix {
+				assert.Empty(t, fixable)
+				return
+			}
 			require.NotEmpty(t, fixable, "the input should have fixes")
 			require.Less(t, len(fixable), 12, "too many fixes to try every subset")
 

@@ -36,7 +36,10 @@ func NewListIndentRule() *ListIndentRule {
 // numbers so that the markers end in the same column. Columns count from the
 // content of the enclosing blockquote. Unordered lists are reported without a
 // fix, because MD007 moves their items to the configured indentation; ordered
-// items are moved only when that keeps the structure.
+// items are moved only when that keeps the structure. A list right inside a
+// blockquote whose first item is indented is not fixed either: MD027 moves
+// that first item in the same pass, and the others would no longer line up
+// with it.
 func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -126,9 +129,18 @@ func listIndentMismatches(file *mdast.FileSnapshot, plan *listShiftPlan, list *m
 			mismatch.expected = expectedEnd - marker.Width()
 		}
 		mismatches = append(mismatches, mismatch)
-		proposeIndentShift(plan, mismatch)
+		if !firstMarkerFollowsQuoteSpace(list, expectedIndent) {
+			proposeIndentShift(plan, mismatch)
+		}
 	}
 	return mismatches
+}
+
+// firstMarkerFollowsQuoteSpace reports whether the first marker of a list is
+// indented right inside a blockquote, where the indentation is extra space
+// after the blockquote marker that MD027 removes.
+func firstMarkerFollowsQuoteSpace(list *mdast.Node, firstIndent int) bool {
+	return firstIndent > 0 && list.Parent != nil && list.Parent.Kind == mdast.NodeBlockquote
 }
 
 // proposeIndentShift proposes moving an item's marker, and with it its
