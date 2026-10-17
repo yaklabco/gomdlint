@@ -611,9 +611,12 @@ func emphasisStyleFix(
 		return nil
 	}
 	if marker == '_' {
+		// An underscore opens and closes emphasis only next to whitespace,
+		// punctuation or the edge of the line (CommonMark flanking rules),
+		// so not after a letter, digit or combining mark.
 		before, _ := utf8.DecodeLastRune(content[:open.StartOffset])
 		after, _ := utf8.DecodeRune(content[closing.EndOffset:])
-		if isLetterOrDigit(before) || isLetterOrDigit(after) {
+		if !isFlankingBoundary(before) || !isFlankingBoundary(after) {
 			return nil
 		}
 	}
@@ -636,7 +639,10 @@ func emphasisStyleFix(
 	return builder
 }
 
-// isLetterOrDigit reports whether r is a Unicode letter or digit.
-func isLetterOrDigit(r rune) bool {
-	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
+// isFlankingBoundary reports whether r, the character next to a delimiter
+// run, lets an underscore run open or close emphasis: the edge of the text
+// (utf8.RuneError), whitespace, or punctuation, which CommonMark and the
+// parser take to include symbols.
+func isFlankingBoundary(r rune) bool {
+	return r == utf8.RuneError || unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r)
 }

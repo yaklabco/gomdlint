@@ -316,6 +316,31 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			wantLines: []int{1},
 		},
 		{
+			// A combining mark is neither whitespace nor punctuation, so an
+			// underscore after it cannot open emphasis.
+			name:      "MD049 no fix to underscore after a combining mark",
+			rule:      NewEmphasisStyleRule(),
+			input:     "e\u0301*word*\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD050 no fix to underscore after a combining mark",
+			rule:      NewStrongStyleRule(),
+			input:     "e\u0301**word**\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD049 underscore between punctuation",
+			rule:      NewEmphasisStyleRule(),
+			input:     "(*word*)\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "(_word_)\n",
+		},
+		{
 			name:      "MD049 ignores strikethrough",
 			rule:      NewEmphasisStyleRule(),
 			input:     "~~struck~~ and *x*\n",
