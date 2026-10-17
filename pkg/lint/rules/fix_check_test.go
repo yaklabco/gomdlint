@@ -301,10 +301,44 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: false,
 		},
 		{
-			name:  "wrapping outside inline elements",
+			// A paragraph with raw HTML must stay byte for byte the same.
+			name:  "wrapping elsewhere in a paragraph with inline HTML",
 			input: "Before <b>bold</b> alpha beta after.\n",
 			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping a paragraph without HTML next to one with HTML",
+			input: "Before <b>bold</b> after.\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
+		},
+		{
+			// The tags in the textarea are text, which no tag matching
+			// can see; the paragraph is compared byte for byte.
+			name:  "wrapping a textarea that holds literal tags",
+			input: "Before <b><textarea>alpha </b> beta gamma</textarea></b> after.\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: false,
+		},
+		{
+			// HTML does not self-close a textarea.
+			name:  "wrapping after a self-closed textarea",
+			input: "Before <textarea/>alpha beta gamma</textarea> after.\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: false,
+		},
+		{
+			name:  "changing a heading with inline HTML",
+			input: "# Title <b>x</b>  with spaces\n",
+			old:   "  with", new: " with",
+			want: false,
+		},
+		{
+			name:  "changing a table cell with inline HTML",
+			input: "| a <b>x</b>  y | b |\n| - | - |\n| 1 | 2 |\n",
+			old:   "  y", new: " y",
+			want: false,
 		},
 		{
 			// The end of the first paragraph closes the span.
@@ -327,8 +361,21 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: false,
 		},
 		{
+			// The HTML blocks may open and close an element around it.
 			name:  "wrapping Markdown inside a details block",
 			input: "<details>\n\nalpha beta\n\n</details>\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping Markdown closed by inline HTML",
+			input: "<div style=\"white-space: pre\">\n\nalpha beta\n\nend </div>\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping Markdown after a closed HTML block",
+			input: "<div>x</div>\n\nalpha beta\n",
 			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
 		},
@@ -340,6 +387,33 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: true,
 		},
 	})
+}
+
+// TestFixCheckSurvivesUnbalancedHTML runs every fixing rule of this file set
+// over raw HTML whose tags do not match, which must not crash the fix check.
+func TestFixCheckSurvivesUnbalancedHTML(t *testing.T) {
+	inputs := []string{
+		"<div>\n\nhello </div>",
+		"</div></div>\n\ntext  \nmore\n",
+		"<b>\n\n</b></b> text\n",
+		"> <span>\n>\n> </span></span> x\n",
+		"Before <b><textarea>alpha </b> beta</textarea></b> after.\n",
+		"Before <textarea/>alpha beta</textarea> after.\n",
+	}
+	rules := []lint.Rule{
+		NewUnorderedListStyleRule(), NewListIndentRule(), NewULIndentRule(), NewTrailingWhitespaceRule(),
+		NewHardTabsRule(), NewMultipleBlankLinesRule(), NewMaxLineLengthRule(), NewNoMultipleSpaceBlockquoteRule(),
+		NewOrderedListIncrementRule(), NewListMarkerSpaceRule(), NewBlanksAroundListsRule(), NewFinalNewlineRule(),
+	}
+	for _, input := range inputs {
+		snapshot := parseForCheck(t, input)
+		for _, rule := range rules {
+			assert.NotPanics(t, func() {
+				_, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+				assert.NoError(t, err)
+			}, "%s on %q", rule.ID(), input)
+		}
+	}
 }
 
 // TestFixCheckWholeDocument checks the effects a fix can have far from the

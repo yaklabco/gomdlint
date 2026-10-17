@@ -220,6 +220,14 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			config:    map[string]any{"ignore_code_blocks": false},
 		},
 		{
+			// A paragraph with inline HTML must stay byte for byte the
+			// same; the one without keeps its fix.
+			name:      "fix only in the paragraph without inline HTML",
+			input:     "Text <b>x</b>   \nmore\n\nplain   \nmore\n",
+			wantDiags: 2,
+			wantFix:   "Text <b>x</b>   \nmore\n\nplain  \nmore\n",
+		},
+		{
 			// Raw HTML is passed through as written, and <pre> keeps the
 			// spaces.
 			name:      "no fix inside a pre HTML block",
@@ -328,6 +336,14 @@ func TestFinalNewlineRule(t *testing.T) {
 			name:      "comment-only last line counts as blank",
 			input:     "Text\n<!-- note -->",
 			wantDiags: 0,
+		},
+		{
+			// The paragraph that ends the file closes an element of the
+			// HTML block above it.
+			name:      "final newline after a paragraph that closes an HTML element",
+			input:     "<div>\n\nhello </div>",
+			wantDiags: 1,
+			wantFix:   "<div>\n\nhello </div>\n",
 		},
 		{
 			name:      "text after comment on last line is not blank",

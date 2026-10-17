@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -348,11 +349,20 @@ func frontMatterLength(content []byte) int {
 // strings and content, table cell alignment, and inline content with its
 // hard breaks, emphasis, links and images with their resolved destinations
 // and titles, code spans and task checkboxes. Raw HTML, code, link titles
-// and image descriptions are kept as written, and so is text inside an HTML
-// element that may keep whitespace (see htmlElements); runs of the
-// whitespace HTML collapses (spaces, tabs, line endings and form feeds)
-// collapse to one space in other text. Code may only differ in tabs that
-// opts allow to become spaces.
+// and image descriptions are kept as written; runs of the whitespace HTML
+// collapses (spaces, tabs, line endings and form feeds) collapse to one
+// space in other text. Code may only differ in tabs that opts allow to
+// become spaces.
+//
+// Whether whitespace shows inside an HTML element depends on the element,
+// its attributes and CSS, which the signature does not try to model. So the
+// source of a leaf block (a paragraph, heading or table cell) must stay byte
+// for byte the same when raw HTML could put its text inside an element: when
+// the block holds inline raw HTML, when it lies between an HTML block and
+// later raw HTML in the same container, which could open and close an
+// element around it, and when it follows raw HTML that opens a raw text or
+// preformatted element, such as a textarea or pre, that is not closed in the
+// same HTML block.
 func goldmarkSignature(doc gmast.Node, source []byte, opts fixCheckOptions) string {
 	var out strings.Builder
 	sig := signatureWriter{source: source, opts: opts, out: &out, anchors: make(map[string]int)}
@@ -369,22 +379,92 @@ type signatureWriter struct {
 	out     *strings.Builder
 	text    []byte
 	anchors map[string]int
-	html    htmlElements
+	// wrapped counts the containers on the way to the current block that
+	// lie between an HTML block and later raw HTML.
+	wrapped int
+	// rawTextOpened is true once raw HTML has opened a raw text or
+	// preformatted element that may run to the end of the document.
+	rawTextOpened bool
 }
 
+// blocks writes the children of a container. A child that lies between the
+// first HTML block of the container and the last child holding raw HTML may
+// be inside an element that the raw HTML opens and closes.
 func (s *signatureWriter) blocks(parent gmast.Node) {
+	firstHTMLBlock, lastRawHTML := -1, -1
+	idx := 0
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
-		s.block(node)
+		if _, ok := node.(*gmast.HTMLBlock); ok && firstHTMLBlock < 0 {
+			firstHTMLBlock = idx
+		}
+		if holdsRawHTML(node) {
+			lastRawHTML = idx
+		}
+		idx++
 	}
+	idx = 0
+	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
+		wrapped := firstHTMLBlock >= 0 && firstHTMLBlock < idx && idx < lastRawHTML
+		if wrapped {
+			s.wrapped++
+		}
+		s.block(node)
+		if wrapped {
+			s.wrapped--
+		}
+		idx++
+	}
+}
+
+// holdsRawHTML reports whether a node is an HTML block or holds raw HTML.
+func holdsRawHTML(node gmast.Node) bool {
+	found := false
+	_ = gmast.Walk(node, func(child gmast.Node, _ bool) (gmast.WalkStatus, error) { //nolint:errcheck // Visitor never returns an error.
+		switch child.(type) {
+		case *gmast.HTMLBlock, *gmast.RawHTML:
+			found = true
+			return gmast.WalkStop, nil
+		default:
+			return gmast.WalkContinue, nil
+		}
+	})
+	return found
+}
+
+// rawSource writes the source of a leaf block's inline content, as it is,
+// when the block must stay byte for byte the same.
+func (s *signatureWriter) rawSource(leaf gmast.Node) {
+	if s.wrapped > 0 || s.rawTextOpened || holdsRawHTML(leaf) {
+		fmt.Fprintf(s.out, "\x00raw%q", linesText(leaf.Lines(), s.source))
+	}
+}
+
+// rawTextStartPattern matches the start tag of an element whose content
+// keeps its whitespace or is raw text up to its end tag. HTML does not
+// self-close these elements, so "<textarea/>" starts one too.
+var rawTextStartPattern = regexp.MustCompile(`(?i)<(script|style|textarea|title|xmp|plaintext|iframe|noembed|noframes|noscript|pre|listing)(?:[\s/>]|$)`)
+
+// opensRawText reports whether raw HTML starts a raw text or preformatted
+// element without its end tag after it.
+func opensRawText(raw string) bool {
+	lower := strings.ToLower(raw)
+	for _, match := range rawTextStartPattern.FindAllStringSubmatchIndex(raw, -1) {
+		if !strings.Contains(lower[match[1]:], "</"+lower[match[2]:match[3]]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *signatureWriter) block(node gmast.Node) {
 	switch node := node.(type) {
 	case *gmast.Paragraph, *gmast.TextBlock:
 		s.out.WriteString("P(")
+		s.rawSource(node)
 		s.inlineContent(node)
 	case *gmast.Heading:
 		fmt.Fprintf(s.out, "H%d#%s(", node.Level, s.anchor(headingText(node, s.source)))
+		s.rawSource(node)
 		s.inlineContent(node)
 	case *gmast.List:
 		kind := "UL"
@@ -407,11 +487,12 @@ func (s *signatureWriter) block(node gmast.Node) {
 			raw += "\n" + strings.TrimRight(string(node.ClosureLine.Value(s.source)), "\r\n")
 		}
 		fmt.Fprintf(s.out, "B(%q", raw)
-		for _, tag := range scanHTMLTags(raw) {
-			s.html.apply(tag, false)
+		if opensRawText(raw) {
+			s.rawTextOpened = true
 		}
 	case *gmextast.TableCell:
 		fmt.Fprintf(s.out, "D%d(", node.Alignment)
+		s.rawSource(node)
 		s.inlineContent(node)
 	default:
 		s.out.WriteString(node.Kind().String() + "(")
@@ -505,16 +586,13 @@ func linesText(lines *gmtext.Segments, source []byte) string {
 	return strings.TrimSuffix(strings.TrimSuffix(text.String(), "\n"), "\r")
 }
 
-// inlineContent writes the inline content of a block, trimmed. The end of
-// the block closes the elements its inline HTML opened.
+// inlineContent writes the inline content of a block, trimmed.
 func (s *signatureWriter) inlineContent(parent gmast.Node) {
 	outer := s.out
 	var inner strings.Builder
 	s.out = &inner
-	depth := len(s.html.open)
 	s.inlines(parent)
 	s.flush()
-	s.html.closeInline(depth)
 	s.out = outer
 	s.out.WriteString(strings.Trim(inner.String(), " "))
 }
@@ -529,19 +607,12 @@ func (s *signatureWriter) inline(node gmast.Node) {
 	switch node := node.(type) {
 	case *gmast.Text:
 		value := node.Value(s.source)
-		exact := s.html.exact()
 		switch {
 		case node.HardLineBreak():
 			// Renderers drop the spaces before a line break; goldmark
-			// leaves some of them in the text with GFM extensions. Where
-			// whitespace shows, what goldmark writes is kept.
-			s.text = append(s.text, value...)
-			if !exact {
-				s.text = bytes.TrimRight(s.text, " \t")
-			}
+			// leaves some of them in the text with GFM extensions.
+			s.text = bytes.TrimRight(append(s.text, value...), " \t")
 			s.token("\x00br")
-		case node.SoftLineBreak() && exact:
-			s.text = append(append(s.text, value...), '\n')
 		case node.SoftLineBreak():
 			s.text = append(append(s.text, value...), ' ')
 		default:
@@ -568,8 +639,8 @@ func (s *signatureWriter) inline(node gmast.Node) {
 			raw.Write(segment.Value(s.source))
 		}
 		s.token(fmt.Sprintf("\x00html%q", raw.String()))
-		for _, tag := range scanHTMLTags(raw.String()) {
-			s.html.apply(tag, true)
+		if rawTextStartPattern.MatchString(raw.String()) {
+			s.rawTextOpened = true
 		}
 	case *gmast.AutoLink:
 		s.token(fmt.Sprintf("\x00autolink%q", node.URL(s.source)))
@@ -626,14 +697,9 @@ func (s *signatureWriter) token(token string) {
 }
 
 // flush writes buffered text with every run of HTML whitespace collapsed to
-// one space, or as it is inside an element that may keep whitespace.
+// one space.
 func (s *signatureWriter) flush() {
 	if len(s.text) == 0 {
-		return
-	}
-	if s.html.exact() {
-		fmt.Fprintf(s.out, "\x00exact%q", s.text)
-		s.text = s.text[:0]
 		return
 	}
 	space := false

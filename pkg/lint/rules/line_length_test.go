@@ -523,11 +523,13 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Plain text runs on until it\nshows *** stars here.\n",
 		},
 		{
+			// Without the closing ">" the text is not a tag, but at the
+			// start of a line it could begin an HTML block.
 			name:     "never starts a line with an HTML block",
-			input:    "Plain text runs on until it has <div> tags in it here.\n",
+			input:    "Plain text runs on until it has <div tags in it here.\n",
 			maxLen:   31,
 			wantFix:  true,
-			wantText: "Plain text runs on until it\nhas <div> tags in it here.\n",
+			wantText: "Plain text runs on until it\nhas <div tags in it here.\n",
 		},
 		{
 			name:     "never starts a line with a pipe",
@@ -599,11 +601,34 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Before <textarea>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</textarea> after.\n",
 		},
 		{
-			name:     "wraps before an inline element",
+			name:     "no fix for a paragraph with inline HTML",
 			input:    "Some words come first and fill the line <b>bold words here</b> after.\n",
 			maxLen:   50,
-			wantFix:  true,
-			wantText: "Some words come first and fill the\nline <b>bold words here</b> after.\n",
+			wantFix:  false,
+			wantText: "Some words come first and fill the line <b>bold words here</b> after.\n",
+		},
+		{
+			name:     "no fix for a textarea that holds literal tags",
+			input:    "Before <b><textarea>alpha </b> beta gamma delta epsilon zeta.</textarea></b> after.\n",
+			maxLen:   40,
+			wantFix:  false,
+			wantText: "Before <b><textarea>alpha </b> beta gamma delta epsilon zeta.</textarea></b> after.\n",
+		},
+		{
+			name:     "no fix for a self-closed textarea",
+			input:    "Before <textarea/>alpha beta gamma delta epsilon zeta eta theta.</textarea> after.\n",
+			maxLen:   40,
+			wantFix:  false,
+			wantText: "Before <textarea/>alpha beta gamma delta epsilon zeta eta theta.</textarea> after.\n",
+		},
+		{
+			name: "only the paragraph without inline HTML is wrapped",
+			input: "Some words come first and fill the line <b>bold words here</b> after.\n\n" +
+				"Some words come first and fill the line with plain words after.\n",
+			maxLen:  50,
+			wantFix: true,
+			wantText: "Some words come first and fill the line <b>bold words here</b> after.\n\n" +
+				"Some words come first and fill the line with plain\nwords after.\n",
 		},
 		{
 			name:     "no fix inside code",
@@ -637,6 +662,19 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Unbreakable - - - - - - - - - - - - - - - - - - - - - - end.\n",
 		},
 	})
+}
+
+// TestMaxLineLengthRule_SkipsParagraphsWithInlineHTML checks that the wrap fix
+// is never offered for a paragraph holding inline raw HTML, whose elements
+// may show the line breaks of their text, while other paragraphs stay
+// wrappable.
+func TestMaxLineLengthRule_SkipsParagraphsWithInlineHTML(t *testing.T) {
+	input := "Text with <span>an element</span> in it.\n\nPlain text only.\n"
+	snapshot, err := goldmark.New(goldmark.FlavorCommonMark).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	lines := wrappableLines(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	assert.NotContains(t, lines, 1, "the paragraph with inline HTML")
+	assert.Contains(t, lines, 3, "the paragraph without HTML")
 }
 
 // TestMaxLineLengthRule_ProtectsTaskCheckboxes checks that the wrap fix never
