@@ -3,8 +3,10 @@ package rules
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
@@ -21,196 +23,233 @@ import (
 // fixCheckOptions lists the changes a rule's fixes are meant to make beyond
 // whitespace in text, which renderers do not show.
 type fixCheckOptions struct {
-	// codeWhitespace allows whitespace changes inside code blocks and code
-	// spans, for rules that replace tabs or trailing whitespace in code.
-	codeWhitespace bool
+	// codeTabSpaces, when positive, lets a tab in a code block or code span
+	// become that many spaces, for MD010, which replaces tabs in code like
+	// markdownlint does.
+	codeTabSpaces int
 }
 
-// keepSafeFixes removes the fix from every diagnostic whose fix, applied on
-// its own to the file, would change what a renderer produces. It is the last
-// step of every fixing rule in this file set, so that a gap in a rule's own
-// safety checks cannot corrupt a document.
+// individualFixChecks is the number of fixes a rule may report in a file up
+// to which each fix is checked on its own before they are checked together.
+// Past it, fixes are checked in batches that are split until each batch
+// keeps the document unchanged, which keeps the cost of a file with many
+// fixes close to one parse per batch.
+const individualFixChecks = 16
+
+// keepSafeFixes removes the fix from every diagnostic whose fix would change
+// what a renderer produces, applied on its own or together with the other
+// fixes the rule keeps. It is the last step of every fixing rule in this file
+// set, so that a gap in a rule's own safety checks cannot corrupt a document.
+//
+// When a rule reports few fixes, each is checked on its own; with many, they
+// are checked in batches, halved until a batch passes or holds one fix. Then
+// the kept fixes are checked together, applied the way the fix engine applies
+// them; if they change the document together, they are kept one at a time
+// in document order, each only when the fixes kept before it and it still
+// leave the document unchanged.
 func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, opts fixCheckOptions) []lint.Diagnostic {
-	var check *fixCheck
+	var candidates []int
 	for idx := range diags {
-		if len(diags[idx].FixEdits) == 0 {
-			continue
+		if len(diags[idx].FixEdits) > 0 {
+			candidates = append(candidates, idx)
 		}
-		if check == nil {
-			flavor := config.FlavorCommonMark
-			if ctx.Config != nil && ctx.Config.Flavor != "" {
-				flavor = ctx.Config.Flavor
+	}
+	if len(candidates) == 0 {
+		return diags
+	}
+	flavor := config.FlavorCommonMark
+	if ctx.Config != nil && ctx.Config.Flavor != "" {
+		flavor = ctx.Config.Flavor
+	}
+	check := newFixCheck(ctx.File, flavor, opts)
+
+	var kept []int
+	if len(candidates) <= individualFixChecks {
+		for _, idx := range candidates {
+			if check.keeps(diags[idx].FixEdits) {
+				kept = append(kept, idx)
 			}
-			check = newFixCheck(ctx.File, flavor, opts)
 		}
-		if !check.keeps(diags[idx].FixEdits) {
+	} else {
+		kept = check.keptInBatches(diags, candidates)
+	}
+	if len(kept) > 1 && !check.keepsTogether(diags, kept) {
+		var together []int
+		for _, idx := range kept {
+			if check.keepsTogether(diags, append(together, idx)) {
+				together = append(together, idx)
+			}
+		}
+		kept = together
+	}
+
+	keep := make(map[int]bool, len(kept))
+	for _, idx := range kept {
+		keep[idx] = true
+	}
+	for _, idx := range candidates {
+		if !keep[idx] {
 			diags[idx].FixEdits = nil
 		}
 	}
 	return diags
 }
 
-// fixCheck verifies candidate fixes by applying each one to a copy of the
-// file, parsing the changed part again with goldmark in the configured
-// flavor, and comparing render signatures (see goldmarkSignature) before and
-// after.
-//
-// Only the top-level blocks around a fix are parsed again: the blocks it
-// touches and one more on each side, so that a change that joins blocks or
-// pulls a following block in is seen. Reference links whose definitions lie
-// outside that region read as text in both parses.
-type fixCheck struct {
-	file      *mdast.FileSnapshot
-	opts      fixCheckOptions
-	markdown  goldmark.Markdown
-	blocks    []lineSpan
-	wholeFile bool
-	baselines map[lineSpan]string
+// keptInBatches returns the fixes of a batch of diagnostics that keep the
+// document unchanged: the whole batch when it passes together, and
+// otherwise the fixes kept from each half, down to single fixes.
+func (c *fixCheck) keptInBatches(diags []lint.Diagnostic, batch []int) []int {
+	if c.keepsTogether(diags, batch) {
+		return batch
+	}
+	if len(batch) == 1 {
+		return nil
+	}
+	half := len(batch) / 2
+	// The halves share their array with the batch, so the result is a copy.
+	return slices.Concat(c.keptInBatches(diags, batch[:half]), c.keptInBatches(diags, batch[half:]))
 }
 
-// lineSpan is a range of lines, both ends included.
-type lineSpan struct {
-	first int
-	last  int
+// fixCheck verifies candidate fixes by applying them to a copy of the whole
+// file, parsing it again with goldmark, and comparing render signatures (see
+// fixCheck.signatures) before and after. The file is parsed in the
+// configured flavor and, when that is CommonMark, in GFM too, because most
+// Markdown is also read on GitHub.
+//
+// The check reads the complete document, so it sees the effects a fix has
+// far from the text it changes: a link reference definition that links
+// elsewhere use, the anchor of a heading that a fragment link points to,
+// front matter that starts or ends.
+type fixCheck struct {
+	content   []byte
+	opts      fixCheckOptions
+	markdowns []goldmark.Markdown
+	baseline  []string
 }
 
 func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor, opts fixCheckOptions) *fixCheck {
-	markdown := goldmark.New()
-	if flavor == config.FlavorGFM {
-		markdown = goldmark.New(goldmark.WithExtensions(gmext.GFM))
+	markdowns := []goldmark.Markdown{goldmark.New(goldmark.WithExtensions(gmext.GFM))}
+	if flavor != config.FlavorGFM {
+		markdowns = append(markdowns, goldmark.New())
 	}
-	check := &fixCheck{
-		file:      file,
-		opts:      opts,
-		markdown:  markdown,
-		baselines: make(map[lineSpan]string),
-	}
-	if file.Root == nil {
-		check.wholeFile = true
-		return check
-	}
-	for block := file.Root.FirstChild; block != nil; block = block.Next {
-		pos := block.SourcePosition()
-		if !pos.IsValid() {
-			// Without a position the blocks around a fix cannot be found.
-			check.wholeFile = true
-			return check
-		}
-		check.blocks = append(check.blocks, lineSpan{first: pos.StartLine, last: nodeLastLine(block)})
-	}
-	return check
+	return &fixCheck{content: file.Content, opts: opts, markdowns: markdowns}
 }
 
-// keeps reports whether applying edits alone leaves the render signature of
-// the document unchanged.
+// keeps reports whether applying edits leaves the render signatures of the
+// document unchanged. The edits must not overlap.
 func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
-	if len(c.file.Lines) == 0 || len(edits) == 0 {
+	if len(edits) == 0 {
 		return false
 	}
-	sorted := append([]fix.TextEdit(nil), edits...)
-	fix.SortEdits(sorted)
-	region := c.region(sorted[0].StartOffset, sorted[len(sorted)-1].EndOffset)
-	start := c.file.Lines[region.first-1].StartOffset
-	end := len(c.file.Content)
-	if region.last < len(c.file.Lines) {
-		end = c.file.Lines[region.last].StartOffset
+	prepared, err := fix.PrepareEdits(edits, len(c.content))
+	if err != nil {
+		return false
 	}
+	return c.unchanged(fix.ApplyEdits(c.content, prepared))
+}
 
-	shifted := make([]fix.TextEdit, len(sorted))
-	for idx, edit := range sorted {
-		if edit.StartOffset < start || edit.EndOffset > end || edit.StartOffset > edit.EndOffset ||
-			(idx > 0 && edit.StartOffset < sorted[idx-1].EndOffset) {
+// keepsTogether reports whether the fixes of the given diagnostics, applied
+// together the way the fix engine applies them, leave the render signatures
+// of the document unchanged.
+func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
+	var edits []fix.TextEdit
+	for _, idx := range indexes {
+		edits = append(edits, diags[idx].FixEdits...)
+	}
+	accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(c.content))
+	if err != nil {
+		return false
+	}
+	return c.unchanged(fix.ApplyEdits(c.content, accepted))
+}
+
+// unchanged reports whether changed renders like the original content.
+func (c *fixCheck) unchanged(changed []byte) bool {
+	if c.baseline == nil {
+		c.baseline = c.signatures(c.content)
+	}
+	candidate := c.signatures(changed)
+	for idx := range candidate {
+		if candidate[idx] != c.baseline[idx] {
 			return false
 		}
-		shifted[idx] = fix.TextEdit{StartOffset: edit.StartOffset - start, EndOffset: edit.EndOffset - start, NewText: edit.NewText}
 	}
-	original := c.file.Content[start:end]
-	changed := fix.ApplyEdits(original, shifted)
-	if region.first == 1 {
-		original, changed = c.withoutPreamble(original), c.withoutPreamble(changed)
-	}
-
-	baseline, ok := c.baselines[region]
-	if !ok {
-		baseline = c.signature(original)
-		c.baselines[region] = baseline
-	}
-	return c.signature(changed) == baseline
+	return true
 }
 
-// withoutPreamble blanks what the parser leaves out at the start of a file:
-// a byte order mark and the front matter lines.
-func (c *fixCheck) withoutPreamble(text []byte) []byte {
-	text = bytes.TrimPrefix(text, []byte("\xEF\xBB\xBF"))
-	if c.file.FrontMatterLines == 0 {
-		return text
-	}
-	blanked := bytes.Clone(text)
-	lines := 0
-	for idx := 0; idx < len(blanked) && lines < c.file.FrontMatterLines; idx++ {
-		switch blanked[idx] {
-		case '\n':
-			lines++
-		case '\r':
-		default:
-			blanked[idx] = ' '
+// signatures returns the render signature of content for each parser: its
+// front matter, kept as written, and the signature of the Markdown after it
+// (see goldmarkSignature). A byte order mark is left out, as the parser
+// leaves it out, and the front matter lines are blanked before parsing.
+func (c *fixCheck) signatures(content []byte) []string {
+	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
+	frontMatter := frontMatterLength(content)
+	source := bytes.Clone(content)
+	for idx := range frontMatter {
+		if source[idx] != '\n' && source[idx] != '\r' {
+			source[idx] = ' '
 		}
 	}
-	return blanked
+	signatures := make([]string, len(c.markdowns))
+	for idx, markdown := range c.markdowns {
+		doc := markdown.Parser().Parse(gmtext.NewReader(source))
+		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source, c.opts)
+	}
+	return signatures
 }
 
-// signature parses text and returns its render signature.
-func (c *fixCheck) signature(text []byte) string {
-	doc := c.markdown.Parser().Parse(gmtext.NewReader(text))
-	return goldmarkSignature(doc, text, c.opts)
-}
+// The lines that open and close YAML and TOML front matter.
+const (
+	yamlFrontMatterFence = "---"
+	tomlFrontMatterFence = "+++"
+)
 
-// region returns the lines to parse again for edits between two offsets:
-// the top-level blocks they touch, or the blocks around them when they fall
-// between blocks, and one more block on each side. A region that reaches the
-// first or last block extends to the start or end of the file.
-func (c *fixCheck) region(startOffset, endOffset int) lineSpan {
-	whole := lineSpan{first: 1, last: len(c.file.Lines)}
-	if c.wholeFile || len(c.blocks) == 0 {
-		return whole
+// frontMatterLength returns the number of bytes of a complete leading YAML
+// or TOML metadata block, the way the parser recognizes one: a first line of
+// "---", "+++" or "{", up to a closing "---" or "..." ("+++" or "}" for the
+// other two), with trailing spaces allowed on both. It returns 0 when the
+// content has no front matter.
+func frontMatterLength(content []byte) int {
+	lines := bytes.SplitAfter(content, []byte("\n"))
+	if len(lines) < 2 {
+		return 0
 	}
-	firstLine, _ := c.file.LineAt(startOffset)
-	lastLine, _ := c.file.LineAt(max(startOffset, endOffset-1))
-	if firstLine < 1 || lastLine < 1 {
-		return whole
+	trimmed := func(line []byte) string {
+		return string(bytes.TrimRight(line, " \t\r\n"))
 	}
-	// The blocks from the first one that ends on or after the first line to
-	// the last one that starts on or before the last line. When the edits
-	// fall between two blocks, the search finds them the other way round,
-	// and the region starts from the two blocks around the edits.
-	lo := sort.Search(len(c.blocks), func(idx int) bool { return c.blocks[idx].last >= firstLine })
-	hi := sort.Search(len(c.blocks), func(idx int) bool { return c.blocks[idx].first > lastLine }) - 1
-	if lo > hi {
-		lo, hi = hi, lo
+	opening := trimmed(lines[0])
+	closing := opening
+	switch opening {
+	case yamlFrontMatterFence, tomlFrontMatterFence:
+	case "{":
+		closing = "}"
+	default:
+		return 0
 	}
-	lo--
-	hi++
-
-	region := whole
-	if lo >= 0 {
-		region.first = c.blocks[lo].first
+	length := len(lines[0])
+	for _, line := range lines[1:] {
+		length += len(line)
+		text := trimmed(line)
+		if text == closing || (opening != "{" && text == "...") {
+			return length
+		}
 	}
-	if hi < len(c.blocks) {
-		region.last = c.blocks[hi].last
-	}
-	return region
+	return 0
 }
 
 // goldmarkSignature describes what a renderer produces for a document parsed
-// by goldmark: block kinds and nesting, heading levels, list kinds, start
-// numbers and tightness, code block info strings and content, raw HTML,
-// table cell alignment, and inline content with its hard breaks, emphasis,
-// links, images, code spans and task checkboxes. Runs of whitespace in text
-// and raw HTML collapse to one space, as renderers show them; code is kept
-// as written, unless opts allow whitespace changes in code.
+// by goldmark: block kinds and nesting, heading levels and the anchors GitHub
+// gives headings, list kinds, start numbers and tightness, code block info
+// strings and content, table cell alignment, and inline content with its
+// hard breaks, emphasis, links and images with their resolved destinations
+// and titles, code spans and task checkboxes. Raw HTML, code, link titles
+// and image descriptions are kept as written; runs of the whitespace HTML
+// collapses (spaces, tabs, line endings and form feeds) collapse to one
+// space in other text. Code may only differ in tabs that opts allow to
+// become spaces.
 func goldmarkSignature(doc gmast.Node, source []byte, opts fixCheckOptions) string {
 	var out strings.Builder
-	sig := signatureWriter{source: source, opts: opts, out: &out}
+	sig := signatureWriter{source: source, opts: opts, out: &out, anchors: make(map[string]int)}
 	sig.blocks(doc)
 	return out.String()
 }
@@ -219,10 +258,11 @@ func goldmarkSignature(doc gmast.Node, source []byte, opts fixCheckOptions) stri
 // that whitespace runs spanning text nodes and soft breaks collapse to one
 // space.
 type signatureWriter struct {
-	source []byte
-	opts   fixCheckOptions
-	out    *strings.Builder
-	text   []byte
+	source  []byte
+	opts    fixCheckOptions
+	out     *strings.Builder
+	text    []byte
+	anchors map[string]int
 }
 
 func (s *signatureWriter) blocks(parent gmast.Node) {
@@ -237,7 +277,7 @@ func (s *signatureWriter) block(node gmast.Node) {
 		s.out.WriteString("P(")
 		s.inlineContent(node)
 	case *gmast.Heading:
-		fmt.Fprintf(s.out, "H%d(", node.Level)
+		fmt.Fprintf(s.out, "H%d#%s(", node.Level, s.anchor(headingText(node, s.source)))
 		s.inlineContent(node)
 	case *gmast.List:
 		kind := "UL"
@@ -251,15 +291,15 @@ func (s *signatureWriter) block(node gmast.Node) {
 		if node.Info != nil {
 			info = string(node.Info.Segment.Value(s.source))
 		}
-		fmt.Fprintf(s.out, "C%q(%q", info, s.code(node.Lines()))
+		fmt.Fprintf(s.out, "C%q(%q", info, s.code(linesText(node.Lines(), s.source)))
 	case *gmast.CodeBlock:
-		fmt.Fprintf(s.out, "C(%q", s.code(node.Lines()))
+		fmt.Fprintf(s.out, "C(%q", s.code(linesText(node.Lines(), s.source)))
 	case *gmast.HTMLBlock:
 		raw := linesText(node.Lines(), s.source)
 		if node.HasClosure() {
 			raw += "\n" + strings.TrimRight(string(node.ClosureLine.Value(s.source)), "\r\n")
 		}
-		fmt.Fprintf(s.out, "B(%q", collapseLineWhitespace(raw))
+		fmt.Fprintf(s.out, "B(%q", raw)
 	case *gmextast.TableCell:
 		fmt.Fprintf(s.out, "D%d(", node.Alignment)
 		s.inlineContent(node)
@@ -270,12 +310,73 @@ func (s *signatureWriter) block(node gmast.Node) {
 	s.out.WriteString(")")
 }
 
-// code returns the content of a code block from its lines, with whitespace
-// collapsed when opts allow whitespace changes in code.
-func (s *signatureWriter) code(lines *gmtext.Segments) string {
-	code := linesText(lines, s.source)
-	if s.opts.codeWhitespace {
-		return collapseLineWhitespace(code)
+// anchor returns the anchor GitHub gives a heading with the given text: the
+// slug of the text, with "-1", "-2" and so on added to repeated slugs, the
+// way github-slugger counts them.
+func (s *signatureWriter) anchor(text string) string {
+	slug := githubSlug(text)
+	unique := slug
+	for {
+		if _, taken := s.anchors[unique]; !taken {
+			break
+		}
+		s.anchors[slug]++
+		unique = slug + "-" + strconv.Itoa(s.anchors[slug])
+	}
+	s.anchors[unique] = 0
+	return unique
+}
+
+// githubSlug returns the github-slugger slug of heading text: lowercased,
+// with every character other than letters, marks, numbers, connector
+// punctuation, spaces and hyphens removed, and each space turned into a
+// hyphen.
+func githubSlug(text string) string {
+	var slug strings.Builder
+	for _, char := range strings.ToLower(text) {
+		switch {
+		case char == ' ':
+			slug.WriteByte('-')
+		case char == '-' || unicode.IsLetter(char) || unicode.IsMark(char) || unicode.IsNumber(char) ||
+			unicode.Is(unicode.Pc, char):
+			slug.WriteRune(char)
+		}
+	}
+	return slug.String()
+}
+
+// headingText returns the text content of a heading as a renderer produces
+// it, the text that GitHub derives the anchor from: the text and code of
+// its inline content without markup, with a line break inside the heading
+// read as a line ending.
+func headingText(heading gmast.Node, source []byte) string {
+	var text strings.Builder
+	var walk func(node gmast.Node)
+	walk = func(parent gmast.Node) {
+		for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
+			switch node := node.(type) {
+			case *gmast.Text:
+				text.Write(node.Value(source))
+				if node.SoftLineBreak() || node.HardLineBreak() {
+					text.WriteByte('\n')
+				}
+			case *gmast.String:
+				text.Write(node.Value)
+			case *gmast.RawHTML, *gmast.Image:
+			default:
+				walk(node)
+			}
+		}
+	}
+	walk(heading)
+	return text.String()
+}
+
+// code returns the content of a code block or code span, with the tabs that
+// opts allow to change replaced by the spaces they may become.
+func (s *signatureWriter) code(code string) string {
+	if s.opts.codeTabSpaces > 0 {
+		return strings.ReplaceAll(code, "\t", strings.Repeat(" ", s.opts.codeTabSpaces))
 	}
 	return code
 }
@@ -302,7 +403,7 @@ func (s *signatureWriter) inlineContent(parent gmast.Node) {
 	s.inlines(parent)
 	s.flush()
 	s.out = outer
-	s.out.WriteString(strings.TrimSpace(inner.String()))
+	s.out.WriteString(strings.Trim(inner.String(), " "))
 }
 
 func (s *signatureWriter) inlines(parent gmast.Node) {
@@ -314,12 +415,17 @@ func (s *signatureWriter) inlines(parent gmast.Node) {
 func (s *signatureWriter) inline(node gmast.Node) {
 	switch node := node.(type) {
 	case *gmast.Text:
-		s.text = append(s.text, node.Value(s.source)...)
+		value := node.Value(s.source)
 		switch {
 		case node.HardLineBreak():
+			// Renderers drop the spaces before a line break; goldmark
+			// leaves some of them in the text with GFM extensions.
+			s.text = bytes.TrimRight(append(s.text, value...), " \t")
 			s.token("\x00br")
 		case node.SoftLineBreak():
-			s.text = append(s.text, ' ')
+			s.text = append(append(s.text, value...), ' ')
+		default:
+			s.text = append(s.text, value...)
 		}
 	case *gmast.String:
 		s.text = append(s.text, node.Value...)
@@ -334,27 +440,22 @@ func (s *signatureWriter) inline(node gmast.Node) {
 			}
 		}
 		content := strings.NewReplacer("\r\n", " ", "\n", " ").Replace(code.String())
-		if s.opts.codeWhitespace {
-			content = collapseWhitespace(content)
-		}
-		s.token(fmt.Sprintf("\x00code%q", content))
+		s.token(fmt.Sprintf("\x00code%q", s.code(content)))
 	case *gmast.RawHTML:
 		var raw strings.Builder
 		for idx := range node.Segments.Len() {
 			segment := node.Segments.At(idx)
 			raw.Write(segment.Value(s.source))
 		}
-		s.token(fmt.Sprintf("\x00html%q", collapseWhitespace(raw.String())))
+		s.token(fmt.Sprintf("\x00html%q", raw.String()))
 	case *gmast.AutoLink:
 		s.token(fmt.Sprintf("\x00autolink%q", node.URL(s.source)))
 	case *gmast.Link:
-		s.token(fmt.Sprintf("\x00link%q%q(", node.Destination, collapseWhitespace(string(node.Title))))
+		s.token(fmt.Sprintf("\x00link%q%q(", node.Destination, node.Title))
 		s.inlines(node)
 		s.token(")")
 	case *gmast.Image:
-		s.token(fmt.Sprintf("\x00image%q%q(", node.Destination, collapseWhitespace(string(node.Title))))
-		s.inlines(node)
-		s.token(")")
+		s.token(fmt.Sprintf("\x00image%q%q%q", node.Destination, node.Title, exactText(node, s.source)))
 	case *gmast.Emphasis:
 		s.token(fmt.Sprintf("\x00em%d(", node.Level))
 		s.inlines(node)
@@ -368,43 +469,66 @@ func (s *signatureWriter) inline(node gmast.Node) {
 	}
 }
 
+// exactText returns the source text of the inline content of a node, such
+// as the description of an image, which renderers write into an attribute
+// as it is, with each line break kept.
+func exactText(parent gmast.Node, source []byte) string {
+	var text strings.Builder
+	var walk func(node gmast.Node)
+	walk = func(parent gmast.Node) {
+		for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
+			switch node := node.(type) {
+			case *gmast.Text:
+				text.Write(node.Value(source))
+				if node.SoftLineBreak() || node.HardLineBreak() {
+					text.WriteByte('\n')
+				}
+			case *gmast.String:
+				text.Write(node.Value)
+			default:
+				fmt.Fprintf(&text, "\x00%s(", node.Kind())
+				walk(node)
+				text.WriteString(")")
+			}
+		}
+	}
+	walk(parent)
+	return text.String()
+}
+
 // token writes buffered text, collapsed, and then a token.
 func (s *signatureWriter) token(token string) {
 	s.flush()
 	s.out.WriteString(token)
 }
 
+// flush writes buffered text with every run of HTML whitespace collapsed to
+// one space.
 func (s *signatureWriter) flush() {
 	if len(s.text) == 0 {
 		return
 	}
-	text := string(s.text)
-	collapsed := collapseWhitespace(text)
-	if collapsed != "" && strings.TrimLeft(text, " \t\r\n") != text {
-		collapsed = " " + collapsed
+	space := false
+	for _, char := range s.text {
+		if isHTMLWhitespace(char) {
+			space = true
+			continue
+		}
+		if space {
+			s.out.WriteByte(' ')
+			space = false
+		}
+		s.out.WriteByte(char)
 	}
-	if strings.TrimRight(text, " \t\r\n") != text {
-		collapsed += " "
+	if space {
+		s.out.WriteByte(' ')
 	}
-	if collapsed == "" {
-		collapsed = " "
-	}
-	s.out.WriteString(collapsed)
 	s.text = s.text[:0]
 }
 
-// collapseWhitespace replaces every run of spaces, tabs and line endings
-// with one space and trims the ends.
-func collapseWhitespace(text string) string {
-	return strings.Join(strings.Fields(text), " ")
-}
-
-// collapseLineWhitespace collapses runs of spaces and tabs within each line
-// and trims each line, keeping the lines.
-func collapseLineWhitespace(text string) string {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	for idx, line := range lines {
-		lines[idx] = collapseWhitespace(line)
-	}
-	return strings.Join(lines, "\n")
+// isHTMLWhitespace reports whether a byte is whitespace that HTML collapses:
+// a space, tab, line feed, form feed or carriage return. A no-break space is
+// not.
+func isHTMLWhitespace(char byte) bool {
+	return char == ' ' || char == '\t' || char == '\n' || char == '\f' || char == '\r'
 }

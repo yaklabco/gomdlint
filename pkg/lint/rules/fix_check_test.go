@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,18 +27,25 @@ func replaceOnce(t *testing.T, input, old, replacement string) fix.TextEdit {
 
 func parseForCheck(t *testing.T, input string) *mdast.FileSnapshot {
 	t.Helper()
-	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	return parseForCheckWith(t, config.FlavorGFM, input)
+}
+
+func parseForCheckWith(t *testing.T, flavor config.Flavor, input string) *mdast.FileSnapshot {
+	t.Helper()
+	snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
 	require.NoError(t, err)
 	return snapshot
 }
 
 func TestFixCheckKeeps(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		old, new    string
-		codeChanges bool
-		want        bool
+		name     string
+		flavor   config.Flavor
+		input    string
+		old, new string
+		// codeTabSpaces is the number of spaces a tab in code may become.
+		codeTabSpaces int
+		want          bool
 	}{
 		{
 			name:  "wrapping a paragraph line",
@@ -106,11 +114,89 @@ func TestFixCheckKeeps(t *testing.T) {
 			want: false,
 		},
 		{
-			name:  "changing code whitespace where allowed",
+			name:  "replacing a tab in code where allowed",
 			input: "```\ncode\there\n```\n",
 			old:   "code\there", new: "code here",
-			codeChanges: true,
-			want:        true,
+			codeTabSpaces: 1,
+			want:          true,
+		},
+		{
+			name:  "replacing a tab in a code span where allowed",
+			input: "Some `a\tb` code.\n",
+			old:   "a\tb", new: "a  b",
+			codeTabSpaces: 2,
+			want:          true,
+		},
+		{
+			name:  "changing other code whitespace where tabs may change",
+			input: "```\ncode  here\n```\n",
+			old:   "code  here", new: "code here",
+			codeTabSpaces: 1,
+			want:          false,
+		},
+		{
+			name:  "trailing spaces in a pre HTML block",
+			input: "<pre>\nalpha   \nbeta\n</pre>\n",
+			old:   "alpha   \n", new: "alpha\n",
+			want: false,
+		},
+		{
+			name:  "tab in an HTML block",
+			input: "<div>\n\tx\n</div>\n",
+			old:   "\tx", new: " x",
+			want: false,
+		},
+		{
+			name:  "spacing in an inline HTML attribute",
+			input: "A <span title=\"a  b\">x</span> here.\n",
+			old:   "a  b", new: "a b",
+			want: false,
+		},
+		{
+			name:  "trailing space inside an inline HTML tag",
+			input: "A <a href=\"x\"  \ntitle=\"y\">z</a> here.\n",
+			old:   "\"x\"  \n", new: "\"x\"\n",
+			want: false,
+		},
+		{
+			name:  "spacing in a link title",
+			input: "A [l](/u \"a  b\") here.\n",
+			old:   "a  b", new: "a b",
+			want: false,
+		},
+		{
+			name:  "spacing in image alt text",
+			input: "An ![a  b](x.png) image.\n",
+			old:   "a  b", new: "a b",
+			want: false,
+		},
+		{
+			name:  "replacing a non-breaking space",
+			input: "a\u00a0b\n",
+			old:   "\u00a0", new: " ",
+			want: false,
+		},
+		{
+			// The definition is far from the link that uses it.
+			name:  "changing a definition used outside its blocks",
+			input: "[x][r]\n\n# A\n\n# B\n\n[r]: </a\tb>\n",
+			old:   "\t", new: " ",
+			want: false,
+		},
+		{
+			name:  "removing a trailing space after a definition",
+			input: "[x][r]\n\n# A\n\n# B\n\n[r]: /a \n",
+			old:   "/a \n", new: "/a\n",
+			want: true,
+		},
+		{
+			// GFM renderers read the checkbox even when the file is linted
+			// as CommonMark.
+			name:   "breaking a task checkbox under CommonMark",
+			flavor: config.FlavorCommonMark,
+			input:  "- [ ] task\n",
+			old:    "[ ]", new: "[\n  ]",
+			want: false,
 		},
 		{
 			name:  "changing code span spacing",
@@ -159,39 +245,105 @@ func TestFixCheckKeeps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			snapshot := parseForCheck(t, tt.input)
-			check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{codeWhitespace: tt.codeChanges})
+			flavor := tt.flavor
+			if flavor == "" {
+				flavor = config.FlavorGFM
+			}
+			snapshot := parseForCheckWith(t, flavor, tt.input)
+			check := newFixCheck(snapshot, flavor, fixCheckOptions{codeTabSpaces: tt.codeTabSpaces})
 			assert.Equal(t, tt.want, check.keeps([]fix.TextEdit{replaceOnce(t, tt.input, tt.old, tt.new)}))
 		})
 	}
 }
 
-// TestFixCheckRegion checks that a fix is judged by the blocks around it and
-// that changes reaching past them are still seen.
-func TestFixCheckRegion(t *testing.T) {
-	input := "# One\n\npara one\n\n# Two\n\n- item\n\n  in item\n\npara three\n\n# Four\n"
-	snapshot := parseForCheck(t, input)
-	check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
+// TestFixCheckWholeDocument checks the effects a fix can have far from the
+// text it changes.
+func TestFixCheckWholeDocument(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		old, new string
+		want     bool
+	}{
+		{
+			name:  "edit that pulls the next block into a list",
+			input: "# One\n\n- item\n\n  in item\n\npara three\n",
+			old:   "\npara three", new: "\n  para three",
+			want: false,
+		},
+		{
+			// GitHub turns each space into a hyphen, so the anchor of the
+			// heading and the link to it would change.
+			name:  "changing the anchor of a heading",
+			input: "# Foo  Bar\n\n# A\n\n# B\n\nSee [it](#foo--bar).\n",
+			old:   "Foo  Bar", new: "Foo Bar",
+			want: false,
+		},
+		{
+			// A tab is dropped from the anchor, a space becomes a hyphen.
+			name:  "replacing a tab in a heading",
+			input: "# Foo\tBar\n\ntext\n",
+			old:   "Foo\tBar", new: "Foo Bar",
+			want: false,
+		},
+		{
+			// The second heading takes the anchor of the first, which
+			// shifts the numbered anchors of the duplicates.
+			name:  "changing which heading gets a duplicate anchor",
+			input: "# a  b\n\n# a b\n\n# a b\n\n[x](#a-b-1)\n",
+			old:   "# a  b", new: "# a b",
+			want: false,
+		},
+		{
+			name:  "turning a thematic break into front matter",
+			input: "***\n\ntitle: abc\n\n---\n",
+			old:   "***", new: "---",
+			want: false,
+		},
+		{
+			name:  "edit at the end of the file",
+			input: "# One\n\ntext",
+			old:   "text", new: "text\n",
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := parseForCheck(t, tt.input)
+			check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
+			assert.Equal(t, tt.want, check.keeps([]fix.TextEdit{replaceOnce(t, tt.input, tt.old, tt.new)}))
+		})
+	}
 
-	t.Run("edit inside a block", func(t *testing.T) {
-		assert.True(t, check.keeps([]fix.TextEdit{replaceOnce(t, input, "para one", "para  one")}))
-	})
-	t.Run("edit between blocks", func(t *testing.T) {
-		assert.True(t, check.keeps([]fix.TextEdit{replaceOnce(t, input, "\n\n# Two", "\n\n\n# Two")}))
-	})
-	t.Run("edit that pulls the next block into a list", func(t *testing.T) {
-		assert.False(t, check.keeps([]fix.TextEdit{replaceOnce(t, input, "\npara three", "\n  para three")}))
-	})
-	t.Run("edit at the end of the file", func(t *testing.T) {
-		end := len(input)
-		assert.True(t, check.keeps([]fix.TextEdit{{StartOffset: end, EndOffset: end, NewText: "\n"}}))
-	})
 	t.Run("overlapping edits", func(t *testing.T) {
+		snapshot := parseForCheck(t, "# One\n\ntext\n")
+		check := newFixCheck(snapshot, config.FlavorGFM, fixCheckOptions{})
 		assert.False(t, check.keeps([]fix.TextEdit{
 			{StartOffset: 2, EndOffset: 5, NewText: "x"},
 			{StartOffset: 4, EndOffset: 6, NewText: "y"},
 		}))
 	})
+}
+
+// TestKeepSafeFixesChecksTheirUnion checks that fixes that are safe on their
+// own but not together are not all kept.
+func TestKeepSafeFixesChecksTheirUnion(t *testing.T) {
+	// Either thematic break may become "---", but both together make the
+	// lines between them front matter.
+	input := "***\n\ntitle: abc\n\n***\n"
+	snapshot := parseForCheck(t, input)
+	diags := []lint.Diagnostic{
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 3, NewText: "---"}}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: len(input) - 4, EndOffset: len(input) - 1, NewText: "---"}}},
+	}
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+	check := newFixCheck(snapshot, config.FlavorCommonMark, fixCheckOptions{})
+	require.True(t, check.keeps(diags[0].FixEdits), "the first fix is safe on its own")
+	require.True(t, check.keeps(diags[1].FixEdits), "the second fix is safe on its own")
+
+	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	assert.True(t, kept[0].HasFix())
+	assert.False(t, kept[1].HasFix(), "the second fix would make front matter together with the first")
 }
 
 func TestKeepSafeFixes(t *testing.T) {
@@ -208,4 +360,32 @@ func TestKeepSafeFixes(t *testing.T) {
 	assert.False(t, kept[0].HasFix(), "removing a hard break changes the rendering")
 	assert.True(t, kept[1].HasFix())
 	assert.False(t, kept[2].HasFix())
+}
+
+// TestKeepSafeFixesInBatches checks the batched path for a rule with many
+// fixes: removing the spaces of a hard break is dropped, removing a single
+// space before a soft break is kept.
+func TestKeepSafeFixesInBatches(t *testing.T) {
+	var input strings.Builder
+	var diags []lint.Diagnostic
+	var wantFix []bool
+	const pairs = 12
+	for idx := range pairs {
+		for _, line := range []string{"soft" + strconv.Itoa(idx) + " ", "hard" + strconv.Itoa(idx) + "  "} {
+			start := input.Len() + len(strings.TrimRight(line, " "))
+			input.WriteString(line + "\n")
+			diags = append(diags, lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: start, EndOffset: input.Len() - 1}}})
+			wantFix = append(wantFix, strings.HasPrefix(line, "soft"))
+		}
+	}
+	require.Greater(t, len(diags), individualFixChecks, "the batched path is taken")
+	snapshot := parseForCheck(t, input.String())
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+
+	kept := keepSafeFixes(ctx, diags, fixCheckOptions{})
+	for idx, diag := range kept {
+		// The last line ends the paragraph, so its spaces make no break.
+		want := wantFix[idx] || idx == len(kept)-1
+		assert.Equal(t, want, diag.HasFix(), "diagnostic %d", idx)
+	}
 }

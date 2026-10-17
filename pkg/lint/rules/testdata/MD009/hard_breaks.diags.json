@@ -6,7 +6,7 @@
     "column": 31,
     "message": "Trailing whitespace",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD009",

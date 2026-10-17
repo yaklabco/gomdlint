@@ -3,7 +3,7 @@
 A two space hard break  
 keeps the next line separate.
 
-A hard break with extra spaces    
+A hard break with extra spaces  
 is normalized to two spaces.
 
 A paragraph ending with two spaces is allowed.  

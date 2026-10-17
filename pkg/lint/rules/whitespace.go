@@ -106,7 +106,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		diags = append(diags, diagBuilder.Build())
 	}
 
-	return keepSafeFixes(ctx, diags, fixCheckOptions{codeWhitespace: true}), nil
+	return keepSafeFixes(ctx, diags, fixCheckOptions{}), nil
 }
 
 // trailingLineEnd says how the parser reads the line ending after trailing

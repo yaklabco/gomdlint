@@ -211,11 +211,21 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
-			name:      "code is checked when ignore_code_blocks is false",
+			// Trailing whitespace in code is part of the code, so it is
+			// reported but kept.
+			name:      "code is checked but not fixed when ignore_code_blocks is false",
 			input:     "```\ncode   \n```\n",
 			wantDiags: 1,
-			wantFix:   "```\ncode\n```\n",
+			wantFix:   "```\ncode   \n```\n",
 			config:    map[string]any{"ignore_code_blocks": false},
+		},
+		{
+			// Raw HTML is passed through as written, and <pre> keeps the
+			// spaces.
+			name:      "no fix inside a pre HTML block",
+			input:     "<pre>\nalpha   \nbeta\n</pre>\n",
+			wantDiags: 1,
+			wantFix:   "<pre>\nalpha   \nbeta\n</pre>\n",
 		},
 	}
 

@@ -1,2 +1,2 @@
-hard_breaks.input.md:6:31 warning Trailing whitespace (MD009/no-trailing-spaces)
+hard_breaks.input.md:6:31 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
 hard_breaks.input.md:11:29 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]

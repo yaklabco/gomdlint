@@ -74,6 +74,27 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   "1.  Item\n",
 		},
 		{
+			// The link far above resolves to the destination, which a space
+			// instead of the tab would change.
+			name:      "tab in a definition destination is reported without a fix",
+			input:     "[x][r]\n\n# A\n\n# B\n\n[r]: </a\tb>\n",
+			wantDiags: 1,
+			wantFix:   "[x][r]\n\n# A\n\n# B\n\n[r]: </a\tb>\n",
+		},
+		{
+			name:      "tab in an HTML block is reported without a fix",
+			input:     "<div>\n\tx\n</div>\n",
+			wantDiags: 1,
+			wantFix:   "<div>\n\tx\n</div>\n",
+		},
+		{
+			// The heading anchor drops a tab but turns a space into a hyphen.
+			name:      "tab in a heading is reported without a fix",
+			input:     "# Foo\tBar\n",
+			wantDiags: 1,
+			wantFix:   "# Foo\tBar\n",
+		},
+		{
 			// The fence and its content stay in the list item: every tab
 			// becomes the spaces that reach the column it reached.
 			name:      "tabs that put a fenced code block in a list item",
@@ -146,6 +167,10 @@ func TestHardTabsRule(t *testing.T) {
 			assert.Len(t, diags, tt.wantDiags)
 			if tt.wantFix != "" {
 				assert.Equal(t, listShape(t, tt.input), listShape(t, tt.wantFix), "the expected fix keeps the structure")
+			}
+
+			if tt.wantDiags > 0 && tt.wantFix == tt.input {
+				assert.Empty(t, filterFixableDiags(diags), "the findings are reported without a fix")
 			}
 
 			// Verify fix application.
