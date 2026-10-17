@@ -22,10 +22,9 @@ type DiffReporter struct {
 
 // NewDiffReporter creates a new diff reporter.
 func NewDiffReporter(opts Options) *DiffReporter {
-	colorEnabled := pretty.IsColorEnabled(opts.Color, opts.Writer)
 	return &DiffReporter{
 		opts:   opts,
-		styles: pretty.NewStyles(colorEnabled),
+		styles: pretty.NewStylesFor(opts.Color, opts.Writer),
 		out:    opts.Writer,
 	}
 }

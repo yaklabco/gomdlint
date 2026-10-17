@@ -66,10 +66,9 @@ type SummaryRenderer struct {
 
 // NewSummaryRenderer creates a new summary renderer.
 func NewSummaryRenderer(opts Options) *SummaryRenderer {
-	colorEnabled := pretty.IsColorEnabled(opts.Color, opts.Writer)
 	return &SummaryRenderer{
 		opts:   opts,
-		styles: pretty.NewStyles(colorEnabled),
+		styles: pretty.NewStylesFor(opts.Color, opts.Writer),
 		out:    opts.Writer,
 	}
 }

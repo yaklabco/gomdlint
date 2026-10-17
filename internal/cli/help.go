@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
@@ -40,24 +41,27 @@ type HelpStyles struct {
 	Dim lipgloss.Style
 }
 
-// NewHelpStyles creates help styles based on color mode.
+// NewHelpStyles creates help styles that render color, in basic ANSI on
+// any writer, when colorEnabled, and plain text otherwise.
 func NewHelpStyles(colorEnabled bool) *HelpStyles {
 	if !colorEnabled {
 		return newNoColorHelpStyles()
 	}
-	return newColorHelpStyles()
+	return newColorHelpStyles(pretty.NewRenderer(io.Discard, termenv.ANSI))
 }
 
-func newColorHelpStyles() *HelpStyles {
+// newColorHelpStyles creates help styles that render with renderer.
+func newColorHelpStyles(renderer *lipgloss.Renderer) *HelpStyles {
+	style := renderer.NewStyle
 	return &HelpStyles{
-		Command:     lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true),
-		Heading:     lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true),
-		Subcommand:  lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
-		Flag:        lipgloss.NewStyle().Foreground(lipgloss.Color("12")),
-		Description: lipgloss.NewStyle(),
-		Example:     lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		Alias:       lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		Dim:         lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		Command:     style().Foreground(lipgloss.Color("14")).Bold(true),
+		Heading:     style().Foreground(lipgloss.Color("11")).Bold(true),
+		Subcommand:  style().Foreground(lipgloss.Color("10")),
+		Flag:        style().Foreground(lipgloss.Color("12")),
+		Description: style(),
+		Example:     style().Foreground(lipgloss.Color("8")),
+		Alias:       style().Foreground(lipgloss.Color("8")),
+		Dim:         style().Foreground(lipgloss.Color("8")),
 	}
 }
 
@@ -81,13 +85,29 @@ type HelpFormatter struct {
 	colorEnabled bool
 }
 
-// NewHelpFormatter creates a new help formatter with the given color mode.
+// NewHelpFormatter creates a help formatter for output to writer under the
+// --color mode colorMode (see pretty.ColorProfile).
 func NewHelpFormatter(colorMode string, writer io.Writer) *HelpFormatter {
-	colorEnabled := pretty.IsColorEnabled(colorMode, writer)
-	return &HelpFormatter{
-		styles:       NewHelpStyles(colorEnabled),
-		colorEnabled: colorEnabled,
+	profile := pretty.ColorProfile(colorMode, writer)
+	if profile == termenv.Ascii {
+		return &HelpFormatter{styles: newNoColorHelpStyles()}
 	}
+	return &HelpFormatter{
+		styles:       newColorHelpStyles(pretty.NewRenderer(writer, profile)),
+		colorEnabled: true,
+	}
+}
+
+// forCommand returns the formatter for help on command: one for the
+// command's output and the --color flag as parsed. The formatter that
+// ApplyToCommand is called on is made before the flags are parsed, so it
+// only serves commands without the flag.
+func (h *HelpFormatter) forCommand(command *cobra.Command) *HelpFormatter {
+	flag := command.Flag("color")
+	if flag == nil {
+		return h
+	}
+	return NewHelpFormatter(flag.Value.String(), command.OutOrStdout())
 }
 
 // templateFuncs returns template functions for styled help rendering.
@@ -280,21 +300,18 @@ func (h *HelpFormatter) styleFlagPart(flagPart string) string {
 	return result.String()
 }
 
-// ApplyToCommand applies styled help templates to a Cobra command and all subcommands.
+// ApplyToCommand applies styled help templates to a Cobra command and all
+// subcommands. Help is styled when it is shown, for the command's output
+// and the --color flag as parsed (see forCommand).
 func (h *HelpFormatter) ApplyToCommand(cmd *cobra.Command) {
-	// Create template funcs with flag styling
-	funcs := h.templateFuncs()
-	funcs["styleFlagsUsage"] = h.styleFlagsUsage
-	funcs["join"] = strings.Join
-
 	// Set the custom templates
 	cmd.SetUsageTemplate(h.usageTemplate())
 	cmd.SetHelpTemplate(h.helpTemplate())
 
 	// Apply funcs by setting them on the usage/help functions
 	cmd.SetUsageFunc(func(command *cobra.Command) error {
-		usageTmpl := template.New("usage").Funcs(funcs)
-		usageTmpl, err := usageTmpl.Parse(h.usageTemplate())
+		formatter := h.forCommand(command)
+		usageTmpl, err := template.New("usage").Funcs(formatter.funcs()).Parse(formatter.usageTemplate())
 		if err != nil {
 			return fmt.Errorf("parse usage template: %w", err)
 		}
@@ -302,8 +319,8 @@ func (h *HelpFormatter) ApplyToCommand(cmd *cobra.Command) {
 	})
 
 	cmd.SetHelpFunc(func(command *cobra.Command, _ []string) {
-		helpTmpl := template.New("help").Funcs(funcs)
-		helpTmpl, err := helpTmpl.Parse(h.helpTemplate())
+		formatter := h.forCommand(command)
+		helpTmpl, err := template.New("help").Funcs(formatter.funcs()).Parse(formatter.helpTemplate())
 		if err != nil {
 			command.PrintErrln(err)
 			return
@@ -312,6 +329,14 @@ func (h *HelpFormatter) ApplyToCommand(cmd *cobra.Command) {
 			command.PrintErrln(err)
 		}
 	})
+}
+
+// funcs returns the template functions of the help and usage templates.
+func (h *HelpFormatter) funcs() template.FuncMap {
+	funcs := h.templateFuncs()
+	funcs["styleFlagsUsage"] = h.styleFlagsUsage
+	funcs["join"] = strings.Join
+	return funcs
 }
 
 // rpad adds padding to the right of a string.

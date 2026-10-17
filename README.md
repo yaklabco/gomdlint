@@ -115,6 +115,21 @@ Total: 7 issues (7 warnings) in 2 files
 
 Control table order with `--summary-order rules` (default) or `--summary-order files`.
 
+### Color
+
+Text, table, summary and diff output, and help, use color on a terminal.
+`--color` controls it:
+
+- `auto` (default): color only when output goes to a terminal and
+  `NO_COLOR` is not set.
+- `always`: color even when output goes to a pipe or a file, and even when
+  `NO_COLOR` is set, because the flag asks for color explicitly. The colors
+  are the 16 basic ANSI colors, which every color terminal and `less -R`
+  show.
+- `never`: no color.
+
+JSON and SARIF output never contain color.
+
 ## Rule Identifier Format
 
 Text, table and summary output name each rule by its name. Use

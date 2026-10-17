@@ -18,10 +18,9 @@ type TextReporter struct {
 
 // NewTextReporter creates a new text reporter.
 func NewTextReporter(opts Options) *TextReporter {
-	colorEnabled := pretty.IsColorEnabled(opts.Color, opts.Writer)
 	return &TextReporter{
 		opts:   opts,
-		styles: pretty.NewStyles(colorEnabled),
+		styles: pretty.NewStylesFor(opts.Color, opts.Writer),
 		out:    opts.Writer,
 	}
 }

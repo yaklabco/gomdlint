@@ -31,8 +31,7 @@ type TableReporter struct {
 
 // NewTableReporter creates a new table reporter.
 func NewTableReporter(opts Options) *TableReporter {
-	colorEnabled := pretty.IsColorEnabled(opts.Color, opts.Writer)
-	styles := pretty.NewStyles(colorEnabled)
+	styles := pretty.NewStylesFor(opts.Color, opts.Writer)
 
 	// Try to get terminal width
 	termWidth := getTerminalWidth(opts.Writer)
@@ -40,7 +39,7 @@ func NewTableReporter(opts Options) *TableReporter {
 	return &TableReporter{
 		opts:      opts,
 		styles:    styles,
-		formatter: pretty.NewTableFormatter(styles, colorEnabled, termWidth, opts.RuleFormat),
+		formatter: pretty.NewTableFormatter(styles, styles.Colored(), termWidth, opts.RuleFormat),
 		out:       opts.Writer,
 		termWidth: termWidth,
 	}

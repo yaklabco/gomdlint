@@ -7,6 +7,13 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
+	"github.com/muesli/termenv"
+)
+
+// The values of the --color flag.
+const (
+	colorAlways = "always"
+	colorNever  = "never"
 )
 
 // Styles contains all styled renderers for CLI output.
@@ -51,59 +58,136 @@ type Styles struct {
 	// Misc
 	Dim  lipgloss.Style
 	Bold lipgloss.Style
+
+	// colored is true when the styles render color.
+	colored bool
 }
 
-// NewStyles creates a new Styles with the given color mode.
+// Colored reports whether the styles render color. Output that marks
+// things only by color must mark them another way when it is false.
+func (s *Styles) Colored() bool {
+	return s.colored
+}
+
+// NewStyles creates styles that render color, in basic ANSI on any
+// writer, when colorEnabled, and plain text otherwise. Reporters use
+// NewStylesFor, which follows the --color flag and the writer.
 func NewStyles(colorEnabled bool) *Styles {
 	if !colorEnabled {
 		return newNoColorStyles()
 	}
-	return newColorStyles()
+	return newColorStyles(NewRenderer(io.Discard, termenv.ANSI))
 }
 
-// newColorStyles creates styles with ANSI 256 colors.
-func newColorStyles() *Styles {
+// NewStylesFor returns the styles for output to writer under the --color
+// mode: "always", "never" or "auto". They render in the color profile that
+// ColorProfile chooses, and render plain text where it allows no color.
+func NewStylesFor(mode string, writer io.Writer) *Styles {
+	profile := ColorProfile(mode, writer)
+	if profile == termenv.Ascii {
+		return newNoColorStyles()
+	}
+	return newColorStyles(NewRenderer(writer, profile))
+}
+
+// NewRenderer returns a renderer for writer that renders in profile,
+// whatever writer is. Styles made with lipgloss.NewStyle render for the
+// process's standard output instead, in the profile detected for it, which
+// has no color when standard output is not a terminal.
+func NewRenderer(writer io.Writer, profile termenv.Profile) *lipgloss.Renderer {
+	renderer := lipgloss.NewRenderer(writer)
+	renderer.SetColorProfile(profile)
+	return renderer
+}
+
+// ColorProfile returns the color profile of output to writer under the
+// --color mode:
+//
+//   - "never" gives no color (termenv.Ascii).
+//   - "always" gives color whatever writer is, so piped output keeps its
+//     color: the profile that TERM and COLORTERM describe, or basic ANSI,
+//     the 16 colors every color terminal shows, where they describe none.
+//     The styles use only those 16 colors, so a richer profile renders them
+//     the same. It also gives color where NO_COLOR is set, since an
+//     explicit flag asks for color for this run, as https://no-color.org
+//     recommends.
+//   - "auto", the default and any other value, gives color only on a
+//     terminal where NO_COLOR is not set: the profile its environment
+//     describes, which may be none, for example for TERM=dumb.
+func ColorProfile(mode string, writer io.Writer) termenv.Profile {
+	switch mode {
+	case colorNever:
+		return termenv.Ascii
+	case colorAlways:
+		// Assuming a terminal makes the environment choose the profile.
+		// An explicit profile skips the NO_COLOR check of the default one.
+		described := termenv.NewOutput(writer, termenv.WithTTY(true), termenv.WithProfile(termenv.Ascii)).ColorProfile()
+		// Profiles with more colors have lower values.
+		return min(described, termenv.ANSI)
+	default:
+		if os.Getenv("NO_COLOR") != "" || !isTerminal(writer) {
+			return termenv.Ascii
+		}
+		return termenv.NewOutput(writer).EnvColorProfile()
+	}
+}
+
+// isTerminal reports whether writer is a file attached to a terminal.
+func isTerminal(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	if !ok {
+		return false
+	}
+	return isatty.IsTerminal(file.Fd()) || isatty.IsCygwinTerminal(file.Fd())
+}
+
+// newColorStyles creates styles that render with renderer. They use only
+// the 16 basic ANSI colors.
+func newColorStyles(renderer *lipgloss.Renderer) *Styles {
+	style := renderer.NewStyle
 	return &Styles{
+		colored: true,
+
 		// Severity colors
-		Error:   lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
-		Warning: lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true),
-		Info:    lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true),
+		Error:   style().Foreground(lipgloss.Color("9")).Bold(true),
+		Warning: style().Foreground(lipgloss.Color("11")).Bold(true),
+		Info:    style().Foreground(lipgloss.Color("12")).Bold(true),
 
 		// Diagnostic components
-		FilePath:   lipgloss.NewStyle().Bold(true),
-		Location:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		RuleID:     lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		Message:    lipgloss.NewStyle(),
-		Suggestion: lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Italic(true),
-		SourceLine: lipgloss.NewStyle().Foreground(lipgloss.Color("7")),
-		Caret:      lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
+		FilePath:   style().Bold(true),
+		Location:   style().Foreground(lipgloss.Color("8")),
+		RuleID:     style().Foreground(lipgloss.Color("8")),
+		Message:    style(),
+		Suggestion: style().Foreground(lipgloss.Color("10")).Italic(true),
+		SourceLine: style().Foreground(lipgloss.Color("7")),
+		Caret:      style().Foreground(lipgloss.Color("9")),
 
 		// Diff styles
-		DiffHeader:  lipgloss.NewStyle().Bold(true),
-		DiffHunk:    lipgloss.NewStyle().Foreground(lipgloss.Color("14")),
-		DiffAdd:     lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
-		DiffRemove:  lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
-		DiffContext: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		DiffHeader:  style().Bold(true),
+		DiffHunk:    style().Foreground(lipgloss.Color("14")),
+		DiffAdd:     style().Foreground(lipgloss.Color("10")),
+		DiffRemove:  style().Foreground(lipgloss.Color("9")),
+		DiffContext: style().Foreground(lipgloss.Color("8")),
 
 		// Summary styles
-		SummaryTitle: lipgloss.NewStyle().Bold(true),
-		SummaryValue: lipgloss.NewStyle(),
-		Success:      lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true),
-		Failure:      lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
+		SummaryTitle: style().Bold(true),
+		SummaryValue: style(),
+		Success:      style().Foreground(lipgloss.Color("10")).Bold(true),
+		Failure:      style().Foreground(lipgloss.Color("9")).Bold(true),
 
 		// Table styles - using foreground colors for severity
-		TableHeader:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("7")),
-		TableBorder:    lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		TableErrorRow:  lipgloss.NewStyle().Foreground(lipgloss.Color("9")),  // Red text
-		TableWarnRow:   lipgloss.NewStyle().Foreground(lipgloss.Color("11")), // Yellow text
-		TableInfoRow:   lipgloss.NewStyle().Foreground(lipgloss.Color("12")), // Blue text
-		TableFixable:   lipgloss.NewStyle().Foreground(lipgloss.Color("10")), // Green
-		TableLegend:    lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true),
-		TableSeparator: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		TableHeader:    style().Bold(true).Foreground(lipgloss.Color("7")),
+		TableBorder:    style().Foreground(lipgloss.Color("8")),
+		TableErrorRow:  style().Foreground(lipgloss.Color("9")),  // Red text
+		TableWarnRow:   style().Foreground(lipgloss.Color("11")), // Yellow text
+		TableInfoRow:   style().Foreground(lipgloss.Color("12")), // Blue text
+		TableFixable:   style().Foreground(lipgloss.Color("10")), // Green
+		TableLegend:    style().Foreground(lipgloss.Color("8")).Italic(true),
+		TableSeparator: style().Foreground(lipgloss.Color("8")),
 
 		// Misc
-		Dim:  lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		Bold: lipgloss.NewStyle().Bold(true),
+		Dim:  style().Foreground(lipgloss.Color("8")),
+		Bold: style().Bold(true),
 	}
 }
 
@@ -143,24 +227,8 @@ func newNoColorStyles() *Styles {
 	}
 }
 
-// IsColorEnabled determines if color should be enabled based on mode and writer.
-// Mode values: "auto" (default), "always", "never".
-// In auto mode, color is enabled only if the writer is a TTY and NO_COLOR is not set.
+// IsColorEnabled reports whether output to writer is colored under the
+// --color mode: "auto" (default), "always" or "never". See ColorProfile.
 func IsColorEnabled(mode string, writer io.Writer) bool {
-	switch mode {
-	case "always":
-		return true
-	case "never":
-		return false
-	default: // "auto"
-		// Check NO_COLOR environment variable (https://no-color.org/)
-		if os.Getenv("NO_COLOR") != "" {
-			return false
-		}
-		// Check if output is a TTY
-		if f, ok := writer.(*os.File); ok {
-			return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
-		}
-		return false
-	}
+	return ColorProfile(mode, writer) != termenv.Ascii
 }
