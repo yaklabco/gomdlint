@@ -1,15 +1,15 @@
     FILE           LOC    MESSAGE                             RULE                               
 ====================================================================================================
  W  README.md      3:22   Trailing whitespace                 no-trailing-spaces                +
- W  README.md      8:19   Trailing whitespace                 no-trailing-spaces                +
  W  README.md      6:11   Heading ends with trailing punc...  no-trailing-punctuation           +
+ W  README.md      8:19   Trailing whitespace                 no-trailing-spaces                +
 ----------------------------------------------------------------------------------------------------
  E  docs/guide.md  3:1    Heading level jumped from H1 to H3  heading-increment                  
  W  docs/guide.md  5:18   Trailing whitespace                 no-trailing-spaces                +
- W  docs/guide.md  13:14  Trailing whitespace                 no-trailing-spaces                +
- W  docs/guide.md  14:12  Trailing whitespace                 no-trailing-spaces                +
  W  docs/guide.md  7:10   Heading ends with trailing punc...  no-trailing-punctuation           +
  W  docs/guide.md  11:9   Heading ends with trailing punc...  no-trailing-punctuation           +
+ W  docs/guide.md  13:14  Trailing whitespace                 no-trailing-spaces                +
+ W  docs/guide.md  14:12  Trailing whitespace                 no-trailing-spaces                +
  W  docs/guide.md  17:1   Unused reference definition [un...  link-image-reference-definitions   
 ====================================================================================================
  Legend: E = error | W = warning | + = fixable

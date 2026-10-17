@@ -390,7 +390,7 @@ sequenceDiagram
     end
 ```
 
-**Deterministic Output:** Results are collected into a map keyed by file path, then output in sorted order regardless of worker completion order.
+**Deterministic Output:** Results are collected into a map keyed by file path, then output in sorted order regardless of worker completion order. The runner also sorts each file's diagnostics by line, as markdownlint-cli2 does, then by column, rule ID and message, so every reporter lists findings in the same order. The engine reports them rule by rule.
 
 ## Error Handling
 

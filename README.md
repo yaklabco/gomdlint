@@ -115,6 +115,10 @@ Total: 7 issues (7 warnings) in 2 files
 
 Control table order with `--summary-order rules` (default) or `--summary-order files`.
 
+Every format lists findings file by file, in path order. Within a file, as
+in markdownlint-cli2, findings follow line order, then column, rule ID and
+message.
+
 ### Color
 
 Text, table, summary and diff output, and help, use color on a terminal.

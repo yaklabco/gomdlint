@@ -3,14 +3,14 @@ README.md (3 issues)
         A short introduction. 
                              ^
     Suggestion: Remove trailing whitespace
-  README.md:8:19  warning  no-trailing-spaces       Trailing whitespace
-        Run the installer. 
-                          ^
-    Suggestion: Remove trailing whitespace
   README.md:6:11  warning  no-trailing-punctuation  Heading ends with trailing punctuation ":"
         ## Install:
                   ^
     Suggestion: Remove trailing punctuation from the heading
+  README.md:8:19  warning  no-trailing-spaces       Trailing whitespace
+        Run the installer. 
+                          ^
+    Suggestion: Remove trailing whitespace
 
 docs/guide.md (7 issues)
   docs/guide.md:3:1    error    heading-increment                 Heading level jumped from H1 to H3
@@ -21,14 +21,6 @@ docs/guide.md (7 issues)
         Some detail text. 
                          ^
     Suggestion: Remove trailing whitespace
-  docs/guide.md:13:14  warning  no-trailing-spaces                Trailing whitespace
-        Use it daily. 
-                     ^
-    Suggestion: Remove trailing whitespace
-  docs/guide.md:14:12  warning  no-trailing-spaces                Trailing whitespace
-        And weekly. 
-                   ^
-    Suggestion: Remove trailing whitespace
   docs/guide.md:7:10   warning  no-trailing-punctuation           Heading ends with trailing punctuation "."
         ### Setup.
                  ^
@@ -37,6 +29,14 @@ docs/guide.md (7 issues)
         ## Usage:
                 ^
     Suggestion: Remove trailing punctuation from the heading
+  docs/guide.md:13:14  warning  no-trailing-spaces                Trailing whitespace
+        Use it daily. 
+                     ^
+    Suggestion: Remove trailing whitespace
+  docs/guide.md:14:12  warning  no-trailing-spaces                Trailing whitespace
+        And weekly. 
+                   ^
+    Suggestion: Remove trailing whitespace
   docs/guide.md:17:1   warning  link-image-reference-definitions  Unused reference definition [unused]
         [unused]: https://example.com/unused
         ^
