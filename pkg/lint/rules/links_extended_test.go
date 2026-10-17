@@ -88,8 +88,18 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 			"See <https://en.wikipedia.org/wiki/Foo_(bar)> now\n", ""},
 		{"inside parentheses", "Docs (see https://example.com/a) here\n", []position{{1, 11}},
 			"Docs (see <https://example.com/a>) here\n", ""},
+		// GitHub, markdownlint, and the parser leave an unbalanced ")" and
+		// the punctuation around it out of the link.
 		{"unbalanced parenthesis before punctuation", "Docs (see https://example.com/a). here\n", []position{{1, 11}},
-			"Docs (see <https://example.com/a>). here\n", "Docs (see https://example.com/a). here\n"},
+			"Docs (see <https://example.com/a>). here\n", ""},
+		{"unbalanced parenthesis after a path", "Root https://example.org/). Next\n", []position{{1, 6}},
+			"Root <https://example.org/>). Next\n", ""},
+		{"balanced parentheses before an unbalanced one", "(https://example.org/path_(x)).\n", []position{{1, 2}},
+			"(<https://example.org/path_(x)>).\n", ""},
+		// goldmark 1.8.6 links the punctuation that dropping an unbalanced ")"
+		// exposes (yuin/goldmark#580), so under GFM the fix is withheld.
+		{"punctuation before an unbalanced parenthesis", "(https://example.com/path.)\n", []position{{1, 2}},
+			"(<https://example.com/path>.)\n", "(https://example.com/path.)\n"},
 		{"backslash in the path", "See https://example.com/a\\b here\n", []position{{1, 5}},
 			"See https://example.com/a\\b here\n", ""},
 		{"quote that ends the literal", "See https://example.com/\"q\" now\n", []position{{1, 5}},
