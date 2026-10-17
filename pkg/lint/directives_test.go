@@ -195,6 +195,60 @@ func TestEngineConfigureFileTagsFollowMarkdownlint(t *testing.T) {
 	assert.NotEmpty(t, reportedLines(t, "<!-- markdownlint-configure-file {\"whitespace\": false} -->\n\n## Section\ntext\n", "MD022"))
 }
 
+// TestEngineDirectiveTagsInPartialRegistries lints with a registry that
+// holds the whole catalog but only one rule. A word that the catalog knows,
+// as a tag or a rule identifier, must resolve as in the full registry,
+// covering only its registered rules even when it has none. Only other
+// words fall back to the rules' own tags.
+func TestEngineDirectiveTagsInPartialRegistries(t *testing.T) {
+	const (
+		looseHeading = "# Document\ntext\n"
+		missingAlt   = "![](image.png)\n"
+		mixedBullets = "- one\n\n* two\n"
+	)
+	tests := []struct {
+		name, directive, body string
+		rule                  lint.Rule
+		want                  int
+	}{
+		// MD022 tags itself whitespace and MD045 tags itself links, but
+		// markdownlint's tags leave them out.
+		{"disable whitespace", "markdownlint-disable whitespace", looseHeading, rules.NewHeadingBlankLinesRule(), 1},
+		{"disable links", "markdownlint-disable links", missingAlt, rules.NewImageAltTextRule(), 1},
+		{"configure-file whitespace", `markdownlint-configure-file {"whitespace": false}`, looseHeading, rules.NewHeadingBlankLinesRule(), 1},
+		{"configure-file links", `markdownlint-configure-file {"links": false}`, missingAlt, rules.NewImageAltTextRule(), 1},
+		// Catalog words whose rules are not registered configure nothing.
+		{
+			"configure-file without registered rules",
+			`markdownlint-configure-file {"bullet": false, "MD004": false, "ul-style": false}`,
+			looseHeading, rules.NewHeadingBlankLinesRule(), 1,
+		},
+		// A catalog tag still covers its registered rules.
+		{"disable blank_lines", "markdownlint-disable blank_lines", looseHeading, rules.NewHeadingBlankLinesRule(), 0},
+		{"configure-file blank_lines", `markdownlint-configure-file {"blank_lines": false}`, looseHeading, rules.NewHeadingBlankLinesRule(), 0},
+		// gomdlint's former tags are not catalog words, so they fall back.
+		{"disable style", "markdownlint-disable style", mixedBullets, rules.NewUnorderedListStyleRule(), 0},
+		{"configure-file style", `markdownlint-configure-file {"style": false}`, mixedBullets, rules.NewUnorderedListStyleRule(), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := lint.NewRegistry()
+			registry.Register(tt.rule)
+			describeCatalog(registry)
+			engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(tt.body), config.NewConfig())
+			require.NoError(t, err)
+			require.Len(t, result.Diagnostics, 1, "the body must make %s report once", tt.rule.ID())
+
+			input := "<!-- " + tt.directive + " -->\n\n" + tt.body
+			result, err = engine.LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
+			require.NoError(t, err)
+			assert.Len(t, result.Diagnostics, tt.want)
+		})
+	}
+}
+
 func TestEngineConfigureFileIsFileScoped(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())

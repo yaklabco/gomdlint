@@ -33,11 +33,13 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 			content := node.Text()
 			offset := rng.StartOffset + match[0]
 			line, _ := file.LineAt(offset)
+			parameter := string(content[match[4]:match[5]])
+			ruleIDs, _ := directiveRuleIDs(parameter, registry)
 			directives = append(directives, inlineDirective{
 				line: line, offset: offset,
 				action:    strings.ToLower(string(content[match[2]:match[3]])),
-				rules:     directiveRuleIDs(string(content[match[4]:match[5]]), registry),
-				parameter: string(content[match[4]:match[5]]),
+				rules:     ruleIDs,
+				parameter: parameter,
 			})
 		}
 	}
@@ -91,8 +93,8 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 				}
 				continue
 			}
-			ids := directiveRuleIDs(key, registry)
-			if len(ids) == 0 {
+			ids, known := directiveRuleIDs(key, registry)
+			if !known {
 				return nil, fmt.Errorf("markdownlint-configure-file at line %d has unknown key %q", directive.line, key)
 			}
 			for _, id := range ids {
@@ -108,39 +110,48 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 	return result, nil
 }
 
-// directiveRuleIDs returns the IDs of the rules that the words of parameter
-// name, or of every rule when it has no words. Each word is a rule ID, name
-// or alias, or a tag, in any case, as in markdownlint. Words that name
-// nothing are ignored.
-func directiveRuleIDs(parameter string, registry *Registry) []string {
+// directiveRuleIDs returns the IDs of the registered rules that the words of
+// parameter name, or of every rule when it has no words, and whether any
+// word is known. Each word is a rule ID, name or alias, or a tag, in any
+// case, as in markdownlint. Words that are not known are ignored.
+func directiveRuleIDs(parameter string, registry *Registry) ([]string, bool) {
 	items := strings.Fields(parameter)
 	if len(items) == 0 {
-		return registry.IDs()
+		return registry.IDs(), true
 	}
 	ids := make(map[string]bool)
+	known := false
 	for _, item := range items {
-		for _, rule := range directiveRules(item, registry) {
+		rules, itemKnown := directiveRules(item, registry)
+		known = known || itemKnown
+		for _, rule := range rules {
 			ids[rule.ID()] = true
 		}
 	}
-	return slices.Sorted(maps.Keys(ids))
+	return slices.Sorted(maps.Keys(ids)), known
 }
 
-// directiveRules returns the rules that one word of a markdownlint comment
-// names: the rule it identifies and the rules its tag covers. Tags come from
-// the rules' catalog entries, which carry markdownlint's tags. A word that
-// names no rule and no catalog tag falls back to the tags that rules report
-// themselves through Rule.Tags, so that gomdlint's former tags, such as
-// style, keep working for now.
-func directiveRules(word string, registry *Registry) []Rule {
+// directiveRules returns the registered rules that one word of a
+// markdownlint comment names, and whether the word is known. The word names
+// the rule it identifies and the rules its tag covers. Tags come from the
+// rules' catalog entries, which carry markdownlint's tags. A word that is an
+// identifier or a tag in the catalog names only those rules, even when none
+// of them is registered, so that a registry holding some of the rules
+// resolves it as the full one does. Any other word falls back to the tags
+// that rules report themselves through Rule.Tags, so that gomdlint's former
+// tags, such as style, keep working for now.
+func directiveRules(word string, registry *Registry) ([]Rule, bool) {
 	rules := registry.RulesByTag(word)
-	if rule, ok := registry.Lookup(word); ok {
+	rule, isRule := registry.Lookup(word)
+	if isRule {
 		rules = append(rules, rule)
 	}
-	if len(rules) == 0 {
-		rules = registry.rulesByOwnTag(word)
+	if isRule || registry.inCatalog(word) {
+		return rules, true
 	}
-	return rules
+
+	rules = registry.rulesByOwnTag(word)
+	return rules, len(rules) > 0
 }
 
 // directiveStates computes rule enablement by original source line. File directives

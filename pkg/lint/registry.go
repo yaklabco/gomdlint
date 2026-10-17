@@ -53,6 +53,10 @@ type ruleIndex struct {
 	// Rule.Tags, to the rules.
 	ownTags map[string][]Rule
 
+	// catalog holds the IDs, names, aliases and tags of every catalog
+	// entry, whether or not its rule is registered.
+	catalog map[string]bool
+
 	// tagNames lists the keys of tags in order.
 	tagNames []string
 
@@ -192,6 +196,13 @@ func (r *Registry) rulesByOwnTag(tag string) []Rule {
 	return slices.Clone(r.lookups().ownTags[foldKey(tag)])
 }
 
+// inCatalog reports whether word is the ID, name, an alias or a tag of any
+// catalog entry the registry holds, whether or not that entry's rule is
+// registered. Matching ignores case and surrounding whitespace.
+func (r *Registry) inCatalog(word string) bool {
+	return r.lookups().catalog[foldKey(word)]
+}
+
 // Suggestion is a rule or a tag that Suggest offers in place of a key.
 type Suggestion struct {
 	// Name is the canonical name of the rule, or the tag.
@@ -323,7 +334,20 @@ func (r *Registry) buildIndex() *ruleIndex {
 		keys:    make(map[string]Rule, 2*len(ids)), // An ID and a name per rule, before aliases.
 		tags:    make(map[string][]Rule),
 		ownTags: make(map[string][]Rule),
+		catalog: make(map[string]bool),
 		rules:   make([]indexedRule, 0, len(ids)),
+	}
+
+	// The catalog's words come from every entry, registered or not, so that
+	// a word means the same in a registry that holds only some of the rules.
+	for _, meta := range r.meta {
+		for _, words := range [][]string{{meta.ID, meta.Name}, meta.Aliases, meta.Tags} {
+			for _, word := range words {
+				if key := foldKey(word); key != "" {
+					index.catalog[key] = true
+				}
+			}
+		}
 	}
 
 	// The first claim on a key wins, so claim IDs, then names, then aliases.

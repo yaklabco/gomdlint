@@ -79,7 +79,8 @@ type Rule interface {
 	// directives and migrated markdownlint configs resolve tags through the
 	// rule's catalog entry instead (RuleMeta.Tags), which carries
 	// markdownlint's tags. Directives fall back to these tags only for a
-	// word that names no rule and no catalog tag.
+	// word that names no registered rule and that no catalog entry uses as
+	// an identifier or a tag.
 	Tags() []string
 
 	// CanFix returns whether this rule can auto-fix issues.

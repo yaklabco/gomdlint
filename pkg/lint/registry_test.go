@@ -339,6 +339,28 @@ func TestRegistry_RulesByTag(t *testing.T) {
 	assert.Equal(t, []string{"MD026", "MD043"}, ruleIDs(reg.RulesByTag("headings")))
 }
 
+func TestRegistry_InCatalog(t *testing.T) {
+	reg := describedRegistry()
+
+	// Every identifier and tag of every catalog entry, registered or not.
+	for _, word := range []string{
+		"MD004", "md004", "unordered-list-style", "UL-STYLE", "bullet", " ul ", "headings",
+		"MD998", "phantom-rule", "phantom-alias",
+	} {
+		assert.True(t, reg.inCatalog(word), "word %q", word)
+	}
+
+	// The rules' own tags are not catalog words.
+	for _, word := range []string{"lists", "style", "", "no-such-word", "MD999"} {
+		assert.False(t, reg.inCatalog(word), "word %q", word)
+	}
+
+	// A registered rule without an entry adds nothing to the catalog.
+	reg.Register(&mockRule{id: "MD999", name: "undescribed", tags: []string{"custom"}})
+	assert.False(t, reg.inCatalog("MD999"))
+	assert.False(t, reg.inCatalog("custom"))
+}
+
 func TestRegistry_SuggestTypos(t *testing.T) {
 	reg := describedRegistry()
 
