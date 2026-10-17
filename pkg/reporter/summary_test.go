@@ -5,7 +5,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/clipperhouse/displaywidth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -152,4 +154,102 @@ func TestSummaryRenderer_FixableIndicator(t *testing.T) {
 	output := buf.String()
 	// The fixable rule should have an indicator
 	assert.Contains(t, output, "✓")
+}
+
+func TestSummaryRenderer_AlignsNonASCIIPaths(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never", SummaryOrder: config.SummaryOrderFiles})
+	report := &analysis.Report{
+		ByFile: []analysis.FileAnalysis{
+			{Path: "plain.md", Issues: 1, Warnings: 1},
+			{Path: "résumé.md", Issues: 1, Warnings: 1},
+			{Path: "文档/说明.md", Issues: 1, Warnings: 1},
+			{Path: "/srv/" + strings.Repeat("x", 80) + "/doc.md", Issues: 1, Warnings: 1},
+		},
+		Totals: analysis.Totals{Issues: 4, Warnings: 4, Files: 4, FilesWithIssues: 4},
+	}
+
+	require.NoError(t, renderer.Render(context.Background(), report))
+
+	lines := strings.Split(buf.String(), "\n")
+	require.Greater(t, len(lines), 7)
+	header := lines[2]
+	require.True(t, strings.HasPrefix(header, "File "), "unexpected header %q", header)
+	for _, row := range lines[4:8] {
+		assert.Equal(t, displaywidth.String(header), displaywidth.String(row), "row %q is not aligned with the header", row)
+	}
+}
+
+func TestSummaryRenderer_TruncatesLongPathsOnCharacterBoundary(t *testing.T) {
+	t.Parallel()
+
+	// A path wider than the column made of two-byte letters and of wide
+	// characters, so any byte-based cut would split one.
+	longPath := "/srv/" + strings.Repeat("é", 40) + strings.Repeat("文", 10) + "/readme.md"
+	require.Greater(t, displaywidth.String(longPath), maxFilePathLength)
+
+	var buf bytes.Buffer
+	renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never"})
+	report := &analysis.Report{
+		ByFile: []analysis.FileAnalysis{{Path: longPath, Issues: 1, Warnings: 1}},
+		Totals: analysis.Totals{Issues: 1, Warnings: 1, Files: 1, FilesWithIssues: 1},
+	}
+
+	require.NoError(t, renderer.Render(context.Background(), report))
+
+	output := buf.String()
+	assert.True(t, utf8.ValidString(output), "summary output must stay valid UTF-8")
+	assert.Contains(t, output, "…")
+	assert.Contains(t, output, "文/readme.md", "the end of the path is kept")
+}
+
+func TestSummaryRenderer_TruncatesLongRuleNamesOnCharacterBoundary(t *testing.T) {
+	t.Parallel()
+
+	// Wider than the column, and cutting it after 28 bytes would split a letter.
+	longName := "x" + strings.Repeat("é", 40)
+	require.Greater(t, displaywidth.String(longName), maxRuleNameLength)
+	require.False(t, utf8.ValidString(longName[:maxRuleNameLength]), "fixture must make a byte cut split a letter")
+	// Longer than the column in bytes but not in display width.
+	fittingName := "x" + strings.Repeat("é", 20)
+
+	var buf bytes.Buffer
+	renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never"})
+	report := &analysis.Report{
+		ByRule: []analysis.RuleAnalysis{
+			{RuleID: "XX1", RuleName: longName, Issues: 2, Warnings: 2},
+			{RuleID: "XX2", RuleName: fittingName, Issues: 1, Warnings: 1},
+		},
+		Totals: analysis.Totals{Issues: 3, Warnings: 3, Files: 1, FilesWithIssues: 1},
+	}
+
+	require.NoError(t, renderer.Render(context.Background(), report))
+
+	output := buf.String()
+	assert.True(t, utf8.ValidString(output), "summary output must stay valid UTF-8")
+
+	lines := strings.Split(output, "\n")
+	require.Greater(t, len(lines), 5)
+	header := lines[2]
+	assert.True(t, strings.HasPrefix(lines[4], "x"+strings.Repeat("é", 27)+ellipsis+" "), "unexpected row %q", lines[4])
+	assert.True(t, strings.HasPrefix(lines[5], fittingName+" "), "a name that fits is shown whole, got %q", lines[5])
+	for _, row := range lines[4:6] {
+		assert.Equal(t, displaywidth.String(header), displaywidth.String(row), "row %q is not aligned with the header", row)
+	}
+}
+
+func TestTruncateLeft(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "short.md", truncateLeft("short.md", 10), "text that fits is unchanged")
+	assert.Equal(t, "…cdef.md", truncateLeft("abcdef.md", 8))
+	assert.Equal(t, "…文档.md", truncateLeft("长长文档.md", 8), "wide characters take two cells")
+	assert.Equal(t, "…档.md", truncateLeft("长长文档.md", 7), "a wide character that does not fit is dropped whole")
+	for width := 1; width <= 12; width++ {
+		got := truncateLeft("/srv/文档/résumé.md", width)
+		assert.LessOrEqual(t, displaywidth.String(got), max(width, 1), "width %d gave %q", width, got)
+		assert.True(t, utf8.ValidString(got), "width %d gave %q", width, got)
+	}
 }

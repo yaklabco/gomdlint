@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // Options configures reporter behavior.
@@ -43,9 +44,27 @@ type Options struct {
 	// SummaryOrder controls the order of tables in summary output.
 	SummaryOrder config.SummaryOrder
 
-	// WorkingDir is the directory to make paths relative to.
-	// If empty, paths are kept as-is (typically absolute).
+	// WorkingDir is the directory paths are shown relative to. Paths of files
+	// inside it are printed relative to it and other paths stay absolute; if
+	// WorkingDir is empty, paths are kept as-is. SARIF output instead makes
+	// artifact URIs relative to the root of the git work tree that contains
+	// WorkingDir, or to WorkingDir itself outside one.
 	WorkingDir string
+
+	// ToolVersion is the gomdlint version recorded in machine-readable output
+	// (SARIF tool.driver.version). When it is empty or "dev", the main module
+	// version from the binary's build information is used, if it has one.
+	ToolVersion string
+
+	// Registry supplies rule metadata (descriptions, tags and default
+	// severities) to formats that describe rules, such as SARIF. When nil,
+	// lint.DefaultRegistry is used.
+	Registry RuleLookup
+}
+
+// RuleLookup finds a rule by its ID. *lint.Registry implements it.
+type RuleLookup interface {
+	GetByID(id string) (lint.Rule, bool)
 }
 
 // DefaultOptions returns Options with sensible defaults.

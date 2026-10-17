@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/runner"
@@ -41,7 +42,7 @@ func (r *DiffReporter) Report(_ context.Context, result *runner.Result) (int, er
 	for _, file := range result.Files {
 		if file.Error != nil {
 			fmt.Fprintf(r.out, "%s: %s\n",
-				r.styles.FilePath.Render(file.Path),
+				r.styles.FilePath.Render(display.Path(file.Path, r.opts.WorkingDir)),
 				r.styles.Error.Render(fmt.Sprintf("error: %v", file.Error)),
 			)
 			continue
@@ -78,52 +79,39 @@ func (r *DiffReporter) writeDiff(diff *fix.Diff) {
 	fmt.Fprintln(r.out, r.styles.DiffRemove.Render("--- a/"+displayPath))
 	fmt.Fprintln(r.out, r.styles.DiffAdd.Render("+++ b/"+displayPath))
 
-	// Parse and colorize the hunk content (skip the --- and +++ lines from String()).
-	lines := strings.Split(diff.String(), "\n")
-	for _, line := range lines {
-		if line == "" || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
-			continue
-		}
+	// Colorize the hunks. Every line after the file headers of String() is
+	// hunk content, even one that starts with "---" or "+++".
+	for _, line := range hunkLines(diff.String()) {
 		r.writeDiffLine(line)
 	}
 
 	fmt.Fprintln(r.out) // Blank line between files
 }
 
-// displayPath converts an absolute path to a relative path from the configured
-// working directory. It resolves symlinks on both sides to handle mount points
-// and volume aliases (e.g., /Volumes/Code vs /Users/.../Code on macOS).
-// Falls back to the original path (not just the basename) to preserve
-// directory context needed for unambiguous patch application.
+// hunkLines returns the lines of a unified diff that follow its "--- " and
+// "+++ " file header lines, without the final newline.
+func hunkLines(unified string) []string {
+	if unified == "" {
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSuffix(unified, "\n"), "\n")
+	if len(lines) >= 2 && strings.HasPrefix(lines[0], "--- ") && strings.HasPrefix(lines[1], "+++ ") {
+		lines = lines[2:]
+	}
+
+	return lines
+}
+
+// displayPath returns the path shown in the diff headers: relative to the
+// working directory when the file lies inside it (see display.Path),
+// as every other reporter shows it. A file outside the working directory keeps
+// its full path, not just its basename, so the patch still applies
+// unambiguously; the leading slash is dropped so the a/ and b/ prefixes do not
+// produce a//path.
 func (r *DiffReporter) displayPath(path string) string {
-	if !filepath.IsAbs(path) {
-		return path
-	}
-
-	workDir := r.opts.WorkingDir
-	if workDir == "" {
-		// Strip leading slash so diff prefix (a/, b/) doesn't produce a//path.
-		return strings.TrimPrefix(path, "/")
-	}
-
-	// Resolve symlinks on both sides so paths through mount points
-	// or symlinks compare correctly.
-	resolvedDir, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		resolvedDir = workDir
-	}
-	resolvedPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		resolvedPath = path
-	}
-
-	rel, err := filepath.Rel(resolvedDir, resolvedPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		// File is outside working directory — keep the full path.
-		return strings.TrimPrefix(path, "/")
-	}
-
-	return rel
+	shown := filepath.ToSlash(display.Path(path, r.opts.WorkingDir))
+	return strings.TrimPrefix(shown, "/")
 }
 
 // writeDiffLine formats a single diff line with color.
@@ -133,10 +121,6 @@ func (r *DiffReporter) writeDiffLine(line string) {
 	switch {
 	case strings.HasPrefix(line, "@@"):
 		styled = r.styles.DiffHunk.Render(line)
-	case strings.HasPrefix(line, "+++"):
-		styled = r.styles.DiffAdd.Render(line)
-	case strings.HasPrefix(line, "---"):
-		styled = r.styles.DiffRemove.Render(line)
 	case strings.HasPrefix(line, "+"):
 		styled = r.styles.DiffAdd.Render(line)
 	case strings.HasPrefix(line, "-"):

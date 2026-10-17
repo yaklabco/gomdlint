@@ -62,17 +62,20 @@ func (r *TableReporter) Report(_ context.Context, result *runner.Result) (int, e
 		return 0, nil
 	}
 
+	shown := displayResult(result, r.opts.WorkingDir)
+
 	// Use per-file or combined output based on option
 	if r.opts.PerFile {
-		r.reportPerFile(result)
+		r.reportPerFile(shown)
 	} else {
-		r.reportCombined(result)
+		r.reportCombined(shown)
 	}
 
 	return totalIssues, nil
 }
 
 // reportCombined outputs all files in a single table.
+// The result must already be in display form (see displayResult).
 func (r *TableReporter) reportCombined(result *runner.Result) {
 	// Format and print the table
 	table := r.formatter.FormatTable(result)
@@ -92,6 +95,7 @@ func (r *TableReporter) reportCombined(result *runner.Result) {
 }
 
 // reportPerFile outputs a separate table for each file with issues.
+// The result must already be in display form (see displayResult).
 func (r *TableReporter) reportPerFile(result *runner.Result) {
 	filesWithIssues := 0
 

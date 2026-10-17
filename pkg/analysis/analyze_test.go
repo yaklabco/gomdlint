@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +10,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
@@ -219,4 +221,80 @@ func TestAnalyze_ExcludeViews(t *testing.T) {
 	assert.Empty(t, report.ByFile, "byFile should be excluded")
 	assert.NotEmpty(t, report.ByRule, "byRule should be included")
 	assert.Equal(t, 1, report.Totals.Issues, "totals always computed")
+}
+
+func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("# Title\n\nÄÖÜ trail   \n")
+	result := &runner.Result{
+		Files: []runner.FileOutcome{{
+			Path: "doc.md",
+			Result: &lint.PipelineResult{
+				FileResult: &lint.FileResult{
+					Snapshot: mdast.NewFileSnapshot("doc.md", content),
+					Diagnostics: []lint.Diagnostic{{
+						RuleID:      "MD009",
+						Severity:    config.SeverityWarning,
+						StartLine:   3,
+						StartColumn: 13,
+						EndLine:     3,
+						EndColumn:   16,
+						FixEdits:    []fix.TextEdit{{StartOffset: 21, EndOffset: 24}},
+					}},
+				},
+			},
+		}},
+	}
+
+	report := Analyze(result, DefaultOptions())
+
+	require.Len(t, report.Diagnostics, 1)
+	entry := report.Diagnostics[0]
+	assert.Equal(t, 10, entry.StartColumn, "start column counts characters, not bytes")
+	assert.Equal(t, 13, entry.EndColumn, "end column counts characters, not bytes")
+	require.Len(t, entry.Fixes, 1)
+	assert.Equal(t, 21, entry.Fixes[0].StartOffset, "fix offsets stay byte offsets into the file")
+	assert.Equal(t, 24, entry.Fixes[0].EndOffset)
+}
+
+func TestAnalyze_PathsRelativeOnlyInsideWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	inside := filepath.Join(workDir, "docs", "in.md")
+	outside := filepath.Join(t.TempDir(), "out.md")
+
+	result := &runner.Result{
+		Files: []runner.FileOutcome{
+			{
+				Path: inside,
+				Result: &lint.PipelineResult{FileResult: &lint.FileResult{
+					Diagnostics: []lint.Diagnostic{{RuleID: "MD001", FilePath: inside}},
+				}},
+			},
+			{
+				Path: outside,
+				Result: &lint.PipelineResult{FileResult: &lint.FileResult{
+					Diagnostics: []lint.Diagnostic{{RuleID: "MD001", FilePath: outside}},
+				}},
+			},
+		},
+	}
+
+	opts := DefaultOptions()
+	opts.WorkingDir = workDir
+	opts.SortBy = SortByAlpha
+
+	report := Analyze(result, opts)
+
+	paths := make([]string, 0, len(report.ByFile))
+	for _, file := range report.ByFile {
+		paths = append(paths, file.Path)
+	}
+	assert.ElementsMatch(t, []string{filepath.Join("docs", "in.md"), outside}, paths)
+
+	require.Len(t, report.Diagnostics, 2)
+	assert.Equal(t, filepath.Join("docs", "in.md"), report.Diagnostics[0].FilePath)
+	assert.Equal(t, outside, report.Diagnostics[1].FilePath, "files outside the working directory keep absolute paths")
 }

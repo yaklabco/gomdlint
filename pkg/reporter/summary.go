@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/clipperhouse/displaywidth"
+
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/analysis"
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -22,26 +24,56 @@ const (
 	warnColWidth       = 8  // Width of warnings column.
 	fixableColWidth    = 8  // Width of fixable column.
 	maxRuleNameLength  = 28 // Maximum characters for rule name before truncation.
-	maxFilePathLength  = 58 // Maximum characters for file path before truncation.
+	maxFilePathLength  = 58 // Maximum display width for file path before truncation.
 	totalPartsCapacity = 2  // Expected number of parts in total summary line.
 )
 
-// padRight pads a string to the given width with spaces on the right.
+// ellipsis marks text shortened to fit a column.
+const ellipsis = "…"
+
+// padRight pads a string with spaces on the right to the given display width.
 // This must be called BEFORE applying ANSI styles.
 func padRight(s string, width int) string {
-	if len(s) >= width {
+	shown := displaywidth.String(s)
+	if shown >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", width-shown)
 }
 
-// padLeft pads a string to the given width with spaces on the left.
+// padLeft pads a string with spaces on the left to the given display width.
 // This must be called BEFORE applying ANSI styles.
 func padLeft(s string, width int) string {
-	if len(s) >= width {
+	shown := displaywidth.String(s)
+	if shown >= width {
 		return s
 	}
-	return strings.Repeat(" ", width-len(s)) + s
+	return strings.Repeat(" ", width-shown) + s
+}
+
+// truncateLeft shortens text to at most maxWidth display cells by replacing
+// its beginning with an ellipsis, so the end of a path (the file name) stays
+// visible. It drops whole grapheme clusters and never splits a character.
+func truncateLeft(text string, maxWidth int) string {
+	if displaywidth.String(text) <= maxWidth {
+		return text
+	}
+
+	var starts, widths []int
+	graphemes := displaywidth.StringGraphemes(text)
+	for offset := 0; graphemes.Next(); offset += len(graphemes.Value()) {
+		starts = append(starts, offset)
+		widths = append(widths, graphemes.Width())
+	}
+
+	budget := maxWidth - displaywidth.String(ellipsis)
+	keepFrom := len(text)
+	for idx := len(starts) - 1; idx >= 0 && widths[idx] <= budget; idx-- {
+		budget -= widths[idx]
+		keepFrom = starts[idx]
+	}
+
+	return ellipsis + text[keepFrom:]
 }
 
 // SummaryRenderer formats results as aggregated summary tables.
@@ -109,8 +141,8 @@ func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
 		if ruleName == "" {
 			ruleName = rule.RuleID
 		}
-		if len(ruleName) > maxRuleNameLength {
-			ruleName = ruleName[:maxRuleNameLength] + "…"
+		if displaywidth.String(ruleName) > maxRuleNameLength {
+			ruleName = displaywidth.TruncateString(ruleName, maxRuleNameLength+displaywidth.String(ellipsis), ellipsis)
 		}
 
 		// Pad first, then style
@@ -159,10 +191,7 @@ func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis) {
 
 	// Rows
 	for _, file := range files {
-		path := file.Path
-		if len(path) > maxFilePathLength {
-			path = "…" + path[len(path)-(maxFilePathLength-1):]
-		}
+		path := truncateLeft(file.Path, maxFilePathLength)
 
 		// Pad first, then style
 		paddedPath := padRight(path, fileColWidth)
