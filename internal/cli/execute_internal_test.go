@@ -7,7 +7,24 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/runner"
 )
+
+// TestSkipWarnings covers files whose fixes the pipeline skipped: each one
+// gets a warning with its reason, whatever the output format.
+func TestSkipWarnings(t *testing.T) {
+	t.Parallel()
+
+	result := &runner.Result{Files: []runner.FileOutcome{
+		{Path: "a.md", Result: &lint.PipelineResult{}},
+		{Path: "b.md", Result: &lint.PipelineResult{Skipped: true, SkipReason: "file modified during processing"}},
+		{Path: "c.md"},
+	}}
+
+	assert.Equal(t, []string{"b.md: fixes not written: file modified during processing"}, skipWarnings(result))
+}
 
 // TestExecutePanicIsInternalError covers a command that panics. Go exits
 // a crashed program with status 2, which the exit code contract reserves

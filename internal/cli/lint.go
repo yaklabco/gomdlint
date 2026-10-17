@@ -285,6 +285,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	if _, err := rep.Report(ctx, result); err != nil {
 		return withExitCode(ExitIOError, fmt.Errorf("report results: %w", err))
 	}
+	for _, warning := range skipWarnings(result) {
+		logger.Warn(warning)
+	}
 
 	// Write memory profile if requested.
 	if flags.memprofile != "" {
@@ -339,6 +342,19 @@ func applyExplicitFlags(cmd *cobra.Command, flags *lintFlags, flagCfg, finalCfg 
 	if changed("no-default-ignores") {
 		finalCfg.DefaultIgnores = config.Bool(!flags.noDefaultIgnores)
 	}
+}
+
+// skipWarnings describes the files whose fixes the pipeline did not write,
+// with its reasons. They go to stderr, so every output format shows them.
+func skipWarnings(result *runner.Result) []string {
+	var warnings []string
+	for idx := range result.Files {
+		file := &result.Files[idx]
+		if file.Result != nil && file.Result.Skipped {
+			warnings = append(warnings, fmt.Sprintf("%s: fixes not written: %s", file.Path, file.Result.SkipReason))
+		}
+	}
+	return warnings
 }
 
 // resultError turns the outcome of a completed run into the command error

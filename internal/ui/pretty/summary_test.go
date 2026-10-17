@@ -269,6 +269,28 @@ func TestFormatSummaryOneLine_DryRun(t *testing.T) {
 	})
 }
 
+func TestFormatSummaryOneLine_SkippedFixes(t *testing.T) {
+	styles := pretty.NewStyles(false)
+
+	result := styles.FormatSummaryOneLine(runner.Stats{
+		FilesProcessed:        2,
+		FilesWithIssues:       1,
+		FilesSkipped:          1,
+		DiagnosticsTotal:      1,
+		DiagnosticsBySeverity: map[string]int{"warning": 1},
+	})
+
+	assert.Contains(t, result, "fixes not written to 1 file")
+
+	result = styles.FormatSummaryOneLine(runner.Stats{
+		FilesProcessed:        1,
+		FilesSkipped:          1,
+		DiagnosticsBySeverity: map[string]int{},
+	})
+
+	assert.Contains(t, result, "fixes not written to 1 file")
+}
+
 func TestFormatTableSummary_ErroredFiles(t *testing.T) {
 	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80)
 

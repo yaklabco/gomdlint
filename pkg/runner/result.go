@@ -126,15 +126,16 @@ func (r *Result) accumulate(outcome FileOutcome) {
 		r.Stats.FilesSkipped++
 	}
 
+	// Fixes count once written, or as pending in a dry run. A skipped file's
+	// fixes never reached the disk, so they do not count.
 	switch {
 	case outcome.Result.Written:
 		r.Stats.FilesModified++
+		r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
 	case outcome.Result.Modified && !outcome.Result.Skipped:
 		r.Stats.FilesWithPendingFixes++
+		r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
 	}
-
-	// Track total edits applied (issues fixed).
-	r.Stats.DiagnosticsFixed += outcome.Result.TotalEditsApplied
 
 	if outcome.Result.FileResult != nil {
 		diagCount := len(outcome.Result.Diagnostics)

@@ -47,6 +47,9 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 		if stats.DiagnosticsFixed > 0 {
 			msg += ", " + s.formatFixed(stats)
 		}
+		if stats.FilesSkipped > 0 {
+			msg += ", " + s.formatSkipped(stats)
+		}
 		return msg + "\n"
 	}
 
@@ -94,11 +97,21 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 		parts = append(parts, s.formatFixed(stats))
 	}
 
+	if stats.FilesSkipped > 0 {
+		parts = append(parts, s.formatSkipped(stats))
+	}
+
 	if stats.FilesErrored > 0 {
 		parts = append(parts, s.formatErrored(stats))
 	}
 
 	return strings.Join(parts, ", ") + "\n"
+}
+
+// formatSkipped describes the files whose fixes the pipeline did not write.
+func (s *Styles) formatSkipped(stats runner.Stats) string {
+	return s.Warning.Render(fmt.Sprintf("fixes not written to %d %s",
+		stats.FilesSkipped, filesNoun(stats.FilesSkipped)))
 }
 
 // formatFixed describes the fixes of a run: those written as applied, and
