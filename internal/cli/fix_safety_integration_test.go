@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -79,6 +80,73 @@ func TestFix_CRLFFileKeepsItsLineEndings(t *testing.T) {
 	assert.Equal(t, string(toCRLF(fixedLF)), string(fixedCRLF),
 		"a CRLF file must get the same fixes as its LF version")
 	assert.True(t, bytes.HasSuffix(fixedCRLF, []byte("End\r\n")), "the final newline must be CRLF")
+}
+
+// sarifInsertedTexts returns every replacement.insertedContent.text in a
+// SARIF document, wherever it sits.
+func sarifInsertedTexts(node any) []string {
+	var texts []string
+	switch value := node.(type) {
+	case map[string]any:
+		if inserted, ok := value["insertedContent"].(map[string]any); ok {
+			if text, ok := inserted["text"].(string); ok {
+				texts = append(texts, text)
+			}
+		}
+		for _, child := range value {
+			texts = append(texts, sarifInsertedTexts(child)...)
+		}
+	case []any:
+		for _, child := range value {
+			texts = append(texts, sarifInsertedTexts(child)...)
+		}
+	}
+	return texts
+}
+
+func TestFix_ReportedFixTextMatchesTheWrittenBytesInCRLFFiles(t *testing.T) {
+	t.Parallel()
+
+	// One finding: the heading needs a blank line below it.
+	const original = "# Title\r\nSome text\r\n"
+	path := filepath.Join(t.TempDir(), "doc.md")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))
+
+	var report struct {
+		Files []struct {
+			Diagnostics []struct {
+				Fixes []struct {
+					StartOffset int    `json:"startOffset"`
+					EndOffset   int    `json:"endOffset"`
+					NewText     string `json:"newText"`
+				} `json:"fixes"`
+			} `json:"diagnostics"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runLint(t, "--format", "json", path)), &report))
+	var reported []fix.TextEdit
+	for _, file := range report.Files {
+		for _, diag := range file.Diagnostics {
+			for _, edit := range diag.Fixes {
+				reported = append(reported, fix.TextEdit{StartOffset: edit.StartOffset, EndOffset: edit.EndOffset, NewText: edit.NewText})
+			}
+		}
+	}
+	require.Len(t, reported, 1, "the fixture must have exactly one fix")
+
+	var sarif any
+	require.NoError(t, json.Unmarshal([]byte(runLint(t, "--format", "sarif", path)), &sarif))
+
+	runLint(t, "--fix", path)
+	written := readFile(t, path)
+
+	prepared, err := fix.PrepareEdits(reported, len(original))
+	require.NoError(t, err)
+	assert.Equal(t, string(written), string(fix.ApplyEdits([]byte(original), prepared)),
+		"the fix reported in JSON must produce exactly the bytes --fix writes")
+	assert.Equal(t, []string{reported[0].NewText}, sarifInsertedTexts(sarif),
+		"SARIF must report the same inserted text as JSON")
+	assert.Equal(t, "\r\n", reported[0].NewText, "reported fix text uses the file's line ending")
 }
 
 func TestFix_CRLFRuleFixturesMatchTheirLFFixes(t *testing.T) {
