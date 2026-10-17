@@ -1,7 +1,5 @@
 package analysis
 
-import "github.com/yaklabco/gomdlint/pkg/config"
-
 // SortField specifies how to sort analysis results.
 type SortField string
 
@@ -24,7 +22,9 @@ func (s SortField) IsValid() bool {
 	}
 }
 
-// Options configures the Analyze function.
+// Options configures the Analyze function. Rule identifiers are not an
+// option: every view carries both the rule ID and the rule name, and
+// renderers choose how to show them.
 type Options struct {
 	// IncludeDiagnostics includes the flat diagnostics list.
 	IncludeDiagnostics bool
@@ -41,9 +41,6 @@ type Options struct {
 	// SortDesc sorts in descending order (highest first).
 	SortDesc bool
 
-	// RuleFormat controls how rule identifiers appear.
-	RuleFormat config.RuleFormat
-
 	// WorkingDir is the directory paths are shown relative to. Paths inside it
 	// become relative; paths outside it, and every path when WorkingDir is
 	// empty, are kept as-is (typically absolute).
@@ -58,6 +55,5 @@ func DefaultOptions() Options {
 		IncludeByRule:      true,
 		SortBy:             SortByCount,
 		SortDesc:           true,
-		RuleFormat:         config.RuleFormatName,
 	}
 }

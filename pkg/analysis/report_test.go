@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 func TestTotals_HasIssues(t *testing.T) {
@@ -74,7 +72,6 @@ func TestDefaultOptions(t *testing.T) {
 	assert.True(t, opts.IncludeByRule)
 	assert.Equal(t, SortByCount, opts.SortBy)
 	assert.True(t, opts.SortDesc)
-	assert.Equal(t, config.RuleFormatName, opts.RuleFormat)
 }
 
 func TestSortField_IsValid(t *testing.T) {

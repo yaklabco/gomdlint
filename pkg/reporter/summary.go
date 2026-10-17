@@ -17,16 +17,22 @@ import (
 // Table layout constants for summary output.
 // Both tables use the same width for visual consistency.
 const (
-	tableWidth         = 90 // Width of table separators (same for both tables).
-	ruleColWidth       = 30 // Width of the rule name column.
+	tableWidth         = 90 // Width of table separators (same for both tables, unless rules need more).
 	fileColWidth       = 60 // Width of the file path column (wider for relative paths).
 	numColWidth        = 7  // Width of numeric columns.
 	warnColWidth       = 8  // Width of warnings column.
 	fixableColWidth    = 8  // Width of fixable column.
-	maxRuleNameLength  = 28 // Maximum characters for rule name before truncation.
 	maxFilePathLength  = 58 // Maximum display width for file path before truncation.
 	totalPartsCapacity = 2  // Expected number of parts in total summary line.
 )
+
+// ruleHeader heads the rule column of the rules table. The column is as wide
+// as the header or the longest rule identifier, so no identifier is cut.
+const ruleHeader = "Rule"
+
+// ruleCountsWidth is the width of the rules table after its rule column: the
+// count, errors, warnings and fixable columns, each after a space.
+const ruleCountsWidth = 1 + numColWidth + 1 + numColWidth + 1 + warnColWidth + 1 + fixableColWidth
 
 // ellipsis marks text shortened to fit a column.
 const ellipsis = "…"
@@ -128,31 +134,33 @@ func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
 		return
 	}
 
+	// Rules are named the way --rule-format asks, in a column as wide as the
+	// longest identifier.
+	identifiers := make([]string, len(rules))
+	ruleWidth := displaywidth.String(ruleHeader)
+	for idx := range rules {
+		identifiers[idx] = config.FormatRuleID(r.opts.RuleFormat, rules[idx].RuleID, rules[idx].RuleName)
+		ruleWidth = max(ruleWidth, displaywidth.String(identifiers[idx]))
+	}
+	separator := r.styles.TableSeparator.Render(strings.Repeat("─", max(tableWidth, ruleWidth+ruleCountsWidth)))
+
 	fmt.Fprintln(r.out, r.styles.Bold.Render("Rules Summary"))
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.out, separator)
 
 	// Header - pad first, then style
 	fmt.Fprintf(r.out, "%s %s %s %s %s\n",
-		r.styles.TableHeader.Render(padRight("Rule", ruleColWidth)),
+		r.styles.TableHeader.Render(padRight(ruleHeader, ruleWidth)),
 		r.styles.TableHeader.Render(padLeft("Count", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Errors", numColWidth)),
 		r.styles.TableHeader.Render(padLeft("Warnings", warnColWidth)),
 		r.styles.TableHeader.Render(padLeft("Fixable", fixableColWidth)),
 	)
-	fmt.Fprintln(r.out, r.styles.TableSeparator.Render(strings.Repeat("─", tableWidth)))
+	fmt.Fprintln(r.out, separator)
 
 	// Rows
-	for _, rule := range rules {
-		ruleName := rule.RuleName
-		if ruleName == "" {
-			ruleName = rule.RuleID
-		}
-		if displaywidth.String(ruleName) > maxRuleNameLength {
-			ruleName = displaywidth.TruncateString(ruleName, maxRuleNameLength+displaywidth.String(ellipsis), ellipsis)
-		}
-
+	for idx, rule := range rules {
 		// Pad first, then style
-		paddedName := padRight(ruleName, ruleColWidth)
+		paddedName := padRight(identifiers[idx], ruleWidth)
 		var styledName string
 		switch {
 		case rule.Errors > 0:

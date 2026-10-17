@@ -45,7 +45,6 @@ func newRendererFacade(renderer Renderer, opts Options) *reporterFacade {
 			IncludeByRule:      true,
 			SortBy:             analysis.SortByCount,
 			SortDesc:           true,
-			RuleFormat:         opts.RuleFormat,
 			WorkingDir:         opts.WorkingDir,
 		},
 	}

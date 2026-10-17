@@ -79,7 +79,7 @@ func TestLintOutputGolden(t *testing.T) {
 	project := readProject(t, testdataPath(t, "project"))
 	goldenDir := testdataPath(t, "golden")
 
-	for _, format := range []string{"text", "table"} {
+	for _, format := range []string{"text", "table", "summary"} {
 		for _, ruleFormat := range []string{"name", "id", "combined"} {
 			name := "lint-" + format + "-" + ruleFormat
 			t.Run(name, func(t *testing.T) {
