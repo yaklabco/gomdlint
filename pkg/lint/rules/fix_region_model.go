@@ -514,13 +514,13 @@ func replacedDiffers(orig string, reps []replacement, whole bool) bool {
 // signature: every region holds, adds the definitions it added before,
 // leaves the anchor counts as they were and has the signature of the
 // original's part, and no list changes tightness. So the set leaves the
-// signature unchanged, and adding a fix to it changes the signature exactly
-// when one of the regions the fix needs, merged with the set's regions that
-// it meets, does not keep its part, or a list changes tightness: the regions
-// that the fix does not meet keep theirs, and since definitions and anchor
-// counts stay, so do the parts outside all regions. Adding a fix then costs
-// only the regions it meets, where checking the set and the fix as a whole
-// costs all of them.
+// signature unchanged. When a fix is added, the regions it needs are merged
+// with the set's regions they meet; the set's other regions keep their
+// parts, so the signature after the fix is the original's with the parts of
+// the merged regions and the tokens of lists that change tightness
+// replaced, and tryAdd compares exactly that. Adding a fix then costs only
+// the regions it meets, where checking the set and the fix as a whole costs
+// all of them.
 type regionState struct {
 	// edits holds the set's edits in source offsets, sorted, as the fix
 	// engine accepts them: no two overlap, and insertions at one offset,
