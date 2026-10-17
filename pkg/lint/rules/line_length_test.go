@@ -197,6 +197,54 @@ func TestMaxLineLengthRule_MarkdownlintOptions(t *testing.T) {
 			input:     "| " + spacedLine(100) + " |\n| --- |\n| cell |\n",
 			wantDiags: 1,
 		},
+		{
+			name:      "line holding only an image is not reported",
+			input:     "![" + spacedLine(90) + "](image.png)\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "line holding only a link is not reported",
+			input:     "[" + spacedLine(90) + "](https://example.com)\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "line holding an image inside emphasis is not reported",
+			input:     "*![" + spacedLine(90) + "](image.png)*\n",
+			wantDiags: 0,
+		},
+		{
+			// The space between the links is text, so the line is not
+			// a link-only line.
+			name:      "line holding two links is reported",
+			input:     "[" + spacedLine(90) + "](https://example.com/a) [b](c)\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "line holding a link and text is reported",
+			input:     "See [" + spacedLine(90) + "](https://example.com/a)\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "title line of a reference definition is not reported",
+			input:     "[id]: /target\n    \"" + spacedLine(90) + "\"\n\nSee [id].\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "destination line of a reference definition is not reported",
+			input:     "[id]:\n/" + strings.Repeat("segment/", 12) + "end \"title\"\n\nSee [id].\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "reference definition in a blockquote is not reported",
+			input:     "> [id]: /target\n>     \"" + spacedLine(90) + "\"\n>\n> See [id].\n",
+			wantDiags: 0,
+		},
+		{
+			// A definition cannot interrupt a paragraph, so this is text.
+			name:      "paragraph line that looks like a definition is reported",
+			input:     "Text\n[id]: /target " + spacedLine(90) + "\n",
+			wantDiags: 1,
+		},
 	}
 
 	for _, tt := range tests {

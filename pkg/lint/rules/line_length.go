@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -178,9 +179,7 @@ func newLineLengthScan(ctx *lint.RuleContext, opts lineLengthOptions) *lineLengt
 	}
 	if opts.compatible {
 		scan.linkOnly = markdownlintLinkOnlyLines(ctx)
-		for _, definition := range ctx.RefContext().AllDefinitions {
-			scan.definitions[definition.LineNumber] = true
-		}
+		scan.definitions = markdownlintDefinitionLines(ctx)
 	}
 	return scan
 }
@@ -273,30 +272,88 @@ func markdownlintCodeLines(ctx *lint.RuleContext) map[int]bool {
 	return lines
 }
 
+// markdownlintLinkOnlyLines returns the lines that hold a link, image or
+// autolink and no text of a paragraph, which markdownlint exempts unless
+// strict. Like markdownlint, only text that is directly in a paragraph
+// counts, including the space between two links; text inside emphasis,
+// links, code spans and HTML does not.
 func markdownlintLinkOnlyLines(ctx *lint.RuleContext) map[int]bool {
 	lines := make(map[int]bool)
-	for _, link := range ctx.Links() {
-		pos := link.SourcePosition()
-		for line := pos.StartLine; line <= pos.EndLine; line++ {
-			lines[line] = true
+	for _, links := range [][]*mdast.Node{ctx.Links(), ctx.Images()} {
+		for _, link := range links {
+			pos := link.SourcePosition()
+			for line := pos.StartLine; pos.IsValid() && line <= pos.EndLine; line++ {
+				lines[line] = true
+			}
 		}
 	}
 	for _, paragraph := range ctx.Paragraphs() {
-		_ = mdast.Walk(paragraph, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
-			if node.Inline == nil || len(node.Inline.Text) == 0 || node.Kind == mdast.NodeCodeSpan {
-				return nil
+		for child := paragraph.FirstChild; child != nil; child = child.Next {
+			if child.Kind != mdast.NodeText || child.Inline == nil || len(child.Inline.Text) == 0 {
+				continue
 			}
-			for parent := node.Parent; parent != nil && parent != paragraph; parent = parent.Parent {
-				if parent.Kind == mdast.NodeLink || parent.Kind == mdast.NodeImage {
-					return nil
-				}
+			pos := child.SourcePosition()
+			for line := pos.StartLine; pos.IsValid() && line <= pos.EndLine; line++ {
+				delete(lines, line)
 			}
-			if strings.TrimSpace(string(node.Inline.Text)) != "" {
-				delete(lines, node.SourcePosition().StartLine)
-			}
-			return nil
-		})
+		}
 	}
+	return lines
+}
+
+// definitionStartPattern matches the start of a link reference definition
+// once the container markers of its line are removed: a label in brackets
+// and a colon.
+var definitionStartPattern = regexp.MustCompile(`^ {0,3}\[(?:[^\]\\]|\\.)+\]:`)
+
+// containerMarkersPattern matches the blockquote markers and list markers at
+// the start of a line, with the whitespace around them.
+var containerMarkersPattern = regexp.MustCompile(`^(?:[ \t]*(?:>[ \t]?|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$)))*`)
+
+// markdownlintDefinitionLines returns every line of each link reference
+// definition, which markdownlint never reports. The parser keeps no node for
+// a definition, so its lines are the ones that no leaf block covers: a line
+// whose text starts with "[label]:" after its container markers, and the
+// lines that continue it, such as a title on the next line, up to a blank
+// line or a line that a block covers.
+func markdownlintDefinitionLines(ctx *lint.RuleContext) map[int]bool {
+	covered := leafBlockLines(ctx.Root)
+	lines := make(map[int]bool)
+	inDefinition := false
+	for lineNum := ctx.File.FrontMatterLines + 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+		text := lint.LineText(ctx.File, lineNum)
+		rest := text[len(containerMarkersPattern.Find(text)):]
+		if covered[lineNum] || len(bytes.TrimSpace(rest)) == 0 {
+			inDefinition = false
+			continue
+		}
+		if definitionStartPattern.Match(rest) {
+			inDefinition = true
+		}
+		if inDefinition {
+			lines[lineNum] = true
+		}
+	}
+	return lines
+}
+
+// leafBlockLines returns the lines that leaf blocks cover: paragraphs,
+// headings, code blocks, HTML blocks, thematic breaks and tables, including
+// fences and setext underlines.
+func leafBlockLines(root *mdast.Node) map[int]bool {
+	lines := make(map[int]bool)
+	_ = mdast.Walk(root, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+		switch node.Kind {
+		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeCodeBlock, mdast.NodeHTMLBlock,
+			mdast.NodeThematicBreak, mdast.NodeTable:
+			pos := node.SourcePosition()
+			for line := pos.StartLine; pos.IsValid() && line <= nodeLastLine(node); line++ {
+				lines[line] = true
+			}
+		default:
+		}
+		return nil
+	})
 	return lines
 }
 
