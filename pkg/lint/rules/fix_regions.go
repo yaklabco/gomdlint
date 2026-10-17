@@ -875,6 +875,85 @@ type regionParse struct {
 	tight bool
 }
 
+// verdict reports whether a parsed region holds and whether it cannot be
+// checked on its own.
+func (p regionParse) verdict() (bool, bool) {
+	return p.holds, p.undecided
+}
+
+// regionVerdict is what decomposeRegions needs of the outcome of a region
+// with its edits, whatever a check compares.
+type regionVerdict interface {
+	verdict() (holds, undecided bool)
+}
+
+// decomposeRegions returns the regions that placed edits, sorted, need,
+// merged and grown until each holds, with their outcomes as evaluate finds
+// them for the edits that start in each. ok is false when a region cannot be
+// checked on its own or cannot grow to hold.
+func decomposeRegions[O regionVerdict](
+	layout *docLayout, placed []placedEdit, evaluate func(region, []placedEdit) O,
+) ([]region, []O, bool) {
+	regions := make([]region, len(placed))
+	for idx, edit := range placed {
+		regions[idx] = layout.regionFor(edit)
+	}
+	regions = layout.mergeRegions(regions)
+	outcomes := make([]O, 0, len(regions))
+	for idx := 0; idx < len(regions); {
+		from, to := layout.editSpan(regions[idx])
+		outcome := evaluate(regions[idx], regionEdits(from, to, placed))
+		holds, undecided := outcome.verdict()
+		switch {
+		case undecided:
+			return nil, nil, false
+		case !holds:
+			grown := layout.grow(regions[idx])
+			if grown == regions[idx] {
+				return nil, nil, false
+			}
+			before := slices.Clone(regions)
+			regions[idx] = grown
+			regions = layout.mergeRegions(regions)
+			// Merging changes no region before the first that differs.
+			idx = firstDifference(before, regions)
+			outcomes = outcomes[:idx]
+			continue
+		}
+		outcomes = append(outcomes, outcome)
+		idx++
+	}
+	return regions, outcomes, true
+}
+
+// firstDifference returns the index of the first region that differs
+// between two sorted lists, or the length of the shorter.
+func firstDifference(a, b []region) int {
+	idx := 0
+	for idx < len(a) && idx < len(b) && a[idx] == b[idx] {
+		idx++
+	}
+	return idx
+}
+
+// listTightAfter reports whether a list is tight after edits: none of its
+// items outside its list regions makes it loose, and none of its list
+// regions does, as loosens reports for the region at an index of regions.
+func (l *docLayout) listTightAfter(list int, regions []region, loosens func(int) bool) bool {
+	model := l.lists[list]
+	loose := model.loose[len(model.loose)-1]
+	for idx, reg := range regions {
+		if !reg.isList() || reg.list != list {
+			continue
+		}
+		loose -= model.looseIn(reg)
+		if loosens(idx) {
+			return false
+		}
+	}
+	return loose == 0
+}
+
 // parseRegion parses a region with its edits, which are in source offsets
 // and sorted.
 func (l *docLayout) parseRegion(reg region, edits []fix.TextEdit) regionParse {

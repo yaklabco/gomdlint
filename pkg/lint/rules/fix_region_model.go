@@ -355,45 +355,7 @@ func (m *regionModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 // grown until each holds, with their outcomes. ok is false when a region
 // cannot be checked on its own.
 func (m *regionModel) decompose(placed []placedEdit) ([]region, []*regionOutcome, bool) {
-	regions := make([]region, len(placed))
-	for idx, edit := range placed {
-		regions[idx] = m.regionFor(edit)
-	}
-	regions = m.mergeRegions(regions)
-	outcomes := make([]*regionOutcome, 0, len(regions))
-	for idx := 0; idx < len(regions); {
-		from, to := m.editSpan(regions[idx])
-		outcome := m.evaluate(regions[idx], regionEdits(from, to, placed))
-		switch {
-		case outcome.undecided:
-			return nil, nil, false
-		case !outcome.holds:
-			grown := m.grow(regions[idx])
-			if grown == regions[idx] {
-				return nil, nil, false
-			}
-			before := slices.Clone(regions)
-			regions[idx] = grown
-			regions = m.mergeRegions(regions)
-			// Merging changes no region before the first that differs.
-			idx = firstDifference(before, regions)
-			outcomes = outcomes[:idx]
-			continue
-		}
-		outcomes = append(outcomes, outcome)
-		idx++
-	}
-	return regions, outcomes, true
-}
-
-// firstDifference returns the index of the first region that differs
-// between two sorted lists, or the length of the shorter.
-func firstDifference(a, b []region) int {
-	idx := 0
-	for idx < len(a) && idx < len(b) && a[idx] == b[idx] {
-		idx++
-	}
-	return idx
+	return decomposeRegions(m.docLayout, placed, m.evaluate)
 }
 
 // replacement replaces a range of the original signature with text.
@@ -448,21 +410,9 @@ func decideReplacements(orig string, reps []replacement) (bool, bool) {
 }
 
 // tightAfter reports whether a list is tight after edits, given the
-// outcomes of the regions: none of its items outside its list regions makes
-// it loose, and none of its list regions does.
+// outcomes of the regions.
 func (m *regionModel) tightAfter(list int, regions []region, outcomes []*regionOutcome) bool {
-	model := m.lists[list]
-	loose := model.loose[len(model.loose)-1]
-	for idx, reg := range regions {
-		if !reg.isList() || reg.list != list {
-			continue
-		}
-		loose -= model.looseIn(reg)
-		if outcomes[idx].loosens {
-			return false
-		}
-	}
-	return loose == 0
+	return m.listTightAfter(list, regions, func(idx int) bool { return outcomes[idx].loosens })
 }
 
 // sameAfterReplacements reports whether orig with the ranges of reps, which

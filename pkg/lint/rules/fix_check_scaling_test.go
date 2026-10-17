@@ -43,6 +43,20 @@ func longListDocument(items int) []byte {
 	return []byte(doc.String())
 }
 
+// codeListDocument returns a document with one loose list of items, each
+// holding a fenced shell block whose commands carry a dollar prompt and no
+// output, a finding that MD014 fixes on a line that starts a block. The code
+// and link rules check such fixes together with every other fix in their
+// top-level block.
+func codeListDocument(items int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range items {
+		fmt.Fprintf(&doc, "- Item %d shows a command:\n\n  ```\n  $ echo item%d\n  $ ls -la /tmp/item%d\n  ```\n\n", idx, idx, idx)
+	}
+	return []byte(doc.String())
+}
+
 // lintDuration lints content with every default rule through the engine,
 // as the CLI does, and returns how long it took, failing the test when it
 // takes longer than limit.
@@ -107,6 +121,9 @@ func TestLintTimeWithManyFixes(t *testing.T) {
 	t.Run("long list", func(t *testing.T) {
 		lintDuration(t, longListDocument(items), limit)
 	})
+	t.Run("code list", func(t *testing.T) {
+		lintDuration(t, codeListDocument(items), limit)
+	})
 }
 
 // TestLintTimeGrowsLinearly checks that linting a document eight times as
@@ -133,6 +150,7 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 	}{
 		{name: "sections", generate: trailingSectionsDocument},
 		{name: "long list", generate: longListDocument},
+		{name: "code list", generate: codeListDocument},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			// The fastest of a few runs is the least disturbed by other work
