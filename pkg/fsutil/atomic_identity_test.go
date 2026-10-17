@@ -162,49 +162,6 @@ func TestWriteAtomic_KeepsModeWhenRewritingHardLinkInPlace(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
-func TestReplaceFile_RefusesASymlink(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	target := filepath.Join(dir, "target.md")
-	link := filepath.Join(dir, "link.md")
-	require.NoError(t, os.WriteFile(target, []byte("old\n"), 0o644))
-	symlinkOrSkip(t, "target.md", link)
-
-	err := fsutil.ReplaceFile(context.Background(), link, []byte("new\n"), 0o644)
-	require.ErrorIs(t, err, fsutil.ErrSymlink)
-
-	got, err := os.ReadFile(target)
-	require.NoError(t, err)
-	assert.Equal(t, "old\n", string(got), "a link that appeared at a resolved path must not be followed")
-	info, err := os.Lstat(link)
-	require.NoError(t, err)
-	assert.NotZero(t, info.Mode()&os.ModeSymlink)
-	assertNoTempFiles(t, dir)
-}
-
-func TestReplaceFile_WritesFilesAndKeepsHardLinks(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	first := filepath.Join(dir, "first.md")
-	second := filepath.Join(dir, "second.md")
-	require.NoError(t, os.WriteFile(first, []byte("old\n"), 0o644))
-	hardLinkOrSkip(t, first, second)
-
-	require.NoError(t, fsutil.ReplaceFile(context.Background(), first, []byte("new\n"), 0o644))
-
-	got, err := os.ReadFile(second)
-	require.NoError(t, err)
-	assert.Equal(t, "new\n", string(got))
-
-	fresh := filepath.Join(dir, "fresh.md")
-	require.NoError(t, fsutil.ReplaceFile(context.Background(), fresh, []byte("created\n"), 0))
-	got, err = os.ReadFile(fresh)
-	require.NoError(t, err)
-	assert.Equal(t, "created\n", string(got))
-}
-
 func TestWriteAtomic_RejectsDirectory(t *testing.T) {
 	t.Parallel()
 

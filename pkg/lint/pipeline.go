@@ -215,43 +215,43 @@ func resolvePath(path string) string {
 	return filepath.Clean(path)
 }
 
-// withinRoots reports whether target, an absolute path without symbolic
-// links, lies inside one of roots. With no roots every path is inside.
-func withinRoots(target string, roots []string) bool {
-	if len(roots) == 0 {
-		return true
-	}
-	for _, root := range roots {
-		if pathWithin(target, resolvePath(root)) {
-			return true
-		}
-	}
-	return false
-}
-
-// pinTarget resolves every symbolic link in path and returns the absolute
-// path of the file that path names now, together with that file's identity.
-func pinTarget(path string) (string, os.FileInfo, error) {
+// resolveFile resolves every symbolic link in path and returns the absolute
+// path of the file that path names.
+func resolveFile(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve %s: %w", path, err)
+		return "", fmt.Errorf("resolve %s: %w", path, err)
 	}
 	target, err := filepath.Abs(resolved)
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve %s: %w", path, err)
+		return "", fmt.Errorf("resolve %s: %w", path, err)
 	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return "", nil, fmt.Errorf("stat %s: %w", target, err)
-	}
-	return target, info, nil
+	return target, nil
 }
 
-// stillNames reports whether path still resolves to target and target is
-// still the file pinned earlier.
-func stillNames(path, target string, pinned os.FileInfo) bool {
-	current, info, err := pinTarget(path)
-	return err == nil && current == target && os.SameFile(pinned, info)
+// writeRoot picks the directory that every operation on target is confined
+// to, and target's path relative to it: the write root that contains
+// target, or target's own directory when that root is the file itself or
+// no roots are set. It reports false when roots are set and none contains
+// target.
+func writeRoot(target string, roots []string) (string, string, bool) {
+	dir, name := filepath.Dir(target), filepath.Base(target)
+	if len(roots) == 0 {
+		return dir, name, true
+	}
+	for _, root := range roots {
+		resolved := resolvePath(root)
+		if !pathWithin(target, resolved) {
+			continue
+		}
+		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+			if rel, err := filepath.Rel(resolved, target); err == nil {
+				return resolved, rel, true
+			}
+		}
+		return dir, name, true
+	}
+	return dir, name, false
 }
 
 // pathWithin reports whether path is root or lies below it. Both must be
@@ -331,25 +331,36 @@ func (p *Pipeline) processFile(
 		Path: path,
 	}
 
-	// Step 1: Pin the file that path names now. Every later step reads,
-	// checks, backs up and writes this resolved path, so a symbolic link
-	// changed during processing cannot redirect the write.
-	target, pinned, err := pinTarget(path)
-	if err != nil {
-		return nil, categorizeError(err)
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("processing cancelled: %w", ctx.Err())
+	default:
 	}
 
-	// Step 2: Read and hash the original file.
-	originalContent, info, err := fsutil.ReadFile(ctx, target)
+	// Step 1: Resolve the file and pin it inside the write root that
+	// contains it. The pinned file holds the root directory and the file it
+	// read: every later check, backup and write goes through that directory
+	// handle and verifies that the name still refers to the same file, so
+	// neither a moved link nor a replaced directory or file can redirect
+	// the write.
+	target, err := resolveFile(path)
 	if err != nil {
 		return nil, categorizeError(err)
 	}
-	result.OriginalInfo = info
+	rootDir, name, inside := writeRoot(target, opts.WriteRoots)
+	pinned, err := fsutil.Pin(rootDir, name)
+	if err != nil {
+		return nil, categorizeError(err)
+	}
+	defer pinned.Close()
+
+	originalContent := pinned.Content()
+	result.OriginalInfo = pinned.Info()
 
 	// A fix may only write inside the linted paths. A file outside them is
 	// linted without fixing (in dry runs too, so a preview never shows a
 	// change that a real run would refuse).
-	outside := opts.Fix && !withinRoots(target, opts.WriteRoots)
+	outside := opts.Fix && !inside
 	lintOpts := opts
 	if outside {
 		lintOpts.Fix = false
@@ -372,43 +383,48 @@ func (p *Pipeline) processFile(
 	}
 	result.ModifiedContent = content
 
-	// Step 4: Handle dry-run mode.
+	// Step 2: Handle dry-run mode.
 	if opts.DryRun {
 		result.Diff = fix.GenerateDiff(path, originalContent, content)
 		return result, nil
 	}
 
-	// Step 5: Make sure path still names the file that was read and that
-	// nobody changed it meanwhile.
-	if !stillNames(path, target, pinned) {
-		refuseWrite(result, original, "file replaced or moved during processing")
+	// Step 3: Make sure the path given still leads to the pinned file (a
+	// link retargeted meanwhile makes it unclear which file was meant), that
+	// the name still refers to the file that was read, and that nobody
+	// changed it meanwhile.
+	if current, err := resolveFile(path); err != nil || current != target {
+		refuseWrite(result, original, fmt.Sprintf("not fixed: %s no longer leads to %s", path, target))
 		return result, nil
 	}
-	modified, err := p.checkModified(ctx, info, opts.StrictRaceDetection)
-	if err != nil {
+	if err := pinned.Check(opts.StrictRaceDetection); err != nil {
+		if errors.Is(err, fsutil.ErrFileChanged) {
+			refuseWrite(result, original, "not fixed: "+err.Error())
+			return result, nil
+		}
 		return nil, fmt.Errorf("check modified: %w", err)
-	}
-	if modified {
-		refuseWrite(result, original, "file modified during processing")
-		return result, nil
 	}
 
 	if p.beforeWrite != nil {
 		p.beforeWrite()
 	}
 
-	// Step 6: Create backup if enabled.
+	// Step 4: Back up the content that was read, if enabled.
 	if opts.Backup.Enabled {
-		created, err := fsutil.CreateBackup(ctx, target, opts.Backup)
+		created, err := pinned.Backup(opts.Backup.Mode)
 		if err != nil {
 			return nil, fmt.Errorf("create backup: %w", err)
 		}
 		result.BackupCreated = created
 	}
 
-	// Step 7: Write the modified content to the pinned file, without
-	// following a link that may have appeared there since.
-	if err := fsutil.ReplaceFile(ctx, target, content, info.Mode); err != nil {
+	// Step 5: Write the fixed content. The write checks again, at commit
+	// time, that the name still refers to the pinned file.
+	if err := pinned.Write(content); err != nil {
+		if errors.Is(err, fsutil.ErrFileChanged) {
+			refuseWrite(result, original, "not fixed: "+err.Error())
+			return result, nil
+		}
 		return nil, fmt.Errorf("%w: %w", ErrWriteFailure, err)
 	}
 	result.Written = true
@@ -620,23 +636,6 @@ func recoverPanic(ctx context.Context, path string, process func()) error {
 		return nil
 	}
 	return panicErr
-}
-
-// checkModified checks if a file has been modified since it was read.
-func (p *Pipeline) checkModified(ctx context.Context, info *fsutil.FileInfo, strict bool) (bool, error) {
-	var modified bool
-	var err error
-
-	if strict {
-		modified, err = fsutil.CheckModified(ctx, info)
-	} else {
-		modified, err = fsutil.CheckModifiedQuick(ctx, info)
-	}
-
-	if err != nil {
-		return false, fmt.Errorf("check modified: %w", err)
-	}
-	return modified, nil
 }
 
 // categorizeError wraps an error with the appropriate pipeline error type.
