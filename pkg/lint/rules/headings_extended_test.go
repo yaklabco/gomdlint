@@ -695,6 +695,12 @@ func TestHeadingStartLeftRule_Containers(t *testing.T) {
 			wantLines: []int{1},
 			wantFixed: "\uFEFF# Indented\n",
 		},
+		{
+			name:      "indented quoted heading after a byte order mark",
+			input:     "\uFEFF>  # Quoted\n",
+			wantLines: []int{1},
+			wantFixed: "\uFEFF> # Quoted\n",
+		},
 	}
 
 	for _, tt := range tests {

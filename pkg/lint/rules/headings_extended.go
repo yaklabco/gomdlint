@@ -432,8 +432,8 @@ func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 			continue
 		}
 		lineNum, _ := ctx.File.LineAt(start)
-		_, bom := lineAfterBOM(ctx.File, lineNum)
-		prefixEnd := line.StartOffset + max(bom, len(lint.ContainerPrefix(ctx.File, heading, lineNum)))
+		// The container prefix includes a byte order mark that starts the file.
+		prefixEnd := line.StartOffset + len(lint.ContainerPrefix(ctx.File, heading, lineNum))
 		if prefixEnd >= start {
 			continue
 		}
