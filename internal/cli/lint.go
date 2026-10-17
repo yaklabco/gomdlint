@@ -63,6 +63,7 @@ func newLintCommand(info BuildInfo, registry *lint.Registry) *cobra.Command {
 	}
 
 	addLintFlags(cmd, &cfg, flags)
+	registerRuleCompletions(cmd, registry)
 
 	return cmd
 }

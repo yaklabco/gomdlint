@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/internal/cli"
 )
 
 // transcript records the outcome of a command line for a golden file: the
@@ -103,6 +106,39 @@ func TestRuleNameMessagesGolden(t *testing.T) {
 			got := execute(t, tt.args...)
 
 			assertGolden(t, testdataPath("golden", tt.name+".golden"), transcript(t, got, dir))
+		})
+	}
+}
+
+// TestRuleCompletionGolden covers the shell completion of the rule flags,
+// which cobra's completion scripts request with the hidden __complete
+// command, and compares its output with testdata/golden/<name>.golden.
+// Each line is a value and its description, separated by a tab, and the
+// last line is cobra's completion directive.
+func TestRuleCompletionGolden(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		// Each rule by name, and the tags.
+		{name: "complete-disable", args: []string{"__complete", "lint", "--disable", ""}},
+		// IDs, once the word starts one.
+		{name: "complete-enable-id", args: []string{"__complete", "lint", "--enable", "MD00"}},
+		// A tag, a name and an alias that start alike.
+		{name: "complete-fix-rules-ul", args: []string{"__complete", "lint", "--fix-rules", "ul"}},
+		// The last item of a list.
+		{name: "complete-disable-list", args: []string{"__complete", "lint", "--disable", "MD009,no-t"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, nil)
+
+			got := execute(t, tt.args...)
+
+			assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+			assert.Contains(t, got.stderr, "ShellCompDirectiveNoFileComp", "rule flags never complete file names")
+			assertGolden(t, testdataPath("golden", tt.name+".golden"), got.stdout)
 		})
 	}
 }
