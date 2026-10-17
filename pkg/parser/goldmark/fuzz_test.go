@@ -43,7 +43,7 @@ func FuzzTokenize(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Tokenize should never panic.
-		tokens := Tokenize(data)
+		tokens := tokenizeContent(data)
 
 		// If we have content, we should have tokens.
 		if len(data) > 0 && len(tokens) == 0 {

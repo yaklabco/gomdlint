@@ -3,7 +3,7 @@
     "rule": "MD024",
     "name": "no-duplicate-heading",
     "line": 7,
-    "column": 6,
+    "column": 3,
     "message": "Duplicate heading text \"Overview\" (first occurrence on line 3)",
     "severity": "warning",
     "fixable": false

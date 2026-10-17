@@ -170,16 +170,9 @@ func markdownlintCodeLines(ctx *lint.RuleContext) map[int]bool {
 		if !pos.IsValid() {
 			continue
 		}
+		// The full span of a fenced code block includes both fences.
 		for line := pos.StartLine; line <= pos.EndLine; line++ {
 			lines[line] = true
-		}
-		if lint.IsFencedCodeBlock(block) {
-			fence := strings.Repeat(string(lint.CodeFenceChar(block)), lint.CodeFenceLength(block))
-			for _, line := range []int{pos.StartLine - 1, pos.EndLine + 1} {
-				if strings.HasPrefix(strings.TrimSpace(string(lint.LineContent(ctx.File, line))), fence) {
-					lines[line] = true
-				}
-			}
 		}
 	}
 	return lines

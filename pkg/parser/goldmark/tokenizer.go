@@ -12,9 +12,19 @@ type tokenizer struct {
 	pos     int
 }
 
-// Tokenize performs a single-pass tokenization of the given content.
-// Returns a slice of tokens that are contiguous, non-overlapping, and cover [0, len(content)).
-func Tokenize(content []byte) []mdast.Token {
+// tokenRegion is a range of a single line whose token kind follows from the
+// parsed document rather than from line-by-line guessing, such as a code
+// fence, a line of code or a line of an HTML block.
+type tokenRegion struct {
+	start, end int
+	kind       mdast.TokenKind
+}
+
+// tokenize classifies every byte of content. Regions, sorted by offset and
+// not overlapping, become single tokens of their kind; everything else is
+// tokenized line by line. Returns a slice of tokens that are contiguous,
+// non-overlapping, and cover [0, len(content)).
+func tokenize(content []byte, regions []tokenRegion) []mdast.Token {
 	if len(content) == 0 {
 		return nil
 	}
@@ -26,16 +36,28 @@ func Tokenize(content []byte) []mdast.Token {
 		pos:     0,
 	}
 
-	tok.tokenize()
+	for _, region := range regions {
+		if region.start < tok.pos || region.end <= region.start || region.end > len(content) {
+			continue // Overlapping or empty regions are tokenized normally.
+		}
+		tok.tokenizeUntil(region.start)
+		tok.emit(region.kind, region.start, region.end)
+		tok.pos = region.end
+	}
+	tok.tokenizeUntil(len(content))
 
 	return tok.tokens
 }
 
-// tokenize performs the main tokenization loop.
-func (t *tokenizer) tokenize() {
+// tokenizeUntil tokenizes line by line up to limit, treating limit as the
+// end of the content so no token crosses it.
+func (t *tokenizer) tokenizeUntil(limit int) {
+	full := t.content
+	t.content = full[:limit]
 	for t.pos < len(t.content) {
 		t.tokenizeLine()
 	}
+	t.content = full
 }
 
 // tokenizeLine tokenizes a single line, handling line-start constructs first.
@@ -65,19 +87,13 @@ func (t *tokenizer) tokenizeLine() {
 				t.consumeThematicBreak('_')
 				return
 			}
-		case '~', '`':
-			if t.tryCodeFence() {
-				return
-			}
 		case '=':
 			if t.trySetextUnderline('=') {
 				return
 			}
-		case '<':
-			if t.tryHTMLBlock() {
-				return
-			}
 		}
+		// Code fences, code lines and HTML blocks come from the parsed
+		// document as regions, so they are not guessed here.
 
 		// Check for ordered list.
 		if t.pos < len(t.content) && isDigit(t.content[t.pos]) {
@@ -211,119 +227,6 @@ func (t *tokenizer) consumeThematicBreak(_ byte) {
 	t.consumeNewline()
 }
 
-// tryCodeFence attempts to parse a code fence (``` or ~~~).
-func (t *tokenizer) tryCodeFence() bool {
-	start := t.pos
-	fenceChar := t.content[t.pos]
-	count := 0
-
-	for t.pos < len(t.content) && t.content[t.pos] == fenceChar {
-		t.pos++
-		count++
-	}
-
-	// Must have at least 3 fence characters.
-	if count < 3 {
-		t.pos = start
-		return false
-	}
-
-	fenceEnd := t.pos
-	t.emit(mdast.TokCodeFence, start, fenceEnd)
-
-	// Parse info string (rest of line).
-	if t.pos < len(t.content) && t.content[t.pos] != '\n' && t.content[t.pos] != '\r' {
-		infoStart := t.pos
-		for t.pos < len(t.content) && t.content[t.pos] != '\n' && t.content[t.pos] != '\r' {
-			t.pos++
-		}
-		if t.pos > infoStart {
-			t.emit(mdast.TokCodeFenceInfo, infoStart, t.pos)
-		}
-	}
-
-	t.consumeNewline()
-
-	// Consume code block content until closing fence.
-	t.consumeCodeBlockContent(fenceChar, count)
-
-	return true
-}
-
-// consumeCodeBlockContent consumes the content of a fenced code block.
-func (t *tokenizer) consumeCodeBlockContent(fenceChar byte, fenceLen int) {
-	for t.pos < len(t.content) {
-		lineStart := t.pos
-
-		// Check for closing fence.
-		// Skip leading whitespace (up to 3 spaces).
-		spaces := 0
-		for t.pos < len(t.content) && t.content[t.pos] == ' ' && spaces < 3 {
-			t.pos++
-			spaces++
-		}
-
-		if t.pos < len(t.content) && t.content[t.pos] == fenceChar {
-			fenceStart := t.pos
-			count := 0
-			for t.pos < len(t.content) && t.content[t.pos] == fenceChar {
-				t.pos++
-				count++
-			}
-
-			// Check if this is a valid closing fence.
-			if count >= fenceLen {
-				// Check rest of line is whitespace only.
-				restStart := t.pos
-				validClosing := true
-				for t.pos < len(t.content) && t.content[t.pos] != '\n' && t.content[t.pos] != '\r' {
-					if t.content[t.pos] != ' ' && t.content[t.pos] != '\t' {
-						// Not a valid closing fence.
-						validClosing = false
-						break
-					}
-					t.pos++
-				}
-
-				if validClosing {
-					// Valid closing fence.
-					if lineStart < fenceStart {
-						t.emit(mdast.TokWhitespace, lineStart, fenceStart)
-					}
-					t.emit(mdast.TokCodeFence, fenceStart, restStart)
-					if restStart < t.pos {
-						t.emit(mdast.TokWhitespace, restStart, t.pos)
-					}
-					t.consumeNewline()
-					return
-				}
-
-				// Not a valid closing fence, reset and treat as content.
-				t.pos = lineStart
-			} else {
-				// Not enough fence chars, reset and treat as content.
-				t.pos = lineStart
-			}
-		} else {
-			t.pos = lineStart
-		}
-
-		t.consumeCodeLine()
-	}
-}
-
-// consumeCodeLine consumes a line of code block content.
-func (t *tokenizer) consumeCodeLine() {
-	start := t.pos
-	for t.pos < len(t.content) && t.content[t.pos] != '\n' && t.content[t.pos] != '\r' {
-		t.pos++
-	}
-	if t.pos > start {
-		t.emit(mdast.TokText, start, t.pos)
-	}
-	t.consumeNewline()
-}
-
 // trySetextUnderline attempts to parse a setext-style heading underline.
 func (t *tokenizer) trySetextUnderline(char byte) bool {
 	start := t.pos
@@ -394,25 +297,6 @@ func (t *tokenizer) tryOrderedListMarker() bool {
 	t.pos++
 	t.emit(mdast.TokWhitespace, wsStart, t.pos)
 
-	return true
-}
-
-// tryHTMLBlock attempts to parse an HTML block.
-func (t *tokenizer) tryHTMLBlock() bool {
-	if t.pos >= len(t.content) || t.content[t.pos] != '<' {
-		return false
-	}
-
-	start := t.pos
-
-	// Simple heuristic: if it starts with <, consume until end of line.
-	// This is a simplified approach; full HTML block detection is complex.
-	for t.pos < len(t.content) && t.content[t.pos] != '\n' && t.content[t.pos] != '\r' {
-		t.pos++
-	}
-
-	t.emit(mdast.TokHTML, start, t.pos)
-	t.consumeNewline()
 	return true
 }
 

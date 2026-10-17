@@ -3,7 +3,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 4,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 3 should be 2",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 5,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 5 should be 3",
     "severity": "warning",
     "fixable": true
@@ -21,7 +21,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 10,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 1 should be 2",
     "severity": "warning",
     "fixable": true
@@ -30,7 +30,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 11,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 1 should be 3",
     "severity": "warning",
     "fixable": true
@@ -39,7 +39,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 12,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 1 should be 4",
     "severity": "warning",
     "fixable": true
@@ -48,7 +48,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 17,
-    "column": 5,
+    "column": 1,
     "message": "Ordered list item numbered 10 should be 2",
     "severity": "warning",
     "fixable": true
@@ -57,7 +57,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 18,
-    "column": 5,
+    "column": 1,
     "message": "Ordered list item numbered 20 should be 3",
     "severity": "warning",
     "fixable": true

@@ -400,3 +400,26 @@ const resource = {
 		t.Errorf("Expected line 9, got %d", def.LineNumber)
 	}
 }
+
+func TestCollect_DefinitionAfterByteOrderMark(t *testing.T) {
+	// goldmark parses the content after a byte order mark, so a definition on
+	// the first line resolves links. The collector must find it there too.
+	content := []byte("\xEF\xBB\xBF[foo]: /u\n\n[x][foo]\n")
+	file, err := goldmark.New("gfm").Parse(context.Background(), "test.md", content)
+	if err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+
+	ctx := Collect(file.Root, file)
+
+	if len(ctx.AllDefinitions) != 1 {
+		t.Fatalf("Expected 1 definition, got %d", len(ctx.AllDefinitions))
+	}
+	def := ctx.AllDefinitions[0]
+	if def.Label != "foo" || def.Destination != "/u" || def.LineNumber != 1 {
+		t.Errorf("Expected [foo]: /u on line 1, got [%s]: %s on line %d", def.Label, def.Destination, def.LineNumber)
+	}
+	if len(ctx.Usages) != 1 || ctx.Usages[0].ResolvedDefinition != def {
+		t.Errorf("Expected [x][foo] to resolve to the definition on line 1")
+	}
+}

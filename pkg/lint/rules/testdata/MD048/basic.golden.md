@@ -8,6 +8,6 @@ echo "backtick"
 
 A tilde fence:
 
-~~~
+```
 echo "tilde"
 ```

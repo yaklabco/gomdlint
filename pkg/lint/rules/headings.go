@@ -284,7 +284,7 @@ func detectHeadingStyle(file *mdast.FileSnapshot, heading *mdast.Node) HeadingSt
 		return ""
 	}
 
-	lineContent := lint.LineContent(file, pos.StartLine)
+	lineContent := lint.LineText(file, pos.StartLine)
 	if len(lineContent) == 0 {
 		return ""
 	}
@@ -380,7 +380,7 @@ func buildHeadingStyleFix(
 		return nil
 	}
 
-	lineContent := lint.LineContent(file, pos.StartLine)
+	lineContent := lint.LineText(file, pos.StartLine)
 	level := lint.HeadingLevel(heading)
 	if level == 0 {
 		return nil
@@ -399,7 +399,7 @@ func buildHeadingStyleFix(
 
 	line := file.Lines[pos.StartLine-1]
 	builder := fix.NewEditBuilder()
-	builder.ReplaceRange(line.StartOffset, line.NewlineStart, newHeading)
+	builder.ReplaceRange(line.StartOffset+lint.LineTextOffset(file, pos.StartLine), line.NewlineStart, newHeading)
 
 	return builder
 }

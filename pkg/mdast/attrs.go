@@ -8,8 +8,70 @@ type BlockAttrs struct {
 	// List holds list-specific attributes for NodeList.
 	List *ListAttrs
 
+	// ListItem holds list item attributes for NodeListItem.
+	ListItem *ListItemAttrs
+
 	// CodeBlock holds code block attributes for NodeCodeBlock.
 	CodeBlock *CodeBlockAttrs
+
+	// Table holds GFM table attributes for NodeTable, NodeTableRow and
+	// NodeTableCell.
+	Table *TableAttrs
+}
+
+// Alignment is the alignment of a GFM table column.
+type Alignment uint8
+
+// Column alignments, set by the colons of a table's delimiter row.
+const (
+	// AlignNone has no colon: "---".
+	AlignNone Alignment = iota
+	// AlignLeft has a leading colon: ":--".
+	AlignLeft
+	// AlignCenter has colons on both sides: ":-:".
+	AlignCenter
+	// AlignRight has a trailing colon: "--:".
+	AlignRight
+)
+
+// String returns the name of the alignment.
+func (a Alignment) String() string {
+	switch a {
+	case AlignLeft:
+		return "left"
+	case AlignCenter:
+		return "center"
+	case AlignRight:
+		return "right"
+	default:
+		return "none"
+	}
+}
+
+// TableAttrs holds attributes for GFM table nodes. A NodeTable sets
+// Alignments; a header NodeTableRow and its cells set Header; a
+// NodeTableCell sets Alignment.
+type TableAttrs struct {
+	// Alignments holds the alignment of each column, from the delimiter row.
+	Alignments []Alignment
+
+	// Header is true for the header row and its cells.
+	Header bool
+
+	// Alignment is the alignment of a cell's column.
+	Alignment Alignment
+}
+
+// ListItemAttrs holds attributes for list item nodes.
+type ListItemAttrs struct {
+	// ContentIndent is the width, in columns, from the start of the
+	// enclosing container's content to the start of the item's content: the
+	// marker's own indentation, the marker and the spaces after it. Lines
+	// that continue the item are indented by at least this much. On the
+	// item's first line goldmark measures a tab after the marker from where
+	// the item starts, not from the start of the line, so the content there
+	// can start fewer columns in. The item's content span locates it.
+	ContentIndent int
 }
 
 // ListAttrs holds attributes for list nodes.
@@ -32,10 +94,11 @@ type ListAttrs struct {
 
 // CodeBlockAttrs holds attributes for code block nodes.
 type CodeBlockAttrs struct {
-	// FenceChar is the fence character ('`' or '~').
+	// FenceChar is the fence character ('`' or '~') of a fenced code block,
+	// read from its opening fence.
 	FenceChar byte
 
-	// FenceLength is the number of fence characters.
+	// FenceLength is the number of characters in the opening fence.
 	FenceLength int
 
 	// Info is the info string (language identifier, etc.).
@@ -43,6 +106,11 @@ type CodeBlockAttrs struct {
 
 	// Indented is true for indented code blocks (vs fenced).
 	Indented bool
+
+	// Closed is true when a fenced code block ends with a closing fence. The
+	// closing fence is then the last line of the block's full span. An
+	// unclosed block runs to the end of its container.
+	Closed bool
 }
 
 // InlineAttrs holds attributes for inline-level nodes.
@@ -55,6 +123,9 @@ type InlineAttrs struct {
 
 	// EmphasisLevel indicates emphasis strength (1 for emphasis, 2 for strong).
 	EmphasisLevel int
+
+	// Checked is true for a checked NodeTaskCheckbox ("[x]" or "[X]").
+	Checked bool
 }
 
 // ReferenceStyle indicates the syntax style of a link or image reference.
@@ -103,11 +174,15 @@ type LinkAttrs struct {
 	// Title is the optional link title.
 	Title string
 
-	// ReferenceLabel is the label for reference-style links.
-	// Empty for inline links and autolinks.
+	// ReferenceLabel is the label of a reference-style link as written in
+	// the source, before normalization: the second bracket pair of a full
+	// reference, or the link text of a collapsed or shortcut one. A label
+	// that spans lines leaves out the container prefix of each continuation
+	// line, such as "> " in a blockquote. Empty for inline links and
+	// autolinks.
 	ReferenceLabel string
 
-	// ReferenceStyle indicates the syntax style used.
+	// ReferenceStyle indicates the syntax style used, as read from the source.
 	ReferenceStyle ReferenceStyle
 }
 
@@ -130,6 +205,18 @@ func (a *BlockAttrs) WithHeadingLevel(level int) *BlockAttrs {
 // WithList sets list attributes and returns the BlockAttrs for chaining.
 func (a *BlockAttrs) WithList(attrs *ListAttrs) *BlockAttrs {
 	a.List = attrs
+	return a
+}
+
+// WithListItem sets list item attributes and returns the BlockAttrs for chaining.
+func (a *BlockAttrs) WithListItem(attrs *ListItemAttrs) *BlockAttrs {
+	a.ListItem = attrs
+	return a
+}
+
+// WithTable sets table attributes and returns the BlockAttrs for chaining.
+func (a *BlockAttrs) WithTable(attrs *TableAttrs) *BlockAttrs {
+	a.Table = attrs
 	return a
 }
 

@@ -2,7 +2,7 @@
   {
     "rule": "MD048",
     "name": "code-fence-style",
-    "line": 12,
+    "line": 11,
     "column": 1,
     "message": "Code fence style 'tilde' does not match expected 'backtick'",
     "severity": "warning",

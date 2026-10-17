@@ -43,6 +43,16 @@ func (i NodeKind) String() string {
 		return "HTMLInline"
 	case NodeRaw:
 		return "Raw"
+	case NodeStrikethrough:
+		return "Strikethrough"
+	case NodeTable:
+		return "Table"
+	case NodeTableRow:
+		return "TableRow"
+	case NodeTableCell:
+		return "TableCell"
+	case NodeTaskCheckbox:
+		return "TaskCheckbox"
 	default:
 		return "NodeKind(" + uitoa(uint(i)) + ")"
 	}

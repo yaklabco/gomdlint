@@ -1,2 +1,2 @@
-frontmatter.input.md:8:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
-frontmatter.input.md:12:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
+frontmatter.input.md:7:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
+frontmatter.input.md:11:1 warning Fenced code block has no language specified (MD040/fenced-code-language)

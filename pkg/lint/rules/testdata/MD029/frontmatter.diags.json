@@ -3,7 +3,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 8,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 1 should be 2",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD029",
     "name": "ol-prefix",
     "line": 9,
-    "column": 4,
+    "column": 1,
     "message": "Ordered list item numbered 1 should be 3",
     "severity": "warning",
     "fixable": true

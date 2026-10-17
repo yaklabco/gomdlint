@@ -47,7 +47,9 @@ func (r *TableColumnStyleRule) applyMarkdownlintStyle(ctx *lint.RuleContext, sty
 
 func (r *TableColumnStyleRule) checkDividerSpacing(ctx *lint.RuleContext, line int, style ColumnStyle) []lint.Diagnostic {
 	content := bytes.TrimRight(lint.LineContent(ctx.File, line), " \t")
-	_, contentStart := linePrefix(string(content))
+	textStart := min(lint.LineTextOffset(ctx.File, line), len(content))
+	_, contentStart := linePrefix(string(content[textStart:]))
+	contentStart += textStart
 	columns := tableDividerOffsets(content)
 	var diags []lint.Diagnostic
 	for index, column := range columns {

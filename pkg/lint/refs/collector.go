@@ -107,16 +107,30 @@ func (c *collector) collectLinkUsage(node *mdast.Node, isImage bool) {
 	c.ctx.Usages = append(c.ctx.Usages, usage)
 }
 
-// extractLinkText extracts plain text from a link/image node.
+// extractLinkText extracts plain text from a link/image node. A line break
+// inside the text separates words, as whitespace in a label does.
 func extractLinkText(node *mdast.Node) string {
 	var buf bytes.Buffer
 	_ = mdast.Walk(node, func(n *mdast.Node) error { //nolint:errcheck // visitor never returns error
-		if n.Kind == mdast.NodeText && n.Inline != nil {
+		switch {
+		case n.Kind == mdast.NodeText && n.Inline != nil:
 			buf.Write(n.Inline.Text)
+		case n.Kind == mdast.NodeSoftBreak || n.Kind == mdast.NodeHardBreak:
+			buf.WriteByte(' ')
 		}
 		return nil
 	})
 	return buf.String()
+}
+
+// referenceLabel returns the label a collapsed or shortcut reference is
+// matched by: its link text as written in the source, such as "**foo**" for
+// "[**foo**][]", falling back to the rendered text.
+func referenceLabel(node *mdast.Node) string {
+	if label := node.Inline.Link.ReferenceLabel; label != "" {
+		return label
+	}
+	return extractLinkText(node)
 }
 
 // detectLinkStyle examines the source to determine the link's syntax style.
@@ -130,11 +144,9 @@ func (c *collector) detectLinkStyle(node *mdast.Node, isImage bool) (ReferenceSt
 		case mdast.RefStyleFull:
 			return StyleFull, node.Inline.Link.ReferenceLabel
 		case mdast.RefStyleCollapsed:
-			label := extractLinkText(node)
-			return StyleCollapsed, label
+			return StyleCollapsed, referenceLabel(node)
 		case mdast.RefStyleShortcut:
-			label := extractLinkText(node)
-			return StyleShortcut, label
+			return StyleShortcut, referenceLabel(node)
 		}
 	}
 
@@ -338,6 +350,11 @@ func (c *collector) collectDefinitionsFromSource() {
 		}
 
 		line := c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
+		if lineNum == 0 {
+			// The parser skips a byte order mark, so a definition can follow
+			// one on the first line.
+			line = bytes.TrimPrefix(line, []byte(mdast.ByteOrderMark))
+		}
 		matches := refDefPattern.FindSubmatch(line)
 		if matches == nil {
 			continue

@@ -91,6 +91,28 @@ func LineContent(file *mdast.FileSnapshot, lineNum int) []byte {
 	return RawLineContent(file, lineNum)
 }
 
+// LineText returns the content of a 1-based line, as LineContent does, without
+// the byte order mark that can start the first line. The parser skips the
+// mark, so a rule that reads a construct from the start of its line must
+// skip it too. LineTextOffset gives the number of bytes left out.
+func LineText(file *mdast.FileSnapshot, lineNum int) []byte {
+	content := LineContent(file, lineNum)
+	if skip := LineTextOffset(file, lineNum); len(content) >= skip {
+		return content[skip:]
+	}
+	return content
+}
+
+// LineTextOffset returns the number of bytes at the start of a 1-based line
+// that come before its text: the length of a byte order mark at the start
+// of the first line, and 0 otherwise.
+func LineTextOffset(file *mdast.FileSnapshot, lineNum int) int {
+	if lineNum != 1 || file == nil || !bytes.HasPrefix(file.Content, []byte(mdast.ByteOrderMark)) {
+		return 0
+	}
+	return len(mdast.ByteOrderMark)
+}
+
 // RawLineContent returns the original bytes of a 1-based line, excluding its newline.
 // Returns nil if the line number is out of range.
 func RawLineContent(file *mdast.FileSnapshot, lineNum int) []byte {
@@ -335,10 +357,7 @@ func IsCommentLine(file *mdast.FileSnapshot, lineNum int) bool {
 	}
 	for _, node := range HTMLBlocks(file.Root) {
 		pos := node.SourcePosition()
-		if pos.StartLine <= lineNum && lineNum < pos.EndLine && IsHTMLComment(node) {
-			return true
-		}
-		if pos.StartLine == lineNum && pos.EndLine == lineNum && IsHTMLComment(node) {
+		if pos.StartLine <= lineNum && lineNum <= pos.EndLine && IsHTMLComment(node) {
 			return true
 		}
 	}
@@ -395,26 +414,12 @@ func Tables(root *mdast.Node) []*mdast.Node {
 	if root == nil {
 		return nil
 	}
-	// Tables are stored in Ext map with key "table"
-	var tables []*mdast.Node
-	_ = mdast.Walk(root, func(n *mdast.Node) error { //nolint:errcheck // Walk visitor never returns error
-		if n.Ext != nil {
-			if _, ok := n.Ext["table"]; ok {
-				tables = append(tables, n)
-			}
-		}
-		return nil
-	})
-	return tables
+	return mdast.FindByKind(root, mdast.NodeTable)
 }
 
 // IsTableNode returns true if the node is a GFM table.
 func IsTableNode(n *mdast.Node) bool {
-	if n == nil || n.Ext == nil {
-		return false
-	}
-	_, ok := n.Ext["table"]
-	return ok
+	return n != nil && n.Kind == mdast.NodeTable
 }
 
 // IsLineInTable returns true if the given line number falls within any table.

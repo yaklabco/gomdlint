@@ -1,1 +1,1 @@
-basic.input.md:11:5 warning Code block style 'indented' does not match expected 'fenced' (MD046/code-block-style)
+basic.input.md:11:1 warning Code block style 'indented' does not match expected 'fenced' (MD046/code-block-style)

@@ -6,13 +6,20 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
+// tokenizeContent tokenizes content without a parsed document, so code,
+// HTML blocks and front matter are not recognized; tests for those parse
+// the content (see parseTokens).
+func tokenizeContent(content []byte) []mdast.Token {
+	return tokenize(content, nil)
+}
+
 func TestTokenize_Empty(t *testing.T) {
-	tokens := Tokenize(nil)
+	tokens := tokenizeContent(nil)
 	if len(tokens) != 0 {
 		t.Errorf("expected 0 tokens for nil input, got %d", len(tokens))
 	}
 
-	tokens = Tokenize([]byte{})
+	tokens = tokenizeContent([]byte{})
 	if len(tokens) != 0 {
 		t.Errorf("expected 0 tokens for empty input, got %d", len(tokens))
 	}
@@ -41,7 +48,7 @@ func TestTokenize_ValidatesContiguous(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := []byte(tt.content)
-			tokens := Tokenize(content)
+			tokens := tokenizeContent(content)
 
 			if !mdast.ValidateTokens(tokens, len(content)) {
 				t.Errorf("tokens are not contiguous or do not cover content")
@@ -70,7 +77,7 @@ func TestTokenize_HeadingMarker(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokens := Tokenize([]byte(tt.content))
+			tokens := tokenizeContent([]byte(tt.content))
 
 			if len(tokens) == 0 {
 				t.Fatal("expected at least one token")
@@ -96,7 +103,7 @@ func TestTokenize_ListBullet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := []byte(tt.marker + " item")
-			tokens := Tokenize(content)
+			tokens := tokenizeContent(content)
 
 			if len(tokens) == 0 {
 				t.Fatal("expected at least one token")
@@ -121,7 +128,7 @@ func TestTokenize_OrderedList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokens := Tokenize([]byte(tt.content))
+			tokens := tokenizeContent([]byte(tt.content))
 
 			if len(tokens) == 0 {
 				t.Fatal("expected at least one token")
@@ -136,7 +143,7 @@ func TestTokenize_OrderedList(t *testing.T) {
 
 func TestTokenize_Blockquote(t *testing.T) {
 	content := []byte("> quoted text")
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if len(tokens) == 0 {
 		t.Fatal("expected at least one token")
@@ -160,12 +167,8 @@ func TestTokenize_CodeFence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content := []byte(tt.content)
-			tokens := Tokenize(content)
-
-			if !mdast.ValidateTokens(tokens, len(content)) {
-				t.Error("tokens are not valid")
-			}
+			// Code fences come from the parsed document.
+			tokens, _ := parseTokens(t, tt.content)
 
 			// First token should be code fence.
 			if len(tokens) == 0 || tokens[0].Kind != mdast.TokCodeFence {
@@ -176,12 +179,7 @@ func TestTokenize_CodeFence(t *testing.T) {
 }
 
 func TestTokenize_CodeFenceWithInfo(t *testing.T) {
-	content := []byte("```go\nfunc main() {}\n```")
-	tokens := Tokenize(content)
-
-	if !mdast.ValidateTokens(tokens, len(content)) {
-		t.Error("tokens are not valid")
-	}
+	tokens, _ := parseTokens(t, "```go\nfunc main() {}\n```")
 
 	// Should have TokCodeFence followed by TokCodeFenceInfo.
 	foundFence := false
@@ -219,7 +217,7 @@ func TestTokenize_ThematicBreak(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := []byte(tt.content)
-			tokens := Tokenize(content)
+			tokens := tokenizeContent(content)
 
 			if len(tokens) == 0 {
 				t.Fatal("expected at least one token")
@@ -234,7 +232,7 @@ func TestTokenize_ThematicBreak(t *testing.T) {
 
 func TestTokenize_InlineCode(t *testing.T) {
 	content := []byte("Use `code` here")
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if !mdast.ValidateTokens(tokens, len(content)) {
 		t.Error("tokens are not valid")
@@ -268,7 +266,7 @@ func TestTokenize_Emphasis(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := []byte(tt.content)
-			tokens := Tokenize(content)
+			tokens := tokenizeContent(content)
 
 			if !mdast.ValidateTokens(tokens, len(content)) {
 				t.Error("tokens are not valid")
@@ -290,7 +288,7 @@ func TestTokenize_Emphasis(t *testing.T) {
 
 func TestTokenize_Link(t *testing.T) {
 	content := []byte("[text](url)")
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if !mdast.ValidateTokens(tokens, len(content)) {
 		t.Error("tokens are not valid")
@@ -328,7 +326,7 @@ func TestTokenize_Link(t *testing.T) {
 
 func TestTokenize_Image(t *testing.T) {
 	content := []byte("![alt](src)")
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if !mdast.ValidateTokens(tokens, len(content)) {
 		t.Error("tokens are not valid")
@@ -350,7 +348,7 @@ func TestTokenize_Image(t *testing.T) {
 
 func TestTokenize_EscapedChar(t *testing.T) {
 	content := []byte(`\*not emphasis\*`)
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if !mdast.ValidateTokens(tokens, len(content)) {
 		t.Error("tokens are not valid")
@@ -370,12 +368,8 @@ func TestTokenize_EscapedChar(t *testing.T) {
 }
 
 func TestTokenize_HTML(t *testing.T) {
-	content := []byte("<div>content</div>")
-	tokens := Tokenize(content)
-
-	if !mdast.ValidateTokens(tokens, len(content)) {
-		t.Error("tokens are not valid")
-	}
+	// HTML blocks come from the parsed document.
+	tokens, _ := parseTokens(t, "<div>content</div>")
 
 	// Should contain HTML tokens.
 	htmlCount := 0
@@ -405,7 +399,7 @@ func TestTokenize_SetextUnderline(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := []byte(tt.content)
-			tokens := Tokenize(content)
+			tokens := tokenizeContent(content)
 
 			if !mdast.ValidateTokens(tokens, len(content)) {
 				t.Error("tokens are not valid")
@@ -439,7 +433,7 @@ func TestTokenize_Newlines(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := []byte(tt.content)
-			tokens := Tokenize(content)
+			tokens := tokenizeContent(content)
 
 			if !mdast.ValidateTokens(tokens, len(content)) {
 				t.Error("tokens are not valid")
@@ -463,7 +457,7 @@ func TestTokenize_Newlines(t *testing.T) {
 
 func TestTokenize_Whitespace(t *testing.T) {
 	content := []byte("hello   there")
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if !mdast.ValidateTokens(tokens, len(content)) {
 		t.Error("tokens are not valid")
@@ -508,7 +502,7 @@ func main() {
 2. Second
 `)
 
-	tokens := Tokenize(content)
+	tokens := tokenizeContent(content)
 
 	if !mdast.ValidateTokens(tokens, len(content)) {
 		t.Error("tokens are not contiguous or do not cover content")

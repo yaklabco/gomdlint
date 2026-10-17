@@ -1,8 +1,3 @@
-// Package mdast provides the core Markdown AST representation for gomdlint.
-// It defines a lossless, immutable view of Markdown files including:
-// - FileSnapshot: the complete file representation
-// - Token stream: every byte classified
-// - AST nodes: structural representation referencing token spans
 package mdast
 
 // FileSnapshot is an immutable, lossless view of a Markdown file at a specific time.

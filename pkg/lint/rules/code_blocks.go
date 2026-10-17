@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -120,53 +121,34 @@ func (r *CodeBlockLanguageRule) buildLanguageFix(
 		return nil // Don't insert "text" as language.
 	}
 
-	// Find position right after opening fence.
-	// pos.StartLine is the first content line, so the fence is on the line before.
-	pos := cb.SourcePosition()
-	fenceLine := pos.StartLine - 1
-	if !pos.IsValid() || fenceLine < 1 || fenceLine > len(file.Lines) {
-		return nil
-	}
-
-	fenceLineInfo := file.Lines[fenceLine-1]
-	lineContent := file.Content[fenceLineInfo.StartOffset:fenceLineInfo.NewlineStart]
-
-	// Find end of fence characters (``` or ~~~).
-	fenceEnd := 0
-	for i, ch := range lineContent {
-		if ch == '`' || ch == '~' {
-			fenceEnd = i + 1
-		} else if fenceEnd > 0 {
-			break
-		}
-	}
-
-	if fenceEnd == 0 {
+	// The full span of a fenced code block starts at its opening fence.
+	fence := cb.SourceRange()
+	fenceLength := lint.CodeFenceLength(cb)
+	if fenceLength == 0 || fence.StartOffset+fenceLength > len(file.Content) {
 		return nil
 	}
 
 	// Insert language right after fence.
 	builder := fix.NewEditBuilder()
-	builder.Insert(fenceLineInfo.StartOffset+fenceEnd, detectedLang)
+	builder.Insert(fence.StartOffset+fenceLength, detectedLang)
 	return builder
 }
 
-// getCodeBlockContent extracts the content of a code block (excluding fences).
-// Note: For fenced code blocks, pos.StartLine points to the first content line
-// (not the opening fence), and pos.EndLine includes the closing fence.
+// getCodeBlockContent extracts the content lines of a code block (excluding fences).
 func (r *CodeBlockLanguageRule) getCodeBlockContent(
 	file *mdast.FileSnapshot,
 	cb *mdast.Node,
 ) []byte {
-	pos := cb.SourcePosition()
+	if cb.ContentRange().IsEmpty() {
+		return nil
+	}
+	pos := cb.ContentPosition()
 	if !pos.IsValid() {
 		return nil
 	}
 
-	// StartLine is already the first content line.
-	// EndLine includes the closing fence, so we skip it.
 	startLine := pos.StartLine
-	endLine := pos.EndLine - 1
+	endLine := pos.EndLine
 
 	if startLine > endLine || startLine < 1 || endLine > len(file.Lines) {
 		return nil
@@ -415,7 +397,7 @@ func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast
 		return nil
 	}
 
-	contentLines := r.getCodeBlockContentLines(ctx.File, pos)
+	contentLines := r.getCodeBlockContentLines(ctx.File, cb)
 	if len(contentLines) == 0 {
 		return nil
 	}
@@ -425,7 +407,8 @@ func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast
 	}
 
 	builder := r.buildDollarRemovalFix(contentLines)
-	diag := lint.NewDiagnostic(r.ID(), cb,
+	// Report at the first command line: the content span of the code block.
+	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, cb.ContentPosition(),
 		"Dollar signs used before commands without showing output").
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion("Remove dollar signs from command-only code blocks").
@@ -508,33 +491,19 @@ type codeLineInfo struct {
 	lineNum     int
 }
 
-func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapshot, pos mdast.SourcePosition) []codeLineInfo {
+// getCodeBlockContentLines returns the lines of the block's content span,
+// so neither fence line is included. A block without code has none.
+func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapshot, cb *mdast.Node) []codeLineInfo {
+	if cb.ContentRange().IsEmpty() {
+		return nil
+	}
+	pos := cb.ContentPosition()
+	if !pos.IsValid() {
+		return nil
+	}
+
 	var lines []codeLineInfo
-
-	// For fenced code blocks, skip the fence lines
-	startLine := pos.StartLine
-	endLine := pos.EndLine
-
-	// Check if first line is a fence
-	if startLine >= 1 && startLine <= len(file.Lines) {
-		firstLineContent := string(lint.LineContent(file, startLine))
-		if strings.HasPrefix(strings.TrimSpace(firstLineContent), "```") ||
-			strings.HasPrefix(strings.TrimSpace(firstLineContent), "~~~") {
-			startLine++
-		}
-	}
-
-	// Check if last line is a fence
-	if endLine >= 1 && endLine <= len(file.Lines) {
-		lastLineContent := string(lint.LineContent(file, endLine))
-		trimmedLast := strings.TrimSpace(lastLineContent)
-		if trimmedLast == "```" || trimmedLast == "~~~" ||
-			strings.HasPrefix(trimmedLast, "```") || strings.HasPrefix(trimmedLast, "~~~") {
-			endLine--
-		}
-	}
-
-	for lineNum := startLine; lineNum <= endLine && lineNum <= len(file.Lines); lineNum++ {
+	for lineNum := pos.StartLine; lineNum <= pos.EndLine && lineNum <= len(file.Lines); lineNum++ {
 		lineInfo := file.Lines[lineNum-1]
 		content := string(file.Content[lineInfo.StartOffset:lineInfo.NewlineStart])
 		lines = append(lines, codeLineInfo{
@@ -557,75 +526,74 @@ func (r *CodeFenceStyleRule) buildFenceFix(
 	}
 
 	pos := cb.SourcePosition()
-	if !pos.IsValid() || pos.StartLine < 1 || pos.EndLine > len(file.Lines) {
+	if !pos.IsValid() || pos.EndLine > len(file.Lines) || cb.Block == nil || cb.Block.CodeBlock == nil {
+		return nil
+	}
+	attrs := cb.Block.CodeBlock
+
+	// The full span of a fenced code block starts at its opening fence.
+	opening := cb.SourceRange().StartOffset
+	if attrs.FenceLength < 3 || opening+attrs.FenceLength > len(file.Content) {
+		return nil
+	}
+	// The converted block must parse the same: a backtick fence cannot have
+	// a backtick in its info string, and a line of code that starts with a
+	// run of the new fence character could close the block early.
+	if expectedChar == '`' && strings.ContainsRune(attrs.Info, '`') {
+		return nil
+	}
+	if codeHoldsFenceRun(file, cb, expectedChar) {
 		return nil
 	}
 
-	fenceLength := lint.CodeFenceLength(cb)
-	if fenceLength < 3 {
-		fenceLength = 3
-	}
-
-	newFence := strings.Repeat(string(expectedChar), fenceLength)
 	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(opening, opening+attrs.FenceLength, strings.Repeat(string(expectedChar), attrs.FenceLength))
 
-	// Fix opening fence on start line.
-	startLine := file.Lines[pos.StartLine-1]
-	startContent := file.Content[startLine.StartOffset:startLine.NewlineStart]
-
-	// Find and replace the fence characters at the start of the line.
-	fenceStart := -1
-	for i, ch := range startContent {
-		if ch == '`' || ch == '~' {
-			if fenceStart < 0 {
-				fenceStart = i
-			}
-		} else if fenceStart >= 0 {
-			// End of fence characters.
-			break
+	// The closing fence may be longer than the opening one: replace its
+	// whole run.
+	if attrs.Closed {
+		start, end, ok := closingFenceRun(file, cb, pos.EndLine, attrs.FenceChar)
+		if !ok {
+			return nil
 		}
-	}
-
-	if fenceStart >= 0 {
-		fenceEnd := fenceStart + fenceLength
-		if fenceEnd > len(startContent) {
-			fenceEnd = len(startContent)
-		}
-		builder.ReplaceRange(
-			startLine.StartOffset+fenceStart,
-			startLine.StartOffset+fenceEnd,
-			newFence,
-		)
-	}
-
-	// Fix closing fence on end line.
-	if pos.EndLine != pos.StartLine && pos.EndLine <= len(file.Lines) {
-		endLine := file.Lines[pos.EndLine-1]
-		endContent := file.Content[endLine.StartOffset:endLine.NewlineStart]
-
-		fenceStart = -1
-		for i, ch := range endContent {
-			if ch == '`' || ch == '~' {
-				if fenceStart < 0 {
-					fenceStart = i
-				}
-			} else if fenceStart >= 0 {
-				break
-			}
-		}
-
-		if fenceStart >= 0 {
-			fenceEnd := fenceStart + fenceLength
-			if fenceEnd > len(endContent) {
-				fenceEnd = len(endContent)
-			}
-			builder.ReplaceRange(
-				endLine.StartOffset+fenceStart,
-				endLine.StartOffset+fenceEnd,
-				newFence,
-			)
-		}
+		builder.ReplaceRange(start, end, strings.Repeat(string(expectedChar), end-start))
 	}
 
 	return builder
+}
+
+// closingFenceRun returns the byte range of the run of fence characters on
+// the closing line of a fenced code block, after its container prefix and
+// indentation.
+func closingFenceRun(file *mdast.FileSnapshot, cb *mdast.Node, lineNum int, fenceChar byte) (int, int, bool) {
+	line := file.Lines[lineNum-1]
+	start := line.StartOffset + len(lint.ContainerPrefix(file, cb, lineNum))
+	for start < line.NewlineStart && (file.Content[start] == ' ' || file.Content[start] == '\t') {
+		start++
+	}
+	end := start
+	for end < line.NewlineStart && file.Content[end] == fenceChar {
+		end++
+	}
+	return start, end, end-start >= 3
+}
+
+// codeHoldsFenceRun reports whether a line of the code block's content
+// starts, after its container prefix and indentation, with three or more of
+// fenceChar.
+func codeHoldsFenceRun(file *mdast.FileSnapshot, cb *mdast.Node, fenceChar byte) bool {
+	pos := cb.SourcePosition()
+	last := pos.EndLine
+	if cb.Block.CodeBlock.Closed {
+		last--
+	}
+	fence := []byte{fenceChar, fenceChar, fenceChar}
+	for lineNum := pos.StartLine + 1; lineNum <= last; lineNum++ {
+		content := lint.RawLineContent(file, lineNum)
+		rest := bytes.TrimLeft(content[len(lint.ContainerPrefix(file, cb, lineNum)):], " \t")
+		if bytes.HasPrefix(rest, fence) {
+			return true
+		}
+	}
+	return false
 }

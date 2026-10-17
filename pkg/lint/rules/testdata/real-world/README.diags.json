@@ -2,7 +2,7 @@
   {
     "rule": "MD040",
     "name": "fenced-code-language",
-    "line": 70,
+    "line": 69,
     "column": 1,
     "message": "Fenced code block has no language specified",
     "severity": "warning",
@@ -38,7 +38,7 @@
   {
     "rule": "MD040",
     "name": "fenced-code-language",
-    "line": 201,
+    "line": 200,
     "column": 1,
     "message": "Fenced code block has no language specified",
     "severity": "warning",

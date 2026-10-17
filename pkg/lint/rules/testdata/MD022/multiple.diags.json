@@ -3,7 +3,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 1,
-    "column": 3,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 3,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) above, found 0",
     "severity": "warning",
     "fixable": true
@@ -21,7 +21,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 3,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true
@@ -30,7 +30,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 5,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) above, found 0",
     "severity": "warning",
     "fixable": true
@@ -39,7 +39,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 5,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true
@@ -48,7 +48,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 7,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) above, found 0",
     "severity": "warning",
     "fixable": true
@@ -57,7 +57,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 7,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true
@@ -66,7 +66,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 9,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) above, found 0",
     "severity": "warning",
     "fixable": true
@@ -75,7 +75,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 9,
-    "column": 4,
+    "column": 1,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true

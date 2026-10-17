@@ -3,7 +3,7 @@
     "rule": "MD050",
     "name": "strong-style",
     "line": 5,
-    "column": 12,
+    "column": 10,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false

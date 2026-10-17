@@ -77,9 +77,9 @@ func TestHRStyleRule_Fix(t *testing.T) {
 	}{
 		{
 			name:      "clean input - all HRs same style",
-			input:     "---\n\nSome text\n\n---\n",
+			input:     "# Title\n\n---\n\nSome text\n\n---\n",
 			wantDiags: 0,
-			wantFix:   "---\n\nSome text\n\n---\n",
+			wantFix:   "# Title\n\n---\n\nSome text\n\n---\n",
 		},
 		{
 			name:      "single violation - consistent mode",
@@ -101,9 +101,18 @@ func TestHRStyleRule_Fix(t *testing.T) {
 		},
 		{
 			name:      "explicit style config - fix dashes to asterisks",
-			input:     "---\n\nSome text\n\n---\n",
+			input:     "# Title\n\n---\n\nSome text\n\n---\n",
 			wantDiags: 2,
-			wantFix:   "***\n\nSome text\n\n***\n",
+			wantFix:   "# Title\n\n***\n\nSome text\n\n***\n",
+			config:    map[string]any{"style": "***"},
+		},
+		{
+			// A document that starts with "---" and has a second "---" line
+			// opens with front matter, whose delimiters are not rules.
+			name:      "front matter delimiters are not horizontal rules",
+			input:     "---\ntitle: Example\n---\n\nSome text\n\n***\n",
+			wantDiags: 0,
+			wantFix:   "---\ntitle: Example\n---\n\nSome text\n\n***\n",
 			config:    map[string]any{"style": "***"},
 		},
 		{

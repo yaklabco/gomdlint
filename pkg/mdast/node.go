@@ -32,6 +32,26 @@ const (
 
 	// Fallback for unrecognized content.
 	NodeRaw
+
+	// GFM extension nodes. They follow NodeRaw so existing values stay stable.
+
+	// NodeStrikethrough is GFM strikethrough text (inline).
+	NodeStrikethrough
+
+	// NodeTable is a GFM table (block). Its children are NodeTableRow.
+	NodeTable
+
+	// NodeTableRow is a row of a GFM table, the header row included (block).
+	// Its children are NodeTableCell.
+	NodeTableRow
+
+	// NodeTableCell is a cell of a GFM table row (block). Its children are
+	// inline nodes.
+	NodeTableCell
+
+	// NodeTaskCheckbox is the "[ ]" or "[x]" that starts a GFM task list
+	// item (inline). InlineAttrs.Checked tells which.
+	NodeTaskCheckbox
 )
 
 // Node represents a single node in the Markdown AST.
@@ -48,14 +68,21 @@ type Node struct {
 	Next       *Node
 
 	// Token span (indices into FileSnapshot.Tokens).
-	// FirstToken <= LastToken for non-empty nodes.
-	// Both are -1 for synthetic/degenerate nodes.
+	// FirstToken <= LastToken whenever both are set; for parsed nodes they
+	// are the tokens overlapping SourceSpan. Both are -1 for synthetic nodes.
 	FirstToken int
 	LastToken  int
 
-	// SourceSpan preserves exact offsets when several nodes share one token.
-	// Nil uses the complete token range as the source span.
+	// SourceSpan is the node's full span: the exact source of the construct,
+	// including its syntax markers. The parser sets it on every node; see
+	// the package documentation for the contract per node kind. Nil (only
+	// for hand-built nodes) derives the span from the token range.
 	SourceSpan *SourceRange
+
+	// ContentSpan is the part of the full span inside the node's markers,
+	// such as the text of a heading or the code of a fenced code block.
+	// Nil means the content span equals the full span.
+	ContentSpan *SourceRange
 
 	// File is a back-reference to the containing FileSnapshot.
 	File *FileSnapshot
@@ -66,7 +93,10 @@ type Node struct {
 	// Inline holds attributes for inline-level nodes.
 	Inline *InlineAttrs
 
-	// Ext holds extension-specific attributes (e.g., GFM).
+	// Ext holds attributes for node kinds defined outside this package. The
+	// goldmark parser does not set it: GFM constructs have typed kinds
+	// (NodeStrikethrough, NodeTable, NodeTableRow, NodeTableCell,
+	// NodeTaskCheckbox) and typed attributes.
 	Ext map[string]any
 }
 
@@ -74,7 +104,8 @@ type Node struct {
 func (n *Node) IsBlock() bool {
 	switch n.Kind {
 	case NodeDocument, NodeParagraph, NodeHeading, NodeList, NodeListItem,
-		NodeBlockquote, NodeCodeBlock, NodeThematicBreak, NodeHTMLBlock:
+		NodeBlockquote, NodeCodeBlock, NodeThematicBreak, NodeHTMLBlock,
+		NodeTable, NodeTableRow, NodeTableCell:
 		return true
 	default:
 		return false
@@ -85,7 +116,8 @@ func (n *Node) IsBlock() bool {
 func (n *Node) IsInline() bool {
 	switch n.Kind {
 	case NodeText, NodeEmphasis, NodeStrong, NodeCodeSpan, NodeLink,
-		NodeImage, NodeSoftBreak, NodeHardBreak, NodeHTMLInline:
+		NodeImage, NodeSoftBreak, NodeHardBreak, NodeHTMLInline, NodeStrikethrough,
+		NodeTaskCheckbox:
 		return true
 	default:
 		return false

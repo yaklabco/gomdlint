@@ -24,6 +24,9 @@ const (
 type Parser struct {
 	flavor string
 	md     goldmark.Markdown
+
+	// spans locates the span recorder of a parse in the parser context.
+	spans spanKey
 }
 
 // New creates a new goldmark-based parser for the given flavor.
@@ -31,9 +34,11 @@ type Parser struct {
 // Invalid flavors default to "commonmark".
 func New(flavor string) *Parser {
 	f := flavorOrDefault(flavor)
+	spans := spanKey{key: spanContextKey}
 	return &Parser{
 		flavor: f,
-		md:     newGoldmarkInstance(f),
+		md:     newGoldmarkInstance(f, spans),
+		spans:  spans,
 	}
 }
 
@@ -47,10 +52,10 @@ func (p *Parser) Flavor() string {
 // The method:
 //  1. Checks for context cancellation.
 //  2. Builds a FileSnapshot shell with path, content, and lines.
-//  3. Parses content with goldmark.
-//  4. Builds the mdast.Node tree from goldmark AST.
-//  5. Tokenizes the content.
-//  6. Assigns token ranges to nodes.
+//  3. Parses content with goldmark, recording source positions.
+//  4. Builds the mdast.Node tree from goldmark AST, with source spans.
+//  5. Tokenizes the content, following the parsed code and HTML blocks.
+//  6. Assigns token ranges to nodes from their source spans.
 //  7. Sets File back-references throughout the tree.
 //  8. Validates the token stream.
 //
@@ -68,8 +73,12 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 		Lines:   mdast.BuildLines(content),
 	}
 
+	// A byte order mark is not Markdown. goldmark parses the content after
+	// it, and spans keep counting from the start of the file.
+	base := bomLength(snapshot.Content)
+
 	// Parse with goldmark.
-	snapshot.FrontMatterLines = frontMatterLines(snapshot)
+	snapshot.FrontMatterLines = frontMatterLines(snapshot, base)
 	parseContent := snapshot.Content
 	if snapshot.FrontMatterLines > 0 {
 		parseContent = copyContent(snapshot.Content)
@@ -80,8 +89,12 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 			}
 		}
 	}
-	reader := text.NewReader(parseContent)
-	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(parser.NewContext()))
+	source := parseContent[base:]
+	reader := text.NewReader(source)
+	recorder := newSpanRecorder()
+	pc := parser.NewContext()
+	pc.Set(p.spans.key, recorder)
+	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(pc))
 
 	// Check for cancellation after parsing.
 	if err := ctx.Err(); err != nil {
@@ -89,15 +102,15 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	}
 
 	// Build mdast.Node tree from goldmark AST.
-	mapper := newMapper(snapshot.Content)
+	mapper := newSourceMapper(snapshot.Content, source, base, snapshot.Lines, recorder)
 	snapshot.Root = mapper.mapDocument(gmDoc)
 
-	// Tokenize content.
-	snapshot.Tokens = Tokenize(snapshot.Content)
+	// Tokenize the content. Code, HTML blocks and front matter follow the
+	// parsed document; the rest is tokenized line by line.
+	snapshot.Tokens = tokenize(snapshot.Content, mapper.tokenRegions(gmDoc, snapshot.FrontMatterLines))
 
-	// Assign token ranges to nodes.
-	assigner := NewTokenRangeAssigner(snapshot.Tokens, snapshot.Content)
-	assigner.AssignRanges(snapshot.Root, gmDoc)
+	// Derive token ranges from the source spans.
+	assignTokenRanges(snapshot.Root, snapshot.Tokens)
 
 	// Set File back-references.
 	mdast.SetFile(snapshot.Root, snapshot)
@@ -110,14 +123,30 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	return snapshot, nil
 }
 
+// utf8BOM is the UTF-8 encoding of the byte order mark U+FEFF.
+const utf8BOM = mdast.ByteOrderMark
+
+// bomLength returns the length of a leading UTF-8 byte order mark.
+func bomLength(content []byte) int {
+	if bytes.HasPrefix(content, []byte(utf8BOM)) {
+		return len(utf8BOM)
+	}
+	return 0
+}
+
 // frontMatterLines recognizes a complete leading YAML or TOML metadata block.
-func frontMatterLines(file *FileSnapshot) int {
+// skip is the number of leading bytes to ignore, such as a byte order mark.
+func frontMatterLines(file *FileSnapshot, skip int) int {
 	if len(file.Lines) < 2 {
 		return 0
 	}
 	lineText := func(idx int) []byte {
 		line := file.Lines[idx]
-		return bytes.TrimRight(file.Content[line.StartOffset:line.NewlineStart], " \t\r")
+		start := line.StartOffset
+		if idx == 0 {
+			start = min(start+skip, line.NewlineStart)
+		}
+		return bytes.TrimRight(file.Content[start:line.NewlineStart], " \t\r")
 	}
 	opening := lineText(0)
 	closingMarker := opening
@@ -151,8 +180,8 @@ func flavorOrDefault(flavor string) string {
 }
 
 // newGoldmarkInstance creates a configured goldmark.Markdown instance.
-func newGoldmarkInstance(flavor string) goldmark.Markdown {
-	opts := []goldmark.Option{goldmark.WithParserOptions(positionedLinks{})}
+func newGoldmarkInstance(flavor string, spans spanKey) goldmark.Markdown {
+	var opts []goldmark.Option
 
 	// Configure extensions based on flavor.
 	switch flavor {
@@ -166,7 +195,11 @@ func newGoldmarkInstance(flavor string) goldmark.Markdown {
 		// No extensions for pure CommonMark.
 	}
 
-	return goldmark.New(opts...)
+	md := goldmark.New(opts...)
+	// Span recording wraps every parser, so it must see the parsers the
+	// extensions added. goldmark applies extensions inside New.
+	md.Parser().AddOptions(sourceSpans{spanKey: spans})
+	return md
 }
 
 // copyContent creates a copy of the content slice to ensure immutability.

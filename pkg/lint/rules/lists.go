@@ -374,7 +374,7 @@ func extractListItemNumber(file *mdast.FileSnapshot, item *mdast.Node) int {
 		return 0
 	}
 
-	lineContent := lint.LineContent(file, pos.StartLine)
+	lineContent := lint.LineText(file, pos.StartLine)
 
 	// Parse the number from the beginning of the line (after whitespace).
 	foundDigit := false

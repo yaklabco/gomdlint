@@ -3,7 +3,7 @@
     "rule": "MD004",
     "name": "unordered-list-style",
     "line": 46,
-    "column": 3,
+    "column": 1,
     "message": "Unordered list bullet '*' does not match expected '-'",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD004",
     "name": "unordered-list-style",
     "line": 47,
-    "column": 3,
+    "column": 1,
     "message": "Unordered list bullet '*' does not match expected '-'",
     "severity": "warning",
     "fixable": true
@@ -20,7 +20,7 @@
   {
     "rule": "MD040",
     "name": "fenced-code-language",
-    "line": 114,
+    "line": 113,
     "column": 1,
     "message": "Fenced code block has no language specified",
     "severity": "warning",
@@ -30,7 +30,7 @@
     "rule": "MD046",
     "name": "code-block-style",
     "line": 123,
-    "column": 5,
+    "column": 1,
     "message": "Code block style 'indented' does not match expected 'fenced'",
     "severity": "warning",
     "fixable": false
@@ -39,7 +39,7 @@
     "rule": "MD049",
     "name": "emphasis-style",
     "line": 165,
-    "column": 47,
+    "column": 46,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false
@@ -48,7 +48,7 @@
     "rule": "MD050",
     "name": "strong-style",
     "line": 167,
-    "column": 48,
+    "column": 46,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false
@@ -57,7 +57,7 @@
     "rule": "MD049",
     "name": "emphasis-style",
     "line": 173,
-    "column": 17,
+    "column": 14,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false
@@ -66,7 +66,7 @@
     "rule": "MD050",
     "name": "strong-style",
     "line": 173,
-    "column": 17,
+    "column": 15,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false
@@ -75,7 +75,7 @@
     "rule": "MD049",
     "name": "emphasis-style",
     "line": 175,
-    "column": 16,
+    "column": 15,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false
@@ -102,7 +102,7 @@
     "rule": "MD022",
     "name": "heading-blank-lines",
     "line": 238,
-    "column": 7,
+    "column": 3,
     "message": "Heading needs 1 blank line(s) below, found 0",
     "severity": "warning",
     "fixable": true

@@ -1,1 +1,1 @@
-frontmatter.input.md:15:4 warning Duplicate heading text "Introduction" (first occurrence on line 7) (MD024/no-duplicate-heading)
+frontmatter.input.md:15:1 warning Duplicate heading text "Introduction" (first occurrence on line 7) (MD024/no-duplicate-heading)
