@@ -50,7 +50,8 @@ const (
 // the original document's. All fixes are tried together first. When that
 // fails, the set is split in halves until the failing fixes are found, and a
 // fix is kept, in document order, only if it passes together with the fixes
-// kept before it.
+// kept before it. The fixes kept are therefore always the last set checked
+// as a whole, so they are safe together as well as one by one.
 func verifyFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, allow fixAllowance) []lint.Diagnostic {
 	var fixable []int
 	for idx := range diags {
@@ -133,8 +134,8 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 	return documentOutline(fixed, v.allow) == v.original
 }
 
-// documentOutline returns a canonical description of a parsed document: each
-// block's kind, its rendering attributes (heading level, list kind, start and
+// documentOutline returns a canonical description of a parsed document: its
+// front matter as written, each block's kind, its rendering attributes (heading level, list kind, start and
 // tightness, code block kind, info and code, table alignments) and children,
 // the text of its inline content as it renders (escapes and entity
 // references resolved), each link's destination and title, and, for a
@@ -144,6 +145,12 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 // are left out, so two documents that render the same have the same outline.
 func documentOutline(file *mdast.FileSnapshot, allow fixAllowance) string {
 	var out strings.Builder
+	// Front matter is not Markdown, so the tree leaves it out. Keep it as written.
+	frontMatter := ""
+	if lines := file.FrontMatterLines; lines > 0 && lines <= len(file.Lines) {
+		frontMatter = string(file.Content[:file.Lines[lines-1].EndOffset])
+	}
+	writeOutlineItem(&out, "frontmatter", frontMatter)
 	writeOutline(&out, file, file.Root, allow)
 	writeOutlineItem(&out, "anchors", strings.Join(refs.HeadingAnchors(file.Root), "\x00"))
 	return out.String()

@@ -136,6 +136,12 @@ func TestVerifyFixes(t *testing.T) {
 			kept:  []bool{false},
 		},
 		{
+			name:  "front matter may not change",
+			input: "---\ntitle: x\n---\n\nText\n",
+			diags: []lint.Diagnostic{edit(11, 12, "y")},
+			kept:  []bool{false},
+		},
+		{
 			name:  "a heading anchor may not change",
 			input: "# ` x`\n\n[link](#-x)\n",
 			allow: fixAllowance{codeSpanSpace: true},
