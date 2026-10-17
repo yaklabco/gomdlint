@@ -54,7 +54,7 @@ func (p *Parser) Flavor() string {
 //  2. Builds a FileSnapshot shell with path, content, and lines.
 //  3. Parses content with goldmark, recording source positions.
 //  4. Builds the mdast.Node tree from goldmark AST, with source spans.
-//  5. Tokenizes the content.
+//  5. Tokenizes the content, following the parsed code and HTML blocks.
 //  6. Assigns token ranges to nodes from their source spans.
 //  7. Sets File back-references throughout the tree.
 //  8. Validates the token stream.
@@ -105,8 +105,9 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	mapper := newSourceMapper(snapshot.Content, source, base, snapshot.Lines, recorder)
 	snapshot.Root = mapper.mapDocument(gmDoc)
 
-	// Tokenize content.
-	snapshot.Tokens = Tokenize(snapshot.Content)
+	// Tokenize the content. Code, HTML blocks and front matter follow the
+	// parsed document; the rest is tokenized line by line.
+	snapshot.Tokens = tokenize(snapshot.Content, mapper.tokenRegions(gmDoc, snapshot.FrontMatterLines))
 
 	// Derive token ranges from the source spans.
 	assignTokenRanges(snapshot.Root, snapshot.Tokens)

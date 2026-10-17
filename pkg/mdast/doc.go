@@ -101,4 +101,15 @@
 //
 // Positions on a line are byte columns. Converting them to character
 // columns is the job of the reporting layer.
+//
+// # Tokens
+//
+// FileSnapshot.Tokens classifies every byte of the content, in order and
+// without gaps. Front matter lines, code fences and info strings, lines of
+// code, and lines of HTML blocks take their kinds from the parsed blocks.
+// Other markers (headings, list items, blockquotes, thematic breaks, setext
+// underlines and inline punctuation) are recognized lexically, line by
+// line, so they can disagree with the document structure; use node spans
+// for structure. Node.FirstToken and Node.LastToken are the tokens that
+// overlap a node's full span, and are never inverted.
 package mdast
