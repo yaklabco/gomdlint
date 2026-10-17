@@ -45,9 +45,10 @@ type RuleError struct {
 	Stack []byte
 }
 
-// Error implements error.
+// Error implements error. It names the rule by name, then ID, as in
+// "rule no-trailing-spaces (MD009): ...".
 func (e *RuleError) Error() string {
-	return fmt.Sprintf("rule %s (%s): %v", e.RuleID, e.RuleName, e.Err)
+	return fmt.Sprintf("rule %s: %v", RuleLabel(e.RuleID, e.RuleName), e.Err)
 }
 
 // Unwrap returns the underlying error.
