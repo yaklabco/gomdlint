@@ -69,7 +69,9 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 // definitions of that document keyed by normalized label (as goldmark's
 // util.ToLinkReference makes them), and then through the definitions
 // content holds. The definitions are shared, not copied, so a parse costs
-// nothing per definition.
+// nothing per definition. A byte order mark and front matter are still
+// recognized at the start of content, so a part that does not start the
+// document should start with a blank line.
 func (p *Parser) ParseWithReferences(
 	ctx context.Context, path string, content []byte, refs map[string]parser.Reference,
 ) (*FileSnapshot, error) {
@@ -84,6 +86,9 @@ type presetContext struct {
 	refs map[string]parser.Reference
 }
 
+// Reference returns the definition a normalized label resolves to, a preset
+// one first.
+//
 //nolint:ireturn // goldmark's parser.Context interface fixes this signature.
 func (c presetContext) Reference(label string) (parser.Reference, bool) {
 	if ref, found := c.refs[label]; found {

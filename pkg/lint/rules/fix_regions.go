@@ -92,10 +92,12 @@ import (
 // signature with the original exactly, without writing it out.
 //
 // The argument depends on goldmark's parser, not on what the signature
-// compares, so docLayout can serve any fix check; regionModel adds the
-// render signature that fixCheck compares. TestRegionChecksDecideAsWholeDocument
-// checks the region decisions against the whole-document check, and must
-// pass again after a goldmark upgrade.
+// compares, so docLayout serves both fix checks that use it: regionModel
+// adds the render signature that fixCheck compares, and outlineModel (see
+// fix_safety_regions.go) the outline that fixVerifier compares.
+// TestRegionChecksDecideAsWholeDocument and
+// TestOutlineRegionsDecideAsWholeDocument check the region decisions against
+// the whole-document checks, and must pass again after a goldmark upgrade.
 //
 // Cost. A region is at least a group, or the items of a top-level list, so a
 // check costs a parse of the blocks around its edits. A document whose fixes

@@ -28,9 +28,18 @@ import (
 // recomputed, provided the front matter stays and every region adds the
 // definitions it added before. Whether a region holds comes from the
 // recording parse of docLayout; its outline comes from a parse with the
-// document's parser, of the region after a blank line, so that its first
-// line is not read as front matter, with the document's definitions preset.
-// When anything cannot be shown, the whole document is parsed, as before.
+// document's parser, of the region after a blank line, with the document's
+// definitions preset. The blank line keeps the region's first line from
+// being read as front matter, and a byte order mark that an edit puts at
+// the region's start from being taken for the document's. An item's outline
+// does not depend on whether its list is tight, though goldmark turns the
+// paragraphs of a tight list into text blocks, because the parser maps both
+// to paragraphs. When anything cannot be shown, the whole document is
+// parsed, as before.
+
+// slugOverhead is what the cache counts for each slug it holds besides the
+// slug's bytes: the string header.
+const slugOverhead = 16
 
 // outlineModel is the outline of the original document, as fixVerifier
 // compares it, cut into the parts that regions replace.
@@ -43,11 +52,13 @@ type outlineModel struct {
 	body      string
 	groupOut  []int
 	groupHead []int
-	lists     []listOutline
-	// slugs holds the slug of each heading with an anchor, in order, and
-	// anchors the text of the anchors item: the anchors GitHub gives them,
+	listParts []listOutline
+	// slugs holds the slug of each heading with an anchor, in order, history
+	// the anchors GitHub gives them with every count it keeps (see
+	// recordAnchors), and anchors the text of the anchors item: the anchors
 	// joined as documentOutline joins them.
 	slugs   []string
+	history anchorHistory
 	anchors string
 	// outcomes caches what parsing a region with its edits found, and
 	// cached counts the bytes it holds of its own.
@@ -89,11 +100,12 @@ type outlineOutcome struct {
 // parser of the given flavor does: GFM, or CommonMark for any other flavor,
 // as gmparser.New takes them.
 func recordingMarkdown(flavor string) goldmark.Markdown {
-	markdowns := regionMarkdowns(config.FlavorCommonMark)
+	// regionMarkdowns builds the instances on first use.
+	regionMarkdowns(config.FlavorGFM)
 	if flavor == gmparser.FlavorGFM {
-		return markdowns[0]
+		return recordingGFM
 	}
-	return markdowns[1]
+	return recordingCommonMark
 }
 
 // headingSlug returns the slug GitHub derives from a heading's text, and
@@ -186,7 +198,7 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	model := &outlineModel{
 		docLayout: layout,
 		verifier:  verifier,
-		lists:     make([]listOutline, len(layout.lists)),
+		listParts: make([]listOutline, len(layout.lists)),
 		outcomes:  make(map[string]*outlineOutcome),
 	}
 	groups := make([][]*mdast.Node, len(layout.bounds)-1)
@@ -196,9 +208,10 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	}
 	lastGroup := 0
 	for child := original.Root.FirstChild; child != nil; child = child.Next {
+		// A block without a span of its own cannot be placed in a group.
 		rng := child.SourceRange()
 		offset := rng.StartOffset - layout.base
-		if offset < 0 || offset > len(layout.source) {
+		if rng.IsEmpty() || offset < 0 || offset > len(layout.source) {
 			return nil
 		}
 		group := layout.groupOf(lineStartIn(layout.source, offset))
@@ -230,12 +243,13 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	out.WriteString(outlineClose)
 	// Every list that list regions may split needs its parts.
 	for idx, list := range layout.lists {
-		if list.regions && model.lists[idx].itemOut == nil {
+		if list.regions && model.listParts[idx].itemOut == nil {
 			return nil
 		}
 	}
 	model.body = out.String()
-	model.anchors = strings.Join(anchorsFromSlugs(model.slugs), "\x00")
+	model.history = recordAnchors(model.slugs)
+	model.anchors = strings.Join(model.history.anchors, "\x00")
 	if model.body+outlineItem("anchors", model.anchors) != verifier.original {
 		return nil
 	}
@@ -253,12 +267,13 @@ func (m *outlineModel) writeTopLevel(
 	if node.Kind == mdast.NodeList {
 		index, known = listAt[lineStartIn(m.source, node.SourceRange().StartOffset-m.base)]
 	}
-	if !known {
+	// Only a list that list regions may split needs its parts.
+	if !known || !m.lists[index].regions {
 		writeOutline(out, file, node, m.verifier.allow)
 		m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{node})...)
 		return true
 	}
-	layoutList := m.docLayout.lists[index]
+	layoutList := m.lists[index]
 	tokens, ok := listTokens(file, node, m.verifier.allow)
 	if !ok {
 		return false
@@ -284,7 +299,7 @@ func (m *outlineModel) writeTopLevel(
 	list.itemOut = append(list.itemOut, out.Len())
 	list.itemHead = append(list.itemHead, len(m.slugs))
 	out.WriteString(outlineClose)
-	m.lists[index] = list
+	m.listParts[index] = list
 	return true
 }
 
@@ -292,7 +307,7 @@ func (m *outlineModel) writeTopLevel(
 // indexes of its first heading with an anchor and of the first after it.
 func (m *outlineModel) outSpan(reg region) (int, int, int, int) {
 	if reg.isList() {
-		list := m.lists[reg.list]
+		list := m.listParts[reg.list]
 		return list.itemOut[reg.first-1], list.itemOut[reg.last+2], list.itemHead[reg.first-1], list.itemHead[reg.last+2]
 	}
 	return m.groupOut[reg.first], m.groupOut[reg.last+1], m.groupHead[reg.first], m.groupHead[reg.last+1]
@@ -331,6 +346,9 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 	if !outcome.same {
 		size += len(outcome.text)
 	}
+	for _, slug := range outcome.slugs {
+		size += len(slug) + slugOverhead
+	}
 	if m.cached+size <= m.cacheBudget() {
 		m.outcomes[key.String()] = outcome
 		m.cached += size
@@ -338,8 +356,9 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 	return outcome
 }
 
-// outline parses a region that holds with the document's parser and writes
-// the outline of its blocks, or items, in place of headings [from, to).
+// outline parses a region that holds with the document's parser, writes the
+// outline of its blocks, or items, and finds whether the slugs of their
+// headings are those of headings [from, to) of the original.
 func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int) {
 	text := outcome.source
 	end := len(text)
@@ -353,10 +372,17 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 		outcome.undecided = true
 		return
 	}
-	// The blank line before the region shifts its offsets by one.
+	// The blank line before the region shifts its offsets by one. A block
+	// without a span of its own cannot be placed before or after the
+	// sentinel.
 	var nodes []*mdast.Node
 	for child := snapshot.Root.FirstChild; child != nil; child = child.Next {
-		if child.SourceRange().StartOffset < 1+end {
+		rng := child.SourceRange()
+		if rng.IsEmpty() {
+			outcome.undecided = true
+			return
+		}
+		if rng.StartOffset < 1+end {
 			nodes = append(nodes, child)
 		}
 	}
@@ -418,7 +444,7 @@ func (m *outlineModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 			continue
 		}
 		listsSeen[reg.list] = true
-		list := m.lists[reg.list]
+		list := m.listParts[reg.list]
 		tight := m.listTightAfter(reg.list, regions, func(at int) bool { return outcomes[at].loosens })
 		if tight != list.tight {
 			reps = append(reps, replacement{start: list.tokenStart, end: list.tokenEnd, text: list.tokens[tight]})
@@ -430,17 +456,41 @@ func (m *outlineModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 	return true, m.anchorsKept(regions, outcomes)
 }
 
-// anchorsKept reports whether the anchors of the edited document are the
-// original's: the slugs of every region are, or the anchors that the slugs
-// of the edited document give, read in order, join to the same text.
+// anchorsKept reports whether the anchors of the edited document join to
+// the text of the original's anchors item.
+//
+// Regions are taken in order while the anchor counts before each are the
+// original's. A region that keeps its headings' slugs keeps their anchors
+// and the counts. Otherwise its anchors are replayed from the counts before
+// it (see anchorHistory). When there are as many as before and they differ,
+// the anchors at those places of the list differ, so the lists do, and so
+// does their text, since no anchor holds the separator. When they are the
+// same and leave the counts as they were, the next region is taken.
+// Anything else, a region that adds or removes headings or changes the
+// counts, has the anchors of the whole edited document worked out.
 func (m *outlineModel) anchorsKept(regions []region, outcomes []*outlineOutcome) bool {
-	changed := false
-	for _, outcome := range outcomes {
-		changed = changed || !outcome.slugsSame
+	for idx, outcome := range outcomes {
+		if outcome.slugsSame {
+			continue
+		}
+		_, _, from, to := m.outSpan(regions[idx])
+		anchors, counts := m.history.replay(outcome.slugs, from)
+		switch {
+		case len(anchors) != to-from:
+			return m.anchorsRebuilt(regions, outcomes)
+		case !slices.Equal(anchors, m.history.anchors[from:to]):
+			return false
+		case !m.history.sameCounts(counts, from, to):
+			return m.anchorsRebuilt(regions, outcomes)
+		}
 	}
-	if !changed {
-		return true
-	}
+	return true
+}
+
+// anchorsRebuilt reports whether the anchors that the slugs of the edited
+// document give, read in order, join to the text of the original's anchors
+// item.
+func (m *outlineModel) anchorsRebuilt(regions []region, outcomes []*outlineOutcome) bool {
 	var slugs []string
 	next := 0
 	for idx, reg := range regions {

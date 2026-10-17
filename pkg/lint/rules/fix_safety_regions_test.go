@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"regexp"
 	"strings"
@@ -36,6 +37,14 @@ var outlineSnippets = []string{
 	"## Heading with [ padded ](https://example.com/p)\n",
 	"- Item with https://example.com/i and ` code`\n- Item two [ x ](https://example.com/x)\n- Item three\n- Item four\n",
 	"- item\n\n  ```\n  $ make\n  ```\n\n- next\n\n  ```\n  $ make test\n  ```\n\n- last\n- end\n",
+	// Headings whose text gives no anchor, an empty slug, slugs that collide
+	// with numbered anchors, and headings in list items and quotes.
+	"#\n",
+	"# ![a](i.png)\n",
+	"## !!!\n",
+	"# Heading one 1\n",
+	"- ## Heading in item ` code`\n- second\n- third\n- fourth\n",
+	"> ## Quoted heading https://example.com/q\n",
 }
 
 // outlineEditPatterns find the places the code and link rules edit.
@@ -78,10 +87,12 @@ func randomOutlineEdits(rng *rand.Rand, text string) []fix.TextEdit {
 	}
 }
 
-// outlineAllowances are the allowances the rules give their checks.
+// outlineAllowances are the allowances the rules give their checks, and all
+// of them together.
 var outlineAllowances = []fixAllowance{
 	{}, {linkTextSpace: true}, {codeSpanSpace: true}, {autolinks: true},
 	{codeInfo: true}, {prompts: true}, {reversedLinks: true},
+	{linkTextSpace: true, codeSpanSpace: true, autolinks: true, codeInfo: true, prompts: true, reversedLinks: true},
 }
 
 // TestOutlineRegionsDecideAsWholeDocument checks the region checks of the
@@ -108,11 +119,17 @@ func TestOutlineRegionsDecideAsWholeDocument(t *testing.T) {
 			}
 		}
 		text := doc.String()
-		if rng.IntN(10) == 0 {
+		switch rng.IntN(10) {
+		case 0:
 			text = "---\ntitle: x\n---\n" + text
+		case 1:
+			text = "---\nopen: front matter\n" + text
 		}
 		if rng.IntN(10) == 0 {
 			text = strings.ReplaceAll(text, "\n", "\r\n")
+		}
+		if rng.IntN(8) == 0 {
+			text = "\xef\xbb\xbf" + text
 		}
 		for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
 			cfg := config.NewConfig()
@@ -152,6 +169,41 @@ func TestOutlineRegionsDecideAsWholeDocument(t *testing.T) {
 	t.Logf("%d edit sets, %d decided by region checks, %d of them keep the document", total, decided, kept)
 	assert.Greater(t, decided, total/2, "region checks decide most edit sets")
 	assert.Positive(t, kept, "some edit sets keep the document")
+}
+
+// TestOutlineCacheIsBounded checks that the outcomes an outline model caches,
+// with the slugs of their headings, stay within a bound that follows the
+// document, even when every check covers a block the size of the document
+// and changes the slugs of its headings, as fixes of padded code spans in
+// the headings of a long blockquote do.
+func TestOutlineCacheIsBounded(t *testing.T) {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range 600 {
+		fmt.Fprintf(&doc, "> ## Section %d ` code`\n>\n", idx)
+	}
+	input := doc.String()
+	cfg := config.NewConfig()
+	verifier := newFixVerifier(lint.NewRuleContext(context.Background(), parseForCheck(t, input), cfg, nil),
+		fixAllowance{codeSpanSpace: true})
+	model := verifier.regions()
+	require.NotNil(t, model)
+	for idx := range 300 {
+		at := strings.Index(input, fmt.Sprintf("Section %d ` code`", idx)) + len(fmt.Sprintf("Section %d `", idx))
+		decided, _ := model.checkEdits([]fix.TextEdit{{StartOffset: at, EndOffset: at + 1}})
+		require.True(t, decided)
+	}
+	cached := 0
+	for key, outcome := range model.outcomes {
+		cached += len(key)
+		if !outcome.same {
+			cached += len(outcome.text)
+		}
+		for _, slug := range outcome.slugs {
+			cached += len(slug) + slugOverhead
+		}
+	}
+	assert.LessOrEqual(t, cached, model.cacheBudget())
 }
 
 // TestOutlineModelMatchesOutline checks that the outline written in parts is

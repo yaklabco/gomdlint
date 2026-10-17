@@ -45,14 +45,27 @@ func longListDocument(items int) []byte {
 
 // codeListDocument returns a document with one loose list of items, each
 // holding a fenced shell block whose commands carry a dollar prompt and no
-// output, a finding that MD014 fixes on a line that starts a block. The code
-// and link rules check such fixes together with every other fix in their
-// top-level block.
+// output, a finding that MD014 fixes at the start of a line of code. A fix
+// there does not stay inside the text of one line, so the code and link
+// rules check it together with every other fix in its top-level block.
 func codeListDocument(items int) []byte {
 	var doc strings.Builder
 	doc.WriteString("# Title\n\n")
 	for idx := range items {
 		fmt.Fprintf(&doc, "- Item %d shows a command:\n\n  ```\n  $ echo item%d\n  $ ls -la /tmp/item%d\n  ```\n\n", idx, idx, idx)
+	}
+	return []byte(doc.String())
+}
+
+// headingCodeDocument returns a document of sections whose headings end in a
+// code span with a space on one side, a finding that MD038 fixes. The fix
+// keeps the outline the check compares but changes the heading's anchor,
+// so the check must work out the anchors of the edited document.
+func headingCodeDocument(sections int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range sections {
+		fmt.Fprintf(&doc, "## Section %d ` code`\n\nText of section %d.\n\n", idx, idx)
 	}
 	return []byte(doc.String())
 }
@@ -151,6 +164,7 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 		{name: "sections", generate: trailingSectionsDocument},
 		{name: "long list", generate: longListDocument},
 		{name: "code list", generate: codeListDocument},
+		{name: "heading code", generate: headingCodeDocument},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			// The fastest of a few runs is the least disturbed by other work

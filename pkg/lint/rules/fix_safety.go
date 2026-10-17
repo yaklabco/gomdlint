@@ -409,7 +409,8 @@ func (v *fixVerifier) settle(kept []fix.TextEdit, diags []lint.Diagnostic, idxs 
 // the regions the edits need (see outlineModel); otherwise the whole
 // document is parsed.
 func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
-	if !v.parsed {
+	// A cancelled run parses nothing, so the whole-document check fails.
+	if !v.parsed || v.ctx.Err() != nil {
 		return false
 	}
 	prepared, err := fix.PrepareEdits(edits, len(v.file.Content))
@@ -442,6 +443,8 @@ func (v *fixVerifier) regions() *outlineModel {
 		if v.originalFile != nil {
 			v.model = buildOutlineModel(v, v.originalFile)
 		}
+		// The model keeps what it compares; the parse can go.
+		v.originalFile = nil
 	}
 	return v.model
 }

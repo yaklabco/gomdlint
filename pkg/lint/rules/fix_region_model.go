@@ -43,6 +43,30 @@ func (h *anchorHistory) write(key string, value int) {
 	h.keys[heading] = append(h.keys[heading], key)
 }
 
+// recordAnchors returns the history of giving headings with the given slugs,
+// in order, the anchors GitHub gives them, numbering repeated slugs as
+// signatureWriter.anchor and refs.AnchorMap do.
+func recordAnchors(slugs []string) anchorHistory {
+	var history anchorHistory
+	counts := make(map[string]int, len(slugs))
+	for _, slug := range slugs {
+		unique := slug
+		for {
+			if _, taken := counts[unique]; !taken {
+				break
+			}
+			counts[slug]++
+			history.write(slug, counts[slug])
+			unique = slug + "-" + strconv.Itoa(counts[slug])
+		}
+		counts[unique] = 0
+		history.write(unique, 0)
+		history.slugs = append(history.slugs, slug)
+		history.anchors = append(history.anchors, unique)
+	}
+	return history
+}
+
 // lookup returns the count of key before the given heading.
 func (h *anchorHistory) lookup(key string, before int) (int, bool) {
 	writes := h.writes[key]

@@ -52,6 +52,19 @@ func TestParseWithReferences(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, firstLink(snapshot), "a reference to no definition stays text")
 
+	snapshot, err = mdParser.ParseWithReferences(context.Background(), "part.md",
+		[]byte("See [x][local].\n\n[local]: /local\n"), refs)
+	require.NoError(t, err)
+	link = firstLink(snapshot)
+	require.NotNil(t, link, "a label only the content defines resolves through the content")
+	assert.Equal(t, "/local", link.Inline.Link.Destination)
+
+	snapshot, err = mdParser.ParseWithReferences(context.Background(), "part.md", []byte("See [x][R].\n"), refs)
+	require.NoError(t, err)
+	link = firstLink(snapshot)
+	require.NotNil(t, link, "labels match after case folding")
+	assert.Equal(t, "/preset", link.Inline.Link.Destination)
+
 	plain, err := mdParser.Parse(context.Background(), "part.md", []byte("See [x][r].\n"))
 	require.NoError(t, err)
 	assert.Nil(t, firstLink(plain), "Parse presets nothing")
