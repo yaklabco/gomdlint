@@ -1,1 +1,3 @@
 basic.input.md:6:1 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]
+basic.input.md:7:1 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]
+basic.input.md:8:1 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]

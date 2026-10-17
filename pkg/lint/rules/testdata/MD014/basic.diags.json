@@ -7,5 +7,23 @@
     "message": "Dollar signs used before commands without showing output",
     "severity": "warning",
     "fixable": true
+  },
+  {
+    "rule": "MD014",
+    "name": "commands-show-output",
+    "line": 7,
+    "column": 1,
+    "message": "Dollar signs used before commands without showing output",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD014",
+    "name": "commands-show-output",
+    "line": 8,
+    "column": 1,
+    "message": "Dollar signs used before commands without showing output",
+    "severity": "warning",
+    "fixable": true
   }
 ]

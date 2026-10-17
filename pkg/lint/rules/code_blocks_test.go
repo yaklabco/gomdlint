@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -418,102 +419,120 @@ func TestCodeFenceStyleRule(t *testing.T) {
 	}
 }
 
+// TestCommandsShowOutputRule follows markdownlint MD014: every code block is
+// checked regardless of its info string, the block is reported only when every
+// non-blank line starts with "$" and whitespace, and each such line gets its
+// own diagnostic and fix.
 func TestCommandsShowOutputRule(t *testing.T) {
+	type position struct{ line, column int }
 	tests := []struct {
-		name    string
-		input   string
-		wantN   int
-		wantFix bool
+		name  string
+		input string
+		want  []position
+		fixed string
 	}{
 		{
-			name:    "all dollar signs no output",
-			input:   "```sh\n$ ls\n$ cat foo\n$ less bar\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "all dollar signs no output",
+			input: "```sh\n$ ls\n$ cat foo\n$ less bar\n```\n",
+			want:  []position{{2, 1}, {3, 1}, {4, 1}},
+			fixed: "```sh\nls\ncat foo\nless bar\n```\n",
 		},
 		{
-			name:    "dollar signs with output",
-			input:   "```bash\n$ ls\nfoo bar\n$ cat foo\nHello world\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "dollar signs with output",
+			input: "```bash\n$ ls\nfoo bar\n$ cat foo\nHello world\n```\n",
 		},
 		{
-			name:    "no dollar signs",
-			input:   "```sh\nls\ncat foo\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "no dollar signs",
+			input: "```sh\nls\ncat foo\n```\n",
 		},
 		{
-			name:    "mixed with output",
-			input:   "```bash\n$ mkdir test\nmkdir: created directory 'test'\n$ ls test\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "any info string is checked",
+			input: "```go\n$ go test ./...\n```\n",
+			want:  []position{{2, 1}},
+			fixed: "```go\ngo test ./...\n```\n",
 		},
 		{
-			name:    "non-shell code block",
-			input:   "```go\n$ not a command\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "info string with attributes",
+			input: "```bash title=\"setup\"\n$ make\n```\n",
+			want:  []position{{2, 1}},
+			fixed: "```bash title=\"setup\"\nmake\n```\n",
 		},
 		{
-			name:    "console block all dollar",
-			input:   "```console\n$ echo hello\n$ pwd\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "powershell block",
+			input: "```powershell\n$ Get-ChildItem\n```\n",
+			want:  []position{{2, 1}},
+			fixed: "```powershell\nGet-ChildItem\n```\n",
 		},
 		{
-			name:    "zsh block all dollar",
-			input:   "```zsh\n$ cd /tmp\n$ ls\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "no info string",
+			input: "```\n$ echo hello\n$ pwd\n```\n",
+			want:  []position{{2, 1}, {3, 1}},
+			fixed: "```\necho hello\npwd\n```\n",
 		},
 		{
-			name:    "terminal block all dollar",
-			input:   "```terminal\n$ npm install\n$ npm test\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "indented code block",
+			input: "Text.\n\n    $ ls\n    $ pwd\n",
+			want:  []position{{3, 5}, {4, 5}},
+			fixed: "Text.\n\n    ls\n    pwd\n",
 		},
 		{
-			name:    "empty code block",
-			input:   "```sh\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "leading whitespace and several spaces after the dollar",
+			input: "```sh\n  $   ls\n```\n",
+			want:  []position{{2, 3}},
+			fixed: "```sh\n  ls\n```\n",
 		},
 		{
-			name:    "blank lines in code",
-			input:   "```sh\n$ echo 1\n\n$ echo 2\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "dollar without following whitespace is output",
+			input: "```sh\n$ echo $HOME\n$HOME\n```\n",
 		},
 		{
-			name:    "single dollar command",
-			input:   "```sh\n$ pwd\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "bare dollar line is output",
+			input: "```sh\n$ echo\n$\n```\n",
+		},
+		{
+			name:  "empty code block",
+			input: "```sh\n```\n",
+		},
+		{
+			name:  "blank lines in code",
+			input: "```sh\n$ echo 1\n\n$ echo 2\n```\n",
+			want:  []position{{2, 1}, {4, 1}},
+			fixed: "```sh\necho 1\n\necho 2\n```\n",
+		},
+		{
+			name:  "fenced block in list item",
+			input: "- item\n\n  ```sh\n  $ ls\n  ```\n",
+			want:  []position{{4, 3}},
+			fixed: "- item\n\n  ```sh\n  ls\n  ```\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parser := goldmark.New(string(config.FlavorCommonMark))
-			snapshot, err := parser.Parse(context.Background(), "test.md", []byte(tt.input))
+			diags := applyDefaultRule(t, NewCommandsShowOutputRule(), tt.input)
+			if len(diags) != len(tt.want) {
+				t.Fatalf("got %d diagnostics, want %d: %+v", len(diags), len(tt.want), diags)
+			}
+			var edits []fix.TextEdit
+			for idx, want := range tt.want {
+				if diags[idx].StartLine != want.line || diags[idx].StartColumn != want.column {
+					t.Errorf("diagnostic %d at %d:%d, want %d:%d",
+						idx, diags[idx].StartLine, diags[idx].StartColumn, want.line, want.column)
+				}
+				if len(diags[idx].FixEdits) == 0 {
+					t.Errorf("diagnostic %d has no fix", idx)
+				}
+				edits = append(edits, diags[idx].FixEdits...)
+			}
+			if len(tt.want) == 0 {
+				return
+			}
+			prepared, err := fix.PrepareEdits(edits, len(tt.input))
 			if err != nil {
-				t.Fatalf("parse error: %v", err)
+				t.Fatalf("PrepareEdits error: %v", err)
 			}
-
-			rule := NewCommandsShowOutputRule()
-			ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
-			diags, err := rule.Apply(ctx)
-			if err != nil {
-				t.Fatalf("Apply error: %v", err)
-			}
-
-			if len(diags) != tt.wantN {
-				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
-			}
-
-			if tt.wantFix && len(diags) > 0 && len(diags[0].FixEdits) == 0 {
-				t.Error("expected fix edits, got none")
+			if got := string(fix.ApplyEdits([]byte(tt.input), prepared)); got != tt.fixed {
+				t.Errorf("fixed = %q, want %q", got, tt.fixed)
 			}
 		})
 	}

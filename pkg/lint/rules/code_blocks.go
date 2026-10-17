@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -365,124 +366,67 @@ func NewCommandsShowOutputRule() *CommandsShowOutputRule {
 	}
 }
 
-// Apply checks for unnecessary dollar signs in code blocks.
+// dollarCommandPattern is markdownlint's dollarCommandRe: optional
+// indentation, then a dollar sign followed by whitespace.
+var dollarCommandPattern = regexp.MustCompile(`^(\s*)(\$\s+)`)
+
+// dollarCommandIndices is the number of submatch indices dollarCommandPattern produces.
+const dollarCommandIndices = 6
+
+// Apply reports dollar-sign prompts in code blocks that show no output. Like
+// markdownlint, every fenced and indented code block is checked whatever its
+// info string, a block is reported only when every non-blank line starts with
+// "$" and whitespace, and each of those lines gets its own diagnostic and fix.
 func (r *CommandsShowOutputRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
-
-	for _, cb := range codeBlocks {
+	for _, cb := range ctx.CodeBlocks() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		if diag := r.checkCodeBlock(ctx, cb); diag != nil {
-			diags = append(diags, *diag)
-		}
+		diags = append(diags, r.checkCodeBlock(ctx, cb)...)
 	}
 
 	return diags, nil
 }
 
-func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast.Node) *lint.Diagnostic {
-	pos := cb.SourcePosition()
-	if !pos.IsValid() {
-		return nil
+func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast.Node) []lint.Diagnostic {
+	type dollarLine struct {
+		line    codeLineInfo
+		indices []int
 	}
-
-	if !r.isShellCodeBlock(cb) {
-		return nil
-	}
-
-	contentLines := r.getCodeBlockContentLines(ctx.File, cb)
-	if len(contentLines) == 0 {
-		return nil
-	}
-
-	if !r.hasOnlyDollarCommands(contentLines) {
-		return nil
-	}
-
-	builder := r.buildDollarRemovalFix(contentLines)
-	// Report at the first command line: the content span of the code block.
-	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, cb.ContentPosition(),
-		"Dollar signs used before commands without showing output").
-		WithSeverity(config.SeverityWarning).
-		WithSuggestion("Remove dollar signs from command-only code blocks").
-		WithFix(builder).
-		Build()
-	return &diag
-}
-
-func (r *CommandsShowOutputRule) isShellCodeBlock(cb *mdast.Node) bool {
-	info := strings.ToLower(lint.CodeBlockInfo(cb))
-	return info == "" || info == "sh" || info == "shell" || info == "bash" ||
-		info == "zsh" || info == "console" || info == "terminal"
-}
-
-func (r *CommandsShowOutputRule) startsWithDollar(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "$ ") || strings.HasPrefix(trimmed, "$\t") || trimmed == "$"
-}
-
-func (r *CommandsShowOutputRule) hasOnlyDollarCommands(lines []codeLineInfo) bool {
-	hasAnyCommand := false
-
-	for lineIdx, line := range lines {
-		trimmed := strings.TrimSpace(line.content)
-		if trimmed == "" {
+	var commands []dollarLine
+	for _, line := range codeBlockContentLines(ctx.File, cb) {
+		if strings.TrimSpace(line.content) == "" {
 			continue
 		}
-
-		if !r.startsWithDollar(trimmed) {
-			return false
+		indices := dollarCommandPattern.FindStringSubmatchIndex(line.content)
+		if len(indices) < dollarCommandIndices {
+			return nil // A line without a prompt is output, so the prompts are justified.
 		}
-		hasAnyCommand = true
-
-		// Check if there's output after this command
-		if r.hasOutputAfter(lines, lineIdx) {
-			return false
-		}
+		commands = append(commands, dollarLine{line: line, indices: indices})
 	}
 
-	return hasAnyCommand
-}
-
-func (r *CommandsShowOutputRule) hasOutputAfter(lines []codeLineInfo, startIdx int) bool {
-	for j := startIdx + 1; j < len(lines); j++ {
-		nextTrimmed := strings.TrimSpace(lines[j].content)
-		if nextTrimmed == "" {
-			continue
-		}
-		// If next non-empty line doesn't start with $, it's output
-		return !r.startsWithDollar(nextTrimmed)
+	diags := make([]lint.Diagnostic, 0, len(commands))
+	for _, command := range commands {
+		promptStart := command.line.startOffset + command.indices[4]
+		promptEnd := command.line.startOffset + command.indices[5]
+		startLine, startColumn := ctx.File.LineAt(promptStart)
+		endLine, endColumn := ctx.File.LineAt(promptEnd)
+		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+		builder := fix.NewEditBuilder()
+		builder.Delete(promptStart, promptEnd)
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+			"Dollar signs used before commands without showing output").
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Remove the dollar sign prompt from command-only code blocks").
+			WithFix(builder).
+			Build())
 	}
-	return false
-}
-
-func (r *CommandsShowOutputRule) buildDollarRemovalFix(lines []codeLineInfo) *fix.EditBuilder {
-	builder := fix.NewEditBuilder()
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line.content)
-		if trimmed == "" {
-			continue
-		}
-
-		dollarIdx := strings.Index(line.content, "$")
-		if dollarIdx < 0 {
-			continue
-		}
-
-		removeEnd := dollarIdx + 1
-		if removeEnd < len(line.content) && (line.content[removeEnd] == ' ' || line.content[removeEnd] == '\t') {
-			removeEnd++
-		}
-		builder.Delete(line.startOffset+dollarIdx, line.startOffset+removeEnd)
-	}
-	return builder
+	return diags
 }
 
 type codeLineInfo struct {
@@ -491,10 +435,11 @@ type codeLineInfo struct {
 	lineNum     int
 }
 
-// getCodeBlockContentLines returns the lines of the block's content span,
-// so neither fence line is included. A block without code has none.
-func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapshot, cb *mdast.Node) []codeLineInfo {
-	if cb.ContentRange().IsEmpty() {
+// codeBlockContentLines returns the lines of a code block's content span,
+// excluding fence lines. Each line starts after the prefix of the enclosing
+// blockquotes and list items, so it begins with the code's own indentation.
+func codeBlockContentLines(file *mdast.FileSnapshot, cb *mdast.Node) []codeLineInfo {
+	if file == nil || cb.ContentRange().IsEmpty() {
 		return nil
 	}
 	pos := cb.ContentPosition()
@@ -505,14 +450,13 @@ func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapsh
 	var lines []codeLineInfo
 	for lineNum := pos.StartLine; lineNum <= pos.EndLine && lineNum <= len(file.Lines); lineNum++ {
 		lineInfo := file.Lines[lineNum-1]
-		content := string(file.Content[lineInfo.StartOffset:lineInfo.NewlineStart])
+		start := lineInfo.StartOffset + len(lint.ContainerPrefix(file, cb, lineNum))
 		lines = append(lines, codeLineInfo{
-			content:     content,
-			startOffset: lineInfo.StartOffset,
+			content:     string(file.Content[start:lineInfo.NewlineStart]),
+			startOffset: start,
 			lineNum:     lineNum,
 		})
 	}
-
 	return lines
 }
 
