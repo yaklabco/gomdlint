@@ -175,28 +175,28 @@ func TestRunner_Run_PreviewKeepsRuleFailuresOfTheFixedContent(t *testing.T) {
 func TestRunner_Run_ReportsSkippedEditsAndOscillation(t *testing.T) {
 	t.Parallel()
 
-	// Both rules always propose their fix, and the fixes overlap: the first
-	// is applied, then reproposed as a no-op, so the loop stops with the
+	// The rule always proposes both fixes, and they overlap: the first is
+	// applied, then reproposed as a no-op, so the loop stops with the
 	// second fix still skipped.
-	first := newContentRule("TEST001", func([]byte) ([]lint.Diagnostic, error) {
-		return []lint.Diagnostic{{RuleID: "TEST001", Message: "one", StartLine: 1,
-			FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "HELLO"}}}}, nil
-	})
-	second := newContentRule("TEST002", func([]byte) ([]lint.Diagnostic, error) {
-		return []lint.Diagnostic{{RuleID: "TEST002", Message: "two", StartLine: 1,
-			FixEdits: []fix.TextEdit{{StartOffset: 3, EndOffset: 8, NewText: "xx"}}}}, nil
+	rule := newContentRule("TEST001", func([]byte) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{
+			{RuleID: "TEST001", Message: "one", StartLine: 1,
+				FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "HELLO"}}},
+			{RuleID: "TEST001", Message: "two", StartLine: 1,
+				FixEdits: []fix.TextEdit{{StartOffset: 3, EndOffset: 8, NewText: "xx"}}},
+		}, nil
 	})
 
 	cfg := config.NewConfig()
 	cfg.Fix = true
 	cfg.NoBackups = true
-	result := runFiles(t, cfg, map[string]string{"a.md": "hello world\n"}, first, second)
+	result := runFiles(t, cfg, map[string]string{"a.md": "hello world\n"}, rule)
 
 	outcome := outcomeFor(t, result, "a.md")
 	require.NoError(t, outcome.Error)
 	assert.True(t, outcome.Oscillated)
 	assert.Equal(t, []lint.SkippedEdit{{
-		RuleID: "TEST002",
+		RuleID: "TEST001",
 		Edit:   fix.TextEdit{StartOffset: 3, EndOffset: 8, NewText: "xx"},
 	}}, outcome.SkippedEdits)
 	assert.Equal(t, 1, result.Stats.EditsSkipped)

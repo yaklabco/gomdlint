@@ -285,7 +285,9 @@ func TestEngine_LintFile_EditConflicts(t *testing.T) {
 	parser := &mockParser{}
 	registry := lint.NewRegistry()
 
-	// Two rules that produce overlapping edits.
+	// One rule whose two fixes overlap. (Fixes of different rules in one
+	// block never reach conflict resolution: all but one rule's wait for
+	// the next pass.)
 	rule1 := &fixableRule{
 		BaseRule: lint.NewBaseRule("TEST001", "test-rule-1", "", nil, true),
 		diags: []lint.Diagnostic{
@@ -294,20 +296,14 @@ func TestEngine_LintFile_EditConflicts(t *testing.T) {
 				Message:  "issue 1",
 				FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 10, NewText: "aaa"}},
 			},
-		},
-	}
-	rule2 := &fixableRule{
-		BaseRule: lint.NewBaseRule("TEST002", "test-rule-2", "", nil, true),
-		diags: []lint.Diagnostic{
 			{
-				RuleID:   "TEST002",
+				RuleID:   "TEST001",
 				Message:  "issue 2",
 				FixEdits: []fix.TextEdit{{StartOffset: 5, EndOffset: 15, NewText: "bbb"}},
 			},
 		},
 	}
 	registry.Register(rule1)
-	registry.Register(rule2)
 
 	engine := lint.NewEngine(parser, registry)
 	cfg := config.NewConfig()

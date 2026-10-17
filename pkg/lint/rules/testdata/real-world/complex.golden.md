@@ -170,7 +170,7 @@ This text has **double asterisk strong** and **double underscore strong**.
 
 This is ***bold and italic*** together.
 
-This is also ***bold and italic*** with underscores.
+This is also *__bold and italic__* with underscores.
 
 And this is **_mixed markers_** for emphasis.
 

@@ -60,14 +60,49 @@ func TestEngine_AcceptedFixesCountsFindings(t *testing.T) {
 	t.Run("a skipped fix is not accepted", func(t *testing.T) {
 		t.Parallel()
 
+		// The rule's second fix overlaps the opening marker of its first.
+		rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+			return []lint.Diagnostic{
+				fixDiag("TEST001",
+					fix.TextEdit{StartOffset: 2, EndOffset: 3, NewText: "_"},
+					fix.TextEdit{StartOffset: 5, EndOffset: 6, NewText: "_"}),
+				fixDiag("TEST001", fix.TextEdit{StartOffset: 1, EndOffset: 4, NewText: "xyz"}),
+			}, nil
+		})
+
+		result := lintWithRules(t, "a *bc* d", true, rule)
+
+		assert.NotEmpty(t, result.SkippedEdits, "the fixes conflict, so one of them is skipped")
+		assert.Equal(t, 1, result.AcceptedFixes)
+	})
+
+	t.Run("a deferred fix is not accepted", func(t *testing.T) {
+		t.Parallel()
+
 		overlap := newFuncRule("TEST002", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
 			return []lint.Diagnostic{fixDiag("TEST002", fix.TextEdit{StartOffset: 1, EndOffset: 4, NewText: "xyz"})}, nil
 		})
 
 		result := lintWithRules(t, "a *bc* d", true, markerPair(), overlap)
 
-		assert.NotEmpty(t, result.SkippedEdits, "the fixes conflict, so one of them is skipped")
+		assert.Len(t, result.Edits, 2, "the first rule's fix is applied")
 		assert.Equal(t, 1, result.AcceptedFixes)
+		assert.Len(t, result.DeferredEdits, 1, "another rule's fix in the same block waits for the next pass")
+		assert.Empty(t, result.SkippedEdits)
+	})
+
+	t.Run("deferred blank-line fixes are not accepted", func(t *testing.T) {
+		t.Parallel()
+
+		// The two insertions at one boundary merge into one fix of two
+		// findings, which waits for TEST001's fix in the same blocks.
+		result := lintWithRules(t, "# Title\n- item\n", true,
+			fixedRule("TEST001", []fix.TextEdit{{StartOffset: 2, EndOffset: 7, NewText: "TITLE"}}),
+			insertRule("TEST002", 8, "\n"), insertRule("TEST003", 8, "\n"))
+
+		assert.Len(t, result.Edits, 1)
+		assert.Equal(t, 1, result.AcceptedFixes)
+		assert.Len(t, result.DeferredEdits, 1)
 	})
 
 	t.Run("a conflicting blank-line fix is not accepted", func(t *testing.T) {
@@ -108,4 +143,36 @@ func TestPipeline_TotalFixesAppliedCountsFindings(t *testing.T) {
 	assert.Equal(t, 2, result.FixPasses)
 	assert.Equal(t, 4, result.TotalEditsApplied)
 	assert.Equal(t, 2, result.TotalFixesApplied)
+}
+
+// TestPipeline_TotalFixesAppliedCountsDeferredFixesWhenApplied covers fixes
+// that the engine defers to a later pass because another rule fixes the
+// same block: they count once a pass applies them, never while they wait.
+func TestPipeline_TotalFixesAppliedCountsDeferredFixesWhenApplied(t *testing.T) {
+	t.Parallel()
+
+	t.Run("each pass counts the fixes it applies", func(t *testing.T) {
+		t.Parallel()
+
+		result := fixMarkdown(t, "x y x y\n", lint.PipelineOptions{},
+			replaceAllRule("TEST001", "x", "X"), replaceAllRule("TEST002", "y", "Y"))
+
+		assert.Equal(t, "X Y X Y\n", string(result.ModifiedContent))
+		assert.Equal(t, 2, result.FixPasses, "the second rule's fixes wait for the first pass")
+		assert.Equal(t, 4, result.TotalEditsApplied)
+		assert.Equal(t, 4, result.TotalFixesApplied)
+	})
+
+	t.Run("fixes deferred when the loop stops are not counted", func(t *testing.T) {
+		t.Parallel()
+
+		result := fixMarkdown(t, "x y x y\n", lint.PipelineOptions{MaxFixPasses: 1},
+			replaceAllRule("TEST001", "x", "X"), replaceAllRule("TEST002", "y", "Y"))
+
+		assert.Equal(t, "X y X y\n", string(result.ModifiedContent))
+		assert.True(t, result.Exhausted)
+		assert.Equal(t, 2, result.TotalEditsApplied)
+		assert.Equal(t, 2, result.TotalFixesApplied, "the deferred fixes were never applied")
+		assert.Equal(t, 2, result.RemainingEdits)
+	})
 }
