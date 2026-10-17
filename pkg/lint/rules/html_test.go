@@ -192,6 +192,11 @@ func TestInlineHTMLRule_EachElement(t *testing.T) {
 			want:  []htmlDiagWant{{1, 3, "div"}, {2, 3, "span"}},
 		},
 		{
+			name:  "quoted tag spanning lines keeps its attributes",
+			input: "> <div\n> title=\"<b>\">\n> x\n> </div>\n",
+			want:  []htmlDiagWant{{1, 3, "div"}},
+		},
+		{
 			name:  "inline element position",
 			input: "Text with <span>inline</span> html.\n",
 			want:  []htmlDiagWant{{1, 11, "span"}},

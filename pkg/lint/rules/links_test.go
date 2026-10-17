@@ -389,6 +389,9 @@ func TestImageAltTextRule_HTMLImages(t *testing.T) {
 		{name: "img inside HTML block", input: "<p>\n  <img src=\"a.png\">\n</p>\n", want: []position{{2, 3}}},
 		{name: "img inside HTML comment", input: "<!-- <img src=\"a.png\"> -->\n"},
 		{name: "other elements ignored", input: "<div class=\"x\">text</div>\n"},
+		{name: "quoted HTML block img spanning lines", input: "> <img src=\"a.png\"\n> alt=\"x\">\n"},
+		{name: "quoted inline img spanning lines", input: "> Text <img src=\"a.png\"\n> alt=\"x\"> more.\n"},
+		{name: "quoted img without alt spanning lines", input: "> <img src=\"a.png\"\n> title=\"x\">\n", want: []position{{1, 3}}},
 	}
 
 	for _, tt := range tests {

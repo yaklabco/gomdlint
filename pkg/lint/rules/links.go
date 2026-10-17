@@ -347,11 +347,11 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	if ctx.File == nil {
 		return diags, nil
 	}
-	for _, construct := range r.htmlImages(ctx) {
+	for _, image := range r.htmlImages(ctx) {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		tag := construct.Text(ctx.File.Content)
+		construct, tag := image.construct, image.construct.Text(image.source)
 		if imgAltAttributePattern.Match(tag) {
 			continue
 		}
@@ -383,25 +383,33 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 }
 
 // htmlImages returns the opening img tags in HTML blocks and inline HTML.
-func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []mdscan.HTMLConstruct {
-	var images []mdscan.HTMLConstruct
-	keep := func(construct mdscan.HTMLConstruct) {
+func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
+	var images []htmlImage
+	keep := func(source []byte, construct mdscan.HTMLConstruct) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
-			images = append(images, construct)
+			images = append(images, htmlImage{construct: construct, source: source})
 		}
 	}
 	for _, block := range ctx.HTMLBlocks() {
 		span := block.SourceRange()
-		for _, construct := range mdscan.ScanHTML(ctx.File.Content, span.StartOffset, span.EndOffset) {
-			keep(construct)
+		source := htmlSource(ctx.File, block)
+		for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
+			keep(source, construct)
 		}
 	}
 	for _, inline := range ctx.HTMLInlines() {
-		if construct, ok := htmlNodeConstruct(inline); ok {
-			keep(construct)
+		source := htmlSource(ctx.File, inline)
+		if construct, ok := htmlNodeConstruct(source, inline); ok {
+			keep(source, construct)
 		}
 	}
 	return images
+}
+
+// htmlImage is an img element and the source its attributes are read from.
+type htmlImage struct {
+	construct mdscan.HTMLConstruct
+	source    []byte
 }
 
 // LinkDestinationStyleRule enforces link destination style (relative vs absolute).

@@ -55,7 +55,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return nil, ctx.Ctx.Err()
 		}
-		scan := &bareURLScan{content: ctx.File.Content}
+		scan := &bareURLScan{file: ctx.File, content: ctx.File.Content}
 		scan.visit(container)
 		urls = append(urls, scan.found...)
 	}
@@ -139,6 +139,7 @@ func isTextContainer(node *mdast.Node) bool {
 // bareURLScan walks one container's inline nodes in order, tracking the
 // unclosed '[' that suppress autolink literals, like micromark.
 type bareURLScan struct {
+	file     *mdast.FileSnapshot
 	content  []byte
 	brackets int
 	found    []bareURL
@@ -159,7 +160,7 @@ func (s *bareURLScan) visit(parent *mdast.Node) {
 		case child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong || child.Kind == mdast.NodeStrikethrough:
 			s.visit(child)
 		case child.Kind == mdast.NodeHTMLInline:
-			idx = skipHTMLElementContent(children, idx)
+			idx = skipHTMLElementContent(s.file, children, idx)
 		case isAutolinkNode(child):
 			s.checkParsedLiteral(child)
 		}
@@ -176,8 +177,8 @@ func isContiguousText(prev, next *mdast.Node) bool {
 // skipHTMLElementContent returns the index of the closing tag that matches the
 // opening tag at children[idx], or idx when there is none, so the element's
 // content is skipped as markdownlint does.
-func skipHTMLElementContent(children []*mdast.Node, idx int) int {
-	open, ok := htmlNodeConstruct(children[idx])
+func skipHTMLElementContent(file *mdast.FileSnapshot, children []*mdast.Node, idx int) int {
+	open, ok := htmlNodeConstruct(htmlSource(file, children[idx]), children[idx])
 	if !ok || !open.IsOpeningElement() {
 		return idx
 	}
@@ -186,7 +187,7 @@ func skipHTMLElementContent(children []*mdast.Node, idx int) int {
 		if children[next].Kind != mdast.NodeHTMLInline {
 			continue
 		}
-		tag, ok := htmlNodeConstruct(children[next])
+		tag, ok := htmlNodeConstruct(htmlSource(file, children[next]), children[next])
 		if !ok || !strings.EqualFold(tag.Name, open.Name) {
 			continue
 		}

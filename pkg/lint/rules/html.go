@@ -63,7 +63,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			return diags, ctx.Ctx.Err()
 		}
 		span := block.SourceRange()
-		for _, construct := range mdscan.ScanHTML(ctx.File.Content, span.StartOffset, span.EndOffset) {
+		for _, construct := range mdscan.ScanHTML(htmlSource(ctx.File, block), span.StartOffset, span.EndOffset) {
 			report(construct, allowed)
 		}
 	}
@@ -72,7 +72,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		construct, ok := htmlNodeConstruct(inline)
+		construct, ok := htmlNodeConstruct(htmlSource(ctx.File, inline), inline)
 		if !ok {
 			continue
 		}
@@ -119,16 +119,48 @@ func (r *InlineHTMLRule) elementDiagnostic(
 		Build()
 }
 
-// htmlNodeConstruct returns the single raw HTML construct of an inline HTML node.
-func htmlNodeConstruct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
-	if node == nil || node.File == nil {
+// htmlNodeConstruct returns the single raw HTML construct of an inline HTML
+// node, read from source, the node's file content as htmlSource returns it.
+func htmlNodeConstruct(source []byte, node *mdast.Node) (mdscan.HTMLConstruct, bool) {
+	if node == nil {
 		return mdscan.HTMLConstruct{}, false
 	}
 	span := node.SourceRange()
-	if span.StartOffset < 0 || span.EndOffset > len(node.File.Content) || span.IsEmpty() {
+	if span.StartOffset < 0 || span.EndOffset > len(source) || span.IsEmpty() {
 		return mdscan.HTMLConstruct{}, false
 	}
-	return mdscan.MatchHTML(node.File.Content[:span.EndOffset], span.StartOffset)
+	return mdscan.MatchHTML(source[:span.EndOffset], span.StartOffset)
+}
+
+// htmlSource returns the file's content with the blockquote prefix of each of
+// node's lines after its first replaced by spaces, at unchanged offsets. Raw
+// HTML that spans lines inside a blockquote is then read the way the parser
+// read it, without a line's '>' marker ending a tag early. The content is
+// copied only when the node has such a line.
+func htmlSource(file *mdast.FileSnapshot, node *mdast.Node) []byte {
+	content := file.Content
+	pos := node.SourcePosition()
+	if !pos.IsValid() {
+		return content
+	}
+	var masked []byte
+	for line := pos.StartLine + 1; line <= pos.EndLine && line <= len(file.Lines); line++ {
+		prefix := lint.ContainerPrefix(file, node, line)
+		if !bytes.ContainsRune(prefix, '>') {
+			continue
+		}
+		if masked == nil {
+			masked = bytes.Clone(content)
+		}
+		start := file.Lines[line-1].StartOffset
+		for idx := start; idx < start+len(prefix); idx++ {
+			masked[idx] = ' '
+		}
+	}
+	if masked == nil {
+		return content
+	}
+	return masked
 }
 
 // lowercaseSet returns the set of lowercased values.
