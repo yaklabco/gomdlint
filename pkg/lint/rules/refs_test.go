@@ -445,8 +445,8 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 		"[a ` x\ny `][]\n\n[a `x y`]: /url\n",
 		"[a\\\nb][]\n\n[a b]: /url\n",
 	} {
-		if diags := testHelper(t, rule, markdown); len(diags) != 1 {
-			t.Errorf("%q: got %+v, want one unused definition", markdown, diags)
+		if got := testHelper(t, rule, markdown); len(got) != 1 {
+			t.Errorf("%q: got %+v, want one unused definition", markdown, got)
 		}
 	}
 	// The strikethrough markers are part of the label, so the definition of

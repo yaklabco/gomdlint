@@ -114,8 +114,7 @@ func fixLayers(root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int
 	for pos := range parent {
 		parent[pos] = pos
 	}
-	var find func(pos int) int
-	find = func(pos int) int {
+	find := func(pos int) int {
 		for parent[pos] != pos {
 			parent[pos] = parent[parent[pos]]
 			pos = parent[pos]
