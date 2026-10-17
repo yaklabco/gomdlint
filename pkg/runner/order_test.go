@@ -15,8 +15,10 @@ import (
 // TestRunner_Run_OrdersDiagnosticsByPosition covers the order of a file's
 // diagnostics, which every reporter prints: by line, as markdownlint-cli2
 // sorts them, then by column, rule ID and message. Diagnostics equal in all
-// of those keep the order their rule reported them in. The engine reports
-// them rule by rule, so the rules here report out of order.
+// of those keep the order their rule reported them in, which
+// TestSortDiagnosticsIsStable covers for more diagnostics than a sort keeps
+// stable by chance. The engine reports diagnostics rule by rule, so the
+// rules here report out of order.
 func TestRunner_Run_OrdersDiagnosticsByPosition(t *testing.T) {
 	t.Parallel()
 
