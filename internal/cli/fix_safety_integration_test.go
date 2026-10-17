@@ -146,6 +146,27 @@ func TestFix_WritesThroughSymlinks(t *testing.T) {
 	assert.Equal(t, "# Hello World\n\nSome text.\n", string(readFile(t, target)), "the symlink target must be fixed")
 }
 
+func TestFix_DoesNotFollowSymlinksOutOfTheLintedPaths(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.md")
+	link := filepath.Join(dir, "link.md")
+	require.NoError(t, os.WriteFile(target, []byte(testMarkdownWithTrailingSpaces), 0o644))
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	runLint(t, "--fix", dir)
+
+	assert.Equal(t, testMarkdownWithTrailingSpaces, string(readFile(t, target)),
+		"fixing a directory must not write a file outside it through a symlink")
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink must be left alone")
+}
+
 func TestFix_KeepsHardLinksTogether(t *testing.T) {
 	t.Parallel()
 

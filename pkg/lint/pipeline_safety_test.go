@@ -198,6 +198,81 @@ func TestPipeline_NeverWritesFixedContentThatCannotBeParsed(t *testing.T) {
 	assert.Equal(t, "x and y", string(got))
 }
 
+func TestPipeline_WritesSymlinkTargetsOnlyInsideTheRoots(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		roots       func(linkDir, targetDir string) []string
+		wantWritten bool
+	}{
+		{name: "no roots means no restriction", roots: func(string, string) []string { return nil }, wantWritten: true},
+		{name: "target inside a root", roots: func(l, d string) []string { return []string{l, d} }, wantWritten: true},
+		{name: "target outside every root", roots: func(l, _ string) []string { return []string{l} }, wantWritten: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			linkDir := t.TempDir()
+			targetDir := t.TempDir()
+			target := filepath.Join(targetDir, "target.md")
+			link := filepath.Join(linkDir, "link.md")
+			require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlinks not supported here: %v", err)
+			}
+
+			pipeline := newTestPipeline(replaceFirstRule("TEST001", "x", "y"))
+			opts := lint.PipelineOptions{Fix: true, SymlinkRoots: tt.roots(linkDir, targetDir)}
+
+			result, err := pipeline.ProcessFile(context.Background(), link, fixConfig(), opts)
+			require.NoError(t, err)
+
+			got, err := os.ReadFile(target)
+			require.NoError(t, err)
+			info, err := os.Lstat(link)
+			require.NoError(t, err)
+			assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link must stay a link")
+
+			if tt.wantWritten {
+				assert.True(t, result.Written)
+				assert.Equal(t, "y", string(got))
+				return
+			}
+			assert.False(t, result.Written)
+			assert.True(t, result.Skipped)
+			assert.Contains(t, result.SkipReason, "outside the linted paths")
+			assert.Equal(t, "x", string(got), "a target outside the linted paths must not be written")
+		})
+	}
+}
+
+func TestSymlinkRoots(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	docs := filepath.Join(workDir, "docs")
+	require.NoError(t, os.MkdirAll(docs, 0o755))
+	target := filepath.Join(workDir, "target.md")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+	link := filepath.Join(workDir, "link.md")
+	if err := os.Symlink("target.md", link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	resolved := func(path string) string {
+		resolvedPath, err := filepath.EvalSymlinks(path)
+		require.NoError(t, err)
+		return resolvedPath
+	}
+
+	assert.Equal(t, []string{resolved(workDir)}, lint.SymlinkRoots(workDir, []string{"."}))
+	assert.Equal(t, []string{resolved(docs), resolved(target)}, lint.SymlinkRoots(workDir, []string{"docs", link}),
+		"relative paths resolve from the working directory and a named link resolves to its target")
+}
+
 func TestPipeline_KeepsCRLFLineEndings(t *testing.T) {
 	t.Parallel()
 

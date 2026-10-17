@@ -140,6 +140,55 @@ func TestRunner_Run_ReportsSkippedEditsAndOscillation(t *testing.T) {
 	assert.False(t, result.HasRuleErrors())
 }
 
+func TestRunner_Run_FixesSymlinkTargetsOnlyInsideTheLintedPaths(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.md")
+	require.NoError(t, os.WriteFile(target, []byte("x\n"), 0o644))
+	link := filepath.Join(dir, "link.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	xToY := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		idx := bytes.IndexByte(content, 'x')
+		if idx < 0 {
+			return nil, nil
+		}
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "x", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}}}}, nil
+	})
+	registry := lint.NewRegistry()
+	registry.Register(xToY)
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+
+	// Linting the directory must not write a file outside it through a link.
+	result, err := lintRunner.Run(context.Background(), runner.Options{Paths: []string{"."}, WorkingDir: dir, Config: cfg})
+	require.NoError(t, err)
+	outcome := outcomeFor(t, result, "link.md")
+	require.NotNil(t, outcome.Result)
+	assert.True(t, outcome.Result.Skipped)
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(got))
+
+	// Naming the link explicitly allows writing its target.
+	result, err = lintRunner.Run(context.Background(), runner.Options{Paths: []string{"link.md"}, WorkingDir: dir, Config: cfg})
+	require.NoError(t, err)
+	outcome = outcomeFor(t, result, "link.md")
+	require.NotNil(t, outcome.Result)
+	assert.True(t, outcome.Result.Written)
+	got, err = os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "y\n", string(got))
+}
+
 func TestResult_HasRuleErrors(t *testing.T) {
 	t.Parallel()
 

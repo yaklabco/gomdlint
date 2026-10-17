@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -139,6 +141,83 @@ type PipelineOptions struct {
 	// When conflicting edits are skipped, a subsequent pass may be able to fix them.
 	// Set to 0 to use DefaultMaxFixPasses.
 	MaxFixPasses int
+
+	// SymlinkRoots limits where a fix may write when the file is a symbolic
+	// link: its target is written only if it lies inside one of these paths
+	// (directories or files, see SymlinkRoots). Otherwise the file is skipped,
+	// so linting a tree never changes a file outside it through a link. Empty
+	// means no restriction. Hard links are not affected: they are the same
+	// file under another name.
+	SymlinkRoots []string
+}
+
+// SymlinkRoots returns the paths that PipelineOptions.SymlinkRoots should
+// hold for a run over paths: each path made absolute (relative paths start
+// from workingDir, or the current directory when it is empty) with symbolic
+// links resolved, so a link named on the command line allows its target.
+func SymlinkRoots(workingDir string, paths []string) []string {
+	if workingDir == "" {
+		if wd, err := os.Getwd(); err == nil {
+			workingDir = wd
+		}
+	}
+
+	roots := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		roots = append(roots, resolvePath(path))
+	}
+	return roots
+}
+
+// resolvePath returns path as an absolute path with symbolic links resolved,
+// or as clean an approximation as possible when it cannot be resolved.
+func resolvePath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
+}
+
+// symlinkTargetOutside reports whether path is a symbolic link whose target
+// lies outside every root, and returns the target. With no roots nothing is
+// outside.
+func symlinkTargetOutside(path string, roots []string) (string, bool) {
+	if len(roots) == 0 {
+		return "", false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		return "", false
+	}
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// A dangling link is reported by the write itself.
+		return "", false
+	}
+	target = resolvePath(target)
+
+	for _, root := range roots {
+		if pathWithin(target, resolvePath(root)) {
+			return target, false
+		}
+	}
+	return target, true
+}
+
+// pathWithin reports whether path is root or lies below it. Both must be
+// absolute and clean.
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // DefaultPipelineOptions returns sensible defaults.
@@ -221,6 +300,15 @@ func (p *Pipeline) processFile(
 		return result, nil
 	}
 	result.ModifiedContent = content
+
+	// A link may only lead the fix to a file inside the linted paths. This
+	// applies to dry runs too, so a preview never shows a change that a real
+	// run would refuse.
+	if target, outside := symlinkTargetOutside(path, opts.SymlinkRoots); outside {
+		result.Skipped = true
+		result.SkipReason = fmt.Sprintf("not fixed: %s is a symbolic link to %s, outside the linted paths", path, target)
+		return result, nil
+	}
 
 	// Step 3: Handle dry-run mode.
 	if opts.DryRun {
