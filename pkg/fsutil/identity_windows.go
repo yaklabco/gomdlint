@@ -10,18 +10,16 @@ import (
 // openNoFollow is not available on Windows.
 const openNoFollow = 0
 
-// hasMultipleLinks reports whether the file at path has more than one hard
-// link. If the link count cannot be read, the file is treated as having one.
-func hasMultipleLinks(path string, _ os.FileInfo) bool {
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
+// syncDirectories is false: Windows cannot flush a directory handle.
+const syncDirectories = false
 
+// hasMultipleLinks reports whether the open file has more than one hard
+// link. When the link count cannot be read it reports true, so the caller
+// rewrites the file in place and keeps its identity.
+func hasMultipleLinks(file *os.File) bool {
 	var data syscall.ByHandleFileInformation
 	if err := syscall.GetFileInformationByHandle(syscall.Handle(file.Fd()), &data); err != nil {
-		return false
+		return true
 	}
 	return data.NumberOfLinks > 1
 }
@@ -31,6 +29,3 @@ func hasMultipleLinks(path string, _ os.FileInfo) bool {
 func restoreOwner(_ ownerFile, _ os.FileInfo) (bool, error) {
 	return true, nil
 }
-
-// syncDir is a no-op on Windows, which cannot flush a directory handle.
-func syncDir(_ string) {}

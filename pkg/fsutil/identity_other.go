@@ -1,4 +1,4 @@
-//go:build !unix && !windows
+//go:build !unix && !windows && !js && !wasip1
 
 package fsutil
 
@@ -7,8 +7,12 @@ import "os"
 // openNoFollow is not available on these platforms.
 const openNoFollow = 0
 
-// hasMultipleLinks always reports false where link counts are unavailable.
-func hasMultipleLinks(_ string, _ os.FileInfo) bool {
+// syncDirectories is false where directories cannot be synced.
+const syncDirectories = false
+
+// hasMultipleLinks reports false: the remaining platforms (Plan 9) have no
+// hard links, so replacing a file cannot split one.
+func hasMultipleLinks(_ *os.File) bool {
 	return false
 }
 
@@ -16,6 +20,3 @@ func hasMultipleLinks(_ string, _ os.FileInfo) bool {
 func restoreOwner(_ ownerFile, _ os.FileInfo) (bool, error) {
 	return true, nil
 }
-
-// syncDir is a no-op where directories cannot be synced.
-func syncDir(_ string) {}

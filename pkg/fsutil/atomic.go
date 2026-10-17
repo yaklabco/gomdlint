@@ -98,10 +98,37 @@ func ReplaceFile(ctx context.Context, path string, content []byte, mode os.FileM
 // writeFile writes content to target, which is not a symbolic link, given
 // its current state (existing is nil when the file does not exist yet).
 func writeFile(target string, content []byte, mode os.FileMode, existing os.FileInfo) error {
-	if existing != nil && hasMultipleLinks(target, existing) {
+	if existing != nil && pathHasMultipleLinks(target) {
 		return rewriteInPlace(target, content, mode)
 	}
 	return replaceFile(target, content, mode, existing)
+}
+
+// pathHasMultipleLinks reports whether the file at path has more than one
+// hard link. When that cannot be determined it reports true, so the file is
+// rewritten in place and keeps its identity.
+func pathHasMultipleLinks(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer file.Close()
+	return hasMultipleLinks(file)
+}
+
+// syncDir makes a rename in dir durable, on a best-effort basis: a
+// directory that cannot be opened (no read permission) or synced (some file
+// systems do not support it) is left as it is.
+func syncDir(dir string) {
+	if !syncDirectories {
+		return
+	}
+	handle, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = handle.Sync() //nolint:errcheck // Best effort: the rename stands whether or not the directory can be synced.
+	_ = handle.Close()
 }
 
 // resolveWriteTarget returns the file that a write to path must change:

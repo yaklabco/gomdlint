@@ -13,11 +13,20 @@ import (
 // after the path was checked.
 const openNoFollow = syscall.O_NOFOLLOW
 
-// hasMultipleLinks reports whether the file described by info has more than
-// one hard link.
-func hasMultipleLinks(_ string, info os.FileInfo) bool {
+// syncDirectories is true where a directory can be synced to make a rename
+// in it durable.
+const syncDirectories = true
+
+// hasMultipleLinks reports whether the open file has more than one hard
+// link. When the link count cannot be read it reports true, so the caller
+// rewrites the file in place and keeps its identity.
+func hasMultipleLinks(file *os.File) bool {
+	info, err := file.Stat()
+	if err != nil {
+		return true
+	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Nlink > 1
+	return !ok || stat.Nlink > 1
 }
 
 // restoreOwner gives tmp the owner and group of existing. It reports false,
@@ -40,16 +49,4 @@ func restoreOwner(tmp ownerFile, existing os.FileInfo) (bool, error) {
 	}
 
 	return tmp.Chown(int(want.Uid), int(want.Gid)) == nil, nil
-}
-
-// syncDir flushes a directory entry change, such as a rename, to disk. It is
-// best-effort: a directory that cannot be opened (no read permission) or
-// synced (some file systems do not support it) is left as it is.
-func syncDir(dir string) {
-	handle, err := os.Open(dir)
-	if err != nil {
-		return
-	}
-	_ = handle.Sync() //nolint:errcheck // Best effort: the rename stands whether or not the directory can be synced.
-	_ = handle.Close()
 }
