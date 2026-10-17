@@ -1068,7 +1068,7 @@ type docOutline struct {
 	blocks      []blockSummary
 	// fragments is true when the document holds anything that could be a
 	// fragment reference: a link or image whose destination holds "#", or
-	// raw HTML outside comments that holds "#" or a character reference.
+	// raw HTML, comments included, that holds "#" or a character reference.
 	fragments bool
 }
 
@@ -1090,24 +1090,16 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 			if strings.Contains(lint.LinkDestination(node), "#") || mayHoldHash(source) {
 				outline.fragments = true
 			}
-		case mdast.NodeHTMLBlock:
-			if tagsMayHoldHash(source) {
+		case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
+			// Raw HTML is not interpreted: a hash anywhere in it counts, in
+			// tags, text and comments alike.
+			if mayHoldHash(source) {
 				outline.fragments = true
 			}
-		case mdast.NodeHTMLInline:
-			if !bytes.HasPrefix(source, []byte("<!--")) {
-				outline.fragments = outline.fragments || mayHoldHash(source)
-				break
-			}
-			// A comment that is not well formed is not skipped: it and the
-			// rest of the inline content after it count as live markup.
-			if end, ok := wellFormedComment(source); !ok || end != len(source) {
-				outline.fragments = outline.fragments || mayHoldHash(doc.Content[rng.StartOffset:inlineContentEnd(node)])
-			}
 		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
-			// Raw HTML that the parser did not read as a tag, such as an
-			// unterminated one, is text of inline content.
-			if textTagsMayHoldHash(doc.Content, node) {
+			// Raw HTML that the parser did not read as such, such as an
+			// unterminated tag, is text of inline content.
+			if textHTMLMayHoldHash(doc.Content, node) {
 				outline.fragments = true
 			}
 		}
@@ -1116,74 +1108,13 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 	return outline
 }
 
-// tagsMayHoldHash reports whether a tag in text, raw HTML, holds "#" or a
-// character reference that could stand for it. Attributes are not parsed: a
-// tag runs from "<" and a letter, "/", "!" or "?" to the first ">" outside
-// quotes, or to the end of text, and is taken whole. The text between tags
-// is left out, and so are well-formed comments; anything else that starts
-// with "<!--" counts as live markup to the end of text.
-func tagsMayHoldHash(text []byte) bool {
-	for idx := 0; idx+1 < len(text); idx++ {
-		if text[idx] != '<' {
-			continue
-		}
-		if bytes.HasPrefix(text[idx:], []byte("<!--")) {
-			end, ok := wellFormedComment(text[idx:])
-			if !ok {
-				return mayHoldHash(text[idx:])
-			}
-			idx += end - 1
-			continue
-		}
-		if next := text[idx+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {
-			continue
-		}
-		end := tagEnd(text, idx)
-		if mayHoldHash(text[idx:end]) {
-			return true
-		}
-		idx = end - 1
-	}
-	return false
-}
-
-// wellFormedComment reports whether text starts with an HTML comment that
-// every browser ends at the same place: "<!--", content that neither starts
-// with ">" or "->" nor holds "--", and the first "-->". end is the offset
-// after the comment.
-func wellFormedComment(text []byte) (int, bool) {
-	opener, closer := []byte("<!--"), []byte("-->")
-	if !bytes.HasPrefix(text, opener) {
-		return 0, false
-	}
-	length := bytes.Index(text[len(opener):], closer)
-	if length < 0 {
-		return 0, false
-	}
-	content := text[len(opener) : len(opener)+length]
-	if bytes.HasPrefix(content, []byte(">")) || bytes.HasPrefix(content, []byte("->")) || bytes.Contains(content, []byte("--")) {
-		return 0, false
-	}
-	return len(opener) + length + len(closer), true
-}
-
-// inlineContentEnd returns where the paragraph, heading or table cell that
-// holds node ends, or where node ends when none does.
-func inlineContentEnd(node *mdast.Node) int {
-	for parent := node.Parent; parent != nil; parent = parent.Parent {
-		if hasInlineContent(parent.Kind) {
-			return parent.SourceRange().EndOffset
-		}
-	}
-	return node.SourceRange().EndOffset
-}
-
-// textTagsMayHoldHash reports whether the inline content of container holds
-// a tag in its text, outside code spans and the inline HTML the parser
-// read, that holds "#" or a character reference that could stand for it.
-// A "<" that a backslash escapes starts no tag. A tag runs to the first ">"
-// outside quotes, or to the end of the container, and is taken whole.
-func textTagsMayHoldHash(content []byte, container *mdast.Node) bool {
+// textHTMLMayHoldHash reports whether the inline content of container could
+// hold raw HTML that the parser did not read as such, with "#" or a
+// character reference that could stand for it: whether the text from the
+// first "<" that could start a tag, outside code spans and the inline HTML
+// the parser read and not escaped by a backslash, to the end of the
+// container holds one.
+func textHTMLMayHoldHash(content []byte, container *mdast.Node) bool {
 	rng := container.SourceRange()
 	if rng.StartOffset < 0 || rng.EndOffset > len(content) {
 		return false
@@ -1202,35 +1133,11 @@ func textTagsMayHoldHash(content []byte, container *mdast.Node) bool {
 			insideRanges(parsed, mdast.SourceRange{StartOffset: idx, EndOffset: idx + 1}) {
 			continue
 		}
-		if next := text[idx+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {
-			continue
+		if next := text[idx+1]; isASCIILetter(next) || next == '/' || next == '!' || next == '?' {
+			return mayHoldHash(text[idx:])
 		}
-		end := tagEnd(text, idx)
-		if mayHoldHash(text[idx:end]) {
-			return true
-		}
-		idx = end - 1
 	}
 	return false
-}
-
-// tagEnd returns the offset after the ">" that ends the tag starting at
-// start, stepping over quoted strings, or the end of text when there is
-// none.
-func tagEnd(text []byte, start int) int {
-	for pos := start + 1; pos < len(text); pos++ {
-		switch text[pos] {
-		case '"', '\'':
-			closing := bytes.IndexByte(text[pos+1:], text[pos])
-			if closing < 0 {
-				return len(text)
-			}
-			pos += 1 + closing
-		case '>':
-			return pos + 1
-		}
-	}
-	return len(text)
 }
 
 // mayHoldHash reports whether text holds "#", or a character reference that

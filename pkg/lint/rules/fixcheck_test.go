@@ -401,12 +401,12 @@ func TestDocumentKept(t *testing.T) {
 			want:   false,
 		},
 		{
-			// A hash in an HTML comment is not an attribute value.
+			// Raw HTML is not interpreted, so a hash in a comment counts.
 			name:   "anchor change with a hash in an HTML comment",
 			input:  "# Foo !\n\n<!-- # note -->\n",
 			edits:  []string{" !", ""},
 			intent: headingLoses(" !"),
-			want:   true,
+			want:   false,
 		},
 		{
 			name:   "fragment link broken by a changed anchor",

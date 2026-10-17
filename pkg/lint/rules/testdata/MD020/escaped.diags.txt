@@ -1,2 +1,2 @@
 escaped.input.md:5:1 warning No space before closing hashes on closed ATX style heading (MD020/no-missing-space-closed-atx) [fixable]
-escaped.input.md:7:1 warning No space inside hashes on closed ATX style heading (both sides) (MD020/no-missing-space-closed-atx) [fixable]
+escaped.input.md:7:1 warning No space inside hashes on closed ATX style heading (both sides) (MD020/no-missing-space-closed-atx)

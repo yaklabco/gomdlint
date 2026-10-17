@@ -1137,9 +1137,18 @@ func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
 		{name: "escaped comment opener before a tag", input: "# Foo !\n\n\\<!-- <a href=\"#foo-\">jump</a>\n"},
 		{name: "tag in a code span", input: "# Foo !\n\n`<a href=\"#foo-\">`\n", wantFix: true},
 		{name: "escaped tag", input: "# Foo !\n\n\\<a href=\"#foo-\">jump\n", wantFix: true},
-		{name: "hash in element text", input: "# Foo !\n\n<div>\n#hashtag text\n</div>\n", wantFix: true},
-		{name: "hash in a comment", input: "# Foo !\n\n<!-- #note -->\n", wantFix: true},
-		{name: "hash in an inline comment", input: "# Foo !\n\nText <!-- #note --> here.\n", wantFix: true},
+		// Raw HTML is not interpreted: a hash anywhere in it counts, in
+		// element text and comments too.
+		{name: "hash in element text", input: "# Foo !\n\n<div>\n#hashtag text\n</div>\n"},
+		{name: "hash in a comment", input: "# Foo !\n\n<!-- #note -->\n"},
+		{name: "hash in an inline comment", input: "# Foo !\n\nText <!-- #note --> here.\n"},
+		// Inside style, script and textarea, "<!--" opens no comment, so the
+		// link after the closing tag is live.
+		{name: "comment opener inside style", input: "# Foo !\n\n<style>\n<!-- </style><a href=\"#foo-\">jump</a> -->\n"},
+		{name: "comment opener inside script", input: "# Foo !\n\n<script>\n<!-- </script><a href=\"#foo-\">jump</a> -->\n"},
+		{name: "comment opener inside textarea", input: "# Foo !\n\n<textarea>\n<!-- </textarea><a href=\"#foo-\">jump</a> -->\n"},
+		{name: "comment opener inside an inline textarea", input: "# Foo !\n\nA <textarea><!-- </textarea><a href=\"#foo-\">jump</a> --> b\n"},
+		{name: "raw HTML without a hash", input: "# Foo !\n\n<div>\n<!-- note -->\ntext\n</div>\n", wantFix: true},
 		// Browsers end a comment at "--!>", and read "<!-->" and "<!--->" as
 		// empty comments, so the links after them are live.
 		{name: "comment that browsers end at --!>", input: "# Foo !\n\n<!-- comment --!><a href=\"#foo-\">jump</a>\n"},
