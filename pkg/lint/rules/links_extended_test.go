@@ -363,3 +363,22 @@ func TestNoBareURLsRule_WithholdsUnsafeFixes(t *testing.T) {
 		}
 	}
 }
+
+// TestNoBareURLsRule_ByteOrderMark treats the start of a file that begins
+// with a byte order mark as the start of its text, as the parser does, so a
+// "www." literal there is still reported.
+func TestNoBareURLsRule_ByteOrderMark(t *testing.T) {
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run(string(flavor), func(t *testing.T) {
+			input := "\xEF\xBB\xBFwww.example.com and https://example.com\n"
+			snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			cfg := config.NewConfig()
+			cfg.Flavor = flavor
+			diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+			require.NoError(t, err)
+			require.Len(t, diags, 2, "diagnostics: %+v", diags)
+			assert.Equal(t, 4, diags[0].StartColumn, "the www literal starts after the mark")
+		})
+	}
+}

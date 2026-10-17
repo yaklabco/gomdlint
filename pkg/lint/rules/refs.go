@@ -256,7 +256,7 @@ type definitionRemoval struct {
 func newDefinitionRemoval(ctx *lint.RuleContext, defs []*refs.ReferenceDefinition) *definitionRemoval {
 	columns := make(map[int]int, len(defs))
 	for _, def := range defs {
-		columns[def.Lines[0]] = def.Position.StartColumn
+		columns[def.Lines[0]] = definitionColumn(ctx.File, def)
 	}
 	return &definitionRemoval{
 		file:    ctx.File,
@@ -293,7 +293,7 @@ func (d *definitionRemoval) keepsStructure(def *refs.ReferenceDefinition) bool {
 	first, last := def.Lines[0], def.Lines[1]
 	startsSibling := func(line int) bool {
 		column, ok := d.columns[line]
-		return ok && column == def.Position.StartColumn
+		return ok && column == definitionColumn(d.file, def)
 	}
 	if next := last + 1; next <= len(d.file.Lines) && !d.isBlank(next) && !startsSibling(next) {
 		return false
@@ -325,6 +325,12 @@ func (d *definitionRemoval) absorbs(prev, first int) bool {
 		}
 	}
 	return false
+}
+
+// definitionColumn returns the column a definition starts at, counted from
+// the start of its line's text, so a byte order mark does not count.
+func definitionColumn(file *mdast.FileSnapshot, def *refs.ReferenceDefinition) int {
+	return def.Position.StartColumn - lint.LineTextOffset(file, def.Lines[0])
 }
 
 // isBlank reports whether a line holds nothing but spaces, tabs, and

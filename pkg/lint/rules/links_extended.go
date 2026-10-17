@@ -55,7 +55,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return nil, ctx.Ctx.Err()
 		}
-		scan := &bareURLScan{file: ctx.File, content: ctx.File.Content}
+		scan := &bareURLScan{file: ctx.File, content: ctx.File.Content, textStart: lint.LineTextOffset(ctx.File, 1)}
 		scan.visit(container)
 		urls = append(urls, scan.found...)
 	}
@@ -139,10 +139,13 @@ func isTextContainer(node *mdast.Node) bool {
 // bareURLScan walks one container's inline nodes in order, tracking the
 // unclosed '[' that suppress autolink literals, like micromark.
 type bareURLScan struct {
-	file     *mdast.FileSnapshot
-	content  []byte
-	brackets int
-	found    []bareURL
+	file    *mdast.FileSnapshot
+	content []byte
+	// textStart is where the document's text starts: after a byte order
+	// mark, which the parser skips, so nothing comes before a literal there.
+	textStart int
+	brackets  int
+	found     []bareURL
 }
 
 func (s *bareURLScan) visit(parent *mdast.Node) {
@@ -225,7 +228,7 @@ func (s *bareURLScan) scanText(start, end int) {
 			continue
 		}
 		var prev byte
-		if pos > 0 {
+		if pos > s.textStart {
 			prev = s.content[pos-1]
 		}
 		literalEnd, kind := mdscan.MatchAutolinkLiteral(text, pos, prev)

@@ -10,6 +10,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -737,5 +738,24 @@ func TestOptionalRulesDefaultDisabled(t *testing.T) {
 		if !rule.DefaultEnabled() {
 			t.Errorf("%s.DefaultEnabled() = false, want true", rule.ID())
 		}
+	}
+}
+
+// TestLinkImageRefDefsRule_ByteOrderMark checks that a byte order mark before
+// definitions on the first lines changes neither MD053's diagnostics nor its
+// fixes: the mark is not part of the first definition's column.
+func TestLinkImageRefDefsRule_ByteOrderMark(t *testing.T) {
+	for _, input := range []string{
+		"[a]: https://a.example\n[b]: https://b.example\n",
+		"> [a]:\n>   https://a.example\n> [b]: https://b.example\n\nText\n",
+	} {
+		t.Run(input, func(t *testing.T) {
+			plain := applyRuleWithOptions(t, NewLinkImageRefDefsRule(), input, nil)
+			require.Len(t, plain, 2)
+			marked := applyRuleWithOptions(t, NewLinkImageRefDefsRule(), mdast.ByteOrderMark+input, nil)
+			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
+			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, input, plain),
+				applyAllFixEdits(t, mdast.ByteOrderMark+input, marked))
+		})
 	}
 }
