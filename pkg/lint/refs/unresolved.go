@@ -37,10 +37,12 @@ func (c *collector) collectUnresolvedReferences() {
 
 // isInlineContainer reports whether a node's children form one run of inline
 // content: a block such as a paragraph, heading, or table cell, or the text
-// of a link or image.
+// of a link or image. An autolink's text is its address, which holds no
+// references.
 func isInlineContainer(node *mdast.Node) bool {
 	if node.Kind == mdast.NodeLink || node.Kind == mdast.NodeImage {
-		return true
+		return node.Inline == nil || node.Inline.Link == nil ||
+			node.Inline.Link.ReferenceStyle != mdast.RefStyleAutolink
 	}
 	if node.IsInline() {
 		return false
@@ -127,12 +129,12 @@ func (c *collector) scanUnresolved(chars []inlineChar) {
 
 // recordReference classifies the bracket pair closing at chars[closing] by
 // what follows it, records the reference, and returns the index the scan
-// continues from.
+// continues from. A "(" after the pair began an inline link the parser
+// rejected, since a valid one would be a link node, so the pair falls back
+// to a reference as in CommonMark.
 func (c *collector) recordReference(chars []inlineChar, opener bracketOpener, closing int) int {
 	next := closing + 1
 	switch {
-	case isChar(chars, next, '('):
-		return closing // A failed inline link, not a reference.
 	case isChar(chars, next, '[') && isChar(chars, next+1, ']'):
 		label, ok := linkTextLabel(chars, opener.index, closing)
 		if ok {

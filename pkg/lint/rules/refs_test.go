@@ -375,6 +375,12 @@ func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
 		{name: "multi-line label", markdown: "See [multi\nline][]\n\n[multi line]: https://example.com\n"},
 		{name: "reference inside strikethrough", markdown: "Old ~~[text][gone]~~ note.\n",
 			want: []want{{1, 7, "Reference link uses undefined label [gone]"}}},
+		{name: "brackets inside an autolink", markdown: "<https://example.com/[a][b]>\n"},
+		{name: "brackets inside a bare URL", markdown: "See https://example.com/[a][b] now.\n"},
+		{name: "shortcut after a failed inline link", markdown: "See [t](bad dest now.\n",
+			options: map[string]any{"shortcut_syntax": true},
+			want:    []want{{1, 5, "Reference link uses undefined label [t]"}}},
+		{name: "failed inline link is not a reference by default", markdown: "See [t](bad dest now.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
