@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -218,4 +219,21 @@ func TestImageAltTextRuleOnLargeDocument(t *testing.T) {
 	diags := applyWithinLimit(t, NewImageAltTextRule(), file, cfg)
 
 	require.Len(t, diags, 2*sections)
+}
+
+// TestNoBareURLsRuleOnLargeDocument verifies that MD034 runs in time that
+// grows about linearly with the document. To skip the content of an HTML
+// element, MD034 reads the tags that follow its opening tag. Copying the
+// file for each tag that spans lines in a blockquote would take minutes on a
+// document with tens of thousands of them, far past the generous limit.
+func TestNoBareURLsRuleOnLargeDocument(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large document")
+	}
+	// Copying memory costs about as much with the race detector as without
+	// it, so both use the same document.
+	const sections = 15000
+	file, cfg := parseLargeDocument(t, largeQuotedImageDocument(sections))
+
+	assert.Empty(t, applyWithinLimit(t, NewNoBareURLsRule(), file, cfg), "the document has no bare URLs")
 }

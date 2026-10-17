@@ -445,8 +445,9 @@ func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 	return images
 }
 
-// htmlImage is an img element and its tag, read as htmlSource gives it, with
-// the attributes that decide whether the image has alt text.
+// htmlImage is an img element and its tag, read from the source that
+// htmlSources gives it, with the attributes that decide whether the image
+// has alt text.
 type htmlImage struct {
 	construct mdscan.HTMLConstruct
 	tag       []byte

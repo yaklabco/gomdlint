@@ -81,13 +81,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		var (
-			construct mdscan.HTMLConstruct
-			ok        bool
-		)
-		sources.with(inline, func(source []byte) {
-			construct, ok = htmlNodeConstruct(source, inline)
-		})
+		construct, ok := sources.construct(inline)
 		if !ok {
 			continue
 		}
@@ -135,7 +129,7 @@ func (r *InlineHTMLRule) elementDiagnostic(
 }
 
 // htmlNodeConstruct returns the single raw HTML construct of an inline HTML
-// node, read from source, the node's file content as htmlSource returns it.
+// node, read from source, the node's file content as htmlSources gives it.
 func htmlNodeConstruct(source []byte, node *mdast.Node) (mdscan.HTMLConstruct, bool) {
 	if node == nil {
 		return mdscan.HTMLConstruct{}, false
@@ -147,27 +141,8 @@ func htmlNodeConstruct(source []byte, node *mdast.Node) (mdscan.HTMLConstruct, b
 	return mdscan.MatchHTML(source[:span.EndOffset], span.StartOffset)
 }
 
-// htmlSource returns the file's content with the blockquote prefix of each of
-// node's lines after its first replaced by spaces, at unchanged offsets. Raw
-// HTML that spans lines inside a blockquote is then read the way the parser
-// read it, without a line's '>' marker ending a tag early. The content is
-// copied only when the node has such a line. A rule that reads many nodes
-// and does not keep their sources uses htmlSources instead, which does not
-// copy the file for each node.
-func htmlSource(file *mdast.FileSnapshot, node *mdast.Node) []byte {
-	prefixes := quotedContinuationPrefixes(file, node)
-	if len(prefixes) == 0 {
-		return file.Content
-	}
-	masked := bytes.Clone(file.Content)
-	for _, prefix := range prefixes {
-		fillWithSpaces(masked[prefix.StartOffset:prefix.EndOffset])
-	}
-	return masked
-}
-
 // quotedContinuationPrefixes returns the byte ranges of the container
-// prefixes that htmlSource masks: on each of node's lines after its first,
+// prefixes that htmlSources masks: on each of node's lines after its first,
 // the prefix when it holds a blockquote marker.
 func quotedContinuationPrefixes(file *mdast.FileSnapshot, node *mdast.Node) []mdast.SourceRange {
 	pos := node.SourcePosition()
@@ -193,13 +168,30 @@ func fillWithSpaces(text []byte) {
 	}
 }
 
-// htmlSources gives HTML nodes the sources that htmlSource gives them. The
-// nodes that need masked lines share one copy of the file, which is masked
-// for a node and restored after it, so a file with many such nodes is copied
-// once instead of once for each node.
+// htmlSources gives each HTML node the source it is read from: the file's
+// content with the blockquote prefix of each of the node's lines after its
+// first replaced by spaces, at unchanged offsets. Raw HTML that spans lines
+// inside a blockquote is then read the way the parser read it, without a
+// line's '>' marker ending a tag early. A node without such lines reads the
+// file itself. The nodes that need masked lines share one copy of the file,
+// which is masked for a node and restored after it, so the file is copied at
+// most once, however many such nodes it holds.
 type htmlSources struct {
 	file    *mdast.FileSnapshot
 	scratch []byte
+}
+
+// construct returns the single raw HTML construct of an inline HTML node,
+// read from the node's source.
+func (s *htmlSources) construct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
+	var (
+		construct mdscan.HTMLConstruct
+		ok        bool
+	)
+	s.with(node, func(source []byte) {
+		construct, ok = htmlNodeConstruct(source, node)
+	})
+	return construct, ok
 }
 
 // with calls use with the source of node. The source is valid only during
