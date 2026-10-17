@@ -130,6 +130,12 @@ func TestVerifyFixes(t *testing.T) {
 			kept:  []bool{false},
 		},
 		{
+			name:  "a blank line taken in by an unclosed fence is code",
+			input: "- a\n  ~~~`\n- ~~~ bash\n  x\n  ~~~\n\n- c\n",
+			diags: []lint.Diagnostic{edit(11, 11, "\n")},
+			kept:  []bool{false},
+		},
+		{
 			name:  "a heading anchor may not change",
 			input: "# ` x`\n\n[link](#-x)\n",
 			allow: fixAllowance{codeSpanSpace: true},

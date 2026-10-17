@@ -297,11 +297,19 @@ func blockOutlineAttrs(file *mdast.FileSnapshot, node *mdast.Node, allow fixAllo
 }
 
 // codeBlockOutline returns a code block's kind, info string, and code: each
-// line without its container prefix and the block's own indentation.
+// line without its container prefix and the block's own indentation. The
+// lines are those the block spans, between its fences, so a blank line it
+// takes in counts even though it adds no characters.
 func codeBlockOutline(file *mdast.FileSnapshot, node *mdast.Node, allow fixAllowance) string {
-	kind := "fenced"
-	if lint.IsIndentedCodeBlock(node) {
-		kind = "indented"
+	pos := node.SourcePosition()
+	first, last := pos.StartLine, pos.EndLine
+	kind := "indented"
+	if !lint.IsIndentedCodeBlock(node) {
+		kind = "fenced"
+		first++
+		if node.Block != nil && node.Block.CodeBlock != nil && node.Block.CodeBlock.Closed {
+			last--
+		}
 	}
 	info := lint.CodeBlockInfo(node)
 	if allow.codeInfo {
@@ -309,8 +317,10 @@ func codeBlockOutline(file *mdast.FileSnapshot, node *mdast.Node, allow fixAllow
 	}
 	indent := codeIndent(file, node)
 	var code strings.Builder
-	for _, line := range codeBlockContentLines(file, node) {
-		text := stripColumns(line.content, indent)
+	for line := max(first, 1); pos.IsValid() && line <= last && line <= len(file.Lines); line++ {
+		lineInfo := file.Lines[line-1]
+		start := min(lineInfo.StartOffset+len(lint.ContainerPrefix(file, node, line)), lineInfo.NewlineStart)
+		text := stripColumns(string(file.Content[start:lineInfo.NewlineStart]), indent)
 		if allow.prompts {
 			text = dollarCommandPattern.ReplaceAllString(text, "${1}")
 		}
