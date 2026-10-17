@@ -66,8 +66,8 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 		keys := slices.Sorted(maps.Keys(raw))
 		slices.SortStableFunc(keys, func(a, b string) int {
-			_, _, aRule := registry.Resolve(normalizedDirectiveKey(a))
-			_, _, bRule := registry.Resolve(normalizedDirectiveKey(b))
+			_, aRule := registry.Lookup(a)
+			_, bRule := registry.Lookup(b)
 			if aRule == bRule {
 				return 0
 			}
@@ -84,7 +84,7 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 				}
 				for _, id := range registry.IDs() {
 					baseline := value
-					if strings.HasPrefix(id, "MDL") {
+					if IsGomdlintOnlyRule(id) {
 						baseline = false
 					}
 					result.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, baseline)
@@ -108,36 +108,39 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 	return result, nil
 }
 
-func normalizedDirectiveKey(key string) string {
-	if strings.HasPrefix(strings.ToLower(key), "md") {
-		return strings.ToUpper(key)
-	}
-	return strings.ToLower(key)
-}
-
+// directiveRuleIDs returns the IDs of the rules that the words of parameter
+// name, or of every rule when it has no words. Each word is a rule ID, name
+// or alias, or a tag, in any case, as in markdownlint. Words that name
+// nothing are ignored.
 func directiveRuleIDs(parameter string, registry *Registry) []string {
-	items := strings.Fields(strings.ToLower(parameter))
+	items := strings.Fields(parameter)
 	if len(items) == 0 {
 		return registry.IDs()
 	}
 	ids := make(map[string]bool)
 	for _, item := range items {
-		key := item
-		if strings.HasPrefix(item, "md") {
-			key = strings.ToUpper(item)
-		}
-		if id, _, ok := registry.Resolve(key); ok {
-			ids[id] = true
-		}
-		for _, rule := range registry.Rules() {
-			for _, tag := range rule.Tags() {
-				if strings.EqualFold(tag, item) {
-					ids[rule.ID()] = true
-				}
-			}
+		for _, rule := range directiveRules(item, registry) {
+			ids[rule.ID()] = true
 		}
 	}
 	return slices.Sorted(maps.Keys(ids))
+}
+
+// directiveRules returns the rules that one word of a markdownlint comment
+// names: the rule it identifies and the rules its tag covers. Tags come from
+// the rules' catalog entries, which carry markdownlint's tags. A word that
+// names no rule and no catalog tag falls back to the tags that rules report
+// themselves through Rule.Tags, so that gomdlint's former tags, such as
+// style, keep working for now.
+func directiveRules(word string, registry *Registry) []Rule {
+	rules := registry.RulesByTag(word)
+	if rule, ok := registry.Lookup(word); ok {
+		rules = append(rules, rule)
+	}
+	if len(rules) == 0 {
+		rules = registry.rulesByOwnTag(word)
+	}
+	return rules
 }
 
 // directiveStates computes rule enablement by original source line. File directives

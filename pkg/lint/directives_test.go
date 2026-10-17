@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -118,6 +119,80 @@ func TestEngineAdditionalMarkdownlintAliases(t *testing.T) {
 			require.Empty(t, result.Diagnostics)
 		})
 	}
+}
+
+// reportedLines lints input with every built-in rule at its default
+// settings, plus the rules in enable, and returns the lines ruleID reports.
+func reportedLines(t *testing.T, input, ruleID string, enable ...string) []int {
+	t.Helper()
+	cfg := config.NewConfig()
+	cfg.EnableRules = enable
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+		context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	var lines []int
+	for _, diag := range result.Diagnostics {
+		if diag.RuleID == ruleID {
+			lines = append(lines, diag.StartLine)
+		}
+	}
+	return lines
+}
+
+func TestEngineDirectiveTagsFollowMarkdownlint(t *testing.T) {
+	const (
+		mixedBullets = "- one\n\n* two\n"
+		extraBlank   = "Text.\n\n\nMore.\n"
+		bareFence    = "```\ncode\n```\n"
+		shortTable   = "| A | B |\n| - | - |\n| 1 | 2 |\n"
+		mixedLinks   = "[a](https://example.com/a) and [b](docs/b.md)\n"
+	)
+	tests := []struct {
+		tag, ruleID, body string
+		enable            []string
+		silenced          bool
+	}{
+		// markdownlint v0.41's tags.
+		{tag: "bullet", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "ul", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "Bullet", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "blank_lines", ruleID: "MD012", body: extraBlank, silenced: true},
+		{tag: "language", ruleID: "MD040", body: bareFence, silenced: true},
+		{tag: "whitespace", ruleID: "MD022", body: "## Section\ntext\n"},
+		{tag: "links", ruleID: "MD045", body: "![](image.png)\n"},
+		// Rules that markdownlint lacks take tags from its vocabulary.
+		{tag: "table", ruleID: "MDL003", body: shortTable, silenced: true},
+		{tag: "links", ruleID: "MDL001", body: mixedLinks, enable: []string{"MDL001"}, silenced: true},
+		{tag: "url", ruleID: "MDL001", body: mixedLinks, enable: []string{"MDL001"}, silenced: true},
+		// gomdlint's former tags keep working for now.
+		{tag: "style", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "lists", ruleID: "MD004", body: mixedBullets, silenced: true},
+		{tag: "layout", ruleID: "MD012", body: extraBlank, silenced: true},
+		{tag: "metadata", ruleID: "MD041", body: "Text.\n", enable: []string{"MD041"}, silenced: true},
+		{tag: "tables", ruleID: "MDL003", body: shortTable, silenced: true},
+		{tag: "gfm", ruleID: "MDL003", body: shortTable, silenced: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag+" "+tt.ruleID, func(t *testing.T) {
+			reported := reportedLines(t, tt.body, tt.ruleID, tt.enable...)
+			require.NotEmpty(t, reported, "the body must make %s report", tt.ruleID)
+
+			directed := reportedLines(t, "<!-- markdownlint-disable "+tt.tag+" -->\n\n"+tt.body, tt.ruleID, tt.enable...)
+			if tt.silenced {
+				assert.Empty(t, directed, "markdownlint-disable %s must silence %s", tt.tag, tt.ruleID)
+			} else {
+				assert.Len(t, directed, len(reported), "markdownlint-disable %s must not silence %s", tt.tag, tt.ruleID)
+			}
+		})
+	}
+}
+
+func TestEngineConfigureFileTagsFollowMarkdownlint(t *testing.T) {
+	const mixedBullets = "- one\n\n* two\n"
+	require.NotEmpty(t, reportedLines(t, mixedBullets, "MD004"))
+
+	assert.Empty(t, reportedLines(t, "<!-- markdownlint-configure-file {\"bullet\": false} -->\n\n"+mixedBullets, "MD004"))
+	assert.NotEmpty(t, reportedLines(t, "<!-- markdownlint-configure-file {\"whitespace\": false} -->\n\n## Section\ntext\n", "MD022"))
 }
 
 func TestEngineConfigureFileIsFileScoped(t *testing.T) {
