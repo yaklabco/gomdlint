@@ -70,7 +70,8 @@ type Stats struct {
 	// DiagnosticsTotal is the total number of diagnostics across all files.
 	DiagnosticsTotal int
 
-	// DiagnosticsFixable is the number of diagnostics that have auto-fixes.
+	// DiagnosticsFixable is the number of diagnostics that --fix would fix:
+	// those with a fix whose rule auto_fix and --fix-rules do not exclude.
 	DiagnosticsFixable int
 
 	// DiagnosticsBySeverity maps severity levels to counts.

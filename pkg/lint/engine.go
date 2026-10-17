@@ -168,6 +168,10 @@ func NewEngine(parser Parser, registry *Registry) *Engine {
 // not stop the others: the failure is recorded in FileResult.RuleErrors and
 // only that rule's results (or only the invalid fix) are dropped. The
 // newlines in fix text are written with the file's dominant line ending.
+//
+// A diagnostic keeps its fix edits only when --fix would apply them (see
+// ResolvedRule.Fixable), whether or not cfg has Fix set, so FixableCount
+// counts the findings that --fix would fix.
 func (e *Engine) LintFile(
 	ctx context.Context,
 	path string,
@@ -248,6 +252,13 @@ func (e *Engine) lintFile(
 			// Ensure rule name is set for human-readable output.
 			if diag.RuleName == "" {
 				diag.RuleName = rule.Name()
+			}
+
+			// A fix that --fix would not apply (auto_fix: false, --fix-rules,
+			// or a rule that declares no fixes) is not offered, so the finding
+			// does not count as fixable.
+			if !rr.Fixable {
+				diag.FixEdits = nil
 			}
 
 			if len(diag.FixEdits) > 0 {
