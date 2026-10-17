@@ -76,13 +76,25 @@ func decodeSARIF(t *testing.T, opts reporter.Options, result *runner.Result) rep
 	return log
 }
 
+// canonicalTempDir returns a new temporary directory with symbolic links in
+// its path resolved, as on macOS where /var links to /private/var.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	return dir
+}
+
 // newGitWorkTree returns a temporary directory marked as the root of a git
-// work tree. A linked worktree or a submodule marks its root with a .git file
-// rather than a directory, so both forms are supported.
+// work tree, with symbolic links in its path resolved. A linked worktree or a
+// submodule marks its root with a .git file rather than a directory, so both
+// forms are supported.
 func newGitWorkTree(t *testing.T, gitFile bool) string {
 	t.Helper()
 
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	marker := filepath.Join(root, ".git")
 	if gitFile {
 		require.NoError(t, os.WriteFile(marker, []byte("gitdir: /elsewhere/.git/worktrees/x\n"), 0o644))
@@ -261,6 +273,54 @@ func skipInsideGitWorkTree(t *testing.T, dir string) {
 			return
 		}
 	}
+}
+
+func TestSARIFReporter_SourceRootFollowsTheResolvedWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	// outer/link points into a different repository, target.
+	outer := newGitWorkTree(t, false)
+	target := newGitWorkTree(t, false)
+	require.NoError(t, os.MkdirAll(filepath.Join(target, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "sub", "a.md"), []byte("x\n"), 0o644))
+	link := filepath.Join(outer, "link")
+	if err := os.Symlink(filepath.Join(target, "sub"), link); err != nil {
+		t.Skip("cannot create symlinks:", err)
+	}
+
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(link, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: link}, result).Runs[0]
+
+	assert.Equal(t, fileURIPrefix(target)+"/", run.OriginalURIBaseIDs["%SRCROOT%"].URI,
+		"the files belong to the repository the link resolves into")
+	assert.Equal(t, []reporter.SARIFArtifactLocation{{URI: "sub/a.md", URIBaseID: "%SRCROOT%"}}, resultLocations(run))
+}
+
+func TestSARIFReporter_SourceRootFallsBackToTheRepositoryOfTheLinkedPath(t *testing.T) {
+	t.Parallel()
+
+	// outer/link points at a directory outside any repository.
+	outer := newGitWorkTree(t, false)
+	plain := canonicalTempDir(t)
+	skipInsideGitWorkTree(t, plain)
+	require.NoError(t, os.WriteFile(filepath.Join(plain, "a.md"), []byte("x\n"), 0o644))
+	link := filepath.Join(outer, "link")
+	if err := os.Symlink(plain, link); err != nil {
+		t.Skip("cannot create symlinks:", err)
+	}
+
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(link, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: link}, result).Runs[0]
+
+	assert.Equal(t, fileURIPrefix(outer)+"/", run.OriginalURIBaseIDs["%SRCROOT%"].URI,
+		"with no repository behind the link, the repository of the path as written is used")
+	assert.Equal(t, []reporter.SARIFArtifactLocation{{URI: "link/a.md", URIBaseID: "%SRCROOT%"}}, resultLocations(run))
 }
 
 func TestSARIFReporter_GitFileMarksSourceRoot(t *testing.T) {
