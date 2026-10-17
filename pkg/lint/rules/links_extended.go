@@ -31,7 +31,7 @@ func NewNoBareURLsRule() *NoBareURLsRule {
 // bareURL is an autolink literal found in inline text.
 type bareURL struct {
 	start, end int
-	email      bool
+	kind       mdscan.LiteralKind
 }
 
 // Apply reports bare URLs and email addresses the way markdownlint does: the
@@ -40,6 +40,9 @@ type bareURL struct {
 // raw HTML, the content of inline HTML elements, HTML blocks, code blocks, and
 // reference definitions are not bare. With the GFM flavor the parser has
 // already turned these literals into autolinks; with CommonMark they are text.
+// The fix wraps a URL or email address in angle brackets; a "www." address is
+// reported without a fix, because without a scheme the brackets would not
+// make an autolink and would show in the rendered text.
 func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -63,23 +66,27 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 
 	diags := make([]lint.Diagnostic, 0, len(urls))
 	for _, url := range urls {
-		text := string(ctx.File.Content[url.start:url.end])
-		builder := fix.NewEditBuilder()
-		builder.ReplaceRange(url.start, url.end, "<"+text+">")
-
 		startLine, startColumn := ctx.File.LineAt(url.start)
 		endLine, endColumn := ctx.File.LineAt(url.end)
 		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
 
-		msg := "Bare URL used"
-		if url.email {
+		msg, suggestion := "Bare URL used", "Wrap the URL/email in angle brackets"
+		switch url.kind {
+		case mdscan.LiteralEmail:
 			msg = "Bare email address used"
+		case mdscan.LiteralWWW:
+			// Angle brackets only make an autolink with a scheme, so there is no safe fix.
+			suggestion = "Write the address with a scheme in angle brackets, such as <https://www.example.com>"
 		}
-		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Wrap the URL/email in angle brackets").
-			WithFix(builder).
-			Build())
+			WithSuggestion(suggestion)
+		if url.kind != mdscan.LiteralWWW {
+			builder := fix.NewEditBuilder()
+			builder.ReplaceRange(url.start, url.end, "<"+string(ctx.File.Content[url.start:url.end])+">")
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 	sortDiagnosticsByPosition(diags)
 	return diags, nil
@@ -194,7 +201,7 @@ func (s *bareURLScan) scanText(start, end int) {
 		if kind == mdscan.LiteralNone {
 			continue
 		}
-		s.add(pos, literalEnd, kind == mdscan.LiteralEmail)
+		s.add(pos, literalEnd, kind)
 		pos = literalEnd - 1
 	}
 }
@@ -210,17 +217,19 @@ func (s *bareURLScan) checkParsedLiteral(node *mdast.Node) {
 	text := strings.ToLower(string(s.content[span.StartOffset:span.EndOffset]))
 	switch {
 	case strings.HasPrefix(text, "http://"), strings.HasPrefix(text, "https://"):
-		s.add(span.StartOffset, span.EndOffset, false)
-	case !strings.Contains(text, "://") && !strings.HasPrefix(text, "www.") && strings.Contains(text, "@"):
-		s.add(span.StartOffset, span.EndOffset, true)
+		s.add(span.StartOffset, span.EndOffset, mdscan.LiteralURL)
+	case strings.HasPrefix(text, "www."):
+		s.add(span.StartOffset, span.EndOffset, mdscan.LiteralWWW)
+	case !strings.Contains(text, "://") && strings.Contains(text, "@"):
+		s.add(span.StartOffset, span.EndOffset, mdscan.LiteralEmail)
 	}
 }
 
 // add records a literal unless it sits between '<' and '>', which markdownlint
 // ignores (micromark issue 164).
-func (s *bareURLScan) add(start, end int, email bool) {
+func (s *bareURLScan) add(start, end int, kind mdscan.LiteralKind) {
 	if start > 0 && end < len(s.content) && s.content[start-1] == '<' && s.content[end] == '>' {
 		return
 	}
-	s.found = append(s.found, bareURL{start: start, end: end, email: email})
+	s.found = append(s.found, bareURL{start: start, end: end, kind: kind})
 }

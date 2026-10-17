@@ -15,3 +15,5 @@ Bracketed text is not bare: [https://example.com/shortcut].
 Code is not bare: `https://example.com/code`.
 
 Inline HTML content is not bare: <span>https://example.com/html</span>.
+
+A www address is reported without a fix: www.example.com/docs.

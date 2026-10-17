@@ -127,6 +127,32 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 	}
 }
 
+// TestNoBareURLsRule_WWWLiterals reports GFM "www." autolink literals like
+// markdownlint, without a fix: wrapping one in angle brackets does not make
+// an autolink (it has no scheme) and would show the brackets.
+func TestNoBareURLsRule_WWWLiterals(t *testing.T) {
+	input := "Visit www.example.com/path. today\n\n" +
+		"See (www.example.com) and *www.example.org* and xwww.example.net here\n\n" +
+		"[www.example.com/shortcut]\n"
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run(string(flavor), func(t *testing.T) {
+			snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			cfg := config.NewConfig()
+			cfg.Flavor = flavor
+			diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+			require.NoError(t, err)
+			require.Len(t, diags, 3, "diagnostics: %+v", diags)
+			for idx, want := range [][2]int{{1, 7}, {3, 6}, {3, 28}} {
+				assert.Equal(t, want[0], diags[idx].StartLine, "diagnostic %d line", idx)
+				assert.Equal(t, want[1], diags[idx].StartColumn, "diagnostic %d column", idx)
+				assert.False(t, diags[idx].HasFix(), "diagnostic %d must not have a fix", idx)
+			}
+			assert.Equal(t, 1+len("www.example.com/path"), diags[0].EndColumn-diags[0].StartColumn+1)
+		})
+	}
+}
+
 func TestNoBareURLsRule_Metadata(t *testing.T) {
 	rule := NewNoBareURLsRule()
 

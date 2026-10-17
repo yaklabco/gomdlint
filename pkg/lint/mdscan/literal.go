@@ -17,6 +17,8 @@ const (
 	LiteralURL
 	// LiteralEmail is an email address.
 	LiteralEmail
+	// LiteralWWW is a "www." address without a scheme.
+	LiteralWWW
 )
 
 // maxProtocolLength is the length of "https", the longest protocol accepted.
@@ -30,25 +32,49 @@ const trailPunctuation = "!\"')*,.:;?_~"
 const pathPunctuation = "!\"&')*,.:;<?]_~"
 
 // MatchAutolinkLiteral matches a GFM autolink literal (an http or https URL,
-// or an email address) that starts at text[pos], following the rules of
-// micromark-extension-gfm-autolink-literal, which markdownlint uses. prev is
-// the character before pos, or 0 at the start of a line. It returns the
-// offset just after the literal: trailing punctuation, an unbalanced closing
-// parenthesis, and an entity reference at the end are not part of it.
-// "www." literals are not matched.
+// a "www." address, or an email address) that starts at text[pos], following
+// the rules of micromark-extension-gfm-autolink-literal, which markdownlint
+// uses. prev is the character before pos, or 0 at the start of a line. It
+// returns the offset just after the literal: trailing punctuation, an
+// unbalanced closing parenthesis, and an entity reference at the end are not
+// part of it.
 func MatchAutolinkLiteral(text []byte, pos int, prev byte) (int, LiteralKind) {
 	if pos < 0 || pos >= len(text) {
 		return pos, LiteralNone
 	}
-	if text[pos] == 'h' || text[pos] == 'H' {
-		if end, ok := matchProtocolLiteral(text, pos, prev); ok {
-			return end, LiteralURL
-		}
-	}
+	// micromark tries an email address first at every position.
 	if end, ok := matchEmailLiteral(text, pos, prev); ok {
 		return end, LiteralEmail
 	}
+	switch text[pos] {
+	case 'h', 'H':
+		if end, ok := matchProtocolLiteral(text, pos, prev); ok {
+			return end, LiteralURL
+		}
+	case 'w', 'W':
+		if end, ok := matchWWWLiteral(text, pos, prev); ok {
+			return end, LiteralWWW
+		}
+	}
 	return pos, LiteralNone
+}
+
+// matchWWWLiteral matches "www." followed by a domain and a path. It may
+// only follow the start of a line, whitespace, or one of ( * _ [ ] ~.
+func matchWWWLiteral(text []byte, pos int, prev byte) (int, bool) {
+	switch prev {
+	case 0, ' ', '\t', '\n', '\r', '(', '*', '_', '[', ']', '~':
+	default:
+		return pos, false
+	}
+	if pos+4 >= len(text) || !strings.EqualFold(string(text[pos:pos+3]), "www") || text[pos+3] != '.' {
+		return pos, false
+	}
+	end, ok := matchLiteralDomain(text, pos)
+	if !ok {
+		return pos, false
+	}
+	return matchLiteralPath(text, end), true
 }
 
 // matchProtocolLiteral matches "http://" or "https://", a domain, and a path.

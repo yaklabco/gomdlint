@@ -33,6 +33,9 @@ func TestMatchAutolinkLiteral(t *testing.T) {
 		{"email with plus", "hello+xyz@mail.example", 0, ' ', "hello+xyz@mail.example", LiteralEmail},
 		{"email trailing dot", "a.b-c_d@a.b.", 0, ' ', "a.b-c_d@a.b", LiteralEmail},
 		{"email after open parenthesis", "x@y.zz)", 0, '(', "x@y.zz", LiteralEmail},
+		{"www address", "www.example.com/path.", 0, ' ', "www.example.com/path", LiteralWWW},
+		{"www after emphasis marker", "WWW.example.com*", 0, '*', "WWW.example.com", LiteralWWW},
+		{"www email is an email", "www.foo@bar.com", 0, ' ', "www.foo@bar.com", LiteralEmail},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,7 +57,9 @@ func TestMatchAutolinkLiteralRejects(t *testing.T) {
 		{"punctuation after protocol", "https://.example.com", ' '},
 		{"underscore in last segments", "https://example.a_b.com", ' '},
 		{"other protocol", "ftp://example.com", ' '},
-		{"www is not matched", "www.example.com", ' '},
+		{"letter before www", "www.example.com", 'x'},
+		{"www without a domain", "www.", ' '},
+		{"www without a dot", "wwwx.example.com", ' '},
 		{"email without dot", "hello@mail+xyz.example", ' '},
 		{"email ending in hyphen", "a.b-c_d@a.b-", ' '},
 		{"email ending in underscore", "a.b-c_d@a.b_", ' '},

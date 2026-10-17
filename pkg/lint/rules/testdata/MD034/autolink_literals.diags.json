@@ -34,5 +34,14 @@
     "message": "Bare email address used",
     "severity": "warning",
     "fixable": true
+  },
+  {
+    "rule": "MD034",
+    "name": "no-bare-urls",
+    "line": 19,
+    "column": 42,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": false
   }
 ]
