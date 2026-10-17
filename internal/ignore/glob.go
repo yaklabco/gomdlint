@@ -86,20 +86,21 @@ func relSegments(base, target string) ([]string, bool) {
 // directory it is relative to. An empty base skips the conversion of
 // absolute paths, which is enough to check the syntax.
 func compileGlob(base, raw string) (pattern, error) {
-	text := raw
-	if base != "" && filepath.IsAbs(raw) {
-		// An absolute path inside base names the same place as the
-		// anchored relative pattern.
-		if rel, err := filepath.Rel(base, raw); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			text = "/" + rel
-		}
-	}
-	text = filepath.ToSlash(text)
-
+	// Take the trailing slash off first: the conversion of an absolute
+	// path below cleans it away.
 	var compiled pattern
+	text := filepath.ToSlash(raw)
 	if strings.HasSuffix(text, "/") {
 		compiled.dirOnly = true
 		text = strings.TrimRight(text, "/")
+	}
+	if base != "" && filepath.IsAbs(raw) {
+		// An absolute path inside base names the same place as the
+		// anchored relative pattern.
+		rel, err := filepath.Rel(base, filepath.FromSlash(text))
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			text = "/" + filepath.ToSlash(rel)
+		}
 	}
 	// Like .gitignore, a slash at the start or in the middle anchors the
 	// pattern to base; without one the pattern matches at any depth.

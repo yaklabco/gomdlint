@@ -134,6 +134,21 @@ func TestLintIgnoreRelativeToConfigFile(t *testing.T) {
 	assert.NotContains(t, got.stdout, "wip.md")
 }
 
+// TestLintIgnoreAbsoluteDirectoryPattern covers an absolute --ignore pattern
+// with a trailing slash: it skips matching directories, not files.
+func TestLintIgnoreAbsoluteDirectoryPattern(t *testing.T) {
+	dir := inProject(t, map[string]string{
+		"guide.md":        trailingDoc,
+		"notes.md/wip.md": trailingDoc,
+	})
+	pattern := filepath.Join(dir, "*.md") + string(filepath.Separator)
+
+	got := execute(t, "lint", "--color", "never", "--no-context", "--ignore", pattern)
+
+	assert.Contains(t, got.stdout, "guide.md")
+	assert.NotContains(t, got.stdout, "wip.md")
+}
+
 // TestLintAppliesLoneMarkdownlintConfig covers a project configured only
 // for markdownlint: its settings apply, with a notice on stderr, and
 // nothing prompts or writes when the streams are not terminals.

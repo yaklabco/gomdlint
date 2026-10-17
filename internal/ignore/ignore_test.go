@@ -361,6 +361,19 @@ func TestSetMatchWildmatch(t *testing.T) {
 	assert.True(t, set.Match(filepath.Join(base, "]-x.md"), false))
 }
 
+// TestSetMatchAbsoluteDirOnlyPattern covers an absolute pattern with a
+// trailing slash, which must keep matching directories only.
+func TestSetMatchAbsoluteDirOnlyPattern(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	set, err := ignore.NewSet(base, []string{filepath.Join(base, "*.md") + string(filepath.Separator)})
+	require.NoError(t, err)
+
+	assert.False(t, set.Match(filepath.Join(base, "a.md"), false), "a regular file is not a directory")
+	assert.True(t, set.Match(filepath.Join(base, "dir.md"), true))
+}
+
 // TestGitignoreForSubdirectory covers walks that start below the repository
 // root, where the .gitignore files of parent directories still apply.
 func TestGitignoreForSubdirectory(t *testing.T) {
