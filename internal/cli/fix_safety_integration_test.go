@@ -45,7 +45,7 @@ func bareLineFeeds(content []byte) int {
 	return bytes.Count(content, []byte("\n")) - bytes.Count(content, []byte("\r\n"))
 }
 
-func readFile(t *testing.T, path string) []byte {
+func readBytes(t *testing.T, path string) []byte {
 	t.Helper()
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -72,8 +72,8 @@ func TestFix_CRLFFileKeepsItsLineEndings(t *testing.T) {
 	runLint(t, "--fix", lfDir)
 	runLint(t, "--fix", crlfDir)
 
-	fixedLF := readFile(t, filepath.Join(lfDir, "doc.md"))
-	fixedCRLF := readFile(t, filepath.Join(crlfDir, "doc.md"))
+	fixedLF := readBytes(t, filepath.Join(lfDir, "doc.md"))
+	fixedCRLF := readBytes(t, filepath.Join(crlfDir, "doc.md"))
 
 	require.NotEqual(t, crlfDocument, string(fixedLF), "the document must have fixable findings")
 	assert.Zero(t, bareLineFeeds(fixedCRLF), "fixing a CRLF file must not add bare LF line endings:\n%q", fixedCRLF)
@@ -138,7 +138,7 @@ func TestFix_ReportedFixTextMatchesTheWrittenBytesInCRLFFiles(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(runLint(t, "--format", "sarif", path)), &sarif))
 
 	runLint(t, "--fix", path)
-	written := readFile(t, path)
+	written := readBytes(t, path)
 
 	prepared, err := fix.PrepareEdits(reported, len(original))
 	require.NoError(t, err)
@@ -188,8 +188,8 @@ func TestFix_CRLFRuleFixturesMatchTheirLFFixes(t *testing.T) {
 	runLint(t, "--fix", crlfDir)
 
 	for _, name := range names {
-		fixedLF := readFile(t, filepath.Join(lfDir, name))
-		fixedCRLF := readFile(t, filepath.Join(crlfDir, name))
+		fixedLF := readBytes(t, filepath.Join(lfDir, name))
+		fixedCRLF := readBytes(t, filepath.Join(crlfDir, name))
 		assert.Zero(t, bareLineFeeds(fixedCRLF), "%s: fixing a CRLF file added bare LF line endings", name)
 		assert.Equal(t, string(toCRLF(fixedLF)), string(fixedCRLF), "%s: CRLF and LF fixes differ", name)
 	}
@@ -211,7 +211,7 @@ func TestFix_WritesThroughSymlinks(t *testing.T) {
 	info, err := os.Lstat(link)
 	require.NoError(t, err)
 	assert.NotZero(t, info.Mode()&os.ModeSymlink, "fixing through a symlink must keep the symlink")
-	assert.Equal(t, "# Hello World\n\nSome text.\n", string(readFile(t, target)), "the symlink target must be fixed")
+	assert.Equal(t, "# Hello World\n\nSome text.\n", string(readBytes(t, target)), "the symlink target must be fixed")
 }
 
 func TestFix_DoesNotFollowSymlinksOutOfTheLintedPaths(t *testing.T) {
@@ -228,7 +228,7 @@ func TestFix_DoesNotFollowSymlinksOutOfTheLintedPaths(t *testing.T) {
 
 	runLint(t, "--fix", dir)
 
-	assert.Equal(t, testMarkdownWithTrailingSpaces, string(readFile(t, target)),
+	assert.Equal(t, testMarkdownWithTrailingSpaces, string(readBytes(t, target)),
 		"fixing a directory must not write a file outside it through a symlink")
 	info, err := os.Lstat(link)
 	require.NoError(t, err)
@@ -248,7 +248,7 @@ func TestFix_KeepsHardLinksTogether(t *testing.T) {
 
 	runLint(t, "--fix", first)
 
-	assert.Equal(t, "# Hello World\n\nSome text.\n", string(readFile(t, second)), "every hard link must see the fix")
+	assert.Equal(t, "# Hello World\n\nSome text.\n", string(readBytes(t, second)), "every hard link must see the fix")
 	firstInfo, err := os.Stat(first)
 	require.NoError(t, err)
 	secondInfo, err := os.Stat(second)
@@ -267,5 +267,5 @@ func TestFix_DryRunDiffShowsAddedFinalNewline(t *testing.T) {
 
 	assert.Contains(t, out, "-Some text\n"+fix.NoNewlineMarker+"\n+Some text\n",
 		"a fix that only adds the final newline must show in the diff")
-	assert.Equal(t, "# Title\n\nSome text", string(readFile(t, path)), "a dry run must not write")
+	assert.Equal(t, "# Title\n\nSome text", string(readBytes(t, path)), "a dry run must not write")
 }
