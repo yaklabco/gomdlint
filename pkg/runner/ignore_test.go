@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -240,8 +241,8 @@ func TestDiscover_SkipDirs(t *testing.T) {
 func TestRunner_Run_UnreadableDirectoryFails(t *testing.T) {
 	t.Parallel()
 
-	if os.Geteuid() == 0 {
-		t.Skip("root can read directories without permission bits")
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permission bits do not stop root or Windows from reading directories")
 	}
 
 	dir := t.TempDir()

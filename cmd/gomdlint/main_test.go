@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -137,8 +138,8 @@ func TestRunExitCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.unreadable != "" && os.Geteuid() == 0 {
-				t.Skip("root can read files without permission bits")
+			if tt.unreadable != "" && (os.Geteuid() == 0 || runtime.GOOS == "windows") {
+				t.Skip("permission bits do not stop root or Windows from reading files")
 			}
 
 			dir := isolate(t)

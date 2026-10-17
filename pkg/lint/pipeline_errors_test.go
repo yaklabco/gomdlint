@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -45,8 +46,8 @@ func TestProcessFileErrorNamesCategoryOnce(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if tt.skipRoot && os.Geteuid() == 0 {
-				t.Skip("root can read files without permission bits")
+			if tt.skipRoot && (os.Geteuid() == 0 || runtime.GOOS == "windows") {
+				t.Skip("permission bits do not stop root or Windows from reading files")
 			}
 
 			_, err := pipeline.ProcessFile(context.Background(), tt.path, config.NewConfig(), lint.DefaultPipelineOptions())

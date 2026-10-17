@@ -3,6 +3,7 @@ package cli_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -208,8 +209,8 @@ func TestLintDiffFormatPreviewsFixes(t *testing.T) {
 }
 
 func TestLintReportsUnreadableFileOnce(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read files without permission bits")
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permission bits do not stop root or Windows from reading files")
 	}
 
 	dir := inProject(t, map[string]string{"locked.md": fixedDoc})

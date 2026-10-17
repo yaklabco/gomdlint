@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -677,8 +678,8 @@ func TestRunner_Run_PanicFailsOnlyThatFile(t *testing.T) {
 func TestRunner_Run_UnreadableFileFails(t *testing.T) {
 	t.Parallel()
 
-	if os.Geteuid() == 0 {
-		t.Skip("root can read files without permission bits")
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permission bits do not stop root or Windows from reading files")
 	}
 
 	dir := t.TempDir()
