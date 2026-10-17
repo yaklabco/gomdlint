@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	gmhtml "github.com/yuin/goldmark/renderer/html"
@@ -47,8 +48,8 @@ const (
 // beyond what allow permits, keeping the diagnostic itself. A fix is applied
 // to a copy of the content, which is parsed again with the configured flavor;
 // its outline (block structure, nesting, list tightness, and text) must equal
-// the original document's. When a rule has only a few fixes, each is first
-// checked on its own. The fixes left are then tried together. When that
+// the original document's. A fix that shares a block with another fix is
+// first checked on its own. The fixes left are then tried together. When that
 // fails, the set is split in halves until the failing fixes are found, and a
 // fix is kept, in document order, only if it passes together with the fixes
 // kept before it. The fixes kept are therefore always the last set checked
@@ -64,29 +65,149 @@ func verifyFixes(ctx *lint.RuleContext, diags []lint.Diagnostic, allow fixAllowa
 		return diags
 	}
 	verifier := newFixVerifier(ctx, allow)
-	if len(fixable) <= maxSeparateChecks {
-		// Check each fix on its own first, so a fix that is only safe next
-		// to another one is withheld. Each check parses the whole document,
-		// so documents with many fixes rely on the checks of the set below.
-		alone := fixable[:0]
-		for _, idx := range fixable {
-			if verifier.accepts(diags[idx].FixEdits) {
-				alone = append(alone, idx)
-			} else {
-				diags[idx].FixEdits = nil
-			}
-		}
-		if fixable = alone; len(fixable) < 2 {
-			return diags
+	// A fix that shares a block, or the gap between two blocks, with another
+	// fix may only be safe next to it, and the engine may apply either one
+	// without the other, so each such fix must be safe on its own. Fixes in
+	// one layer touch different blocks, so a layer is checked as one set.
+	for _, layer := range fixLayers(ctx.Root, diags, fixable) {
+		verifier.keepSafeAlone(diags, layer)
+	}
+	kept := fixable[:0]
+	for _, idx := range fixable {
+		if diags[idx].HasFix() {
+			kept = append(kept, idx)
 		}
 	}
-	verifier.settle(nil, diags, fixable)
+	verifier.settle(nil, diags, kept)
 	return diags
 }
 
-// maxSeparateChecks is the largest number of fixes from one rule that are
-// each checked on their own before they are checked together.
-const maxSeparateChecks = 8
+// keepSafeAlone withholds each fix in diags[idxs] that changes the document
+// on its own. The fixes touch different blocks, so they cannot make up for
+// one another, and a set that passes as a whole passes fix by fix.
+func (v *fixVerifier) keepSafeAlone(diags []lint.Diagnostic, idxs []int) {
+	var edits []fix.TextEdit
+	for _, idx := range idxs {
+		edits = append(edits, diags[idx].FixEdits...)
+	}
+	switch {
+	case v.accepts(edits):
+	case len(idxs) == 1:
+		diags[idxs[0]].FixEdits = nil
+	default:
+		mid := len(idxs) / 2
+		v.keepSafeAlone(diags, idxs[:mid])
+		v.keepSafeAlone(diags, idxs[mid:])
+	}
+}
+
+// fixLayers groups the fixes of diags[fixable] that touch a common leaf
+// block (a paragraph, heading, code block, HTML block, thematic break, or
+// table) and returns layers of them: the nth layer holds the nth fix of
+// every group, so no two fixes in a layer share a block. An edit inside one
+// block touches only that block; any other edit sits on a block's edge or
+// between blocks, where it can join or split them, and touches the blocks
+// on both sides. Fixes that share no block with another fix are left out.
+func fixLayers(root *mdast.Node, diags []lint.Diagnostic, fixable []int) [][]int {
+	leaves := leafBlockSpans(root)
+	parent := make([]int, len(fixable))
+	for pos := range parent {
+		parent[pos] = pos
+	}
+	var find func(pos int) int
+	find = func(pos int) int {
+		for parent[pos] != pos {
+			parent[pos] = parent[parent[pos]]
+			pos = parent[pos]
+		}
+		return pos
+	}
+	owner := make(map[int]int)
+	for pos, idx := range fixable {
+		for _, edit := range diags[idx].FixEdits {
+			for _, leaf := range touchedLeaves(leaves, edit) {
+				if other, taken := owner[leaf]; taken {
+					parent[find(pos)] = find(other)
+				} else {
+					owner[leaf] = pos
+				}
+			}
+		}
+	}
+	groups := make(map[int][]int)
+	var order []int
+	for pos := range fixable {
+		root := find(pos)
+		if _, seen := groups[root]; !seen {
+			order = append(order, root)
+		}
+		groups[root] = append(groups[root], fixable[pos])
+	}
+	var layers [][]int
+	for _, root := range order {
+		members := groups[root]
+		if len(members) < 2 {
+			continue
+		}
+		for rank, idx := range members {
+			if rank == len(layers) {
+				layers = append(layers, nil)
+			}
+			layers[rank] = append(layers[rank], idx)
+		}
+	}
+	return layers
+}
+
+// leafBlockSpans returns the spans of the blocks that hold content rather
+// than other blocks, in document order. An empty container counts as one.
+func leafBlockSpans(root *mdast.Node) []mdast.SourceRange {
+	var spans []mdast.SourceRange
+	var walk func(node *mdast.Node)
+	walk = func(node *mdast.Node) {
+		for child := node.FirstChild; child != nil; child = child.Next {
+			if child.IsInline() {
+				continue
+			}
+			switch child.Kind {
+			case mdast.NodeBlockquote, mdast.NodeList, mdast.NodeListItem:
+				if child.FirstChild != nil {
+					walk(child)
+					continue
+				}
+			}
+			spans = append(spans, child.SourceRange())
+		}
+	}
+	if root != nil {
+		walk(root)
+	}
+	sort.SliceStable(spans, func(i, j int) bool { return spans[i].StartOffset < spans[j].StartOffset })
+	return spans
+}
+
+// touchedLeaves returns the indices of the leaf blocks an edit touches: the
+// one it sits inside, or else every block it overlaps or borders and the
+// nearest block on each side.
+func touchedLeaves(leaves []mdast.SourceRange, edit fix.TextEdit) []int {
+	start, end := edit.StartOffset, edit.EndOffset
+	first := sort.Search(len(leaves), func(i int) bool { return leaves[i].EndOffset >= start })
+	if first < len(leaves) && leaves[first].StartOffset < start && end < leaves[first].EndOffset {
+		return []int{first}
+	}
+	var touched []int
+	if first > 0 {
+		touched = append(touched, first-1)
+	}
+	idx := first
+	for ; idx < len(leaves) && leaves[idx].StartOffset <= end; idx++ {
+		touched = append(touched, idx)
+	}
+	if idx < len(leaves) {
+		touched = append(touched, idx)
+	}
+	return touched
+}
 
 // fixVerifier compares the outline of the document with candidate fixes
 // applied against the original document's outline.

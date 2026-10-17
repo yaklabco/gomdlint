@@ -142,6 +142,16 @@ func TestVerifyFixes(t *testing.T) {
 			kept:  []bool{false, false},
 		},
 		{
+			name:  "fixes that depend on each other are withheld among many",
+			input: "*a*\n\nb\n\nc\n\nd\n\ne\n\nf\n\ng\n\nh\n",
+			diags: []lint.Diagnostic{
+				edit(0, 1, "_"), edit(2, 3, "_"),
+				edit(5, 5, "\n"), edit(8, 8, "\n"), edit(11, 11, "\n"), edit(14, 14, "\n"),
+				edit(17, 17, "\n"), edit(20, 20, "\n"), edit(23, 23, "\n"),
+			},
+			kept: []bool{false, false, true, true, true, true, true, true, true},
+		},
+		{
 			name:  "front matter may not change",
 			input: "---\ntitle: x\n---\n\nText\n",
 			diags: []lint.Diagnostic{edit(11, 12, "y")},
