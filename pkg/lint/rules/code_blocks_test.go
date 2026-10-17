@@ -577,6 +577,12 @@ func TestCommandsShowOutputRule(t *testing.T) {
 			want:  []position{{4, 3}},
 			fixed: "- item\n\n  ```sh\n  ls\n  ```\n",
 		},
+		{
+			name:  "fenced block in blockquote",
+			input: "> ```sh\n> $ ls\n> $ pwd\n> ```\n",
+			want:  []position{{2, 3}, {3, 3}},
+			fixed: "> ```sh\n> ls\n> pwd\n> ```\n",
+		},
 	}
 
 	for _, tt := range tests {
