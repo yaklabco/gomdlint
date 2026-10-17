@@ -489,12 +489,12 @@ func canonicalRuleIDs(flag string, keys []string) ([]string, error) {
 	ids := make([]string, 0, len(keys))
 	var unknown []string
 	for _, key := range keys {
-		id, ok := lint.LookupRuleID(lint.DefaultRegistry, key)
+		rule, ok := lint.DefaultRegistry.Lookup(key)
 		if !ok {
 			unknown = append(unknown, strconv.Quote(key))
 			continue
 		}
-		ids = append(ids, id)
+		ids = append(ids, rule.ID())
 	}
 
 	switch len(unknown) {

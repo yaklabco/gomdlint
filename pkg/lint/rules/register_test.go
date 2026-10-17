@@ -30,10 +30,9 @@ func TestRegisterAll(t *testing.T) {
 	assert.Equal(t, "single-h1", rule.Name())
 }
 
-func TestRegisterLegacyAliases(t *testing.T) {
+func TestRegisterAllRegistersMarkdownlintAliases(t *testing.T) {
 	registry := lint.NewRegistry()
 	RegisterAll(registry)
-	RegisterLegacyAliases(registry)
 
 	tests := []struct {
 		name         string
@@ -82,6 +81,27 @@ func TestRegisterLegacyAliases(t *testing.T) {
 			alias:        "MD041",
 			expectID:     "MD041",
 			expectName:   "first-line-heading",
+			expectExists: true,
+		},
+		{
+			name:         "ul-style resolves to MD004",
+			alias:        "ul-style",
+			expectID:     "MD004",
+			expectName:   "unordered-list-style",
+			expectExists: true,
+		},
+		{
+			name:         "no-multiple-blanks resolves to MD012",
+			alias:        "no-multiple-blanks",
+			expectID:     "MD012",
+			expectName:   "no-multiple-blank-lines",
+			expectExists: true,
+		},
+		{
+			name:         "blanks-around-headings resolves to MD022",
+			alias:        "blanks-around-headings",
+			expectID:     "MD022",
+			expectName:   "heading-blank-lines",
 			expectExists: true,
 		},
 		{

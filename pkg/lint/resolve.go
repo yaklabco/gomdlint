@@ -46,22 +46,6 @@ func ResolveRules(registry *Registry, cfg *config.Config) []ResolvedRule {
 	return resolved
 }
 
-// LookupRuleID resolves a rule ID, name, or alias to the canonical rule ID.
-// Matching ignores case and surrounding whitespace, so "md009" and
-// "No-Trailing-Spaces" both resolve to "MD009".
-func LookupRuleID(registry *Registry, key string) (string, bool) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "", false
-	}
-	for _, candidate := range []string{key, strings.ToUpper(key), strings.ToLower(key)} {
-		if id, _, ok := registry.Resolve(candidate); ok {
-			return id, true
-		}
-	}
-	return "", false
-}
-
 // ruleListed reports whether list names rule by ID or name, ignoring case.
 func ruleListed(list []string, rule Rule) bool {
 	for _, key := range list {

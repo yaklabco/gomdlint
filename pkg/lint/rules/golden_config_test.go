@@ -323,10 +323,10 @@ func (inertRule) Apply(_ *lint.RuleContext) ([]lint.Diagnostic, error) {
 	return nil, nil
 }
 
-// isolatedRegistry returns a registry with the rules, names, tags and legacy
-// aliases of lint.DefaultRegistry, in which every rule outside rules is an
-// inert stand-in. Inline directives resolve exactly as in the product, but
-// even a bare markdownlint-enable cannot make another rule report.
+// isolatedRegistry returns a registry with the rules and catalog entries of
+// lint.DefaultRegistry, in which every rule outside rules is an inert
+// stand-in. Inline directives resolve exactly as in the product, but even a
+// bare markdownlint-enable cannot make another rule report.
 func isolatedRegistry(rules []lint.Rule) *lint.Registry {
 	registry := lint.NewRegistry()
 	for _, rule := range lint.DefaultRegistry.Rules() {
@@ -338,8 +338,10 @@ func isolatedRegistry(rules []lint.Rule) *lint.Registry {
 		} else {
 			registry.Register(inertRule{Rule: rule})
 		}
+		if meta, ok := lint.DefaultRegistry.Meta(rule.ID()); ok {
+			registry.Describe(meta)
+		}
 	}
-	RegisterLegacyAliases(registry)
 
 	return registry
 }

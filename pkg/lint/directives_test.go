@@ -79,10 +79,18 @@ func TestSuppressedHeadingFixDoesNotLeak(t *testing.T) {
 	require.Equal(t, "# Document\n\n<!-- markdownlint-disable MD022 -->\n## Suppressed\ntext\n<!-- markdownlint-enable MD022 -->\n\n## Checked\n\ntext\n", string(output))
 }
 
+// describeCatalog gives registry the catalog entries of the built-in rules,
+// so that it resolves their aliases and tags as the product does.
+func describeCatalog(registry *lint.Registry) {
+	for _, meta := range rules.Catalog() {
+		registry.Describe(meta)
+	}
+}
+
 func TestEngineMarkdownlintHeadingAlias(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewHeadingBlankLinesRule())
-	rules.RegisterLegacyAliases(registry)
+	describeCatalog(registry)
 	input := "<!-- markdownlint-disable blanks-around-headings -->\n# Document\ntext\n"
 	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 		context.Background(), "test.md", []byte(input), config.NewConfig())
@@ -102,7 +110,7 @@ func TestEngineAdditionalMarkdownlintAliases(t *testing.T) {
 		t.Run(tt.alias, func(t *testing.T) {
 			registry := lint.NewRegistry()
 			registry.Register(tt.rule)
-			rules.RegisterLegacyAliases(registry)
+			describeCatalog(registry)
 			input := "<!-- markdownlint-disable " + tt.alias + " -->\n" + tt.input
 			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 				context.Background(), "test.md", []byte(input), config.NewConfig())

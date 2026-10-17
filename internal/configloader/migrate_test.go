@@ -32,7 +32,6 @@ func lintMigratedMarkdown(t *testing.T, settings, input string) []lint.Diagnosti
 	require.NoError(t, err)
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
-	rules.RegisterLegacyAliases(registry)
 	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
 		context.Background(), "test.md", []byte(input), loaded.Config)
 	require.NoError(t, err)
