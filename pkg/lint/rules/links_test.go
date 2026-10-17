@@ -199,6 +199,9 @@ func TestLinkSpacesRule_Fix(t *testing.T) {
 		{"blockquote", "> [ text ](url)\n", "> [text](url)\n"},
 		{"line ending is not trimmed", "[\ntext ](url)\n", "[\ntext](url)\n"},
 		{"title is not link text", "[text](url \"title \")\n", "[text](url \"title \")\n"},
+		{"backslash would escape the bracket", "[foo\\ ](url)\n", "[foo\\ ](url)\n"},
+		{"escaped backslash before the space", "[foo\\\\ ](url)\n", "[foo\\\\](url)\n"},
+		{"leading side still fixed", "[ foo\\ ](url)\n", "[foo\\ ](url)\n"},
 	}
 
 	for _, tt := range tests {

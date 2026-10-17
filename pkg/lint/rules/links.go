@@ -173,6 +173,10 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 			if trailing > 0 && leading < len(text) {
 				at, deleteFrom = end-trailing, end-trailing
 			}
+			// A backslash left before the closing bracket would escape it.
+			if escapesNext(ctx.File.Content, start, deleteFrom) {
+				deleteFrom = end
+			}
 			diags = append(diags, r.spaceDiagnostic(ctx, at, deleteFrom, end, "Link text has trailing spaces"))
 		}
 	}
@@ -194,6 +198,16 @@ func (r *LinkSpacesRule) spaceDiagnostic(ctx *lint.RuleContext, at, from, to int
 		diagBuilder = diagBuilder.WithFix(builder)
 	}
 	return diagBuilder.Build()
+}
+
+// escapesNext reports whether content[from:at] ends with an odd number of
+// backslashes, so that the last one escapes the character placed at at.
+func escapesNext(content []byte, from, at int) bool {
+	count := 0
+	for idx := at - 1; idx >= from && content[idx] == '\\'; idx-- {
+		count++
+	}
+	return count%2 == 1
 }
 
 // isSameLineSpace reports whether r is whitespace other than a line ending.
