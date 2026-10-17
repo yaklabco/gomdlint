@@ -33,6 +33,8 @@ const individualFixChecks = 16
 // what a renderer produces, applied on its own or together with the other
 // fixes the rule keeps. It is the last step of every fixing rule in this file
 // set, so that a gap in a rule's own safety checks cannot corrupt a document.
+// A fix that changes no byte at all, such as an empty deletion, is no fix and
+// is removed first.
 //
 // The engine may apply only some of the fixes, after a directive, a conflict
 // or the last pass, so every fix must be safe on its own. When a rule reports
@@ -48,7 +50,11 @@ const individualFixChecks = 16
 func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagnostic {
 	var candidates []int
 	for idx := range diags {
-		if len(diags[idx].FixEdits) > 0 {
+		switch {
+		case len(diags[idx].FixEdits) == 0:
+		case !changesContent(ctx.File.Content, diags[idx].FixEdits):
+			diags[idx].FixEdits = nil
+		default:
 			candidates = append(candidates, idx)
 		}
 	}
@@ -95,6 +101,27 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 		}
 	}
 	return diags
+}
+
+// changesContent reports whether applying the edits of one fix changes the
+// content. Edits that cannot be applied together count as a change, which
+// the fix check then rejects.
+func changesContent(content []byte, edits []fix.TextEdit) bool {
+	prepared, err := fix.PrepareEdits(edits, len(content))
+	if err != nil {
+		return true
+	}
+	// Sorted edits that do not overlap end in order, so the last one ends
+	// the span they change.
+	start, end := prepared[0].StartOffset, prepared[len(prepared)-1].EndOffset
+	changed := make([]byte, 0, end-start)
+	cursor := start
+	for _, edit := range prepared {
+		changed = append(changed, content[cursor:edit.StartOffset]...)
+		changed = append(changed, edit.NewText...)
+		cursor = edit.EndOffset
+	}
+	return !bytes.Equal(changed, content[start:end])
 }
 
 // sharedFixes returns the fixes whose edits share a top-level block of the

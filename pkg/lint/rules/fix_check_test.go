@@ -518,6 +518,63 @@ func TestKeepSafeFixes(t *testing.T) {
 	assert.False(t, kept[2].HasFix())
 }
 
+// TestKeepSafeFixesDropsFixesThatChangeNothing checks that a fix whose edits
+// leave the content as it was is removed while its diagnostic stays: an
+// empty deletion, like the one MD012 offered at the end of a file, a
+// replacement by the same text, and edits that undo each other.
+func TestKeepSafeFixesDropsFixesThatChangeNothing(t *testing.T) {
+	input := "Text\n\n"
+	end := len(input)
+	diags := []lint.Diagnostic{
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: end, EndOffset: end}}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "Text", "Text")}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 1}, {StartOffset: 1, EndOffset: 1, NewText: "T"}}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: end - 1, EndOffset: end}}},
+	}
+	snapshot := parseForCheck(t, input)
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+
+	kept := keepSafeFixes(ctx, diags)
+	require.Len(t, kept, len(diags))
+	assert.False(t, kept[0].HasFix(), "an empty deletion changes nothing")
+	assert.False(t, kept[1].HasFix(), "replacing text by the same text changes nothing")
+	assert.False(t, kept[2].HasFix(), "edits that undo each other change nothing")
+	assert.True(t, kept[3].HasFix(), "removing the extra line ending changes the content")
+}
+
+// TestKeepSafeFixesDropsFixesThatChangeNothingInBatches checks the same for a
+// rule with many fixes, where a fix that changes nothing would otherwise pass
+// with the batch of fixes it is checked in, or on its own.
+func TestKeepSafeFixesDropsFixesThatChangeNothingInBatches(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("# Title\n\n")
+	var diags []lint.Diagnostic
+	// Each harmless fix removes the single space before a soft break in a
+	// paragraph of its own.
+	const harmless = 18
+	for idx := range harmless {
+		input.WriteString("line" + strconv.Itoa(idx))
+		start := input.Len()
+		input.WriteString(" \nmore\n\n")
+		diags = append(diags, lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: start, EndOffset: start + 1}}})
+	}
+	end := input.Len()
+	diags = append(diags,
+		lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input.String(), "Title", "Title")}},
+		lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: end, EndOffset: end}}},
+	)
+	require.Greater(t, len(diags), individualFixChecks, "the batched path is taken")
+	snapshot := parseForCheck(t, input.String())
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+
+	kept := keepSafeFixes(ctx, diags)
+	for idx := range harmless {
+		assert.True(t, kept[idx].HasFix(), "harmless fix %d", idx)
+	}
+	assert.False(t, kept[harmless].HasFix(), "replacing the heading text by the same text changes nothing")
+	assert.False(t, kept[harmless+1].HasFix(), "an empty deletion at the end of the file changes nothing")
+}
+
 // TestKeepSafeFixesInBatches checks the batched path for a rule with many
 // fixes, each alone in its paragraph: removing the spaces of a hard break is
 // dropped, removing a single space before a soft break is kept.

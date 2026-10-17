@@ -2,6 +2,9 @@ package rules
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -531,6 +534,65 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 				assert.Empty(t, diags2, "fix should be idempotent")
 			}
 		})
+	}
+}
+
+// TestMultipleBlankLinesRule_FixesChangeContent checks that every fix MD012
+// offers removes something. The extra blank line at the end of a file that
+// ends in two line endings is the empty line after the last one, so the fix
+// removes the line ending before it: deleting the empty line itself would be
+// an empty edit. Once the fixes are applied, nothing is left to remove, so
+// MD012 reports nothing and offers no fix.
+func TestMultipleBlankLinesRule_FixesChangeContent(t *testing.T) {
+	inputs := []struct{ name, input string }{
+		{"blank line before end of file", "Text\n\n"},
+		{"blank lines before end of file", "Text\n\n\n\n"},
+		{"blank lines before end of CRLF file", "Text\r\n\r\n\r\n"},
+		{"byte order mark and blank lines", "\uFEFFText\n\n\n"},
+		{"only line endings", "\n\n\n"},
+		{"whitespace-only final line", "Text\n\n  "},
+		{"front matter and blank lines", "---\ntitle: x\n---\n\n\n"},
+		{"code block and blank lines", "```\ncode\n```\n\n\n"},
+		{"blank lines in the middle", "Text\n\n\n\nMore\n"},
+	}
+	for _, name := range []string{"AGENTS", "overlapping_deletions"} {
+		content, err := os.ReadFile(filepath.Join("testdata", "real-world", name+".input.md"))
+		require.NoError(t, err)
+		inputs = append(inputs, struct{ name, input string }{"real-world " + name, string(content)})
+	}
+
+	parser := goldmark.New(string(config.FlavorCommonMark))
+	rule := NewMultipleBlankLinesRule()
+	apply := func(t *testing.T, content []byte, ruleCfg *config.RuleConfig) []lint.Diagnostic {
+		t.Helper()
+		snapshot, err := parser.Parse(context.Background(), "test.md", content)
+		require.NoError(t, err)
+		diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
+		require.NoError(t, err)
+		return diags
+	}
+	for _, tt := range inputs {
+		for _, maximum := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s max %d", tt.name, maximum), func(t *testing.T) {
+				ruleCfg := &config.RuleConfig{Options: map[string]any{"max_consecutive": maximum}}
+				var edits []fix.TextEdit
+				for _, diag := range apply(t, []byte(tt.input), ruleCfg) {
+					if !diag.HasFix() {
+						continue
+					}
+					prepared, err := fix.PrepareEdits(diag.FixEdits, len(tt.input))
+					require.NoError(t, err)
+					assert.NotEqual(t, tt.input, string(fix.ApplyEdits([]byte(tt.input), prepared)),
+						"the fix for line %d changes nothing", diag.StartLine)
+					edits = append(edits, diag.FixEdits...)
+				}
+
+				accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(tt.input))
+				require.NoError(t, err)
+				fixed := fix.ApplyEdits([]byte(tt.input), accepted)
+				assert.Empty(t, apply(t, fixed, ruleCfg), "nothing is left to remove in %q", fixed)
+			})
+		}
 	}
 }
 
