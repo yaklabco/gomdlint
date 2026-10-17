@@ -2,14 +2,8 @@
 //
 // # Rule Domains
 //
-// The rules are grouped by the Markdown construct they check.
-//
-// Whitespace and layout:
-//
-//   - MD009: no-trailing-spaces
-//   - MD010: no-hard-tabs
-//   - MD012: no-multiple-blank-lines
-//   - MD047: single-trailing-newline
+// The rules are grouped by the Markdown construct they check, as their
+// catalog entries record (see Catalog).
 //
 // Headings:
 //
@@ -37,15 +31,23 @@
 //   - MD030: list-marker-space
 //   - MD032: blanks-around-lists
 //
-// Blockquotes:
+// Whitespace and layout:
 //
-//   - MD027: no-multiple-space-blockquote
-//   - MD028: no-blanks-blockquote
-//
-// Line length and text:
-//
+//   - MD009: no-trailing-spaces
+//   - MD010: no-hard-tabs
+//   - MD012: no-multiple-blank-lines
 //   - MD013: line-length
-//   - MD044: proper-names
+//   - MD035: hr-style
+//   - MD047: single-trailing-newline
+//
+// Code:
+//
+//   - MD014: commands-show-output
+//   - MD031: blanks-around-fences
+//   - MD038: no-space-in-code
+//   - MD040: fenced-code-language
+//   - MD046: code-block-style
+//   - MD048: code-fence-style
 //
 // Links and images:
 //
@@ -61,26 +63,6 @@
 //   - MD059: descriptive-link-text
 //   - MDL001: link-destination-style
 //
-// Code:
-//
-//   - MD014: commands-show-output
-//   - MD031: blanks-around-fences
-//   - MD038: no-space-in-code
-//   - MD040: fenced-code-language
-//   - MD046: code-block-style
-//   - MD048: code-fence-style
-//
-// Emphasis and horizontal rules:
-//
-//   - MD035: hr-style
-//   - MD037: no-space-in-emphasis
-//   - MD049: emphasis-style
-//   - MD050: strong-style
-//
-// HTML:
-//
-//   - MD033: no-inline-html
-//
 // Tables (GFM):
 //
 //   - MD055: table-pipe-style
@@ -88,6 +70,25 @@
 //   - MD058: blanks-around-tables
 //   - MD060: table-column-style
 //   - MDL003: table-alignment
+//
+// Emphasis:
+//
+//   - MD037: no-space-in-emphasis
+//   - MD049: emphasis-style
+//   - MD050: strong-style
+//
+// Blockquotes:
+//
+//   - MD027: no-multiple-space-blockquote
+//   - MD028: no-blanks-blockquote
+//
+// HTML:
+//
+//   - MD033: no-inline-html
+//
+// Spelling:
+//
+//   - MD044: proper-names
 //
 // # Rule IDs
 //
@@ -110,7 +111,13 @@
 //
 // # Registration
 //
-// Rules are registered with the default registry via RegisterAll.
+// Rules are registered with the default registry via RegisterAll, together
+// with their catalog entries. Catalog describes every rule: its ID, name,
+// markdownlint aliases, category and markdownlint tags, and whether it can
+// fix what it finds. The registry resolves rule names and aliases, and
+// inline directives resolve tags, through these entries. Each
+// catalog_<category>.go file lists the rules of one category.
+//
 // Each rule follows the lint.Rule interface and uses the RuleContext,
 // DiagnosticBuilder, and EditBuilder infrastructure.
 package rules

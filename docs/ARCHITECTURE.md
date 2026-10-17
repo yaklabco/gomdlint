@@ -168,7 +168,7 @@ The codebase employs several well-established patterns:
 
 `pkg/lint/registry.go`
 
-`DefaultRegistry` is a thread-safe singleton (protected by `sync.RWMutex`). Rules self-register via `init()` functions. Supports lookup by ID (`MD001`), name (`heading-increment`), or alias.
+`DefaultRegistry` is a thread-safe singleton (protected by `sync.RWMutex`). Rules self-register via `init()` functions, each with a catalog entry from `pkg/lint/rules/catalog_<category>.go` that records its markdownlint aliases, category and markdownlint tags. `Lookup` finds a rule by ID (`MD001`), name (`heading-increment`), or alias, in any case. `RulesByTag` resolves the tags of inline directives, and `Suggest` offers the closest rules and tags for a key that names none.
 
 ### Strategy Pattern
 
@@ -282,7 +282,8 @@ sequenceDiagram
 
     init->>rule: NewMyRule()
     init->>registry: Register(rule)
-    Note over registry: Stores by ID, name, aliases
+    init->>registry: Describe(catalog entry)
+    Note over registry: Stores by ID and name, with aliases and tags from the catalog
 
     engine->>registry: ResolveRules(config)
     registry-->>engine: []ResolvedRule
@@ -296,6 +297,7 @@ Steps:
 2. Embed `lint.BaseRule` for default implementations
 3. Implement `Apply(ctx *RuleContext) ([]Diagnostic, error)`
 4. Register in `register.go`: `registry.Register(NewMyRule())`
+5. Add its catalog entry to the `catalog_<category>.go` file of its category: ID, name, markdownlint aliases and tags, and whether it can fix
 
 ### Adding a New Output Format
 
@@ -516,7 +518,7 @@ For each rule, the final configuration is computed:
 | `autoFix` | `rule.CanFix()` | `rules.X.auto_fix` | `--fix-rules` filter |
 | `options` | Rule-specific | `rules.X.options.*` | — |
 
-**Rule Identification:** Config files accept both ID (`MD001`) and name (`heading-increment`) interchangeably via alias lookup in the registry.
+**Rule Identification:** Config files accept a rule's ID (`MD001`), name (`heading-increment`), or markdownlint alias (`ul-style` for MD004) interchangeably, in any case, through `Registry.Lookup`.
 
 ## Design Principles
 
