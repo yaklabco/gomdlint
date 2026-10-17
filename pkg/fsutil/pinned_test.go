@@ -124,6 +124,35 @@ func TestPinnedFile_WriteRefusesAReplacedFile(t *testing.T) {
 	assertNoTempFiles(t, dir)
 }
 
+func TestPinnedFile_WriteRefusesContentSavedAfterTheCheck(t *testing.T) {
+	t.Parallel()
+
+	for _, linked := range []bool{false, true} {
+		name := "ordinary file"
+		if linked {
+			name = "hard-linked file"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "a.md")
+			writeTestFile(t, path, "x\n", 0o644)
+			if linked {
+				hardLinkOrSkip(t, path, filepath.Join(dir, "b.md"))
+			}
+			pinned := pinFile(t, dir, "a.md")
+			require.NoError(t, pinned.Check(true))
+
+			// Another program saves into the same file after the check.
+			require.NoError(t, os.WriteFile(path, []byte("concurrent\n"), 0o644))
+
+			require.ErrorIs(t, pinned.Write([]byte("y\n")), fsutil.ErrFileChanged)
+			assert.Equal(t, "concurrent\n", readTestFile(t, path), "a concurrent save must not be lost")
+		})
+	}
+}
+
 func TestPinnedFile_WriteRefusesAHardLinkToAnotherFile(t *testing.T) {
 	t.Parallel()
 

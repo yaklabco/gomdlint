@@ -15,71 +15,119 @@ import (
 // maxTempAttempts bounds the attempts to find an unused temp file name.
 const maxTempAttempts = 16
 
-// PinnedFile is a regular file read for fixing. It keeps the directory the
-// file was opened through as an os.Root, which confines every later
-// operation to that directory and refuses symbolic links that lead out of
-// it, even if a directory on the way is replaced meanwhile. It also keeps
-// the file it read open, so that file's identity cannot be reused by
-// another file: Check and Write fail with ErrFileChanged when the name no
-// longer refers to that same file.
+// errExchangeUnsupported reports that two names cannot be exchanged
+// atomically on this platform or file system.
+var errExchangeUnsupported = errors.New("atomic exchange not supported")
+
+// PinnedFile is a regular file read for fixing, which is written back only
+// if nothing changed it meanwhile.
+//
+// Pin opens the write root as an os.Root, opens the file's directory
+// through it as its own os.Root, and opens and reads the file through that
+// directory. It keeps the file open, so its identity (device and inode)
+// cannot be reused by another file. Every later operation goes through the
+// pinned directory: a directory on the path that is moved, or replaced by a
+// link, afterwards cannot redirect it, and links that would lead out of the
+// directory are refused. Before a backup or a write, the pinned file checks
+// that the directory is still where it was pinned, that the name in it
+// still refers to the file that was read, and that the file still holds the
+// content that was read (re-read through a handle on that file). Otherwise
+// it fails with ErrFileChanged.
+//
+// How a write commits, and what can still race with other programs:
+//   - A file with more than one hard link is rewritten in place, through a
+//     handle that was opened and checked for the purpose. A program writing
+//     into the file between that check and the rewrite (a few system calls)
+//     can interleave with it; file systems offer no way to prevent that
+//     short of mandatory locking.
+//   - Otherwise the new content goes to a hidden temp file in the same
+//     directory. On Linux the temp file and the name are then exchanged
+//     atomically (renameat2 with RENAME_EXCHANGE), and the file swapped out
+//     must be the pinned file, with a single link and the content that was
+//     read; if it is not, the exchange is undone and the write fails with
+//     ErrFileChanged. Only a program that keeps the old file open and
+//     writes to it after the exchange loses that write, as with any save
+//     that replaces a file.
+//   - Where names cannot be exchanged (macOS, BSD, Windows, other
+//     platforms, and Linux file systems without RENAME_EXCHANGE), the temp
+//     file is renamed over the name right after the checks. A file replaced
+//     or saved into, or a hard link created, between those checks and the
+//     rename (a few system calls) is not detected.
 //
 // A PinnedFile must be closed.
 type PinnedFile struct {
-	root    *os.Root
-	held    *os.File
-	dir     string
-	name    string
-	info    os.FileInfo
-	content []byte
-	hash    [sha256.Size]byte
+	root       *os.Root    // the write root
+	parent     *os.Root    // the file's directory, opened through root
+	exchange   *os.File    // the same directory, for exchanging names (Linux)
+	parentRel  string      // the directory's path relative to root
+	parentInfo os.FileInfo // the directory's identity
+	held       *os.File    // the file as read, kept open
+	dir        string      // the write root's path
+	name       string      // the file's path relative to root
+	base       string      // the file's name in parent
+	info       os.FileInfo
+	content    []byte
+	hash       [sha256.Size]byte
+
+	// beforeCommit, when set, runs after the final checks and right before
+	// a backup or a write is committed. Tests use it to race the commit.
+	beforeCommit func()
+
+	// noExchange forces the rename commit. Tests use it to cover the
+	// platforms without an atomic exchange.
+	noExchange bool
 }
 
 // Pin opens the regular file name, relative to the directory dir, and reads
 // it. Symbolic links in name are followed only while they stay inside dir.
 func Pin(dir, name string) (*PinnedFile, error) {
-	path := filepath.Join(dir, name)
-
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, describeOpenError(path, err)
+	pinned := &PinnedFile{
+		dir:       dir,
+		name:      name,
+		parentRel: filepath.Dir(name),
+		base:      filepath.Base(name),
 	}
-
-	file, err := root.Open(name)
-	if err != nil {
-		_ = root.Close()
-		return nil, describeOpenError(path, err)
-	}
-	fail := func(err error) (*PinnedFile, error) {
-		_ = file.Close()
-		_ = root.Close()
+	if err := pinned.open(); err != nil {
+		_ = pinned.Close()
 		return nil, err
 	}
+	return pinned, nil
+}
 
-	info, err := file.Stat()
-	if err != nil {
-		return fail(fmt.Errorf("stat %s: %w", path, err))
-	}
-	if info.IsDir() {
-		return fail(fmt.Errorf("%w: %s", ErrIsDirectory, path))
-	}
-	if !info.Mode().IsRegular() {
-		return fail(fmt.Errorf("%s is not a regular file", path))
-	}
+// open opens the handles of a new PinnedFile and reads the file.
+func (p *PinnedFile) open() error {
+	path := filepath.Join(p.dir, p.name)
 
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return fail(describeOpenError(path, err))
+	var err error
+	if p.root, err = os.OpenRoot(p.dir); err != nil {
+		return describeOpenError(path, err)
 	}
-
-	return &PinnedFile{
-		root:    root,
-		held:    file,
-		dir:     dir,
-		name:    name,
-		info:    info,
-		content: content,
-		hash:    sha256.Sum256(content),
-	}, nil
+	if p.parent, err = p.root.OpenRoot(p.parentRel); err != nil {
+		return describeOpenError(path, err)
+	}
+	if p.parentInfo, err = p.parent.Stat("."); err != nil {
+		return fmt.Errorf("stat the directory of %s: %w", path, err)
+	}
+	if p.exchange, err = openExchangeDir(p.parent); err != nil {
+		return fmt.Errorf("open the directory of %s: %w", path, err)
+	}
+	if p.held, err = p.parent.Open(p.base); err != nil {
+		return describeOpenError(path, err)
+	}
+	if p.info, err = p.held.Stat(); err != nil {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	if p.info.IsDir() {
+		return fmt.Errorf("%w: %s", ErrIsDirectory, path)
+	}
+	if !p.info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	if p.content, err = io.ReadAll(p.held); err != nil {
+		return describeOpenError(path, err)
+	}
+	p.hash = sha256.Sum256(p.content)
+	return nil
 }
 
 // describeOpenError wraps an error from opening or reading path with the
@@ -114,14 +162,27 @@ func (p *PinnedFile) Info() *FileInfo {
 // Close releases the file and directory handles.
 func (p *PinnedFile) Close() error {
 	p.release()
-	if err := p.root.Close(); err != nil {
+	var errs []error
+	if p.exchange != nil {
+		errs = append(errs, p.exchange.Close())
+		p.exchange = nil
+	}
+	if p.parent != nil {
+		errs = append(errs, p.parent.Close())
+		p.parent = nil
+	}
+	if p.root != nil {
+		errs = append(errs, p.root.Close())
+		p.root = nil
+	}
+	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("close %s: %w", p.dir, err)
 	}
 	return nil
 }
 
-// release closes the file handle held since Pin. Write calls it right
-// before renaming over the file, which Windows refuses while it is open.
+// release closes the file handle held since Pin. The rename commit calls it
+// first, since Windows refuses to rename over a file that is open.
 func (p *PinnedFile) release() {
 	if p.held != nil {
 		_ = p.held.Close()
@@ -129,38 +190,44 @@ func (p *PinnedFile) release() {
 	}
 }
 
-// Check reports ErrFileChanged when the name no longer refers to the file
-// that was read, or when its size or modification time changed, or, with
-// strict, when its content changed.
+// Check reports ErrFileChanged when the directory moved, the name no longer
+// refers to the file that was read, or the file changed: its size or
+// modification time, or, with strict, its content.
 func (p *PinnedFile) Check(strict bool) error {
-	file, info, err := p.openSame(os.O_RDONLY)
+	file, _, err := p.verify(os.O_RDONLY, strict)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-
-	if info.Size() != p.info.Size() || !info.ModTime().Equal(p.info.ModTime()) {
-		return fmt.Errorf("%w: %s was modified", ErrFileChanged, p.name)
-	}
-	if !strict {
+	if strict {
 		return nil
 	}
-	content, err := io.ReadAll(file)
+
+	info, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("read %s: %w", p.name, err)
+		return fmt.Errorf("stat %s: %w", p.name, err)
 	}
-	if sha256.Sum256(content) != p.hash {
+	if info.Size() != p.info.Size() || !info.ModTime().Equal(p.info.ModTime()) {
 		return fmt.Errorf("%w: %s was modified", ErrFileChanged, p.name)
 	}
 	return nil
 }
 
-// openSame opens the name through the root and checks that it still refers
-// to the file that was read. Any failure to open it means the file is gone,
-// was replaced or now lies outside the root, so it is reported as
-// ErrFileChanged.
-func (p *PinnedFile) openSame(flag int) (*os.File, os.FileInfo, error) {
-	file, err := p.root.OpenFile(p.name, flag, 0)
+// verify checks that the directory is still where it was pinned and that
+// the name in it still refers to the pinned file, and returns a handle to
+// that file opened with flag. With content set, it also reads the file
+// through that handle and checks that it holds the content that was read,
+// and returns those bytes. Every mismatch is reported as ErrFileChanged.
+func (p *PinnedFile) verify(flag int, content bool) (*os.File, []byte, error) {
+	current, err := p.root.Lstat(p.parentRel)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: the directory of %s: %w", ErrFileChanged, p.name, err)
+	}
+	if !os.SameFile(current, p.parentInfo) {
+		return nil, nil, fmt.Errorf("%w: the directory of %s was moved or replaced", ErrFileChanged, p.name)
+	}
+
+	file, err := p.parent.OpenFile(p.base, flag, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: open %s: %w", ErrFileChanged, p.name, err)
 	}
@@ -173,70 +240,117 @@ func (p *PinnedFile) openSame(flag int) (*os.File, os.FileInfo, error) {
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("%w: %s now refers to another file", ErrFileChanged, p.name)
 	}
-	return file, info, nil
+	if !content {
+		return file, nil, nil
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("read %s: %w", p.name, err)
+	}
+	if sha256.Sum256(data) != p.hash {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("%w: %s was modified", ErrFileChanged, p.name)
+	}
+	return file, data, nil
 }
 
 // Backup saves the content that was read next to the file, as the name plus
 // BackupSuffix, unless mode is BackupModeNone or a backup already exists. It
-// reports whether it created one. Like CreateBackup, it never overwrites an
-// existing backup, so repeated runs keep the oldest original.
+// reports whether it created one. It first checks that the file is
+// unchanged, so it never saves a backup for a write that will be refused,
+// and it never overwrites an existing backup, so repeated runs keep the
+// oldest original.
 func (p *PinnedFile) Backup(mode BackupMode) (bool, error) {
 	if mode == BackupModeNone {
 		return false, nil
 	}
 
-	backupName := p.name + BackupSuffix
-	if _, err := p.root.Lstat(backupName); err == nil {
-		return false, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return false, fmt.Errorf("stat backup %s: %w", backupName, err)
-	}
-
-	tmpName, tmp, err := p.createTemp(filepath.Base(backupName))
+	file, _, err := p.verify(os.O_RDONLY, true)
 	if err != nil {
 		return false, err
 	}
-	committed := false
+	_ = file.Close()
+
+	backupName := p.base + BackupSuffix
+	tmpName, tmp, err := p.createTemp(backupName)
+	if err != nil {
+		return false, err
+	}
 	defer func() {
-		if !committed {
-			_ = tmp.Close()
-			_ = p.root.Remove(tmpName) //nolint:errcheck // Best effort: cleaning up a temp file after a failed write.
-		}
+		_ = tmp.Close()
+		_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: the temp name is removed once the backup is linked or abandoned.
 	}()
 
-	if _, err := tmp.Write(p.content); err != nil {
+	if err := writeAndClose(tmp, p.content, p.info.Mode()); err != nil {
 		return false, fmt.Errorf("write backup: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
-		return false, fmt.Errorf("sync backup: %w", err)
+
+	if p.beforeCommit != nil {
+		p.beforeCommit()
 	}
-	if err := tmp.Chmod(p.info.Mode()); err != nil {
-		return false, fmt.Errorf("chmod backup: %w", err)
+
+	// Link the temp file into place: unlike a rename, a link never
+	// replaces a backup that exists already.
+	err = p.parent.Link(tmpName, backupName)
+	switch {
+	case err == nil:
+		p.syncDir()
+		return true, nil
+	case errors.Is(err, fs.ErrExist):
+		return false, nil
 	}
-	if err := tmp.Close(); err != nil {
-		return false, fmt.Errorf("close backup: %w", err)
+
+	// Hard links are not available here: create the backup exclusively.
+	return p.writeBackupExclusively(backupName)
+}
+
+// writeBackupExclusively creates the backup with O_EXCL, so it never
+// replaces an existing one either. Unlike linking, a crash part way leaves
+// a partial backup.
+func (p *PinnedFile) writeBackupExclusively(name string) (bool, error) {
+	file, err := p.parent.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
 	}
-	if err := p.root.Rename(tmpName, backupName); err != nil {
-		return false, fmt.Errorf("rename backup into place: %w", err)
+	if err != nil {
+		return false, fmt.Errorf("create backup %s: %w", name, err)
 	}
-	committed = true
+	if err := writeAndClose(file, p.content, p.info.Mode()); err != nil {
+		_ = p.parent.Remove(name) //nolint:errcheck // Best effort: a partial backup is worse than none.
+		return false, fmt.Errorf("write backup %s: %w", name, err)
+	}
 	p.syncDir()
 	return true, nil
 }
 
+// writeAndClose writes content to a new file, syncs it, gives it mode and
+// closes it.
+func writeAndClose(file *os.File, content []byte, mode os.FileMode) error {
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("sync: %w", err)
+	}
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("chmod: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close: %w", err)
+	}
+	return nil
+}
+
 // Write replaces the file's content and keeps its mode, and its owner where
-// possible. At commit time the name must still refer to the file that was
-// read; otherwise nothing is written and the error wraps ErrFileChanged.
-//
-// A file with more than one hard link is rewritten in place, through a
-// handle that was opened and checked for the purpose, so every link sees
-// the new content; the bytes for a rollback are read through that same
-// handle. Otherwise the content goes to a temp file in the same directory,
-// which gets the original owner and mode and is renamed over the name. When
-// the owner cannot be restored, a writable file is rewritten in place
-// instead, so its owner does not change.
+// possible, as described on PinnedFile. If the file changed after it was
+// read, nothing is written and the error wraps ErrFileChanged.
 func (p *PinnedFile) Write(content []byte) error {
-	file, _, err := p.openSame(os.O_RDONLY)
+	file, _, err := p.verify(os.O_RDONLY, true)
 	if err != nil {
 		return err
 	}
@@ -249,18 +363,13 @@ func (p *PinnedFile) Write(content []byte) error {
 	return p.replace(content)
 }
 
-// rewriteInPlace overwrites the file through a checked handle, which keeps
-// its inode, hard links and owner.
+// rewriteInPlace overwrites the file through a handle that was checked for
+// identity and content just before, which keeps its inode, hard links and
+// owner. The bytes for a rollback are the ones read through that handle.
 func (p *PinnedFile) rewriteInPlace(content []byte) error {
-	file, info, err := p.openSame(os.O_RDWR)
+	file, original, err := p.verify(os.O_RDWR, true)
 	if err != nil {
 		return err
-	}
-
-	original := make([]byte, info.Size())
-	if _, err := file.ReadAt(original, 0); err != nil && !errors.Is(err, io.EOF) {
-		_ = file.Close()
-		return fmt.Errorf("read %s before rewriting it in place: %w", p.name, err)
 	}
 
 	if err := overwriteWithRollback(file, content, original); err != nil {
@@ -269,6 +378,11 @@ func (p *PinnedFile) rewriteInPlace(content []byte) error {
 	}
 
 	mode := p.info.Mode()
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return fmt.Errorf("stat %s after rewriting it in place: %w", p.name, err)
+	}
 	if info.Mode()&chmodBits != mode&chmodBits {
 		if err := file.Chmod(mode); err != nil {
 			_ = file.Close()
@@ -281,18 +395,18 @@ func (p *PinnedFile) rewriteInPlace(content []byte) error {
 	return nil
 }
 
-// replace writes content to a temp file next to the file and renames it
-// over the name, after checking that the name still refers to the file.
+// replace writes content to a temp file next to the file and commits it as
+// described on PinnedFile.
 func (p *PinnedFile) replace(content []byte) error {
-	tmpName, tmp, err := p.createTemp(filepath.Base(p.name))
+	tmpName, tmp, err := p.createTemp(p.base)
 	if err != nil {
 		return err
 	}
-	committed := false
+	tmpLeft := true
 	defer func() {
-		if !committed {
+		if tmpLeft {
 			_ = tmp.Close()
-			_ = p.root.Remove(tmpName) //nolint:errcheck // Best effort: cleaning up a temp file after a failed write.
+			_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: cleaning up a temp file after a failed write.
 		}
 	}()
 
@@ -325,34 +439,96 @@ func (p *PinnedFile) replace(content []byte) error {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	// Commit only if the name still refers to the file that was read.
-	current, err := p.root.Lstat(p.name)
+	// The name must still refer to the pinned file, unchanged.
+	file, _, err := p.verify(os.O_RDONLY, true)
 	if err != nil {
-		return fmt.Errorf("%w: stat %s: %w", ErrFileChanged, p.name, err)
+		return err
 	}
-	if !os.SameFile(current, p.info) {
-		return fmt.Errorf("%w: %s now refers to another file", ErrFileChanged, p.name)
+	_ = file.Close()
+
+	if p.beforeCommit != nil {
+		p.beforeCommit()
 	}
+
+	if !p.noExchange {
+		err := exchangeFiles(p.exchange, tmpName, p.base)
+		if err == nil {
+			tmpLeft = false
+			return p.settleExchange(tmpName)
+		}
+		if !errors.Is(err, errExchangeUnsupported) {
+			return err
+		}
+	}
+
+	// No atomic exchange here: rename over the name. A change between the
+	// check above and this rename is not detected.
 	p.release()
-	if err := p.root.Rename(tmpName, p.name); err != nil {
+	if err := p.parent.Rename(tmpName, p.base); err != nil {
 		return fmt.Errorf("rename temp file: %w", err)
 	}
-	committed = true
+	tmpLeft = false
 	p.syncDir()
 	return nil
 }
 
-// createTemp creates a new file with a random name based on base in the
-// file's directory, inside the root.
+// settleExchange runs after the temp file and the name were exchanged: the
+// name now holds the new content and tmpName the file that had the name. If
+// that file is the pinned file, with a single link and the content that was
+// read, it is removed and the write is done. Otherwise the exchange is
+// undone and the write fails with ErrFileChanged.
+func (p *PinnedFile) settleExchange(tmpName string) error {
+	reason := p.swappedOutChange(tmpName)
+	if reason == "" {
+		_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: the write is done; only the replaced file is left over.
+		p.syncDir()
+		return nil
+	}
+
+	if err := exchangeFiles(p.exchange, tmpName, p.base); err != nil {
+		return fmt.Errorf("%s %s during the write, and putting it back failed; its content is in %s: %w",
+			p.name, reason, filepath.Join(p.dir, p.parentRel, tmpName), err)
+	}
+	_ = p.parent.Remove(tmpName) //nolint:errcheck // Best effort: removing the unused new content.
+	return fmt.Errorf("%w: %s %s", ErrFileChanged, p.name, reason)
+}
+
+// swappedOutChange describes how the file now at name differs from the
+// pinned file, or returns an empty string when it is the pinned file, with a
+// single link and the content that was read.
+func (p *PinnedFile) swappedOutChange(name string) string {
+	file, err := p.parent.Open(name)
+	if err != nil {
+		return "could not be checked"
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	switch {
+	case err != nil:
+		return "could not be checked"
+	case !os.SameFile(info, p.info):
+		return "was replaced"
+	case hasMultipleLinks(file):
+		return "got another hard link"
+	}
+	data, err := io.ReadAll(file)
+	if err != nil || sha256.Sum256(data) != p.hash {
+		return "was modified"
+	}
+	return ""
+}
+
+// createTemp creates a new hidden file, named after base with a random
+// suffix, in the file's directory.
 func (p *PinnedFile) createTemp(base string) (string, *os.File, error) {
-	dir := filepath.Dir(p.name)
 	for range maxTempAttempts {
 		var suffix [6]byte
 		if _, err := rand.Read(suffix[:]); err != nil {
 			return "", nil, fmt.Errorf("create temp file name: %w", err)
 		}
-		name := filepath.Join(dir, "."+base+".tmp."+hex.EncodeToString(suffix[:]))
-		file, err := p.root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		name := "." + base + ".tmp." + hex.EncodeToString(suffix[:])
+		file, err := p.parent.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			return name, file, nil
 		}
@@ -360,19 +536,19 @@ func (p *PinnedFile) createTemp(base string) (string, *os.File, error) {
 			return "", nil, fmt.Errorf("create temp file: %w", err)
 		}
 	}
-	return "", nil, fmt.Errorf("create temp file in %s: no unused name found", filepath.Join(p.dir, dir))
+	return "", nil, fmt.Errorf("create temp file in %s: no unused name found", filepath.Join(p.dir, p.parentRel))
 }
 
-// syncDir makes a rename in the file's directory durable, on a best-effort
+// syncDir makes a change in the file's directory durable, on a best-effort
 // basis.
 func (p *PinnedFile) syncDir() {
 	if !syncDirectories {
 		return
 	}
-	dir, err := p.root.Open(filepath.Dir(p.name))
+	dir, err := p.parent.Open(".")
 	if err != nil {
 		return
 	}
-	_ = dir.Sync() //nolint:errcheck // Best effort: the rename stands whether or not the directory can be synced.
+	_ = dir.Sync() //nolint:errcheck // Best effort: the change stands whether or not the directory can be synced.
 	_ = dir.Close()
 }
