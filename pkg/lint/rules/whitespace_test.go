@@ -124,6 +124,55 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			wantFix:   "Line one  \nLine two\n",
 		},
 		{
+			name:      "fix keeps a hard break in a setext heading",
+			input:     "Title   \nsubtitle\n===\n",
+			wantDiags: 1,
+			wantFix:   "Title  \nsubtitle\n===\n",
+		},
+		{
+			name:      "fix keeps a hard break before a lazy continuation line",
+			input:     "> Line one   \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "> Line one  \nLine two\n",
+		},
+		{
+			name:      "strict reports a hard break in a setext heading without a fix",
+			input:     "Title  \nsubtitle\n===\n",
+			wantDiags: 1,
+			wantFix:   "Title  \nsubtitle\n===\n",
+			config:    map[string]any{"strict": true},
+		},
+		{
+			// CommonMark renderers such as pandoc read whitespace that
+			// spans two or more columns as a hard break even when it ends in
+			// a tab, while goldmark reads a soft break, so neither deleting
+			// nor normalizing the whitespace is safe.
+			name:      "no fix for whitespace ending in a tab before a line break",
+			input:     "text  \t\nnext\n",
+			wantDiags: 1,
+			wantFix:   "text  \t\nnext\n",
+		},
+		{
+			name:      "no fix for a tab before a line break",
+			input:     "Line one\t\nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one\t\nLine two\n",
+		},
+		{
+			name:      "no fix for spaces around a tab before a line break",
+			input:     "Line one \t \nLine two\n",
+			wantDiags: 1,
+			wantFix:   "Line one \t \nLine two\n",
+		},
+		{
+			// In a code span the line ending becomes a space, so the
+			// trailing whitespace is part of the code text.
+			name:      "no fix inside a code span that continues on the next line",
+			input:     "Some `code   \nspan` here\n",
+			wantDiags: 1,
+			wantFix:   "Some `code   \nspan` here\n",
+		},
+		{
 			name:      "fix removes a single space where no hard break exists",
 			input:     "Line one \nLine two\n",
 			wantDiags: 1,

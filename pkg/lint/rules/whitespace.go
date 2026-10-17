@@ -37,7 +37,9 @@ const defaultBreakSpaces = 2
 //
 // Defaults follow markdownlint: two trailing spaces (br_spaces) are allowed,
 // code blocks are skipped (ignore_code_blocks), and with strict the allowance
-// only applies where the spaces actually produce a hard line break.
+// only applies to paragraph lines, where the spaces can produce a hard line
+// break. The fix reads the line breaks the parser found, so it keeps every
+// hard break and leaves alone whitespace that renderers read differently.
 func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
@@ -57,6 +59,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		breakSpaces = 0
 	}
 	breakLines := hardBreakLines(ctx)
+	lineEnds := trailingLineEnds(ctx)
 
 	var diags []lint.Diagnostic
 
@@ -97,7 +100,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Trailing whitespace").
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove trailing whitespace")
-		if builder := trailingWhitespaceFix(ctx.File.Content[start:end], start, end, canBreak, breakSpaces); builder != nil {
+		if builder := trailingWhitespaceFix(ctx.File.Content[start:end], start, end, lineEnds[lineNum], breakSpaces); builder != nil {
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
@@ -106,28 +109,82 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	return diags, nil
 }
 
-// trailingWhitespaceFix builds the fix for trailing whitespace without changing
-// the rendered output: whitespace that forms a hard line break (two or more
-// spaces before the line ending inside a paragraph) is normalized to the
-// configured break spaces instead of being deleted. When trailing-space breaks
-// are disallowed (breakSpaces is 0) such a break is reported without a fix.
-func trailingWhitespaceFix(trailing []byte, start, end int, canBreak bool, breakSpaces int) *fix.EditBuilder {
-	builder := fix.NewEditBuilder()
-	hardBreak := canBreak && bytes.HasSuffix(trailing, []byte("  "))
-	switch {
-	case !hardBreak:
-		builder.Delete(start, end)
-	case breakSpaces >= 2:
-		builder.ReplaceRange(start, end, strings.Repeat(" ", breakSpaces))
-	default:
+// trailingLineEnd says how the parser reads the line ending after trailing
+// whitespace, which decides whether the whitespace is rendered.
+type trailingLineEnd int
+
+const (
+	// lineEndPlain is a line ending that ends a block or lies outside inline
+	// content, where trailing whitespace is never rendered.
+	lineEndPlain trailingLineEnd = iota
+	// lineEndSoftBreak is a soft line break inside inline content.
+	lineEndSoftBreak
+	// lineEndHardBreak is a hard line break that the trailing whitespace
+	// makes.
+	lineEndHardBreak
+	// lineEndCode is a line ending inside a code span, where it becomes a
+	// space and the trailing whitespace is part of the code text.
+	lineEndCode
+)
+
+// trailingLineEnds classifies the line ending of every line that ends inside
+// inline content: lines ending in a soft or hard break, including breaks in
+// headings and in containers, and lines ending inside a code span.
+func trailingLineEnds(ctx *lint.RuleContext) map[int]trailingLineEnd {
+	ends := make(map[int]trailingLineEnd)
+	_ = mdast.Walk(ctx.Root, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+		switch node.Kind {
+		case mdast.NodeHardBreak:
+			ends[node.SourcePosition().StartLine] = lineEndHardBreak
+		case mdast.NodeSoftBreak:
+			ends[node.SourcePosition().StartLine] = lineEndSoftBreak
+		default:
+		}
 		return nil
+	})
+	for _, span := range ctx.CodeSpans() {
+		pos := span.SourcePosition()
+		for lineNum := pos.StartLine; pos.IsValid() && lineNum < pos.EndLine; lineNum++ {
+			ends[lineNum] = lineEndCode
+		}
+	}
+	return ends
+}
+
+// trailingWhitespaceFix builds the fix for trailing whitespace without changing
+// the rendered output. Whitespace that makes a hard line break is normalized
+// to the configured break spaces, which every renderer reads as a hard break;
+// it is reported without a fix when trailing-space breaks are disallowed
+// (breakSpaces is 0) or already normalized. Before a soft break only a single
+// space is removed: renderers such as pandoc read tabs and wider whitespace as
+// a hard break where goldmark does not. Whitespace inside a code span is code
+// text and is never fixed.
+func trailingWhitespaceFix(trailing []byte, start, end int, lineEnd trailingLineEnd, breakSpaces int) *fix.EditBuilder {
+	builder := fix.NewEditBuilder()
+	switch lineEnd {
+	case lineEndHardBreak:
+		normalized := strings.Repeat(" ", breakSpaces)
+		if breakSpaces < 2 || string(trailing) == normalized {
+			return nil
+		}
+		builder.ReplaceRange(start, end, normalized)
+	case lineEndSoftBreak:
+		if string(trailing) != " " {
+			return nil
+		}
+		builder.Delete(start, end)
+	case lineEndCode:
+		return nil
+	default:
+		builder.Delete(start, end)
 	}
 	return builder
 }
 
-// hardBreakLines returns the lines whose trailing spaces would produce a hard
-// line break: every paragraph line except the last, outside code blocks and
-// outside code spans that continue onto the next line.
+// hardBreakLines returns the lines where strict mode allows break spaces,
+// as markdownlint decides them: every paragraph line except the last,
+// outside code blocks and outside code spans that continue onto the next
+// line.
 func hardBreakLines(ctx *lint.RuleContext) map[int]bool {
 	lines := make(map[int]bool)
 	for _, paragraph := range ctx.Paragraphs() {
