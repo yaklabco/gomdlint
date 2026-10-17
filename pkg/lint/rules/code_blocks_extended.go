@@ -46,8 +46,9 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip indented code blocks.
-		if lint.IsIndentedCodeBlock(cb) {
+		// Only fenced code blocks have fences to surround. This also makes
+		// sure the block has code block attributes.
+		if !lint.IsFencedCodeBlock(cb) {
 			continue
 		}
 
