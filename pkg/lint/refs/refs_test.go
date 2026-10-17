@@ -628,3 +628,48 @@ func TestCollect_DefinitionAfterByteOrderMark(t *testing.T) {
 		t.Errorf("Expected [x][foo] to resolve to the definition on line 1")
 	}
 }
+
+// TestJSToLower mirrors JavaScript's String.prototype.toLowerCase, which
+// github-slugger and markdownlint use: full case mapping, so U+0130 becomes
+// "i" and a combining dot above, and a capital sigma at the end of a word
+// becomes the final sigma.
+func TestJSToLower(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"Hello World", "hello world"},
+		{"İ", "i̇"},
+		{"ΟΣ", "ος"},
+		{"ΣΑ", "σα"},
+		{"Σ", "σ"},
+		{"A.Σ", "a.ς"},
+		{"ΟΔΟΣ ΚΑΙ ΣΟΦΙΑ", "οδος και σοφια"},
+		{"ΑΣ́", "ας́"},
+		{"Σ́Α", "σ́α"},
+		{"x Σ y", "x σ y"},
+		{"ǅ", "ǆ"},
+		{"ẞ", "ß"},
+		{"AΣͅ", "aςͅ"},
+		{"Σ.", "σ."},
+		{"AΣ.B", "aσ.b"},
+	}
+	for _, tt := range tests {
+		if got := jsToLower(tt.in); got != tt.want {
+			t.Errorf("jsToLower(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestGenerateAnchor_JavaScriptLowercase(t *testing.T) {
+	tests := []struct {
+		text, want string
+	}{
+		{"İ", "i̇"},
+		{"ΟΣ", "ος"},
+	}
+	for _, tt := range tests {
+		if got := NewAnchorMap().GenerateAnchor(tt.text); got != tt.want {
+			t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.want)
+		}
+	}
+}

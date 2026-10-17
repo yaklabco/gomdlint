@@ -66,7 +66,7 @@ func NewAnchorMap() *AnchorMap {
 func (m *AnchorMap) Add(anchor *Anchor) {
 	id := anchor.ID
 	m.anchors[id] = append(m.anchors[id], anchor)
-	m.anchorLower[strings.ToLower(id)] = id
+	m.anchorLower[jsToLower(id)] = id
 }
 
 // AddFromHeading generates and adds an anchor from heading text.
@@ -104,15 +104,15 @@ func (m *AnchorMap) GenerateAnchor(text string) string {
 }
 
 // generateAnchorBase converts heading text to a slug with github-slugger's
-// rules: lowercase the text, remove every character except letters, marks,
-// numbers, connector punctuation, hyphens, and spaces, then replace each
-// space with a hyphen. Nothing is trimmed or collapsed, so "A - B" becomes
-// "a---b".
+// rules: lowercase the text as JavaScript does, remove every character
+// except letters, marks, numbers, connector punctuation, hyphens, and
+// spaces, then replace each space with a hyphen. Nothing is trimmed or
+// collapsed, so "A - B" becomes "a---b".
 func generateAnchorBase(text string) string {
 	var buf strings.Builder
 	buf.Grow(len(text))
 
-	for _, ch := range strings.ToLower(text) {
+	for _, ch := range jsToLower(text) {
 		switch {
 		case ch == ' ':
 			_ = buf.WriteByte('-') // strings.Builder.WriteByte never fails
@@ -147,7 +147,7 @@ func (m *AnchorMap) Has(id string) bool {
 
 // HasIgnoreCase returns true if the anchor ID exists (case-insensitive).
 func (m *AnchorMap) HasIgnoreCase(id string) bool {
-	_, ok := m.anchorLower[strings.ToLower(id)]
+	_, ok := m.anchorLower[jsToLower(id)]
 	return ok
 }
 
@@ -162,7 +162,7 @@ func (m *AnchorMap) Lookup(id string) *Anchor {
 
 // LookupIgnoreCase returns the first anchor matching case-insensitively.
 func (m *AnchorMap) LookupIgnoreCase(id string) *Anchor {
-	canonicalID, ok := m.anchorLower[strings.ToLower(id)]
+	canonicalID, ok := m.anchorLower[jsToLower(id)]
 	if !ok {
 		return nil
 	}

@@ -574,6 +574,10 @@ func TestLinkFragmentsRule_GitHubSlugs(t *testing.T) {
 		{"suffix collision keeps counting", "# Foo\n\n# Foo\n\n# Foo 1\n\n[x](#foo-1-1)\n", 0},
 		{"missing duplicate suffix", "# Foo\n\n# Foo\n\n[x](#foo-2)\n", 1},
 		{"trailing emoji leaves a hyphen", "## Hello World 🎉\n\n[x](#hello-world-)\n", 0},
+		{"capital I with dot lowercases to i and a dot", "# \u0130\n\n[x](#i%CC%87)\n", 0},
+		{"capital I with dot is not plain i", "# \u0130\n\n[x](#i)\n", 1},
+		{"final sigma", "# \u039f\u03a3\n\n[x](#\u03bf\u03c2)\n", 0},
+		{"non-final sigma form at the end of a word", "# \u039f\u03a3\n\n[x](#\u03bf\u03c3)\n", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
