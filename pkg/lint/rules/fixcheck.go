@@ -1165,11 +1165,12 @@ func trailingHashes(content []byte, rng mdast.SourceRange) mdast.SourceRange {
 // the ranges.
 func hashOutside(content []byte, ranges []mdast.SourceRange) bool {
 	slices.SortFunc(ranges, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
+	cover := sortedCover{ranges: ranges, end: math.MinInt}
 	for idx, char := range content {
 		if char != '#' && !bytes.HasPrefix(content[idx:], []byte("&num;")) {
 			continue
 		}
-		if !insideSorted(ranges, idx) {
+		if !cover.inside(idx) {
 			return true
 		}
 	}
@@ -1252,9 +1253,10 @@ func textHasRawHTML(content []byte, container *mdast.Node) bool {
 		return nil
 	})
 	slices.SortFunc(parsed, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
+	cover := sortedCover{ranges: parsed, end: math.MinInt}
 	text := content[:rng.EndOffset]
 	for idx := rng.StartOffset; idx+1 < len(text); idx++ {
-		if text[idx] != '<' || escapedAt(text, rng.StartOffset, idx) || insideSorted(parsed, idx) {
+		if text[idx] != '<' || escapedAt(text, rng.StartOffset, idx) || cover.inside(idx) {
 			continue
 		}
 		if next := text[idx+1]; isASCIILetter(next) || next == '/' || next == '!' || next == '?' {
@@ -1264,18 +1266,27 @@ func textHasRawHTML(content []byte, container *mdast.Node) bool {
 	return false
 }
 
-// insideSorted reports whether offset lies in one of ranges, which are
-// sorted by start and may nest.
-func insideSorted(ranges []mdast.SourceRange, offset int) bool {
-	for _, rng := range ranges {
-		if rng.StartOffset > offset {
-			return false
-		}
-		if offset < rng.EndOffset {
-			return true
-		}
+// sortedCover answers whether offsets lie in one of ranges, which are
+// sorted by start and may nest, for offsets asked in increasing order. An
+// offset lies in one of the ranges exactly when the furthest end of the
+// ranges that start at or before it lies after it, so each range is looked
+// at once, however many offsets are asked: scanning the ranges from the
+// first for each offset made a long document take time that grows with its
+// square. A new cover has end set to math.MinInt.
+type sortedCover struct {
+	ranges []mdast.SourceRange
+	next   int
+	end    int
+}
+
+// inside reports whether offset, no smaller than the offsets asked before,
+// lies in one of the ranges.
+func (c *sortedCover) inside(offset int) bool {
+	for c.next < len(c.ranges) && c.ranges[c.next].StartOffset <= offset {
+		c.end = max(c.end, c.ranges[c.next].EndOffset)
+		c.next++
 	}
-	return false
+	return offset < c.end
 }
 
 // rangesOverlap reports whether two ranges share a byte.
