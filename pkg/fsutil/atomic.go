@@ -158,11 +158,24 @@ func replaceFile(target string, content []byte, mode os.FileMode, existing os.Fi
 	}
 	success = true
 
-	// Make the rename itself durable.
-	if err := syncDir(dir); err != nil {
-		return fmt.Errorf("%s was written but its directory could not be synced: %w", target, err)
-	}
+	// Make the rename itself durable, on a best-effort basis: the new content
+	// is already in place, so a directory that cannot be synced is not a
+	// failed write.
+	syncDir(dir)
 	return nil
+}
+
+// ownerFile is the part of *os.File that restoring an owner needs.
+type ownerFile interface {
+	Stat() (os.FileInfo, error)
+	Chown(uid, gid int) error
+}
+
+// contentWriter is the part of *os.File that rewriting in place needs.
+type contentWriter interface {
+	WriteAt(p []byte, off int64) (int, error)
+	Truncate(size int64) error
+	Sync() error
 }
 
 // rewriteInPlace overwrites the existing file at target without replacing
@@ -186,25 +199,20 @@ func rewriteOpenFile(target string, file *os.File, content []byte, mode os.FileM
 		return fmt.Errorf("read %s before rewriting it in place: %w", target, err)
 	}
 
-	if err := overwriteFile(file, content); err != nil {
-		if restoreErr := overwriteFile(file, original); restoreErr != nil {
-			_ = file.Close()
-			return fmt.Errorf("rewrite %s in place: %w",
-				target, errors.Join(err, fmt.Errorf("restore original content: %w", restoreErr)))
-		}
+	if err := overwriteWithRollback(file, content, original); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("rewrite %s in place (original content restored): %w", target, err)
+		return fmt.Errorf("rewrite %s in place: %w", target, err)
 	}
 
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return fmt.Errorf("stat %s: %w", target, err)
+		return fmt.Errorf("stat %s after rewriting it in place: %w", target, err)
 	}
 	if info.Mode()&chmodBits != mode&chmodBits {
 		if err := file.Chmod(mode); err != nil {
 			_ = file.Close()
-			return fmt.Errorf("chmod %s: %w", target, err)
+			return fmt.Errorf("chmod %s after rewriting it in place (the new content is written): %w", target, err)
 		}
 	}
 
@@ -214,8 +222,21 @@ func rewriteOpenFile(target string, file *os.File, content []byte, mode os.FileM
 	return nil
 }
 
+// overwriteWithRollback replaces the content behind file. If that fails, it
+// tries to put original back, and the error says whether that worked.
+func overwriteWithRollback(file contentWriter, content, original []byte) error {
+	err := overwriteFile(file, content)
+	if err == nil {
+		return nil
+	}
+	if restoreErr := overwriteFile(file, original); restoreErr != nil {
+		return errors.Join(err, fmt.Errorf("restore original content: %w", restoreErr))
+	}
+	return fmt.Errorf("%w (original content restored)", err)
+}
+
 // overwriteFile replaces the whole content of an open file and syncs it.
-func overwriteFile(file *os.File, content []byte) error {
+func overwriteFile(file contentWriter, content []byte) error {
 	if _, err := file.WriteAt(content, 0); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}

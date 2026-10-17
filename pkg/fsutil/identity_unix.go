@@ -3,9 +3,7 @@
 package fsutil
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"syscall"
 )
@@ -18,8 +16,10 @@ func hasMultipleLinks(_ string, info os.FileInfo) bool {
 }
 
 // restoreOwner gives tmp the owner and group of existing. It reports false,
-// without an error, when the current user is not allowed to do that.
-func restoreOwner(tmp *os.File, existing os.FileInfo) (bool, error) {
+// without an error, when that fails for any reason: the current user may not
+// give files away (EPERM), the ID has no mapping in a user namespace
+// (EINVAL), or the file system has no owners (ENOSYS, EOPNOTSUPP).
+func restoreOwner(tmp ownerFile, existing os.FileInfo) (bool, error) {
 	want, ok := existing.Sys().(*syscall.Stat_t)
 	if !ok {
 		return true, nil
@@ -34,30 +34,17 @@ func restoreOwner(tmp *os.File, existing os.FileInfo) (bool, error) {
 		return true, nil
 	}
 
-	if err := tmp.Chown(int(want.Uid), int(want.Gid)); err != nil {
-		if errors.Is(err, fs.ErrPermission) {
-			return false, nil
-		}
-		return false, fmt.Errorf("chown temp file: %w", err)
-	}
-	return true, nil
+	return tmp.Chown(int(want.Uid), int(want.Gid)) == nil, nil
 }
 
-// syncDir flushes a directory entry change, such as a rename, to disk.
-// File systems that cannot sync directories are not treated as an error.
-func syncDir(dir string) error {
+// syncDir flushes a directory entry change, such as a rename, to disk. It is
+// best-effort: a directory that cannot be opened (no read permission) or
+// synced (some file systems do not support it) is left as it is.
+func syncDir(dir string) {
 	handle, err := os.Open(dir)
 	if err != nil {
-		return fmt.Errorf("open directory: %w", err)
+		return
 	}
-
-	syncErr := handle.Sync()
-	closeErr := handle.Close()
-	if syncErr != nil && !errors.Is(syncErr, syscall.EINVAL) && !errors.Is(syncErr, syscall.ENOTSUP) {
-		return fmt.Errorf("sync directory: %w", syncErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close directory: %w", closeErr)
-	}
-	return nil
+	_ = handle.Sync() //nolint:errcheck // Best effort: the rename stands whether or not the directory can be synced.
+	_ = handle.Close()
 }

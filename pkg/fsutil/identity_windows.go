@@ -25,11 +25,9 @@ func hasMultipleLinks(path string, _ os.FileInfo) bool {
 
 // restoreOwner is a no-op on Windows: a replacement file inherits its
 // security descriptor from the directory.
-func restoreOwner(_ *os.File, _ os.FileInfo) (bool, error) {
+func restoreOwner(_ ownerFile, _ os.FileInfo) (bool, error) {
 	return true, nil
 }
 
 // syncDir is a no-op on Windows, which cannot flush a directory handle.
-func syncDir(_ string) error {
-	return nil
-}
+func syncDir(_ string) {}

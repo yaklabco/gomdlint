@@ -118,11 +118,51 @@ func TestWriteAtomic_PreservesOwnerAsRoot(t *testing.T) {
 	assert.Equal(t, uint32(nobody), stat.Gid)
 }
 
-func TestSyncDir(t *testing.T) {
+// fakeOwnerFile is an ownerFile whose Chown fails with a fixed error.
+type fakeOwnerFile struct {
+	info     os.FileInfo
+	chownErr error
+}
+
+func (f fakeOwnerFile) Stat() (os.FileInfo, error) { return f.info, nil }
+func (f fakeOwnerFile) Chown(_, _ int) error       { return f.chownErr }
+
+func TestRestoreOwner_TreatsAnyChownFailureAsNotRestored(t *testing.T) {
 	t.Parallel()
 
-	require.NoError(t, syncDir(t.TempDir()))
-	require.Error(t, syncDir(filepath.Join(t.TempDir(), "missing")))
+	path := filepath.Join(t.TempDir(), "doc.md")
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	other := *statT(t, info)
+	other.Uid++
+
+	// EINVAL: an ID with no mapping in a user namespace (rootless
+	// containers); ENOSYS: a file system without chown support.
+	for _, chownErr := range []error{syscall.EINVAL, syscall.ENOSYS, syscall.EPERM} {
+		restored, err := restoreOwner(fakeOwnerFile{info: info, chownErr: chownErr}, ownerOverride{FileInfo: info, stat: &other})
+		require.NoError(t, err, "chown failing with %v must not fail the write", chownErr)
+		assert.False(t, restored, "chown failing with %v means the owner was not restored", chownErr)
+	}
+}
+
+func TestWriteAtomic_DirectorySyncIsBestEffort(t *testing.T) {
+	t.Parallel()
+
+	// Without read permission the directory cannot be opened for syncing,
+	// but files can still be created and renamed in it.
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o333))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(dir, 0o755)) })
+
+	path := filepath.Join(dir, "doc.md")
+	require.NoError(t, WriteAtomic(context.Background(), path, []byte("new\n"), 0o644),
+		"a file that was written must not be reported as a failed write")
+
+	require.NoError(t, os.Chmod(dir, 0o755))
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "new\n", string(got))
 }
 
 func assertNoTempFilesInternal(t *testing.T, dir string) {

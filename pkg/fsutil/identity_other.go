@@ -10,11 +10,9 @@ func hasMultipleLinks(_ string, _ os.FileInfo) bool {
 }
 
 // restoreOwner is a no-op where files have no owner to restore.
-func restoreOwner(_ *os.File, _ os.FileInfo) (bool, error) {
+func restoreOwner(_ ownerFile, _ os.FileInfo) (bool, error) {
 	return true, nil
 }
 
 // syncDir is a no-op where directories cannot be synced.
-func syncDir(_ string) error {
-	return nil
-}
+func syncDir(_ string) {}
