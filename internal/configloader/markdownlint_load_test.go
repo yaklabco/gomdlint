@@ -5,7 +5,9 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -61,6 +63,56 @@ func TestLoad_AppliesMarkdownlintConfig(t *testing.T) {
 	assert.False(t, result.MigrationPerformed)
 	assert.Empty(t, stderr.String(), "no prompt without a terminal")
 	assert.NoFileExists(t, filepath.Join(dir, ".gomdlint.yml"))
+}
+
+// TestLoad_MarkdownlintNoticeQuotesPaths covers a project directory whose
+// name a shell would split or misread: the suggested command still passes
+// each path as one argument.
+func TestLoad_MarkdownlintNoticeQuotesPaths(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == goosWindows {
+		t.Skip("the check runs the command through a POSIX shell")
+	}
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("no POSIX shell: %v", err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "it's a $HOME")
+	source := writeMarkdownlint(t, dir, ".markdownlint.json", `{"MD013": false}`)
+
+	result, err := Load(context.Background(), markdownlintOptions(dir, false, "", io.Discard))
+	require.NoError(t, err)
+	require.Len(t, result.Notices, 1)
+
+	_, command, found := strings.Cut(result.Notices[0], "run: ")
+	require.True(t, found, "the notice must give a command: %s", result.Notices[0])
+	out, err := exec.Command(shell, "-c", `set -- `+command+`; printf '%s\n' "$@"`).Output()
+	require.NoError(t, err)
+	assert.Equal(t,
+		[]string{"gomdlint", "migrate", source, "--output", filepath.Join(dir, ".gomdlint.yml")},
+		strings.Split(strings.TrimSuffix(string(out), "\n"), "\n"))
+}
+
+func TestShellQuote(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path    string
+		windows bool
+		want    string
+	}{
+		{path: "/home/me/docs/.markdownlint.json", want: "/home/me/docs/.markdownlint.json"},
+		{path: "/home/me/my docs/.markdownlint.json", want: "'/home/me/my docs/.markdownlint.json'"},
+		{path: "/home/me/it's/x", want: `'/home/me/it'\''s/x'`},
+		{path: `C:\docs\.markdownlint.json`, windows: true, want: `C:\docs\.markdownlint.json`},
+		{path: `C:\my docs\.markdownlint.json`, windows: true, want: `"C:\my docs\.markdownlint.json"`},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, shellQuote(tt.path, tt.windows), tt.path)
+	}
 }
 
 func TestLoad_AppliesMarkdownlintConfigFromParentDirectory(t *testing.T) {

@@ -92,9 +92,12 @@ func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
 	return paths, nil
 }
 
+// goosWindows is runtime.GOOS on Windows.
+const goosWindows = "windows"
+
 // findSystemConfig returns the path to the system-wide config file, if it exists.
 func findSystemConfig() string {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		// On Windows, use ProgramData
 		programData := os.Getenv("ProgramData")
 		if programData == "" {

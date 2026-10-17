@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -336,9 +337,11 @@ func applyMarkdownlint(path string, opts LoadOptions, result *LoadResult) (*conf
 		}
 	}
 	if !result.MigrationPerformed {
+		windows := runtime.GOOS == goosWindows
 		result.Notices = append(result.Notices,
 			fmt.Sprintf("using %s, translated to gomdlint settings for this run; "+
-				"run 'gomdlint migrate %s --output %s' to save them", path, path, target))
+				"to save them, run: gomdlint migrate %s --output %s",
+				path, shellQuote(path, windows), shellQuote(target, windows)))
 	}
 
 	// Only rule settings come from markdownlint; other settings keep the
@@ -365,6 +368,30 @@ func saveMigratedConfig(converted *MigrationResult, target string) error {
 		return fmt.Errorf("save %s: %w", target, err)
 	}
 	return nil
+}
+
+// shellQuote quotes path for a command line the user may paste into a
+// shell, leaving it bare when it holds only characters no shell treats
+// specially. POSIX shells get single quotes; Windows gets double quotes,
+// since cmd.exe does not treat single quotes as quotes.
+func shellQuote(path string, windows bool) string {
+	special := func(char rune) bool {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+			return false
+		case strings.ContainsRune("@%+=:,./_-", char):
+			return false
+		default:
+			return !windows || char != '\\'
+		}
+	}
+	if path != "" && !strings.ContainsFunc(path, special) {
+		return path
+	}
+	if windows {
+		return `"` + path + `"`
+	}
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 // promptYes asks question on stderr and reads the answer from stdin. An
