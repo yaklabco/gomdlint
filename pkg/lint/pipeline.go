@@ -18,9 +18,11 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/fsutil"
 )
 
-// DefaultMaxFixPasses is the maximum number of fix passes to prevent infinite loops.
-// This should be sufficient for most files - if more passes are needed, there may
-// be rules that create issues for each other.
+// DefaultMaxFixPasses is the number of fix passes allowed for fixes that
+// reveal new findings, to prevent infinite loops. The default pass limit
+// adds a pass for each rule that can fix (see PipelineOptions.MaxFixPasses).
+// This should be sufficient for most files. If more passes are needed, there
+// may be rules that create issues for each other.
 const DefaultMaxFixPasses = 10
 
 // Pipeline error types for categorization.
@@ -120,8 +122,9 @@ type PipelineResult struct {
 	// FileResult.AcceptedFixes).
 	TotalFixesApplied int
 
-	// Exhausted is true if the fix loop hit MaxFixPasses while the fixed
-	// content still had fixes to apply.
+	// Exhausted is true if the fix loop hit its pass limit (see
+	// PipelineOptions.MaxFixPasses) while the fixed content still had fixes
+	// to apply.
 	Exhausted bool
 
 	// Oscillated is true if the fix loop stopped because applying the
@@ -130,7 +133,8 @@ type PipelineResult struct {
 	Oscillated bool
 
 	// RemainingEdits is the number of edits still proposed for the final
-	// content when the loop stopped early (Exhausted or Oscillated).
+	// content when the loop stopped early (Exhausted or Oscillated),
+	// including the edits of fixes deferred to a later pass.
 	RemainingEdits int
 }
 
@@ -184,7 +188,10 @@ type PipelineOptions struct {
 
 	// MaxFixPasses limits the number of fix iterations to prevent infinite loops.
 	// When conflicting edits are skipped, a subsequent pass may be able to fix them.
-	// Set to 0 to use DefaultMaxFixPasses.
+	// Set to 0 to allow DefaultMaxFixPasses passes plus one for each rule
+	// that can fix: each pass applies the fixes of one rule to each
+	// top-level block, so a block with findings of several rules takes a
+	// pass per rule.
 	MaxFixPasses int
 
 	// WriteRoots limits where fixes are written: a file is fixed only if its
@@ -316,7 +323,8 @@ func NewPipeline(engine *Engine) *Pipeline {
 //  1. Read and hash the original file.
 //  2. Lint the file and, in fix mode, apply fixes pass by pass, re-linting
 //     the fixed content after each pass, until no fix remains, the fixes
-//     start repeating earlier content, or MaxFixPasses is reached.
+//     start repeating earlier content, or the pass limit is reached (see
+//     PipelineOptions.MaxFixPasses).
 //  3. Generate diff (if dry-run mode).
 //  4. Check for concurrent modifications.
 //  5. Create backup (if enabled).
@@ -478,6 +486,7 @@ func refuseWrite(result *PipelineResult, original *FileResult, reason string) {
 	original.AcceptedFixes = 0
 	original.SkippedEdits = nil
 	original.EditConflicts = false
+	original.DeferredEdits = nil
 
 	result.FileResult = original
 	result.Skipped = true
@@ -545,11 +554,12 @@ func (p *Pipeline) processContent(
 
 // lintAndFix lints original and, in fix mode, applies the accepted fixes
 // pass by pass. After every pass the fixed content is linted again, so the
-// final FileResult always describes the returned content. The loop stops
+// final FileResult always describes the returned content, and the fixes the
+// engine deferred are proposed again for that content. The loop stops
 // when no fix remains, when applying the remaining fixes would recreate
-// content seen before (Oscillated), or after MaxFixPasses passes
-// (Exhausted). Rule errors from every pass are kept. It also returns the
-// lint result of the original content.
+// content seen before (Oscillated), or at the pass limit (Exhausted; see
+// PipelineOptions.MaxFixPasses). Rule errors from every pass are kept. It
+// also returns the lint result of the original content.
 //
 // If the fixed content cannot be linted (a fix produced content the parser
 // rejects), the file is marked skipped and the original content is kept.
@@ -563,7 +573,7 @@ func (p *Pipeline) lintAndFix(
 ) ([]byte, *FileResult, error) {
 	maxPasses := opts.MaxFixPasses
 	if maxPasses <= 0 {
-		maxPasses = DefaultMaxFixPasses
+		maxPasses = p.defaultMaxFixPasses()
 	}
 
 	// Use the original file's line ending for every pass.
@@ -627,7 +637,7 @@ func (p *Pipeline) lintAndFix(
 	}
 
 	if result.Exhausted || result.Oscillated {
-		result.RemainingEdits = len(fileResult.Edits)
+		result.RemainingEdits = len(fileResult.Edits) + len(fileResult.DeferredEdits)
 	}
 
 	// Report rule failures from every pass, preferring the final one.
@@ -646,6 +656,25 @@ func (p *Pipeline) lintAndFix(
 	}
 	result.Modified = !bytes.Equal(content, original)
 	return content, originalResult, nil
+}
+
+// defaultMaxFixPasses returns the pass limit used when
+// PipelineOptions.MaxFixPasses is not set: DefaultMaxFixPasses, plus a pass
+// for each registered rule that can fix. In each pass the engine applies
+// the fixes of one rule to each top-level block and defers the others (see
+// FileResult.DeferredEdits), so a block with findings of several rules
+// takes a pass per rule before any fix reveals a new finding.
+func (p *Pipeline) defaultMaxFixPasses() int {
+	passes := DefaultMaxFixPasses
+	if p.Engine == nil || p.Engine.Registry == nil {
+		return passes
+	}
+	for _, rule := range p.Engine.Registry.Rules() {
+		if rule.CanFix() {
+			passes++
+		}
+	}
+	return passes
 }
 
 // recoverPanic runs process and turns a panic into an error wrapping

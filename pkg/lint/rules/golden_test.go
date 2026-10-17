@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -100,9 +101,9 @@ func TestGoldenRealWorld(t *testing.T) {
 // TestGoldenRoundTrip verifies that fixes are idempotent.
 // For each test case with fixable diagnostics:
 //  1. Parse input and run rules
-//  2. Apply all fixes
-//  3. Re-parse fixed content and re-run rules
-//  4. Assert zero fixable diagnostics remain.
+//  2. Apply all fixes as --fix does, pass by pass, re-parsing the fixed
+//     content and re-running the rules after each pass
+//  3. Assert that the passes converge and zero fixable diagnostics remain.
 func TestGoldenRoundTrip(t *testing.T) {
 	baseDir := testdataDir(t)
 
@@ -145,15 +146,18 @@ func runRealWorldGoldenTest(t *testing.T, tc GoldenTestCase, updateGolden bool) 
 
 	// Lint with the case's configuration and the default-enabled rules
 	run := mustGoldenRun(t, tc)
-	result := run.mustLintFile(t, filepath.Base(tc.InputPath), input)
+	name := filepath.Base(tc.InputPath)
+	result := run.mustLintFile(t, name, input)
 
 	// Sort diagnostics by line, column for consistent output
 	diags := result.Diagnostics
 	sortDiagnostics(diags)
 
-	// Compare diagnostics and the output after applying the fixes
+	// Compare diagnostics and the output of --fix, which applies the fixes
+	// of several rules over several passes
 	compareDiags(t, diags, tc, updateGolden)
-	compareWithGolden(t, fix.ApplyEdits(input, result.Edits), tc.GoldenPath, updateGolden)
+	fixed, _ := run.mustFixFile(t, name, input)
+	compareWithGolden(t, fixed, tc.GoldenPath, updateGolden)
 }
 
 // runRoundTripTest verifies that applying fixes results in zero fixable diagnostics.
@@ -175,9 +179,10 @@ func runRoundTripTest(t *testing.T, tc GoldenTestCase) {
 		return
 	}
 
-	// Apply the fixes and lint the fixed content again
-	fixedContent := fix.ApplyEdits(input, first.Edits)
-	second := run.mustLintFile(t, name, fixedContent)
+	// Fix the content as --fix does, linting it again after each pass
+	fixedContent, second := run.mustFixFile(t, name, input)
+	assert.False(t, second.Exhausted, "the fixes did not converge within the pass limit")
+	assert.False(t, second.Oscillated, "the fixes recreate earlier content")
 
 	// Assert zero fixable diagnostics remain
 	remainingFixable := filterFixableDiags(second.Diagnostics)
@@ -581,6 +586,40 @@ func TestGoldenLintFile(t *testing.T) {
 		_, err := stubRun(rule).lintFile("stub.input.md", content)
 		require.ErrorContains(t, err, "stub failure")
 	})
+}
+
+// firstMarkRule is a fixable rule MD999 that reports the first "x" of the
+// content with a fix to "y", so fixing every "x" takes one pass each.
+type firstMarkRule struct {
+	lint.BaseRule
+}
+
+// Apply reports the first "x".
+func (r *firstMarkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
+	idx := bytes.IndexByte(ctx.File.Content, 'x')
+	if idx < 0 {
+		return nil, nil
+	}
+	line, column := ctx.File.LineAt(idx)
+	return []lint.Diagnostic{{
+		RuleID: r.ID(), Message: "x", StartLine: line, StartColumn: column,
+		FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}},
+	}}, nil
+}
+
+// TestGoldenFixFile verifies that golden cases fix content as --fix does.
+func TestGoldenFixFile(t *testing.T) {
+	rule := &firstMarkRule{BaseRule: lint.NewBaseRule("MD999", "stub-rule", "Stub rule", nil, true)}
+	registry := lint.NewRegistry()
+	registry.Register(rule)
+	cfg := config.NewConfig()
+	run := goldenRun{cfg: cfg, parser: goldmark.New(string(cfg.Flavor)), registry: registry, rules: []lint.Rule{rule}}
+
+	fixed, result := run.mustFixFile(t, "passes.input.md", []byte("# Title\n\nax bx cx\n"))
+
+	assert.Equal(t, "# Title\n\nay by cy\n", string(fixed), "the fixes are applied pass by pass")
+	assert.Equal(t, 3, result.FixPasses)
+	assert.Empty(t, result.Diagnostics, "the result describes the fixed content")
 }
 
 // strayTestdataFiles returns the files under baseDir that belong to no

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/log"
@@ -116,6 +115,33 @@ func TestEngine_InvalidFixIsReportedWithoutFixMode(t *testing.T) {
 func TestEngine_SkippedEditsNameTheirRule(t *testing.T) {
 	t.Parallel()
 
+	// TEST001 fixes the first paragraph; TEST002's two fixes inside the
+	// second paragraph overlap each other. (An edit at the start of the
+	// paragraph would touch the first paragraph too.)
+	first := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{fixDiag("TEST001", fix.TextEdit{StartOffset: 0, EndOffset: 5, NewText: "First"})}, nil
+	})
+	second := newFuncRule("TEST002", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{
+			fixDiag("TEST002", fix.TextEdit{StartOffset: 8, EndOffset: 17, NewText: "aaa"}),
+			fixDiag("TEST002", fix.TextEdit{StartOffset: 12, EndOffset: 22, NewText: "bbb"}),
+		}, nil
+	})
+
+	result := lintWithRules(t, "first\n\nhello world again", true, first, second)
+
+	assert.True(t, result.EditConflicts)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 12, EndOffset: 22, NewText: "bbb"},
+	}}, result.SkippedEdits)
+	assert.Empty(t, result.DeferredEdits)
+	assert.Empty(t, result.RuleErrors, "a conflict is not a rule error")
+}
+
+func TestEngine_DefersAnotherRulesOverlappingFixInsteadOfSkippingIt(t *testing.T) {
+	t.Parallel()
+
 	first := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
 		return []lint.Diagnostic{fixDiag("TEST001", fix.TextEdit{StartOffset: 0, EndOffset: 10, NewText: "aaa"})}, nil
 	})
@@ -125,29 +151,32 @@ func TestEngine_SkippedEditsNameTheirRule(t *testing.T) {
 
 	result := lintWithRules(t, "hello world again", true, first, second)
 
-	assert.True(t, result.EditConflicts)
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 0, EndOffset: 10, NewText: "aaa"}}, result.Edits)
 	assert.Equal(t, []lint.SkippedEdit{{
 		RuleID: "TEST002",
 		Edit:   fix.TextEdit{StartOffset: 5, EndOffset: 15, NewText: "bbb"},
-	}}, result.SkippedEdits)
-	assert.Empty(t, result.RuleErrors, "a conflict is not a rule error")
+	}}, result.DeferredEdits)
+	assert.Empty(t, result.SkippedEdits)
+	assert.False(t, result.EditConflicts, "a deferred fix is not a conflict")
+	assert.Empty(t, result.RuleErrors)
 }
 
 func TestEngine_MultiEditFixIsAppliedWholeOrNotAtAll(t *testing.T) {
 	t.Parallel()
 
-	// TEST001 rewrites a pair of markers; TEST002 overlaps the first one.
-	pair := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
-		return []lint.Diagnostic{fixDiag("TEST001",
-			fix.TextEdit{StartOffset: 2, EndOffset: 3, NewText: "_"},
-			fix.TextEdit{StartOffset: 8, EndOffset: 9, NewText: "_"},
-		)}, nil
-	})
-	overlap := newFuncRule("TEST002", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
-		return []lint.Diagnostic{fixDiag("TEST002", fix.TextEdit{StartOffset: 1, EndOffset: 4, NewText: "xyz"})}, nil
+	// One fix rewrites a pair of markers; another fix of the same rule
+	// overlaps the first marker.
+	rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{
+			fixDiag("TEST001",
+				fix.TextEdit{StartOffset: 2, EndOffset: 3, NewText: "_"},
+				fix.TextEdit{StartOffset: 8, EndOffset: 9, NewText: "_"},
+			),
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 1, EndOffset: 4, NewText: "xyz"}),
+		}, nil
 	})
 
-	result := lintWithRules(t, "a *bc de* f", true, pair, overlap)
+	result := lintWithRules(t, "a *bc de* f", true, rule)
 
 	assert.Equal(t, []fix.TextEdit{{StartOffset: 1, EndOffset: 4, NewText: "xyz"}}, result.Edits,
 		"the closing marker must not be rewritten without the opening one")
@@ -284,10 +313,24 @@ func insertRule(id string, offset int, text string) *funcRule {
 	})
 }
 
+// insertionsRule returns a rule that reports one finding for each text,
+// each fixed by inserting that text at offset, the way a blank-line rule
+// reports both headings around one boundary.
+func insertionsRule(id string, offset int, texts ...string) *funcRule {
+	return newFuncRule(id, func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		diags := make([]lint.Diagnostic, 0, len(texts))
+		for _, text := range texts {
+			diags = append(diags, fixDiag(id, fix.TextEdit{StartOffset: offset, EndOffset: offset, NewText: text}))
+		}
+		return diags, nil
+	})
+}
+
 func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 	t.Parallel()
 
-	// Offset 6 is the boundary between the two quoted headings.
+	// Offset 6 is the boundary between the two quoted headings. One rule
+	// reports a finding for each text.
 	const quoted = "> # A\n> ## B\n"
 
 	tests := []struct {
@@ -298,7 +341,7 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "the same quoted blank line from two rules",
+			name:    "the same quoted blank line twice",
 			content: quoted, offset: 6,
 			texts: []string{">\n", ">\n"},
 			want:  ">\n",
@@ -324,7 +367,7 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 			want:  ">\n>\n",
 		},
 		{
-			name:    "the container prefix survives whatever the rule order",
+			name:    "the container prefix survives whatever the order of the findings",
 			content: quoted, offset: 6,
 			texts: []string{"\n\n\n", "  > >\n"},
 			want:  "  > >\n  > >\n  > >\n",
@@ -360,20 +403,31 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var rules []lint.Rule
-			for idx, text := range tt.texts {
-				rules = append(rules, insertRule(fmt.Sprintf("TEST%03d", idx+1), tt.offset, text))
-			}
-
-			result := lintWithRules(t, tt.content, true, rules...)
+			result := lintWithRules(t, tt.content, true, insertionsRule("TEST001", tt.offset, tt.texts...))
 
 			assert.Equal(t, []fix.TextEdit{{StartOffset: tt.offset, EndOffset: tt.offset, NewText: tt.want}}, result.Edits,
 				"blank-line insertions at one boundary must insert one blank line")
+			assert.Equal(t, len(tt.texts), result.AcceptedFixes, "the merged insertion fixes every finding")
 		})
 	}
 }
 
-func TestEngine_DifferentContainerBlankLinesConflict(t *testing.T) {
+func TestEngine_DoesNotMergeBlankLineInsertionsOfTwoRules(t *testing.T) {
+	t.Parallel()
+
+	// Both insertions touch the same blocks, so TEST002's waits for the
+	// next pass, which lints the content with TEST001's blank line in place.
+	result := lintWithRules(t, "> # A\n> ## B\n", true, insertRule("TEST001", 6, ">\n"), insertRule("TEST002", 6, ">\n>\n"))
+
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 6, EndOffset: 6, NewText: ">\n"}}, result.Edits)
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 6, EndOffset: 6, NewText: ">\n>\n"},
+	}}, result.DeferredEdits)
+}
+
+func TestEngine_DifferentContainerBlankLinesWaitForTheNextPass(t *testing.T) {
 	t.Parallel()
 
 	// "> >" keeps a nested quote open where ">" would close it: the rules
@@ -387,8 +441,30 @@ func TestEngine_DifferentContainerBlankLinesConflict(t *testing.T) {
 	assert.Equal(t, []lint.SkippedEdit{{
 		RuleID: "TEST002",
 		Edit:   fix.TextEdit{StartOffset: 8, EndOffset: 8, NewText: ">\n"},
+	}}, result.DeferredEdits)
+	assert.Empty(t, result.SkippedEdits)
+	assert.False(t, result.EditConflicts)
+}
+
+func TestEngine_DifferentContainerBlankLinesFromOneRuleConflict(t *testing.T) {
+	t.Parallel()
+
+	rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 8, EndOffset: 8, NewText: "> >\n"}),
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 8, EndOffset: 8, NewText: ">\n"}),
+		}, nil
+	})
+
+	result := lintWithRules(t, "> > # A\n> > ## B\n", true, rule)
+
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 8, EndOffset: 8, NewText: "> >\n"}}, result.Edits)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST001",
+		Edit:   fix.TextEdit{StartOffset: 8, EndOffset: 8, NewText: ">\n"},
 	}}, result.SkippedEdits)
 	assert.True(t, result.EditConflicts)
+	assert.Empty(t, result.DeferredEdits)
 }
 
 func TestEngine_DoesNotMergeInsertionsWithContent(t *testing.T) {
@@ -399,10 +475,11 @@ func TestEngine_DoesNotMergeInsertionsWithContent(t *testing.T) {
 		insertRule("TEST002", 6, "> text\n"),
 	)
 
-	assert.Equal(t, []fix.TextEdit{
-		{StartOffset: 6, EndOffset: 6, NewText: ">\n"},
-		{StartOffset: 6, EndOffset: 6, NewText: "> text\n"},
-	}, result.Edits)
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 6, EndOffset: 6, NewText: ">\n"}}, result.Edits)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 6, EndOffset: 6, NewText: "> text\n"},
+	}}, result.DeferredEdits, "the insertion with content is another rule's fix in the same block")
 }
 
 func TestEngine_RejectsFixThatSplitsCRLF(t *testing.T) {

@@ -213,7 +213,8 @@ func TestPipeline_UnparsableFixLeavesNoPendingEdits(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(replaceFirstRule("TEST001", "y", "z"))
 	registry.Register(replaceFirstRule("TEST002", "z", "BAD"))
-	// Conflicts with TEST001 on the first pass, so that pass skips it.
+	// Touches the same block as TEST001 on the first pass, so that pass
+	// defers it.
 	registry.Register(replaceFirstRule("TEST003", "y", "w"))
 	pipeline := lint.NewPipeline(lint.NewEngine(strict, registry))
 
@@ -224,6 +225,7 @@ func TestPipeline_UnparsableFixLeavesNoPendingEdits(t *testing.T) {
 	require.True(t, result.Skipped)
 	assert.Empty(t, result.Edits, "no fix will be applied to a skipped file")
 	assert.Empty(t, result.SkippedEdits, "skipped edits only describe a loop that stopped early")
+	assert.Empty(t, result.DeferredEdits, "deferred edits only describe a loop that stopped early")
 	assert.False(t, result.EditConflicts)
 	assert.Len(t, result.Diagnostics, 2, "the unchanged file's findings are still reported")
 }

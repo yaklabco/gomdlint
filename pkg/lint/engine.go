@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -54,8 +55,9 @@ func (e *RuleError) Unwrap() error {
 	return e.Err
 }
 
-// SkippedEdit is a fix edit that was proposed but not applied because its fix
-// conflicted with an earlier fix.
+// SkippedEdit is a fix edit that was proposed but not applied in this pass:
+// its fix conflicted with an earlier fix (FileResult.SkippedEdits), or was
+// deferred to the next pass (FileResult.DeferredEdits).
 type SkippedEdit struct {
 	// RuleID identifies the rule that proposed the edit.
 	RuleID string
@@ -72,23 +74,34 @@ type FileResult struct {
 	// Diagnostics contains all issues found.
 	Diagnostics []Diagnostic
 
-	// Edits contains validated, sorted, conflict-free edits for auto-fix.
-	// Empty if no fixes are available or --fix was not requested.
+	// Edits contains the validated, sorted, conflict-free edits to apply in
+	// this pass. Each top-level block gets the fixes of one rule; see
+	// DeferredEdits. Empty if no fixes are available or --fix was not
+	// requested.
 	Edits []fix.TextEdit
 
 	// AcceptedFixes is the number of diagnostics whose fixes Edits holds. It
 	// can differ from len(Edits): one fix may take several edits, and the
-	// blank-line fixes of several diagnostics at one boundary share one.
+	// blank-line fixes of several diagnostics of one rule at one boundary
+	// share one.
 	AcceptedFixes int
 
 	// SkippedEdits contains the edits of fixes that were not applied because
-	// they conflicted with an earlier fix. A fix is applied whole or not at
-	// all, so every edit of a skipped fix is listed. The multi-pass pipeline
-	// proposes a skipped fix again on the next pass.
+	// they conflicted with an earlier fix of the same rule. A fix is applied
+	// whole or not at all, so every edit of a skipped fix is listed. The
+	// multi-pass pipeline proposes a skipped fix again on the next pass.
 	SkippedEdits []SkippedEdit
 
 	// EditConflicts is true if any edits were skipped due to conflicts.
 	EditConflicts bool
+
+	// DeferredEdits contains the edits of fixes held back for the next pass
+	// because another rule's fixes are applied to the same top-level block
+	// (the front matter, or a child of the document root) in this pass.
+	// Fixes of different rules can each be safe and still corrupt a block
+	// together, so the multi-pass pipeline lints the fixed content and each
+	// rule proposes its fixes again. Deferred fixes are not conflicts.
+	DeferredEdits []SkippedEdit
 
 	// RuleErrors maps a rule ID to that rule's failure on this file: an error
 	// the rule returned, a recovered panic (ErrRulePanic) or invalid fix edits
@@ -173,6 +186,8 @@ func NewEngine(parser Parser, registry *Registry) *Engine {
 // not stop the others: the failure is recorded in FileResult.RuleErrors and
 // only that rule's results (or only the invalid fix) are dropped. The
 // newlines in fix text are written with the file's dominant line ending.
+// The fixes of one rule per top-level block are returned as Edits, and the
+// other rules' fixes in those blocks as DeferredEdits.
 //
 // A diagnostic keeps its fix edits only when --fix would apply them (see
 // ResolvedRule.Fixable), whether or not cfg has Fix set, so FixableCount
@@ -292,16 +307,154 @@ func (e *Engine) lintFile(
 		}
 	}
 
-	merged, conflicting := mergeBlankLineInsertions(fixes)
-	result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(merged)
-	for _, pending := range conflicting {
-		for _, edit := range pending.edits {
-			result.SkippedEdits = append(result.SkippedEdits, SkippedEdit{RuleID: pending.ruleID, Edit: edit})
+	selectEdits(result, fixes, content, newTopLevelBlocks(snapshot))
+	return result, nil
+}
+
+// selectEdits decides which fixes this pass applies to content and records
+// the outcome in result. Each rule's blank-line insertions at one boundary
+// are merged first. Then each top-level block keeps the fixes of one rule,
+// and the other rules' fixes there are deferred (see selectFixes). Finally
+// the fixes taken are resolved against each other, so a fix that overlaps
+// another fix of the same rule is skipped.
+//
+// Fixes that change nothing must not keep another rule's fixes out of a
+// block, or the pass would end without progress while those wait. A fix
+// that changes nothing by itself takes no part, and neither does a rule's
+// group of fixes that changes nothing together (see selectFixes). If the
+// selection as a whole still changes nothing while fixes wait, the rules
+// it holds sit out the pass and the fixes are chosen again, so a pass whose
+// edits change nothing never defers a fix. Fixes that take no part are
+// offered only when nothing else can be applied, and only if together they
+// change nothing, so the pipeline sees that the remaining fixes make no
+// progress without applying two rules' fixes to one block. Their conflicts
+// are reported as skipped, like those of any fixes the pass applies.
+func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks *topLevelBlocks) {
+	changes, idle := splitNoops(fixes, content)
+	merged, conflicting := mergeBlankLineInsertions(changes)
+	for idx := range conflicting {
+		conflicting[idx].mergeConflict = true
+	}
+	candidates := slices.Concat(merged, conflicting)
+
+	var selection fixSelection
+	var conflicts []pendingFix
+	for {
+		selection = selectFixes(candidates, blocks, content)
+		var accepted []pendingFix
+		accepted, conflicts = splitMergeConflicts(selection.selected)
+		result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(accepted)
+		if len(selection.deferred) == 0 || changesContent(content, result.Edits) {
+			break
+		}
+		// Every rule's fixes here change content, but together they do not.
+		// Each round removes at least one rule, so the loop ends.
+		held := make(map[string]bool)
+		for _, pending := range selection.selected {
+			held[pending.ruleID] = true
+		}
+		kept := candidates[:0:0]
+		for _, pending := range candidates {
+			if held[pending.ruleID] {
+				idle = append(idle, pending)
+			} else {
+				kept = append(kept, pending)
+			}
+		}
+		candidates = kept
+	}
+	idle = append(idle, selection.idle...)
+
+	if len(result.Edits) == 0 {
+		// A blank-line insertion that conflicts with another at its boundary
+		// is never applied, so it is reported, not offered.
+		offered, idleConflicts := splitMergeConflicts(idle)
+		if edits, skipped, count := resolveFixes(offered); !changesContent(content, edits) {
+			result.Edits, result.AcceptedFixes = edits, count
+			result.SkippedEdits = append(result.SkippedEdits, skipped...)
+			result.SkippedEdits = appendEditsOf(result.SkippedEdits, idleConflicts)
 		}
 	}
+	result.SkippedEdits = appendEditsOf(result.SkippedEdits, conflicts)
 	result.EditConflicts = len(result.SkippedEdits) > 0
+	result.DeferredEdits = appendEditsOf(nil, selection.deferred)
+}
 
-	return result, nil
+// splitMergeConflicts separates the selected fixes the pass applies from
+// the blank-line insertions that conflict with another insertion at their
+// boundary, which the pass skips.
+func splitMergeConflicts(selected []pendingFix) ([]pendingFix, []pendingFix) {
+	var accepted, conflicts []pendingFix
+	for _, pending := range selected {
+		if pending.mergeConflict {
+			conflicts = append(conflicts, pending)
+		} else {
+			accepted = append(accepted, pending)
+		}
+	}
+	return accepted, conflicts
+}
+
+// splitNoops separates the fixes that change content from the fixes that,
+// applied, would leave it as it is.
+func splitNoops(fixes []pendingFix, content []byte) ([]pendingFix, []pendingFix) {
+	var changes, noops []pendingFix
+	for _, pending := range fixes {
+		if changesContent(content, pending.edits) {
+			changes = append(changes, pending)
+		} else {
+			noops = append(noops, pending)
+		}
+	}
+	return changes, noops
+}
+
+// changesContent reports whether applying edits, sorted and without
+// overlaps as fix.Validator returns them, would change content. Edits can
+// change nothing each, or only together, as when one deletes a character
+// and the next inserts it again where it was.
+//
+// Content that keeps its length matches the fixed content before the first
+// edit and after the last one, so only the text in between is compared,
+// piece by piece, and the comparison stops at the first difference.
+func changesContent(content []byte, edits []fix.TextEdit) bool {
+	delta := 0
+	for _, edit := range edits {
+		delta += len(edit.NewText) - (edit.EndOffset - edit.StartOffset)
+	}
+	if delta != 0 {
+		return true
+	}
+	if len(edits) == 0 {
+		return false
+	}
+
+	// pos is the offset in content that the next piece of fixed text must
+	// match; kept is where the content the edits keep resumes.
+	pos, kept := edits[0].StartOffset, edits[0].StartOffset
+	for _, edit := range edits {
+		unchanged := content[kept:edit.StartOffset]
+		if pos+len(unchanged) > len(content) || !bytes.Equal(content[pos:pos+len(unchanged)], unchanged) {
+			return true
+		}
+		pos += len(unchanged)
+		if pos+len(edit.NewText) > len(content) || string(content[pos:pos+len(edit.NewText)]) != edit.NewText {
+			return true
+		}
+		pos += len(edit.NewText)
+		kept = edit.EndOffset
+	}
+	return false
+}
+
+// appendEditsOf appends every edit of fixes, with its rule.
+func appendEditsOf(edits []SkippedEdit, fixes []pendingFix) []SkippedEdit {
+	for _, pending := range fixes {
+		for _, edit := range pending.edits {
+			edits = append(edits, SkippedEdit{RuleID: pending.ruleID, Edit: edit})
+		}
+	}
+	return edits
 }
 
 // applyRule runs one rule. A returned error or a panic becomes a *RuleError;
@@ -352,8 +505,12 @@ type pendingFix struct {
 	edits  []fix.TextEdit
 
 	// diagnostics is the number of diagnostics the fix fixes: one, or more
-	// for blank-line insertions merged into one fix.
+	// for one rule's blank-line insertions merged into one fix.
 	diagnostics int
+
+	// mergeConflict marks a blank-line insertion for a different container
+	// than another insertion at the same boundary.
+	mergeConflict bool
 }
 
 // resolveFixes picks the fixes to apply and lists the edits of the others.
@@ -371,14 +528,12 @@ func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit, int) {
 	}
 	accepted, skippedFixes := fix.ResolveFixes(groups)
 
-	var skipped []SkippedEdit
+	skipped := make([]pendingFix, 0, len(skippedFixes))
 	for _, idx := range skippedFixes {
 		fixed -= fixes[idx].diagnostics
-		for _, edit := range fixes[idx].edits {
-			skipped = append(skipped, SkippedEdit{RuleID: fixes[idx].ruleID, Edit: edit})
-		}
+		skipped = append(skipped, fixes[idx])
 	}
-	return accepted, skipped, fixed
+	return accepted, appendEditsOf(nil, skipped), fixed
 }
 
 // convertNewlines writes the newlines in the text of edits as lineEnding, in
@@ -390,20 +545,28 @@ func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
 	return edits
 }
 
-// mergeBlankLineInsertions combines formatting requirements at the same
-// boundary: several single-edit fixes that insert only blank lines at one
-// offset become one insertion (see mergeBlankLines). It runs after
-// suppression so disabled findings cannot increase an enabled fix. Fixes
-// whose blank lines belong to a different container than an earlier fix at
-// the same offset are returned separately, as conflicts.
+// mergeBlankLineInsertions combines one rule's formatting requirements at
+// the same boundary: several single-edit fixes of that rule that insert
+// only blank lines at one offset become one insertion (see
+// mergeBlankLines), which would otherwise insert the blank lines twice. It
+// runs after suppression so disabled findings cannot increase an enabled
+// fix. Fixes whose blank lines belong to a different container than an
+// earlier fix of the rule at the same offset are returned separately, as
+// conflicts.
+//
+// Insertions of different rules are not merged. Two insertions at one
+// offset touch the same top-level blocks, so selectFixes applies one
+// rule's and defers the other's, and the next pass lints the content with
+// the blank line in place.
 func mergeBlankLineInsertions(fixes []pendingFix) ([]pendingFix, []pendingFix) {
 	result := make([]pendingFix, 0, len(fixes))
 	var conflicting []pendingFix
-	boundaries := make(map[int]int)
+	boundaries := make(map[blankLineBoundary]int)
 	for _, pending := range fixes {
 		if len(pending.edits) == 1 && isBlankLineInsertion(pending.edits[0]) {
 			offset := pending.edits[0].StartOffset
-			if idx, ok := boundaries[offset]; ok {
+			key := blankLineBoundary{ruleID: pending.ruleID, offset: offset}
+			if idx, ok := boundaries[key]; ok {
 				text, ok := mergeBlankLines(result[idx].edits[0].NewText, pending.edits[0].NewText)
 				if !ok {
 					conflicting = append(conflicting, pending)
@@ -417,11 +580,17 @@ func mergeBlankLineInsertions(fixes []pendingFix) ([]pendingFix, []pendingFix) {
 				}
 				continue
 			}
-			boundaries[offset] = len(result)
+			boundaries[key] = len(result)
 		}
 		result = append(result, pending)
 	}
 	return result, conflicting
+}
+
+// blankLineBoundary is the offset at which a rule inserts blank lines.
+type blankLineBoundary struct {
+	ruleID string
+	offset int
 }
 
 // blankLines is a blank-line insertion: count lines, each the container
