@@ -258,6 +258,13 @@ func editSlots(file *mdast.FileSnapshot, blocks [][2]int, ordered bool, edit fix
 	if ordered {
 		return orderedEditSlots(len(file.Lines), blocks, first, last)
 	}
+	return scannedEditSlots(len(file.Lines), blocks, first, last)
+}
+
+// scannedEditSlots returns the slots of editSlots for the lines first to
+// last by scanning every block and gap of a file of the given number of
+// lines.
+func scannedEditSlots(lines int, blocks [][2]int, first, last int) []int {
 	var slots []int
 	for idx, block := range blocks {
 		if block[1] >= first && block[0] <= last {
@@ -265,7 +272,7 @@ func editSlots(file *mdast.FileSnapshot, blocks [][2]int, ordered bool, edit fix
 		}
 	}
 	for idx := 0; idx <= len(blocks); idx++ {
-		gapFirst, gapLast := 1, len(file.Lines)
+		gapFirst, gapLast := 1, lines
 		if idx > 0 {
 			gapFirst = blocks[idx-1][1] + 1
 		}

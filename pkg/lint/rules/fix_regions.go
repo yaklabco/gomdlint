@@ -94,7 +94,13 @@ import (
 // The argument depends on goldmark's parser, not on what the signature
 // compares, so docLayout can serve any fix check; regionModel adds the
 // render signature that fixCheck compares. TestRegionChecksDecideAsWholeDocument
-// checks the region decisions against the whole-document check.
+// checks the region decisions against the whole-document check, and must
+// pass again after a goldmark upgrade.
+//
+// Cost. A region is at least a group, or the items of a top-level list, so a
+// check costs a parse of the blocks around its edits. A document whose fixes
+// sit in one big block other than a top-level list, such as a long table or
+// blockquote, still costs a parse of that block per check.
 
 // regionSentinel is the line parsed after a group region to find out whether
 // the region leaves a block open.
@@ -185,15 +191,42 @@ func sameRef(a, b goldparser.Reference) bool {
 		bytes.Equal(a.Destination(), b.Destination()) && bytes.Equal(a.Title(), b.Title())
 }
 
-// recordingContext records the link reference definitions a parse adds.
+// recordingContext records the link reference definitions a parse adds. Links
+// resolve through preset first, the definitions of the document a region
+// comes from, by normalized label, and then through those the parse adds.
 type recordingContext struct {
 	goldparser.Context
-	rec *parseRecord
+	rec    *parseRecord
+	preset map[string]goldparser.Reference
 }
 
 func (c *recordingContext) AddReference(ref goldparser.Reference) {
 	c.rec.refs = append(c.rec.refs, recordedRef{offset: c.rec.paragraph, ref: ref})
 	c.Context.AddReference(ref)
+}
+
+// Reference returns the definition a normalized label resolves to. goldmark
+// resolves links only through it.
+//
+//nolint:ireturn // goldmark's parser.Context interface fixes this signature.
+func (c *recordingContext) Reference(label string) (goldparser.Reference, bool) {
+	if ref, found := c.preset[label]; found {
+		return ref, true
+	}
+	return c.Context.Reference(label)
+}
+
+// referenceIndex returns definitions by normalized label, the first of each
+// label winning, as goldmark's parse context keeps them.
+func referenceIndex(refs []recordedRef) map[string]goldparser.Reference {
+	index := make(map[string]goldparser.Reference, len(refs))
+	for _, ref := range refs {
+		key := gmutil.ToLinkReference(ref.ref.Label())
+		if _, taken := index[key]; !taken {
+			index[key] = ref.ref
+		}
+	}
+	return index
 }
 
 // groupReader records where the parser starts each group: the parser skips
@@ -295,18 +328,16 @@ type recordedParse struct {
 	rec *parseRecord
 }
 
-// parseRecorded parses source with a recording goldmark instance. The parse
-// starts out with the given link reference definitions, so that links
-// resolve as in the document a region comes from; the record holds only the
-// definitions that source adds.
-func parseRecorded(markdown goldmark.Markdown, source []byte, preset []recordedRef) *recordedParse {
-	inner := goldparser.NewContext()
-	for _, ref := range preset {
-		inner.AddReference(ref.ref)
-	}
+// parseRecorded parses source with a recording goldmark instance. Links
+// resolve through preset first, the definitions of the document a region
+// comes from (see referenceIndex), so that they resolve as in that document;
+// the record holds only the definitions that source adds. The index is
+// shared, not copied, so a parse costs nothing per definition.
+func parseRecorded(markdown goldmark.Markdown, source []byte, preset map[string]goldparser.Reference) *recordedParse {
 	rec := &parseRecord{opens: make(map[gmast.Node]int), paragraph: -1}
 	reader := &groupReader{Reader: gmtext.NewReader(source), rec: rec}
-	doc := markdown.Parser().Parse(reader, goldparser.WithContext(&recordingContext{Context: inner, rec: rec}))
+	pc := &recordingContext{Context: goldparser.NewContext(), rec: rec, preset: preset}
+	doc := markdown.Parser().Parse(reader, goldparser.WithContext(pc))
 	return &recordedParse{doc: doc, rec: rec}
 }
 
@@ -353,7 +384,10 @@ type docLayout struct {
 	lists      []*layoutList
 	listIndex  map[gmast.Node]int
 	searchable []*layoutList
-	refs       []recordedRef
+	// refs holds the link reference definitions in the order the parser
+	// added them, and refIndex the definition each label resolves to.
+	refs     []recordedRef
+	refIndex map[string]goldparser.Reference
 }
 
 // layoutList is a top-level list of the original document.
@@ -414,6 +448,7 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		groupNodes:    append(counts, len(nodes)),
 		listIndex:     make(map[gmast.Node]int),
 		refs:          parsed.rec.refs,
+		refIndex:      referenceIndex(parsed.rec.refs),
 	}
 	layout.bounds = append(layout.bounds, 0)
 	for _, start := range starts[1:] {
@@ -539,9 +574,12 @@ func (l *docLayout) firstLineKeeps(edits, more []placedEdit) bool {
 		case len(more) > 0:
 			next = &more[0]
 		}
+		// Each piece is the text of an edit or the source up to the next
+		// edit, so each byte is looked at once.
+		var piece []byte
 		switch {
 		case next != nil && next.edit.StartOffset == pos:
-			line = append(line, next.edit.NewText...)
+			piece = []byte(next.edit.NewText)
 			pos = next.edit.EndOffset
 			if fromEdits {
 				edits = edits[1:]
@@ -549,14 +587,19 @@ func (l *docLayout) firstLineKeeps(edits, more []placedEdit) bool {
 				more = more[1:]
 			}
 		case pos < len(l.source):
-			line = append(line, l.source[pos])
-			pos++
+			end := len(l.source)
+			if next != nil {
+				end = min(end, next.edit.StartOffset)
+			}
+			piece = l.source[pos:end]
+			pos = end
 		default:
 			return l.firstLineOK(line)
 		}
-		if end := bytes.IndexByte(line, '\n'); end >= 0 {
-			return l.firstLineOK(line[:end])
+		if end := bytes.IndexByte(piece, '\n'); end >= 0 {
+			return l.firstLineOK(append(line, piece[:end]...))
 		}
+		line = append(line, piece...)
 	}
 }
 
@@ -719,11 +762,11 @@ func regionEdits(from, to int, placed []placedEdit) []placedEdit {
 }
 
 // meets reports whether two regions must be parsed as one: group regions
-// that share a group, list regions of a list whose items with their
-// neighbours overlap, beyond the item one shares with the other as its
-// neighbour, and a group region and a list region in one of its groups.
-// Regions that do not meet are parsed apart, and their spans do not
-// overlap.
+// that share a group; list regions of one list that share an item, counting
+// the item before and the item after each (the spans of two list regions may
+// only touch, where the item after one is the item before the other); and a
+// group region and a list region in one of its groups. Regions that do not
+// meet are parsed apart, and their spans do not overlap.
 func (l *docLayout) meets(one, other region) bool {
 	switch {
 	case !one.isList() && !other.isList():
@@ -742,58 +785,52 @@ func (l *docLayout) meets(one, other region) bool {
 // mergeRegions returns regions merged so that no two meet, sorted by span.
 // A list region without an item before it or two after it becomes the group
 // region of its list, and a list region that a group region covers is
-// dropped.
+// dropped. Two list regions that fit merge into one that fits, so merging
+// needs one pass.
 func (l *docLayout) mergeRegions(regions []region) []region {
-	for {
-		var groups, lists []region
-		for _, reg := range regions {
-			switch {
-			case !reg.isList():
-				groups = append(groups, reg)
-			case l.listRegionFits(reg):
-				lists = append(lists, reg)
-			default:
-				group := l.lists[reg.list].group
-				groups = append(groups, region{list: -1, first: group, last: group})
-			}
-		}
-		slices.SortFunc(groups, func(a, b region) int { return a.first - b.first })
-		var merged []region
-		for _, reg := range groups {
-			if n := len(merged); n > 0 && reg.first <= merged[n-1].last {
-				merged[n-1].last = max(merged[n-1].last, reg.last)
-				continue
-			}
-			merged = append(merged, reg)
-		}
-		covered := func(group int) bool {
-			idx := sort.Search(len(merged), func(i int) bool { return merged[i].last >= group })
-			return idx < len(merged) && merged[idx].first <= group
-		}
-		slices.SortFunc(lists, func(a, b region) int {
-			if a.list != b.list {
-				return a.list - b.list
-			}
-			return a.first - b.first
-		})
-		changed := false
-		var kept []region
-		for _, reg := range lists {
-			if covered(l.lists[reg.list].group) {
-				continue
-			}
-			if n := len(kept); n > 0 && kept[n-1].list == reg.list && reg.first <= kept[n-1].last+2 {
-				kept[n-1].last = max(kept[n-1].last, reg.last)
-				changed = changed || !l.listRegionFits(kept[n-1])
-				continue
-			}
-			kept = append(kept, reg)
-		}
-		regions = slices.Concat(merged, kept)
-		if !changed {
-			break
+	var groups, lists []region
+	for _, reg := range regions {
+		switch {
+		case !reg.isList():
+			groups = append(groups, reg)
+		case l.listRegionFits(reg):
+			lists = append(lists, reg)
+		default:
+			group := l.lists[reg.list].group
+			groups = append(groups, region{list: -1, first: group, last: group})
 		}
 	}
+	slices.SortFunc(groups, func(a, b region) int { return a.first - b.first })
+	var merged []region
+	for _, reg := range groups {
+		if n := len(merged); n > 0 && reg.first <= merged[n-1].last {
+			merged[n-1].last = max(merged[n-1].last, reg.last)
+			continue
+		}
+		merged = append(merged, reg)
+	}
+	covered := func(group int) bool {
+		idx := sort.Search(len(merged), func(i int) bool { return merged[i].last >= group })
+		return idx < len(merged) && merged[idx].first <= group
+	}
+	slices.SortFunc(lists, func(a, b region) int {
+		if a.list != b.list {
+			return a.list - b.list
+		}
+		return a.first - b.first
+	})
+	var kept []region
+	for _, reg := range lists {
+		if covered(l.lists[reg.list].group) {
+			continue
+		}
+		if n := len(kept); n > 0 && kept[n-1].list == reg.list && reg.first <= kept[n-1].last+2 {
+			kept[n-1].last = max(kept[n-1].last, reg.last)
+			continue
+		}
+		kept = append(kept, reg)
+	}
+	regions = slices.Concat(merged, kept)
 	slices.SortFunc(regions, func(a, b region) int {
 		start, _ := l.span(a)
 		other, _ := l.span(b)
@@ -861,7 +898,7 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 		}
 		text = append(text, regionSentinel...)
 	}
-	parsed := parseRecorded(l.markdown, text, l.refs)
+	parsed := parseRecorded(l.markdown, text, l.refIndex)
 	blocks := children(parsed.doc)
 	if !final {
 		groups := parsed.rec.groups
@@ -885,7 +922,7 @@ func (l *docLayout) parseListRegion(reg region, edits []fix.TextEdit) regionPars
 	list := l.lists[reg.list]
 	from, to := l.span(reg)
 	text := applyWithin(l.source, from, to, edits)
-	parsed := parseRecorded(l.markdown, text, l.refs)
+	parsed := parseRecorded(l.markdown, text, l.refIndex)
 	blocks := children(parsed.doc)
 	if len(blocks) != 1 {
 		return regionParse{}
@@ -913,8 +950,10 @@ func (l *docLayout) parseListRegion(reg region, edits []fix.TextEdit) regionPars
 	}
 }
 
-// applyWithin returns source[from:to] with edits applied; the edits lie in
-// that range and are sorted.
+// applyWithin returns a copy of source[from:to] with edits applied; the
+// edits lie in that range and are sorted. The copy matters: fix.ApplyEdits
+// returns its input when there are no edits, and a group region appends the
+// sentinel to the text.
 func applyWithin(source []byte, from, to int, edits []fix.TextEdit) []byte {
 	shifted := make([]fix.TextEdit, len(edits))
 	for idx, edit := range edits {

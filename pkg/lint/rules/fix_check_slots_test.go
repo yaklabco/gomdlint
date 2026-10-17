@@ -10,38 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// scanEditSlots returns the slots of editSlots for the lines first to last
-// by scanning every block and gap, as editSlots does for blocks that are
-// not ordered.
-func scanEditSlots(lines int, blocks [][2]int, first, last int) []int {
-	var slots []int
-	for idx, block := range blocks {
-		if block[1] >= first && block[0] <= last {
-			slots = append(slots, 2*idx+1)
-		}
-	}
-	for idx := 0; idx <= len(blocks); idx++ {
-		gapFirst, gapLast := 1, lines
-		if idx > 0 {
-			gapFirst = blocks[idx-1][1] + 1
-		}
-		if idx < len(blocks) {
-			gapLast = blocks[idx][0] - 1
-		}
-		if gapFirst > gapLast || gapLast < first || gapFirst > last {
-			continue
-		}
-		slots = append(slots, 2*idx)
-		if idx > 0 {
-			slots = append(slots, 2*idx-1)
-		}
-		if idx < len(blocks) {
-			slots = append(slots, 2*idx+1)
-		}
-	}
-	return slots
-}
-
 // slotSet returns slots sorted and without repeats.
 func slotSet(slots []int) []int {
 	sorted := slices.Clone(slots)
@@ -64,7 +32,7 @@ func TestOrderedEditSlotsMatchesScan(t *testing.T) {
 		require.True(t, blocksOrdered(blocks, lines), "%v in %d lines", blocks, lines)
 		for first := 1; first <= lines; first++ {
 			for last := first; last <= lines; last++ {
-				assert.Equal(t, slotSet(scanEditSlots(lines, blocks, first, last)),
+				require.Equal(t, slotSet(scannedEditSlots(lines, blocks, first, last)),
 					slotSet(orderedEditSlots(lines, blocks, first, last)),
 					"blocks %v in %d lines, lines %d to %d", blocks, lines, first, last)
 			}

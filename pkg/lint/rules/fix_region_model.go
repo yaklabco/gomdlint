@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -82,7 +83,7 @@ func (h *anchorHistory) replay(slugs []string, before int) ([]string, map[string
 
 // sameCounts reports whether replacing headings [from, to) of the document
 // with headings that set counts leaves the anchor counts as the document
-// has them after heading to.
+// has them when it reaches heading to, after the replaced headings.
 func (h *anchorHistory) sameCounts(counts map[string]int, from, to int) bool {
 	same := func(key string) bool {
 		want, wantFound := h.lookup(key, to)
@@ -119,8 +120,19 @@ type regionModel struct {
 	groupHeading []int
 	listSigs     []listSig
 	history      anchorHistory
-	// outcomes caches what parsing a region with its edits found.
+	// outcomes caches what parsing a region with its edits found, and
+	// cached counts the bytes it holds of its own (see cacheBudget).
 	outcomes map[string]*regionOutcome
+	cached   int
+}
+
+// cacheBudget returns how many bytes of their own the cached outcomes may
+// hold. An outcome whose region keeps its part shares the text of the
+// signature, but in a document that is one big block every check covers
+// that block, and each outcome that changes it would otherwise keep a copy
+// the size of the document.
+func (m *regionModel) cacheBudget() int {
+	return 8*len(m.sig) + 1<<20
 }
 
 // listSig is where the signature of a top-level list has its parts.
@@ -249,9 +261,17 @@ func (m *regionModel) evaluate(reg region, edits []placedEdit) *regionOutcome {
 		}
 		m.finish(outcome, from, to)
 	}
-	// The cache keeps what the checks compare, not the parse.
+	// The cache keeps what the checks compare, not the parse, and stops
+	// growing at its budget; an outcome left out is found again if needed.
 	outcome.source, outcome.blocks = nil, nil
-	m.outcomes[key.String()] = outcome
+	size := key.Len()
+	if !outcome.same {
+		size += len(outcome.text)
+	}
+	if m.cached+size <= m.cacheBudget() {
+		m.outcomes[key.String()] = outcome
+		m.cached += size
+	}
 	return outcome
 }
 
@@ -268,8 +288,13 @@ func (m *regionModel) finish(outcome *regionOutcome, from, to int) {
 		outcome.countsSame = m.history.sameCounts(counts, from, to)
 	}
 	text, ok := regionSignature(outcome.blocks, outcome.source, anchors)
+	part := m.sig[outcome.start:outcome.end]
+	outcome.same = text == part
 	outcome.text = text
-	outcome.same = text == m.sig[outcome.start:outcome.end]
+	if outcome.same {
+		// The part shares the signature's memory; the copy can go.
+		outcome.text = part
+	}
 	outcome.undecided = !ok
 }
 
@@ -497,8 +522,10 @@ func replacedDiffers(orig string, reps []replacement, whole bool) bool {
 // only the regions it meets, where checking the set and the fix as a whole
 // costs all of them.
 type regionState struct {
-	// edits holds the set's edits in source offsets, sorted, no two of which
-	// overlap or have the same range.
+	// edits holds the set's edits in source offsets, sorted, as the fix
+	// engine accepts them: no two overlap, and insertions at one offset,
+	// which a state built from accepted edits may hold, keep their order.
+	// An edit added later never has the range of one already held.
 	edits []placedEdit
 	// regions holds the set's regions, sorted by span, no two of which meet,
 	// with their outcomes.
@@ -746,13 +773,7 @@ func (m *regionModel) settle(state *regionState, placed []placedEdit) ([]region,
 			regions = m.mergeRegions(regions)
 			continue
 		}
-		taken := slices.Sorted(func(yield func(int) bool) {
-			for idx := range absorbed {
-				if !yield(idx) {
-					return
-				}
-			}
-		})
+		taken := slices.Sorted(maps.Keys(absorbed))
 		return regions, outcomes, taken, true
 	}
 }

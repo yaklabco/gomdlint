@@ -91,12 +91,14 @@ func TestLintTimeWithManyFixes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long document")
 	}
-	const limit = 5 * time.Second
 	// The race detector slows every rule down several times, so it gets
-	// smaller documents; a check that is quadratic still runs far past the
-	// limit on them.
+	// smaller documents and more time, which a slow machine running other
+	// packages may need; a check that is quadratic still runs far past the
+	// limit on them, as it took about 9 seconds on 800 sections without it.
+	limit := 5 * time.Second
 	sections, items := 2500, 2500
 	if raceEnabled {
+		limit = 30 * time.Second
 		sections, items = 800, 800
 	}
 	t.Run("sections", func(t *testing.T) {
@@ -135,15 +137,15 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 		t.Run(doc.name, func(t *testing.T) {
 			// The fastest of a few runs is the least disturbed by other work
 			// on the machine.
-			fastest := func(content []byte, runs int) time.Duration {
+			fastest := func(content []byte) time.Duration {
 				best := limit
-				for range runs {
+				for range 3 {
 					best = min(best, lintDuration(t, content, limit))
 				}
 				return best
 			}
-			short := fastest(doc.generate(small), 3)
-			long := fastest(doc.generate(factor*small), 2)
+			short := fastest(doc.generate(small))
+			long := fastest(doc.generate(factor * small))
 			ratio := float64(long) / float64(short)
 			t.Logf("%s: %v for %d, %v for %d, ratio %.1f", doc.name, short, small, long, factor*small, ratio)
 			require.Less(t, ratio, float64(maxRatio), "lint time grows faster than the document")

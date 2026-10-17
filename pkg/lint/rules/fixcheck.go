@@ -1165,7 +1165,7 @@ func trailingHashes(content []byte, rng mdast.SourceRange) mdast.SourceRange {
 // the ranges.
 func hashOutside(content []byte, ranges []mdast.SourceRange) bool {
 	slices.SortFunc(ranges, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
-	cover := sortedCover{ranges: ranges, end: math.MinInt}
+	cover := sortedCover{ranges: ranges}
 	for idx, char := range content {
 		if char != '#' && !bytes.HasPrefix(content[idx:], []byte("&num;")) {
 			continue
@@ -1253,7 +1253,7 @@ func textHasRawHTML(content []byte, container *mdast.Node) bool {
 		return nil
 	})
 	slices.SortFunc(parsed, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
-	cover := sortedCover{ranges: parsed, end: math.MinInt}
+	cover := sortedCover{ranges: parsed}
 	text := content[:rng.EndOffset]
 	for idx := rng.StartOffset; idx+1 < len(text); idx++ {
 		if text[idx] != '<' || escapedAt(text, rng.StartOffset, idx) || cover.inside(idx) {
@@ -1272,7 +1272,7 @@ func textHasRawHTML(content []byte, container *mdast.Node) bool {
 // ranges that start at or before it lies after it, so each range is looked
 // at once, however many offsets are asked: scanning the ranges from the
 // first for each offset made a long document take time that grows with its
-// square. A new cover has end set to math.MinInt.
+// square. The zero end serves, since offsets are not negative.
 type sortedCover struct {
 	ranges []mdast.SourceRange
 	next   int

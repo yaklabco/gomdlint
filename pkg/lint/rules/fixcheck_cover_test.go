@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"math"
 	"math/rand/v2"
 	"slices"
 	"testing"
@@ -37,7 +36,7 @@ func TestSortedCoverMatchesScan(t *testing.T) {
 			ranges = append(ranges, mdast.SourceRange{StartOffset: start, EndOffset: start + rng.IntN(10)})
 		}
 		slices.SortFunc(ranges, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
-		cover := sortedCover{ranges: ranges, end: math.MinInt}
+		cover := sortedCover{ranges: ranges}
 		for offset := range 50 {
 			require.Equal(t, scanInside(ranges, offset), cover.inside(offset), "ranges %v offset %d", ranges, offset)
 		}

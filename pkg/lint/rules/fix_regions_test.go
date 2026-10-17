@@ -6,9 +6,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gmast "github.com/yuin/goldmark/ast"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -340,7 +342,8 @@ func TestRegionChecksOnLongLists(t *testing.T) {
 		{name: "other delimiter", old: "5. five", new: "5) five"},
 		{name: "fence left open", old: "- item 5 with", new: "- ```item 5 with"},
 	}
-	for _, doc := range []string{tight, loose, ordered} {
+	cases, decided := 0, 0
+	for docName, doc := range map[string]string{"tight": tight, "loose": loose, "ordered": ordered} {
 		for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
 			snapshot := parseForCheckWith(t, flavor, doc)
 			check := newFixCheck(snapshot, flavor)
@@ -348,15 +351,101 @@ func TestRegionChecksOnLongLists(t *testing.T) {
 				if strings.Count(doc, tt.old) != 1 {
 					continue
 				}
-				edit := replaceOnce(t, doc, tt.old, tt.new)
-				want := check.unchanged(fix.ApplyEdits(snapshot.Content, []fix.TextEdit{edit}))
-				decided, got := check.regionsUnchanged([]fix.TextEdit{edit})
-				if decided {
-					assert.Equal(t, want, got, "%s in %q", tt.name, doc)
-				}
+				cases++
+				t.Run(docName+"/"+string(flavor)+"/"+tt.name, func(t *testing.T) {
+					edit := replaceOnce(t, doc, tt.old, tt.new)
+					want := check.unchanged(fix.ApplyEdits(snapshot.Content, []fix.TextEdit{edit}))
+					ok, got := check.regionsUnchanged([]fix.TextEdit{edit})
+					if ok {
+						decided++
+						assert.Equal(t, want, got)
+					}
+				})
 			}
 		}
 	}
+	// Edits in long lists are what list regions are for.
+	assert.Equal(t, cases, decided, "region checks decide every case")
+}
+
+// TestFirstLineKeepsOnALongLine checks that clearing edits on the first line
+// takes time that grows with the line, not with its square: a document can
+// be one long line.
+func TestFirstLineKeepsOnALongLine(t *testing.T) {
+	content := []byte(strings.Repeat("word ", 1<<18) + "\n\nnext\n")
+	layout := newDocLayout(regionMarkdowns(config.FlavorGFM)[0], content)
+	require.NotNil(t, layout)
+	require.True(t, layout.firstLineFree)
+	start := time.Now()
+	edits := []placedEdit{layout.placeEdit(fix.TextEdit{StartOffset: 4, EndOffset: 5, NewText: " "})}
+	assert.True(t, layout.firstLineKeeps(edits, nil))
+	assert.False(t, layout.firstLineKeeps([]placedEdit{layout.placeEdit(fix.TextEdit{
+		StartOffset: 0, EndOffset: len(content) - len("\n\nnext\n"), NewText: "---",
+	})}, nil), "a first line made an opener")
+	assert.Less(t, time.Since(start), time.Second)
+}
+
+// TestRegionParsesShareDefinitions checks that a region parse resolves links
+// through the document's definitions without adding them all again, which
+// made the checks of a document with many definitions and many fixes take
+// time that grows with their product.
+func TestRegionParsesShareDefinitions(t *testing.T) {
+	const definitions, paragraphs = 5000, 2000
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range definitions {
+		fmt.Fprintf(&doc, "[label %d]: /target/%d\n", idx, idx)
+	}
+	for idx := range paragraphs {
+		fmt.Fprintf(&doc, "\nParagraph %d links to [label %d].\n", idx, idx)
+	}
+	layout := newDocLayout(regionMarkdowns(config.FlavorGFM)[0], []byte(doc.String()))
+	require.NotNil(t, layout)
+	groups := len(layout.bounds) - 1
+	require.Greater(t, groups, paragraphs)
+	start := time.Now()
+	for group := groups - paragraphs; group < groups; group++ {
+		parse := layout.parseRegion(region{list: -1, first: group, last: group}, nil)
+		require.True(t, parse.holds)
+		require.True(t, parse.refsSame)
+		require.Len(t, parse.blocks, 1)
+		link, ok := parse.blocks[0].FirstChild().NextSibling().(*gmast.Link)
+		require.True(t, ok, "the paragraph links")
+		assert.Equal(t, fmt.Sprintf("/target/%d", group-(groups-paragraphs)), string(link.Destination))
+	}
+	assert.Less(t, time.Since(start), time.Second)
+}
+
+// TestRegionOutcomeCacheIsBounded checks that the outcomes a model caches
+// stay within a bound that follows the document, even when every check
+// covers a block the size of the document, as a long blockquote is.
+func TestRegionOutcomeCacheIsBounded(t *testing.T) {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range 2000 {
+		fmt.Fprintf(&doc, "> quoted line %d\n", idx)
+	}
+	input := doc.String()
+	check := newFixCheck(parseForCheck(t, input), config.FlavorGFM)
+	check.ensureModels()
+	model := check.models[0]
+	require.NotNil(t, model)
+	for idx := range 500 {
+		// Each edit changes the text of another line, so no check reuses
+		// another's outcome.
+		at := strings.Index(input, fmt.Sprintf("line %d\n", idx))
+		decided, unchanged := model.checkEdits([]fix.TextEdit{{StartOffset: at, EndOffset: at + 4, NewText: "LINE"}})
+		require.True(t, decided)
+		require.False(t, unchanged)
+	}
+	cached := 0
+	for key, outcome := range model.outcomes {
+		cached += len(key)
+		if !outcome.same {
+			cached += len(outcome.text)
+		}
+	}
+	assert.LessOrEqual(t, cached, 8*len(model.sig)+1<<20)
 }
 
 // TestRegionModelMatchesSignature checks that the recording parser gives
