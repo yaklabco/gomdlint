@@ -119,6 +119,15 @@ func TestMultilineCollapsedReferenceUsesDefinition(t *testing.T) {
 	require.Empty(t, applyCompatibilityRule(t, NewLinkImageRefDefsRule(), input))
 }
 
+func TestReferenceLabelsUseTheirSourceText(t *testing.T) {
+	// A collapsed or shortcut reference is matched by its raw label, not by
+	// the rendered text of the link.
+	input := "# Title\n\nSee [**foo**][], [bar baz][] and [*qux*].\n\n" +
+		"[**foo**]: https://example.com/foo\n[bar baz]: https://example.com/bar\n[*qux*]: https://example.com/qux\n"
+	require.Empty(t, applyCompatibilityRule(t, NewReferenceLinkImagesRule(), input))
+	require.Empty(t, applyCompatibilityRule(t, NewLinkImageRefDefsRule(), input))
+}
+
 func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
 	input := "# Title\n\n1) one\n1) two\n3) three\n"
 	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)
