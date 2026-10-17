@@ -19,12 +19,12 @@ docs/guide.md
  W  11:9        Heading ends with trailing punctuation ":"  no-trailing-punctuation           +
  W  17:1        Unused reference definition [unused]        link-image-reference-definitions   
 ==================================================================================================
- 1 errors | 6 warnings | 5 fixable
+ 1 error | 6 warnings | 5 fixable
 
  Legend: E = error | W = warning | + = fixable
 
 ════════════════════════════════════════════════════════════════════════════════
 Overall Summary
- 2 files checked | 1 errors | 9 warnings
+ 2 files checked | 1 error | 9 warnings
 
 Run with --fix to auto-repair fixable issues

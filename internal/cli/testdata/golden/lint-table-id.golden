@@ -13,6 +13,6 @@
  W  docs/guide.md         17:1        Unused reference definition [unused]        MD053      
 ================================================================================================
  Legend: E = error | W = warning | + = fixable
- 2 files checked | 1 errors | 9 warnings
+ 2 files checked | 1 error | 9 warnings
 
 Run with --fix to auto-repair fixable issues

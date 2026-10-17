@@ -13,6 +13,6 @@
 [93m W  docs/guide.md  17:1   Unused reference definition [un...  link-image-reference-definitions   [0m
 [90m====================================================================================================[0m
  [3;90mLegend: [0m[91mE[0m[3;90m = error[0m[3;90m | [0m[93mW[0m[3;90m = warning[0m[3;90m | [0m[92m+[0m[3;90m = fixable[0m
- 2 files checked | [1;91m1 errors[0m | [1;93m9 warnings[0m
+ 2 files checked | [1;91m1 error[0m | [1;93m9 warnings[0m
 
 [90mRun with --fix to auto-repair fixable issues[0m

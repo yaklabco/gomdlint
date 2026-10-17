@@ -227,10 +227,13 @@ func (r *SummaryRenderer) renderTotals(totals analysis.Totals) {
 	// Severity breakdown
 	var severityParts []string
 	if totals.Errors > 0 {
-		severityParts = append(severityParts, r.styles.Error.Render(fmt.Sprintf("%d errors", totals.Errors)))
+		severityParts = append(severityParts, r.styles.Error.Render(pretty.SeverityCount(totals.Errors, config.SeverityError)))
 	}
 	if totals.Warnings > 0 {
-		severityParts = append(severityParts, r.styles.Warning.Render(fmt.Sprintf("%d warnings", totals.Warnings)))
+		severityParts = append(severityParts, r.styles.Warning.Render(pretty.SeverityCount(totals.Warnings, config.SeverityWarning)))
+	}
+	if totals.Infos > 0 {
+		severityParts = append(severityParts, r.styles.Info.Render(pretty.SeverityCount(totals.Infos, config.SeverityInfo)))
 	}
 	if len(severityParts) > 0 {
 		parts[0] = fmt.Sprintf("%d %s (%s)", totals.Issues, issueWord, strings.Join(severityParts, ", "))

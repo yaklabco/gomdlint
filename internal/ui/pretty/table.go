@@ -237,13 +237,13 @@ func (t *TableFormatter) formatFileSummary(rows []TableRow) string {
 
 	var parts []string
 	if errors > 0 {
-		parts = append(parts, t.styles.Error.Render(fmt.Sprintf("%d errors", errors)))
+		parts = append(parts, t.styles.Error.Render(SeverityCount(errors, config.SeverityError)))
 	}
 	if warnings > 0 {
-		parts = append(parts, t.styles.Warning.Render(fmt.Sprintf("%d warnings", warnings)))
+		parts = append(parts, t.styles.Warning.Render(SeverityCount(warnings, config.SeverityWarning)))
 	}
 	if infos > 0 {
-		parts = append(parts, t.styles.Info.Render(fmt.Sprintf("%d info", infos)))
+		parts = append(parts, t.styles.Info.Render(SeverityCount(infos, config.SeverityInfo)))
 	}
 	if fixable > 0 {
 		parts = append(parts, t.styles.TableFixable.Render(fmt.Sprintf("%d fixable", fixable)))
@@ -504,19 +504,16 @@ func (t *TableFormatter) FormatTableSummary(stats runner.Stats, duration string)
 
 	parts = append(parts, t.styles.formatFailures(stats)...)
 
-	if stats.DiagnosticsBySeverity["error"] > 0 {
-		errCount := t.styles.Error.Render(fmt.Sprintf("%d errors", stats.DiagnosticsBySeverity["error"]))
-		parts = append(parts, errCount)
+	if errors := stats.DiagnosticsBySeverity["error"]; errors > 0 {
+		parts = append(parts, t.styles.Error.Render(SeverityCount(errors, config.SeverityError)))
 	}
 
-	if stats.DiagnosticsBySeverity["warning"] > 0 {
-		warnCount := t.styles.Warning.Render(fmt.Sprintf("%d warnings", stats.DiagnosticsBySeverity["warning"]))
-		parts = append(parts, warnCount)
+	if warnings := stats.DiagnosticsBySeverity["warning"]; warnings > 0 {
+		parts = append(parts, t.styles.Warning.Render(SeverityCount(warnings, config.SeverityWarning)))
 	}
 
-	if stats.DiagnosticsBySeverity["info"] > 0 {
-		infoCount := t.styles.Info.Render(fmt.Sprintf("%d info", stats.DiagnosticsBySeverity["info"]))
-		parts = append(parts, infoCount)
+	if infos := stats.DiagnosticsBySeverity["info"]; infos > 0 {
+		parts = append(parts, t.styles.Info.Render(SeverityCount(infos, config.SeverityInfo)))
 	}
 
 	// Count fixable issues

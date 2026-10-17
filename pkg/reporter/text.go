@@ -93,9 +93,7 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 
 		// Warn if fix loop was exhausted
 		if file.Exhausted {
-			fmt.Fprintf(r.out, "  %s\n",
-				r.styles.Warning.Render(fmt.Sprintf("warning: fix loop exhausted after %d passes with %d edits remaining",
-					file.FixPasses, file.RemainingEdits)))
+			fmt.Fprintf(r.out, "  %s\n", r.styles.Warning.Render(exhaustedWarning(file)))
 		}
 
 		// Blank line between files
@@ -141,10 +139,15 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 		if file.Exhausted {
 			fmt.Fprintf(r.out, "%s: %s\n",
 				r.styles.FilePath.Render(file.Path),
-				r.styles.Warning.Render(fmt.Sprintf("warning: fix loop exhausted after %d passes with %d edits remaining",
-					file.FixPasses, file.RemainingEdits)))
+				r.styles.Warning.Render(exhaustedWarning(file)))
 		}
 	}
 
 	return total
+}
+
+// exhaustedWarning describes a fix loop that stopped with edits left.
+func exhaustedWarning(file runner.FileOutcome) string {
+	return "warning: fix loop exhausted after " + pretty.Count(file.FixPasses, "pass", "passes") +
+		" with " + pretty.Count(file.RemainingEdits, "edit", "edits") + " remaining"
 }

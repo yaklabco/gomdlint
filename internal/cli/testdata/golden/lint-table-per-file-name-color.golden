@@ -19,12 +19,12 @@
 [93m W  11:9        Heading ends with trailing punctuation ":"  no-trailing-punctuation           [92m+[0m[0m
 [93m W  17:1        Unused reference definition [unused]        link-image-reference-definitions   [0m
 [90m==================================================================================================[0m
- [1;91m1 errors[0m | [1;93m6 warnings[0m | [92m5 fixable[0m
+ [1;91m1 error[0m | [1;93m6 warnings[0m | [92m5 fixable[0m
 
  [3;90mLegend: [0m[91mE[0m[3;90m = error[0m[3;90m | [0m[93mW[0m[3;90m = warning[0m[3;90m | [0m[92m+[0m[3;90m = fixable[0m
 
 [90m════════════════════════════════════════════════════════════════════════════════[0m
 [1mOverall Summary[0m
- 2 files checked | [1;91m1 errors[0m | [1;93m9 warnings[0m
+ 2 files checked | [1;91m1 error[0m | [1;93m9 warnings[0m
 
 [90mRun with --fix to auto-repair fixable issues[0m

@@ -67,7 +67,7 @@ func (r *TableReporter) Report(_ context.Context, result *runner.Result) (int, e
 			} else {
 				fmt.Fprintln(r.out, r.styles.Success.Render("All files passed!"))
 				fmt.Fprintln(r.out, r.styles.Dim.Render(
-					fmt.Sprintf("%d files checked", result.Stats.FilesProcessed),
+					pretty.Count(result.Stats.FilesProcessed, "file", "files")+" checked",
 				))
 			}
 		}

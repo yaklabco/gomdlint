@@ -130,6 +130,45 @@ func TestSummaryRenderer_ShowsTotals(t *testing.T) {
 	assert.Contains(t, output, "3 files")
 }
 
+// TestSummaryRenderer_TotalCountsAgree covers the totals line of summary
+// output with zero, one and two issues of each severity and files with
+// issues. Zero severity counts are left out.
+func TestSummaryRenderer_TotalCountsAgree(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		totals analysis.Totals
+		want   string
+	}{
+		{
+			totals: analysis.Totals{Issues: 2, Errors: 1, Warnings: 1, Files: 1, FilesWithIssues: 1},
+			want:   "Total: 2 issues (1 error, 1 warning) in 1 file\n",
+		},
+		{
+			totals: analysis.Totals{Issues: 4, Errors: 2, Warnings: 2, Files: 2, FilesWithIssues: 2},
+			want:   "Total: 4 issues (2 errors, 2 warnings) in 2 files\n",
+		},
+		{
+			totals: analysis.Totals{Issues: 1, Warnings: 1, Files: 3, FilesWithIssues: 1},
+			want:   "Total: 1 issue (1 warning) in 1 file\n",
+		},
+		{
+			// The breakdown adds up to the issues: info findings count too.
+			totals: analysis.Totals{Issues: 3, Errors: 1, Warnings: 1, Infos: 1, Files: 1, FilesWithIssues: 1},
+			want:   "Total: 3 issues (1 error, 1 warning, 1 info) in 1 file\n",
+		},
+	}
+
+	for _, tt := range tests {
+		var buf bytes.Buffer
+		renderer := NewSummaryRenderer(Options{Writer: &buf, Color: "never"})
+
+		require.NoError(t, renderer.Render(context.Background(), &analysis.Report{Totals: tt.totals}))
+
+		assert.True(t, strings.HasSuffix(buf.String(), tt.want), "want the totals %q, got:\n%s", tt.want, buf.String())
+	}
+}
+
 func TestSummaryRenderer_FixableIndicator(t *testing.T) {
 	t.Parallel()
 
