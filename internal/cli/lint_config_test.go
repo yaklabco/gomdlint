@@ -108,6 +108,26 @@ func TestLintFixesEveryHardLink(t *testing.T) {
 	}
 }
 
+// TestLintFixLeavesFilesIgnoredDespiteSymlinkedGitignore covers a nested
+// .gitignore that is a symlink to a file re-including keep.md. Git does not
+// read it, so keep.md stays ignored by the root pattern and --fix must not
+// touch it.
+func TestLintFixLeavesFilesIgnoredDespiteSymlinkedGitignore(t *testing.T) {
+	dir := inProject(t, map[string]string{
+		".git/HEAD":    "ref: refs/heads/main\n",
+		".gitignore":   "*.md\n",
+		"policy.txt":   "!keep.md\n",
+		"docs/keep.md": trailingDoc,
+	})
+	if err := os.Symlink(filepath.Join("..", "policy.txt"), filepath.Join(dir, "docs", ".gitignore")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	got := execute(t, "lint", "--fix", "--no-backups", ".")
+
+	assert.Equal(t, trailingDoc, readFile(t, filepath.Join(dir, "docs", "keep.md")), got.stdout)
+}
+
 func TestLintIgnoreDefaultsCanBeTurnedOff(t *testing.T) {
 	tests := []struct {
 		name   string

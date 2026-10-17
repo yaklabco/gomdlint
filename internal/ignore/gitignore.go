@@ -45,7 +45,8 @@ type gitRule struct {
 // Git lets the run cross directories and even match "abc". Here such a run
 // matches like "*", as the gitignore documentation describes.
 //
-// The global excludes file and .git/info/exclude are not read.
+// As in Git, a .gitignore that is a symlink is not followed. The global
+// excludes file and .git/info/exclude are not read.
 type Gitignore struct {
 	rules []gitRule
 }
@@ -91,14 +92,28 @@ func workTreeRoot(dir string) (string, bool) {
 
 // Child returns the patterns in effect inside dir, a subdirectory of the
 // directory g describes: g's patterns followed by those of dir's .gitignore.
-// It returns g itself when dir has no .gitignore.
+// It returns g itself when dir has no .gitignore that Git would read. Like
+// Git, it does not follow a .gitignore that is a symlink, and it reads
+// nothing from one that is not a regular file, such as a directory.
 func (g *Gitignore) Child(dir string) (*Gitignore, error) {
-	content, err := os.ReadFile(filepath.Join(dir, gitignoreFile))
+	path := filepath.Join(dir, gitignoreFile)
+	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 		return g, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", filepath.Join(dir, gitignoreFile), err)
+		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return g, nil
+	}
+
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+		return g, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	added := parseGitignore(dir, content)

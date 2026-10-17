@@ -432,3 +432,61 @@ func TestGitignoreForOutsideRepository(t *testing.T) {
 	assert.True(t, rules.Ignored(filepath.Join(dir, "skip.md"), false))
 	assert.False(t, rules.Ignored(filepath.Join(dir, "keep.md"), false))
 }
+
+// TestGitignoreSkipsFilesGitDoesNotRead covers .gitignore entries that Git
+// does not read: a symlink, whether at the repository root or below it, and
+// a directory. Each verdict comes from git check-ignore.
+func TestGitignoreSkipsFilesGitDoesNotRead(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nested symlink with a negation", func(t *testing.T) {
+		t.Parallel()
+
+		repo := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+		writeTree(t, repo, map[string]string{
+			".gitignore":   "*.md\n",
+			"policy.txt":   "!keep.md\n",
+			"docs/keep.md": "",
+		})
+		if err := os.Symlink("../policy.txt", filepath.Join(repo, "docs", ".gitignore")); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+
+		rules, err := ignore.GitignoreFor(filepath.Join(repo, "docs"))
+		require.NoError(t, err)
+
+		assert.True(t, rules.Ignored(filepath.Join(repo, "docs", "keep.md"), false),
+			"the root pattern still applies: Git does not read the symlinked negation")
+	})
+
+	t.Run("root symlink", func(t *testing.T) {
+		t.Parallel()
+
+		repo := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+		writeTree(t, repo, map[string]string{"rules.txt": "*.md\n", "a.md": ""})
+		if err := os.Symlink("rules.txt", filepath.Join(repo, ".gitignore")); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+
+		rules, err := ignore.GitignoreFor(repo)
+		require.NoError(t, err)
+
+		assert.False(t, rules.Ignored(filepath.Join(repo, "a.md"), false))
+	})
+
+	t.Run("directory", func(t *testing.T) {
+		t.Parallel()
+
+		repo := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+		writeTree(t, repo, map[string]string{".gitignore": "*.md\n", "docs/keep.md": ""})
+		require.NoError(t, os.Mkdir(filepath.Join(repo, "docs", ".gitignore"), 0o755))
+
+		rules, err := ignore.GitignoreFor(filepath.Join(repo, "docs"))
+		require.NoError(t, err)
+
+		assert.True(t, rules.Ignored(filepath.Join(repo, "docs", "keep.md"), false))
+	})
+}
