@@ -1,11 +1,11 @@
 // Package ignore decides which paths a lint run skips. It matches gomdlint's
 // ignore patterns and the patterns of .gitignore files, both segment by
-// segment, so "**" spans whole path segments and "*" never crosses a slash.
+// segment with Git's wildmatch rules, so "**" spans whole path segments and
+// "*" never crosses a slash.
 package ignore
 
 import (
 	"fmt"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -29,12 +29,12 @@ func (p pattern) matches(segments []string, isDir bool) bool {
 
 // matchSegments matches path segments against pattern segments. A "**"
 // pattern segment matches zero or more path segments; any other pattern
-// segment matches one path segment with path.Match.
+// segment matches one path segment with wildmatch.
 func matchSegments(patternSegs, pathSegs []string) bool {
 	for len(patternSegs) > 0 {
-		if patternSegs[0] == doubleStar {
+		if isDoubleStar(patternSegs[0]) {
 			rest := patternSegs[1:]
-			for len(rest) > 0 && rest[0] == doubleStar {
+			for len(rest) > 0 && isDoubleStar(rest[0]) {
 				rest = rest[1:]
 			}
 			for skip := 0; skip <= len(pathSegs); skip++ {
@@ -45,10 +45,7 @@ func matchSegments(patternSegs, pathSegs []string) bool {
 			return false
 		}
 
-		if len(pathSegs) == 0 {
-			return false
-		}
-		if ok, err := path.Match(patternSegs[0], pathSegs[0]); err != nil || !ok {
+		if len(pathSegs) == 0 || !wildmatch(patternSegs[0], pathSegs[0]) {
 			return false
 		}
 		patternSegs, pathSegs = patternSegs[1:], pathSegs[1:]
@@ -56,10 +53,11 @@ func matchSegments(patternSegs, pathSegs []string) bool {
 	return len(pathSegs) == 0
 }
 
-// validateSegments reports a malformed segment, such as an unclosed "[".
+// validateSegments reports a segment that can match nothing, such as one
+// with an unclosed "[".
 func validateSegments(segments []string) error {
 	for _, segment := range segments {
-		if _, err := path.Match(segment, ""); err != nil {
+		if err := validateSegment(segment); err != nil {
 			return fmt.Errorf("segment %q: %w", segment, err)
 		}
 	}
@@ -111,7 +109,7 @@ func compileGlob(base, raw string) (pattern, error) {
 		return pattern{}, fmt.Errorf("ignore pattern %q matches nothing", raw)
 	}
 
-	compiled.segments = strings.Split(text, "/")
+	compiled.segments = splitPattern(text)
 	if !anchored {
 		compiled.segments = append([]string{doubleStar}, compiled.segments...)
 	}
@@ -130,9 +128,12 @@ func ValidatePattern(raw string) error {
 // Set is a list of gomdlint ignore patterns resolved against a base
 // directory, and matches paths inside it.
 //
-// Patterns use forward slashes. "*", "?" and "[...]" match within one path
-// segment, and a "**" segment matches any number of segments, including
-// none, so "vendor/**" matches the vendor directory itself. As in
+// Patterns use forward slashes and Git's wildmatch rules. Within one path
+// segment "*" matches any bytes, "?" matches one byte, "[...]" matches one
+// byte from a set, which "!" or "^" negates and which may hold ranges and
+// classes such as "[:digit:]", and a backslash escapes the next byte. A
+// "**" segment matches any number of segments, including none, so
+// "vendor/**" matches the vendor directory itself. As in
 // .gitignore, a pattern without a slash matches a name at any depth, a
 // slash at the start or in the middle anchors the pattern to the base
 // directory, and a trailing slash matches directories only. A leading "./"

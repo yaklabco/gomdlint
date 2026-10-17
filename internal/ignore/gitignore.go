@@ -32,8 +32,14 @@ type gitRule struct {
 // "!" negates, a trailing "/" matches directories only, a pattern with a
 // slash other than a trailing one is anchored to its file's directory,
 // "**" matches across directories, and backslash escapes a special
-// character. As in Git, a path inside an ignored directory cannot be
-// re-included, because walks never enter ignored directories.
+// character. Patterns match with Git's wildmatch rules, as described on
+// Set. As in Git, a path inside an ignored directory cannot be re-included,
+// because walks never enter ignored directories.
+//
+// One quirk of Git's matcher is not copied. When the first wildcard of an
+// anchored pattern is a run of stars after literal text, as in "ab**/c",
+// Git lets the run cross directories and even match "abc". Here such a run
+// matches like "*", as the gitignore documentation describes.
 //
 // The global excludes file and .git/info/exclude are not read.
 type Gitignore struct {
@@ -153,16 +159,13 @@ func parseGitignoreLine(dir, line string) (gitRule, bool) {
 	// A slash at the start or in the middle anchors the pattern to dir.
 	anchored := strings.Contains(line, "/")
 	line = strings.TrimPrefix(line, "/")
-	segments := strings.Split(line, "/")
-	for idx, segment := range segments {
-		segments[idx] = bracketNegation(segment)
-	}
+	segments := splitPattern(line)
 	if !anchored {
 		segments = append([]string{doubleStar}, segments...)
 	}
 	// A trailing "/**" matches everything inside a directory but not the
 	// directory itself, so a later pattern can re-include its contents.
-	if len(segments) > 1 && segments[len(segments)-1] == doubleStar {
+	if len(segments) > 1 && isDoubleStar(segments[len(segments)-1]) {
 		segments = append(segments[:len(segments)-1], "*", doubleStar)
 	}
 	if validateSegments(segments) != nil {
@@ -183,28 +186,4 @@ func trimTrailingSpaces(line string) string {
 		end--
 	}
 	return line[:end]
-}
-
-// bracketNegation converts the "[!...]" negated classes of .gitignore to the
-// "[^...]" form that path.Match understands.
-func bracketNegation(segment string) string {
-	if !strings.Contains(segment, "[!") {
-		return segment
-	}
-	var out strings.Builder
-	for idx := 0; idx < len(segment); idx++ {
-		char := segment[idx]
-		if char == '\\' && idx+1 < len(segment) {
-			out.WriteByte(char)
-			idx++
-			out.WriteByte(segment[idx])
-			continue
-		}
-		out.WriteByte(char)
-		if char == '[' && idx+1 < len(segment) && segment[idx+1] == '!' {
-			out.WriteByte('^')
-			idx++
-		}
-	}
-	return out.String()
 }

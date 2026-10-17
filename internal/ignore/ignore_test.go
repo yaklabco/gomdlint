@@ -114,6 +114,13 @@ func TestNewSetRejectsMalformedPatterns(t *testing.T) {
 
 	require.Error(t, ignore.ValidatePattern("[z-a"))
 	require.NoError(t, ignore.ValidatePattern("docs/**/*.md"))
+
+	for _, malformed := range []string{"foo[", "[[:bogus:]].md", "[[:alpha:].md", `a\`} {
+		require.Error(t, ignore.ValidatePattern(malformed), malformed)
+	}
+	for _, valid := range []string{"generated[[:digit:]].md", "[]a].md", `[\]].md`, "[a-].md", `\*.md`} {
+		require.NoError(t, ignore.ValidatePattern(valid), valid)
+	}
 }
 
 // writeTree creates files under dir from a map of slash-separated paths.
@@ -223,6 +230,99 @@ func TestGitignoreMoreRules(t *testing.T) {
 			assert.Equal(t, tt.want, rules.Ignored(filepath.Join(repo, filepath.FromSlash(tt.path)), tt.isDir))
 		})
 	}
+}
+
+// TestGitignoreWildmatch holds the pattern language to Git's wildmatch, with
+// each verdict taken from `git -c core.excludesFile=/dev/null check-ignore`
+// (one pattern per directory, so cases cannot interact).
+func TestGitignoreWildmatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		pattern string
+		ignored []string
+		kept    []string
+	}{
+		{pattern: "generated[[:digit:]].md", ignored: []string{"generated1.md"}, kept: []string{"generatedx.md"}},
+		{pattern: "[]a].md", ignored: []string{"].md", "a.md"}, kept: []string{"b.md"}},
+		{pattern: "?.md", ignored: []string{"x.md"}, kept: []string{"界.md", "ab.md"}},
+		{pattern: "???.md", ignored: []string{"界.md", "abc.md"}},
+		{pattern: "[!a].md", ignored: []string{"b.md"}, kept: []string{"a.md"}},
+		{pattern: "[^a].md", ignored: []string{"b.md"}, kept: []string{"a.md"}},
+		{pattern: "[a-c].md", ignored: []string{"b.md"}, kept: []string{"d.md"}},
+		{pattern: `[\]].md`, ignored: []string{"].md"}, kept: []string{"x.md"}},
+		{pattern: `\*.md`, ignored: []string{"*.md"}, kept: []string{"x.md"}},
+		{pattern: "foo[", kept: []string{"foo["}},
+		{pattern: "[[:bogus:]].md", kept: []string{"a.md"}},
+		{pattern: "[[:alpha:]].md", ignored: []string{"a.md"}, kept: []string{"1.md"}},
+		{pattern: "[[:upper:]].md", ignored: []string{"A.md"}, kept: []string{"a.md"}},
+		{pattern: "[[:punct:]].md", ignored: []string{"_.md"}, kept: []string{"a.md"}},
+		// Git's ctype counts tab, newline, carriage return and space as
+		// space, but not vertical tab or form feed.
+		{pattern: "[[:space:]]x.md", ignored: []string{" x.md", "\tx.md", "\rx.md"}, kept: []string{"ax.md", "\vx.md", "\fx.md"}},
+		{pattern: "[[:xdigit:]].md", ignored: []string{"f.md"}, kept: []string{"g.md"}},
+		{pattern: "[[:graph:]].md", ignored: []string{"a.md", "~.md"}, kept: []string{" .md"}},
+		{pattern: "[[:print:]].md", ignored: []string{" .md", "a.md"}, kept: []string{"\x7f.md"}},
+		{pattern: "[[:cntrl:]].md", ignored: []string{"\x01.md"}, kept: []string{"a.md"}},
+		{pattern: "[[:blank:]].md", ignored: []string{"\t.md", " .md"}, kept: []string{"\v.md"}},
+		{pattern: "[[:lower:]].md", ignored: []string{"a.md"}, kept: []string{"A.md"}},
+		{pattern: "[[:alnum:]].md", ignored: []string{"a.md", "1.md"}, kept: []string{"_.md"}},
+		{pattern: "[a-].md", ignored: []string{"-.md", "a.md"}, kept: []string{"b.md"}},
+		{pattern: "[[:digit:]-z].md", ignored: []string{"5.md", "-.md", "z.md"}, kept: []string{"y.md"}},
+		{pattern: "[--0].md", ignored: []string{"-.md", "0.md"}, kept: []string{"1.md"}},
+		{pattern: `[a-\z].md`, ignored: []string{"m.md"}},
+		// A reversed range matches nothing, but its first character
+		// still counts on its own.
+		{pattern: "[z-a].md", ignored: []string{"z.md"}, kept: []string{"m.md", "a.md"}},
+		{pattern: "[[:]x.md", ignored: []string{"[x.md", ":x.md"}, kept: []string{"ax.md"}},
+		{pattern: "[!]a]x", ignored: []string{"bx"}, kept: []string{"ax", "]x"}},
+		{pattern: "[[:alpha:].md", kept: []string{"a.md", "[.md", ":.md"}},
+		{pattern: "[界].md", kept: []string{"界.md"}},
+		{pattern: `a\`, kept: []string{`a\`, "a"}},
+		{pattern: `\#foo`, ignored: []string{"#foo"}},
+		{pattern: "*.MD", ignored: []string{"x.MD"}, kept: []string{"x.md"}},
+		// A slash inside a bracket expression does not split the pattern,
+		// and can never match.
+		{pattern: "x[a/b]y", ignored: []string{"xay", "xby"}, kept: []string{"xcy"}},
+		// An escaped slash separates directories like a plain one.
+		{pattern: `a\/b`, ignored: []string{"a/b"}},
+		{pattern: "a/***/b", ignored: []string{"a/b", "a/x/b", "a/x/y/b"}},
+		// Before an escaped slash, "**" must match at least one directory.
+		{pattern: `**\/b`, ignored: []string{"x/b"}, kept: []string{"b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			writeTree(t, dir, map[string]string{".gitignore": tt.pattern + "\n"})
+			rules, err := ignore.GitignoreFor(dir)
+			require.NoError(t, err)
+
+			for _, name := range tt.ignored {
+				assert.True(t, rules.Ignored(filepath.Join(dir, name), false), "%q should be ignored", name)
+			}
+			for _, name := range tt.kept {
+				assert.False(t, rules.Ignored(filepath.Join(dir, name), false), "%q should be kept", name)
+			}
+		})
+	}
+}
+
+// TestSetMatchWildmatch applies the same pattern language to gomdlint's own
+// ignore patterns.
+func TestSetMatchWildmatch(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.FromSlash("/base")
+	set, err := ignore.NewSet(base, []string{"generated[[:digit:]].md", "?.md", "[]a]-x.md"})
+	require.NoError(t, err)
+
+	assert.True(t, set.Match(filepath.Join(base, "generated7.md"), false))
+	assert.True(t, set.Match(filepath.Join(base, "q.md"), false))
+	assert.False(t, set.Match(filepath.Join(base, "界.md"), false), "? matches one byte, as in Git")
+	assert.True(t, set.Match(filepath.Join(base, "]-x.md"), false))
 }
 
 // TestGitignoreForSubdirectory covers walks that start below the repository
