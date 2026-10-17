@@ -377,6 +377,10 @@ func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
 		{name: "reference inside strikethrough", markdown: "Old ~~[text][gone]~~ note.\n",
 			want: []want{{1, 7, "Reference link uses undefined label [gone]"}}},
 		{name: "brackets inside an autolink", markdown: "<https://example.com/[a][b]>\n"},
+		{name: "code span in a collapsed label", markdown: "See [a `code`][] here.\n",
+			want: []want{{1, 5, "Reference link uses undefined label [a `code`]"}}},
+		{name: "strikethrough in a full label", markdown: "See [text][~~missing~~] here.\n\n[missing]: /exists\n",
+			want: []want{{1, 5, "Reference link uses undefined label [~~missing~~]"}}},
 		{name: "brackets inside a bare URL", markdown: "See https://example.com/[a][b] now.\n"},
 		{name: "shortcut after a failed inline link", markdown: "See [t](bad dest now.\n",
 			options: map[string]any{"shortcut_syntax": true},
@@ -428,6 +432,12 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 	diags := testHelper(t, rule, "See [one][alpha].\n\n[alpha]: https://a.example\n[beta]: https://b.example\n")
 	if len(diags) != 1 || diags[0].Message != "Unused reference definition [beta]" {
 		t.Errorf("got %+v, want one unused [beta]", diags)
+	}
+	// The strikethrough markers are part of the label, so the definition of
+	// a label without them is not used.
+	diags = testHelper(t, rule, "See [text][~~missing~~] here.\n\n[missing]: /exists\n")
+	if len(diags) != 1 || diags[0].Message != "Unused reference definition [missing]" {
+		t.Errorf("got %+v, want one unused [missing]", diags)
 	}
 }
 

@@ -10,14 +10,17 @@ import (
 // maxLabelLength is the CommonMark limit on characters inside a link label.
 const maxLabelLength = 999
 
-// inlineChar is one character of an inline container's text, or an opaque
-// placeholder for an inline node whose content cannot hold reference
-// brackets: a code span, raw HTML, an autolink, or a resolved link or image.
+// inlineChar is one character of an inline container's source, or an opaque
+// placeholder for an inline node that cannot be part of a label: an
+// autolink, or a resolved link or image. A literal character comes from a
+// code span or raw HTML: it is part of a label's text as written, but it is
+// never a bracket or an escape.
 type inlineChar struct {
-	ch     byte
-	offset int // source offset of ch; -1 when unknown
-	opaque bool
-	node   *mdast.Node // text node holding ch
+	ch      byte
+	offset  int // source offset of ch; -1 when unknown
+	opaque  bool
+	literal bool
+	node    *mdast.Node // node holding ch
 }
 
 // collectUnresolvedReferences finds reference syntax the parser left as text
@@ -55,11 +58,21 @@ func isInlineContainer(node *mdast.Node) bool {
 	return false
 }
 
-// flattenInline turns a container's inline children into characters.
-// Emphasis, strong, and strikethrough are transparent because brackets are
-// matched before emphasis.
+// flattenInline turns a container's inline children into characters, so
+// labels keep the source they were written with. Emphasis, strong, and
+// strikethrough are transparent to bracket matching, which comes before
+// emphasis, but their delimiters stay in the text; code spans and raw HTML
+// are kept as written, as literal characters.
 func flattenInline(container *mdast.Node) []inlineChar {
 	var chars []inlineChar
+	source := func(node *mdast.Node, from, to int, literal bool) {
+		if node.File == nil || from < 0 || to > len(node.File.Content) {
+			return
+		}
+		for offset := from; offset < to; offset++ {
+			chars = append(chars, inlineChar{ch: node.File.Content[offset], offset: offset, literal: literal, node: node})
+		}
+	}
 	var add func(parent *mdast.Node)
 	add = func(parent *mdast.Node) {
 		for child := parent.FirstChild; child != nil; child = child.Next {
@@ -83,13 +96,39 @@ func flattenInline(container *mdast.Node) []inlineChar {
 					chars = append(chars, inlineChar{ch: '\n', offset: -1, node: child})
 				}
 			case mdast.NodeEmphasis, mdast.NodeStrong, mdast.NodeStrikethrough:
+				full, inner := child.SourceRange(), child.ContentRange()
+				source(child, full.StartOffset, inner.StartOffset, false)
 				add(child)
+				source(child, inner.EndOffset, full.EndOffset, false)
+			case mdast.NodeCodeSpan, mdast.NodeHTMLInline:
+				chars = append(chars, literalChars(child)...)
 			default:
 				chars = append(chars, inlineChar{offset: -1, opaque: true, node: child})
 			}
 		}
 	}
 	add(container)
+	return chars
+}
+
+// literalChars returns a code span or raw HTML as literal characters: its
+// source when it sits on one line, and otherwise, for a code span, its
+// content between backtick runs, since the source of later lines holds
+// their container prefix.
+func literalChars(node *mdast.Node) []inlineChar {
+	span := node.SourceRange()
+	text := []byte(nil)
+	switch pos := node.SourcePosition(); {
+	case node.File != nil && span.EndOffset <= len(node.File.Content) && (pos.StartLine == pos.EndLine || node.Kind != mdast.NodeCodeSpan):
+		text = node.File.Content[span.StartOffset:span.EndOffset]
+	case node.Inline != nil:
+		fence := strings.Repeat("`", max(1, node.ContentRange().StartOffset-span.StartOffset))
+		text = []byte(fence + string(node.Inline.Text) + fence)
+	}
+	chars := make([]inlineChar, 0, len(text))
+	for _, ch := range text {
+		chars = append(chars, inlineChar{ch: ch, offset: -1, literal: true, node: node})
+	}
 	return chars
 }
 
@@ -105,7 +144,7 @@ func (c *collector) scanUnresolved(chars []inlineChar) {
 	var openers []bracketOpener
 	for idx := 0; idx < len(chars); idx++ {
 		char := chars[idx]
-		if char.opaque {
+		if char.opaque || char.literal {
 			continue
 		}
 		switch char.ch {
@@ -184,15 +223,16 @@ func (c *collector) addUnresolved(
 	c.ctx.Usages = append(c.ctx.Usages, usage)
 }
 
-// linkTextLabel returns the link text between two brackets as a label. It is
-// not a label when it holds an unescaped bracket or an opaque inline node,
-// is blank, or is longer than CommonMark allows.
+// linkTextLabel returns the link text between two brackets as a label, as
+// written. It is not a label when it holds an unescaped bracket (a bracket
+// inside a code span counts, since a label is raw text) or a link, is
+// blank, or is longer than CommonMark allows.
 func linkTextLabel(chars []inlineChar, open, closing int) (string, bool) {
 	for idx := open + 1; idx < closing; idx++ {
 		if chars[idx].opaque {
 			return "", false
 		}
-		if (chars[idx].ch == '[' || chars[idx].ch == ']') && !isEscapedChar(chars, idx) {
+		if (chars[idx].ch == '[' || chars[idx].ch == ']') && (chars[idx].literal || !isEscapedChar(chars, idx)) {
 			return "", false
 		}
 	}
@@ -207,8 +247,11 @@ func linkTextLabel(chars []inlineChar, open, closing int) (string, bool) {
 // chars[open]. Labels contain no unescaped brackets or inline nodes.
 func labelEndIndex(chars []inlineChar, open int) (int, bool) {
 	for idx := open + 1; idx < len(chars) && idx-open-1 <= maxLabelLength; idx++ {
-		if chars[idx].opaque {
+		if chars[idx].opaque || (chars[idx].literal && (chars[idx].ch == '[' || chars[idx].ch == ']')) {
 			return 0, false
+		}
+		if chars[idx].literal {
+			continue
 		}
 		switch chars[idx].ch {
 		case '\\':
@@ -239,7 +282,7 @@ func charsText(chars []inlineChar, from, to int) string {
 }
 
 func isChar(chars []inlineChar, idx int, ch byte) bool {
-	return idx >= 0 && idx < len(chars) && !chars[idx].opaque && chars[idx].ch == ch
+	return idx >= 0 && idx < len(chars) && !chars[idx].opaque && !chars[idx].literal && chars[idx].ch == ch
 }
 
 // isEscapedChar reports whether chars[idx] follows an odd number of backslashes.
