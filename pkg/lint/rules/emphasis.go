@@ -112,21 +112,13 @@ func soleEmphasisChild(para *mdast.Node) *mdast.Node {
 			continue
 		case child.Kind == mdast.NodeText && child.Inline != nil && len(bytes.TrimSpace(child.Inline.Text)) == 0:
 			continue
-		case emphasis == nil && (child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong) &&
-			!isStrikethrough(child):
+		case emphasis == nil && (child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong):
 			emphasis = child
 		default:
 			return nil
 		}
 	}
 	return emphasis
-}
-
-// isStrikethrough reports whether a node is GFM strikethrough, which the
-// parser represents as emphasis.
-func isStrikethrough(node *mdast.Node) bool {
-	_, ok := node.Ext["strikethrough"]
-	return ok
 }
 
 // plainEmphasisText returns the raw text of emphasis whose only child is a
@@ -520,9 +512,6 @@ func checkEmphasisStyle(
 	for _, node := range nodes {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
-		}
-		if isStrikethrough(node) {
-			continue
 		}
 		open, closing, ok := emphasisDelimiters(ctx.File, node, markerLength)
 		if !ok {
