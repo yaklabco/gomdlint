@@ -17,6 +17,7 @@ flavor: gfm
 ignore:
   # Test data files - intentionally contain lint errors for testing
   - "pkg/lint/rules/testdata/**"
+  - "internal/cli/testdata/**"
 
   # Common directories to ignore
   - "vendor/**"

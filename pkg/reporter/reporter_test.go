@@ -358,6 +358,73 @@ func TestTextReporter_RuleFormat(t *testing.T) {
 	assert.NotContains(t, buf.String(), "MD009")
 }
 
+// TestTextReporter_LinesUpEachFile covers the columns of text output: within
+// a file, the location, severity and rule columns are as wide as their
+// widest entry, so rule names and messages line up. Each file is measured
+// on its own, in grouped and in flat output.
+func TestTextReporter_LinesUpEachFile(t *testing.T) {
+	diagnostic := func(line, column int, id, name, message string, severity config.Severity) lint.Diagnostic {
+		return lint.Diagnostic{
+			RuleID: id, RuleName: name, Message: message, Severity: severity,
+			StartLine: line, StartColumn: column,
+		}
+	}
+	outcome := func(path string, diagnostics ...lint.Diagnostic) runner.FileOutcome {
+		return runner.FileOutcome{
+			Path:   path,
+			Result: &lint.PipelineResult{FileResult: &lint.FileResult{Diagnostics: diagnostics}},
+		}
+	}
+	result := &runner.Result{Files: []runner.FileOutcome{
+		outcome("a.md",
+			diagnostic(1, 5, "MD009", "no-trailing-spaces", "Trailing whitespace", config.SeverityWarning),
+			diagnostic(12, 1, "MD053", "link-image-reference-definitions", "Unused reference definition [x]", config.SeverityWarning),
+		),
+		outcome("b.md",
+			diagnostic(3, 1, "MD001", "heading-increment", "Heading level jumped from H1 to H3", config.SeverityError),
+			diagnostic(4, 2, "MD009", "no-trailing-spaces", "Trailing whitespace", config.SeverityWarning),
+		),
+	}}
+
+	aLines := "  a.md:1:5   warning  no-trailing-spaces                Trailing whitespace\n" +
+		"  a.md:12:1  warning  link-image-reference-definitions  Unused reference definition [x]\n"
+	bLines := "  b.md:3:1  error    heading-increment   Heading level jumped from H1 to H3\n" +
+		"  b.md:4:2  warning  no-trailing-spaces  Trailing whitespace\n"
+
+	tests := []struct {
+		name    string
+		grouped bool
+		want    string
+	}{
+		{
+			name:    "grouped",
+			grouped: true,
+			want:    "a.md (2 issues)\n" + aLines + "\n" + "b.md (2 issues)\n" + bLines + "\n",
+		},
+		{
+			name: "flat",
+			want: aLines + bLines,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			opts := reporter.DefaultOptions()
+			opts.Writer = &buf
+			opts.Color = "never"
+			opts.ShowContext = false
+			opts.ShowSummary = false
+			opts.GroupByFile = tt.grouped
+
+			_, err := reporter.NewTextReporter(opts).Report(context.Background(), result)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, buf.String())
+		})
+	}
+}
+
 // createTestResult creates a test runner.Result with sample diagnostics.
 func createTestResult() *runner.Result {
 	return &runner.Result{

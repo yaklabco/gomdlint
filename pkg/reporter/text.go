@@ -79,6 +79,8 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 		// File header
 		fmt.Fprintln(r.out, r.styles.FormatFileHeader(file.Path, len(diagnostics)))
 
+		// The diagnostics of a file line up their rules and messages.
+		layout := pretty.NewDiagnosticLayout(diagnostics, r.opts.RuleFormat)
 		for _, diag := range diagnostics {
 			// Get source line for context if enabled
 			var contextLine string
@@ -86,7 +88,7 @@ func (r *TextReporter) reportGrouped(_ context.Context, result *runner.Result) i
 				contextLine = sourceLine(file.Result.Snapshot, diag.StartLine)
 			}
 
-			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, contextLine, r.opts.RuleFormat))
+			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithLayout(&diag, r.opts.ShowContext, contextLine, layout))
 			total++
 		}
 
@@ -123,6 +125,8 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 			continue
 		}
 
+		// The diagnostics of a file line up their rules and messages.
+		layout := pretty.NewDiagnosticLayout(file.Result.Diagnostics, r.opts.RuleFormat)
 		for _, diag := range file.Result.Diagnostics {
 			// Get source line for context if enabled
 			var contextLine string
@@ -130,7 +134,7 @@ func (r *TextReporter) reportFlat(_ context.Context, result *runner.Result) int 
 				contextLine = sourceLine(file.Result.Snapshot, diag.StartLine)
 			}
 
-			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithFormat(&diag, r.opts.ShowContext, contextLine, r.opts.RuleFormat))
+			fmt.Fprint(r.out, r.styles.FormatDiagnosticWithLayout(&diag, r.opts.ShowContext, contextLine, layout))
 			total++
 		}
 

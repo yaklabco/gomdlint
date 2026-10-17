@@ -10,32 +10,64 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
-// FormatDiagnostic formats a single diagnostic for terminal output.
-// Uses ID format for backwards compatibility.
-func (s *Styles) FormatDiagnostic(diag *lint.Diagnostic, showContext bool, sourceLine string) string {
-	return s.FormatDiagnosticWithFormat(diag, showContext, sourceLine, config.RuleFormatID)
+// DiagnosticLayout controls the main line of formatted diagnostics: the form
+// of the rule identifier, and the display widths that the location,
+// severity and rule columns are padded to. Diagnostics formatted with one
+// layout line up their rule identifiers and messages. The zero value names
+// rules by name and pads nothing.
+type DiagnosticLayout struct {
+	// RuleFormat is the form of the rule identifier.
+	RuleFormat config.RuleFormat
+
+	// LocationWidth, SeverityWidth and RuleWidth are the widths, in terminal
+	// cells, that the location, severity and rule columns are padded to.
+	// Wider text is never cut.
+	LocationWidth int
+	SeverityWidth int
+	RuleWidth     int
 }
 
-// FormatDiagnosticWithFormat formats a diagnostic with configurable rule identifier format.
-func (s *Styles) FormatDiagnosticWithFormat(diag *lint.Diagnostic, showContext bool, sourceLine string, ruleFormat config.RuleFormat) string {
+// NewDiagnosticLayout returns the layout that lines up diagnostics, naming
+// their rules in ruleFormat: each column is as wide as its widest entry.
+func NewDiagnosticLayout(diagnostics []lint.Diagnostic, ruleFormat config.RuleFormat) DiagnosticLayout {
+	layout := DiagnosticLayout{RuleFormat: ruleFormat}
+	for idx := range diagnostics {
+		diag := &diagnostics[idx]
+		layout.LocationWidth = max(layout.LocationWidth, displaywidth.String(diag.FilePath+diagnosticPosition(diag)))
+		layout.SeverityWidth = max(layout.SeverityWidth, displaywidth.String(string(diag.Severity)))
+		layout.RuleWidth = max(layout.RuleWidth,
+			displaywidth.String(config.FormatRuleID(ruleFormat, diag.RuleID, diag.RuleName)))
+	}
+	return layout
+}
+
+// FormatDiagnostic formats a single diagnostic for terminal output, naming
+// its rule by name and padding no column.
+func (s *Styles) FormatDiagnostic(diag *lint.Diagnostic, showContext bool, sourceLine string) string {
+	return s.FormatDiagnosticWithLayout(diag, showContext, sourceLine, DiagnosticLayout{RuleFormat: config.RuleFormatName})
+}
+
+// FormatDiagnosticWithLayout formats a diagnostic for terminal output. Its
+// main line holds the location, which terminals and editors open as
+// path:line:col, then the severity, the rule identifier and the message,
+// with the first three padded to the widths of layout. The source line with
+// a caret under the column and the suggestion follow, when there are any.
+func (s *Styles) FormatDiagnosticWithLayout(diag *lint.Diagnostic, showContext bool, sourceLine string, layout DiagnosticLayout) string {
 	var builder strings.Builder
 
-	// Location: path:line:col
-	location := fmt.Sprintf("%s:%d:%d",
-		s.FilePath.Render(diag.FilePath),
-		diag.StartLine,
-		diag.StartColumn,
-	)
+	position := diagnosticPosition(diag)
+	severity := string(diag.Severity) // The text FormatSeverity styles.
+	rule := config.FormatRuleID(layout.RuleFormat, diag.RuleID, diag.RuleName)
 
-	// Severity with prefix
-	severity := s.FormatSeverity(diag.Severity)
-
-	// Rule identifier formatted according to config
-	ruleIdentifier := config.FormatRuleID(ruleFormat, diag.RuleID, diag.RuleName)
-	ruleDisplay := s.RuleID.Render("(" + ruleIdentifier + ")")
-
-	// Main line: location  severity  message  (rule-id)
-	builder.WriteString("  " + location + "  " + severity + "  " + s.Message.Render(diag.Message) + "  " + ruleDisplay + "\n")
+	// Columns are padded by the width of their plain text, outside the
+	// styles, whose escape sequences take no cells.
+	line := "  " + s.FilePath.Render(diag.FilePath) + position + padding(diag.FilePath+position, layout.LocationWidth) +
+		"  " + s.FormatSeverity(diag.Severity) + padding(severity, layout.SeverityWidth) +
+		"  " + s.RuleID.Render(rule)
+	if diag.Message != "" {
+		line += padding(rule, layout.RuleWidth) + "  " + s.Message.Render(diag.Message)
+	}
+	builder.WriteString(line + "\n")
 
 	// Source context
 	if showContext && sourceLine != "" {
@@ -49,6 +81,17 @@ func (s *Styles) FormatDiagnosticWithFormat(diag *lint.Diagnostic, showContext b
 	}
 
 	return builder.String()
+}
+
+// diagnosticPosition returns the ":line:col" that follows the path in the
+// location of diag.
+func diagnosticPosition(diag *lint.Diagnostic) string {
+	return fmt.Sprintf(":%d:%d", diag.StartLine, diag.StartColumn)
+}
+
+// padding returns the spaces that widen text to width terminal cells.
+func padding(text string, width int) string {
+	return strings.Repeat(" ", max(width-displaywidth.String(text), 0))
 }
 
 // FormatSeverity returns a styled severity string.

@@ -1,0 +1,6 @@
+# Fixture project of the lint output golden tests (golden_test.go). Its
+# Markdown files break a few rules on purpose. MD001 reports errors, so the
+# severity column of text output holds two widths.
+rules:
+  MD001:
+    severity: error
