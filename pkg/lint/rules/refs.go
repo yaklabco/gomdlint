@@ -409,7 +409,7 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 			if !allowInline {
 				allowed = false
 				msg = "Inline links/images are not allowed"
-			} else if !allowURLInline && isURLAsText(usage) {
+			} else if !allowURLInline && allowAutolink && isURLAsText(ctx.File.Content, usage) {
 				allowed = false
 				msg = "URL as inline link text is not allowed; use autolink syntax"
 			}
@@ -442,13 +442,37 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 	return diags, nil
 }
 
-// isURLAsText checks if inline link has URL as both text and destination.
-func isURLAsText(usage *refs.ReferenceUsage) bool {
-	if usage.Style != refs.StyleInline {
+// isURLAsText reports whether an inline link could be written as an
+// autolink, as markdownlint's url_inline decides it: a link, not an image,
+// with no title, whose label is its destination, and whose destination an
+// autolink can hold. The caller also requires autolinks to be allowed. Like
+// markdownlint, it compares the label as written in content, between the
+// brackets, with the destination as written, so a label with formatting or
+// an escape that the destination lacks, which an autolink would lose, does
+// not match.
+func isURLAsText(content []byte, usage *refs.ReferenceUsage) bool {
+	if usage.Style != refs.StyleInline || usage.IsImage {
 		return false
 	}
-	// Check if text equals destination (URL as link text)
-	return usage.Text == usage.Destination && isAbsoluteURL(usage.Destination)
+	node := usage.Node
+	if node == nil || node.Inline == nil || node.Inline.Link == nil || node.Inline.Link.Title != "" {
+		return false
+	}
+	start, end, ok := linkTextSpan(content, node)
+	return ok && string(content[start:end]) == usage.Destination && isAutolinkDestination(usage.Destination)
+}
+
+// isAutolinkDestination reports whether a destination could be written as a
+// CommonMark autolink: it starts with a scheme, as uriSchemePattern matches
+// one in any case, and holds no spaces, ASCII control characters, "<" or
+// ">". A protocol-relative //host/path has no scheme, so it cannot.
+// markdownlint asks instead whether a browser parses the destination as a
+// URL, which also accepts a one-letter scheme, such as c:x, that starts no
+// autolink, and rejects http:// without a host, which an autolink can hold.
+func isAutolinkDestination(dest string) bool {
+	return uriSchemePattern.MatchString(dest) && !strings.ContainsFunc(dest, func(char rune) bool {
+		return char == ' ' || char == '<' || char == '>' || char < 0x20 || char == 0x7f
+	})
 }
 
 // DescriptiveLinkTextRule checks for generic link text (MD059).

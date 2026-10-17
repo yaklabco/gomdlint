@@ -545,18 +545,6 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 	return diags, nil
 }
 
-// isAbsoluteURL returns true if the URL is absolute (has a scheme).
-func isAbsoluteURL(url string) bool {
-	// Check for common schemes.
-	return strings.HasPrefix(url, "http://") ||
-		strings.HasPrefix(url, "https://") ||
-		strings.HasPrefix(url, "ftp://") ||
-		strings.HasPrefix(url, "mailto:") ||
-		strings.HasPrefix(url, "tel:") ||
-		strings.HasPrefix(url, "file://") ||
-		strings.Contains(url, "://")
-}
-
 // uriSchemePattern matches a URI scheme and its colon at the start of a link
 // destination, as CommonMark defines a scheme for autolinks: an ASCII letter
 // followed by 1 to 31 letters, digits, "+", "." or "-".
