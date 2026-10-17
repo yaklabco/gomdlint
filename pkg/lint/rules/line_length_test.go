@@ -457,6 +457,16 @@ func TestMaxLineLengthRule_Autofix(t *testing.T) {
 			wantText: "Read\n[docs](https://example.com/a \"a long title here\")\nnow.\n",
 		},
 		{
+			// A break between the brackets would turn the checkbox into
+			// bracket text, and no other break makes the line shorter.
+			name:     "never breaks inside a task list checkbox",
+			flavor:   goldmark.FlavorGFM,
+			input:    "- [ ] task details are long enough to wrap\n",
+			maxLen:   4,
+			wantFix:  false,
+			wantText: "- [ ] task details are long enough to wrap\n",
+		},
+		{
 			name:     "no fix inside code",
 			input:    "```\nthis is code that is long and must not wrap at all\n```\n",
 			maxLen:   30,

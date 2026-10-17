@@ -350,7 +350,9 @@ func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
 
 // noBreakRanges returns, per line, the byte ranges where inserting a line
 // break would change inline content: code spans (whose whitespace is
-// literal), inline HTML, and the destination and title of links and images.
+// literal), inline HTML, the destination and title of links and images, and
+// GFM task list checkboxes, which a break between the brackets turns into
+// bracket text.
 func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 	ranges := make(map[int][]offsetRange)
 	add := func(start, end int) {
@@ -382,6 +384,10 @@ func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 			}
 			add(textEnd, rng.EndOffset)
 		}
+	}
+	for _, checkbox := range mdast.FindByKind(ctx.Root, mdast.NodeTaskCheckbox) {
+		rng := checkbox.SourceRange()
+		add(rng.StartOffset, rng.EndOffset)
 	}
 	return ranges
 }
