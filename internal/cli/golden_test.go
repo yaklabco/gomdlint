@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,12 +37,13 @@ func testdataPath(elem ...string) string {
 	return filepath.Join(append([]string{testdataDir}, elem...)...)
 }
 
-// skipOnWindows skips a test whose golden output holds slash-separated
-// paths, which Windows prints with backslashes.
-func skipOnWindows(t *testing.T) {
+// skipUnlessSlashPaths skips a test whose golden output holds
+// slash-separated paths on systems that print paths with another
+// separator, such as Windows.
+func skipUnlessSlashPaths(t *testing.T) {
 	t.Helper()
 
-	if runtime.GOOS == "windows" {
+	if filepath.Separator != '/' {
 		t.Skip("golden files hold slash-separated paths")
 	}
 }
@@ -93,7 +93,7 @@ func assertGolden(t *testing.T, path, got string) {
 // each human output format with each rule identifier format, and compares
 // the output with testdata/golden/lint-<format>-<rule format>.golden.
 func TestLintOutputGolden(t *testing.T) {
-	skipOnWindows(t)
+	skipUnlessSlashPaths(t)
 	project := readProject(t, testdataPath("project"))
 
 	for _, format := range []string{"text", "table", "summary"} {
@@ -115,7 +115,7 @@ func TestLintOutputGolden(t *testing.T) {
 // TestLintRuleFormatDefaultsToName covers lint without --rule-format, which
 // names rules as --rule-format name does.
 func TestLintRuleFormatDefaultsToName(t *testing.T) {
-	skipOnWindows(t)
+	skipUnlessSlashPaths(t)
 	inProject(t, readProject(t, testdataPath("project")))
 
 	got := execute(t, "lint", "--color", "never")
@@ -129,7 +129,7 @@ func TestLintRuleFormatDefaultsToName(t *testing.T) {
 // given. Like GOMDLINT_FORMAT, an invalid value is a configuration error,
 // and the flag wins over the environment, even over an invalid value.
 func TestLintRuleFormatFromEnvironment(t *testing.T) {
-	skipOnWindows(t)
+	skipUnlessSlashPaths(t)
 	project := readProject(t, testdataPath("project"))
 	golden := func(t *testing.T, name string) string {
 		t.Helper()
