@@ -1,10 +1,14 @@
 package goldmark
 
 import (
+	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
@@ -487,5 +491,42 @@ func TestMapper_ParentChildRelationships(t *testing.T) {
 
 	if para.Prev != heading {
 		t.Error("paragraph.Prev should be heading")
+	}
+}
+
+// TestListItemLoose checks which items of a list make it loose as CommonMark
+// reads it, and that a list is tight exactly when none of them does.
+func TestListItemLoose(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		loose []bool
+	}{
+		{"tight", "- a\n- b\n- c\n", []bool{false, false, false}},
+		{"item after a blank line", "- a\n\n- b\n- c\n", []bool{false, true, false}},
+		{"first item after a blank line", "Intro\n\n- a\n- b\n", []bool{false, false}},
+		{"blank line between blocks", "- a\n\n  more\n- b\n", []bool{true, false}},
+		{"definition then text after a paragraph", "Intro\n\n- [x]: /url\n  text\n- b\n", []bool{false, false}},
+		{"definition then text in a later item", "- a\n- [x]: /url\n  text\n- c\n", []bool{false, false, false}},
+		{"blank line between definition and text", "- [x]: /url\n\n  text\n- b\n", []bool{true, false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := []byte(tt.input)
+			doc := goldmark.New().Parser().Parse(text.NewReader(source))
+			var list *ast.List
+			for node := doc.FirstChild(); node != nil && list == nil; node = node.NextSibling() {
+				if found, ok := node.(*ast.List); ok {
+					list = found
+				}
+			}
+			require.NotNil(t, list)
+			var loose []bool
+			for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+				loose = append(loose, ListItemLoose(item, item == list.FirstChild(), source))
+			}
+			assert.Equal(t, tt.loose, loose)
+			assert.Equal(t, !slices.Contains(loose, true), ListTight(list, source))
+		})
 	}
 }

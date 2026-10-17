@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -21,8 +22,9 @@ import (
 // lines, or that the fixing rules change: front matter, reference
 // definitions and links through them, headings with repeated anchors and
 // fragment links, raw HTML blocks of every kind, tight and loose lists,
-// nested lists, lazy continuation lines, fences and HTML blocks left open,
-// setext headings, tables, tabs and trailing spaces.
+// nested lists, list items that start with link reference definitions,
+// lazy continuation lines, fences and HTML blocks left open, setext
+// headings, tables, tabs and trailing spaces.
 var regionSnippets = []string{
 	"# Heading one\n",
 	"## Heading  two ##\n",
@@ -67,6 +69,18 @@ var regionSnippets = []string{
 	"\n\n",
 	"Final line without newline",
 	"Escaped \\# hash and &#35; refs.\n",
+	// goldmark 1.8 gives each definition a node of its own and reads a list
+	// as loose when an item starts with definitions followed by text after a
+	// blank line, where CommonMark reads it as tight.
+	"- [d1]: /one\n  text after a definition\n- second\n- third\n- fourth\n",
+	"- [d2]: /two\n  [d3]: /three\n  text after two\n- second\n- third\n- fourth\n",
+	"- first\n- [d4]: /four\n  \"Title\"\n  text after a title\n- third\n- fourth\n",
+	"- [d5]: /five\n- after a definition alone\n- third\n- fourth\n",
+	"1. [d6]: /six\n   text\n2. two\n3. three\n4. four\n",
+	"- [d7]: /seven\n  Setext in an item\n  ===\n- second\n- third\n",
+	"- [d8]: /eight\n\n  text after a blank line\n- second\n- third\n",
+	"Intro paragraph\n- [d9]: /nine\n  text\n- b\n- c\n- d\n",
+	"> - [d10]: /ten\n>   quoted text\n> - b\n> - c\n",
 }
 
 // regionEditTexts are the texts random edits insert.
@@ -366,6 +380,83 @@ func TestRegionChecksOnLongLists(t *testing.T) {
 	}
 	// Edits in long lists are what list regions are for.
 	assert.Equal(t, cases, decided, "region checks decide every case")
+}
+
+// TestRegionChecksOnListsThatStartWithDefinitions checks list regions on
+// lists whose items start with link reference definitions followed by text.
+// goldmark gives each definition a node of its own and reads such a list as
+// loose when the item follows a blank line, where CommonMark reads it as
+// tight, and a list region parses its first item on its first line, as if a
+// blank line came before it. Both region checks decide every edit that keeps
+// the definitions, as the whole-document checks do.
+func TestRegionChecksOnListsThatStartWithDefinitions(t *testing.T) {
+	var list strings.Builder
+	list.WriteString("# Title\n\nIntro.\n\n")
+	for idx := range 12 {
+		if idx%3 == 1 {
+			fmt.Fprintf(&list, "- [ref%d]: /url%d\n  text of item %d   \n", idx, idx, idx)
+			continue
+		}
+		fmt.Fprintf(&list, "- item %d with trailing spaces   \n", idx)
+	}
+	list.WriteString("\nAfter the list.\n")
+	inside := list.String()
+	docs := map[string]string{
+		"definitions inside": inside,
+		"definition first": strings.Replace(inside, "- item 0 with trailing spaces   \n",
+			"- [ref0]: /url0\n  text of item 0\n", 1),
+		"loose": strings.ReplaceAll(inside, "   \n- ", "   \n\n- "),
+	}
+	edits := []struct {
+		name     string
+		old, new string
+	}{
+		{name: "trailing spaces after a definition item", old: "item 2 with trailing spaces   ", new: "item 2 with trailing spaces"},
+		{name: "trailing spaces after a definition", old: "text of item 4   ", new: "text of item 4"},
+		{name: "trailing spaces in the second item", old: "text of item 1   ", new: "text of item 1"},
+		{name: "blank line before a definition item", old: "spaces   \n- [ref7]", new: "spaces   \n\n- [ref7]"},
+		{name: "blank line after a definition", old: "/url4\n  text", new: "/url4\n\n  text"},
+		{name: "blank line removed", old: "spaces   \n\n- [ref7]", new: "spaces   \n- [ref7]"},
+		{name: "item split after a definition", old: "text of item 10", new: "text\n- of item 10"},
+		{name: "definition item nested", old: "\n- [ref7]", new: "\n  - [ref7]"},
+	}
+	cases, decided := 0, 0
+	for docName, doc := range docs {
+		for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+			snapshot := parseForCheckWith(t, flavor, doc)
+			check := newFixCheck(snapshot, flavor)
+			cfg := config.NewConfig()
+			cfg.Flavor = flavor
+			verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
+			model := verifier.regions()
+			for _, tt := range edits {
+				if strings.Count(doc, tt.old) != 1 {
+					continue
+				}
+				cases++
+				t.Run(docName+"/"+string(flavor)+"/"+tt.name, func(t *testing.T) {
+					edits := []fix.TextEdit{replaceOnce(t, doc, tt.old, tt.new)}
+					want := check.unchanged(fix.ApplyEdits(snapshot.Content, edits))
+					ok, got := check.regionsUnchanged(edits)
+					outlineWant := verifier.acceptsWhole(edits)
+					outlineOK, outlineGot := false, false
+					if model != nil {
+						outlineOK, outlineGot = model.checkEdits(edits)
+					}
+					if ok && outlineOK {
+						decided++
+					}
+					if ok {
+						assert.Equal(t, want, got, "render signature")
+					}
+					if outlineOK {
+						assert.Equal(t, outlineWant, outlineGot, "outline")
+					}
+				})
+			}
+		}
+	}
+	assert.Equal(t, cases, decided, "both region checks decide every case")
 }
 
 // TestFirstLineKeepsOnALongLine checks that clearing edits on the first line

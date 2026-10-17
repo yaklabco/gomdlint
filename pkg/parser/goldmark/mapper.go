@@ -315,25 +315,41 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 // definitions, and keeps the flag that its first line got when the item
 // followed a blank line, so goldmark reads the list as loose. Definitions
 // render nothing, so they and the rest of their paragraph count as one block.
+//
+// A list is tight exactly when none of its items makes it loose, as
+// ListItemLoose reports for each.
 func ListTight(list *ast.List, source []byte) bool {
 	if list.IsTight {
 		return true
 	}
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-		if item != list.FirstChild() && item.HasBlankPreviousLines() {
+		if ListItemLoose(item, item == list.FirstChild(), source) {
 			return false
-		}
-		first := firstBlockEnd(item.FirstChild(), source)
-		if first == nil {
-			continue
-		}
-		for block := first.NextSibling(); block != nil; block = block.NextSibling() {
-			if block.HasBlankPreviousLines() {
-				return false
-			}
 		}
 	}
 	return true
+}
+
+// ListItemLoose reports whether an item of a list that goldmark parsed from
+// source makes the list loose as CommonMark reads it (see ListTight): it
+// follows a blank line and is not the list's first item, or a block of it
+// after its first block follows a blank line. It reads the blank-line flags
+// of the item and of the blocks after its first block, not those of its
+// first block, which follow from the line before the item.
+func ListItemLoose(item ast.Node, first bool, source []byte) bool {
+	if !first && item.HasBlankPreviousLines() {
+		return true
+	}
+	end := firstBlockEnd(item.FirstChild(), source)
+	if end == nil {
+		return false
+	}
+	for block := end.NextSibling(); block != nil; block = block.NextSibling() {
+		if block.HasBlankPreviousLines() {
+			return true
+		}
+	}
+	return false
 }
 
 // firstBlockEnd returns the last node of an item's first block, which starts

@@ -12,6 +12,7 @@ import (
 	gmast "github.com/yuin/goldmark/ast"
 
 	"github.com/yaklabco/gomdlint/pkg/fix"
+	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // anchorHistory records the slugs and anchors the signature writer gives
@@ -213,9 +214,10 @@ func buildRegionModel(markdown goldmark.Markdown, content []byte, baseline strin
 // writeListSignature writes the signature of a top-level list, as
 // signatureWriter.block does, and returns where its parts are.
 func writeListSignature(writer *signatureWriter, list *gmast.List) listSig {
-	sig := listSig{ordered: list.IsOrdered(), start: list.Start, tight: list.IsTight}
+	tight := gmparser.ListTight(list, writer.source)
+	sig := listSig{ordered: list.IsOrdered(), start: list.Start, tight: tight}
 	sig.tokenStart = writer.out.Len()
-	writer.out.WriteString(listToken(list.IsOrdered(), list.Start, list.IsTight))
+	writer.out.WriteString(listToken(list.IsOrdered(), list.Start, tight))
 	sig.tokenEnd = writer.out.Len()
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		sig.itemSig = append(sig.itemSig, writer.out.Len())

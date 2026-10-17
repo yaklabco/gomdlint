@@ -18,6 +18,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
+	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // Region checks.
@@ -27,7 +28,7 @@ import (
 // made a long document with many findings take time that grows with the
 // square of its length. A region check decides as the whole-document check
 // does, while it parses only the part of the document that a fix can
-// change. The argument rests on how goldmark 1.7 parses.
+// change. The argument rests on how goldmark 1.8 parses.
 //
 // Groups. goldmark reads blocks line by line. When no block is open, it skips
 // blank lines and opens the next block (the outer loop of
@@ -37,8 +38,10 @@ import (
 // flags of the list parsers are reset when a list or item opens, before they
 // are read; the setext and fence flags live only while their block is open;
 // the first block opened there is marked as following a blank line whatever
-// came before; and link reference definitions only matter to inline parsing,
-// which starts once all blocks are closed. So the document falls into
+// came before; and link reference definitions become nodes, made from the
+// lines of their paragraph when it closes, and otherwise only matter to
+// inline parsing, which starts once all blocks are closed. So the document
+// falls into
 // groups, each starting at a line where the parser opened a block with no
 // block open, and the blocks of a group parse the same on their own as in
 // the document, given the document's definitions. A group runs from its
@@ -66,13 +69,21 @@ import (
 // region holds when its parse is one list whose first item opens on the
 // first line and whose last item opens on the marker line of the item after
 // the edited ones: then that item, and the lines after it, parse as in the
-// document. A list is tight when no item but the first follows a blank line
-// and no item has a block but its first after a blank line
-// (listParser.Close). The region's list decides that for its items but its
-// first; that item's blank line and the items outside the regions come from
-// the original, so the tightness of the edited list follows. docLayout
-// checks that this rule gives goldmark's answer for every list of the
-// original and uses no list regions for a list where it does not.
+// document. A list is tight, as CommonMark reads it (gmparser.ListTight),
+// when no item makes it loose by following a blank line, unless it is the
+// first item, or by having a block after its first block that follows one
+// (gmparser.ListItemLoose). Only the flags of the item before and of its
+// first block depend on the line before the region, and the rule reads
+// neither: the item before is the region's first item, and no item's first
+// block is read. So the region's list decides for its items as the
+// document does, but for whether the item before follows a blank line,
+// which comes from the original, as do the items outside the regions, and
+// the tightness of the edited list follows. goldmark's own IsTight is not
+// used: it reads the rest of a paragraph that starts with link reference
+// definitions as a block of its own, with the flag of the item's first line.
+// docLayout checks that the items give gmparser.ListTight's answer for every
+// list of the original and uses no list regions for a list where they do
+// not.
 //
 // Signatures. The signature of the document is its front matter and the
 // signatures of its top-level blocks in order, and that of a list is a token
@@ -400,7 +411,8 @@ type layoutList struct {
 	// lines holds the source offset of the marker line of each item.
 	lines []int
 	// blank reports whether each item follows a blank line, and loose
-	// counts the items before each that make the list loose (itemLoose).
+	// counts the items before each that make the list loose
+	// (gmparser.ListItemLoose).
 	blank []bool
 	loose []int
 }
@@ -489,35 +501,17 @@ func newLayoutList(list *gmast.List, rec *parseRecord, source []byte, index, gro
 		}
 		model.lines = append(model.lines, line)
 		model.blank = append(model.blank, item.HasBlankPreviousLines())
-		if itemLoose(item, item == list.FirstChild()) {
+		if gmparser.ListItemLoose(item, item == list.FirstChild(), source) {
 			loose++
 		}
 		model.loose = append(model.loose, loose)
 	}
-	// List regions rely on goldmark's rule for tight lists, so a list for
-	// which the rule does not give goldmark's answer gets none.
-	if (loose == 0) != list.IsTight {
+	// List regions rely on the items deciding the list's tightness one by
+	// one, so a list whose items do not give its tightness gets none.
+	if (loose == 0) != gmparser.ListTight(list, source) {
 		model.regions = false
 	}
 	return model
-}
-
-// itemLoose reports whether a list item makes its list loose: it follows a
-// blank line and is not the first item, or one of its blocks but the first
-// follows a blank line. This is how goldmark's listParser.Close decides.
-func itemLoose(item gmast.Node, first bool) bool {
-	if !first && item.HasBlankPreviousLines() {
-		return true
-	}
-	if item.FirstChild() == nil || item.FirstChild() == item.LastChild() {
-		return false
-	}
-	for child := item.FirstChild().NextSibling(); child != nil; child = child.NextSibling() {
-		if child.HasBlankPreviousLines() {
-			return true
-		}
-	}
-	return false
 }
 
 // lineStartIn returns the offset of the start of the line holding offset.
@@ -873,7 +867,8 @@ type regionParse struct {
 	// definitions it added before, in the same order.
 	refsSame bool
 	// tight reports whether the list of a list region is tight, as
-	// goldmark decides for its items but its first.
+	// CommonMark reads it (gmparser.ListTight), which decides for its items
+	// but whether its first follows a blank line.
 	tight bool
 }
 
@@ -1027,7 +1022,7 @@ func (l *docLayout) parseListRegion(reg region, edits []fix.TextEdit) regionPars
 		source:   text,
 		blocks:   children(parsedList),
 		refsSame: l.sameRefs(from, to, parsed.rec.refs),
-		tight:    parsedList.IsTight,
+		tight:    gmparser.ListTight(parsedList, text),
 	}
 }
 
