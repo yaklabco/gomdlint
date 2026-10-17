@@ -82,7 +82,7 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		if intent, ok := lineHeadingIntent(ctx, line, hashStart, headingAttrs(len(hashes), StyleATX), false, hashRange); ok {
 			builder := fix.NewEditBuilder()
 			builder.Insert(hashRange.EndOffset, " ")
-			offered = checker.offer(builder, intent)
+			offered = checker.offer(builder, intent.withLocal(true))
 		}
 
 		pos := mdast.SourcePosition{
@@ -171,7 +171,7 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", spaces.Len())).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the hash characters").
-			WithFix(checker.offer(builder, fixIntent{})).
+			WithFix(checker.offer(builder, fixIntent{local: true})).
 			Build()
 		diags = append(diags, diag)
 	}
@@ -291,7 +291,7 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 			headingAttrs(len(openHashes), StyleATXClosed), true, openRange, closeRange); ok {
 			builder := fix.NewEditBuilder()
 			builder.ReplaceRange(textStart, line.NewlineStart, replacement)
-			offered = checker.offer(builder, intent)
+			offered = checker.offer(builder, intent.withLocal(true))
 		}
 
 		closeEnd := bom + len(lineContent) - len(match[closedATXTrail])
@@ -393,7 +393,7 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space inside the hash characters").
-			WithFix(checker.offer(builder, fixIntent{})).
+			WithFix(checker.offer(builder, fixIntent{local: true})).
 			Build()
 		diags = append(diags, diag)
 	}
@@ -468,7 +468,7 @@ func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 			fmt.Sprintf("Heading is indented by %d character(s)", len(indent))).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove leading whitespace from the heading").
-			WithFix(checker.offer(builder, fixIntent{})).
+			WithFix(checker.offer(builder, fixIntent{local: true})).
 			Build()
 		diags = append(diags, diag)
 	}
@@ -722,7 +722,8 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 // It returns nil unless the fix changes nothing but the heading's text, and
 // that only by the deleted characters: removing the punctuation must not
 // leave a setext line blank or turn it into a thematic break, underline or
-// other block, expose a closing hash sequence, or leave a backslash showing.
+// other block, expose a closing hash sequence, leave a backslash showing, or
+// change an anchor that a fragment link uses.
 func trailingPunctuationFix(
 	ctx *lint.RuleContext,
 	checker *fixChecker,
@@ -746,7 +747,7 @@ func trailingPunctuationFix(
 	deleted := mdast.SourceRange{StartOffset: deleteStart, EndOffset: content.EndOffset}
 	builder := fix.NewEditBuilder()
 	builder.Delete(deleted.StartOffset, deleted.EndOffset)
-	return checker.offer(builder, changeText(heading, textSub{rng: deleted}))
+	return checker.offer(builder, changeText(heading, textSub{rng: deleted}).withLocal(true))
 }
 
 // escapedAt reports whether the byte at offset follows an odd number of
@@ -796,32 +797,35 @@ func lineHeadingIntent(
 	for _, marker := range markers {
 		subs = append(subs, textSub{rng: marker})
 	}
+	// The pieces cover whole lines of the target, so that the intents of
+	// fixes to several of its lines can be merged.
 	rng := target.SourceRange()
+	spanStart, spanEnd := lineStartOf(ctx.File, rng.StartOffset), lineEndOf(ctx.File, rng.EndOffset)
 	heading := blockWant{
 		kind:  mdast.NodeHeading,
 		attrs: attrs,
-		from:  mdast.SourceRange{StartOffset: textStart, EndOffset: line.EndOffset},
+		from:  mdast.SourceRange{StartOffset: line.StartOffset, EndOffset: line.EndOffset},
 		subs:  subs,
 	}
 	switch {
 	case target.Kind == mdast.NodeHeading && atxHeading && !isSetextHeading(ctx.File, target):
-		heading.from = rng
+		heading.from = mdast.SourceRange{StartOffset: spanStart, EndOffset: spanEnd}
 		return fixIntent{target: target, into: []blockWant{heading}}, true
 	case target.Kind != mdast.NodeParagraph:
 		return fixIntent{}, false
 	}
 	var into []blockWant
-	if rng.StartOffset < line.StartOffset {
+	if spanStart < line.StartOffset {
 		into = append(into, blockWant{
 			kind: mdast.NodeParagraph,
-			from: mdast.SourceRange{StartOffset: rng.StartOffset, EndOffset: line.StartOffset},
+			from: mdast.SourceRange{StartOffset: spanStart, EndOffset: line.StartOffset},
 		})
 	}
 	into = append(into, heading)
-	if line.EndOffset < rng.EndOffset {
+	if line.EndOffset < spanEnd {
 		into = append(into, blockWant{
 			kind: mdast.NodeParagraph,
-			from: mdast.SourceRange{StartOffset: line.EndOffset, EndOffset: rng.EndOffset},
+			from: mdast.SourceRange{StartOffset: line.EndOffset, EndOffset: spanEnd},
 		})
 	}
 	return fixIntent{target: target, into: into}, true

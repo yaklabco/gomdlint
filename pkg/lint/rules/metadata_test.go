@@ -913,11 +913,12 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			wantLines: []int{},
 		},
 		{
+			// Reported like markdownlint, which reads the fence as code, but
+			// the block is raw HTML, so the fix would change a script source.
 			name:      "tag in fenced code in an HTML block without html_elements",
 			input:     "<details>\n```html\n<script src=\"javascript.js\"></script>\n```\n</details>\n",
 			options:   map[string]any{"names": javascript, "html_elements": false},
 			wantLines: []int{3},
-			wantFixed: "<details>\n```html\n<script src=\"JavaScript.js\"></script>\n```\n</details>\n",
 		},
 		{
 			name:      "tag in a code span in an HTML block without code_blocks",
@@ -938,6 +939,14 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			options:   map[string]any{"names": github},
 			wantLines: []int{2},
 			wantFixed: "<div>\n<https://github.com/x> GitHub\n</div>\n",
+		},
+		{
+			// In the document the block is raw HTML, so "github" is in the
+			// src attribute whatever the code span seems to say.
+			name:      "name in an attribute that a code span seems to end",
+			input:     "<div>\n`<img alt=\"`\" src=\"github.png\">\n</div>\n",
+			options:   map[string]any{"names": github, "code_blocks": false, "html_elements": false},
+			wantLines: []int{2},
 		},
 		{
 			name:      "URL split by emphasis",

@@ -169,7 +169,7 @@ func (r *NoEmphasisAsHeadingRule) buildHeadingFix(
 	full, content := emphasis.SourceRange(), emphasis.ContentRange()
 	return checker.offer(builder, becomes(para, mdast.NodeHeading, headingAttrs(level, StyleATX),
 		textSub{rng: mdast.SourceRange{StartOffset: full.StartOffset, EndOffset: content.StartOffset}},
-		textSub{rng: mdast.SourceRange{StartOffset: content.EndOffset, EndOffset: full.EndOffset}}))
+		textSub{rng: mdast.SourceRange{StartOffset: content.EndOffset, EndOffset: full.EndOffset}}).withLocal(true))
 }
 
 // inferHeadingLevel determines the appropriate heading level for an emphasis paragraph.
@@ -339,10 +339,73 @@ func (r *NoSpaceInEmphasisRule) checkPair(
 	diag := lint.NewDiagnosticAt(r.ID(), file.Path, pos, "Spaces inside emphasis markers").
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion("Remove spaces from inside emphasis markers")
-	if containsLetter(file.Content[open.end:closing.start]) && !spacedSingleAsterisks(file, open, closing) {
-		diag = diag.WithFix(checker.offer(builder, changeText(block, subs...)))
+	// Inside square brackets the new emphasis could change a link label, so
+	// that the text would match a definition it did not match before.
+	if containsLetter(file.Content[open.end:closing.start]) && !spacedSingleAsterisks(file, open, closing) &&
+		!insideBrackets(file, block, open.start, closing.end) {
+		diag = diag.WithFix(checker.offer(builder, changeText(block, subs...).withLocal(true)))
 	}
 	return diag.Build(), true
+}
+
+// inLinkLabel reports whether inline node could be part of a link label: it
+// is inside the text of a collapsed or shortcut reference link, which is the
+// label, or inside square brackets that are not a link but could become one.
+func inLinkLabel(ctx *lint.RuleContext, node *mdast.Node) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeLink || parent.Kind == mdast.NodeImage {
+			if parent.Inline == nil || parent.Inline.Link == nil {
+				return true
+			}
+			style := parent.Inline.Link.ReferenceStyle
+			return style == mdast.RefStyleCollapsed || style == mdast.RefStyleShortcut
+		}
+	}
+	rng := node.SourceRange()
+	return insideBrackets(ctx.File, leafBlockAt(ctx.Root, rng.StartOffset), rng.StartOffset, rng.EndOffset)
+}
+
+// insideBrackets reports whether the source from start to end lies inside
+// a pair of square brackets in block, counting brackets that a backslash does
+// not escape. A nil block counts as brackets.
+func insideBrackets(file *mdast.FileSnapshot, block *mdast.Node, start, end int) bool {
+	if block == nil {
+		return true
+	}
+	rng := block.SourceRange()
+	if rng.StartOffset < 0 || rng.EndOffset > len(file.Content) || start < rng.StartOffset || end > rng.EndOffset {
+		return true
+	}
+	content := file.Content
+	depth := 0
+	for pos := rng.StartOffset; pos < start; pos++ {
+		switch {
+		case content[pos] == '\\':
+			pos++
+		case content[pos] == '[':
+			depth++
+		case content[pos] == ']' && depth > 0:
+			depth--
+		}
+	}
+	if depth == 0 {
+		return false
+	}
+	open := depth
+	for pos := end; pos < rng.EndOffset; pos++ {
+		switch content[pos] {
+		case '\\':
+			pos++
+		case '[':
+			open++
+		case ']':
+			open--
+			if open < depth {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // rng returns the source range of a run.
@@ -602,7 +665,13 @@ func checkEmphasisStyle(
 			fmt.Sprintf("%s style %q does not match expected %q", label, actual, style)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(fmt.Sprintf("Use %q for all %s", style, suggestionNoun))
-		if builder := checker.offer(emphasisStyleFix(ctx.File, node, open, closing, style), fixIntent{}); builder != nil {
+		// New markers in a link label would change the label, so no fix is
+		// offered for emphasis that could be part of one.
+		var builder *fix.EditBuilder
+		if !inLinkLabel(ctx, node) {
+			builder = checker.offer(emphasisStyleFix(ctx.File, node, open, closing, style), fixIntent{local: true})
+		}
+		if builder != nil {
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())

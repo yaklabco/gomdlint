@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -388,7 +389,7 @@ func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
 	return lint.NewDiagnostic(r.ID(), heading, msg).
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(fmt.Sprintf("Add %d blank line(s) before the heading", blanksNeeded)).
-		WithFix(checker.offer(builder, fixIntent{})).
+		WithFix(checker.offer(builder, fixIntent{local: true})).
 		Build()
 }
 
@@ -411,7 +412,7 @@ func (r *HeadingBlankLinesRule) createBlankAfterDiagnostic(
 	return lint.NewDiagnostic(r.ID(), heading, msg).
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(fmt.Sprintf("Add %d blank line(s) after the heading", blanksNeeded)).
-		WithFix(checker.offer(builder, fixIntent{})).
+		WithFix(checker.offer(builder, fixIntent{local: true})).
 		Build()
 }
 
@@ -689,7 +690,8 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 				}
 				foundText := string(content[found.StartOffset:found.EndOffset])
 				if !slices.Contains(properNames, foundText) && !overlapsAny(exclusions, found) {
-					diags = append(diags, r.nameDiagnostic(ctx, checker, found, foundText, name, !region.tag))
+					fixable := !region.tag && !overlapsAny(scan.rawTags, found)
+					diags = append(diags, r.nameDiagnostic(ctx, checker, found, foundText, name, fixable))
 				}
 				exclusions = append(exclusions, found)
 			}
@@ -749,7 +751,10 @@ func (r *ProperNamesRule) nameDiagnostic(
 	if leaf := leafBlockAt(ctx.Root, found.StartOffset); fixable && leaf != nil {
 		builder := fix.NewEditBuilder()
 		builder.ReplaceRange(found.StartOffset, found.EndOffset, name)
-		checked = checker.offer(builder, changeText(leaf, textSub{rng: found, text: name}))
+		// Link labels match whatever the case, and anchors are lowercase, so
+		// a change of ASCII letter case reaches no further than the block.
+		checked = checker.offer(builder,
+			changeText(leaf, textSub{rng: found, text: name}).withLocal(asciiCaseChange(foundText, name)))
 	}
 	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, found),
 		fmt.Sprintf("Proper name %q should be %q", foundText, name)).
@@ -770,6 +775,10 @@ type properNameScan struct {
 	inline []mdast.SourceRange
 	// autolinks holds the source of each autolink.
 	autolinks []mdast.SourceRange
+	// rawTags holds the tags of the HTML blocks as raw HTML reads them,
+	// whatever the Markdown parse of their content says. Names inside them
+	// are in attribute values, which a fix must not change.
+	rawTags []mdast.SourceRange
 }
 
 // scan collects the source text MD044 checks.
@@ -912,6 +921,11 @@ func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast
 		return
 	}
 
+	for _, tag := range htmlTagRanges(file.Content[rng.StartOffset:rng.EndOffset]) {
+		s.rawTags = append(s.rawTags, mdast.SourceRange{
+			StartOffset: rng.StartOffset + tag.StartOffset, EndOffset: rng.StartOffset + tag.EndOffset,
+		})
+	}
 	masked, tags := maskHTMLBlockStarts(file.Content[rng.StartOffset:rng.EndOffset])
 	snapshot, ok := reparseWithoutIndentedCode(s.ctx, masked)
 	if !ok {
@@ -963,6 +977,42 @@ func maskHTMLBlockStarts(text []byte) ([]byte, []mdast.SourceRange) {
 		lineStart = next + newline + 1
 	}
 	return masked, tags
+}
+
+// htmlTagRanges returns the ranges of the open and closing tags in text, raw
+// HTML, skipping comments, processing instructions, declarations and CDATA
+// sections.
+func htmlTagRanges(text []byte) []mdast.SourceRange {
+	var tags []mdast.SourceRange
+	for idx := 0; idx < len(text); idx++ {
+		if text[idx] != '<' {
+			continue
+		}
+		end := htmlConstructEnd(text, idx)
+		if end < 0 {
+			continue
+		}
+		if idx+1 < len(text) && (isASCIILetter(text[idx+1]) || text[idx+1] == '/') {
+			tags = append(tags, mdast.SourceRange{StartOffset: idx, EndOffset: end})
+		}
+		idx = end - 1
+	}
+	return tags
+}
+
+// asciiCaseChange reports whether replacing from with to changes only the
+// case of ASCII letters.
+func asciiCaseChange(from, to string) bool {
+	if len(from) != len(to) {
+		return false
+	}
+	for idx := range len(from) {
+		if from[idx] >= utf8.RuneSelf || to[idx] >= utf8.RuneSelf ||
+			(from[idx] != to[idx] && !strings.EqualFold(from[idx:idx+1], to[idx:idx+1])) {
+			return false
+		}
+	}
+	return true
 }
 
 // blockStartAfterMarkers returns the offset where a block could start on the

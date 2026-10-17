@@ -285,7 +285,7 @@ func TestFixWindow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := fixCheckContext(t, tt.input)
 			edit := span(t, tt.input, tt.part, 0, len(tt.part))
-			start, end, looseDepth := fixWindow(ctx.File, edit.StartOffset, edit.EndOffset)
+			start, end, looseDepth := fixWindow(ctx.File, edit.StartOffset, edit.EndOffset, nil)
 			assert.Equal(t, tt.want, tt.input[start:end])
 			assert.Equal(t, tt.looseDepth, looseDepth)
 		})
@@ -307,4 +307,102 @@ func TestFixChecker(t *testing.T) {
 	// The blank line above "# B" would make the list loose.
 	assert.Equal(t, map[int]bool{1: true, 5: false, 7: true}, fixable)
 	assert.Equal(t, "# A\n\nText\n\n- a\n- # B\n\n# C\n\nMore\n", applyAllEdits(t, input, diags))
+}
+
+// TestDocumentKept verifies the whole document check: front matter, links
+// that resolve through distant reference definitions, and fragment links.
+func TestDocumentKept(t *testing.T) {
+	type docCase struct {
+		name   string
+		input  string
+		edits  []string // Pairs of text to find and its replacement, applied to the first match.
+		intent func(t *testing.T, ctx *lint.RuleContext) fixIntent
+		want   bool
+	}
+	noChange := func(*testing.T, *lint.RuleContext) fixIntent { return fixIntent{} }
+	headingLoses := func(part string) func(*testing.T, *lint.RuleContext) fixIntent {
+		return func(t *testing.T, ctx *lint.RuleContext) fixIntent {
+			t.Helper()
+			return changeText(firstNode(ctx.Root, mdast.NodeHeading),
+				textSub{rng: span(t, string(ctx.File.Content), part, 0, len(part))})
+		}
+	}
+	strongBecomesHeading := func(t *testing.T, ctx *lint.RuleContext) fixIntent {
+		t.Helper()
+		strong := firstNode(ctx.Root, mdast.NodeStrong)
+		require.NotNil(t, strong)
+		full, content := strong.SourceRange(), strong.ContentRange()
+		return becomes(firstNode(ctx.Root, mdast.NodeParagraph), mdast.NodeHeading, headingAttrs(2, StyleATX),
+			textSub{rng: mdast.SourceRange{StartOffset: full.StartOffset, EndOffset: content.StartOffset}},
+			textSub{rng: mdast.SourceRange{StartOffset: content.EndOffset, EndOffset: full.EndOffset}})
+	}
+	tests := []docCase{
+		{
+			name:   "closing delimiter for front matter opened far above",
+			input:  "---\n\nText.\n\n***\n",
+			edits:  []string{"***", "---"},
+			intent: noChange,
+			want:   false,
+		},
+		{
+			name:   "thematic break that stays one",
+			input:  "# Title\n\n---\n\nText.\n\n***\n",
+			edits:  []string{"***", "---"},
+			intent: noChange,
+			want:   true,
+		},
+		{
+			name:   "link label that no longer matches its distant definition",
+			input:  "See [*bold*].\n\nOne.\n\nTwo.\n\n[*bold*]: /target\n",
+			edits:  []string{"[*", "[_", "*]", "_]"},
+			intent: noChange,
+			want:   false,
+		},
+		{
+			name:   "fragment link that a new heading takes",
+			input:  "**Heading**\n\nFiller.\n\n## Heading\n\n[jump](#heading)\n",
+			edits:  []string{"**Heading**", "## Heading"},
+			intent: strongBecomesHeading,
+			want:   false,
+		},
+		{
+			name:   "new heading that no fragment link uses",
+			input:  "**Heading**\n\nFiller.\n\n## Other\n\n[jump](#other)\n",
+			edits:  []string{"**Heading**", "## Heading"},
+			intent: strongBecomesHeading,
+			want:   true,
+		},
+		{
+			name:   "fragment link broken by a changed anchor",
+			input:  "# Foo !\n\n[jump](#foo-)\n",
+			edits:  []string{" !", ""},
+			intent: headingLoses(" !"),
+			want:   false,
+		},
+		{
+			name:   "changed anchor that no fragment link uses",
+			input:  "# Foo !\n\nText.\n",
+			edits:  []string{" !", ""},
+			intent: headingLoses(" !"),
+			want:   true,
+		},
+		{
+			name:   "fragment link that starts to resolve",
+			input:  "# Foo !\n\n[jump](#foo)\n",
+			edits:  []string{" !", ""},
+			intent: headingLoses(" !"),
+			want:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := fixCheckContext(t, tt.input)
+			var edits []fix.TextEdit
+			for idx := 0; idx+1 < len(tt.edits); idx += 2 {
+				rng := span(t, tt.input, tt.edits[idx], 0, len(tt.edits[idx]))
+				edits = append(edits, fix.TextEdit{StartOffset: rng.StartOffset, EndOffset: rng.EndOffset, NewText: tt.edits[idx+1]})
+			}
+			assert.Equal(t, tt.want, newFixChecker(ctx).documentKept(edits, []fixIntent{tt.intent(t, ctx)}))
+		})
+	}
 }

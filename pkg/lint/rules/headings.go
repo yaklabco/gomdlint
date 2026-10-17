@@ -464,5 +464,5 @@ func buildHeadingStyleFix(
 	}
 	builder := fix.NewEditBuilder()
 	builder.ReplaceRange(edit.StartOffset, edit.EndOffset, edit.NewText)
-	return checker.offer(builder, becomes(heading, mdast.NodeHeading, headingAttrs(level, to)))
+	return checker.offer(builder, becomes(heading, mdast.NodeHeading, headingAttrs(level, to)).withLocal(true))
 }

@@ -94,6 +94,13 @@ func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
 			wantFixed: "## Section Title\n",
 		},
 		{name: "italic paragraph is reported without a fix", input: "_Another section_\n", wantLines: []int{1}},
+		{
+			// A heading "Heading" before the existing one would take its
+			// anchor, so the link would point to the new heading.
+			name:      "no fix that takes the anchor of a later heading",
+			input:     "**Heading**\n\nFiller.\n\n## Heading\n\n[jump](#heading)\n",
+			wantLines: []int{1},
+		},
 		{name: "blockquote paragraph", input: "> **Quoted Title**\n", wantLines: []int{}},
 		{name: "list item paragraph", input: "- **Listed Title**\n", wantLines: []int{}},
 		{name: "multi-line emphasis", input: "**Two\nlines**\n", wantLines: []int{}},
@@ -348,6 +355,22 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			name:      "MD050 no fix to underscore after a combining mark",
 			rule:      NewStrongStyleRule(),
 			input:     "e\u0301**word**\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			// The link text is the label of a reference whose definition
+			// keeps the asterisks, so the link would disappear.
+			name:      "MD049 no fix to a reference label",
+			rule:      NewEmphasisStyleRule(),
+			input:     "See [*bold*].\n\nOne.\n\nTwo.\n\n[*bold*]: /target\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD050 no fix to a reference label",
+			rule:      NewStrongStyleRule(),
+			input:     "See [**bold**].\n\nOne.\n\nTwo.\n\n[**bold**]: /target\n",
 			options:   map[string]any{"style": "underscore"},
 			wantLines: []int{1},
 		},

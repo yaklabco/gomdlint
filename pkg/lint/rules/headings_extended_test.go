@@ -1009,6 +1009,19 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 			wantFixed: "# Foo &copy;\n",
 		},
 		{
+			// The anchor would change from "foo-" to "foo", breaking the link.
+			name:      "anchor of a fragment link",
+			input:     "# Foo !\n\n[jump](#foo-)\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "anchor that stays the same",
+			input:     "# Foo.\n\n[jump](#foo)\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Foo\n\n[jump](#foo)\n",
+		},
+		{
 			// Deleting only the "!" would leave the backslash showing.
 			name:      "escaped punctuation",
 			input:     "# Text\\!\n",

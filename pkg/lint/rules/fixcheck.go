@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -21,15 +23,29 @@ import (
 // Fix safety check.
 //
 // A fix is offered only when it changes the document the way its rule
-// intends and in no other way. fixesKeepDocument parses the blocks around
-// a fix twice, as they are and with the fix applied, with the document's
-// flavor, and summarizes each parse as a list of blocks: their kind,
-// attributes (heading level and style, list type and tightness, code fence
-// info, table alignment), nesting, and rendered text, with inline markup,
-// link destinations and decoded escapes and character references. The
-// summaries must match, except for the rule's target block, which must
-// become what the rule says. Rules offer their fixes to a fixChecker, which
-// keeps the fixes that pass and checks them together where it can.
+// intends and in no other way. Rules offer their fixes to a fixChecker,
+// which keeps those that are safe each on its own and all together.
+//
+// The document check parses the whole document with the fixes applied, with
+// the document's flavor, and compares it with the document as it is: its
+// front matter; its blocks, summarized by kind, attributes (heading level
+// and style, list type and tightness, code fence info, table alignment),
+// nesting and rendered text, with inline markup, the destinations and
+// titles links resolve to, decoded escapes and character references, and
+// raw HTML byte for byte; and the heading or HTML anchor that each fragment
+// link resolves to, with heading anchors made as GitHub makes them. The
+// blocks must match, except for each fix's target block, which must become
+// what its rule says, and a fragment link that resolved must resolve to the
+// same heading or anchor.
+//
+// Each fix is first checked on its own. When its rule shows that it leaves
+// link labels alone and the fix cannot reach the front matter, that check
+// parses only the blocks around the fix (fixesKeepDocument) and recomputes
+// the document's heading anchors with the headings it leaves there, so that
+// a long document with many fixes is not parsed whole for each of them.
+// Other fixes are checked on their own against the whole document. Then the
+// fixes that pass are checked together against the whole document, and
+// fixes are dropped until those left pass together.
 
 // fixIntent describes the change a fix is meant to make. The zero value
 // allows no change: every block keeps its kind, attributes, nesting and
@@ -41,6 +57,16 @@ type fixIntent struct {
 	// into lists the blocks that target becomes, in order. Empty keeps
 	// target as it is.
 	into []blockWant
+	// local is true when the rule shows that the fix leaves link labels
+	// alone, so that, unless it can reach the front matter, its effects
+	// other than on heading anchors stay among the blocks around it.
+	local bool
+}
+
+// withLocal returns intent with local set.
+func (i fixIntent) withLocal(local bool) fixIntent {
+	i.local = local
+	return i
 }
 
 // blockWant is one block that a fix's target becomes.
@@ -81,14 +107,27 @@ func headingAttrs(level int, style HeadingStyle) string {
 	return fmt.Sprintf("h%d %s", level, style)
 }
 
-// fixChecker collects the fixes that a rule offers and keeps those that
-// pass fixesKeepDocument. It checks them together, with one parse of the
-// blocks around all of them, and only when that fails checks halves of them,
-// down to single fixes, so that a long list with many fixes is not parsed
-// again for each of them.
+// fixChecker collects the fixes that a rule offers and keeps those that are
+// safe each on its own and all together.
 type fixChecker struct {
 	ctx     *lint.RuleContext
 	pending []pendingFix
+	// before is the outline of the document as it is, parsed when first
+	// needed; ready reports whether that parse worked. index finds a block
+	// of it by kind and start, and targets holds where its fragment links
+	// resolve.
+	before  *docOutline
+	ready   bool
+	index   map[blockKey]int
+	targets map[string]string
+	// children caches the block children of containers for window searches.
+	children blockChildren
+}
+
+// blockKey identifies a block by its kind and where it starts.
+type blockKey struct {
+	kind  mdast.NodeKind
+	start int
 }
 
 // pendingFix is a fix that a fixChecker has yet to check.
@@ -99,7 +138,7 @@ type pendingFix struct {
 
 // newFixChecker returns a fixChecker for a rule's run.
 func newFixChecker(ctx *lint.RuleContext) *fixChecker {
-	return &fixChecker{ctx: ctx}
+	return &fixChecker{ctx: ctx, children: blockChildren{}}
 }
 
 // offer records a fix and returns builder, so that a diagnostic carries its
@@ -112,19 +151,20 @@ func (c *fixChecker) offer(builder *fix.EditBuilder, intent fixIntent) *fix.Edit
 	return builder
 }
 
-// filter checks the offered fixes and removes from diags those that fail.
-// When the run was cancelled, it removes them all.
+// filter removes from diags the fixes that are not safe on their own or
+// together with the others. When the run was cancelled, it removes them all.
 func (c *fixChecker) filter(diags []lint.Diagnostic) []lint.Diagnostic {
 	safe := make(map[string]bool, len(c.pending))
 	if !c.ctx.Cancelled() {
-		order := make([]int, len(c.pending))
-		for idx := range order {
-			order[idx] = idx
+		var alone []int
+		for idx, pending := range c.pending {
+			if c.safeAlone(pending) {
+				alone = append(alone, idx)
+			}
 		}
-		sort.SliceStable(order, func(a, b int) bool {
-			return c.pending[order[a]].edits[0].StartOffset < c.pending[order[b]].edits[0].StartOffset
-		})
-		c.check(order, safe)
+		for _, idx := range c.safeTogether(alone) {
+			safe[editsKey(c.pending[idx].edits)] = true
+		}
 	}
 	for idx := range diags {
 		if len(diags[idx].FixEdits) > 0 && !safe[editsKey(diags[idx].FixEdits)] {
@@ -134,29 +174,180 @@ func (c *fixChecker) filter(diags []lint.Diagnostic) []lint.Diagnostic {
 	return diags
 }
 
-// check checks the fixes in group, which is in document order, and records
-// those that pass in safe.
-func (c *fixChecker) check(group []int, safe map[string]bool) {
-	if len(group) == 0 {
-		return
+// safeAlone checks a fix on its own: among the blocks around it, with the
+// document's heading anchors, when its rule shows it local and it cannot
+// reach the front matter, and against the whole document otherwise.
+func (c *fixChecker) safeAlone(pending pendingFix) bool {
+	if !pending.intent.local || touchesFrontMatter(c.ctx.File, pending.edits) {
+		return c.documentKept(pending.edits, []fixIntent{pending.intent})
 	}
-	var edits []fix.TextEdit
-	intents := make([]fixIntent, 0, len(group))
-	for _, idx := range group {
-		edits = append(edits, c.pending[idx].edits...)
-		intents = append(intents, c.pending[idx].intent)
+	return c.localKept(pending)
+}
+
+// localKept reports whether a local fix changes the blocks around it only as
+// its intent says, and leaves every fragment link of the document resolving
+// as it did, with the headings around the fix as the fix leaves them.
+func (c *fixChecker) localKept(pending pendingFix) bool {
+	window, ok := checkWindow(c.ctx, pending.edits, []fixIntent{pending.intent}, c.children)
+	if !ok || !slices.EqualFunc(window.want, window.after, sameBlock) {
+		return false
 	}
-	if fixesKeepDocument(c.ctx, edits, intents) {
-		for _, idx := range group {
-			safe[editsKey(c.pending[idx].edits)] = true
+	return c.anchorsKept(window)
+}
+
+// anchorsKept reports whether every fragment link of the document resolves
+// as it did when the headings in window are replaced with the headings the
+// fix leaves there.
+func (c *fixChecker) anchorsKept(window windowCheck) bool {
+	before, ok := c.outline()
+	if !ok {
+		return false
+	}
+	var beforeHeadings, afterHeadings []anchorHeading
+	for _, block := range window.before {
+		if block.kind == mdast.NodeHeading {
+			beforeHeadings = append(beforeHeadings, anchorHeading{target: c.headingTarget(block.kind, block.start, -1), plain: block.plain})
 		}
-		return
 	}
-	if len(group) > 1 {
-		half := len(group) / 2
-		c.check(group[:half], safe)
-		c.check(group[half:], safe)
+	for idx, block := range window.after {
+		if block.kind != mdast.NodeHeading {
+			continue
+		}
+		target := fmt.Sprintf("new heading %d", idx)
+		if origin := window.want[idx].origin; origin >= 0 {
+			target = c.headingTarget(window.before[origin].kind, window.before[origin].start, idx)
+		}
+		afterHeadings = append(afterHeadings, anchorHeading{target: target, plain: block.plain})
 	}
+	// Anchors depend only on the order of the headings and the anchors their
+	// texts make, so the document's anchors stay the same when the window's
+	// do.
+	sameAnchors := slices.EqualFunc(beforeHeadings, afterHeadings, func(a, b anchorHeading) bool {
+		return a.target == b.target && githubAnchor(a.plain) == githubAnchor(b.plain)
+	})
+	if sameAnchors {
+		return true
+	}
+
+	// Splice the window's headings after the fix into the document's.
+	var headings []anchorHeading
+	spliced := false
+	for idx, block := range before.blocks {
+		if block.kind != mdast.NodeHeading {
+			continue
+		}
+		inside := block.start >= window.start && block.start < window.end
+		if !spliced && (inside || block.start >= window.end) {
+			headings = append(headings, afterHeadings...)
+			spliced = true
+		}
+		if !inside {
+			headings = append(headings, anchorHeading{target: fmt.Sprintf("heading %d", idx), plain: block.plain})
+		}
+	}
+	if !spliced {
+		headings = append(headings, afterHeadings...)
+	}
+	targets := anchorTargets(headings, before.anchors)
+	for _, fragment := range before.fragments {
+		if target, resolved := c.targets[fragment]; resolved && targets[fragment] != target {
+			return false
+		}
+	}
+	return true
+}
+
+// headingTarget names the heading of the document that starts at start, or
+// a new heading at idx when there is none.
+func (c *fixChecker) headingTarget(kind mdast.NodeKind, start, idx int) string {
+	if global, found := c.index[blockKey{kind, start}]; found {
+		return fmt.Sprintf("heading %d", global)
+	}
+	return fmt.Sprintf("new heading %d", idx)
+}
+
+// safeTogether returns the fixes among candidates that the document check
+// accepts together, in document order: all of them when it accepts them
+// all, and otherwise those it accepts as it adds halves of them, down to
+// single fixes, to those it has accepted, so that a fix which is only safe
+// without another is left out.
+func (c *fixChecker) safeTogether(candidates []int) []int {
+	order := slices.Clone(candidates)
+	sort.SliceStable(order, func(a, b int) bool {
+		return c.pending[order[a]].edits[0].StartOffset < c.pending[order[b]].edits[0].StartOffset
+	})
+	var accepted []int
+	var add func(group []int)
+	add = func(group []int) {
+		if len(group) == 0 {
+			return
+		}
+		trial := append(slices.Clone(accepted), group...)
+		var edits []fix.TextEdit
+		intents := make([]fixIntent, 0, len(trial))
+		for _, idx := range trial {
+			edits = append(edits, c.pending[idx].edits...)
+			intents = append(intents, c.pending[idx].intent)
+		}
+		if c.documentKept(edits, intents) {
+			accepted = trial
+			return
+		}
+		if len(group) > 1 {
+			half := len(group) / 2
+			add(group[:half])
+			add(group[half:])
+		}
+	}
+	add(order)
+	return accepted
+}
+
+// outline returns the outline of the document as it is, parsed again with
+// the flavor the checks use. ok is false when that parse fails.
+func (c *fixChecker) outline() (docOutline, bool) {
+	if c.before == nil {
+		c.before = &docOutline{}
+		if doc, ok := reparse(c.ctx, c.ctx.File.Content); ok {
+			*c.before = outlineOf(doc)
+			c.ready = true
+			c.index = make(map[blockKey]int, len(c.before.blocks))
+			for idx, block := range c.before.blocks {
+				if _, seen := c.index[blockKey{block.kind, block.start}]; !seen {
+					c.index[blockKey{block.kind, block.start}] = idx
+				}
+			}
+			c.targets = fragmentTargets(c.before.blocks, nil, c.before.anchors)
+		}
+	}
+	return *c.before, c.ready
+}
+
+// documentKept reports whether applying edits changes the whole document
+// only as the intents say: the same front matter, the same blocks except
+// for the intents' targets, and fragment links that resolve as they did.
+func (c *fixChecker) documentKept(edits []fix.TextEdit, intents []fixIntent) bool {
+	before, ok := c.outline()
+	if !ok || len(edits) == 0 {
+		return false
+	}
+	content, ok := applyShiftedEdits(c.ctx.File.Content, edits, 0)
+	if !ok {
+		return false
+	}
+	doc, ok := reparse(c.ctx, content)
+	if !ok {
+		return false
+	}
+	after := outlineOf(doc)
+	if after.frontMatter != before.frontMatter {
+		return false
+	}
+	want, ok := expectedBlocks(before.blocks, intents)
+	if !ok || !slices.EqualFunc(want, after.blocks, sameBlock) {
+		return false
+	}
+	return fragmentsKept(before, want, after)
 }
 
 // editsKey identifies a fix by its edits.
@@ -168,12 +359,35 @@ func editsKey(edits []fix.TextEdit) string {
 	return key.String()
 }
 
-// fixesKeepDocument reports whether applying edits changes the document only
-// as the intents say.
+// fixesKeepDocument reports whether applying edits changes the blocks around
+// them only as the intents say. It parses only those blocks, so it is for
+// fixes whose effects stay there: front matter, reference definitions and
+// heading anchors elsewhere are out of its sight.
 func fixesKeepDocument(ctx *lint.RuleContext, edits []fix.TextEdit, intents []fixIntent) bool {
+	window, ok := checkWindow(ctx, edits, intents, nil)
+	return ok && slices.EqualFunc(window.want, window.after, sameBlock)
+}
+
+// windowCheck holds the summaries of the blocks around fixes: before the
+// fixes, as the fixes' intents say they should be, and after the fixes;
+// start and end bound those blocks in the document.
+type windowCheck struct {
+	before, want, after []blockSummary
+	start, end          int
+}
+
+// checkWindow parses the blocks around edits before and after applying them.
+// ok is false when the edits do not apply or the intents cannot be met.
+// cache, which may be nil, keeps the block children it looks up.
+func checkWindow(
+	ctx *lint.RuleContext,
+	edits []fix.TextEdit,
+	intents []fixIntent,
+	cache blockChildren,
+) (windowCheck, bool) {
 	file := ctx.File
 	if file == nil || file.Root == nil || len(edits) == 0 {
-		return false
+		return windowCheck{}, false
 	}
 	low, high := edits[0].StartOffset, edits[0].EndOffset
 	for _, edit := range edits[1:] {
@@ -186,13 +400,13 @@ func fixesKeepDocument(ctx *lint.RuleContext, edits []fix.TextEdit, intents []fi
 		}
 	}
 	if low < 0 || high > len(file.Content) {
-		return false
+		return windowCheck{}, false
 	}
 
 	// Parsed on their own, the blocks of a window that does not start the
 	// document must not be taken for front matter, so a blank line goes
 	// first.
-	start, end, looseDepth := fixWindow(file, low, high)
+	start, end, looseDepth := fixWindow(file, low, high, cache)
 	prefix := ""
 	if start > 0 {
 		prefix = "\n"
@@ -201,26 +415,67 @@ func fixesKeepDocument(ctx *lint.RuleContext, edits []fix.TextEdit, intents []fi
 	before := append([]byte(prefix), file.Content[start:end]...)
 	after, ok := applyShiftedEdits(before, edits, shift)
 	if !ok {
-		return false
+		return windowCheck{}, false
 	}
 	beforeDoc, ok := reparse(ctx, before)
 	if !ok {
-		return false
+		return windowCheck{}, false
 	}
 	afterDoc, ok := reparse(ctx, after)
 	if !ok {
-		return false
+		return windowCheck{}, false
 	}
-	beforeBlocks, afterBlocks := summarizeBlocks(beforeDoc, -shift), summarizeBlocks(afterDoc, 0)
+	window := windowCheck{
+		before: summarizeBlocks(beforeDoc, -shift),
+		after:  summarizeBlocks(afterDoc, 0),
+		start:  start,
+		end:    end,
+	}
 	if looseDepth >= 0 {
-		loosenLists(beforeBlocks, looseDepth)
-		loosenLists(afterBlocks, looseDepth)
+		loosenLists(window.before, looseDepth)
+		loosenLists(window.after, looseDepth)
 	}
-	want, ok := expectedBlocks(beforeBlocks, intents)
-	if !ok {
+	window.want, ok = expectedBlocks(window.before, intents)
+	return window, ok
+}
+
+// touchesFrontMatter reports whether edits could change the document's front
+// matter: they touch its first line, or that line could open front matter
+// and a line they edit could close it, before or after the edit.
+func touchesFrontMatter(file *mdast.FileSnapshot, edits []fix.TextEdit) bool {
+	if len(file.Lines) == 0 {
 		return false
 	}
-	return slices.EqualFunc(want, afterBlocks, sameBlock)
+	for _, edit := range edits {
+		if edit.StartOffset < file.Lines[0].EndOffset {
+			return true
+		}
+	}
+	opener := strings.TrimRight(strings.TrimPrefix(string(lint.RawLineContent(file, 1)), mdast.ByteOrderMark), " \t\r")
+	if opener != "---" && opener != "+++" && opener != "{" {
+		return false
+	}
+	closes := func(text string) bool {
+		for _, line := range strings.Split(text, "\n") {
+			switch strings.TrimRight(line, " \t\r") {
+			case "---", "...", "+++", "}":
+				return true
+			}
+		}
+		return false
+	}
+	for _, edit := range edits {
+		lineStart := lineStartOf(file, edit.StartOffset)
+		lineEnd := lineEndOf(file, edit.EndOffset)
+		if edit.EndOffset < len(file.Content) {
+			lineEnd = lineEndOf(file, edit.EndOffset+1)
+		}
+		edited := string(file.Content[lineStart:edit.StartOffset]) + edit.NewText + string(file.Content[edit.EndOffset:lineEnd])
+		if closes(string(file.Content[lineStart:lineEnd])) || closes(edited) {
+			return true
+		}
+	}
+	return false
 }
 
 // loosenLists marks the lists at depth as loose. A window that holds some of
@@ -242,7 +497,10 @@ func leafBlockAt(root *mdast.Node, offset int) *mdast.Node {
 		var next *mdast.Node
 		for child := node.FirstChild; child != nil; child = child.Next {
 			rng := child.SourceRange()
-			if !child.IsInline() && rng.StartOffset <= offset && offset < rng.EndOffset {
+			if rng.StartOffset > offset {
+				break // Children are in document order.
+			}
+			if !child.IsInline() && offset < rng.EndOffset {
 				next = child
 				break
 			}
@@ -270,14 +528,14 @@ func leafBlockAt(root *mdast.Node, offset int) *mdast.Node {
 // keep their blockquote markers, so the window parses with the same nesting.
 // looseDepth is the depth of the list whose items the window holds when that
 // list is loose, and -1 otherwise.
-func fixWindow(file *mdast.FileSnapshot, low, high int) (int, int, int) {
+func fixWindow(file *mdast.FileSnapshot, low, high int, cache blockChildren) (int, int, int) {
 	type level struct {
 		container   *mdast.Node
 		depth       int
 		children    []*mdast.Node
 		first, last int
 	}
-	children, first, last := blockSlice(file.Root, low, high)
+	children, first, last := blockSlice(cache.of(file.Root), low, high)
 	levels := []level{{container: file.Root, children: children, first: first, last: last}}
 	for {
 		current := levels[len(levels)-1]
@@ -289,7 +547,7 @@ func fixWindow(file *mdast.FileSnapshot, low, high int) (int, int, int) {
 		if child.Kind != mdast.NodeList && child.Kind != mdast.NodeBlockquote {
 			break
 		}
-		inner, innerFirst, innerLast := blockSlice(child, low, high)
+		inner, innerFirst, innerLast := blockSlice(cache.of(child), low, high)
 		levels = append(levels, level{
 			container: child, depth: current.depth + 1, children: inner, first: innerFirst, last: innerLast,
 		})
@@ -322,17 +580,32 @@ func fixWindow(file *mdast.FileSnapshot, low, high int) (int, int, int) {
 	return min(start, lineStartOf(file, low)), max(end, lineEndOf(file, high)), looseDepth
 }
 
-// blockSlice returns the block children of container and the indexes of the
-// first one that ends at or after low and of the last one that starts at or
-// before high. first is greater than last when the range lies between two
-// children.
-func blockSlice(container *mdast.Node, low, high int) ([]*mdast.Node, int, int) {
+// blockChildren caches the block children of containers. A nil cache keeps
+// nothing.
+type blockChildren map[*mdast.Node][]*mdast.Node
+
+// of returns the block children of container.
+func (cache blockChildren) of(container *mdast.Node) []*mdast.Node {
+	if children, found := cache[container]; found {
+		return children
+	}
 	var children []*mdast.Node
 	for child := container.FirstChild; child != nil; child = child.Next {
 		if !child.IsInline() {
 			children = append(children, child)
 		}
 	}
+	if cache != nil {
+		cache[container] = children
+	}
+	return children
+}
+
+// blockSlice returns children, the block children of a container, with the
+// indexes of the first one that ends at or after low and of the last one
+// that starts at or before high. first is greater than last when the range
+// lies between two children.
+func blockSlice(children []*mdast.Node, low, high int) ([]*mdast.Node, int, int) {
 	first := sort.Search(len(children), func(i int) bool { return children[i].SourceRange().EndOffset >= low })
 	last := sort.Search(len(children), func(i int) bool { return children[i].SourceRange().StartOffset > high }) - 1
 	return children, first, last
@@ -395,7 +668,7 @@ func reparse(ctx *lint.RuleContext, text []byte) (*mdast.FileSnapshot, bool) {
 	return snapshot, true
 }
 
-// blockSummary is what fixesKeepDocument compares of a block.
+// blockSummary is what the checks compare of a block.
 type blockSummary struct {
 	depth int
 	kind  mdast.NodeKind
@@ -403,6 +676,12 @@ type blockSummary struct {
 	// start is where the block starts in the document.
 	start int
 	atoms []textAtom
+	// plain is a heading's text content, from which its anchor is made.
+	plain string
+	// origin is the index, among the summaries of the document as it is,
+	// of the block this one is or comes from, or -1 for a heading that a fix
+	// makes of another kind of block.
+	origin int
 }
 
 // text returns the block's rendered text. Like CommonMark, it leaves out
@@ -449,10 +728,14 @@ func summarizeBlocks(doc *mdast.FileSnapshot, offset int) []blockSummary {
 				continue
 			}
 			summary := blockSummary{
-				depth: depth,
-				kind:  node.Kind,
-				attrs: blockAttrs(doc, node),
-				start: node.SourceRange().StartOffset + offset,
+				depth:  depth,
+				kind:   node.Kind,
+				attrs:  blockAttrs(doc, node),
+				start:  node.SourceRange().StartOffset + offset,
+				origin: len(blocks),
+			}
+			if node.Kind == mdast.NodeHeading {
+				summary.plain = headingPlainText(node)
 			}
 			render := &atomRenderer{doc: doc, offset: offset}
 			switch {
@@ -633,10 +916,6 @@ func (r *atomRenderer) text(node *mdast.Node) {
 // is not a leaf block among them, when two intents change one block in ways
 // that cannot be merged, or when a block an intent makes would split an atom.
 func expectedBlocks(before []blockSummary, intents []fixIntent) ([]blockSummary, bool) {
-	type blockKey struct {
-		kind  mdast.NodeKind
-		start int
-	}
 	index := make(map[blockKey]int, len(before))
 	for idx, block := range before {
 		if _, seen := index[blockKey{block.kind, block.start}]; !seen {
@@ -671,14 +950,22 @@ func expectedBlocks(before []blockSummary, intents []fixIntent) ([]blockSummary,
 			if !ok {
 				return nil, false
 			}
+			// A piece of a split paragraph that holds no text makes no block.
+			if !block.keep && block.kind == mdast.NodeParagraph && trimRendered(substitute(atoms, block.subs)) == "" {
+				continue
+			}
 			summary := blockSummary{
-				depth: target.depth,
-				kind:  block.kind,
-				attrs: block.attrs,
-				atoms: []textAtom{{text: substitute(atoms, block.subs)}},
+				depth:  target.depth,
+				kind:   block.kind,
+				attrs:  block.attrs,
+				atoms:  []textAtom{{text: substitute(atoms, block.subs)}},
+				origin: -1,
 			}
 			if block.keep {
 				summary.kind, summary.attrs = target.kind, target.attrs
+			}
+			if summary.kind == mdast.NodeHeading && target.kind == mdast.NodeHeading {
+				summary.origin = target.origin
 			}
 			want = append(want, summary)
 		}
@@ -687,8 +974,9 @@ func expectedBlocks(before []blockSummary, intents []fixIntent) ([]blockSummary,
 }
 
 // mergeWants combines what two fixes make of one block: either may keep it
-// as it is, and two text changes that keep its kind merge their subs. ok is
-// false for anything else.
+// as it is, two text changes that keep its kind merge their subs, and two
+// splits of it into consecutive pieces merge by refineSplits. ok is false for
+// anything else.
 func mergeWants(earlier, later []blockWant) ([]blockWant, bool) {
 	switch {
 	case len(earlier) == 0:
@@ -700,8 +988,65 @@ func mergeWants(earlier, later []blockWant) ([]blockWant, bool) {
 		merged.subs = append(slices.Clone(earlier[0].subs), later[0].subs...)
 		return []blockWant{merged}, true
 	default:
+		return refineSplits(earlier, later)
+	}
+}
+
+// refineSplits merges two splits of a block into consecutive pieces of its
+// source, such as a paragraph around a line that a fix makes a heading. The
+// merged split cuts the source at the boundaries of both, and each piece
+// becomes the block that either split makes of it other than a paragraph,
+// or a paragraph. ok is false when either list is not such a split, or when
+// both make something other than a paragraph of one piece.
+func refineSplits(first, second []blockWant) ([]blockWant, bool) {
+	if !isSplit(first) || !isSplit(second) {
 		return nil, false
 	}
+	var cuts []int
+	for _, block := range slices.Concat(first, second) {
+		cuts = append(cuts, block.from.StartOffset, block.from.EndOffset)
+	}
+	slices.Sort(cuts)
+	cuts = slices.Compact(cuts)
+	covering := func(split []blockWant, piece mdast.SourceRange) *blockWant {
+		for idx := range split {
+			if split[idx].from.StartOffset <= piece.StartOffset && piece.EndOffset <= split[idx].from.EndOffset {
+				return &split[idx]
+			}
+		}
+		return nil
+	}
+	var merged []blockWant
+	for idx := 0; idx+1 < len(cuts); idx++ {
+		piece := mdast.SourceRange{StartOffset: cuts[idx], EndOffset: cuts[idx+1]}
+		block := blockWant{kind: mdast.NodeParagraph, from: piece}
+		for _, made := range []*blockWant{covering(first, piece), covering(second, piece)} {
+			if made == nil || made.kind == mdast.NodeParagraph {
+				continue
+			}
+			if block.kind != mdast.NodeParagraph || made.from != piece {
+				return nil, false
+			}
+			block = *made
+		}
+		if last := len(merged) - 1; last >= 0 && block.kind == mdast.NodeParagraph && merged[last].kind == mdast.NodeParagraph {
+			merged[last].from.EndOffset = piece.EndOffset
+			continue
+		}
+		merged = append(merged, block)
+	}
+	return merged, true
+}
+
+// isSplit reports whether blocks split a block into consecutive pieces of
+// its source, none of which keeps the block as it is.
+func isSplit(blocks []blockWant) bool {
+	for idx, block := range blocks {
+		if block.keep || (idx > 0 && blocks[idx-1].from.EndOffset != block.from.StartOffset) {
+			return false
+		}
+	}
+	return len(blocks) > 0
 }
 
 // atomsWithin returns the atoms, or parts of linear atoms, whose source lies
@@ -784,6 +1129,212 @@ func substitute(atoms []textAtom, subs []textSub) string {
 	}
 	insertBefore(math.MaxInt)
 	return out.String()
+}
+
+// docOutline is what the document check compares of a whole document.
+type docOutline struct {
+	// frontMatter is the source of the front matter, if any.
+	frontMatter string
+	blocks      []blockSummary
+	// fragments holds the fragments of the document's links, and anchors
+	// the id and name attributes of its raw HTML.
+	fragments []string
+	anchors   []string
+}
+
+// htmlAttributePattern matches an href, id or name attribute and its value.
+var htmlAttributePattern = regexp.MustCompile(
+	`(?i)\b(href|id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>` + "`" + `]+))`)
+
+// outlineOf returns the outline of doc.
+func outlineOf(doc *mdast.FileSnapshot) docOutline {
+	outline := docOutline{blocks: summarizeBlocks(doc, 0)}
+	if lines := doc.FrontMatterLines; lines > 0 && lines <= len(doc.Lines) {
+		outline.frontMatter = string(doc.Content[:doc.Lines[lines-1].EndOffset])
+	}
+	//nolint:errcheck // Walk visitor never returns error.
+	_ = mdast.Walk(doc.Root, func(node *mdast.Node) error {
+		switch node.Kind {
+		case mdast.NodeLink:
+			if destination := lint.LinkDestination(node); strings.HasPrefix(destination, "#") {
+				outline.fragments = append(outline.fragments, fragmentName(destination[1:]))
+			}
+		case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
+			rng := node.SourceRange()
+			if rng.StartOffset < 0 || rng.EndOffset > len(doc.Content) {
+				return nil
+			}
+			for _, match := range htmlAttributePattern.FindAllSubmatch(doc.Content[rng.StartOffset:rng.EndOffset], -1) {
+				value := string(match[2]) + string(match[3]) + string(match[4])
+				switch strings.ToLower(string(match[1])) {
+				case "href":
+					if strings.HasPrefix(value, "#") {
+						outline.fragments = append(outline.fragments, fragmentName(value[1:]))
+					}
+				default:
+					outline.anchors = append(outline.anchors, value)
+				}
+			}
+		}
+		return nil
+	})
+	return outline
+}
+
+// fragmentName returns a link fragment with percent escapes decoded.
+func fragmentName(fragment string) string {
+	if decoded, err := url.PathUnescape(fragment); err == nil {
+		return decoded
+	}
+	return fragment
+}
+
+// fragmentsKept reports whether every fragment link of the document that
+// resolved before the fixes resolves to the same heading or HTML anchor
+// after them. Headings after the fixes are known by the origin of the block
+// in want that they match.
+func fragmentsKept(before docOutline, want []blockSummary, after docOutline) bool {
+	resolvedBefore := fragmentTargets(before.blocks, nil, before.anchors)
+	resolvedAfter := fragmentTargets(after.blocks, want, after.anchors)
+	for _, fragment := range slices.Concat(before.fragments, after.fragments) {
+		if target, resolved := resolvedBefore[fragment]; resolved && resolvedAfter[fragment] != target {
+			return false
+		}
+	}
+	return true
+}
+
+// fragmentTargets maps the anchors of the headings in blocks, made as GitHub
+// makes them, and the HTML anchors to what they point to. A heading is
+// named by its origin, taken from origins at the same index when given.
+func fragmentTargets(blocks, origins []blockSummary, anchors []string) map[string]string {
+	var headings []anchorHeading
+	for idx, block := range blocks {
+		if block.kind != mdast.NodeHeading {
+			continue
+		}
+		origin := block.origin
+		if origins != nil {
+			origin = origins[idx].origin
+		}
+		target := fmt.Sprintf("heading %d", origin)
+		if origin < 0 {
+			target = fmt.Sprintf("new heading %d", idx)
+		}
+		headings = append(headings, anchorHeading{target: target, plain: block.plain})
+	}
+	return anchorTargets(headings, anchors)
+}
+
+// anchorHeading is a heading as anchors see it: what it is, and its text.
+type anchorHeading struct {
+	target string
+	plain  string
+}
+
+// anchorTargets maps the anchors of headings, in document order, and the
+// HTML anchors to what they point to.
+func anchorTargets(headings []anchorHeading, anchors []string) map[string]string {
+	targets := make(map[string]string, len(headings)+len(anchors))
+	slugs := slugger{}
+	for _, heading := range headings {
+		targets[slugs.slug(heading.plain)] = heading.target
+	}
+	for _, anchor := range anchors {
+		if _, taken := targets[anchor]; !taken {
+			targets[anchor] = "anchor " + anchor
+		}
+	}
+	return targets
+}
+
+// slugger makes unique heading anchors as github-slugger does, counting the
+// anchors it has made.
+type slugger map[string]int
+
+// slug returns the anchor of a heading with text: the GitHub anchor of the
+// text, with "-1", "-2" and so on added when it is taken.
+func (s slugger) slug(text string) string {
+	base := githubAnchor(text)
+	result := base
+	for {
+		if _, taken := s[result]; !taken {
+			break
+		}
+		s[base]++
+		result = fmt.Sprintf("%s-%d", base, s[base])
+	}
+	s[result] = 0
+	return result
+}
+
+// githubAnchor returns the anchor GitHub makes of heading text: lowercase,
+// without characters other than letters, marks, numbers, connector
+// punctuation, hyphens and spaces, and with spaces turned into hyphens.
+func githubAnchor(text string) string {
+	var anchor strings.Builder
+	for _, char := range strings.ToLower(text) {
+		switch {
+		case char == ' ':
+			anchor.WriteByte('-')
+		case char == '-' || unicode.In(char, unicode.L, unicode.M, unicode.N, unicode.Pc):
+			anchor.WriteRune(char)
+		}
+	}
+	return anchor.String()
+}
+
+// headingPlainText returns a heading's text content, as GitHub reads it to
+// make its anchor: text with escapes and character references decoded, code
+// span content, and the text inside emphasis and links, without images and
+// raw HTML.
+func headingPlainText(heading *mdast.Node) string {
+	var text strings.Builder
+	var visit func(parent *mdast.Node)
+	visit = func(parent *mdast.Node) {
+		for node := parent.FirstChild; node != nil; node = node.Next {
+			switch node.Kind {
+			case mdast.NodeText:
+				if node.Inline != nil {
+					text.WriteString(decodeInline(node.Inline.Text))
+				}
+			case mdast.NodeCodeSpan:
+				if node.Inline != nil {
+					text.Write(node.Inline.Text)
+				}
+			case mdast.NodeSoftBreak, mdast.NodeHardBreak:
+				text.WriteByte(' ')
+			case mdast.NodeImage, mdast.NodeHTMLInline, mdast.NodeTaskCheckbox:
+			default:
+				visit(node)
+			}
+		}
+	}
+	visit(heading)
+	return strings.TrimSpace(text.String())
+}
+
+// decodeInline returns raw inline text with backslash escapes and character
+// references decoded.
+func decodeInline(text []byte) string {
+	var decoded strings.Builder
+	for idx := 0; idx < len(text); {
+		if text[idx] == '\\' && idx+1 < len(text) && isASCIIPunctuation(text[idx+1]) {
+			decoded.WriteByte(text[idx+1])
+			idx += 2
+			continue
+		}
+		if text[idx] == '&' {
+			if loc := characterReferenceStart.FindIndex(text[idx:]); loc != nil {
+				decoded.WriteString(html.UnescapeString(string(text[idx : idx+loc[1]])))
+				idx += loc[1]
+				continue
+			}
+		}
+		decoded.WriteByte(text[idx])
+		idx++
+	}
+	return decoded.String()
 }
 
 // rangesOverlap reports whether two ranges share a byte.

@@ -96,7 +96,7 @@ func (r *HRStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			if hrFixAllowed(ctx.File, node, pos.StartLine, expectedStyle) {
 				builder := fix.NewEditBuilder()
 				builder.ReplaceRange(rng.StartOffset, rng.StartOffset+len(marker), expectedStyle)
-				diagBuilder = diagBuilder.WithFix(checker.offer(builder, fixIntent{}))
+				diagBuilder = diagBuilder.WithFix(checker.offer(builder, fixIntent{local: true}))
 			}
 
 			diags = append(diags, diagBuilder.Build())

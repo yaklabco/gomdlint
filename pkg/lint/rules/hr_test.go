@@ -125,6 +125,11 @@ func TestHRStyleRule_SafeFix(t *testing.T) {
 			wantLines: []int{3},
 		},
 		{
+			name:      "no fix that closes front matter opened far above",
+			input:     "---\n\nText.\n\n***\n",
+			wantLines: []int{5},
+		},
+		{
 			name:      "no fix to a style that is not a horizontal rule",
 			input:     "***\n",
 			options:   map[string]any{"style": "==="},
@@ -146,6 +151,16 @@ func TestHRStyleRule_SafeFix(t *testing.T) {
 			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
 		})
 	}
+}
+
+// TestHRStyleRule_FixesSafeTogether verifies that MD035 offers only fixes that
+// are safe together: either fix alone keeps two thematic breaks, but both
+// would make front matter of the first five lines.
+func TestHRStyleRule_FixesSafeTogether(t *testing.T) {
+	input := "***\n\ntitle: abc\n\n***\n"
+	diags := applyRuleWithOptions(t, NewHRStyleRule(), input, map[string]any{"style": "---"})
+	assert.Equal(t, []int{1, 5}, diagLines(diags))
+	assert.Equal(t, "---\n\ntitle: abc\n\n***\n", applyAllEdits(t, input, diags))
 }
 
 // TestHRStyleRule_Containers verifies MD035 finds horizontal rules inside
@@ -232,16 +247,25 @@ func TestHRStyleRule_Fix(t *testing.T) {
 			wantFix:   "# Title\n\n---\n\nSome text\n\n---\n",
 		},
 		{
+			// A leading heading keeps the dashes from forming front matter.
 			name:      "single violation - consistent mode",
-			input:     "---\n\nSome text\n\n***\n",
+			input:     "# Title\n\n---\n\nSome text\n\n***\n",
 			wantDiags: 1,
-			wantFix:   "---\n\nSome text\n\n---\n",
+			wantFix:   "# Title\n\n---\n\nSome text\n\n---\n",
 		},
 		{
 			name:      "multiple violations - consistent mode",
-			input:     "---\n\nText\n\n***\n\nMore text\n\n___\n",
+			input:     "# Title\n\n---\n\nText\n\n***\n\nMore text\n\n___\n",
 			wantDiags: 2,
-			wantFix:   "---\n\nText\n\n---\n\nMore text\n\n---\n",
+			wantFix:   "# Title\n\n---\n\nText\n\n---\n\nMore text\n\n---\n",
+		},
+		{
+			// With "---" on the first line, a second "---" line would make
+			// front matter of the lines between, so no fix is offered.
+			name:      "single violation under a first-line rule",
+			input:     "---\n\nSome text\n\n***\n",
+			wantDiags: 1,
+			wantFix:   "---\n\nSome text\n\n***\n",
 		},
 		{
 			name:      "empty file",
@@ -268,9 +292,9 @@ func TestHRStyleRule_Fix(t *testing.T) {
 		},
 		{
 			name:      "explicit style config - mixed styles",
-			input:     "---\n\nText\n\n***\n\nMore\n\n___\n",
+			input:     "# Title\n\n---\n\nText\n\n***\n\nMore\n\n___\n",
 			wantDiags: 2,
-			wantFix:   "---\n\nText\n\n---\n\nMore\n\n---\n",
+			wantFix:   "# Title\n\n---\n\nText\n\n---\n\nMore\n\n---\n",
 			config:    map[string]any{"style": "---"},
 		},
 	}
@@ -302,7 +326,10 @@ func TestHRStyleRule_Fix(t *testing.T) {
 			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
 			assert.Equal(t, tt.wantFix, string(fixed))
 
-			// Verify idempotency (always)
+			// Verify idempotency when a fix was applied.
+			if string(fixed) == tt.input {
+				return
+			}
 			snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
 			require.NoError(t, err)
 			ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
