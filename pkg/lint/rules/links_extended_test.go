@@ -2,6 +2,8 @@ package rules
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +12,8 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -74,32 +78,45 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 		input string
 		want  []position
 		fixed string
+		// gfmFixed is the fixed output with the GFM flavor when it differs:
+		// the fix is withheld where the parser reads the literal differently.
+		gfmFixed string
 	}{
-		{"trailing period", "Visit https://example.com/path.\n", []position{{1, 7}}, "Visit <https://example.com/path>.\n"},
+		{"trailing period", "Visit https://example.com/path.\n", []position{{1, 7}}, "Visit <https://example.com/path>.\n", ""},
 		{"balanced parentheses", "See https://en.wikipedia.org/wiki/Foo_(bar) now\n", []position{{1, 5}},
-			"See <https://en.wikipedia.org/wiki/Foo_(bar)> now\n"},
+			"See <https://en.wikipedia.org/wiki/Foo_(bar)> now\n", ""},
 		{"inside parentheses", "Docs (see https://example.com/a) here\n", []position{{1, 11}},
-			"Docs (see <https://example.com/a>) here\n"},
+			"Docs (see <https://example.com/a>) here\n", ""},
 		{"unbalanced parenthesis before punctuation", "Docs (see https://example.com/a). here\n", []position{{1, 11}},
-			"Docs (see <https://example.com/a>). here\n"},
-		{"email with trailing period", "Mail user@example.com.\n", []position{{1, 6}}, "Mail <user@example.com>.\n"},
+			"Docs (see <https://example.com/a>). here\n", "Docs (see https://example.com/a). here\n"},
+		{"backslash in the path", "See https://example.com/a\\b here\n", []position{{1, 5}},
+			"See https://example.com/a\\b here\n", ""},
+		{"quote that ends the literal", "See https://example.com/\"q\" now\n", []position{{1, 5}},
+			"See <https://example.com/\"q>\" now\n", "See https://example.com/\"q\" now\n"},
+		{"path that runs into emphasis", "See https://example.com/a*b* now\n", []position{{1, 5}},
+			"See https://example.com/a*b* now\n", ""},
+		{"address after mailto", "Write mailto:user@example.com now\n", []position{{1, 14}},
+			"Write mailto:user@example.com now\n", ""},
+		{"digit in the last domain label of an email", "Mail user@example.co1 now\n", nil, "", ""},
+		{"underscore in the last two domain labels", "See https://example.a_b.com/a now\n", nil, "", ""},
+		{"email with trailing period", "Mail user@example.com.\n", []position{{1, 6}}, "Mail <user@example.com>.\n", ""},
 		{"entity after url", "Go to https://example.com/q?a=1&amp; now\n", []position{{1, 7}},
-			"Go to <https://example.com/q?a=1>&amp; now\n"},
-		{"inside emphasis", "Read *https://example.com* now\n", []position{{1, 7}}, "Read *<https://example.com>* now\n"},
-		{"inside strikethrough", "Old ~~see https://example.com~~ now\n", []position{{1, 11}}, "Old ~~see <https://example.com>~~ now\n"},
-		{"blockquote", "> Visit https://example.com\n", []position{{1, 9}}, "> Visit <https://example.com>\n"},
-		{"multibyte text before url", "中文中文 https://example.com\n", []position{{1, 14}}, "中文中文 <https://example.com>\n"},
-		{"url in link text", "[https://example.com](https://example.com)\n", nil, ""},
-		{"url in brackets", "[https://example.com]\n", nil, ""},
-		{"url after unclosed bracket", "[see https://example.com and more\n", nil, ""},
-		{"url after closed bracket", "[note] https://example.com\n", []position{{1, 8}}, "[note] <https://example.com>\n"},
-		{"url in code span", "Use `https://example.com` here\n", nil, ""},
-		{"url in inline html content", "Use <span>https://example.com</span> here\n", nil, ""},
-		{"url in html attribute", "Use <a href=\"https://example.com\">x</a> here\n", nil, ""},
-		{"url in html block", "<div>\nhttps://example.com\n</div>\n", nil, ""},
-		{"letter before protocol", "xhttps://example.com\n", nil, ""},
-		{"autolink", "<https://example.com>\n", nil, ""},
-		{"reference definition", "[ref]: https://example.com\n\n[ref]\n", nil, ""},
+			"Go to <https://example.com/q?a=1>&amp; now\n", ""},
+		{"inside emphasis", "Read *https://example.com* now\n", []position{{1, 7}}, "Read *<https://example.com>* now\n", ""},
+		{"inside strikethrough", "Old ~~see https://example.com~~ now\n", []position{{1, 11}}, "Old ~~see <https://example.com>~~ now\n", ""},
+		{"blockquote", "> Visit https://example.com\n", []position{{1, 9}}, "> Visit <https://example.com>\n", ""},
+		{"multibyte text before url", "中文中文 https://example.com\n", []position{{1, 14}}, "中文中文 <https://example.com>\n", ""},
+		{"url in link text", "[https://example.com](https://example.com)\n", nil, "", ""},
+		{"url in brackets", "[https://example.com]\n", nil, "", ""},
+		{"url after unclosed bracket", "[see https://example.com and more\n", nil, "", ""},
+		{"url after closed bracket", "[note] https://example.com\n", []position{{1, 8}}, "[note] <https://example.com>\n", ""},
+		{"url in code span", "Use `https://example.com` here\n", nil, "", ""},
+		{"url in inline html content", "Use <span>https://example.com</span> here\n", nil, "", ""},
+		{"url in html attribute", "Use <a href=\"https://example.com\">x</a> here\n", nil, "", ""},
+		{"url in html block", "<div>\nhttps://example.com\n</div>\n", nil, "", ""},
+		{"letter before protocol", "xhttps://example.com\n", nil, "", ""},
+		{"autolink", "<https://example.com>\n", nil, "", ""},
+		{"reference definition", "[ref]: https://example.com\n\n[ref]\n", nil, "", ""},
 	}
 
 	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
@@ -123,10 +140,134 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 				}
 				prepared, err := fix.PrepareEdits(edits, len(tt.input))
 				require.NoError(t, err)
-				assert.Equal(t, tt.fixed, string(fix.ApplyEdits([]byte(tt.input), prepared)))
+				want := tt.fixed
+				if flavor == config.FlavorGFM && tt.gfmFixed != "" {
+					want = tt.gfmFixed
+				}
+				assert.Equal(t, want, string(fix.ApplyEdits([]byte(tt.input), prepared)))
 			})
 		}
 	}
+}
+
+// TestNoBareURLsRule_FixesAgreeWithTheParser runs MD034 over generated autolink
+// literal shapes in several contexts, with both flavors. Every finding must be
+// a GFM autolink literal. A fix may only come where the parser read the
+// literal as plain text or as one autolink with exactly its span, since the
+// fix check sees only what the parser sees, and never for an address after
+// mailto: or xmpp:. Every fix must leave an autolink to the literal's address.
+func TestNoBareURLsRule_FixesAgreeWithTheParser(t *testing.T) {
+	shapes := []string{
+		`https://example.com/a\b`, `https://example.com/a\)b`, `https://example.com/a\_b`,
+		`https://example.com/a&amp;`, `https://example.com/a&amp;b`, `https://example.com/&copy;`,
+		`https://example.com/a&b;c`, `https://example.com/a&;`, `https://example.com/a&#38;`,
+		`https://example.com/(a(b)c)`, `https://example.com/a))`, `https://example.com/a(b))`,
+		`https://example.com/a).`, `https://example.com/((a)`,
+		`https://example.com/a?!.,`, `https://example.com/a...`, `https://example.com/a:;`, `https://example.com/a_~`,
+		`https://example.a_b.com/a`, `https://a_b.example.com/a`, `www.a_b.example.com`, `www.example.a_b.com`,
+		`user@example.co1`, `https://example.co1/a`, `user@example.1co`,
+		`www.example.com`, `www.example.com/a.`, `WWW.EXAMPLE.COM`,
+		`http://example.com`, `https://example.com`, `HTTPS://EXAMPLE.COM/A`, `https://`, `https://.`,
+		`mailto:user@example.com`, `xmpp:user@example.com/res`, `user@example.com`,
+		`user.name+tag@sub.example.org.`, `user@example.com_`, `user@exa_mple.com`, `user@example.c_m`,
+		`https://example.com/a<b`, `https://example.com/<x>`,
+		`https://example.com/"q"`, `'https://example.com'`, `"https://example.com"`,
+		`https://example.com/a*b*`, "https://example.com/a`b`",
+	}
+	layouts := []string{
+		"See %s here\n", "%s\n", "> Quote %s here\n", "- Item %s here\n", "# Heading %s\n",
+		"| %s | b |\n| - | - |\n", "Read *%s* now\n", "Docs (%s) here\n", "Say \"%s\" now\n",
+		mdast.ByteOrderMark + "%s here\n",
+	}
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		for _, layout := range layouts {
+			for _, shape := range shapes {
+				checkBareURLFixes(t, flavor, fmt.Sprintf(layout, shape))
+			}
+		}
+	}
+}
+
+// checkBareURLFixes checks MD034's findings and fixes on one document.
+func checkBareURLFixes(t *testing.T, flavor config.Flavor, doc string) {
+	t.Helper()
+	parse := func(source string) *mdast.FileSnapshot {
+		snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(source))
+		require.NoError(t, err)
+		return snapshot
+	}
+	snapshot := parse(doc)
+	cfg := config.NewConfig()
+	cfg.Flavor = flavor
+	diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+	require.NoError(t, err)
+	textStart := 0
+	if strings.HasPrefix(doc, mdast.ByteOrderMark) {
+		textStart = len(mdast.ByteOrderMark)
+	}
+	for _, diag := range diags {
+		start := snapshot.Lines[diag.StartLine-1].StartOffset + diag.StartColumn - 1
+		end := snapshot.Lines[diag.EndLine-1].StartOffset + diag.EndColumn - 1
+		var prev byte
+		if start > textStart {
+			prev = doc[start-1]
+		}
+		literalEnd, kind := mdscan.MatchAutolinkLiteral([]byte(doc), start, prev)
+		require.NotEqual(t, mdscan.LiteralNone, kind, "%s %q: finding at %d is no GFM literal", flavor, doc, start)
+		require.Equal(t, literalEnd, end, "%s %q: finding is not the whole GFM literal", flavor, doc)
+		if !diag.HasFix() {
+			continue
+		}
+		literal := doc[start:end]
+		before := strings.ToLower(doc[:start])
+		require.False(t, strings.HasSuffix(before, "mailto:") || strings.HasSuffix(before, "xmpp:"),
+			"%s %q: fix for an address after a scheme", flavor, doc)
+		require.True(t, readAsText(snapshot.Root, start, end),
+			"%s %q: fix for %q, which the parser reads differently", flavor, doc, literal)
+		require.Len(t, diag.FixEdits, 1)
+		edit := diag.FixEdits[0]
+		require.Equal(t, [2]int{start, end}, [2]int{edit.StartOffset, edit.EndOffset}, "%s %q: fix range", flavor, doc)
+		require.Equal(t, "<"+literal+">", edit.NewText)
+		// The parser records an email autolink's address without "mailto:".
+		fixed := parse(doc[:start] + edit.NewText + doc[end:])
+		require.Equal(t, literal, autolinkDestinationAt(fixed.Root, start, end+2),
+			"%s %q: the fix changes the address", flavor, doc)
+	}
+}
+
+// readAsText reports whether the parser read source[start:end] as plain text
+// or as one autolink with exactly that span: every inline node overlapping
+// the range is text, that autolink, or a container holding the whole range.
+func readAsText(root *mdast.Node, start, end int) bool {
+	plain := true
+	_ = mdast.Walk(root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		span := node.SourceRange()
+		if !node.IsInline() || span.EndOffset <= start || span.StartOffset >= end {
+			return nil
+		}
+		switch {
+		case node.Kind == mdast.NodeText:
+		case isAutolinkNode(node) && span.StartOffset == start && span.EndOffset == end:
+		case node.Kind != mdast.NodeLink && span.StartOffset <= start && span.EndOffset >= end:
+		default:
+			plain = false
+		}
+		return nil
+	})
+	return plain
+}
+
+// autolinkDestinationAt returns the destination of the autolink whose span is
+// source[start:end], or "" when there is none.
+func autolinkDestinationAt(root *mdast.Node, start, end int) string {
+	destination := ""
+	_ = mdast.Walk(root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if span := node.SourceRange(); isAutolinkNode(node) && span.StartOffset == start && span.EndOffset == end {
+			destination = node.Inline.Link.Destination
+		}
+		return nil
+	})
+	return destination
 }
 
 // TestNoBareURLsRule_WWWLiterals reports GFM "www." autolink literals like

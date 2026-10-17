@@ -36,17 +36,27 @@ func NewNoBareURLsRule() *NoBareURLsRule {
 type bareURL struct {
 	start, end int
 	kind       mdscan.LiteralKind
+	// fixable reports whether the parser read the literal the way GFM does
+	// (as text or as one autolink with the same span) and no scheme before
+	// it joins the address to a longer link, so the fix check can see what
+	// angle brackets do to it.
+	fixable bool
 }
 
 // Apply reports bare URLs and email addresses the way markdownlint does: the
-// GFM autolink literals in inline text, with trailing punctuation and
-// unbalanced parentheses left out. URLs in link text, code spans, autolinks,
-// raw HTML, the content of inline HTML elements, HTML blocks, code blocks, and
-// reference definitions are not bare. With the GFM flavor the parser has
-// already turned these literals into autolinks; with CommonMark they are text.
-// The fix wraps a URL or email address in angle brackets; a "www." address is
-// reported without a fix, because without a scheme the brackets would not
-// make an autolink and would show in the rendered text.
+// GFM autolink literals that a port of micromark's grammar finds in inline
+// text, with trailing punctuation and unbalanced parentheses left out. URLs in
+// link text, code spans, autolinks, raw HTML, the content of inline HTML
+// elements, HTML blocks, code blocks, and reference definitions are not bare.
+// The fix wraps a URL or email address in angle brackets. The fix check sees
+// only what the parser sees, so the fix is attached only where the parser read
+// the literal the same way: as text, which it is with CommonMark, or as one
+// autolink with the same span, which it usually is with GFM. goldmark ends
+// some literals elsewhere, before a backslash or after an unbalanced ")"
+// that punctuation follows, and such literals are reported without a fix. So
+// are "www." addresses, which without a scheme would not become autolinks and
+// would show the brackets, and addresses after mailto: or xmpp:, which GitHub
+// links together with the scheme.
 func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -57,7 +67,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return nil, ctx.Ctx.Err()
 		}
-		scan := &bareURLScan{file: ctx.File, content: ctx.File.Content, textStart: lint.LineTextOffset(ctx.File, 1)}
+		scan := newBareURLScan(ctx.File, container)
 		scan.visit(container)
 		urls = append(urls, scan.found...)
 	}
@@ -85,7 +95,7 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion)
-		if safe {
+		if safe && url.fixable {
 			builder := fix.NewEditBuilder()
 			builder.ReplaceRange(url.start, url.end, "<"+string(literal)+">")
 			diagBuilder = diagBuilder.WithFix(builder)
@@ -148,8 +158,30 @@ type bareURLScan struct {
 	// textStart is where the document's text starts: after a byte order
 	// mark, which the parser skips, so nothing comes before a literal there.
 	textStart int
-	brackets  int
-	found     []bareURL
+	// limit is where the container's inline content ends. A literal can run
+	// on past the text it starts in, over markup the parser read there.
+	limit int
+	// consumed is where the last literal ended; no literal starts before it.
+	consumed int
+	// parsed holds the spans of the autolinks the parser made from literals.
+	parsed   []mdast.SourceRange
+	brackets int
+	found    []bareURL
+}
+
+// newBareURLScan prepares a scan of a container's inline content.
+func newBareURLScan(file *mdast.FileSnapshot, container *mdast.Node) *bareURLScan {
+	scan := &bareURLScan{file: file, content: file.Content, textStart: lint.LineTextOffset(file, 1)}
+	if last := container.LastChild; last != nil {
+		scan.limit = last.SourceRange().EndOffset
+	}
+	_ = mdast.Walk(container, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if isLinkifiedAutolink(file.Content, node) {
+			scan.parsed = append(scan.parsed, node.SourceRange())
+		}
+		return nil
+	})
+	return scan
 }
 
 func (s *bareURLScan) visit(parent *mdast.Node) {
@@ -157,9 +189,10 @@ func (s *bareURLScan) visit(parent *mdast.Node) {
 	for idx := 0; idx < len(children); idx++ {
 		child := children[idx]
 		switch {
-		case child.Kind == mdast.NodeText && child.Inline != nil:
+		case s.isLiteralText(child):
 			last := idx
-			for last+1 < len(children) && isContiguousText(children[last], children[last+1]) {
+			for last+1 < len(children) && s.isLiteralText(children[last+1]) &&
+				children[last+1].SourceRange().StartOffset == children[last].SourceRange().EndOffset {
 				last++
 			}
 			s.scanText(children[idx].SourceRange().StartOffset, children[last].SourceRange().EndOffset)
@@ -168,17 +201,23 @@ func (s *bareURLScan) visit(parent *mdast.Node) {
 			s.visit(child)
 		case child.Kind == mdast.NodeHTMLInline:
 			idx = skipHTMLElementContent(s.file, children, idx)
-		case isAutolinkNode(child):
-			s.checkParsedLiteral(child)
 		}
 	}
 }
 
-// isContiguousText reports whether two siblings are text nodes that are
-// adjacent in the source, so a URL may continue from one into the next.
-func isContiguousText(prev, next *mdast.Node) bool {
-	return next.Kind == mdast.NodeText && next.Inline != nil &&
-		next.SourceRange().StartOffset == prev.SourceRange().EndOffset
+// isLiteralText reports whether a node's source is text in which the GFM
+// grammar looks for literals: a text node, or an autolink the parser made
+// from a literal. Adjacent ones are searched together, so a literal the
+// parser ended early or late is still read whole.
+func (s *bareURLScan) isLiteralText(node *mdast.Node) bool {
+	return (node.Kind == mdast.NodeText && node.Inline != nil) || isLinkifiedAutolink(s.content, node)
+}
+
+// isLinkifiedAutolink reports whether a node is an autolink the parser made
+// from a GFM literal rather than one written in angle brackets.
+func isLinkifiedAutolink(content []byte, node *mdast.Node) bool {
+	span := node.SourceRange()
+	return isAutolinkNode(node) && !span.IsEmpty() && content[span.StartOffset] != '<'
 }
 
 // skipHTMLElementContent returns the index of the closing tag that matches the
@@ -210,11 +249,13 @@ func skipHTMLElementContent(file *mdast.FileSnapshot, children []*mdast.Node, id
 	return idx
 }
 
-// scanText searches content[start:end] for autolink literals, skipping
-// backslash escapes and counting brackets.
+// scanText searches the text content[start:end] for autolink literals,
+// skipping backslash escapes and counting brackets. A literal may run on past
+// the text, over markup the parser read there; the parser then read it
+// differently, so it gets no fix.
 func (s *bareURLScan) scanText(start, end int) {
-	text := s.content[:end]
-	for pos := start; pos < end; pos++ {
+	text := s.content[:max(s.limit, end)]
+	for pos := max(start, s.consumed); pos < end; pos++ {
 		switch ch := text[pos]; {
 		case ch == '\\' && pos+1 < end && mdscan.IsASCIIPunct(text[pos+1]):
 			pos++
@@ -239,46 +280,39 @@ func (s *bareURLScan) scanText(start, end int) {
 		if kind == mdscan.LiteralNone {
 			continue
 		}
-		s.add(pos, literalEnd, kind)
+		fixable := literalEnd <= end && s.parsedAgrees(pos, literalEnd) &&
+			(kind != mdscan.LiteralEmail || !followsLinkScheme(s.content[:pos]))
+		s.add(pos, literalEnd, kind, fixable)
+		s.consumed = literalEnd
 		pos = literalEnd - 1
 	}
 }
 
-// checkParsedLiteral reports an autolink the parser created from a GFM
-// autolink literal: an http or https URL, a "www." address, or an email
-// address. Autolinks written in angle brackets and other schemes are not
-// reported. The literal ends where GFM ends it: goldmark keeps an unbalanced
-// ")" that punctuation follows, as in "(see https://example.com/a).", which
-// GFM and markdownlint leave out.
-func (s *bareURLScan) checkParsedLiteral(node *mdast.Node) {
-	span := node.SourceRange()
-	if s.brackets > 0 || span.IsEmpty() || s.content[span.StartOffset] == '<' {
-		return
+// parsedAgrees reports whether the parser read content[start:end] the way the
+// GFM grammar did: no autolink the parser made overlaps it, or one has
+// exactly its span.
+func (s *bareURLScan) parsedAgrees(start, end int) bool {
+	for _, span := range s.parsed {
+		overlaps := span.StartOffset < end && start < span.EndOffset
+		if overlaps && (span.StartOffset != start || span.EndOffset != end) {
+			return false
+		}
 	}
-	end := span.EndOffset
-	var prev byte
-	if span.StartOffset > s.textStart {
-		prev = s.content[span.StartOffset-1]
-	}
-	if gfmEnd, kind := mdscan.MatchAutolinkLiteral(s.content[:end], span.StartOffset, prev); kind != mdscan.LiteralNone {
-		end = min(end, gfmEnd)
-	}
-	text := strings.ToLower(string(s.content[span.StartOffset:end]))
-	switch {
-	case strings.HasPrefix(text, "http://"), strings.HasPrefix(text, "https://"):
-		s.add(span.StartOffset, end, mdscan.LiteralURL)
-	case strings.HasPrefix(text, "www."):
-		s.add(span.StartOffset, end, mdscan.LiteralWWW)
-	case !strings.Contains(text, "://") && strings.Contains(text, "@"):
-		s.add(span.StartOffset, end, mdscan.LiteralEmail)
-	}
+	return true
+}
+
+// followsLinkScheme reports whether text ends with "mailto:" or "xmpp:",
+// which GFM as GitHub renders it links together with the address after it.
+func followsLinkScheme(text []byte) bool {
+	tail := strings.ToLower(string(text[max(0, len(text)-len("mailto:")):]))
+	return strings.HasSuffix(tail, "mailto:") || strings.HasSuffix(tail, "xmpp:")
 }
 
 // add records a literal unless it sits between '<' and '>', which markdownlint
 // ignores (micromark issue 164).
-func (s *bareURLScan) add(start, end int, kind mdscan.LiteralKind) {
+func (s *bareURLScan) add(start, end int, kind mdscan.LiteralKind, fixable bool) {
 	if start > 0 && end < len(s.content) && s.content[start-1] == '<' && s.content[end] == '>' {
 		return
 	}
-	s.found = append(s.found, bareURL{start: start, end: end, kind: kind})
+	s.found = append(s.found, bareURL{start: start, end: end, kind: kind, fixable: fixable})
 }
