@@ -575,6 +575,14 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "- [ ] task details are long enough to wrap\n",
 		},
 		{
+			// The text of a textarea keeps its line breaks.
+			name:     "never wraps inside an inline textarea",
+			input:    "Before <textarea>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</textarea> after.\n",
+			maxLen:   80,
+			wantFix:  false,
+			wantText: "Before <textarea>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</textarea> after.\n",
+		},
+		{
 			name:     "no fix inside code",
 			input:    "```\nthis is code that is long and must not wrap at all\n```\n",
 			maxLen:   30,

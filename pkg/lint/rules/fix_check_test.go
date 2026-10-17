@@ -37,16 +37,35 @@ func parseForCheckWith(t *testing.T, flavor config.Flavor, input string) *mdast.
 	return snapshot
 }
 
+// fixCheckCase is one candidate edit and whether the check keeps it.
+type fixCheckCase struct {
+	name     string
+	flavor   config.Flavor
+	input    string
+	old, new string
+	// codeTabSpaces is the number of spaces a tab in code may become.
+	codeTabSpaces int
+	want          bool
+}
+
+// runFixCheckCases checks each edit on its own against its input.
+func runFixCheckCases(t *testing.T, tests []fixCheckCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flavor := tt.flavor
+			if flavor == "" {
+				flavor = config.FlavorGFM
+			}
+			snapshot := parseForCheckWith(t, flavor, tt.input)
+			check := newFixCheck(snapshot, flavor, fixCheckOptions{codeTabSpaces: tt.codeTabSpaces})
+			assert.Equal(t, tt.want, check.keeps([]fix.TextEdit{replaceOnce(t, tt.input, tt.old, tt.new)}))
+		})
+	}
+}
+
 func TestFixCheckKeeps(t *testing.T) {
-	tests := []struct {
-		name     string
-		flavor   config.Flavor
-		input    string
-		old, new string
-		// codeTabSpaces is the number of spaces a tab in code may become.
-		codeTabSpaces int
-		want          bool
-	}{
+	runFixCheckCases(t, []fixCheckCase{
 		{
 			name:  "wrapping a paragraph line",
 			input: "# Title\n\nSome words in a line here.\n\nNext paragraph.\n",
@@ -135,30 +154,6 @@ func TestFixCheckKeeps(t *testing.T) {
 			want:          false,
 		},
 		{
-			name:  "trailing spaces in a pre HTML block",
-			input: "<pre>\nalpha   \nbeta\n</pre>\n",
-			old:   "alpha   \n", new: "alpha\n",
-			want: false,
-		},
-		{
-			name:  "tab in an HTML block",
-			input: "<div>\n\tx\n</div>\n",
-			old:   "\tx", new: " x",
-			want: false,
-		},
-		{
-			name:  "spacing in an inline HTML attribute",
-			input: "A <span title=\"a  b\">x</span> here.\n",
-			old:   "a  b", new: "a b",
-			want: false,
-		},
-		{
-			name:  "trailing space inside an inline HTML tag",
-			input: "A <a href=\"x\"  \ntitle=\"y\">z</a> here.\n",
-			old:   "\"x\"  \n", new: "\"x\"\n",
-			want: false,
-		},
-		{
 			name:  "spacing in a link title",
 			input: "A [l](/u \"a  b\") here.\n",
 			old:   "a  b", new: "a b",
@@ -241,19 +236,110 @@ func TestFixCheckKeeps(t *testing.T) {
 			old:   "Text.", new: "Text.\n",
 			want: true,
 		},
-	}
+	})
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			flavor := tt.flavor
-			if flavor == "" {
-				flavor = config.FlavorGFM
-			}
-			snapshot := parseForCheckWith(t, flavor, tt.input)
-			check := newFixCheck(snapshot, flavor, fixCheckOptions{codeTabSpaces: tt.codeTabSpaces})
-			assert.Equal(t, tt.want, check.keeps([]fix.TextEdit{replaceOnce(t, tt.input, tt.old, tt.new)}))
-		})
-	}
+// TestFixCheckKeepsRawHTML covers raw HTML, which renderers pass through as
+// written, and the text of the elements it opens.
+func TestFixCheckKeepsRawHTML(t *testing.T) {
+	runFixCheckCases(t, []fixCheckCase{
+		{
+			name:  "trailing spaces in a pre HTML block",
+			input: "<pre>\nalpha   \nbeta\n</pre>\n",
+			old:   "alpha   \n", new: "alpha\n",
+			want: false,
+		},
+		{
+			name:  "tab in an HTML block",
+			input: "<div>\n\tx\n</div>\n",
+			old:   "\tx", new: " x",
+			want: false,
+		},
+		{
+			name:  "spacing in an inline HTML attribute",
+			input: "A <span title=\"a  b\">x</span> here.\n",
+			old:   "a  b", new: "a b",
+			want: false,
+		},
+		{
+			name:  "trailing space inside an inline HTML tag",
+			input: "A <a href=\"x\"  \ntitle=\"y\">z</a> here.\n",
+			old:   "\"x\"  \n", new: "\"x\"\n",
+			want: false,
+		},
+		{
+			// A textarea shows its text with the line break.
+			name:  "wrapping inside an inline textarea",
+			input: "Before <textarea>alpha beta gamma</textarea> after.\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: false,
+		},
+		{
+			name:  "wrapping inside an inline pre element",
+			input: "Before <pre>alpha beta</pre> after.\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping inside a span with a style",
+			input: "Before <span style=\"white-space: pre\">alpha beta</span> after.\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// CSS can change how any element treats whitespace.
+			name:  "wrapping inside nested inline elements",
+			input: "Before <b><i>alpha beta</i></b> after.\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// The element runs to the end of the paragraph.
+			name:  "wrapping after an unclosed inline element",
+			input: "Before <span>alpha beta gamma\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: false,
+		},
+		{
+			name:  "wrapping outside inline elements",
+			input: "Before <b>bold</b> alpha beta after.\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			// The end of the first paragraph closes the span.
+			name:  "wrapping in a paragraph after an unclosed span",
+			input: "Open <span>here\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			// A textarea takes all the HTML that follows it as its text.
+			name:  "wrapping in a paragraph after an unclosed textarea",
+			input: "Open <textarea>here\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping Markdown inside a styled HTML block",
+			input: "<div style=\"white-space: pre\">\n\nalpha beta\n\n</div>\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping Markdown inside a details block",
+			input: "<details>\n\nalpha beta\n\n</details>\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			// The div inside the script is script text, not an element.
+			name:  "wrapping after a script that holds a tag",
+			input: "<script>\nvar x = '<div style=\"a\">';\n</script>\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+	})
 }
 
 // TestFixCheckWholeDocument checks the effects a fix can have far from the

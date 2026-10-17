@@ -348,10 +348,11 @@ func frontMatterLength(content []byte) int {
 // strings and content, table cell alignment, and inline content with its
 // hard breaks, emphasis, links and images with their resolved destinations
 // and titles, code spans and task checkboxes. Raw HTML, code, link titles
-// and image descriptions are kept as written; runs of the whitespace HTML
-// collapses (spaces, tabs, line endings and form feeds) collapse to one
-// space in other text. Code may only differ in tabs that opts allow to
-// become spaces.
+// and image descriptions are kept as written, and so is text inside an HTML
+// element that may keep whitespace (see htmlElements); runs of the
+// whitespace HTML collapses (spaces, tabs, line endings and form feeds)
+// collapse to one space in other text. Code may only differ in tabs that
+// opts allow to become spaces.
 func goldmarkSignature(doc gmast.Node, source []byte, opts fixCheckOptions) string {
 	var out strings.Builder
 	sig := signatureWriter{source: source, opts: opts, out: &out, anchors: make(map[string]int)}
@@ -368,6 +369,7 @@ type signatureWriter struct {
 	out     *strings.Builder
 	text    []byte
 	anchors map[string]int
+	html    htmlElements
 }
 
 func (s *signatureWriter) blocks(parent gmast.Node) {
@@ -405,6 +407,9 @@ func (s *signatureWriter) block(node gmast.Node) {
 			raw += "\n" + strings.TrimRight(string(node.ClosureLine.Value(s.source)), "\r\n")
 		}
 		fmt.Fprintf(s.out, "B(%q", raw)
+		for _, tag := range scanHTMLTags(raw) {
+			s.html.apply(tag, false)
+		}
 	case *gmextast.TableCell:
 		fmt.Fprintf(s.out, "D%d(", node.Alignment)
 		s.inlineContent(node)
@@ -500,13 +505,16 @@ func linesText(lines *gmtext.Segments, source []byte) string {
 	return strings.TrimSuffix(strings.TrimSuffix(text.String(), "\n"), "\r")
 }
 
-// inlineContent writes the inline content of a block, trimmed.
+// inlineContent writes the inline content of a block, trimmed. The end of
+// the block closes the elements its inline HTML opened.
 func (s *signatureWriter) inlineContent(parent gmast.Node) {
 	outer := s.out
 	var inner strings.Builder
 	s.out = &inner
+	depth := len(s.html.open)
 	s.inlines(parent)
 	s.flush()
+	s.html.closeInline(depth)
 	s.out = outer
 	s.out.WriteString(strings.Trim(inner.String(), " "))
 }
@@ -521,12 +529,19 @@ func (s *signatureWriter) inline(node gmast.Node) {
 	switch node := node.(type) {
 	case *gmast.Text:
 		value := node.Value(s.source)
+		exact := s.html.exact()
 		switch {
 		case node.HardLineBreak():
 			// Renderers drop the spaces before a line break; goldmark
-			// leaves some of them in the text with GFM extensions.
-			s.text = bytes.TrimRight(append(s.text, value...), " \t")
+			// leaves some of them in the text with GFM extensions. Where
+			// whitespace shows, what goldmark writes is kept.
+			s.text = append(s.text, value...)
+			if !exact {
+				s.text = bytes.TrimRight(s.text, " \t")
+			}
 			s.token("\x00br")
+		case node.SoftLineBreak() && exact:
+			s.text = append(append(s.text, value...), '\n')
 		case node.SoftLineBreak():
 			s.text = append(append(s.text, value...), ' ')
 		default:
@@ -553,6 +568,9 @@ func (s *signatureWriter) inline(node gmast.Node) {
 			raw.Write(segment.Value(s.source))
 		}
 		s.token(fmt.Sprintf("\x00html%q", raw.String()))
+		for _, tag := range scanHTMLTags(raw.String()) {
+			s.html.apply(tag, true)
+		}
 	case *gmast.AutoLink:
 		s.token(fmt.Sprintf("\x00autolink%q", node.URL(s.source)))
 	case *gmast.Link:
@@ -608,9 +626,14 @@ func (s *signatureWriter) token(token string) {
 }
 
 // flush writes buffered text with every run of HTML whitespace collapsed to
-// one space.
+// one space, or as it is inside an element that may keep whitespace.
 func (s *signatureWriter) flush() {
 	if len(s.text) == 0 {
+		return
+	}
+	if s.html.exact() {
+		fmt.Fprintf(s.out, "\x00exact%q", s.text)
+		s.text = s.text[:0]
 		return
 	}
 	space := false
