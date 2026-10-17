@@ -32,6 +32,7 @@ func TestDetect_WholeBlockEvidence(t *testing.T) {
 		{"diff without a final newline marker", "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", "diff"},
 		{"two file sections", "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n--- a/g\n+++ b/g\n@@ -1 +1 @@\n-c\n+d\n", "diff"},
 		{"dockerfile", "FROM golang:1.21\nWORKDIR /app\nCOPY . .\nRUN go build", "dockerfile"},
+		{"dockerfile with a lowercase stage keyword", "FROM golang:1.21 as build\nRUN go build\n", "dockerfile"},
 		{"dockerfile with comments and continuations", "# build stage\nFROM golang:1.21 AS build\nRUN apt-get update && \\\n    apt-get install -y git\nCMD [\"app\"]\n", "dockerfile"},
 	}
 

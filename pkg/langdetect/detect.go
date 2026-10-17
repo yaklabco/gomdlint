@@ -207,8 +207,8 @@ func hunkEnd(lines []string, idx, oldCount, newCount int) (int, bool) {
 
 var (
 	// dockerFrom matches a FROM instruction: an optional platform, an image
-	// reference, and an optional stage name.
-	dockerFrom = regexp.MustCompile(`^FROM\s+(?:--platform=\S+\s+)?[\w.\-/:@${}]+(?:\s+AS\s+[\w.\-]+)?\s*$`)
+	// reference, and an optional stage name after AS, in either case.
+	dockerFrom = regexp.MustCompile(`^FROM\s+(?:--platform=\S+\s+)?[\w.\-/:@${}]+(?:\s+(?i:as)\s+[\w.\-]+)?\s*$`)
 	// dockerInstruction matches the start of any other instruction.
 	dockerInstruction = regexp.MustCompile(
 		`^(?:FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)(?:\s|$)`)
