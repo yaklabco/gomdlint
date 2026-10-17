@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -216,10 +217,16 @@ func resolvePath(path string) string {
 }
 
 // resolveFile resolves every symbolic link in path and returns the absolute
-// path of the file that path names.
+// path of the file that path names. A missing or unreadable path fails with
+// the fsutil error that reading it would give, so it is categorized alike.
 func resolveFile(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "", fmt.Errorf("%w: %s: %w", fsutil.ErrNotFound, path, err)
+	case errors.Is(err, fs.ErrPermission):
+		return "", fmt.Errorf("%w: %s: %w", fsutil.ErrPermissionDenied, path, err)
+	case err != nil:
 		return "", fmt.Errorf("resolve %s: %w", path, err)
 	}
 	target, err := filepath.Abs(resolved)
