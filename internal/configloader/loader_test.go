@@ -340,7 +340,7 @@ unknown_section: 1
 	want := []string{
 		`:1: unknown key "flavour" (did you mean "flavor"?)`,
 		`:2: unknown key "ignor" (did you mean "ignore"?)`,
-		`:4: "format" cannot be set in a config file; use the --format flag`,
+		`:4: "format" cannot be set in a config file; use the --format flag or the GOMDLINT_FORMAT environment variable`,
 		`:6: unknown key "backups.enable" (did you mean "backups.enabled"?)`,
 		`:9: unknown key "rules.MD013.line_length"; rule options belong under "rules.MD013.options"`,
 		`:13: unknown key "unknown_section"`,
@@ -353,6 +353,32 @@ unknown_section: 1
 	}
 	if len(result.Warnings) != len(want) {
 		t.Errorf("expected %d warnings, got %d:\n%s", len(want), len(result.Warnings), joined)
+	}
+}
+
+// TestLoad_CommandLineOnlyKeysPointAtTheirSettings covers settings that
+// config files cannot hold. The warning names the flag, and the environment
+// variable that sets a lasting default where there is one.
+func TestLoad_CommandLineOnlyKeysPointAtTheirSettings(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "rule_format: id\nenable_rules: [MD001]\n")
+	if err != nil {
+		t.Fatalf("command-line-only keys must not fail loading: %v", err)
+	}
+
+	want := []string{
+		`:1: "rule_format" cannot be set in a config file; use the --rule-format flag or the GOMDLINT_RULE_FORMAT environment variable`,
+		`:2: "enable_rules" cannot be set in a config file; use the --enable flag` + "\n",
+	}
+	joined := strings.Join(result.Warnings, "\n") + "\n"
+	for _, fragment := range want {
+		if !strings.Contains(joined, fragment) {
+			t.Errorf("warnings do not contain %q:\n%s", fragment, joined)
+		}
+	}
+	if result.Config.RuleFormat != config.RuleFormatName {
+		t.Errorf("rule format = %q, want the default %q", result.Config.RuleFormat, config.RuleFormatName)
 	}
 }
 
