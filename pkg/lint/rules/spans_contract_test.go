@@ -206,6 +206,18 @@ func TestReferenceLabelsUseTheirSourceText(t *testing.T) {
 	require.Empty(t, applyCompatibilityRule(t, NewLinkImageRefDefsRule(), input))
 }
 
+func TestQuotedMultilineReferencesUseTheirDefinitions(t *testing.T) {
+	for _, input := range []string{
+		"# Title\n\n> See [a\n> b][].\n\n[a b]: https://example.com\n",
+		"# Title\n\n> See [text][a\n> b].\n\n[a b]: https://example.com\n",
+	} {
+		t.Run(input, func(t *testing.T) {
+			require.Empty(t, applyCompatibilityRule(t, NewReferenceLinkImagesRule(), input))
+			require.Empty(t, applyCompatibilityRule(t, NewLinkImageRefDefsRule(), input))
+		})
+	}
+}
+
 func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
 	input := "# Title\n\n1) one\n1) two\n3) three\n"
 	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)

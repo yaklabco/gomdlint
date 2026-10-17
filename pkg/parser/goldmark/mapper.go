@@ -860,7 +860,7 @@ func (m *mapper) setLinkSpans(node *mdast.Node, gmNode ast.Node) {
 		content := clampTo(mdast.SourceRange{StartOffset: m.abs(extent.contentStart), EndOffset: m.abs(max(extent.contentStart, extent.contentEnd))}, full)
 		setSpans(node, full, content)
 		if node.Inline != nil && node.Inline.Link != nil {
-			node.Inline.Link.ReferenceStyle, node.Inline.Link.ReferenceLabel = m.referenceStyle(full, content)
+			node.Inline.Link.ReferenceStyle, node.Inline.Link.ReferenceLabel = m.referenceStyle(gmNode, full, content)
 		}
 		return
 	}
@@ -871,23 +871,48 @@ func (m *mapper) setLinkSpans(node *mdast.Node, gmNode ast.Node) {
 // closing bracket of its text: "(" for an inline link, "[label]" for a full
 // reference, "[]" for a collapsed one and nothing for a shortcut. Goldmark
 // only builds reference links whose label is defined.
-func (m *mapper) referenceStyle(full, content mdast.SourceRange) (mdast.ReferenceStyle, string) {
+func (m *mapper) referenceStyle(gmNode ast.Node, full, content mdast.SourceRange) (mdast.ReferenceStyle, string) {
 	closing := content.EndOffset
 	if closing >= full.EndOffset || m.content[closing] != ']' {
 		return mdast.RefStyleInline, ""
 	}
 	rest := m.content[closing+1 : full.EndOffset]
-	label := string(m.content[content.StartOffset:content.EndOffset])
 	switch {
 	case len(rest) == 0:
-		return mdast.RefStyleShortcut, label
+		return mdast.RefStyleShortcut, m.blockText(gmNode, content)
 	case string(rest) == "[]":
-		return mdast.RefStyleCollapsed, label
+		return mdast.RefStyleCollapsed, m.blockText(gmNode, content)
 	case rest[0] == '[' && rest[len(rest)-1] == ']':
-		return mdast.RefStyleFull, string(rest[1 : len(rest)-1])
+		label := mdast.SourceRange{StartOffset: closing + 2, EndOffset: full.EndOffset - 1}
+		return mdast.RefStyleFull, m.blockText(gmNode, label)
 	default:
 		return mdast.RefStyleInline, ""
 	}
+}
+
+// blockText returns the text of span as the enclosing block's inline
+// content holds it: its line segments, which leave out the container
+// prefix of each continuation line (such as "> " in a blockquote) and the
+// indentation goldmark trims. Markdown punctuation is kept.
+func (m *mapper) blockText(gmNode ast.Node, span mdast.SourceRange) string {
+	block := gmNode.Parent()
+	for block != nil && block.Type() != ast.TypeBlock {
+		block = block.Parent()
+	}
+	if block == nil || block.Lines().Len() == 0 {
+		return string(m.content[span.StartOffset:span.EndOffset])
+	}
+	var label strings.Builder
+	lines := block.Lines()
+	for idx := range lines.Len() {
+		segment := lines.At(idx)
+		start := max(m.abs(segment.Start), span.StartOffset)
+		end := min(m.abs(segment.Stop), span.EndOffset)
+		if start < end {
+			label.Write(m.content[start:end])
+		}
+	}
+	return label.String()
 }
 
 // setRawHTMLSpans gives inline HTML its span from its segments.

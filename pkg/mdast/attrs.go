@@ -173,8 +173,10 @@ type LinkAttrs struct {
 
 	// ReferenceLabel is the label of a reference-style link as written in
 	// the source, before normalization: the second bracket pair of a full
-	// reference, or the link text of a collapsed or shortcut one.
-	// Empty for inline links and autolinks.
+	// reference, or the link text of a collapsed or shortcut one. A label
+	// that spans lines leaves out the container prefix of each continuation
+	// line, such as "> " in a blockquote. Empty for inline links and
+	// autolinks.
 	ReferenceLabel string
 
 	// ReferenceStyle indicates the syntax style used, as read from the source.

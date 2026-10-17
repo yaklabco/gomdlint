@@ -549,6 +549,30 @@ func TestStrikethroughNode(t *testing.T) {
 	require.Nil(t, strike.Ext)
 }
 
+func TestQuotedMultilineReferenceLabels(t *testing.T) {
+	// Labels that span lines inside a container do not include the
+	// container prefix of their continuation lines.
+	tests := []struct {
+		input string
+		style mdast.ReferenceStyle
+		label string
+	}{
+		{"> [a\n> b][]\n\n[a b]: /u\n", mdast.RefStyleCollapsed, "a\nb"},
+		{"> [a\n> b]\n\n[a b]: /u\n", mdast.RefStyleShortcut, "a\nb"},
+		{"> [text][a\n> b]\n\n[a b]: /u\n", mdast.RefStyleFull, "a\nb"},
+		{"- [x *y*\n  z][]\n\n[x *y* z]: /u\n", mdast.RefStyleCollapsed, "x *y*\nz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			link := nthNode(file.Root, mdast.NodeLink, 0)
+			require.NotNil(t, link)
+			require.Equal(t, tt.style, link.Inline.Link.ReferenceStyle)
+			require.Equal(t, tt.label, link.Inline.Link.ReferenceLabel)
+		})
+	}
+}
+
 func TestExtendedAutolinkSpans(t *testing.T) {
 	input := "Visit www.example.com, (https://example.org/path) or me@example.com.\n"
 	assertSpans(t, parseForSpans(t, FlavorGFM, input), []spanExpectation{
