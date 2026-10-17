@@ -1,0 +1,3 @@
+positions.input.md:5:3 warning Fenced code block has no language specified (MD040/fenced-code-language)
+positions.input.md:11:3 warning Fenced code block has no language specified (MD040/fenced-code-language)
+positions.input.md:17:1 warning Fenced code block has no language specified (MD040/fenced-code-language)

@@ -1,0 +1,2 @@
+indented_first.input.md:9:1 warning Code block style 'fenced' does not match expected 'indented' (MD046/code-block-style)
+indented_first.input.md:15:3 warning Code block style 'fenced' does not match expected 'indented' (MD046/code-block-style)
