@@ -6,7 +6,6 @@ import (
 
 	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // ValidationError represents a configuration validation error.
@@ -193,19 +192,11 @@ func validateRules(cfg *config.Config, result *ValidationResult) {
 	validateRuleMap("rule_defaults", cfg.RuleDefaults, result)
 }
 
+// validateRuleMap checks the settings of each rule in one section. Keys that
+// name no rule are not checked here: the unknown key warnings of the file
+// that holds them name its path and line.
 func validateRuleMap(section string, rules map[string]config.RuleConfig, result *ValidationResult) {
-	registry := lint.DefaultRegistry
-
 	for ruleID, ruleCfg := range rules {
-		// Check if rule exists in registry
-		if _, exists := registry.Get(ruleID); !exists {
-			result.Warnings = append(result.Warnings, ValidationError{
-				Field:   section + "." + ruleID,
-				Value:   ruleID,
-				Message: fmt.Sprintf("unknown rule %q; it will be ignored", ruleID),
-			})
-		}
-
 		// Validate rule severity
 		if ruleCfg.Severity != nil && !knownSeverities[*ruleCfg.Severity] {
 			result.Errors = append(result.Errors, ValidationError{

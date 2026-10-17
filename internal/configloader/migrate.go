@@ -193,9 +193,11 @@ func processSpecialKeys(raw map[string]any, result *MigrationResult) {
 }
 
 // processRuleKey processes a single key from the markdownlint config: a rule
-// ID, name or alias, or a markdownlint tag, in any case.
+// ID, name or alias, or a markdownlint tag, in any case. Like markdownlint,
+// it reads the key whole, so a key that is empty or holds whitespace names
+// nothing.
 func processRuleKey(registry *lint.Registry, cfg *config.Config, key string, value any, result *MigrationResult) {
-	if rule, ok := registry.Lookup(key); ok {
+	if rule, ok := registry.Lookup(key); ok && lint.IsSingleWord(key) {
 		cfg.Rules[rule.ID()] = config.MarkdownlintRuleConfig(rule.ID(), value)
 		return
 	}
@@ -207,9 +209,8 @@ func processRuleKey(registry *lint.Registry, cfg *config.Config, key string, val
 		return
 	}
 
-	// Unknown key
-	result.Warnings = append(result.Warnings,
-		fmt.Sprintf("unknown key %q; skipping", key))
+	// markdownlint ignores keys it does not know.
+	result.Warnings = append(result.Warnings, registry.UnknownKeyText(key)+"; it is ignored")
 }
 
 // isMarkdownlintTag reports whether key is a markdownlint tag.
@@ -220,8 +221,12 @@ func isMarkdownlintTag(registry *lint.Registry, key string) bool {
 // markdownlintTagRuleIDs returns the IDs of the markdownlint rules that the
 // markdownlint tag covers, in ID order. gomdlint files its own rules under
 // markdownlint's tags too, but in a markdownlint config a tag means only
-// markdownlint's rules, because markdownlint never runs gomdlint's.
+// markdownlint's rules, because markdownlint never runs gomdlint's. A tag
+// with surrounding whitespace is no tag there.
 func markdownlintTagRuleIDs(registry *lint.Registry, tag string) []string {
+	if !lint.IsSingleWord(tag) {
+		return nil
+	}
 	var ruleIDs []string
 	for _, rule := range registry.RulesByTag(tag) {
 		if !lint.IsGomdlintOnlyRule(rule.ID()) {

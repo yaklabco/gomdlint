@@ -10,6 +10,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/internal/editdistance"
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // maxSuggestionDistance is the largest edit distance at which an unknown key
@@ -49,8 +50,9 @@ func yamlKeys(value any) []string {
 // unknownKeyWarnings reports keys in the parsed document of a configuration
 // file that gomdlint does not read. YAML decoding drops them silently, so a
 // typo such as "flavour" would otherwise leave the default in force without
-// a trace.
-func unknownKeyWarnings(path string, doc *yaml.Node) []string {
+// a trace. Keys under rules and rule_defaults that name no rule in registry
+// are reported too.
+func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []string {
 	if len(doc.Content) == 0 {
 		return nil // An empty file has no keys.
 	}
@@ -89,6 +91,9 @@ func unknownKeyWarnings(path string, doc *yaml.Node) []string {
 			})
 		case "rules", "rule_defaults":
 			forEachKey(value, func(rule, settings *yaml.Node) {
+				if _, known := registry.Lookup(rule.Value); !known {
+					warn(rule, unknownRuleMessage(registry, rule.Value))
+				}
 				prefix := name + "." + rule.Value + "."
 				forEachKey(settings, func(nested, _ *yaml.Node) {
 					if !slices.Contains(ruleKeys, nested.Value) {
@@ -101,6 +106,23 @@ func unknownKeyWarnings(path string, doc *yaml.Node) []string {
 	})
 
 	return warnings
+}
+
+// unknownRuleMessage describes key, a key under rules or rule_defaults that
+// names no rule, offering the closest rules. Those keys take rules, not
+// tags, so a tag gets the names of the rules it covers instead.
+func unknownRuleMessage(registry *lint.Registry, key string) string {
+	tagged := registry.RulesByTag(key)
+	if len(tagged) == 0 {
+		return lint.UnknownRuleText(key, registry.ClosestRules(key)) + "; it is ignored"
+	}
+
+	names := make([]string, len(tagged))
+	for idx, rule := range tagged {
+		names[idx] = rule.Name()
+	}
+	return fmt.Sprintf("unknown rule %q (it is a tag; configure its rules instead: %s); it is ignored",
+		key, strings.Join(names, ", "))
 }
 
 // unknownKeyMessage describes an unknown key, suggesting the closest known

@@ -315,7 +315,7 @@ func loadConfigFile(path string) (*config.Config, []string, error) {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
 
-	return cfg, unknownKeyWarnings(path, doc), nil
+	return cfg, unknownKeyWarnings(path, doc, lint.DefaultRegistry), nil
 }
 
 // parseYAMLDocument parses content into a YAML document node. Decoding the
@@ -456,7 +456,8 @@ func isTerminal(stream any) bool {
 // normalizeRuleKeys converts the rule names, aliases and differently cased
 // IDs of one configuration layer to canonical IDs, so layers merge by rule
 // whatever key each uses. A rule configured under two keys in one layer is
-// an error: either key could win, depending on map order.
+// an error: either key could win, depending on map order. Keys that name no
+// rule stay as they are; the file's unknown key warnings report them.
 func normalizeRuleKeys(cfg *config.Config, registry *lint.Registry) error {
 	rules, err := normalizeRuleMap("rules", cfg.Rules, registry)
 	if err != nil {
@@ -486,7 +487,7 @@ func normalizeRuleMap(
 	for _, key := range slices.Sorted(maps.Keys(rules)) {
 		rule, found := registry.Lookup(key)
 		if !found {
-			// Unknown rule: keep it as-is; validation warns about it.
+			// Unknown rule: keep it as-is, so that it configures nothing.
 			normalized[key] = rules[key]
 			continue
 		}
@@ -494,7 +495,7 @@ func normalizeRuleMap(
 
 		if previous, duplicate := seen[canonicalID]; duplicate {
 			return nil, fmt.Errorf("%s: %q and %q both configure %s; keep one of them",
-				section, previous, key, canonicalID)
+				section, previous, key, lint.RuleLabel(canonicalID, rule.Name()))
 		}
 
 		seen[canonicalID] = key

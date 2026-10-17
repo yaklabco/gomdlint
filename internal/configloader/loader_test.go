@@ -10,6 +10,8 @@ import (
 	"testing"
 	"unicode/utf16"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // Register rules
@@ -660,6 +662,63 @@ func TestLoad_WarnsAboutUnknownKeysInJSON(t *testing.T) {
 	}
 }
 
+// relativeWarnings returns warnings with the directory of the config file,
+// the part before name, cut off.
+func relativeWarnings(warnings []string, name string) []string {
+	relative := make([]string, len(warnings))
+	for idx, warning := range warnings {
+		relative[idx] = warning[max(strings.Index(warning, name), 0):]
+	}
+	return relative
+}
+
+// TestLoad_WarnsAboutUnknownRules covers keys under rules and rule_defaults
+// that name no rule. The warning names the file and line of the key and the
+// closest rule. Those keys take rules only, so a typo is never offered a
+// tag, and a tag gets the names of its rules.
+func TestLoad_WarnsAboutUnknownRules(t *testing.T) {
+	t.Parallel()
+
+	content := `rules:
+  no-trailling-spaces:
+    enabled: false
+  blockquote: false
+  tables: false
+  MD009:
+    severity: error
+rule_defaults:
+  line-lenght:
+    enabled: false
+`
+	result, err := loadProject(t, content)
+	if err != nil {
+		t.Fatalf("unknown rules must not fail loading: %v", err)
+	}
+
+	want := []string{
+		`.gomdlint.yml:2: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+		`.gomdlint.yml:4: unknown rule "blockquote" (it is a tag; configure its rules instead: ` +
+			`no-multiple-space-blockquote, no-blanks-blockquote); it is ignored`,
+		`.gomdlint.yml:5: unknown rule "tables" (did you mean "blanks-around-tables"?); it is ignored`,
+		`.gomdlint.yml:9: unknown rule "line-lenght" (did you mean "line-length"?); it is ignored`,
+	}
+	assert.Equal(t, want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+}
+
+func TestLoad_WarnsAboutUnknownRulesInJSON(t *testing.T) {
+	t.Parallel()
+
+	content := "{\n  \"rules\": {\n    \"no-trailling-spaces\": false\n  }\n}\n"
+	result, err := loadProjectFile(t, ".gomdlint.json", content)
+	if err != nil {
+		t.Fatalf("unknown rules must not fail loading: %v", err)
+	}
+
+	assert.Equal(t, []string{
+		`.gomdlint.json:3: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+	}, relativeWarnings(result.Warnings, ".gomdlint.json"))
+}
+
 // TestLoad_IgnoreBaseDir covers the directory ignore patterns are relative
 // to: the config file's own directory for project and explicit configs, and
 // the working directory otherwise.
@@ -990,30 +1049,31 @@ func TestLoad_EnvRuleFormat(t *testing.T) {
 func TestLoader_RejectsDuplicateRules(t *testing.T) {
 	t.Parallel()
 
+	// The message names the rule by name, then ID.
 	tests := []struct {
 		name    string
 		content string
-		keys    []string
+		want    string
 	}{
 		{
 			name:    "ID and name",
 			content: "rules:\n  MD009:\n    enabled: false\n  no-trailing-spaces:\n    enabled: true\n",
-			keys:    []string{`"MD009"`, `"no-trailing-spaces"`},
+			want:    `rules: "MD009" and "no-trailing-spaces" both configure no-trailing-spaces (MD009); keep one of them`,
 		},
 		{
 			name:    "ID and alias",
 			content: "rules:\n  MD004:\n    enabled: false\n  ul-style:\n    enabled: true\n",
-			keys:    []string{`"MD004"`, `"ul-style"`},
+			want:    `rules: "MD004" and "ul-style" both configure unordered-list-style (MD004); keep one of them`,
 		},
 		{
 			name:    "ID in two cases",
 			content: "rules:\n  MD009:\n    enabled: false\n  md009:\n    enabled: true\n",
-			keys:    []string{`"MD009"`, `"md009"`},
+			want:    `rules: "MD009" and "md009" both configure no-trailing-spaces (MD009); keep one of them`,
 		},
 		{
 			name:    "rule_defaults",
 			content: "rule_defaults:\n  MD009:\n    enabled: false\n  no-trailing-spaces:\n    enabled: true\n",
-			keys:    []string{`"MD009"`, `"no-trailing-spaces"`, "rule_defaults"},
+			want:    `rule_defaults: "MD009" and "no-trailing-spaces" both configure no-trailing-spaces (MD009); keep one of them`,
 		},
 	}
 
@@ -1026,10 +1086,8 @@ func TestLoader_RejectsDuplicateRules(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected an error for a rule configured under two keys")
 				}
-				for _, key := range tt.keys {
-					if !strings.Contains(err.Error(), key) {
-						t.Errorf("error %q does not name %s", err, key)
-					}
+				if !strings.HasSuffix(err.Error(), ".gomdlint.yml: "+tt.want) {
+					t.Errorf("error = %q, want it to end with %q", err, ".gomdlint.yml: "+tt.want)
 				}
 			}
 		})
