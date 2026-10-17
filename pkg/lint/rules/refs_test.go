@@ -410,6 +410,9 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 		"> See [multi\n> line][] here.\n\n[multi line]: https://example.com\n",
 		"> [a\n> b][]\n\n[a b]: https://example.com\n",
 		"Use [`code` label][] here.\n\n[`code` label]: https://example.com\n",
+		"> See [*docs\n> page*][] now.\n\n[*docs page*]: https://example.com\n",
+		"> See [*docs\n> page*] now.\n\n[*docs page*]: https://example.com\n",
+		"Use [a\\]b][] here.\n\n[a\\]b]: https://example.com\n",
 	} {
 		if diags := testHelper(t, rule, markdown); len(diags) != 0 {
 			t.Errorf("%q: got %d diagnostics, want 0: %+v", markdown, len(diags), diags)

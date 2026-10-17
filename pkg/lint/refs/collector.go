@@ -128,7 +128,7 @@ func (c *collector) collectLinkUsage(node *mdast.Node, isImage bool) {
 	}
 
 	// Detect reference style by examining source
-	style, label := c.detectLinkStyle(node, isImage)
+	style, label := detectLinkStyle(node)
 	usage.Style = style
 	usage.Label = label
 	usage.NormalizedLabel = NormalizeLabel(label)
@@ -153,43 +153,27 @@ func extractLinkText(node *mdast.Node) string {
 }
 
 // detectLinkStyle returns the reference syntax the parser recorded for a link
-// or image and the label it was resolved with. A collapsed or shortcut
-// reference's label is its link text as written; it is rebuilt from the
-// children's source so the container prefix of a continuation line, such as
-// "> " inside a blockquote, is not part of it.
-func (c *collector) detectLinkStyle(node *mdast.Node, _ bool) (ReferenceStyle, string) {
+// or image and the label it was resolved with: the second bracket pair of a
+// full reference, or the link text of a collapsed or shortcut one, as
+// written and without the container prefix of a continuation line, such as
+// "> " inside a blockquote.
+func detectLinkStyle(node *mdast.Node) (ReferenceStyle, string) {
 	if node.Inline == nil || node.Inline.Link == nil {
 		return StyleInline, ""
 	}
-	switch node.Inline.Link.ReferenceStyle {
+	link := node.Inline.Link
+	switch link.ReferenceStyle {
 	case mdast.RefStyleAutolink:
 		return StyleAutolink, ""
 	case mdast.RefStyleFull:
-		return StyleFull, node.Inline.Link.ReferenceLabel
+		return StyleFull, link.ReferenceLabel
 	case mdast.RefStyleCollapsed:
-		return StyleCollapsed, c.linkTextSource(node)
+		return StyleCollapsed, link.ReferenceLabel
 	case mdast.RefStyleShortcut:
-		return StyleShortcut, c.linkTextSource(node)
+		return StyleShortcut, link.ReferenceLabel
 	case mdast.RefStyleInline:
 	}
 	return StyleInline, ""
-}
-
-// linkTextSource returns the source of a link's text, joining lines with a
-// space and leaving out the container prefix of each continuation line.
-func (c *collector) linkTextSource(node *mdast.Node) string {
-	if c.ctx.File == nil {
-		return extractLinkText(node)
-	}
-	var buf strings.Builder
-	for child := node.FirstChild; child != nil; child = child.Next {
-		if child.Kind == mdast.NodeSoftBreak || child.Kind == mdast.NodeHardBreak {
-			_ = buf.WriteByte(' ') // strings.Builder.WriteByte never fails
-			continue
-		}
-		buf.Write(child.Text())
-	}
-	return buf.String()
 }
 
 // collectHTMLAnchors extracts id and name attributes from HTML.
