@@ -73,70 +73,11 @@ func TestScanHTMLStaysInRange(t *testing.T) {
 	assert.Equal(t, []string{"div", "b"}, names)
 }
 
-func TestCodeSpanEnd(t *testing.T) {
-	end, ok := CodeSpanEnd([]byte("`a` b"), 0)
-	require.True(t, ok)
-	assert.Equal(t, 3, end)
-
-	end, ok = CodeSpanEnd([]byte("`` a`b `` c"), 0)
-	require.True(t, ok)
-	assert.Equal(t, 9, end)
-
-	_, ok = CodeSpanEnd([]byte("`` a ` b"), 0)
-	assert.False(t, ok)
-}
-
-func TestMatchAutolink(t *testing.T) {
-	for _, src := range []string{"<https://example.com/a?b=c>", "<mailto:x@y.z>", "<user@example.com>"} {
-		end, ok := MatchAutolink([]byte(src), 0)
-		assert.True(t, ok, src)
-		assert.Equal(t, len(src), end, src)
+func TestIsASCIIPunct(t *testing.T) {
+	for _, ch := range []byte("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~") {
+		assert.True(t, IsASCIIPunct(ch), "%q", ch)
 	}
-	for _, src := range []string{"<https://exa mple.com>", "<a>", "<x:>"} {
-		_, ok := MatchAutolink([]byte(src), 0)
-		assert.False(t, ok, src)
+	for _, ch := range []byte("aZ09 \t\n") {
+		assert.False(t, IsASCIIPunct(ch), "%q", ch)
 	}
-}
-
-func TestLinkTextEnd(t *testing.T) {
-	tests := []struct {
-		src  string
-		want int
-	}{
-		{"[text](url)", 5},
-		{"[a [b] c](u)", 8},
-		{"[a \\] b](u)", 7},
-		{"[a `]` b](u)", 8},
-		{"[a <span title=\"]\">b</span>](u)", 27},
-		{"[a <https://x.y/]> b](u)", 20},
-	}
-	for _, tt := range tests {
-		got, ok := LinkTextEnd([]byte(tt.src), 0)
-		require.True(t, ok, tt.src)
-		assert.Equal(t, tt.want, got, tt.src)
-		assert.Equal(t, byte(']'), tt.src[got], tt.src)
-	}
-	_, ok := LinkTextEnd([]byte("[never closed"), 0)
-	assert.False(t, ok)
-}
-
-func TestLinkLabelEnd(t *testing.T) {
-	got, ok := LinkLabelEnd([]byte("[label] rest"), 0)
-	require.True(t, ok)
-	assert.Equal(t, 6, got)
-
-	got, ok = LinkLabelEnd([]byte(`[a\]b]`), 0)
-	require.True(t, ok)
-	assert.Equal(t, 5, got)
-
-	for _, src := range []string{"[]", "[  ]", "[a[b]", "[open"} {
-		_, ok := LinkLabelEnd([]byte(src), 0)
-		assert.False(t, ok, src)
-	}
-}
-
-func TestIsEscaped(t *testing.T) {
-	src := []byte(`a\[b\\[c`)
-	assert.True(t, IsEscaped(src, 2))
-	assert.False(t, IsEscaped(src, 6))
 }

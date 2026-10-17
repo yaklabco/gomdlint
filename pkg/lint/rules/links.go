@@ -202,21 +202,15 @@ func isAutolinkNode(node *mdast.Node) bool {
 }
 
 // linkTextSpan returns the byte range of the text between the brackets of a
-// link or image, excluding the brackets themselves.
+// link or image: its content span. It reports false when the span is not
+// enclosed by brackets.
 func linkTextSpan(content []byte, node *mdast.Node) (int, int, bool) {
-	span := node.SourceRange()
-	if span.StartOffset < 0 || span.EndOffset > len(content) || span.IsEmpty() {
+	text := node.ContentRange()
+	if text.StartOffset < 1 || text.EndOffset >= len(content) ||
+		content[text.StartOffset-1] != '[' || content[text.EndOffset] != ']' {
 		return 0, 0, false
 	}
-	open := span.StartOffset
-	if content[open] == '!' {
-		open++
-	}
-	closing, ok := mdscan.LinkTextEnd(content[:span.EndOffset], open)
-	if !ok {
-		return 0, 0, false
-	}
-	return open + 1, closing, true
+	return text.StartOffset, text.EndOffset, true
 }
 
 // EmptyLinkRule detects links with empty destination or text.
