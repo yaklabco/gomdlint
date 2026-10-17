@@ -28,28 +28,56 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   "Hello world\nSecond line\n",
 		},
 		{
+			// A leading tab indents to column 4, which makes an indented code
+			// block; it is replaced by the spaces that keep that column.
 			name:      "single tab",
 			input:     "\tIndented\n",
 			wantDiags: 1,
-			wantFix:   " Indented\n",
+			wantFix:   "    Indented\n",
 		},
 		{
+			// The first tab is the code block indentation; the second is code
+			// and gets spaces_per_tab spaces.
 			name:      "multiple tabs same line",
 			input:     "\t\tDouble indent\n",
 			wantDiags: 1,
-			wantFix:   "  Double indent\n",
+			wantFix:   "     Double indent\n",
 		},
 		{
 			name:      "tabs on multiple lines",
 			input:     "\tLine one\n\tLine two\n",
 			wantDiags: 2,
-			wantFix:   " Line one\n Line two\n",
+			wantFix:   "    Line one\n    Line two\n",
 		},
 		{
 			name:      "mixed spaces and tabs",
 			input:     "  \tMixed\n",
 			wantDiags: 1,
-			wantFix:   "   Mixed\n",
+			wantFix:   "    Mixed\n",
+		},
+		{
+			name:      "tab indenting a nested list keeps it nested",
+			input:     "- first\n\t- nested\n",
+			wantDiags: 1,
+			wantFix:   "- first\n    - nested\n",
+		},
+		{
+			name:      "tab after a list marker keeps the content column",
+			input:     "- first\n-\tsecond\n\n  para\n",
+			wantDiags: 1,
+			wantFix:   "- first\n-   second\n\n  para\n",
+		},
+		{
+			name:      "tab after an ordered list marker",
+			input:     "1.\tItem\n",
+			wantDiags: 1,
+			wantFix:   "1.  Item\n",
+		},
+		{
+			name:      "tab after a blockquote marker",
+			input:     ">\tquote\n",
+			wantDiags: 1,
+			wantFix:   ">   quote\n",
 		},
 		{
 			name:      "tab in middle of line",
@@ -108,6 +136,9 @@ func TestHardTabsRule(t *testing.T) {
 			diags, err := rule.Apply(ruleCtx)
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
+			if tt.wantFix != "" {
+				assert.Equal(t, listShape(t, tt.input), listShape(t, tt.wantFix), "the expected fix keeps the structure")
+			}
 
 			// Verify fix application.
 			if tt.wantDiags > 0 && tt.wantFix != tt.input {

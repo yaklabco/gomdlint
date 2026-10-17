@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -28,7 +27,16 @@ func NewHardTabsRule() *HardTabsRule {
 	}
 }
 
+// tabWidth is the CommonMark tab stop width.
+const tabWidth = 4
+
 // Apply checks for hard tab characters on each line.
+//
+// The fix keeps the document structure: a tab in the part of a line that
+// CommonMark measures in columns (indentation, blockquote markers, list
+// markers and the space after them, and the indentation of indented code) is
+// replaced by the spaces that reach the same tab stop. Other tabs, in text
+// and code, are replaced by spaces_per_tab spaces, as markdownlint does.
 func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
@@ -54,6 +62,12 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 	// Build map of code block lines and their languages.
 	codeBlockInfo := buildCodeBlockInfo(ctx.Root)
+	codeBlockByLine := make(map[int]*mdast.Node)
+	for _, block := range ctx.CodeBlocks() {
+		for lineNum := range lint.CodeContentLines([]*mdast.Node{block}) {
+			codeBlockByLine[lineNum] = block
+		}
+	}
 
 	// Like markdownlint, excluding code blocks also excludes code spans.
 	var codeSpans []mdast.SourceRange
@@ -93,10 +107,15 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		}
 
 		// Build fix: replace all tabs with spaces.
+		structureEnd := tabStructureEnd(ctx.File, lineNum, lineContent, codeBlockByLine[lineNum])
 		builder := fix.NewEditBuilder()
 		for _, tabPos := range tabPositions {
 			offset := line.StartOffset + tabPos
-			builder.ReplaceRange(offset, offset+1, strings.Repeat(" ", spacesPerTab))
+			spaces := spacesPerTab
+			if tabPos < structureEnd {
+				spaces = tabWidth - visualColumn(lineContent[:tabPos])%tabWidth
+			}
+			builder.ReplaceRange(offset, offset+1, strings.Repeat(" ", spaces))
 		}
 
 		// Create a single diagnostic for the line at the first tab position.
@@ -110,13 +129,80 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Hard tab character found").
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion(fmt.Sprintf("Replace tab with %d space(s)", spacesPerTab)).
+			WithSuggestion("Replace tabs with spaces").
 			WithFix(builder).
 			Build()
 		diags = append(diags, diag)
 	}
 
 	return diags, nil
+}
+
+// tabStructureEnd returns the byte index where the part of a line that
+// CommonMark measures in columns ends. On a code line it is the container
+// prefix, followed for indented code by the four columns of code
+// indentation. On other lines it is the leading run of whitespace,
+// blockquote markers and list markers.
+func tabStructureEnd(file *mdast.FileSnapshot, lineNum int, content []byte, codeBlock *mdast.Node) int {
+	if codeBlock != nil {
+		end := len(lint.ContainerPrefix(file, codeBlock, lineNum))
+		if !lint.IsIndentedCodeBlock(codeBlock) {
+			return end
+		}
+		base := visualColumn(content[:end])
+		for end < len(content) && (content[end] == ' ' || content[end] == '\t') && visualColumn(content[:end])-base < tabWidth {
+			end++
+		}
+		return end
+	}
+	pos := 0
+	for pos < len(content) {
+		switch {
+		case content[pos] == ' ' || content[pos] == '\t' || content[pos] == '>':
+			pos++
+		case isLeadingListMarker(content, pos):
+			for pos < len(content) && content[pos] != ' ' && content[pos] != '\t' {
+				pos++
+			}
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+// isLeadingListMarker reports whether a list marker followed by whitespace
+// starts at pos.
+func isLeadingListMarker(content []byte, pos int) bool {
+	end := pos
+	switch {
+	case content[pos] == '-' || content[pos] == '+' || content[pos] == '*':
+		end++
+	case isASCIIDigit(content[pos]):
+		for end < len(content) && isASCIIDigit(content[end]) {
+			end++
+		}
+		if end == len(content) || (content[end] != '.' && content[end] != ')') {
+			return false
+		}
+		end++
+	default:
+		return false
+	}
+	return end < len(content) && (content[end] == ' ' || content[end] == '\t')
+}
+
+// visualColumn returns the column after text, expanding tabs to tab stops.
+func visualColumn(text []byte) int {
+	col := 0
+	for _, char := range text {
+		if char == '\t' {
+			col += tabWidth - col%tabWidth
+			continue
+		}
+		col++
+	}
+	return col
 }
 
 // codeBlockLineInfo stores information about a line inside a code block.
