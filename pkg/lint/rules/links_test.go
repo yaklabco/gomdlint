@@ -288,6 +288,11 @@ func TestEmptyLinkRule(t *testing.T) {
 			wantN: 0,
 		},
 		{
+			name:  "reference to empty destination definition",
+			input: "[text][empty] and [empty][]\n\n[empty]: <>\n",
+			wantN: 0,
+		},
+		{
 			name:  "image with empty destination is not a link",
 			input: "![alt]()",
 			wantN: 0,

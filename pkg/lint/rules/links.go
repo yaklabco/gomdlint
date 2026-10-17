@@ -250,9 +250,10 @@ func NewEmptyLinkRule() *EmptyLinkRule {
 	}
 }
 
-// Apply checks for links whose destination is empty or an empty fragment ("#").
-// Like markdownlint, the destination of a reference link is the destination of
-// its definition, and links with empty text but a destination are not empty.
+// Apply checks for links whose destination is empty or an empty fragment
+// ("#"), as markdownlint does: an inline link is empty when its destination
+// is missing or "#", and a reference link when its definition's destination
+// is "#". Links with empty text but a destination are not empty.
 func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -266,16 +267,20 @@ func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) 
 			return diags, ctx.Ctx.Err()
 		}
 
-		if link.Inline != nil && link.Inline.Link != nil && link.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink {
+		style := mdast.RefStyleInline
+		if link.Inline != nil && link.Inline.Link != nil {
+			style = link.Inline.Link.ReferenceStyle
+		}
+		if style == mdast.RefStyleAutolink {
 			continue
 		}
 
 		var msg string
-		switch strings.TrimSpace(lint.LinkDestination(link)) {
-		case "":
-			msg = "Link has empty destination"
-		case "#":
+		switch destination := strings.TrimSpace(lint.LinkDestination(link)); {
+		case destination == "#":
 			msg = "Link has empty fragment"
+		case destination == "" && style == mdast.RefStyleInline:
+			msg = "Link has empty destination"
 		default:
 			continue
 		}
