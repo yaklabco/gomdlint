@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"bytes"
+	"regexp"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -64,26 +66,60 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		endLine, endColumn := ctx.File.LineAt(url.end)
 		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
 
+		literal := ctx.File.Content[url.start:url.end]
 		msg, suggestion := "Bare URL used", "Wrap the URL/email in angle brackets"
-		switch url.kind {
-		case mdscan.LiteralEmail:
-			msg = "Bare email address used"
-		case mdscan.LiteralWWW:
+		safe := angleBracketsKeepLiteral(url.kind, literal)
+		switch {
+		case url.kind == mdscan.LiteralWWW:
 			// Angle brackets only make an autolink with a scheme, so there is no safe fix.
 			suggestion = "Write the address with a scheme in angle brackets, such as <https://www.example.com>"
+		case url.kind == mdscan.LiteralEmail && !safe:
+			msg, suggestion = "Bare email address used", "Write the address as a link, such as [text](mailto:...)"
+		case url.kind == mdscan.LiteralEmail:
+			msg = "Bare email address used"
+		case !safe:
+			suggestion = "Write the URL as a link with its <, >, and backslash characters percent-encoded"
 		}
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion)
-		if url.kind != mdscan.LiteralWWW {
+		if safe {
 			builder := fix.NewEditBuilder()
-			builder.ReplaceRange(url.start, url.end, "<"+string(ctx.File.Content[url.start:url.end])+">")
+			builder.ReplaceRange(url.start, url.end, "<"+string(literal)+">")
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
 	}
 	sortDiagnosticsByPosition(diags)
 	return diags, nil
+}
+
+// emailAutolinkPattern is the CommonMark grammar for the address inside an
+// email autolink, which is stricter than a GFM email literal: its domain
+// labels hold only letters, digits, and inner hyphens.
+var emailAutolinkPattern = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@" +
+	`[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+
+// angleBracketsKeepLiteral reports whether wrapping an autolink literal in
+// angle brackets makes an autolink to the same address. A URI autolink
+// cannot hold '<', '>', spaces, or ASCII control characters, and reads a
+// backslash as part of the address where the literal's text read it as an
+// escape. A "www." literal has no scheme, so brackets never make it an
+// autolink.
+func angleBracketsKeepLiteral(kind mdscan.LiteralKind, literal []byte) bool {
+	switch kind {
+	case mdscan.LiteralURL:
+		return !bytes.ContainsAny(literal, "<>\\ ") && !bytes.ContainsFunc(literal, isASCIIControl)
+	case mdscan.LiteralEmail:
+		return emailAutolinkPattern.Match(literal)
+	case mdscan.LiteralNone, mdscan.LiteralWWW:
+	}
+	return false
+}
+
+// isASCIIControl reports whether r is an ASCII control character.
+func isASCIIControl(r rune) bool {
+	return r < ' ' || r == 0x7f
 }
 
 // isTextContainer reports whether a block's children are inline content: a
@@ -201,8 +237,9 @@ func (s *bareURLScan) scanText(start, end int) {
 }
 
 // checkParsedLiteral reports an autolink the parser created from a GFM
-// autolink literal. Autolinks written in angle brackets, "www." literals,
-// and other schemes are not reported.
+// autolink literal: an http or https URL, a "www." address, or an email
+// address. Autolinks written in angle brackets and other schemes are not
+// reported.
 func (s *bareURLScan) checkParsedLiteral(node *mdast.Node) {
 	span := node.SourceRange()
 	if s.brackets > 0 || span.IsEmpty() || s.content[span.StartOffset] == '<' {

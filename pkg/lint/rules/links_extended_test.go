@@ -338,3 +338,28 @@ func TestNoBareURLsRule_Fix(t *testing.T) {
 		})
 	}
 }
+
+// TestNoBareURLsRule_WithholdsUnsafeFixes reports literals that angle brackets
+// would not turn into the same autolink, without a fix: a URL holding '<',
+// '>', or a backslash, and an email address whose domain an autolink does not
+// accept.
+func TestNoBareURLsRule_WithholdsUnsafeFixes(t *testing.T) {
+	for _, input := range []string{
+		"See https://example.com/a>b now.\n",
+		"See \\[https://example.com\\] now.\n",
+		"Mail foo@a_b.com now.\n",
+	} {
+		for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+			t.Run(string(flavor)+" "+input, func(t *testing.T) {
+				snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+				require.NoError(t, err)
+				cfg := config.NewConfig()
+				cfg.Flavor = flavor
+				diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+				require.NoError(t, err)
+				require.Len(t, diags, 1, "the literal is still reported: %+v", diags)
+				assert.False(t, diags[0].HasFix(), "angle brackets would not make the same autolink")
+			})
+		}
+	}
+}
