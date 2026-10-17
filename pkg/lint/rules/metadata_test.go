@@ -826,11 +826,12 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			wantLines: []int{},
 		},
 		{
+			// Reported, but no name inside an HTML block gets a fix: the
+			// block is raw HTML, whose attributes a fix could break.
 			name:      "text in an HTML block is checked without html_elements",
 			input:     "<div>\njavascript text\n</div>\n",
 			options:   map[string]any{"names": javascript, "html_elements": false},
 			wantLines: []int{2},
-			wantFixed: "<div>\nJavaScript text\n</div>\n",
 		},
 		{
 			// The name in the attribute is reported without a fix: a change
@@ -865,7 +866,6 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			input:     "<!-- github note -->\n",
 			options:   map[string]any{"names": github},
 			wantLines: []int{1},
-			wantFixed: "<!-- GitHub note -->\n",
 		},
 		{
 			name:      "quoted angle bracket in an excluded attribute",
@@ -890,21 +890,18 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			input:     "<details>\n```github\ngithub code\n```\n</details>\n",
 			options:   map[string]any{"names": github},
 			wantLines: []int{3},
-			wantFixed: "<details>\n```github\nGitHub code\n```\n</details>\n",
 		},
 		{
 			name:      "link destination in an HTML block",
 			input:     "<div>\n[docs](https://github.com/x) github\n</div>\n",
 			options:   map[string]any{"names": github},
 			wantLines: []int{2},
-			wantFixed: "<div>\n[docs](https://github.com/x) GitHub\n</div>\n",
 		},
 		{
 			name:      "indented text in an HTML block is prose",
 			input:     "<pre>\n\n    javascript text\n</pre>\n",
 			options:   map[string]any{"names": javascript, "code_blocks": false},
 			wantLines: []int{3},
-			wantFixed: "<pre>\n\n    JavaScript text\n</pre>\n",
 		},
 		{
 			name:      "tag in fenced code in an HTML block without code_blocks",
@@ -931,14 +928,12 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			input:     "<div>\n<pre\njavascript text\n</div>\n",
 			options:   map[string]any{"names": javascript},
 			wantLines: []int{3},
-			wantFixed: "<div>\n<pre\nJavaScript text\n</div>\n",
 		},
 		{
 			name:      "autolink in an HTML block",
 			input:     "<div>\n<https://github.com/x> github\n</div>\n",
 			options:   map[string]any{"names": github},
 			wantLines: []int{2},
-			wantFixed: "<div>\n<https://github.com/x> GitHub\n</div>\n",
 		},
 		{
 			// In the document the block is raw HTML, so "github" is in the
@@ -946,6 +941,20 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			name:      "name in an attribute that a code span seems to end",
 			input:     "<div>\n`<img alt=\"`\" src=\"github.png\">\n</div>\n",
 			options:   map[string]any{"names": github, "code_blocks": false, "html_elements": false},
+			wantLines: []int{2},
+		},
+		{
+			// The tag scanner rejects "@click", but the block is still raw
+			// HTML, so the src attribute keeps its file name.
+			name:      "attribute after one the tag scanner rejects",
+			input:     "<div>\n<img src=\"github.png\" @click=\"foo\">\n</div>\n",
+			options:   map[string]any{"names": github},
+			wantLines: []int{2},
+		},
+		{
+			name:      "attribute after one the tag scanner rejects without html_elements",
+			input:     "<div>\n<img src=\"github.png\" @click=\"foo\">\n</div>\n",
+			options:   map[string]any{"names": github, "html_elements": false},
 			wantLines: []int{2},
 		},
 		{
@@ -967,7 +976,6 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 			input:     "<div>\n`<a title=\"`\">github`\n</div>\n",
 			options:   map[string]any{"names": github, "code_blocks": false},
 			wantLines: []int{2},
-			wantFixed: "<div>\n`<a title=\"`\">GitHub`\n</div>\n",
 		},
 		{
 			name:      "image description",

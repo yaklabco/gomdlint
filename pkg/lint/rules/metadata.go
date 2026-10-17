@@ -640,10 +640,6 @@ type properNameRegion struct {
 	// links is true when addresses in the region are links whose names are
 	// not checked (prose and code, but not raw HTML).
 	links bool
-	// tag is true for an HTML tag. Its names are reported without a fix:
-	// they sit in attribute values, such as file names and URLs, which a
-	// change of case can break.
-	tag bool
 }
 
 // Apply checks for incorrect capitalization of proper names.
@@ -653,9 +649,10 @@ type properNameRegion struct {
 // default true). Link destinations, reference definitions, fence info
 // strings, URLs and e-mail addresses are never checked. Text between the tags
 // of an HTML block is prose, so it is checked even without html_elements.
-// Names inside HTML tags are reported without a fix, as their attribute
-// values can be file names or URLs, and every fix is offered only when the
-// block that holds the name changes in nothing but its text.
+// Names in HTML blocks and inline raw HTML are reported without a fix, as
+// they can sit in attribute values, such as file names or URLs, and every
+// other fix is offered only when the block that holds the name changes in
+// nothing but its text.
 // Longer names are matched first, and text matching one configured name is
 // not checked against the names it contains, so "github.com" stays as written
 // when both "GitHub" and "github.com" are listed.
@@ -700,7 +697,7 @@ func (r *ProperNamesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 				}
 				foundText := string(content[found.StartOffset:found.EndOffset])
 				if !slices.Contains(properNames, foundText) && !overlapsAny(exclusions, found) {
-					fixable := !region.tag && !overlapsAny(scan.rawTags, found)
+					fixable := !insideRanges(scan.rawHTML, found)
 					diags = append(diags, r.nameDiagnostic(ctx, checker, found, foundText, name, fixable))
 				}
 				exclusions = append(exclusions, found)
@@ -785,10 +782,11 @@ type properNameScan struct {
 	inline []mdast.SourceRange
 	// autolinks holds the source of each autolink.
 	autolinks []mdast.SourceRange
-	// rawTags holds the tags of the HTML blocks as raw HTML reads them,
-	// whatever the Markdown parse of their content says. Names inside them
-	// are in attribute values, which a fix must not change.
-	rawTags []mdast.SourceRange
+	// rawHTML holds the lines of the HTML blocks and the inline raw HTML of
+	// the document, in document order. Names there are reported without a
+	// fix, as they can sit in attribute values, such as file names and URLs,
+	// which a change of case can break.
+	rawHTML []mdast.SourceRange
 }
 
 // scan collects the source text MD044 checks.
@@ -844,16 +842,11 @@ func (s *properNameScan) addRegion(start, end int, links bool) {
 	}
 }
 
-// addHTMLRegion records the raw HTML from start to end in the document: a
-// tag, or a comment, processing instruction, declaration or CDATA section.
-func (s *properNameScan) addHTMLRegion(start, end int) {
-	if start < end {
-		text := s.ctx.File.Content[start:end]
-		s.regions = append(s.regions, properNameRegion{
-			rng: mdast.SourceRange{StartOffset: start, EndOffset: end},
-			tag: len(text) > 1 && (isASCIILetter(text[1]) || text[1] == '/'),
-		})
-	}
+// insideRanges reports whether rng overlaps one of ranges, which are in
+// document order and do not overlap each other.
+func insideRanges(ranges []mdast.SourceRange, rng mdast.SourceRange) bool {
+	idx := sort.Search(len(ranges), func(i int) bool { return ranges[i].EndOffset > rng.StartOffset })
+	return idx < len(ranges) && ranges[idx].StartOffset < rng.EndOffset
 }
 
 // collect adds the regions of file. For the content of an HTML block parsed
@@ -898,13 +891,21 @@ func (s *properNameScan) collect(file *mdast.FileSnapshot, base int, tags []mdas
 				add(node.ContentRange(), true, nil)
 			}
 		case mdast.NodeHTMLInline:
-			if rng := node.SourceRange(); s.includeHTML && rng.StartOffset >= 0 && rng.EndOffset <= len(file.Content) {
-				s.addHTMLRegion(base+rng.StartOffset, base+rng.EndOffset)
+			rng := node.SourceRange()
+			if !nested {
+				s.rawHTML = append(s.rawHTML, rng)
+			}
+			if s.includeHTML {
+				add(rng, false, nil)
 			}
 		case mdast.NodeHTMLBlock:
 			// Content parsed again has no HTML blocks, as maskHTMLBlockStarts
 			// masks every '<' that could start one.
 			if !nested {
+				rng := node.SourceRange()
+				s.rawHTML = append(s.rawHTML, mdast.SourceRange{
+					StartOffset: lineStartOf(file, rng.StartOffset), EndOffset: lineEndOf(file, rng.EndOffset),
+				})
 				s.collectHTMLBlock(file, node)
 			}
 		}
@@ -931,11 +932,6 @@ func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast
 		return
 	}
 
-	for _, tag := range htmlTagRanges(file.Content[rng.StartOffset:rng.EndOffset]) {
-		s.rawTags = append(s.rawTags, mdast.SourceRange{
-			StartOffset: rng.StartOffset + tag.StartOffset, EndOffset: rng.StartOffset + tag.EndOffset,
-		})
-	}
 	masked, tags := maskHTMLBlockStarts(file.Content[rng.StartOffset:rng.EndOffset])
 	snapshot, ok := reparseWithoutIndentedCode(s.ctx, masked)
 	if !ok {
@@ -945,7 +941,7 @@ func (s *properNameScan) collectHTMLBlock(file *mdast.FileSnapshot, block *mdast
 		code := codeRanges(snapshot)
 		for _, tag := range tags {
 			if !overlapsAny(code, tag) {
-				s.addHTMLRegion(rng.StartOffset+tag.StartOffset, rng.StartOffset+tag.EndOffset)
+				s.addRegion(rng.StartOffset+tag.StartOffset, rng.StartOffset+tag.EndOffset, false)
 			}
 		}
 	}
@@ -987,27 +983,6 @@ func maskHTMLBlockStarts(text []byte) ([]byte, []mdast.SourceRange) {
 		lineStart = next + newline + 1
 	}
 	return masked, tags
-}
-
-// htmlTagRanges returns the ranges of the open and closing tags in text, raw
-// HTML, skipping comments, processing instructions, declarations and CDATA
-// sections.
-func htmlTagRanges(text []byte) []mdast.SourceRange {
-	var tags []mdast.SourceRange
-	for idx := 0; idx < len(text); idx++ {
-		if text[idx] != '<' {
-			continue
-		}
-		end := htmlConstructEnd(text, idx)
-		if end < 0 {
-			continue
-		}
-		if idx+1 < len(text) && (isASCIILetter(text[idx+1]) || text[idx+1] == '/') {
-			tags = append(tags, mdast.SourceRange{StartOffset: idx, EndOffset: end})
-		}
-		idx = end - 1
-	}
-	return tags
 }
 
 // asciiCaseChange reports whether replacing from with to changes only the
