@@ -13,6 +13,10 @@ import (
 // gitignoreFile is the name of the files whose patterns Gitignore applies.
 const gitignoreFile = ".gitignore"
 
+// utf8BOM is the byte order mark some editors write at the start of a file.
+// Git skips it before reading the first pattern.
+const utf8BOM = "\xef\xbb\xbf"
+
 // gitRule is one pattern of a .gitignore file.
 type gitRule struct {
 	pattern
@@ -127,6 +131,7 @@ func (g *Gitignore) Ignored(target string, isDir bool) bool {
 // Malformed patterns are skipped, as Git skips them.
 func parseGitignore(dir string, content []byte) []gitRule {
 	var rules []gitRule
+	content = bytes.TrimPrefix(content, []byte(utf8BOM))
 	for _, line := range bytes.Split(content, []byte("\n")) {
 		rule, ok := parseGitignoreLine(dir, strings.TrimSuffix(string(line), "\r"))
 		if ok {
@@ -148,9 +153,11 @@ func parseGitignoreLine(dir, line string) (gitRule, bool) {
 		rule.negate = true
 		line = line[1:]
 	}
+	// Only one trailing slash marks a directory pattern: Git keeps any
+	// other, which anchors the pattern and leaves an empty last segment.
 	if strings.HasSuffix(line, "/") {
 		rule.dirOnly = true
-		line = strings.TrimRight(line, "/")
+		line = line[:len(line)-1]
 	}
 	if line == "" {
 		return gitRule{}, false
@@ -176,14 +183,26 @@ func parseGitignoreLine(dir, line string) (gitRule, bool) {
 	return rule, true
 }
 
-// trimTrailingSpaces removes trailing spaces unless a backslash escapes them.
+// trimTrailingSpaces removes trailing spaces unless a backslash escapes
+// them. Like Git, it reads escapes from the left, so in "a\\ " the
+// backslashes escape each other and the space goes.
 func trimTrailingSpaces(line string) string {
-	end := len(line)
-	for end > 0 && line[end-1] == ' ' {
-		if end > 1 && line[end-2] == '\\' {
-			break
+	spaces := -1 // where the run of trailing spaces starts
+	for idx := 0; idx < len(line); idx++ {
+		switch line[idx] {
+		case ' ':
+			if spaces < 0 {
+				spaces = idx
+			}
+		case '\\':
+			idx++
+			spaces = -1
+		default:
+			spaces = -1
 		}
-		end--
 	}
-	return line[:end]
+	if spaces < 0 {
+		return line
+	}
+	return line[:spaces]
 }

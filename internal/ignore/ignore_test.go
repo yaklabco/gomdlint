@@ -310,6 +310,42 @@ func TestGitignoreWildmatch(t *testing.T) {
 	}
 }
 
+// TestGitignoreLineParsing holds the reading of .gitignore lines to git
+// check-ignore: a leading UTF-8 BOM is skipped, escapes are read from the
+// left to decide which trailing spaces stay, and only one trailing slash
+// marks a directory pattern.
+func TestGitignoreLineParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		line    string
+		target  string
+		isDir   bool
+		ignored bool
+	}{
+		{name: "byte order mark", line: "\xef\xbb\xbfbuild/", target: "build", isDir: true, ignored: true},
+		{name: "escaped space stays", line: `foo\ `, target: "foo ", ignored: true},
+		{name: "escaped space is needed", line: `foo\ `, target: "foo", ignored: false},
+		{name: "space after escaped backslash goes", line: `foo\\ `, target: `foo\`, ignored: true},
+		{name: "space after escaped backslash is not kept", line: `foo\\ `, target: `foo\ `, ignored: false},
+		{name: "second trailing slash anchors", line: "foo//", target: "foo", isDir: true, ignored: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			writeTree(t, dir, map[string]string{".gitignore": tt.line + "\n"})
+			rules, err := ignore.GitignoreFor(dir)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.ignored, rules.Ignored(filepath.Join(dir, tt.target), tt.isDir))
+		})
+	}
+}
+
 // TestSetMatchWildmatch applies the same pattern language to gomdlint's own
 // ignore patterns.
 func TestSetMatchWildmatch(t *testing.T) {
