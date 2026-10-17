@@ -201,9 +201,11 @@ func (r *TablePipeStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		return nil, nil
 	}
 
+	// Like markdownlint, a style expects each pipe unless it rules that pipe
+	// out, so an unknown style expects both.
 	expected := PipeStyle(ctx.OptionString("style", string(PipeStyleConsistent)))
-	expectLeading := expected == PipeStyleLeadingAndTrailing || expected == PipeStyleLeadingOnly
-	expectTrailing := expected == PipeStyleLeadingAndTrailing || expected == PipeStyleTrailingOnly
+	expectLeading := expected != PipeStyleNoLeadingOrTrailing && expected != PipeStyleTrailingOnly
+	expectTrailing := expected != PipeStyleNoLeadingOrTrailing && expected != PipeStyleLeadingOnly
 
 	var diags []lint.Diagnostic
 	for _, table := range ctx.Tables() {

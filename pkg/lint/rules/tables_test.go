@@ -460,6 +460,20 @@ func TestTablePipeStyleRule(t *testing.T) {
 			flavor: config.FlavorCommonMark,
 			wantN:  0,
 		},
+		{
+			name:   "unknown style expects both pipes like markdownlint",
+			input:  "| A | B |\n| --- | --- |\n| 1 | 2 |",
+			style:  "typo",
+			flavor: config.FlavorGFM,
+			wantN:  0,
+		},
+		{
+			name:   "unknown style reports missing pipes",
+			input:  "A | B\n--- | ---\n1 | 2",
+			style:  "typo",
+			flavor: config.FlavorGFM,
+			wantN:  6,
+		},
 	}
 
 	for _, tt := range tests {
