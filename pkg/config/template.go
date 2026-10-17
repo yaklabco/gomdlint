@@ -242,12 +242,17 @@ func templateToJSON(yamlContent []byte) ([]byte, error) {
 		return nil, fmt.Errorf("parse template: %w", err)
 	}
 
-	jsonBytes, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
+	// People edit config files by hand, so <, > and & stay as they are
+	// instead of becoming < escapes. Encode ends the file with a newline.
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(settings); err != nil {
 		return nil, fmt.Errorf("marshal JSON: %w", err)
 	}
 
-	return append(jsonBytes, '\n'), nil
+	return buf.Bytes(), nil
 }
 
 // DefaultTemplateHeader returns the default header for generated configs.

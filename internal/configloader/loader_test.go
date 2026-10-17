@@ -608,6 +608,26 @@ func TestLoad_RejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestLoad_JSONFileHoldingYAML covers a .json config that holds YAML, as
+// "gomdlint init --output x.json" and "gomdlint migrate --output x.json"
+// wrote before they wrote JSON for such a name. Loading fails, and the error
+// says what to do. JSON that is merely malformed gets no such advice.
+func TestLoad_JSONFileHoldingYAML(t *testing.T) {
+	t.Parallel()
+
+	const hint = "it looks like YAML; rename it to .yml, or rewrite it as JSON"
+
+	_, err := loadProjectFile(t, ".gomdlint.json", "# gomdlint configuration\nflavor: gfm\nrules:\n  MD009: false\n")
+	if err == nil || !strings.Contains(err.Error(), "parse JSON: ") || !strings.Contains(err.Error(), hint) {
+		t.Errorf("error = %v, want a JSON parse error with the hint %q", err, hint)
+	}
+
+	_, err = loadProjectFile(t, ".gomdlint.json", "{\n  \"flavor\": \n}\n")
+	if err == nil || strings.Contains(err.Error(), hint) {
+		t.Errorf("error = %v, want a JSON parse error without the hint", err)
+	}
+}
+
 // TestLoad_WarnsAboutUnknownKeysInJSON covers the unknown key warnings of a
 // JSON config file, which name the line of the key like those of a YAML one.
 func TestLoad_WarnsAboutUnknownKeysInJSON(t *testing.T) {

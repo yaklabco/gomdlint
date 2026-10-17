@@ -38,6 +38,9 @@ func HoldsJSON(path string) bool {
 func jsonDocument(content []byte) (*yaml.Node, error) {
 	text := bytes.TrimPrefix(content, utf8BOM)
 	if err := checkJSON(text); err != nil {
+		if looksLikeYAML(text) {
+			return nil, fmt.Errorf("%w; it looks like YAML; rename it to .yml, or rewrite it as JSON", err)
+		}
 		return nil, err
 	}
 
@@ -51,6 +54,19 @@ func jsonDocument(content []byte) (*yaml.Node, error) {
 		return nil, errTrailingData // checkJSON has ruled this out.
 	}
 	return &yaml.Node{Kind: yaml.DocumentNode, Line: root.Line, Content: []*yaml.Node{root}}, nil
+}
+
+// looksLikeYAML reports whether content, which is not valid JSON, is a YAML
+// mapping that does not start like JSON does: a YAML config in a .json
+// file, as init and migrate wrote for such a name before they wrote JSON.
+// Malformed JSON starts with a brace or bracket, so it does not qualify.
+func looksLikeYAML(content []byte) bool {
+	trimmed := bytes.TrimLeft(content, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] == '{' || trimmed[0] == '[' {
+		return false
+	}
+	var doc yaml.Node
+	return yaml.Unmarshal(content, &doc) == nil && len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode
 }
 
 // checkJSON returns the first syntax error in content, with its line and

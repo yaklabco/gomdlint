@@ -26,7 +26,8 @@ func newMigrateCommand() *cobra.Command {
 		Use:   "migrate [input]",
 		Short: "Convert a markdownlint configuration to gomdlint format",
 		Long: `Convert an existing markdownlint configuration file (.markdownlint.json,
-.markdownlint.yaml, etc.) to gomdlint format (.gomdlint.yml).
+.markdownlint.yaml, etc.) to gomdlint format (.gomdlint.yml). An --output
+name ending in .json gets JSON, since lint reads such a file as JSON.
 
 If no input file is specified, the command will search for markdownlint
 configuration files in the current directory.

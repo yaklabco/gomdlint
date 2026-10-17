@@ -195,6 +195,14 @@ func TestConfigToJSON(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, data)
 	})
+
+	// People edit config files by hand, so markup stays readable.
+	t.Run("keeps markup characters", func(t *testing.T) {
+		withMarkup := &config.Config{Ignore: []string{"<draft> & co/**"}}
+		data, err := withMarkup.ToJSON()
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"<draft> & co/**"`)
+	})
 }
 
 func TestFromYAML(t *testing.T) {
