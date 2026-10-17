@@ -80,6 +80,8 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 			"See <https://en.wikipedia.org/wiki/Foo_(bar)> now\n"},
 		{"inside parentheses", "Docs (see https://example.com/a) here\n", []position{{1, 11}},
 			"Docs (see <https://example.com/a>) here\n"},
+		{"unbalanced parenthesis before punctuation", "Docs (see https://example.com/a). here\n", []position{{1, 11}},
+			"Docs (see <https://example.com/a>). here\n"},
 		{"email with trailing period", "Mail user@example.com.\n", []position{{1, 6}}, "Mail <user@example.com>.\n"},
 		{"entity after url", "Go to https://example.com/q?a=1&amp; now\n", []position{{1, 7}},
 			"Go to <https://example.com/q?a=1>&amp; now\n"},

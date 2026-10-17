@@ -4,7 +4,7 @@ Trailing punctuation stays outside: <https://example.com/path>.
 
 Balanced parentheses stay inside: <https://en.wikipedia.org/wiki/Foo_(bar)>.
 
-An unbalanced parenthesis stays outside (see <https://example.com/a)>.
+An unbalanced parenthesis stays outside (see <https://example.com/a>).
 
 An email address ends before its final period: <user@example.com>.
 

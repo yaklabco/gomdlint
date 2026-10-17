@@ -247,20 +247,30 @@ func (s *bareURLScan) scanText(start, end int) {
 // checkParsedLiteral reports an autolink the parser created from a GFM
 // autolink literal: an http or https URL, a "www." address, or an email
 // address. Autolinks written in angle brackets and other schemes are not
-// reported.
+// reported. The literal ends where GFM ends it: goldmark keeps an unbalanced
+// ")" that punctuation follows, as in "(see https://example.com/a).", which
+// GFM and markdownlint leave out.
 func (s *bareURLScan) checkParsedLiteral(node *mdast.Node) {
 	span := node.SourceRange()
 	if s.brackets > 0 || span.IsEmpty() || s.content[span.StartOffset] == '<' {
 		return
 	}
-	text := strings.ToLower(string(s.content[span.StartOffset:span.EndOffset]))
+	end := span.EndOffset
+	var prev byte
+	if span.StartOffset > s.textStart {
+		prev = s.content[span.StartOffset-1]
+	}
+	if gfmEnd, kind := mdscan.MatchAutolinkLiteral(s.content[:end], span.StartOffset, prev); kind != mdscan.LiteralNone {
+		end = min(end, gfmEnd)
+	}
+	text := strings.ToLower(string(s.content[span.StartOffset:end]))
 	switch {
 	case strings.HasPrefix(text, "http://"), strings.HasPrefix(text, "https://"):
-		s.add(span.StartOffset, span.EndOffset, mdscan.LiteralURL)
+		s.add(span.StartOffset, end, mdscan.LiteralURL)
 	case strings.HasPrefix(text, "www."):
-		s.add(span.StartOffset, span.EndOffset, mdscan.LiteralWWW)
+		s.add(span.StartOffset, end, mdscan.LiteralWWW)
 	case !strings.Contains(text, "://") && strings.Contains(text, "@"):
-		s.add(span.StartOffset, span.EndOffset, mdscan.LiteralEmail)
+		s.add(span.StartOffset, end, mdscan.LiteralEmail)
 	}
 }
 
