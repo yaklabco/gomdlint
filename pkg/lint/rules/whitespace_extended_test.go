@@ -128,6 +128,13 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   "<hr><lin\u212a>\n\nalpha\tbeta\n",
 		},
 		{
+			// An event handler can set styles on the whole document.
+			name:      "tab before an image with an error handler is not fixed",
+			input:     "alpha\tbeta\n\n<img src=\"data:image/png,broken\" onerror=\"document.body.style.whiteSpace='pre'\">\n",
+			wantDiags: 1,
+			wantFix:   "alpha\tbeta\n\n<img src=\"data:image/png,broken\" onerror=\"document.body.style.whiteSpace='pre'\">\n",
+		},
+		{
 			name:      "tab next to line breaks and comments is fixed",
 			input:     "alpha\tbeta\n\n<br>\n<!-- markdownlint-disable MD013 -->\n",
 			wantDiags: 1,

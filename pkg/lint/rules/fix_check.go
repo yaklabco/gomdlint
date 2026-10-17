@@ -469,11 +469,12 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 // benignHTML reports whether raw HTML can show nothing that the render
 // signature does not compare: it is a run of whitespace, well-formed
 // comments, and start tags of br, wbr, hr and img, named in any ASCII case,
-// with attributes as CommonMark defines them and quoted values on one line.
-// Any other HTML, including any other tag, an end tag, a tag name with other
-// than ASCII letters, a malformed comment, a processing instruction, a
-// declaration or CDATA, may bring a style sheet or open an element, which
-// changes how a browser shows the text before or after it.
+// with only the attributes benignAttribute allows, each once, written as
+// CommonMark defines them with quoted values on one line. Any other HTML,
+// including any other tag or attribute, an end tag, a name with other than
+// ASCII letters, a malformed comment, a processing instruction, a
+// declaration or CDATA, may bring a style sheet, run a script or open an
+// element, which changes how a browser shows the text before or after it.
 func benignHTML(raw []byte) bool {
 	for pos := 0; pos < len(raw); {
 		end := -1
@@ -523,11 +524,13 @@ func benignTagEnd(raw []byte, pos int) int {
 	for idx < len(raw) && (isASCIILetter(raw[idx]) || isASCIIDigit(raw[idx]) || raw[idx] == '-') {
 		idx++
 	}
-	switch string(bytes.ToLower(raw[pos+1 : idx])) {
+	tag := string(bytes.ToLower(raw[pos+1 : idx]))
+	switch tag {
 	case "br", "wbr", "hr", "img":
 	default:
 		return -1
 	}
+	var seen []string
 	for {
 		spaces := idx
 		for idx < len(raw) && isHTMLSpace(raw[idx]) {
@@ -547,27 +550,56 @@ func benignTagEnd(raw []byte, pos int) int {
 			// Attributes are separated by whitespace.
 			return -1
 		}
-		if idx = htmlAttributeEnd(raw, idx); idx < 0 {
+		nameEnd := idx + 1
+		for nameEnd < len(raw) && isAttributeNameChar(raw[nameEnd]) {
+			nameEnd++
+		}
+		attribute := string(bytes.ToLower(raw[idx:nameEnd]))
+		if !benignAttribute(tag, attribute) || slices.Contains(seen, attribute) {
+			return -1
+		}
+		seen = append(seen, attribute)
+		if idx = htmlAttributeValueEnd(raw, nameEnd); idx < 0 {
 			return -1
 		}
 	}
 }
 
-// htmlAttributeEnd returns the offset after the attribute that starts at
-// pos: a name, and optionally "=" and a value, which is either quoted, with
-// no line ending inside, or unquoted, without whitespace, quotes, "=", "<",
-// ">" or "`". It returns -1 when the value is malformed.
-func htmlAttributeEnd(raw []byte, pos int) int {
-	idx := pos + 1
-	for idx < len(raw) && isAttributeNameChar(raw[idx]) {
-		idx++
+// benignAttribute reports whether a benign tag may carry an attribute,
+// named in lowercase: an img its source, text, size, alignment, border and
+// loading hints, a br clear, and an hr its alignment, size and shading. Any
+// other attribute, such as an event handler, a style, a class or an id, can
+// change how the text around the tag shows.
+func benignAttribute(tag, attribute string) bool {
+	switch tag {
+	case "img":
+		switch attribute {
+		case "src", "alt", "title", "width", "height", "align", "border", "loading", "decoding", "srcset", "sizes":
+			return true
+		}
+	case "br":
+		return attribute == "clear"
+	case "hr":
+		switch attribute {
+		case "align", "width", "size", "noshade":
+			return true
+		}
 	}
-	value := idx
+	return false
+}
+
+// htmlAttributeValueEnd returns the offset after the value of the attribute
+// whose name ends at pos, or pos when it has none. A value follows "=" and
+// is either quoted, with no line ending inside, or unquoted, without
+// whitespace, quotes, "=", "<", ">" or "`". It returns -1 when the value is
+// malformed.
+func htmlAttributeValueEnd(raw []byte, pos int) int {
+	value := pos
 	for value < len(raw) && isHTMLSpace(raw[value]) {
 		value++
 	}
 	if value == len(raw) || raw[value] != '=' {
-		return idx
+		return pos
 	}
 	value++
 	for value < len(raw) && isHTMLSpace(raw[value]) {

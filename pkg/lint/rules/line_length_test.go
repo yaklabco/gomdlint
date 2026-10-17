@@ -646,6 +646,14 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "alpha beta gamma delta epsilon\n\n<link rel=stylesheet href=\"a.css\">\n",
 		},
 		{
+			// An event handler can set styles on the whole document.
+			name:     "no fix before an image with an error handler",
+			input:    "alpha beta gamma delta epsilon\n\n<img src=\"data:image/png,broken\" onerror=\"document.body.style.whiteSpace='pre'\">\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "alpha beta gamma delta epsilon\n\n<img src=\"data:image/png,broken\" onerror=\"document.body.style.whiteSpace='pre'\">\n",
+		},
+		{
 			name:     "wraps next to a directive comment and an image",
 			input:    "<!-- markdownlint-disable MD033 -->\n<img src=\"x.png\" alt=\"a b\">\n\nalpha beta gamma delta epsilon\n",
 			maxLen:   20,
