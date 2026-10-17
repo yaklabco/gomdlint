@@ -214,6 +214,7 @@ func (CI) Gate() error {
 		Test.Default,
 		CI.ModTidy,
 		CI.Cross,
+		CI.Vuln,
 	)
 	fmt.Println("\n✓ All CI gate checks passed!")
 	return nil
@@ -281,6 +282,17 @@ func (CI) Cross() error {
 	return nil
 }
 
+// govulncheckPkg pins the govulncheck release. Keep it in step with the
+// govulncheck job in .github/workflows/checks.yml and the pinned tool
+// versions in CI_CD.md.
+const govulncheckPkg = "golang.org/x/vuln/cmd/govulncheck@v1.9.0"
+
+// Vuln reports known vulnerabilities that the module's code can reach.
+func (CI) Vuln() error {
+	fmt.Println("Running govulncheck...")
+	return sh.RunV("go", "run", govulncheckPkg, "./...")
+}
+
 // ---------------------------------------------------------------------------
 // Bench namespace
 // ---------------------------------------------------------------------------
@@ -330,7 +342,7 @@ func (Bench) Fast() error {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers (unexported — not targets)
+// Helpers (unexported, not targets)
 // ---------------------------------------------------------------------------
 
 // gitOutput runs a git command and returns trimmed stdout, or empty on error.

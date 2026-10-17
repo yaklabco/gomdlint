@@ -5,19 +5,24 @@ on:
   schedule:
     - cron: '0 3 * * 0'  # Weekly on Sunday at 3am UTC
 
+permissions:
+  contents: read
+
 jobs:
   compare:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install system dependencies
         run: |
@@ -28,7 +33,7 @@ jobs:
         run: npm install -g markdownlint-cli
 
       - name: Cache benchmark repos
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/gomdlint-compare
           key: compare-repos-v1
@@ -37,7 +42,7 @@ jobs:
         run: go build -o gomdlint ./cmd/gomdlint
 
       - name: Add gomdlint to PATH
-        run: echo "$PWD" >> $GITHUB_PATH
+        run: echo "$PWD" >> "$GITHUB_PATH"
 
       - name: Clone benchmark repos
         run: ./bench/scripts/clone-repos.sh
@@ -49,7 +54,7 @@ jobs:
         run: ./bench/scripts/generate-plots.sh
 
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: comparison-results-${{ github.run_number }}
           path: bench/results/
