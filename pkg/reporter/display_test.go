@@ -93,7 +93,7 @@ func TestTextReporter_CharacterColumnsAndRelativePath(t *testing.T) {
 
 	output := buf.String()
 	shown := filepath.Join("docs", "umlaut.md")
-	assert.Contains(t, output, shown+" (1 issues)", "file header uses the relative path")
+	assert.Contains(t, output, shown+" (1 issue)", "file header uses the relative path")
 	assert.Contains(t, output, shown+":3:10 ", "location uses the relative path and character column")
 	assert.NotContains(t, output, workDir, "no absolute paths for files inside the working directory")
 	assert.Contains(t, output, contextIndent+"ÄÖÜ trail   \n"+caretLine(10)+"\n",

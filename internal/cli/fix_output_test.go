@@ -66,7 +66,7 @@ func TestLint_FindingsWhoseFixesAreExcludedAreNotFixable(t *testing.T) {
 			dir := inProject(t, files)
 
 			text := execute(t, append([]string{"lint", "--color", "never", "--no-context", "doc.md"}, tt.args...)...)
-			assert.Contains(t, text.stdout, "1 issue (1 warnings), in 1 file\n", "summary: %s", text.stdout)
+			assert.Contains(t, text.stdout, "1 issue (1 warning), in 1 file\n", "summary: %s", text.stdout)
 			assert.NotContains(t, text.stdout, "fixable")
 
 			report := execute(t, append([]string{"lint", "--format", "json", "doc.md"}, tt.args...)...)
@@ -84,7 +84,7 @@ func TestLint_FindingsWhoseFixesAreExcludedAreNotFixable(t *testing.T) {
 
 		got := execute(t, "lint", "--color", "never", "--no-context", "--fix-rules", "no-trailing-spaces", "doc.md")
 
-		assert.Contains(t, got.stdout, "1 issue (1 warnings), in 1 file, 1 fixable\n")
+		assert.Contains(t, got.stdout, "1 issue (1 warning), in 1 file, 1 fixable\n")
 	})
 }
 

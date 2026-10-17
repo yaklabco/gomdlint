@@ -59,7 +59,7 @@ and optional backups.`,
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "",
 		"path to a config file to use instead of the project config")
-	rootCmd.PersistentFlags().StringVar(&color, "color", "auto",
+	rootCmd.PersistentFlags().StringVar(&color, "color", colorModeAuto,
 		"colorize output: auto, always, never")
 
 	// Add subcommands.
@@ -82,10 +82,13 @@ and optional backups.`,
 	return rootCmd
 }
 
+// colorModeAuto is the default --color mode: color on a terminal only.
+const colorModeAuto = "auto"
+
 // validateColorMode rejects --color values other than auto, always and never.
 func validateColorMode(mode string) error {
 	switch mode {
-	case "auto", "always", "never":
+	case colorModeAuto, "always", "never":
 		return nil
 	default:
 		return usageError("invalid color mode %q; valid modes: auto, always, never", mode)

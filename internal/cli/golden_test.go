@@ -112,6 +112,39 @@ func TestLintOutputGolden(t *testing.T) {
 	}
 }
 
+// TestLintTableOutputGolden lints the fixture project in table format,
+// combined and per file, with and without color, and compares the output
+// with testdata/golden/lint-table[-per-file]-name[-color].golden. The
+// tables show the same text either way: severity markers lead the rows,
+// and the legend explains the markers the rows show. Color uses basic ANSI,
+// which --color always uses without TERM.
+func TestLintTableOutputGolden(t *testing.T) {
+	skipUnlessSlashPaths(t)
+	project := readProject(t, testdataPath("project"))
+
+	for _, layout := range []struct{ name, flag string }{{name: "table"}, {name: "table-per-file", flag: "--per-file"}} {
+		for _, color := range []struct{ suffix, mode string }{{mode: "never"}, {suffix: "-color", mode: "always"}} {
+			name := "lint-" + layout.name + "-name" + color.suffix
+			t.Run(name, func(t *testing.T) {
+				inProject(t, project)
+				for _, env := range []string{"TERM", "COLORTERM", "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "CI"} {
+					t.Setenv(env, "")
+				}
+				args := []string{"lint", "--color", color.mode, "--format", "table"}
+				if layout.flag != "" {
+					args = append(args, layout.flag)
+				}
+
+				got := execute(t, args...)
+
+				assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
+				assert.Empty(t, got.stderr)
+				assertGolden(t, testdataPath("golden", name+".golden"), got.stdout)
+			})
+		}
+	}
+}
+
 // TestLintRuleFormatDefaultsToName covers lint without --rule-format, which
 // names rules as --rule-format name does.
 func TestLintRuleFormatDefaultsToName(t *testing.T) {

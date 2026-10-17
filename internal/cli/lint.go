@@ -261,7 +261,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	// Get color mode from persistent flag.
 	colorMode, err := cmd.Flags().GetString("color")
 	if err != nil {
-		colorMode = "auto" // Default to auto if flag retrieval fails
+		colorMode = colorModeAuto // Default to auto if flag retrieval fails
 	}
 
 	// Create reporter.

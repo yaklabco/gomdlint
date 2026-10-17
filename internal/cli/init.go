@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yaklabco/gomdlint/internal/configloader"
 	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
@@ -14,12 +15,22 @@ import (
 // configFilePermissions is the file mode for configuration files (world-readable).
 const configFilePermissions = 0644
 
+// The formats init writes config files in, the values of its --format flag.
+const (
+	templateYAML = "yaml"
+	templateJSON = "json"
+)
+
 // initFlags holds the flags for the init command.
 type initFlags struct {
 	force  bool
 	full   bool
 	format string
 	output string
+
+	// formatSet is true when --format was given, so the output name does
+	// not choose the format.
+	formatSet bool
 }
 
 func newInitCommand() *cobra.Command {
@@ -32,19 +43,24 @@ func newInitCommand() *cobra.Command {
 with sensible defaults. The file can be customized to enable/disable rules,
 change severities, and configure other options.
 
+A file whose name ends in .json holds JSON, so --output with such a name
+writes JSON unless --format says otherwise.
+
 Examples:
   gomdlint init                   Create minimal .gomdlint.yml
   gomdlint init --full            Create full config with all rules documented
   gomdlint init --format json     Create .gomdlint.json instead
   gomdlint init --output custom.yml  Write to a custom file path`,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			flags.formatSet = cmd.Flags().Changed("format")
 			return runInit(flags)
 		},
 	}
 
 	cmd.Flags().BoolVarP(&flags.force, "force", "f", false, "Overwrite existing configuration file")
 	cmd.Flags().BoolVar(&flags.full, "full", false, "Generate full template with all rules documented")
-	cmd.Flags().StringVar(&flags.format, "format", "yaml", "Output format: yaml or json")
+	cmd.Flags().StringVar(&flags.format, "format", templateYAML,
+		"Output format: yaml or json (json by default for an --output name ending in .json)")
 	cmd.Flags().StringVarP(&flags.output, "output", "o", "", "Output file path (default: .gomdlint.yml or .gomdlint.json)")
 
 	return cmd
@@ -54,18 +70,23 @@ func runInit(flags *initFlags) error {
 	logger := logging.NewInteractive()
 
 	// Validate format
-	if flags.format != "yaml" && flags.format != "json" {
-		return usageError("invalid format %q: must be yaml or json", flags.format)
+	format := flags.format
+	if format != templateYAML && format != templateJSON {
+		return usageError("invalid format %q: must be yaml or json", format)
 	}
 
-	// Determine output path
+	// Determine output path. lint reads a .json file as JSON, so such a
+	// name selects JSON, and YAML cannot go there.
 	outputPath := flags.output
-	if outputPath == "" {
-		if flags.format == "json" {
-			outputPath = ".gomdlint.json"
-		} else {
-			outputPath = ".gomdlint.yml"
-		}
+	switch {
+	case outputPath == "" && format == templateJSON:
+		outputPath = ".gomdlint.json"
+	case outputPath == "":
+		outputPath = ".gomdlint.yml"
+	case configloader.HoldsJSON(outputPath) && !flags.formatSet:
+		format = templateJSON
+	case configloader.HoldsJSON(outputPath) && format == templateYAML:
+		return usageError("--format yaml cannot write %q: a .json file must hold JSON; use --format json or a .yml name", outputPath)
 	}
 
 	// Make path absolute
@@ -85,7 +106,7 @@ func runInit(flags *initFlags) error {
 	// Generate template
 	opts := config.TemplateOptions{
 		Full:   flags.full,
-		Format: flags.format,
+		Format: format,
 	}
 
 	content, err := config.GenerateTemplate(opts)

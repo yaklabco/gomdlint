@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"runtime"
@@ -190,6 +191,9 @@ func (r *Runner) processFile(
 		}()
 
 		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
+		if err == nil && pr.FileResult != nil {
+			sortDiagnostics(pr.Diagnostics)
+		}
 		if err == nil && preview && pr.FileResult != nil && pr.FixableCount() > 0 {
 			err = r.attachPreview(ctx, path, cfg, opts, pr)
 		}
@@ -209,6 +213,22 @@ func (r *Runner) processFile(
 	}()
 
 	return outcome
+}
+
+// sortDiagnostics orders the diagnostics of one file, in place, as every
+// reporter prints them: by line, as markdownlint-cli2 sorts its results,
+// then by column, rule ID and message. Diagnostics equal in all of those
+// keep their order. The engine reports diagnostics rule by rule, so without
+// this a file's findings would print in rule ID order.
+func sortDiagnostics(diagnostics []lint.Diagnostic) {
+	slices.SortStableFunc(diagnostics, func(left, right lint.Diagnostic) int {
+		return cmp.Or(
+			cmp.Compare(left.StartLine, right.StartLine),
+			cmp.Compare(left.StartColumn, right.StartColumn),
+			cmp.Compare(left.RuleID, right.RuleID),
+			cmp.Compare(left.Message, right.Message),
+		)
+	})
 }
 
 // attachPreview attaches to pr the diff that fixing path would produce,

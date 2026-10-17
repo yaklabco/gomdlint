@@ -1,0 +1,30 @@
+
+README.md
+    LOC         MESSAGE                                     RULE                      
+=========================================================================================
+ W  3:22        Trailing whitespace                         no-trailing-spaces       +
+ W  6:11        Heading ends with trailing punctuation ":"  no-trailing-punctuation  +
+ W  8:19        Trailing whitespace                         no-trailing-spaces       +
+=========================================================================================
+ 3 warnings | 3 fixable
+
+docs/guide.md
+    LOC         MESSAGE                                     RULE                               
+==================================================================================================
+ E  3:1         Heading level jumped from H1 to H3          heading-increment                  
+ W  5:18        Trailing whitespace                         no-trailing-spaces                +
+ W  7:10        Heading ends with trailing punctuation "."  no-trailing-punctuation           +
+ W  11:9        Heading ends with trailing punctuation ":"  no-trailing-punctuation           +
+ W  13:14       Trailing whitespace                         no-trailing-spaces                +
+ W  14:12       Trailing whitespace                         no-trailing-spaces                +
+ W  17:1        Unused reference definition [unused]        link-image-reference-definitions   
+==================================================================================================
+ 1 error | 6 warnings | 5 fixable
+
+ Legend: E = error | W = warning | + = fixable
+
+════════════════════════════════════════════════════════════════════════════════
+Overall Summary
+ 2 files checked | 1 error | 9 warnings
+
+Run with --fix to auto-repair fixable issues

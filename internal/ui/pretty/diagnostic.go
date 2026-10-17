@@ -167,7 +167,7 @@ func expandTabs(text string, start int) (string, int) {
 func (s *Styles) FormatFileHeader(path string, issueCount int) string {
 	header := s.FilePath.Render(path)
 	if issueCount > 0 {
-		header += s.Dim.Render(fmt.Sprintf(" (%d issues)", issueCount))
+		header += s.Dim.Render(" (" + Count(issueCount, "issue", "issues") + ")")
 	}
 	return header
 }

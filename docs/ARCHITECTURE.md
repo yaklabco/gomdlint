@@ -112,7 +112,7 @@ Cobra parses commands and flags. `internal/cli/lint.go:runLint()` orchestrates e
 
 `internal/configloader/`
 
-Discovers config files (`.gomdlint.yml`, `.gomdlint.yaml`) and merges: defaults → config file → CLI flags → environment variables.
+Discovers config files (`.gomdlint.yml`, `.gomdlint.yaml`, `.gomdlint.json`, and the same names without the leading dot) and merges: defaults → config file → CLI flags → environment variables.
 
 ### Stage 3: File Discovery
 
@@ -390,7 +390,7 @@ sequenceDiagram
     end
 ```
 
-**Deterministic Output:** Results are collected into a map keyed by file path, then output in sorted order regardless of worker completion order.
+**Deterministic Output:** Results are collected into a map keyed by file path, then output in sorted order regardless of worker completion order. The runner also sorts each file's diagnostics by line, as markdownlint-cli2 does, then by column, rule ID and message, so every reporter lists findings in the same order. The engine reports them rule by rule.
 
 ## Error Handling
 
@@ -463,7 +463,7 @@ Configuration is resolved through a layered precedence system:
 flowchart TB
     subgraph Sources["Configuration Sources (lowest to highest priority)"]
         defaults["1. Rule Defaults<br/>DefaultEnabled(), DefaultSeverity()"]
-        configFile["2. Config File<br/>.gomdlint.yml / .gomdlint.yaml"]
+        configFile["2. Config File<br/>.gomdlint.yml / .gomdlint.yaml / .gomdlint.json"]
         envVars["3. Environment Variables<br/>GOMDLINT_*"]
         cliFlags["4. CLI Flags<br/>--enable, --disable, --fix"]
     end
@@ -491,6 +491,7 @@ flowchart LR
     cwd[Current Directory] --> search{Find config?}
     search -->|.gomdlint.yml| found[Load]
     search -->|.gomdlint.yaml| found
+    search -->|.gomdlint.json| found
     search -->|Not found| parent[Parent Directory]
     parent --> search
     parent -->|Root reached| userDir[User Config Dir]
@@ -498,7 +499,7 @@ flowchart LR
     userDir -->|Not found| systemDir[System Config Dir]
     systemDir --> search
     systemDir -->|Not found| useDefaults[Use Defaults Only]
-    found --> parse[Parse YAML]
+    found --> parse[Parse YAML or JSON]
     parse --> validate[Validate Schema]
 ```
 

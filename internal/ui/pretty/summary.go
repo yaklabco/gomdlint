@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/runner"
 )
 
@@ -20,6 +21,30 @@ func filesNoun(count int) string {
 		return wordFile
 	}
 	return wordFiles
+}
+
+// Count formats count followed by the noun that agrees with it: one for a
+// count of one, and many for any other count, zero included, as in
+// "1 error" and "0 errors".
+func Count(count int, one, many string) string {
+	if count == 1 {
+		return strconv.Itoa(count) + " " + one
+	}
+	return strconv.Itoa(count) + " " + many
+}
+
+// SeverityCount formats a count of findings of severity, as in "1 error",
+// "2 warnings" and "2 info". Info names a severity, not a thing, so it has
+// no plural.
+func SeverityCount(count int, severity config.Severity) string {
+	switch severity {
+	case config.SeverityError:
+		return Count(count, "error", "errors")
+	case config.SeverityWarning:
+		return Count(count, "warning", "warnings")
+	default:
+		return Count(count, string(severity), string(severity))
+	}
 }
 
 // FormatFailures describes what kept a run from linting its files
@@ -76,36 +101,29 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 	var parts []string
 
 	// Total issues
-	issueWord := "issues"
-	if stats.DiagnosticsTotal == 1 {
-		issueWord = "issue"
-	}
+	issues := Count(stats.DiagnosticsTotal, "issue", "issues")
 
 	// Build severity breakdown
 	var severityParts []string
 	if errors := stats.DiagnosticsBySeverity["error"]; errors > 0 {
-		severityParts = append(severityParts, s.Error.Render(fmt.Sprintf("%d errors", errors)))
+		severityParts = append(severityParts, s.Error.Render(SeverityCount(errors, config.SeverityError)))
 	}
 	if warnings := stats.DiagnosticsBySeverity["warning"]; warnings > 0 {
-		severityParts = append(severityParts, s.Warning.Render(fmt.Sprintf("%d warnings", warnings)))
+		severityParts = append(severityParts, s.Warning.Render(SeverityCount(warnings, config.SeverityWarning)))
 	}
 	if infos := stats.DiagnosticsBySeverity["info"]; infos > 0 {
-		severityParts = append(severityParts, s.Info.Render(fmt.Sprintf("%d info", infos)))
+		severityParts = append(severityParts, s.Info.Render(SeverityCount(infos, config.SeverityInfo)))
 	}
 
 	// Main count with severity breakdown
 	if len(severityParts) > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s (%s)", stats.DiagnosticsTotal, issueWord, strings.Join(severityParts, ", ")))
+		parts = append(parts, issues+" ("+strings.Join(severityParts, ", ")+")")
 	} else {
-		parts = append(parts, fmt.Sprintf("%d %s", stats.DiagnosticsTotal, issueWord))
+		parts = append(parts, issues)
 	}
 
 	// Files with issues
-	fileWord := wordFiles
-	if stats.FilesWithIssues == 1 {
-		fileWord = wordFile
-	}
-	parts = append(parts, fmt.Sprintf("in %d %s", stats.FilesWithIssues, fileWord))
+	parts = append(parts, "in "+Count(stats.FilesWithIssues, wordFile, wordFiles))
 
 	// Fixable count
 	if stats.DiagnosticsFixable > 0 {

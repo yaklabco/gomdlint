@@ -115,6 +115,27 @@ Total: 7 issues (7 warnings) in 2 files
 
 Control table order with `--summary-order rules` (default) or `--summary-order files`.
 
+Every format lists findings file by file, in path order. Within a file, as
+in markdownlint-cli2, findings follow line order, then column, rule ID and
+message.
+
+### Color
+
+Text, table, summary and diff output, and help, use color on a terminal.
+`--color` controls it:
+
+- `auto` (default): color only when output goes to a terminal and
+  `NO_COLOR` is not set.
+- `always`: color even when output goes to a pipe or a file, and even when
+  `NO_COLOR` is set, because the flag asks for color explicitly. The colors
+  are the 16 basic ANSI colors, which every color terminal and `less -R`
+  show.
+- `never`: no color.
+
+JSON and SARIF output never contain color. Table rows start with a severity
+marker, `E`, `W` or `I`, which the legend under the table explains, so a
+table reads the same without color.
+
 ## Rule Identifier Format
 
 Text, table and summary output name each rule by its name. Use
@@ -132,7 +153,29 @@ always carry both the ID and the name.
 
 ## Configuration
 
-Configure gomdlint via YAML files (`.gomdlint.yml` or `.gomdlint.yaml`). The tool searches project, user, and system directories, merging configurations hierarchically.
+Configure gomdlint with a YAML or JSON file. The tool searches project,
+user, and system directories, merging configurations hierarchically.
+
+For the project config, gomdlint looks in the current directory and then in
+each parent directory, up to the repository root or your home directory. It
+uses the first directory that holds one of these files. In that directory it
+reads the first name in this list and ignores the others:
+
+1. `.gomdlint.yml`
+2. `.gomdlint.yaml`
+3. `gomdlint.yml`
+4. `gomdlint.yaml`
+5. `.gomdlint.json`
+6. `gomdlint.json`
+
+`gomdlint init` writes `.gomdlint.yml`, or `.gomdlint.json` with
+`--format json`. A file whose name ends in `.json` must hold JSON, so
+`init --output` and `migrate --output` write JSON for such a name.
+
+The user config is `config.yaml`, `config.yml` or `config.json`, in that
+order of preference, in `$XDG_CONFIG_HOME/gomdlint` (by default
+`~/.config/gomdlint`). The system config uses the same names in
+`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows.
 
 ```yaml
 # .gomdlint.yaml

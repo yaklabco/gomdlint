@@ -17,9 +17,10 @@ import (
 const (
 	fixableSymbol      = "+"
 	tablePadding       = 2
-	tableColumnCount   = 5 // FILE, LOC, MESSAGE, RULE, FIXABLE
-	perFileColumnCount = 4 // LOC, MESSAGE, RULE, FIXABLE (no FILE column)
+	tableColumnCount   = 6 // SEVERITY, FILE, LOC, MESSAGE, RULE, FIXABLE
+	perFileColumnCount = 5 // SEVERITY, LOC, MESSAGE, RULE, FIXABLE (no FILE column)
 	fixableColumnWidth = 3 // width for fixable indicator column
+	markerColumnWidth  = 1 // width of the severity marker column (see severityMarker)
 	minFileWidth       = 20
 	minLocWidth        = 10
 	minMessageWidth    = 35
@@ -55,25 +56,24 @@ type TableRow struct {
 	Fixable  bool
 }
 
-// TableFormatter formats diagnostics as a styled table.
+// TableFormatter formats diagnostics as a styled table. Its tables show the
+// same text with and without color: color only adds escape sequences.
 type TableFormatter struct {
-	styles       *Styles
-	colorEnabled bool
-	termWidth    int
-	ruleFormat   config.RuleFormat
+	styles     *Styles
+	termWidth  int
+	ruleFormat config.RuleFormat
 }
 
 // NewTableFormatter creates a new table formatter whose RULE column names
 // rules in ruleFormat.
-func NewTableFormatter(styles *Styles, colorEnabled bool, termWidth int, ruleFormat config.RuleFormat) *TableFormatter {
+func NewTableFormatter(styles *Styles, termWidth int, ruleFormat config.RuleFormat) *TableFormatter {
 	if termWidth <= 0 {
 		termWidth = defaultTermWidth
 	}
 	return &TableFormatter{
-		styles:       styles,
-		colorEnabled: colorEnabled,
-		termWidth:    termWidth,
-		ruleFormat:   ruleFormat,
+		styles:     styles,
+		termWidth:  termWidth,
+		ruleFormat: ruleFormat,
 	}
 }
 
@@ -120,7 +120,7 @@ func (t *TableFormatter) FormatTable(result *runner.Result) string {
 	builder.WriteString("\n")
 
 	// Write legend
-	builder.WriteString(t.formatLegend())
+	builder.WriteString(t.legend(fileGroups))
 	builder.WriteString("\n")
 
 	return builder.String()
@@ -179,7 +179,7 @@ func (t *TableFormatter) FormatFileTable(file runner.FileOutcome) string {
 
 // formatPerFileHeader formats the header for per-file tables.
 func (t *TableFormatter) formatPerFileHeader(widths columnWidths) string {
-	header := " " + fitCell(locHeader, widths.loc) +
+	header := markerHeader + fitCell(locHeader, widths.loc) +
 		"  " + fitCell(messageHeader, widths.message) +
 		"  " + fitCell(ruleHeader, widths.rule) + "   "
 	return t.styles.TableHeader.Render(header)
@@ -198,13 +198,23 @@ func (t *TableFormatter) formatPerFileRow(row TableRow, widths columnWidths) str
 		fixable = t.styles.TableFixable.Render(fixableSymbol)
 	}
 
-	content := " " + fitCell(row.Location, widths.loc) +
+	content := markerCell(row.Severity) + fitCell(row.Location, widths.loc) +
 		"  " + fitCell(row.Message, widths.message) +
 		"  " + fitCell(row.Rule, widths.rule) +
 		"  " + fixable
 
 	rowStyle := t.getRowStyle(row.Severity)
 	return rowStyle.Render(content)
+}
+
+// markerHeader heads the severity marker column, which has no title.
+const markerHeader = "    "
+
+// markerCell returns the start of a row of severity: its marker, between
+// the table's left margin and the padding before the next column. It is as
+// wide as markerHeader.
+func markerCell(severity config.Severity) string {
+	return " " + severityMarker(severity) + "  "
 }
 
 // formatFileSummary formats a summary line for a single file.
@@ -227,13 +237,13 @@ func (t *TableFormatter) formatFileSummary(rows []TableRow) string {
 
 	var parts []string
 	if errors > 0 {
-		parts = append(parts, t.styles.Error.Render(fmt.Sprintf("%d errors", errors)))
+		parts = append(parts, t.styles.Error.Render(SeverityCount(errors, config.SeverityError)))
 	}
 	if warnings > 0 {
-		parts = append(parts, t.styles.Warning.Render(fmt.Sprintf("%d warnings", warnings)))
+		parts = append(parts, t.styles.Warning.Render(SeverityCount(warnings, config.SeverityWarning)))
 	}
 	if infos > 0 {
-		parts = append(parts, t.styles.Info.Render(fmt.Sprintf("%d info", infos)))
+		parts = append(parts, t.styles.Info.Render(SeverityCount(infos, config.SeverityInfo)))
 	}
 	if fixable > 0 {
 		parts = append(parts, t.styles.TableFixable.Render(fmt.Sprintf("%d fixable", fixable)))
@@ -355,7 +365,7 @@ func shrinkToFit(limit int, total func() int, steps ...shrinkStep) {
 // separatorWidth returns the width of the separators of a table with
 // columns of widths, its widest lines.
 func separatorWidth(widths columnWidths, withFile bool) int {
-	total := widths.loc + widths.message + widths.rule + fixableColumnWidth
+	total := markerColumnWidth + widths.loc + widths.message + widths.rule + fixableColumnWidth
 	if withFile {
 		return total + widths.file + tablePadding*tableColumnCount
 	}
@@ -378,7 +388,7 @@ func fitPathCell(path string, width int) string {
 
 // formatHeader formats the table header row.
 func (t *TableFormatter) formatHeader(widths columnWidths) string {
-	header := " " + fitCell(fileHeader, widths.file) +
+	header := markerHeader + fitCell(fileHeader, widths.file) +
 		"  " + fitCell(locHeader, widths.loc) +
 		"  " + fitCell(messageHeader, widths.message) +
 		"  " + fitCell(ruleHeader, widths.rule) + "   "
@@ -399,7 +409,7 @@ func (t *TableFormatter) formatRow(row TableRow, widths columnWidths) string {
 		fixable = t.styles.TableFixable.Render(fixableSymbol)
 	}
 
-	content := " " + fitPathCell(row.File, widths.file) +
+	content := markerCell(row.Severity) + fitPathCell(row.File, widths.file) +
 		"  " + fitCell(row.Location, widths.loc) +
 		"  " + fitCell(row.Message, widths.message) +
 		"  " + fitCell(row.Rule, widths.rule) +
@@ -424,22 +434,66 @@ func (t *TableFormatter) getRowStyle(severity config.Severity) lipgloss.Style {
 	}
 }
 
-// formatLegend formats the legend explaining the table symbols and colors.
-func (t *TableFormatter) formatLegend() string {
-	if !t.colorEnabled {
-		return t.styles.TableLegend.Render(
-			fmt.Sprintf(" Legend: E = error | W = warning | %s = fixable", fixableSymbol),
-		)
+// FormatLegend formats the legend of the per-file tables of result, the
+// legend that ends its combined table (see legend). It returns nothing for
+// a result without findings.
+func (t *TableFormatter) FormatLegend(result *runner.Result) string {
+	if result == nil {
+		return ""
+	}
+	legend := t.legend(t.collectRows(result))
+	if legend == "" {
+		return ""
+	}
+	return legend + "\n"
+}
+
+// legend formats the legend of a table of the rows in groups. It explains
+// exactly the markers the rows show: the severity markers of the
+// severities they have, in the colors of their rows, and the fixable
+// marker if a row is fixable. It is the same text with and without color.
+// It returns nothing when there are no rows.
+func (t *TableFormatter) legend(groups [][]TableRow) string {
+	severities := make(map[config.Severity]bool)
+	fixable := false
+	for _, group := range groups {
+		for _, row := range group {
+			severities[row.Severity] = true
+			fixable = fixable || row.Fixable
+		}
 	}
 
-	errorSample := t.styles.TableErrorRow.Render(" error ")
-	warnSample := t.styles.TableWarnRow.Render(" warning ")
-	fixableSample := t.styles.TableFixable.Render(fixableSymbol)
+	var entries []string
+	for _, severity := range []config.Severity{config.SeverityError, config.SeverityWarning, config.SeverityInfo} {
+		if severities[severity] {
+			entries = append(entries, t.getRowStyle(severity).Render(severityMarker(severity))+
+				t.styles.TableLegend.Render(" = "+string(severity)))
+		}
+	}
+	if fixable {
+		entries = append(entries, t.styles.TableFixable.Render(fixableSymbol)+t.styles.TableLegend.Render(" = fixable"))
+	}
+	if len(entries) == 0 {
+		return ""
+	}
 
-	return t.styles.TableLegend.Render(
-		fmt.Sprintf(" Legend: %s = error  %s = warning  %s = fixable",
-			errorSample, warnSample, fixableSample),
-	)
+	return " " + t.styles.TableLegend.Render("Legend: ") + strings.Join(entries, t.styles.TableLegend.Render(" | "))
+}
+
+// severityMarker returns the marker that leads the rows of severity: E, W
+// or I. A severity that is none of those gets a blank marker, which the
+// legend does not list.
+func severityMarker(severity config.Severity) string {
+	switch severity {
+	case config.SeverityError:
+		return "E"
+	case config.SeverityWarning:
+		return "W"
+	case config.SeverityInfo:
+		return "I"
+	default:
+		return " "
+	}
 }
 
 // FormatTableSummary formats a summary line for table output.
@@ -450,19 +504,16 @@ func (t *TableFormatter) FormatTableSummary(stats runner.Stats, duration string)
 
 	parts = append(parts, t.styles.formatFailures(stats)...)
 
-	if stats.DiagnosticsBySeverity["error"] > 0 {
-		errCount := t.styles.Error.Render(fmt.Sprintf("%d errors", stats.DiagnosticsBySeverity["error"]))
-		parts = append(parts, errCount)
+	if errors := stats.DiagnosticsBySeverity["error"]; errors > 0 {
+		parts = append(parts, t.styles.Error.Render(SeverityCount(errors, config.SeverityError)))
 	}
 
-	if stats.DiagnosticsBySeverity["warning"] > 0 {
-		warnCount := t.styles.Warning.Render(fmt.Sprintf("%d warnings", stats.DiagnosticsBySeverity["warning"]))
-		parts = append(parts, warnCount)
+	if warnings := stats.DiagnosticsBySeverity["warning"]; warnings > 0 {
+		parts = append(parts, t.styles.Warning.Render(SeverityCount(warnings, config.SeverityWarning)))
 	}
 
-	if stats.DiagnosticsBySeverity["info"] > 0 {
-		infoCount := t.styles.Info.Render(fmt.Sprintf("%d info", stats.DiagnosticsBySeverity["info"]))
-		parts = append(parts, infoCount)
+	if infos := stats.DiagnosticsBySeverity["info"]; infos > 0 {
+		parts = append(parts, t.styles.Info.Render(SeverityCount(infos, config.SeverityInfo)))
 	}
 
 	// Count fixable issues
@@ -501,13 +552,18 @@ func cellText(text string) string {
 
 // DiagnosticToTableRow converts a lint diagnostic to a table row, naming its
 // rule in ruleFormat. Each cell holds one line of valid UTF-8 (see cellText).
+// A diagnostic without a severity is a warning, as run statistics count it.
 func DiagnosticToTableRow(path string, diag *lint.Diagnostic, ruleFormat config.RuleFormat) TableRow {
+	severity := diag.Severity
+	if severity == "" {
+		severity = config.SeverityWarning
+	}
 	return TableRow{
 		File:     cellText(path),
 		Location: fmt.Sprintf("%d:%d", diag.StartLine, diag.StartColumn),
 		Message:  cellText(diag.Message),
 		Rule:     cellText(config.FormatRuleID(ruleFormat, diag.RuleID, diag.RuleName)),
-		Severity: diag.Severity,
+		Severity: severity,
 		Fixable:  len(diag.FixEdits) > 0,
 	}
 }

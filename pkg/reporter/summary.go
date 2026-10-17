@@ -66,10 +66,9 @@ type SummaryRenderer struct {
 
 // NewSummaryRenderer creates a new summary renderer.
 func NewSummaryRenderer(opts Options) *SummaryRenderer {
-	colorEnabled := pretty.IsColorEnabled(opts.Color, opts.Writer)
 	return &SummaryRenderer{
 		opts:   opts,
-		styles: pretty.NewStyles(colorEnabled),
+		styles: pretty.NewStylesFor(opts.Color, opts.Writer),
 		out:    opts.Writer,
 	}
 }
@@ -219,30 +218,26 @@ func (r *SummaryRenderer) renderTotals(totals analysis.Totals) {
 	parts := make([]string, 0, totalPartsCapacity)
 
 	// Total issues
-	issueWord := "issues"
-	if totals.Issues == 1 {
-		issueWord = "issue"
-	}
-	parts = append(parts, fmt.Sprintf("%d %s", totals.Issues, issueWord))
+	issues := pretty.Count(totals.Issues, "issue", "issues")
+	parts = append(parts, issues)
 
 	// Severity breakdown
 	var severityParts []string
 	if totals.Errors > 0 {
-		severityParts = append(severityParts, r.styles.Error.Render(fmt.Sprintf("%d errors", totals.Errors)))
+		severityParts = append(severityParts, r.styles.Error.Render(pretty.SeverityCount(totals.Errors, config.SeverityError)))
 	}
 	if totals.Warnings > 0 {
-		severityParts = append(severityParts, r.styles.Warning.Render(fmt.Sprintf("%d warnings", totals.Warnings)))
+		severityParts = append(severityParts, r.styles.Warning.Render(pretty.SeverityCount(totals.Warnings, config.SeverityWarning)))
+	}
+	if totals.Infos > 0 {
+		severityParts = append(severityParts, r.styles.Info.Render(pretty.SeverityCount(totals.Infos, config.SeverityInfo)))
 	}
 	if len(severityParts) > 0 {
-		parts[0] = fmt.Sprintf("%d %s (%s)", totals.Issues, issueWord, strings.Join(severityParts, ", "))
+		parts[0] = issues + " (" + strings.Join(severityParts, ", ") + ")"
 	}
 
 	// Files with issues
-	fileWord := "files"
-	if totals.FilesWithIssues == 1 {
-		fileWord = "file"
-	}
-	parts = append(parts, fmt.Sprintf("in %d %s", totals.FilesWithIssues, fileWord))
+	parts = append(parts, "in "+pretty.Count(totals.FilesWithIssues, "file", "files"))
 
 	line := strings.Join(parts, " ")
 	if failures := r.styles.FormatFailures(totals.FilesErrored, totals.RuleErrors); len(failures) > 0 {

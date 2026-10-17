@@ -293,7 +293,7 @@ func TestFormatSummaryOneLine_SkippedFixes(t *testing.T) {
 }
 
 func TestFormatTableSummary_ErroredFiles(t *testing.T) {
-	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80, config.RuleFormatName)
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), 80, config.RuleFormatName)
 
 	result := formatter.FormatTableSummary(runner.Stats{
 		FilesProcessed:        1,
@@ -339,7 +339,7 @@ func TestFormatSummaryOneLine_RuleFailures(t *testing.T) {
 }
 
 func TestFormatTableSummary_RuleFailures(t *testing.T) {
-	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), false, 80, config.RuleFormatName)
+	formatter := pretty.NewTableFormatter(pretty.NewStyles(false), 80, config.RuleFormatName)
 
 	result := formatter.FormatTableSummary(runner.Stats{
 		FilesProcessed:        1,

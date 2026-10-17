@@ -45,13 +45,13 @@ func yamlKeys(value any) []string {
 	return keys
 }
 
-// unknownKeyWarnings reports keys in a configuration file that gomdlint does
-// not read. YAML decoding drops them silently, so a typo such as "flavour"
-// would otherwise leave the default in force without a trace.
-func unknownKeyWarnings(path string, content []byte) []string {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(content, &doc); err != nil || len(doc.Content) == 0 {
-		return nil // Decoding errors are reported when the file is decoded.
+// unknownKeyWarnings reports keys in the parsed document of a configuration
+// file that gomdlint does not read. YAML decoding drops them silently, so a
+// typo such as "flavour" would otherwise leave the default in force without
+// a trace.
+func unknownKeyWarnings(path string, doc *yaml.Node) []string {
+	if len(doc.Content) == 0 {
+		return nil // An empty file has no keys.
 	}
 
 	topKeys := yamlKeys(config.Config{})
