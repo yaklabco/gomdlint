@@ -649,16 +649,27 @@ func TestSARIFReporter_RecordsRuleFailures(t *testing.T) {
 			Level:          "error",
 			Message:        reporter.SARIFMessage{Text: "rule MD009 failed: whitespace exploded"},
 			Locations:      location,
-			AssociatedRule: &reporter.SARIFRuleReference{ID: "MD009"},
+			AssociatedRule: &reporter.SARIFRuleReference{ID: "MD009", Index: intPtr(1)},
 		},
 		{
 			Level:          "error",
 			Message:        reporter.SARIFMessage{Text: "rule MD013 failed: line length exploded"},
 			Locations:      location,
-			AssociatedRule: &reporter.SARIFRuleReference{ID: "MD013"},
+			AssociatedRule: &reporter.SARIFRuleReference{ID: "MD013", Index: intPtr(2)},
 		},
 	}, run.Invocations[0].ToolExecutionNotifications, "one notification per failed rule, in rule order")
 	assert.Len(t, run.Results, 1, "findings of the rules that ran are still reported")
+
+	// A failed rule is described too, so its reference can carry an index.
+	descriptors := run.Tool.Driver.Rules
+	require.Len(t, descriptors, 3)
+	assert.Equal(t, []string{"MD041", "MD009", "MD013"}, []string{descriptors[0].ID, descriptors[1].ID, descriptors[2].ID})
+	assert.NotNil(t, descriptors[2].ShortDescription, "the failed rule carries its registry metadata")
+}
+
+// intPtr returns a pointer to value, for optional integers in SARIF types.
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestSARIFReporter_SuccessfulRun(t *testing.T) {
@@ -717,6 +728,32 @@ func TestSARIFReporter_TypedNilRegistryFallsBackToDefault(t *testing.T) {
 
 	require.Len(t, driver.Rules, 1)
 	assert.NotNil(t, driver.Rules[0].ShortDescription, "the default registry describes MD009")
+}
+
+func TestSARIFReporter_ResultsReferenceTheirRuleByIndex(t *testing.T) {
+	t.Parallel()
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), umlautContent,
+			lint.Diagnostic{RuleID: "MD009", RuleName: "no-trailing-spaces", StartLine: 3, StartColumn: 13},
+			lint.Diagnostic{RuleID: "XX999", RuleName: "custom-rule", StartLine: 1},
+			lint.Diagnostic{RuleID: "MD009", RuleName: "no-trailing-spaces", StartLine: 3, StartColumn: 14},
+		),
+		sarifFile(filepath.Join(root, "b.md"), "x\n", lint.Diagnostic{RuleID: "MD041", StartLine: 1}),
+	}}
+
+	run := decodeSARIF(t, reporter.Options{WorkingDir: root}, result).Runs[0]
+	descriptors := run.Tool.Driver.Rules
+
+	want := []int{0, 1, 0, 2}
+	require.Len(t, run.Results, len(want))
+	for idx, res := range run.Results {
+		require.NotNil(t, res.RuleIndex, "result %d must reference its rule descriptor, even at index 0", idx)
+		assert.Equal(t, want[idx], *res.RuleIndex, "result %d", idx)
+		require.Less(t, *res.RuleIndex, len(descriptors))
+		assert.Equal(t, res.RuleID, descriptors[*res.RuleIndex].ID, "result %d points at the descriptor of its own rule", idx)
+	}
 }
 
 func TestSARIFReporter_ToolMetadata(t *testing.T) {

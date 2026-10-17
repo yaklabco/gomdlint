@@ -92,9 +92,11 @@ type SARIFNotification struct {
 	AssociatedRule *SARIFRuleReference `json:"associatedRule,omitempty"`
 }
 
-// SARIFRuleReference refers to a rule by its ID.
+// SARIFRuleReference refers to a rule by its ID and, when the run describes
+// the rule, by its position in tool.driver.rules.
 type SARIFRuleReference struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Index *int   `json:"index,omitempty"`
 }
 
 // SARIFTool describes the analysis tool.
@@ -137,7 +139,12 @@ type SARIFRuleConfig struct {
 
 // SARIFResult represents a single diagnostic result.
 type SARIFResult struct {
-	RuleID    string          `json:"ruleId"`
+	RuleID string `json:"ruleId"`
+
+	// RuleIndex is the position of the result's rule in tool.driver.rules.
+	// SARIF requires the reference whenever the run describes the rule.
+	RuleIndex *int `json:"ruleIndex,omitempty"`
+
 	Level     string          `json:"level"`
 	Message   SARIFMessage    `json:"message"`
 	Locations []SARIFLocation `json:"locations"`
@@ -272,7 +279,7 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 			run:       &run,
 			registry:  r.registry,
 			locator:   locator,
-			described: make(map[string]bool),
+			ruleIndex: make(map[string]int),
 		}
 		for _, file := range result.Files {
 			if file.Error != nil {
@@ -324,11 +331,30 @@ func toolVersion(explicit string, buildInfo *debug.BuildInfo) string {
 
 // sarifRunBuilder accumulates the rules, results and failures of a run.
 type sarifRunBuilder struct {
-	run        *SARIFRun
-	registry   RuleLookup
-	locator    *artifactLocator
-	described  map[string]bool
+	run      *SARIFRun
+	registry RuleLookup
+	locator  *artifactLocator
+
+	// ruleIndex maps each described rule ID to its position in
+	// tool.driver.rules.
+	ruleIndex map[string]int
+
 	invocation SARIFInvocation
+}
+
+// ruleReference returns the position of ruleID in tool.driver.rules,
+// describing the rule on first use. fallbackName names a rule the registry
+// does not know.
+func (b *sarifRunBuilder) ruleReference(ruleID, fallbackName string) int {
+	if index, ok := b.ruleIndex[ruleID]; ok {
+		return index
+	}
+
+	index := len(b.run.Tool.Driver.Rules)
+	b.ruleIndex[ruleID] = index
+	b.run.Tool.Driver.Rules = append(b.run.Tool.Driver.Rules, b.describeRule(ruleID, fallbackName))
+
+	return index
 }
 
 // addFailure records an error the run met as an error notification, located
@@ -338,7 +364,8 @@ func (b *sarifRunBuilder) addFailure(err error, path string) {
 }
 
 // addRuleFailures records each rule that failed on the file at path as an
-// error notification naming the rule, in rule ID order.
+// error notification, in rule ID order. The notification refers to the
+// rule's descriptor, which is added to the run if no result described it.
 func (b *sarifRunBuilder) addRuleFailures(path string, ruleErrors map[string]error) {
 	for _, ruleID := range slices.Sorted(maps.Keys(ruleErrors)) {
 		err := ruleErrors[ruleID]
@@ -346,8 +373,9 @@ func (b *sarifRunBuilder) addRuleFailures(path string, ruleErrors map[string]err
 			continue
 		}
 
+		index := b.ruleReference(ruleID, "")
 		notification := b.failure(fmt.Sprintf("rule %s failed: %v", ruleID, err), path)
-		notification.AssociatedRule = &SARIFRuleReference{ID: ruleID}
+		notification.AssociatedRule = &SARIFRuleReference{ID: ruleID, Index: &index}
 		b.notify(notification)
 	}
 }
@@ -370,12 +398,10 @@ func (b *sarifRunBuilder) notify(notification SARIFNotification) {
 	b.invocation.ToolExecutionNotifications = append(b.invocation.ToolExecutionNotifications, notification)
 }
 
-// addResult appends the result for diag, describing its rule on first use.
+// addResult appends the result for diag, which refers to its rule's
+// descriptor by index.
 func (b *sarifRunBuilder) addResult(file runner.FileOutcome, diag *lint.Diagnostic) {
-	if !b.described[diag.RuleID] {
-		b.described[diag.RuleID] = true
-		b.run.Tool.Driver.Rules = append(b.run.Tool.Driver.Rules, b.describeRule(diag))
-	}
+	ruleIndex := b.ruleReference(diag.RuleID, diag.RuleName)
 
 	path := diag.FilePath
 	if path == "" {
@@ -385,9 +411,10 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, diag *lint.Diagnost
 	snapshot := file.Result.Snapshot
 
 	result := SARIFResult{
-		RuleID:  diag.RuleID,
-		Level:   severityToSARIFLevel(diag.Severity),
-		Message: SARIFMessage{Text: diag.Message},
+		RuleID:    diag.RuleID,
+		RuleIndex: &ruleIndex,
+		Level:     severityToSARIFLevel(diag.Severity),
+		Message:   SARIFMessage{Text: diag.Message},
 		Locations: []SARIFLocation{{
 			PhysicalLocation: SARIFPhysicalLocation{
 				ArtifactLocation: location,
@@ -403,12 +430,13 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, diag *lint.Diagnost
 	b.run.Results = append(b.run.Results, result)
 }
 
-// describeRule returns the SARIF description of the rule that produced diag,
-// taking its metadata from the registry.
-func (b *sarifRunBuilder) describeRule(diag *lint.Diagnostic) SARIFRule {
-	rule := SARIFRule{ID: diag.RuleID, Name: diag.RuleName}
+// describeRule returns the SARIF description of a rule, taking its metadata
+// from the registry. A rule the registry does not know is identified by its
+// ID and fallbackName only.
+func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
+	rule := SARIFRule{ID: ruleID, Name: fallbackName}
 
-	registered, ok := b.registry.GetByID(diag.RuleID)
+	registered, ok := b.registry.GetByID(ruleID)
 	if !ok {
 		return rule
 	}
