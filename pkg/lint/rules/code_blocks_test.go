@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -683,5 +686,32 @@ func TestCommandsShowOutputRule(t *testing.T) {
 				t.Errorf("fixed = %q, want %q", got, tt.fixed)
 			}
 		})
+	}
+}
+
+// TestCommandsShowOutputRule_PromptThatLooksLikeAFence covers a prompt line
+// whose command is a fence: removing its prompt would close the code block
+// there and turn the lines after it into other blocks. Both prompts are
+// reported, as markdownlint does, but the fix check withholds that line's
+// fix, so the block still ends where it does now.
+func TestCommandsShowOutputRule_PromptThatLooksLikeAFence(t *testing.T) {
+	tests := []struct {
+		name, input, fixed string
+	}{
+		{"backtick fence", "```sh\n$ ```\n$ pwd\n```\n", "```sh\n$ ```\npwd\n```\n"},
+		{"tilde fence", "~~~sh\n$ ~~~\n$ pwd\n~~~\n", "~~~sh\n$ ~~~\npwd\n~~~\n"},
+		{"four-backtick fence", "````sh\n$ ````\n$ pwd\n````\n", "````sh\n$ ````\npwd\n````\n"},
+	}
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		for _, tt := range tests {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				diags, err := NewCommandsShowOutputRule().Apply(fixSafetyContext(t, flavor, tt.input))
+				require.NoError(t, err)
+				require.Len(t, diags, 2)
+				assert.Equal(t, []int{2, 3}, []int{diags[0].StartLine, diags[1].StartLine})
+				assert.False(t, diags[0].HasFix(), "removing the prompt would close the fence")
+				assert.Equal(t, tt.fixed, applyAllFixEdits(t, tt.input, diags))
+			})
+		}
 	}
 }
