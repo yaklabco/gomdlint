@@ -363,18 +363,13 @@ func NewLinkImageStyleRule() *LinkImageStyleRule {
 	}
 }
 
-// DefaultEnabled returns false for this optional rule.
-func (r *LinkImageStyleRule) DefaultEnabled() bool {
-	return false
-}
-
-// Apply checks link/image style consistency.
+// Apply checks link/image style consistency. Every style is allowed by
+// default, as in markdownlint, so the rule reports nothing until an option
+// disallows a style, and like markdownlint it then returns at once.
 func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
-
-	refCtx := ctx.RefContext()
 
 	// Get allowed styles from config
 	allowAutolink := ctx.OptionBool("autolink", true)
@@ -383,7 +378,11 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 	allowCollapsed := ctx.OptionBool("collapsed", true)
 	allowShortcut := ctx.OptionBool("shortcut", true)
 	allowURLInline := ctx.OptionBool("url_inline", true)
+	if allowAutolink && allowInline && allowFull && allowCollapsed && allowShortcut && allowURLInline {
+		return nil, nil
+	}
 
+	refCtx := ctx.RefContext()
 	var diags []lint.Diagnostic
 
 	for _, usage := range refCtx.Usages {
@@ -491,11 +490,6 @@ func NewDescriptiveLinkTextRule() *DescriptiveLinkTextRule {
 			false, // Not auto-fixable
 		),
 	}
-}
-
-// DefaultEnabled returns false for this optional rule.
-func (r *DescriptiveLinkTextRule) DefaultEnabled() bool {
-	return false
 }
 
 // getDefaultGenericPatterns returns markdownlint's default prohibited_texts.

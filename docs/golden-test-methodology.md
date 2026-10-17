@@ -158,7 +158,7 @@ rules:
 
 A scenario that depends on a flavor sets it explicitly, even when it matches the current default. The GFM table scenarios set `flavor: gfm` for this reason.
 
-A per-rule scenario runs its directory's rule even when that rule is disabled by default, such as MD043 or MD044, and no other rule can report in it. A real-world scenario runs the default-enabled rules, and rules that are disabled by default stay inert there even if a directive enables them. To reproduce a per-rule scenario with the CLI, pass the sidecar with `--config` and enable the rule with `--enable`. The CLI also runs the other default-enabled rules, so expect their findings too.
+A per-rule scenario runs only its directory's rule, and no other rule can report in it. A real-world scenario runs the default-enabled rules, which are all the rules, as in markdownlint. Rules such as MD043 and MD044 check nothing until they are given options, so they report in a real-world scenario only when its sidecar configures them. To reproduce a per-rule scenario with the CLI, pass the sidecar with `--config`. The CLI also runs every other rule, so expect their findings too.
 
 The harness fails a scenario rather than ignore part of its sidecar. These sidecars are rejected:
 

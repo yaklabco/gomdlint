@@ -32,11 +32,6 @@ func NewInlineHTMLRule() *InlineHTMLRule {
 	}
 }
 
-// DefaultEnabled returns false - this rule is opt-in.
-func (r *InlineHTMLRule) DefaultEnabled() bool {
-	return false
-}
-
 // Apply reports every opening HTML element that is not allowed. HTML blocks
 // are scanned for each element they contain, like markdownlint, which
 // re-parses HTML blocks as inline content. Closing tags, comments,

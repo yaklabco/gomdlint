@@ -825,27 +825,17 @@ func TestRuleMetadata(t *testing.T) {
 	}
 }
 
-func TestOptionalRulesDefaultDisabled(t *testing.T) {
-	// These rules should be disabled by default
-	optionalRules := []lint.Rule{
-		NewLinkImageStyleRule(),
-		NewDescriptiveLinkTextRule(),
-	}
-
-	for _, rule := range optionalRules {
-		if rule.DefaultEnabled() {
-			t.Errorf("%s.DefaultEnabled() = true, want false", rule.ID())
-		}
-	}
-
-	// These rules should be enabled by default
-	enabledRules := []lint.Rule{
+// TestReferenceRulesDefaultEnabled checks that the link and reference rules
+// run by default, as in markdownlint. MD054 allows every style by default,
+// so it reports nothing until an option disallows one.
+func TestReferenceRulesDefaultEnabled(t *testing.T) {
+	for _, rule := range []lint.Rule{
 		NewLinkFragmentsRule(),
 		NewReferenceLinkImagesRule(),
 		NewLinkImageRefDefsRule(),
-	}
-
-	for _, rule := range enabledRules {
+		NewLinkImageStyleRule(),
+		NewDescriptiveLinkTextRule(),
+	} {
 		if !rule.DefaultEnabled() {
 			t.Errorf("%s.DefaultEnabled() = false, want true", rule.ID())
 		}

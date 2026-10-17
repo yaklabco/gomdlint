@@ -467,11 +467,6 @@ func NewTableColumnStyleRule() *TableColumnStyleRule {
 	}
 }
 
-// DefaultEnabled returns false - this is an optional style rule.
-func (r *TableColumnStyleRule) DefaultEnabled() bool {
-	return false
-}
-
 // ColumnStyle represents the column spacing style of tables.
 type ColumnStyle string
 

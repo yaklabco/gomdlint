@@ -104,11 +104,10 @@ func TestInlineHTMLRule(t *testing.T) {
 	}
 }
 
-func TestInlineHTMLRule_DefaultDisabled(t *testing.T) {
-	rule := NewInlineHTMLRule()
-	if rule.DefaultEnabled() {
-		t.Error("InlineHTMLRule should be disabled by default")
-	}
+// TestInlineHTMLRule_DefaultEnabled checks that MD033 runs by default, as in
+// markdownlint.
+func TestInlineHTMLRule_DefaultEnabled(t *testing.T) {
+	assert.True(t, NewInlineHTMLRule().DefaultEnabled())
 }
 
 // applyHTMLRule runs MD033 on input parsed with the given flavor and options.

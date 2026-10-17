@@ -483,11 +483,6 @@ const (
 	LinkDestConsistent LinkDestStyle = "consistent"
 )
 
-// DefaultEnabled returns false for this optional rule.
-func (r *LinkDestinationStyleRule) DefaultEnabled() bool {
-	return false
-}
-
 // Apply checks link destination style consistency.
 func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {

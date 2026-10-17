@@ -119,6 +119,32 @@ func TestInit_FullTemplateDocumentsEveryRule(t *testing.T) {
 	})
 }
 
+// TestInit_FullTemplateEnablesEveryRule covers the enabled states that
+// "init --full" writes. Like markdownlint, gomdlint runs every rule by
+// default, so every rule is listed as enabled.
+func TestInit_FullTemplateEnablesEveryRule(t *testing.T) {
+	for _, tt := range []struct {
+		format, name string
+		unmarshal    func([]byte, any) error
+	}{
+		{format: "yaml", name: ".gomdlint.yml", unmarshal: yaml.Unmarshal},
+		{format: "json", name: ".gomdlint.json", unmarshal: json.Unmarshal},
+	} {
+		t.Run(tt.format, func(t *testing.T) {
+			_, content := initTemplate(t, tt.name, "--format", tt.format, "--full")
+
+			var parsed struct {
+				Rules map[string]map[string]bool `json:"rules" yaml:"rules"`
+			}
+			require.NoError(t, tt.unmarshal([]byte(content), &parsed), content)
+			assert.Len(t, parsed.Rules, len(lint.DefaultRegistry.IDs()), "every registered rule is listed")
+			for _, id := range lint.DefaultRegistry.IDs() {
+				assert.Equal(t, map[string]bool{"enabled": true}, parsed.Rules[id], id)
+			}
+		})
+	}
+}
+
 // TestInit_JSONTemplates covers "init --format json": the minimal template
 // sets what the minimal YAML template sets and lists no rules, and the full
 // one lists every rule with its default enabled state. Neither sets a

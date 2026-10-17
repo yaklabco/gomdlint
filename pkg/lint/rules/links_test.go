@@ -621,10 +621,13 @@ func TestLinkDestinationStyleRule_GFMAutolinkLiterals(t *testing.T) {
 	}
 }
 
-func TestLinkDestinationStyleRule_DefaultDisabled(t *testing.T) {
+// TestLinkDestinationStyleRule_DefaultEnabled checks that MDL001, a gomdlint
+// rule that markdownlint does not have, runs by default like every
+// markdownlint rule.
+func TestLinkDestinationStyleRule_DefaultEnabled(t *testing.T) {
 	rule := NewLinkDestinationStyleRule()
-	if rule.DefaultEnabled() {
-		t.Error("LinkDestinationStyleRule should be disabled by default")
+	if !rule.DefaultEnabled() {
+		t.Error("LinkDestinationStyleRule should be enabled by default")
 	}
 }
 

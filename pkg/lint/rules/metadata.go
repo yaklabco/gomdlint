@@ -33,11 +33,6 @@ func NewFirstLineHeadingRule() *FirstLineHeadingRule {
 	}
 }
 
-// DefaultEnabled returns false - this rule is opt-in.
-func (r *FirstLineHeadingRule) DefaultEnabled() bool {
-	return false
-}
-
 // Apply checks that the first content in the file is a top-level heading.
 func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil || len(ctx.File.Content) == 0 {
@@ -473,11 +468,6 @@ func NewRequiredHeadingsRule() *RequiredHeadingsRule {
 	}
 }
 
-// DefaultEnabled returns false - this rule requires configuration.
-func (r *RequiredHeadingsRule) DefaultEnabled() bool {
-	return false
-}
-
 // noMoreHeadings is markdownlint's placeholder for "past the end of the list".
 const noMoreHeadings = "[None]"
 
@@ -616,11 +606,6 @@ func NewProperNamesRule() *ProperNamesRule {
 			true, // Auto-fixable.
 		),
 	}
-}
-
-// DefaultEnabled returns false - this rule requires configuration.
-func (r *ProperNamesRule) DefaultEnabled() bool {
-	return false
 }
 
 // literalLinkPattern matches the addresses GFM turns into links (http(s)

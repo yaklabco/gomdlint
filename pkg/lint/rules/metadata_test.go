@@ -211,10 +211,12 @@ func TestFirstLineHeadingRule_HTMLHeading(t *testing.T) {
 	}
 }
 
-func TestFirstLineHeadingRule_DefaultDisabled(t *testing.T) {
+// TestFirstLineHeadingRule_DefaultEnabled checks that MD041 runs by default,
+// as in markdownlint.
+func TestFirstLineHeadingRule_DefaultEnabled(t *testing.T) {
 	rule := NewFirstLineHeadingRule()
-	if rule.DefaultEnabled() {
-		t.Error("FirstLineHeadingRule should be disabled by default")
+	if !rule.DefaultEnabled() {
+		t.Error("FirstLineHeadingRule should be enabled by default")
 	}
 }
 
@@ -643,10 +645,12 @@ func TestRequiredHeadingsRule_MarkdownlintParity(t *testing.T) {
 	}
 }
 
-func TestRequiredHeadingsRule_DefaultDisabled(t *testing.T) {
+// TestRequiredHeadingsRule_DefaultEnabled checks that MD043 runs by default,
+// as in markdownlint. It checks nothing until it is given headings.
+func TestRequiredHeadingsRule_DefaultEnabled(t *testing.T) {
 	rule := NewRequiredHeadingsRule()
-	if rule.DefaultEnabled() {
-		t.Error("RequiredHeadingsRule should be disabled by default")
+	if !rule.DefaultEnabled() {
+		t.Error("RequiredHeadingsRule should be enabled by default")
 	}
 }
 
@@ -1003,9 +1007,11 @@ func TestProperNamesRule_MarkdownlintParity(t *testing.T) {
 	}
 }
 
-func TestProperNamesRule_DefaultDisabled(t *testing.T) {
+// TestProperNamesRule_DefaultEnabled checks that MD044 runs by default, as
+// in markdownlint. It checks nothing until it is given names.
+func TestProperNamesRule_DefaultEnabled(t *testing.T) {
 	rule := NewProperNamesRule()
-	if rule.DefaultEnabled() {
-		t.Error("ProperNamesRule should be disabled by default")
+	if !rule.DefaultEnabled() {
+		t.Error("ProperNamesRule should be enabled by default")
 	}
 }
