@@ -1,6 +1,7 @@
 package goldmark
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
@@ -125,14 +126,20 @@ func (m *mapper) mapNode(gmNode ast.Node) *mdast.Node {
 
 	case *ast.Paragraph, *ast.TextBlock:
 		// A tight list item holds its text in a TextBlock: a paragraph
-		// rendered without <p>. A TextBlock with no lines stands for link
-		// reference definitions that goldmark removed; it has no source.
+		// rendered without <p>. A block with no lines has no source.
 		if gmNode.Lines().Len() == 0 && !gmNode.HasChildren() {
 			return nil
 		}
 		node = mdast.NewNode(mdast.NodeParagraph)
 		m.mapChildren(gmNode, node)
 		m.setParagraphSpans(node, gmNode)
+
+	case *ast.LinkReferenceDefinition:
+		// A definition renders nothing, and the tree records no node for
+		// it: the refs package finds definitions on the lines that no leaf
+		// block covers. goldmark gives each definition a node of its own,
+		// placed before the paragraph it started, if any text is left.
+		return nil
 
 	case *ast.List:
 		node = m.mapList(gmn)
@@ -248,7 +255,7 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 	listAttrs := &mdast.ListAttrs{
 		Ordered:     list.IsOrdered(),
 		StartNumber: list.Start,
-		Tight:       list.IsTight,
+		Tight:       listTight(list, m.source),
 	}
 
 	// goldmark's Marker is the bullet character of a bullet list and the
@@ -263,6 +270,76 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 	m.mapChildren(list, node)
 	m.setContainerSpans(node, list, false)
 	return node
+}
+
+// listTight reports whether a list is tight as CommonMark reads it. goldmark
+// reads a list as loose when an item but the first, or a block of an item
+// but its first, follows a blank line, by the blocks' blank-line flags
+// (listParser.Close). It gives each link reference definition that starts a
+// paragraph a node of its own before the paragraph, and the first of them
+// takes the paragraph's flag. The text left after the definitions then
+// counts as a later block of the item, although no blank line separates it
+// from them, and keeps the flag that its first line got when the item
+// followed a blank line, so goldmark reads the list as loose. Definitions
+// render nothing, so they and the text after them count as one block.
+func listTight(list *ast.List, source []byte) bool {
+	if list.IsTight {
+		return true
+	}
+	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+		if item != list.FirstChild() && item.HasBlankPreviousLines() {
+			return false
+		}
+		first := firstBlockEnd(item.FirstChild(), source)
+		if first == nil {
+			continue
+		}
+		for block := first.NextSibling(); block != nil; block = block.NextSibling() {
+			if block.HasBlankPreviousLines() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// firstBlockEnd returns the last node of an item's first block, which starts
+// at node: the node itself, or, when it is a link reference definition, the
+// last definition of its run or the paragraph that holds the text after
+// them.
+func firstBlockEnd(node ast.Node, source []byte) ast.Node {
+	if _, ok := node.(*ast.LinkReferenceDefinition); !ok {
+		return node
+	}
+	for {
+		next := node.NextSibling()
+		if _, ok := next.(*ast.LinkReferenceDefinition); !ok {
+			break
+		}
+		node = next
+	}
+	switch next := node.NextSibling().(type) {
+	case *ast.Paragraph, *ast.TextBlock:
+		if continuesDefinitions(node, next, source) {
+			return next
+		}
+	}
+	return node
+}
+
+// continuesDefinitions reports whether paragraph holds the text that
+// followed the definitions ending with def in one source paragraph: its
+// first line is the line after def's last line.
+func continuesDefinitions(def, paragraph ast.Node, source []byte) bool {
+	defLines, lines := def.Lines(), paragraph.Lines()
+	if defLines.Len() == 0 || lines.Len() == 0 {
+		return false
+	}
+	end, start := defLines.At(defLines.Len()-1).Stop, lines.At(0).Start
+	if end > start || start > len(source) {
+		return false
+	}
+	return bytes.Count(source[end:start], []byte{'\n'}) == 1
 }
 
 // mapFencedCodeBlock converts a goldmark FencedCodeBlock to an mdast node.
