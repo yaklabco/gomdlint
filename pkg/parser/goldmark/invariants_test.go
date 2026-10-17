@@ -36,6 +36,7 @@ var invariantInputs = map[string]string{
 	"tables": "Lead line\n| a | b |\n|---|---|\n| `x\\|y` | 2 |\n\n> | q |\n> |---|\n> | r |\n",
 	"bom":    "\xEF\xBB\xBF# Title\n\nText\n",
 	"tabs":   "-\tone\n\n\tcode\n>\tquote\n",
+	"items":  "> -\t> # H\n>     > Text\n\n> 1.\t> q\n\n- -\t# H\n\n1. >\t- x\n\n-\t\tcode\n\n- [a]: /u\n  text\n\n- [b]: /v\n",
 	"crlf":   "# Title\r\n\r\n- a\r\n- b\r\n\r\n```\r\nx\r\n```\r\n",
 }
 

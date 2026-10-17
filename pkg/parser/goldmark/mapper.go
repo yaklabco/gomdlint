@@ -141,7 +141,7 @@ func (m *mapper) mapNode(gmNode ast.Node) *mdast.Node {
 		node = mdast.NewNode(mdast.NodeListItem)
 		node.Block = mdast.NewBlockAttrs().WithListItem(&mdast.ListItemAttrs{ContentIndent: gmn.Offset})
 		m.mapChildren(gmNode, node)
-		m.setContainerSpans(node, gmNode, true)
+		m.setListItemSpans(node, gmNode)
 
 	case *ast.Blockquote:
 		node = mdast.NewNode(mdast.NodeBlockquote)
@@ -778,6 +778,25 @@ func (m *mapper) setContainerSpans(node *mdast.Node, gmNode ast.Node, withConten
 	content := emptyAt(full.EndOffset)
 	if hasChildren {
 		content = children
+	}
+	setSpans(node, full, clampTo(content, full))
+}
+
+// setListItemSpans gives a list item its spans. The content starts where
+// goldmark found it on the item's first line, after the marker and the
+// spaces the item claims, so it also covers link reference definitions
+// there, which have no node. When the first line holds only the marker, the
+// content starts at the first child.
+func (m *mapper) setListItemSpans(node *mdast.Node, gmNode ast.Node) {
+	m.setContainerSpans(node, gmNode, true)
+	extent := m.block(gmNode)
+	if extent == nil || extent.contentStart < 0 || node.SourceSpan == nil {
+		return
+	}
+	full := *node.SourceSpan
+	content := mdast.SourceRange{StartOffset: m.abs(extent.contentStart), EndOffset: full.EndOffset}
+	if children, ok := childrenRange(node); ok {
+		content.EndOffset = children.EndOffset
 	}
 	setSpans(node, full, clampTo(content, full))
 }

@@ -53,8 +53,16 @@
 //   - List: from the first item's marker to the end of the last item. Blank
 //     lines after the last item are not included.
 //   - ListItem: from the marker to the end of the item's last line.
-//     Content: from the start of the first child to the end of the last
-//     child, or empty after the marker when the item has no children.
+//     Content: from where the item's content starts on its first line,
+//     after the marker and the spaces the item claims, to the end of the
+//     last child, or to the end of the item when only link reference
+//     definitions follow the marker. A tab the item claims only in part
+//     belongs to the content. When the first line holds only the marker,
+//     the content starts at the first child, and it is empty, at the end of
+//     the marker line, when the item has no content at all. Where the
+//     content starts on the first line is not always ContentIndent columns
+//     after the marker: goldmark measures a tab after the marker from where
+//     the item starts, not from the start of the line.
 //   - Blockquote: from the first '>' to the end of its last line, including
 //     lines that hold only '>' and lazy continuation lines. Content: from the
 //     first to the last child, or empty at the end when it has none.

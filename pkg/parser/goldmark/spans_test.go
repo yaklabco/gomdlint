@@ -670,6 +670,40 @@ func TestListItemContentIndent(t *testing.T) {
 	}
 }
 
+// TestListItemContentStartsAfterItsMarker checks that a list item's content
+// starts where goldmark found it on the item's first line. goldmark measures
+// a tab after the marker from where the item starts, so ContentIndent alone
+// does not locate the content when the item does not start on a tab stop.
+func TestListItemContentStartsAfterItsMarker(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		index   int
+		full    string
+		content string
+		indent  int
+	}{
+		{"tab after a bullet in a blockquote", "> -\t> # H\n", 0, "-\t> # H", "> # H", 4},
+		{"tab after an ordered marker in a blockquote", "> 1.\t> # H\n", 0, "1.\t> # H", "> # H", 4},
+		{"tab after a nested bullet", "- -\t# H\n", 1, "-\t# H", "# H", 4},
+		{"definition only", "- [a]: https://example.com\n", 0, "- [a]: https://example.com", "[a]: https://example.com", 2},
+		{"definition before a paragraph", "- [a]: /u\n  text\n", 0, "- [a]: /u\n  text", "[a]: /u\n  text", 2},
+		{"first line holds only the marker", "-\n  text\n", 0, "-\n  text", "text", 2},
+		{"indented code after spaces", "-     code\n", 0, "-     code", "    code", 2},
+		{"tab claimed in part before indented code", "-\t\tcode\n", 0, "-\t\tcode", "\t\tcode", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := parseForSpans(t, FlavorCommonMark, tt.input)
+			item := nthNode(file.Root, mdast.NodeListItem, tt.index)
+			require.NotNil(t, item)
+			require.Equal(t, tt.full, string(item.Text()))
+			require.Equal(t, tt.content, string(item.ContentText()))
+			require.Equal(t, tt.indent, item.Block.ListItem.ContentIndent)
+		})
+	}
+}
+
 func TestCodeBlockFenceAttributes(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -67,7 +67,10 @@ type ListItemAttrs struct {
 	// ContentIndent is the width, in columns, from the start of the
 	// enclosing container's content to the start of the item's content: the
 	// marker's own indentation, the marker and the spaces after it. Lines
-	// that continue the item are indented by at least this much.
+	// that continue the item are indented by at least this much. On the
+	// item's first line goldmark measures a tab after the marker from where
+	// the item starts, not from the start of the line, so the content there
+	// can start fewer columns in. The item's content span locates it.
 	ContentIndent int
 }
 

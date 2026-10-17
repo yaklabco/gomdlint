@@ -22,6 +22,12 @@ type blockExtent struct {
 	// closed records that the block consumed a closing line, such as the
 	// closing fence of fenced code.
 	closed bool
+
+	// contentStart is the offset where a list item's content starts on its
+	// first line, after the marker and the spaces the item claims. A tab
+	// the item claims only in part belongs to the content. It is -1 for
+	// other blocks and for an item whose first line holds only its marker.
+	contentStart int
 }
 
 // inlineExtent records the source range an inline parser consumed.
@@ -92,7 +98,26 @@ func (r *spanRecorder) openBlock(node ast.Node, source []byte, segment text.Segm
 	if _, indented := node.(*ast.CodeBlock); !indented {
 		start = firstNonBlank(source, segment.Start, segment.Stop)
 	}
-	r.blocks[node] = &blockExtent{start: start, lastLine: segment.Start}
+	r.blocks[node] = &blockExtent{start: start, lastLine: segment.Start, contentStart: -1}
+}
+
+// openContent records where a list item's content starts on its first
+// line. after is the reader's position once the item has consumed its
+// marker and the spaces after it. goldmark measures those spaces from where
+// the item starts rather than from the start of the line, so the item's
+// content indentation does not locate its content on a line with tabs.
+// When the item claims only part of a tab, the reader is past the tab and
+// its padding holds the columns left to the content.
+func (r *spanRecorder) openContent(node ast.Node, source []byte, after text.Segment) {
+	extent, ok := r.blocks[node]
+	if !ok {
+		return
+	}
+	start := after.Start
+	if after.Padding > 0 && start > 0 && source[start-1] == '\t' {
+		start--
+	}
+	extent.contentStart = start
 }
 
 // ownLine records that a block owns the line containing offset.
@@ -169,6 +194,10 @@ func (p *spanBlockParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 	if node != nil {
 		if rec := p.recorder(pc); rec != nil {
 			rec.openBlock(node, reader.Source(), segment)
+			if _, item := node.(*ast.ListItem); item && state&parser.HasChildren != 0 {
+				_, after := reader.Position()
+				rec.openContent(node, reader.Source(), after)
+			}
 		}
 	}
 	return node, state
