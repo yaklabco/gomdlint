@@ -2,6 +2,7 @@ package rules
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
+	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // HeadingIncrementRule checks that heading levels increment by one.
@@ -277,7 +279,7 @@ func (r *HeadingStyleRule) createStyleDiagnostic(
 
 	// Only auto-fix ATX style changes (not setext conversions).
 	if canAutoFix(detected, expected) {
-		fixBuilder := buildHeadingStyleFix(ctx.File, heading, detected, expected)
+		fixBuilder := buildHeadingStyleFix(ctx, heading, detected, expected)
 		if fixBuilder != nil {
 			builder = builder.WithFix(fixBuilder)
 		}
@@ -318,65 +320,196 @@ func lineOf(file *mdast.FileSnapshot, offset int) *mdast.LineInfo {
 	return &file.Lines[lineNum-1]
 }
 
-// atxClosingSequence returns the range of the closing hash sequence that
-// follows an ATX heading's content; ok is false when the heading is not closed.
-func atxClosingSequence(file *mdast.FileSnapshot, content mdast.SourceRange) (mdast.SourceRange, bool) {
-	line := lineOf(file, content.EndOffset-1)
-	if line == nil {
-		return mdast.SourceRange{}, false
-	}
-	rest := file.Content[content.EndOffset:line.NewlineStart]
-	trimmed := bytes.TrimLeft(rest, " \t")
-	if len(trimmed) == len(rest) {
-		// The closing sequence must be preceded by whitespace.
-		return mdast.SourceRange{}, false
-	}
-	hashes := len(trimmed) - len(bytes.TrimLeft(trimmed, "#"))
-	if hashes == 0 || len(bytes.TrimSpace(trimmed[hashes:])) > 0 {
-		return mdast.SourceRange{}, false
-	}
-	start := line.NewlineStart - len(trimmed)
-	return mdast.SourceRange{StartOffset: start, EndOffset: start + hashes}, true
+// atxParts holds the syntax parts of an ATX heading line as byte ranges.
+type atxParts struct {
+	open       mdast.SourceRange // The opening hash sequence.
+	openSpace  mdast.SourceRange // Whitespace after the opening sequence.
+	content    mdast.SourceRange // The heading text; empty when there is none.
+	closeSpace mdast.SourceRange // Whitespace between the text and the closing sequence.
+	close      mdast.SourceRange // The closing hash sequence; empty when not closed.
 }
 
-// atxOpeningWhitespace returns the whitespace between an ATX heading's
-// opening hash sequence and its content, and the offset where the opening
-// sequence starts.
-func atxOpeningWhitespace(file *mdast.FileSnapshot, content mdast.SourceRange) (mdast.SourceRange, int) {
-	wsStart := content.StartOffset
-	for wsStart > 0 && (file.Content[wsStart-1] == ' ' || file.Content[wsStart-1] == '\t') {
-		wsStart--
+// isSetextHeading reports whether a heading is a setext heading, whose full
+// span runs from its text through its underline over more than one line.
+func isSetextHeading(file *mdast.FileSnapshot, heading *mdast.Node) bool {
+	full := heading.SourceRange()
+	if full.IsEmpty() || full.EndOffset > len(file.Content) {
+		return false
 	}
-	seqStart := wsStart
-	for seqStart > 0 && file.Content[seqStart-1] == '#' {
-		seqStart--
-	}
-	return mdast.SourceRange{StartOffset: wsStart, EndOffset: content.StartOffset}, seqStart
+	first, _ := file.LineAt(full.StartOffset)
+	last, _ := file.LineAt(full.EndOffset - 1)
+	return last > first
 }
 
-// detectHeadingStyle determines the style of a heading from its source.
-//
-// An ATX heading's content is preceded on its line by the opening hash
-// sequence; a setext heading's content is preceded only by indentation and
-// container markers. Closed ATX headings have a closing hash sequence after
-// the content, which an escaped hash (\#) is not.
+// atxHeadingParts splits an ATX heading's full span into its parts, so that
+// empty headings such as "#" or "## ##" are classified like any other. ok is
+// false for setext headings and headings without a usable span.
+func atxHeadingParts(file *mdast.FileSnapshot, heading *mdast.Node) (atxParts, bool) {
+	full := heading.SourceRange()
+	if full.StartOffset < 0 || full.EndOffset > len(file.Content) || full.IsEmpty() ||
+		file.Content[full.StartOffset] != '#' || isSetextHeading(file, heading) {
+		return atxParts{}, false
+	}
+	content := file.Content
+	isSpace := func(b byte) bool { return b == ' ' || b == '\t' }
+	openEnd := full.StartOffset
+	for openEnd < full.EndOffset && content[openEnd] == '#' {
+		openEnd++
+	}
+	spaceEnd := openEnd
+	for spaceEnd < full.EndOffset && isSpace(content[spaceEnd]) {
+		spaceEnd++
+	}
+	end := full.EndOffset
+	for end > spaceEnd && isSpace(content[end-1]) {
+		end--
+	}
+	parts := atxParts{
+		open:      mdast.SourceRange{StartOffset: full.StartOffset, EndOffset: openEnd},
+		openSpace: mdast.SourceRange{StartOffset: openEnd, EndOffset: spaceEnd},
+		content:   mdast.SourceRange{StartOffset: spaceEnd, EndOffset: spaceEnd},
+	}
+	if text, ok := headingContentRange(file, heading); ok {
+		parts.content = text
+	}
+
+	// A closing sequence is a run of hashes that ends the line and follows
+	// whitespace: after the text, or after the opening run of an empty heading.
+	closeStart := parts.content.EndOffset
+	for closeStart < end && isSpace(content[closeStart]) {
+		closeStart++
+	}
+	closeEnd := closeStart
+	for closeEnd < end && content[closeEnd] == '#' {
+		closeEnd++
+	}
+	afterSpace := closeStart > parts.content.EndOffset || (parts.content.IsEmpty() && spaceEnd > openEnd)
+	if closeStart < end && closeEnd == end && afterSpace {
+		parts.closeSpace = mdast.SourceRange{StartOffset: parts.content.EndOffset, EndOffset: closeStart}
+		parts.close = mdast.SourceRange{StartOffset: closeStart, EndOffset: end}
+	}
+	return parts, true
+}
+
+// detectHeadingStyle determines the style of a heading from its full span:
+// setext headings span their underline, and closed ATX headings end with a
+// closing hash sequence, which an escaped hash (\#) is not.
 func detectHeadingStyle(file *mdast.FileSnapshot, heading *mdast.Node) HeadingStyle {
-	content, ok := headingContentRange(file, heading)
-	if !ok {
+	if file == nil || heading == nil {
 		return ""
 	}
-	line := lineOf(file, content.StartOffset)
-	if line == nil {
-		return ""
-	}
-	before := bytes.TrimRight(file.Content[line.StartOffset:content.StartOffset], " \t")
-	if !bytes.HasSuffix(before, []byte("#")) {
+	if isSetextHeading(file, heading) {
 		return StyleSetext
 	}
-	if _, closed := atxClosingSequence(file, content); closed {
+	parts, ok := atxHeadingParts(file, heading)
+	switch {
+	case !ok:
+		return ""
+	case !parts.close.IsEmpty():
 		return StyleATXClosed
+	default:
+		return StyleATX
 	}
-	return StyleATX
+}
+
+// headingText returns a heading's text without trailing whitespace.
+func headingText(file *mdast.FileSnapshot, heading *mdast.Node) string {
+	if rng, ok := headingContentRange(file, heading); ok {
+		return string(file.Content[rng.StartOffset:rng.EndOffset])
+	}
+	return ""
+}
+
+// parseFlavor returns the Markdown flavor the document was linted with.
+func parseFlavor(ctx *lint.RuleContext) string {
+	if ctx.Config != nil && ctx.Config.Flavor != "" {
+		return string(ctx.Config.Flavor)
+	}
+	return string(config.FlavorCommonMark)
+}
+
+// reparse parses text on its own with the document's flavor.
+func reparse(ctx *lint.RuleContext, text []byte) (*mdast.FileSnapshot, bool) {
+	parseCtx := ctx.Ctx
+	if parseCtx == nil {
+		parseCtx = context.Background()
+	}
+	snapshot, err := gmparser.New(parseFlavor(ctx)).Parse(parseCtx, "", text)
+	if err != nil || snapshot == nil || snapshot.Root == nil {
+		return nil, false
+	}
+	return snapshot, true
+}
+
+// reparsedHeading parses the lines of a heading on their own, without their
+// container prefixes and with edit applied when it is not nil, and returns
+// the heading when the lines hold exactly one. ok is false when the edit
+// does not lie within one line of the heading, outside the container prefix.
+func reparsedHeading(
+	ctx *lint.RuleContext,
+	heading *mdast.Node,
+	edit *fix.TextEdit,
+) (*mdast.FileSnapshot, *mdast.Node, bool) {
+	file := ctx.File
+	full := heading.SourceRange()
+	if full.IsEmpty() || full.EndOffset > len(file.Content) {
+		return nil, nil, false
+	}
+	first, _ := file.LineAt(full.StartOffset)
+	last, _ := file.LineAt(full.EndOffset - 1)
+	var block bytes.Buffer
+	applied := edit == nil
+	for lineNum := first; lineNum <= last; lineNum++ {
+		line := file.Lines[lineNum-1]
+		start := line.StartOffset + len(lint.ContainerPrefix(file, heading, lineNum))
+		end := line.NewlineStart
+		if !applied && edit.StartOffset >= start && edit.EndOffset <= end {
+			block.Write(file.Content[start:edit.StartOffset])
+			block.WriteString(edit.NewText)
+			block.Write(file.Content[edit.EndOffset:end])
+			applied = true
+		} else {
+			block.Write(file.Content[start:end])
+		}
+		block.WriteByte('\n')
+	}
+	if !applied {
+		return nil, nil, false
+	}
+	snapshot, ok := reparse(ctx, block.Bytes())
+	if !ok {
+		return nil, nil, false
+	}
+	parsed := snapshot.Root.FirstChild
+	if parsed == nil || parsed.Next != nil || parsed.Kind != mdast.NodeHeading {
+		return nil, nil, false
+	}
+	return snapshot, parsed, true
+}
+
+// headingEditKeeps reports whether a heading, with edit applied, still parses
+// as one heading of the same level, with the given style and text. Rules use
+// it to withhold fixes that would change the document's structure.
+func headingEditKeeps(
+	ctx *lint.RuleContext,
+	heading *mdast.Node,
+	edit fix.TextEdit,
+	style HeadingStyle,
+	text string,
+) bool {
+	snapshot, edited, ok := reparsedHeading(ctx, heading, &edit)
+	return ok && lint.HeadingLevel(edited) == lint.HeadingLevel(heading) &&
+		detectHeadingStyle(snapshot, edited) == style && headingText(snapshot, edited) == text
+}
+
+// reparsedHeadingText returns the text of a heading as headingEditKeeps sees
+// it: parsed on its own, without container prefixes.
+func reparsedHeadingText(ctx *lint.RuleContext, heading *mdast.Node) (string, bool) {
+	snapshot, parsed, ok := reparsedHeading(ctx, heading, nil)
+	if !ok {
+		return "", false
+	}
+	return headingText(snapshot, parsed), true
 }
 
 // allSameChar returns true if all bytes in b are the same as c.
@@ -400,33 +533,39 @@ func canAutoFix(from, to HeadingStyle) bool {
 
 // buildHeadingStyleFix converts between open and closed ATX headings. It edits
 // only the text after the heading content, so indentation and container
-// prefixes such as blockquote markers are preserved.
+// prefixes such as blockquote markers are preserved. It returns nil when the
+// heading text would change, for example when removing the closing sequence
+// of "# Text # #" would make the literal "#" a closing sequence.
 func buildHeadingStyleFix(
-	file *mdast.FileSnapshot,
+	ctx *lint.RuleContext,
 	heading *mdast.Node,
 	from, to HeadingStyle,
 ) *fix.EditBuilder {
-	content, ok := headingContentRange(file, heading)
+	parts, ok := atxHeadingParts(ctx.File, heading)
 	level := lint.HeadingLevel(heading)
-	if !ok || level == 0 {
+	line := lineOf(ctx.File, heading.SourceRange().StartOffset)
+	if !ok || level == 0 || line == nil {
 		return nil
 	}
-	line := lineOf(file, content.EndOffset-1)
-	if line == nil {
-		return nil
+	anchor := parts.content.EndOffset
+	if parts.content.IsEmpty() {
+		anchor = parts.open.EndOffset
 	}
 
-	builder := fix.NewEditBuilder()
+	var edit fix.TextEdit
 	switch {
 	case from == StyleATX && to == StyleATXClosed:
-		builder.ReplaceRange(content.EndOffset, line.NewlineStart, " "+strings.Repeat("#", level))
+		edit = fix.TextEdit{StartOffset: anchor, EndOffset: line.NewlineStart, NewText: " " + strings.Repeat("#", level)}
 	case from == StyleATXClosed && to == StyleATX:
-		if _, closed := atxClosingSequence(file, content); !closed {
-			return nil
-		}
-		builder.Delete(content.EndOffset, line.NewlineStart)
+		edit = fix.TextEdit{StartOffset: anchor, EndOffset: line.NewlineStart}
 	default:
 		return nil
 	}
+	text, ok := reparsedHeadingText(ctx, heading)
+	if !ok || !headingEditKeeps(ctx, heading, edit, to, text) {
+		return nil
+	}
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(edit.StartOffset, edit.EndOffset, edit.NewText)
 	return builder
 }

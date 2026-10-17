@@ -517,6 +517,20 @@ func TestHeadingStyleRule_MarkdownlintStyles(t *testing.T) {
 			wantLines: []int{4},
 		},
 		{
+			// Removing the closing "#" would make the literal "#" before it
+			// the closing sequence, dropping it from the heading text.
+			name:      "no fix when removing the closing sequence exposes another",
+			input:     "# Text # #\n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "empty heading sets the style",
+			input:     "#\n\n## Closed ##\n",
+			wantLines: []int{3},
+			wantFixed: "#\n\n## Closed\n",
+		},
+		{
 			name:      "require_closing_atx with the default style",
 			input:     "# H1\n\n## H2\n",
 			options:   map[string]any{"require_closing_atx": true},

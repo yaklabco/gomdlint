@@ -502,6 +502,21 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			wantFixed: "# Right #\n",
 		},
 		{name: "MD021 skips escaped hash headings", rule: NewNoMultipleSpaceClosedATXRule(), input: "##  Learn C\\#\n", wantLines: []int{}},
+		{
+			name:      "MD019 empty heading",
+			rule:      NewNoMultipleSpaceATXRule(),
+			input:     "##  \n",
+			wantLines: []int{1},
+			wantFixed: "## \n",
+		},
+		{
+			name:      "MD021 empty closed heading",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "##  ##\n",
+			wantLines: []int{1},
+			wantFixed: "## ##\n",
+		},
+		{name: "MD019 skips an empty closed heading", rule: NewNoMultipleSpaceATXRule(), input: "##  ##\n", wantLines: []int{}},
 	}
 
 	for _, tt := range tests {
@@ -933,6 +948,31 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 			name:      "setext heading of only punctuation in a list item is not fixed",
 			input:     "- .\n  ---\n",
 			wantLines: []int{1},
+		},
+		{
+			// "***" would be a thematic break and end the heading.
+			name:      "setext line that would become a thematic break",
+			input:     "Heading\n***.\n---\n",
+			wantLines: []int{2},
+		},
+		{
+			// "---" would become the underline of "Text" alone.
+			name:      "setext line that would become an underline",
+			input:     "Text\n---.\n===\n",
+			wantLines: []int{2},
+		},
+		{
+			// "# Foo #" would read the hash as a closing sequence.
+			name:      "deletion that would expose a closing sequence",
+			input:     "# Foo #.\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "period after a character reference",
+			input:     "# Foo &copy;.\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "# Foo &copy;\n",
 		},
 	}
 

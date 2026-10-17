@@ -163,17 +163,11 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		if detectHeadingStyle(ctx.File, heading) != StyleATX {
+		parts, ok := atxHeadingParts(ctx.File, heading)
+		if !ok || !parts.close.IsEmpty() || parts.openSpace.Len() < 2 {
 			continue
 		}
-		content, ok := headingContentRange(ctx.File, heading)
-		if !ok {
-			continue
-		}
-		spaces, _ := atxOpeningWhitespace(ctx.File, content)
-		if spaces.Len() < 2 {
-			continue
-		}
+		spaces := parts.openSpace
 
 		// Build fix: replace multiple spaces with single space.
 		builder := fix.NewEditBuilder()
@@ -351,16 +345,11 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		content, ok := headingContentRange(ctx.File, heading)
-		if !ok || detectHeadingStyle(ctx.File, heading) != StyleATXClosed {
+		parts, ok := atxHeadingParts(ctx.File, heading)
+		if !ok || parts.close.IsEmpty() {
 			continue
 		}
-		closing, closed := atxClosingSequence(ctx.File, content)
-		if !closed {
-			continue
-		}
-		openSpaces, openStart := atxOpeningWhitespace(ctx.File, content)
-		closeSpaces := mdast.SourceRange{StartOffset: content.EndOffset, EndOffset: closing.StartOffset}
+		openSpaces, closeSpaces := parts.openSpace, parts.closeSpace
 
 		multipleOpenSpaces := openSpaces.Len() > 1
 		multipleCloseSpaces := closeSpaces.Len() > 1
@@ -377,7 +366,7 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 			builder.ReplaceRange(closeSpaces.StartOffset, closeSpaces.EndOffset, " ")
 		}
 
-		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: openStart, EndOffset: closing.EndOffset})
+		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: parts.open.StartOffset, EndOffset: parts.close.EndOffset})
 
 		var msg string
 		switch {
@@ -631,6 +620,11 @@ const defaultPunctuation = ".,;:!\u3002\uFF0C\uFF1B\uFF1A\uFF01"
 var htmlEntityPattern = regexp.MustCompile(
 	`&(?:#\d+|#[xX][\da-fA-F]+|[a-zA-Z]{2,31}|blk\d{2}|emsp1[34]|frac\d{2}|sup\d|there4);$`)
 
+// characterReferencePattern matches a named, decimal or hexadecimal
+// character reference such as "&copy;", "&#169;" or "&#xA9;".
+var characterReferencePattern = regexp.MustCompile(
+	`&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});`)
+
 // gemojiCodePattern matches a GitHub emoji code such as :smile: at the end of
 // text (markdownlint's endOfLineGemojiCodeRe).
 var gemojiCodePattern = regexp.MustCompile(
@@ -678,7 +672,14 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 			}
 			punctStart -= size
 		}
-		if punctStart == len(text) {
+		// The semicolon that ends a character reference such as "&copy;"
+		// belongs to the reference, not to the trailing punctuation.
+		for _, ref := range characterReferencePattern.FindAllIndex(text, -1) {
+			if ref[1] > punctStart {
+				punctStart = ref[1]
+			}
+		}
+		if punctStart >= len(text) {
 			continue
 		}
 		run := text[punctStart:]
@@ -689,7 +690,7 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 			fmt.Sprintf("Heading ends with trailing punctuation %q", run)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove trailing punctuation from the heading")
-		if builder := trailingPunctuationFix(ctx.File, heading, content, start); builder != nil {
+		if builder := trailingPunctuationFix(ctx, heading, content, start); builder != nil {
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
@@ -699,15 +700,18 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 }
 
 // trailingPunctuationFix deletes the punctuation starting at start, together
-// with the whitespace before it on the same line. It returns nil when the
-// deletion would empty a line of a setext heading, which would turn the
-// heading into a paragraph or split it.
+// with the whitespace before it on the same line. It returns nil unless the
+// heading, parsed again with the deletion, is still one heading of the same
+// level and style whose text only lost the deleted characters: removing the
+// punctuation must not leave a setext line blank or turn it into a thematic
+// break, underline or other block, nor expose a closing hash sequence.
 func trailingPunctuationFix(
-	file *mdast.FileSnapshot,
+	ctx *lint.RuleContext,
 	heading *mdast.Node,
 	content mdast.SourceRange,
 	start int,
 ) *fix.EditBuilder {
+	file := ctx.File
 	line := lineOf(file, start)
 	if line == nil {
 		return nil
@@ -717,13 +721,14 @@ func trailingPunctuationFix(
 	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
 		deleteStart--
 	}
-	if detectHeadingStyle(file, heading) == StyleSetext {
-		// The line would be left blank within its containers.
-		lineNum, _ := file.LineAt(start)
-		prefixEnd := line.StartOffset + len(lint.ContainerPrefix(file, heading, lineNum))
-		if prefixEnd >= deleteStart || len(bytes.TrimSpace(file.Content[prefixEnd:deleteStart])) == 0 {
-			return nil
-		}
+	text, ok := reparsedHeadingText(ctx, heading)
+	deleted := string(file.Content[deleteStart:content.EndOffset])
+	if !ok || !strings.HasSuffix(text, deleted) {
+		return nil
+	}
+	edit := fix.TextEdit{StartOffset: deleteStart, EndOffset: content.EndOffset}
+	if !headingEditKeeps(ctx, heading, edit, detectHeadingStyle(file, heading), strings.TrimSuffix(text, deleted)) {
+		return nil
 	}
 	builder := fix.NewEditBuilder()
 	builder.Delete(deleteStart, content.EndOffset)
