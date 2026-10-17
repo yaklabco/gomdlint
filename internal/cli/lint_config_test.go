@@ -90,6 +90,24 @@ func TestLintFixSkipsVendoredAndGitignoredFiles(t *testing.T) {
 	}
 }
 
+// TestLintFixesEveryHardLink covers a file with two names: --fix fixes it
+// under both, so a strict lint afterwards passes.
+func TestLintFixesEveryHardLink(t *testing.T) {
+	dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+	if err := os.Link(filepath.Join(dir, "doc.md"), filepath.Join(dir, "same.md")); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	fixed := execute(t, "lint", "--strict", "--fix", "--no-backups", ".")
+	require.Equal(t, cli.ExitSuccess, fixed.code, fixed.stderr)
+
+	got := execute(t, "lint", "--strict", ".")
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stdout)
+	for _, name := range []string{"doc.md", "same.md"} {
+		assert.Equal(t, fixedDoc, readFile(t, filepath.Join(dir, name)), name)
+	}
+}
+
 func TestLintIgnoreDefaultsCanBeTurnedOff(t *testing.T) {
 	tests := []struct {
 		name   string

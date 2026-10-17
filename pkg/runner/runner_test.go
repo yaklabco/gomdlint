@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -632,6 +634,139 @@ func TestRunner_Run_PreviewFixes(t *testing.T) {
 	}
 	if !strings.Contains(outcome.Result.Diff.String(), "+world") {
 		t.Errorf("diff does not show the fix:\n%s", outcome.Result.Diff.String())
+	}
+}
+
+// TestRunner_Run_FixesEveryHardLink covers a file with two hard links. Each
+// path is processed, so both end up fixed even when writing the fix to one
+// path splits the link.
+func TestRunner_Run_FixesEveryHardLink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "a.md"), filepath.Join(dir, "b.md")
+	if err := os.WriteFile(first, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Link(first, second); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	registry := lint.NewRegistry()
+	registry.Register(&fixableRule{
+		BaseRule: lint.NewBaseRule("TEST001", "test-rule", "", nil, true),
+		diags: []lint.Diagnostic{{
+			RuleID:   "TEST001",
+			Message:  "fix needed",
+			FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "world"}},
+		}},
+	})
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     cfg,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(result.Files) != 2 {
+		t.Errorf("got %d outcomes, want one per path", len(result.Files))
+	}
+	for _, path := range []string{first, second} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(content) != "world" {
+			t.Errorf("%s = %q, want the fix applied", filepath.Base(path), content)
+		}
+	}
+}
+
+// overlapParser records whether two paths naming one file were ever parsed
+// at the same time.
+type overlapParser struct {
+	mockParser
+
+	mu      sync.Mutex
+	active  []os.FileInfo
+	overlap bool
+}
+
+func (p *overlapParser) Parse(ctx context.Context, path string, content []byte) (*mdast.FileSnapshot, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	for _, other := range p.active {
+		if os.SameFile(info, other) {
+			p.overlap = true
+		}
+	}
+	p.active = append(p.active, info)
+	p.mu.Unlock()
+
+	time.Sleep(5 * time.Millisecond) // Widen the window for an overlap.
+
+	p.mu.Lock()
+	for idx, other := range p.active {
+		if other == info {
+			p.active = append(p.active[:idx], p.active[idx+1:]...)
+			break
+		}
+	}
+	p.mu.Unlock()
+
+	return p.mockParser.Parse(ctx, path, content)
+}
+
+// TestRunner_Run_HardLinksNeverOverlap covers the paths of one file: they go
+// to one worker in turn, so a write through one path never races a read or
+// write through another.
+func TestRunner_Run_HardLinksNeverOverlap(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	original := filepath.Join(dir, "link0.md")
+	if err := os.WriteFile(original, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	const links = 8
+	for idx := 1; idx < links; idx++ {
+		if err := os.Link(original, filepath.Join(dir, "link"+string(rune('0'+idx))+".md")); err != nil {
+			t.Skipf("hard links not supported: %v", err)
+		}
+		other := filepath.Join(dir, "other"+string(rune('0'+idx))+".md")
+		if err := os.WriteFile(other, []byte("# Test\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	parser := &overlapParser{}
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(parser, lint.NewRegistry())))
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     config.NewConfig(),
+		Jobs:       links,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if want := 2*links - 1; len(result.Files) != want {
+		t.Errorf("got %d outcomes, want %d", len(result.Files), want)
+	}
+	if parser.overlap {
+		t.Error("two paths naming one file were processed at the same time")
 	}
 }
 

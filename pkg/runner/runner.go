@@ -29,6 +29,7 @@ func New(pipeline *lint.Pipeline) *Runner {
 // The runner:
 //   - Discovers files matching the options criteria
 //   - Processes files concurrently using a worker pool
+//   - Processes the paths of one file, such as hard links, in turn
 //   - Aggregates results into a single Result with statistics
 //   - Respects context cancellation
 func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
@@ -37,7 +38,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := found.files
+	files, groups := found.files, found.groups
 
 	result := &Result{
 		Files: make([]FileOutcome, 0, len(files)+len(found.unreadable)),
@@ -57,16 +58,16 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if jobs <= 0 {
 		jobs = runtime.NumCPU()
 	}
-	// Don't use more workers than files.
-	if jobs > len(files) {
-		jobs = len(files)
+	// Don't use more workers than there is work.
+	if jobs > len(groups) {
+		jobs = len(groups)
 	}
 
 	// Get pipeline options from config.
 	pipelineOpts := lint.PipelineOptionsFromConfig(opts.Config)
 
-	// Create channels.
-	workCh := make(chan string)
+	// Create channels. Each unit of work is the paths naming one file.
+	workCh := make(chan []string)
 	outCh := make(chan FileOutcome)
 
 	var wg sync.WaitGroup
@@ -83,11 +84,11 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	// Feed work in a separate goroutine.
 	go func() {
 		defer close(workCh)
-		for _, path := range files {
+		for _, group := range groups {
 			select {
 			case <-ctx.Done():
 				return
-			case workCh <- path:
+			case workCh <- group:
 			}
 		}
 	}()
@@ -129,28 +130,31 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	return result, nil
 }
 
-// worker processes files from workCh and sends outcomes to outCh.
+// worker processes groups of paths from workCh, the paths of each group in
+// turn, and sends outcomes to outCh.
 func (r *Runner) worker(
 	ctx context.Context,
-	workCh <-chan string,
+	workCh <-chan []string,
 	outCh chan<- FileOutcome,
 	cfg *config.Config,
 	opts lint.PipelineOptions,
 	preview bool,
 ) {
-	for path := range workCh {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	for group := range workCh {
+		for _, path := range group {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 
-		outcome := r.processFile(ctx, path, cfg, opts, preview)
+			outcome := r.processFile(ctx, path, cfg, opts, preview)
 
-		select {
-		case <-ctx.Done():
-			return
-		case outCh <- outcome:
+			select {
+			case <-ctx.Done():
+				return
+			case outCh <- outcome:
+			}
 		}
 	}
 }

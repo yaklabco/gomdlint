@@ -32,6 +32,10 @@ type discovery struct {
 	// files are the matching files, sorted.
 	files []string
 
+	// groups holds files again, grouped by the file each path names: hard
+	// links share a group. Each group is sorted.
+	groups [][]string
+
 	// unreadable are directories whose contents could not be listed.
 	unreadable []FileOutcome
 }
@@ -96,7 +100,9 @@ func discover(ctx context.Context, opts Options) (*discovery, error) {
 
 	// Sort for deterministic ordering.
 	sort.Strings(found.files)
-	found.files = uniqueFiles(found.files)
+	found.groups = groupFiles(found.files)
+	found.files = slices.Concat(found.groups...)
+	sort.Strings(found.files)
 	found.unreadable = finder.unreadable
 
 	return found, nil
@@ -110,49 +116,87 @@ type fileKey struct {
 	modTime int64
 }
 
-// uniqueFiles drops paths that name a file already listed, such as a hard
-// link or a symlink to it, so two workers never process one file at once.
-// Of the paths naming one file it keeps the first that is not a symlink.
-// paths must be sorted; the result is too.
-func uniqueFiles(paths []string) []string {
-	type seenFile struct {
+// groupFiles groups the paths that name one file, so that one worker
+// processes them in turn and a write through one path never races a read or
+// write through another. paths must be sorted; each group is sorted too.
+func groupFiles(paths []string) [][]string {
+	type identity struct {
 		info  fs.FileInfo
-		index int // into kept
+		group int // into groups
 	}
-	groups := make(map[fileKey][]seenFile)
-	kept := make([]string, 0, len(paths))
-	replaced := false
+	var groups [][]string
+	identities := make(map[fileKey][]identity)
 
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
-			kept = append(kept, path) // Processing reports the error.
+			groups = append(groups, []string{path}) // Processing reports the error.
 			continue
 		}
 
 		key := fileKey{size: info.Size(), modTime: info.ModTime().UnixNano()}
-		duplicate := -1
-		for _, seen := range groups[key] {
+		group := -1
+		for _, seen := range identities[key] {
 			if os.SameFile(info, seen.info) {
-				duplicate = seen.index
+				group = seen.group
 				break
 			}
 		}
-		if duplicate < 0 {
-			groups[key] = append(groups[key], seenFile{info: info, index: len(kept)})
-			kept = append(kept, path)
+		if group < 0 {
+			group = len(groups)
+			groups = append(groups, nil)
+			identities[key] = append(identities[key], identity{info: info, group: group})
+		}
+		groups[group] = append(groups[group], path)
+	}
+
+	for idx, group := range groups {
+		if len(group) > 1 {
+			groups[idx] = dropAliases(group)
+		}
+	}
+	return groups
+}
+
+// dropAliases keeps one path per directory entry of a group of paths naming
+// one file. A symlink and its target, or two paths through a symlinked
+// directory, name one entry: the first path that is not itself a symlink
+// stays. Hard links are separate entries and all stay, since writing a fix
+// through one can split the link and leave the others to fix under their own
+// names. group must be sorted; the result is too.
+func dropAliases(group []string) []string {
+	type kept struct {
+		index   int // into unique
+		symlink bool
+	}
+	entries := make(map[string]kept, len(group))
+	unique := make([]string, 0, len(group))
+	replaced := false
+
+	for _, path := range group {
+		entry, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			entry = path
+		}
+		symlink := isSymlink(path)
+
+		seen, ok := entries[entry]
+		if !ok {
+			entries[entry] = kept{index: len(unique), symlink: symlink}
+			unique = append(unique, path)
 			continue
 		}
-		if isSymlink(kept[duplicate]) && !isSymlink(path) {
-			kept[duplicate] = path
+		if seen.symlink && !symlink {
+			unique[seen.index] = path
+			entries[entry] = kept{index: seen.index}
 			replaced = true
 		}
 	}
 
 	if replaced {
-		sort.Strings(kept)
+		sort.Strings(unique)
 	}
-	return kept
+	return unique
 }
 
 // isSymlink reports whether path itself is a symbolic link.

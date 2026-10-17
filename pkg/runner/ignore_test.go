@@ -240,9 +240,11 @@ func TestDiscover_SkipDirs(t *testing.T) {
 
 // TestDiscover_ListsEachFileOnce covers paths that name the same file. Two
 // workers fixing one file at once would race, so each file is listed once.
-func TestDiscover_ListsEachFileOnce(t *testing.T) {
+func TestDiscover_PathsNamingOneFile(t *testing.T) {
 	t.Parallel()
 
+	// Every hard link stays listed: fixing one of them can split the link,
+	// which leaves the others to fix under their own names.
 	t.Run("hard links", func(t *testing.T) {
 		t.Parallel()
 
@@ -253,7 +255,23 @@ func TestDiscover_ListsEachFileOnce(t *testing.T) {
 		}
 
 		got := discoverRel(t, dir, runner.Options{Paths: []string{"."}, WorkingDir: dir})
-		assert.Equal(t, []string{"a.md", "other.md"}, got)
+		assert.Equal(t, []string{"a.md", "b.md", "other.md"}, got)
+	})
+
+	t.Run("symlink to one of two hard links", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		makeTree(t, dir, map[string]string{"b.md": "# A\n"})
+		if err := os.Link(filepath.Join(dir, "b.md"), filepath.Join(dir, "c.md")); err != nil {
+			t.Skipf("hard links not supported: %v", err)
+		}
+		if err := os.Symlink("c.md", filepath.Join(dir, "a.md")); err != nil {
+			t.Skipf("symlinks not supported: %v", err)
+		}
+
+		got := discoverRel(t, dir, runner.Options{Paths: []string{"."}, WorkingDir: dir})
+		assert.Equal(t, []string{"b.md", "c.md"}, got)
 	})
 
 	t.Run("symlink named with its target", func(t *testing.T) {
