@@ -83,16 +83,28 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 		wantFixedLang string // Expected language to be inserted
 	}{
 		{
-			name:          "go code",
+			name:          "go statements are not whole-block evidence",
 			input:         "```\npackage main\n\nfunc main() {}\n```",
-			wantFix:       true,
-			wantFixedLang: "go",
+			wantFix:       false,
+			wantFixedLang: "",
 		},
 		{
-			name:          "python code",
+			name:          "python statements are not whole-block evidence",
 			input:         "```\ndef hello():\n    print('hello')\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "shebang names the language",
+			input:         "```\n#!/usr/bin/env python3\nprint('hello')\n```",
 			wantFix:       true,
 			wantFixedLang: "python",
+		},
+		{
+			name:          "complete diff",
+			input:         "```\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n```",
+			wantFix:       true,
+			wantFixedLang: "diff",
 		},
 		{
 			name:          "json code",
@@ -107,10 +119,10 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 			wantFixedLang: "",
 		},
 		{
-			name:          "tilde fence go code",
-			input:         "~~~\npackage main\n~~~",
+			name:          "tilde fence json",
+			input:         "~~~\n[1, 2]\n~~~",
 			wantFix:       true,
-			wantFixedLang: "go",
+			wantFixedLang: "json",
 		},
 		{
 			name:          "empty code block",
@@ -119,16 +131,28 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 			wantFixedLang: "",
 		},
 		{
-			name:          "es module import is javascript",
+			name:          "es module import gets no guess",
 			input:         "```\nimport React from 'react';\n```",
-			wantFix:       true,
-			wantFixedLang: "javascript",
+			wantFix:       false,
+			wantFixedLang: "",
 		},
 		{
-			name:          "javascript call inside a python string",
+			name:          "javascript call inside a python string gets no guess",
 			input:         "```\ndef example():\n    print(\"console.log(x)\")\n```",
-			wantFix:       true,
-			wantFixedLang: "python",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "javascript call in a python comment gets no guess",
+			input:         "```\n# console.log(42)\nprint(42)\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "diff inside a python string gets no guess",
+			input:         "```\ndef patch():\n    return \"\"\"\n--- old\n+++ new\n\"\"\"\n```",
+			wantFix:       false,
+			wantFixedLang: "",
 		},
 		{
 			name:          "python with a javascript comment line gets no guess",

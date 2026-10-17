@@ -1,6 +1,6 @@
 # Go Detection
 
-```go
+```
 package main
 
 func main() {

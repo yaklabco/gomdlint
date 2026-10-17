@@ -6,142 +6,10 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/langdetect"
 )
 
-func TestDetect(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		content  string
-		expected string
-	}{
-		{
-			name:     "shebang bash",
-			content:  "#!/bin/bash\necho hello",
-			expected: "bash",
-		},
-		{
-			name:     "shebang sh",
-			content:  "#!/bin/sh\necho hello",
-			expected: "bash",
-		},
-		{
-			name:     "shebang python",
-			content:  "#!/usr/bin/env python3\nprint('hello')",
-			expected: "python",
-		},
-		{
-			name:     "go code",
-			content:  "package main\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}",
-			expected: "go",
-		},
-		{
-			name:     "python code",
-			content:  "def foo():\n    pass\n\nif __name__ == '__main__':\n    foo()",
-			expected: "python",
-		},
-		{
-			name:     "javascript code",
-			content:  "const x = () => { return 42; };\nconsole.log(x());",
-			expected: "javascript",
-		},
-		{
-			name:     "json object",
-			content:  `{"key": "value", "number": 123}`,
-			expected: "json",
-		},
-		{
-			name:     "yaml content",
-			content:  "key: value\nother: 123\nlist:\n  - item1\n  - item2",
-			expected: "yaml",
-		},
-		{
-			name:     "rust code",
-			content:  "fn main() {\n    println!(\"Hello, world!\");\n}",
-			expected: "rust",
-		},
-		{
-			name:     "plain text fallback",
-			content:  "just some text without any code patterns",
-			expected: "text",
-		},
-		{
-			name:     "empty content fallback",
-			content:  "",
-			expected: "text",
-		},
-		{
-			name:     "sql query",
-			content:  "SELECT * FROM users WHERE id = 1;",
-			expected: "sql",
-		},
-		{
-			name:     "html content",
-			content:  "<!DOCTYPE html>\n<html>\n<head><title>Test</title></head>\n<body></body>\n</html>",
-			expected: "html",
-		},
-		{
-			name:     "dockerfile",
-			content:  "FROM golang:1.21\nWORKDIR /app\nCOPY . .\nRUN go build",
-			expected: "dockerfile",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := langdetect.Detect([]byte(tt.content))
-
-			if result != tt.expected {
-				t.Errorf("Detect() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestDetect_RefusesWeakSignals covers content that weak substring heuristics
-// misdetected. Detection must return "text" unless it is confident.
-func TestDetect_RefusesWeakSignals(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		content string
-	}{
-		{"shell test expression is not json", "[ \"$HOME\" = /root ] && echo root"},
-		{"english prose with let and const", "Let me explain: we let the constant drift, then const values settle."},
-		{"prose with an arrow", "Click Save => the dialog closes."},
-		{"c const declaration", "const int max = 10;\nint total = max * 2;"},
-		{"directory tree", ".\n├── cmd/\n│   └── main.go\n└── README.md"},
-		{"directory tree with comments", "project/\n- docs: documentation\n- src: source code"},
-		{"flat key value prose", "Note: this matters.\nWarning: be careful."},
-		{"prose that starts like sql", "Select the files from the list below."},
-		{"python looking words", "We import data from the warehouse and define the import process."},
-		{"single word", "hello"},
-		{"cli usage", "Usage: gomdlint [flags] <paths>\n\nFlags:\n  --fix    apply fixes"},
-		{"log output", "2024-01-01T00:00:00Z INFO server: started\n2024-01-01T00:00:01Z WARN db: slow"},
-		{"shell commands", "npm install\nnpm run build"},
-		{"http request", "GET /api/users HTTP/1.1\nHost: example.com\nAccept: application/json"},
-		{"toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\""},
-		{"indented tree", "src/\n  main.go\n  util/\n    helpers.go"},
-		{"unfinished console call in prose", "Open the console.log( file to see output"},
-		{"python with a javascript call in a comment", "import os\n# console.log(x)"},
-		{"python and javascript statements", "import os\nconsole.log(os)"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := langdetect.Detect([]byte(tt.content)); got != "text" {
-				t.Errorf("Detect() = %q, want %q", got, "text")
-			}
-		})
-	}
-}
-
-// TestDetect_ConfidentLanguages covers strong, language-specific signals.
-func TestDetect_ConfidentLanguages(t *testing.T) {
+// TestDetect_WholeBlockEvidence covers the only evidence Detect accepts:
+// the whole block says which language it is, in a way that strings and
+// comments cannot fake.
+func TestDetect_WholeBlockEvidence(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -149,29 +17,22 @@ func TestDetect_ConfidentLanguages(t *testing.T) {
 		content string
 		want    string
 	}{
-		{"javascript es module import", "import React from 'react';\n\nexport default function App() {}", "javascript"},
-		{"javascript require", "const fs = require('fs');", "javascript"},
-		{"typescript interface", "export interface User {\n  name: string;\n}", "typescript"},
-		{"typescript import with types", "import { Router } from 'express';\nconst port: number = 3000;", "typescript"},
-		{"python import", "import os\nimport sys\n\nprint(os.getcwd())", "python"},
-		{"python from import", "from pathlib import Path\n\nroot = Path('.')", "python"},
-		{"python class", "class Greeter:\n    pass", "python"},
-		{"go with leading comment", "// Package demo shows things.\npackage demo\n\nfunc F() {}", "go"},
-		{"java package is not go", "package com.example;\n\npublic class App {}", "text"},
-		{"rust function", "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}", "rust"},
-		{"c include", "#include <stdio.h>\n\nint main(void) { return 0; }", "c"},
-		{"cpp include", "#include <iostream>\n\nint main() { std::cout << 1; }", "cpp"},
-		{"php", "<?php\necho 'hi';", "php"},
-		{"xml", "<?xml version=\"1.0\"?>\n<root/>", "xml"},
-		{"unified diff", "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new", "diff"},
-		{"nested yaml", "services:\n  web:\n    image: nginx\nversion: \"3\"", "yaml"},
-		{"json array", "[\"a\", \"b\"]", "json"},
-		{"uppercase sql insert", "INSERT INTO users (id) VALUES (1);", "sql"},
-		{"dockerfile with arg", "ARG BASE=golang\nFROM ${BASE}\nRUN go build", "dockerfile"},
+		{"shebang bash", "#!/bin/bash\necho hello", "bash"},
+		{"shebang sh normalizes to bash", "#!/bin/sh\necho hello", "bash"},
+		{"shebang env python3", "#!/usr/bin/env python3\nprint('hello')", "python"},
+		{"shebang wins over the content", "#!/bin/bash\ndef foo():\n    pass", "bash"},
 		{"multi-word language name uses an alias", "#!/usr/bin/env sbcl\n(print 1)", "lisp"},
-		{"python with a javascript call in a string", "def example():\n    print(\"console.log(x)\")", "python"},
-		{"javascript with a python definition in a comment", "// def foo():\nconsole.log(1)", "javascript"},
-		{"rust lifetime is not a string", "fn first<'a>(x: &'a str) -> &'a str {\n    x\n}", "rust"},
+		{"json object", `{"key": "value", "number": 123}`, "json"},
+		{"json array over lines", "[\n  \"a\",\n  \"b\"\n]\n", "json"},
+		{"xml document", "<?xml version=\"1.0\"?>\n<root>\n  <item a=\"1\"/>\n</root>\n", "xml"},
+		{"php opening tag", "<?php\necho 'hi';", "php"},
+		{"html doctype", "<!DOCTYPE html>\n<html>\n<body></body>\n</html>", "html"},
+		{"git diff", "diff --git a/x b/x\nindex 83db48f..bf269f4 100644\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n", "diff"},
+		{"unified diff with two hunks", "--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n@@ -10 +10,2 @@\n x\n+y\n", "diff"},
+		{"diff without a final newline marker", "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", "diff"},
+		{"two file sections", "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n--- a/g\n+++ b/g\n@@ -1 +1 @@\n-c\n+d\n", "diff"},
+		{"dockerfile", "FROM golang:1.21\nWORKDIR /app\nCOPY . .\nRUN go build", "dockerfile"},
+		{"dockerfile with comments and continuations", "# build stage\nFROM golang:1.21 AS build\nRUN apt-get update && \\\n    apt-get install -y git\nCMD [\"app\"]\n", "dockerfile"},
 	}
 
 	for _, tt := range tests {
@@ -185,46 +46,50 @@ func TestDetect_ConfidentLanguages(t *testing.T) {
 	}
 }
 
-func TestDetect_ShebangTakesPrecedence(t *testing.T) {
-	t.Parallel()
-
-	// Content looks like Python but has bash shebang
-	content := []byte("#!/bin/bash\ndef foo():\n    pass")
-	result := langdetect.Detect(content)
-
-	if result != "bash" {
-		t.Errorf("Detect() = %q, want %q (shebang should take precedence)", result, "bash")
-	}
-}
-
-func TestDetect_NormalizesLanguageNames(t *testing.T) {
+// TestDetect_NoWholeBlockEvidence covers content that names no language
+// beyond doubt: statements of one language can sit in another's strings or
+// comments, so they never name a language, and structures that are only
+// partly there do not count.
+func TestDetect_NoWholeBlockEvidence(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
 		content string
-		want    string
 	}{
-		{
-			name:    "shell normalizes to bash",
-			content: "#!/bin/sh\necho test",
-			want:    "bash",
-		},
-		{
-			name:    "languages are lowercase",
-			content: "package main\n\nfunc main() {}",
-			want:    "go",
-		},
+		{"empty", ""},
+		{"go code", "package main\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}"},
+		{"python code", "def foo():\n    pass\n\nif __name__ == '__main__':\n    foo()"},
+		{"javascript code", "const x = () => { return 42; };\nconsole.log(x());"},
+		{"typescript code", "export interface User {\n  name: string;\n}"},
+		{"yaml content", "key: value\nother: 123\nlist:\n  - item1\n  - item2"},
+		{"rust code", "fn main() {\n    println!(\"Hello, world!\");\n}"},
+		{"sql query", "SELECT * FROM users WHERE id = 1;"},
+		{"c include", "#include <stdio.h>\n\nint main(void) { return 0; }"},
+		{"python with a javascript call in a comment", "# console.log(42)\nprint(42)"},
+		{"python with a diff in a string", "def patch():\n    return \"\"\"\n--- old\n+++ new\n@@ -1 +1 @@\n-a\n+b\n\"\"\"\n"},
+		{"diff headers without hunks", "--- old\n+++ new\n"},
+		{"diff with prose after it", "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\nThat is the change.\n"},
+		{"diff with prose before it", "Apply this:\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"},
+		{"diff whose hunk is short", "--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n-a\n+b\n"},
+		{"json followed by prose", "{\"a\": 1}\nand more"},
+		{"xml that is not well formed", "<?xml version=\"1.0\"?>\n<root><item></root>\n"},
+		{"xml with text after the root", "<?xml version=\"1.0\"?>\n<root/>\ntrailing words\n"},
+		{"dockerfile that starts with ARG", "ARG BASE=golang\nFROM ${BASE}\nRUN go build"},
+		{"single FROM line", "FROM golang:1.21"},
+		{"prose that starts with FROM", "FROM the start, read every line.\nRUN the tests after."},
+		{"dockerfile with a stray line", "FROM alpine\nRUN apk add git\nthen run it\n"},
+		{"shell test expression", "[ \"$HOME\" = /root ] && echo root"},
+		{"english prose", "Let me explain: we let the constant drift, then const values settle."},
+		{"shell commands", "npm install\nnpm run build"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := langdetect.Detect([]byte(tt.content))
-
-			if result != tt.want {
-				t.Errorf("Detect() = %q, want %q", result, tt.want)
+			if got := langdetect.Detect([]byte(tt.content)); got != "text" {
+				t.Errorf("Detect() = %q, want %q", got, "text")
 			}
 		})
 	}
