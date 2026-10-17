@@ -235,17 +235,47 @@ func (m *mapper) mapHeading(heading *ast.Heading) *mdast.Node {
 
 	first, last := lines.At(0), lines.At(lines.Len()-1)
 	content := mdast.SourceRange{StartOffset: m.abs(first.Start), EndOffset: m.abs(last.Stop)}
-	// goldmark keeps the spaces before a closing sequence in the text segment.
 	content.EndOffset = m.trimLineEnding(content.StartOffset, content.EndOffset)
 	if extent == nil {
 		setSpans(node, content, content)
 		return node
 	}
 	full := m.extentRange(extent)
+	if full.StartOffset < len(m.content) && m.content[full.StartOffset] == '#' {
+		// The content keeps the spaces before a closing sequence, which
+		// goldmark leaves out of the text segment.
+		content.EndOffset = m.closingSequenceStart(content.EndOffset)
+	}
 	// A setext heading opens on its underline; its text lines come first.
 	full.StartOffset = min(full.StartOffset, content.StartOffset)
 	setSpans(node, full, clampTo(content, full))
 	return node
+}
+
+// closingSequenceStart returns where the closing sequence of an ATX heading
+// whose text ends at end starts, when only spaces and tabs come between
+// them, and end otherwise. A closing sequence is a run of '#' that only
+// spaces and tabs follow on its line.
+func (m *mapper) closingSequenceStart(end int) int {
+	isBlank := func(ch byte) bool { return ch == ' ' || ch == '\t' }
+	start := end
+	for start < len(m.content) && isBlank(m.content[start]) {
+		start++
+	}
+	if start == end || start == len(m.content) || m.content[start] != '#' {
+		return end
+	}
+	rest := start
+	for rest < len(m.content) && m.content[rest] == '#' {
+		rest++
+	}
+	for rest < len(m.content) && isBlank(m.content[rest]) {
+		rest++
+	}
+	if rest < len(m.content) && m.content[rest] != '\n' && m.content[rest] != '\r' {
+		return end
+	}
+	return start
 }
 
 // mapList converts a goldmark List to an mdast node.
