@@ -409,10 +409,15 @@ func (p *Pipeline) processFile(
 		p.beforeWrite()
 	}
 
-	// Step 4: Back up the content that was read, if enabled.
+	// Step 4: Back up the content that was read, if enabled. The backup
+	// checks again that the file is unchanged and stays in its directory.
 	if opts.Backup.Enabled {
 		created, err := pinned.Backup(opts.Backup.Mode)
 		if err != nil {
+			if errors.Is(err, fsutil.ErrFileChanged) {
+				refuseWrite(result, original, "not fixed: "+err.Error())
+				return result, nil
+			}
 			return nil, fmt.Errorf("create backup: %w", err)
 		}
 		result.BackupCreated = created

@@ -12,6 +12,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/fsutil"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -48,6 +49,11 @@ func (r *xToYRule) Apply(ctx *RuleContext) ([]Diagnostic, error) {
 // every check and right before the write.
 func processWithHook(t *testing.T, path string, roots []string, beforeWrite func()) *PipelineResult {
 	t.Helper()
+	return processWithOptions(t, path, PipelineOptions{Fix: true, WriteRoots: roots}, beforeWrite)
+}
+
+func processWithOptions(t *testing.T, path string, opts PipelineOptions, beforeWrite func()) *PipelineResult {
+	t.Helper()
 
 	registry := NewRegistry()
 	registry.Register(&xToYRule{BaseRule: NewBaseRule("TEST001", "x-to-y", "", nil, true)})
@@ -56,9 +62,70 @@ func processWithHook(t *testing.T, path string, roots []string, beforeWrite func
 
 	cfg := config.NewConfig()
 	cfg.Fix = true
-	result, err := pipeline.ProcessFile(context.Background(), path, cfg, PipelineOptions{Fix: true, WriteRoots: roots})
+	result, err := pipeline.ProcessFile(context.Background(), path, cfg, opts)
 	require.NoError(t, err)
 	return result
+}
+
+func withBackups(roots ...string) PipelineOptions {
+	return PipelineOptions{
+		Fix:        true,
+		WriteRoots: roots,
+		Backup:     fsutil.BackupConfig{Enabled: true, Mode: fsutil.BackupModeSidecar},
+	}
+}
+
+func TestPipeline_KeepsContentSavedIntoTheFileBeforeTheWrite(t *testing.T) {
+	t.Parallel()
+
+	for _, linked := range []bool{false, true} {
+		name := "ordinary file"
+		if linked {
+			name = "hard-linked file"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			path := filepath.Join(root, "doc.md")
+			require.NoError(t, os.WriteFile(path, []byte("x\n"), 0o644))
+			if linked {
+				require.NoError(t, os.Link(path, filepath.Join(root, "twin.md")))
+			}
+
+			// Another program saves into the same file after the checks.
+			result := processWithOptions(t, path, withBackups(root), func() {
+				require.NoError(t, os.WriteFile(path, []byte("concurrent x\n"), 0o644))
+			})
+
+			requireRefused(t, result)
+			assert.Equal(t, "concurrent x\n", readString(t, path), "a concurrent save must not be lost")
+			assert.NoFileExists(t, path+fsutil.BackupSuffix, "no backup of content that will not be replaced")
+		})
+	}
+}
+
+func TestPipeline_NeverBacksUpIntoAReplacedDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, dir := range []string{"docs", "other"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, dir), 0o755))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "doc.md"), []byte("x\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "other", "doc.md"), []byte("other x\n"), 0o644))
+
+	result := processWithOptions(t, filepath.Join(root, "docs", "doc.md"), withBackups(root), func() {
+		require.NoError(t, os.Rename(filepath.Join(root, "docs"), filepath.Join(root, "docs.aside")))
+		if err := os.Symlink("other", filepath.Join(root, "docs")); err != nil {
+			t.Skipf("symlinks not supported here: %v", err)
+		}
+	})
+
+	requireRefused(t, result)
+	assert.NoFileExists(t, filepath.Join(root, "other", "doc.md"+fsutil.BackupSuffix),
+		"a backup must never land next to another file")
+	assert.Equal(t, "other x\n", readString(t, filepath.Join(root, "other", "doc.md")))
 }
 
 func readString(t *testing.T, path string) string {
