@@ -248,9 +248,11 @@ type delimiterRun struct {
 // that the parser could not match in each block's inline content, pairs runs
 // of the same marker in order, and reports a pair whose opening run is
 // followed by whitespace or whose closing run is preceded by whitespace on its
-// line. Runs inside emphasis, link or image text are not checked. Unlike
-// markdownlint, a pair around content without any letter, such as
-// "2 * 3 * 4", is read as arithmetic and not reported.
+// line. Runs inside emphasis, link or image text are not checked.
+//
+// The fix deletes the whitespace inside the markers. It is withheld when the
+// content between them has no letter, such as "2 * 3 * 4", where removing the
+// spaces would turn arithmetic into emphasis.
 func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -306,9 +308,6 @@ func (r *NoSpaceInEmphasisRule) checkPair(
 	if !openBad && !closeBad {
 		return lint.Diagnostic{}, false
 	}
-	if !containsLetter(file.Content[open.end:closing.start]) {
-		return lint.Diagnostic{}, false
-	}
 
 	builder := fix.NewEditBuilder()
 	reported := closing
@@ -321,11 +320,13 @@ func (r *NoSpaceInEmphasisRule) checkPair(
 	}
 
 	pos := rangePosition(file, mdast.SourceRange{StartOffset: reported.start, EndOffset: reported.end})
-	return lint.NewDiagnosticAt(r.ID(), file.Path, pos, "Spaces inside emphasis markers").
+	diag := lint.NewDiagnosticAt(r.ID(), file.Path, pos, "Spaces inside emphasis markers").
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion("Remove spaces from inside emphasis markers").
-		WithFix(builder).
-		Build(), true
+		WithSuggestion("Remove spaces from inside emphasis markers")
+	if containsLetter(file.Content[open.end:closing.start]) {
+		diag = diag.WithFix(builder)
+	}
+	return diag.Build(), true
 }
 
 // unmatchedDelimiterRuns returns the emphasis delimiter runs in the direct

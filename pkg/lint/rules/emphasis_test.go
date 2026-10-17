@@ -153,11 +153,11 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 		wantFixed string // Expected output after fixes; empty means unchanged.
 	}{
 		{
-			// markdownlint reports this; gomdlint treats markers around
-			// content without letters as arithmetic.
-			name:      "arithmetic",
+			// Reported like markdownlint, but "2 *3* 4" would turn arithmetic
+			// into emphasis, so no fix is offered for content without letters.
+			name:      "arithmetic is reported without a fix",
 			input:     "See 2 * 3 * 4\n",
-			wantLines: []int{},
+			wantLines: []int{1},
 		},
 		{
 			name:      "space only after the opening marker",
@@ -225,6 +225,9 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			diags := applyGFMRule(t, NewNoSpaceInEmphasisRule(), tt.input, nil)
 			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFixed != "", diag.HasFix(), "fix offered")
+			}
 			want := tt.wantFixed
 			if want == "" {
 				want = tt.input

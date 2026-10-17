@@ -2,6 +2,15 @@
   {
     "rule": "MD037",
     "name": "no-space-in-emphasis",
+    "line": 3,
+    "column": 7,
+    "message": "Spaces inside emphasis markers",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD037",
+    "name": "no-space-in-emphasis",
     "line": 5,
     "column": 11,
     "message": "Spaces inside emphasis markers",
