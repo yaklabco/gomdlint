@@ -1,0 +1,7 @@
+one_or_ordered.input.md:9:1 warning Ordered list item numbered 2 should be 1 (MD029/ol-prefix)
+one_or_ordered.input.md:21:1 warning Ordered list item numbered 1 should be 3 (MD029/ol-prefix) [fixable]
+one_or_ordered.input.md:28:1 warning Ordered list item numbered 3 should be 1 (MD029/ol-prefix) [fixable]
+one_or_ordered.input.md:33:1 warning Ordered list item numbered 4 should be 1 (MD029/ol-prefix)
+one_or_ordered.input.md:34:1 warning Ordered list item numbered 5 should be 2 (MD029/ol-prefix)
+one_or_ordered.input.md:41:3 warning Ordered list item numbered 4 should be 3 (MD029/ol-prefix) [fixable]
+one_or_ordered.input.md:48:1 warning Ordered list item numbered 3 should be 2 (MD029/ol-prefix) [fixable]

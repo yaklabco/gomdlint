@@ -3,7 +3,7 @@
     "rule": "MD007",
     "name": "ul-indent",
     "line": 4,
-    "column": 5,
+    "column": 1,
     "message": "Unordered list indentation 4 does not match expected 2",
     "severity": "warning",
     "fixable": true
@@ -12,16 +12,16 @@
     "rule": "MD007",
     "name": "ul-indent",
     "line": 5,
-    "column": 9,
+    "column": 1,
     "message": "Unordered list indentation 8 does not match expected 4",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD007",
     "name": "ul-indent",
     "line": 10,
-    "column": 4,
+    "column": 1,
     "message": "Unordered list indentation 3 does not match expected 2",
     "severity": "warning",
     "fixable": true

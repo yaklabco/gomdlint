@@ -7,5 +7,5 @@ title: Test
 - First item with dash
 - Second item with dash
 
-- Third item with asterisk
-- Fourth item with asterisk
+* Third item with asterisk
+* Fourth item with asterisk

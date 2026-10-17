@@ -1,0 +1,4 @@
+containers.input.md:3:4 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]
+containers.input.md:4:4 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]
+containers.input.md:8:7 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]
+containers.input.md:12:5 warning List marker space 2 does not match expected 1 (MD030/list-marker-space) [fixable]

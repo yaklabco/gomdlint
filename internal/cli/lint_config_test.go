@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	trailingDoc = "# Title  \n\nText.\n"
+	trailingDoc = "# Title \n\nText.\n"
 	fixedDoc    = "# Title\n\nText.\n"
 )
 
@@ -251,7 +251,7 @@ func TestLintDiffFormatPreviewsFixes(t *testing.T) {
 	got := execute(t, "lint", "--format", "diff", "--color", "never", "doc.md")
 
 	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
-	assert.Contains(t, got.stdout, "-# Title  ")
+	assert.Contains(t, got.stdout, "-# Title ")
 	assert.Contains(t, got.stdout, "+# Title")
 	assert.Equal(t, trailingDoc, readFile(t, filepath.Join(dir, "doc.md")))
 	assert.Empty(t, backupFiles(t, dir))

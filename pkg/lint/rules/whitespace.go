@@ -1,7 +1,9 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -27,18 +29,37 @@ func NewTrailingWhitespaceRule() *TrailingWhitespaceRule {
 	}
 }
 
+// defaultBreakSpaces is markdownlint's default br_spaces: two trailing spaces
+// written to produce a hard line break are allowed.
+const defaultBreakSpaces = 2
+
 // Apply checks for trailing whitespace on each line.
+//
+// Defaults follow markdownlint: two trailing spaces (br_spaces) are allowed,
+// code blocks are skipped (ignore_code_blocks), and with strict the allowance
+// only applies to paragraph lines, where the spaces can produce a hard line
+// break. The fix reads the line breaks the parser found, so it keeps every
+// hard break and leaves alone whitespace that renderers read differently.
 func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
 	}
 
-	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", false)
+	ignoreCodeBlocks := ctx.OptionBool("ignore_code_blocks", true)
 	var codeLines map[int]bool
 	if ignoreCodeBlocks {
 		// Fence lines are not code, so their trailing whitespace is checked.
 		codeLines = lint.CodeContentLines(ctx.CodeBlocks())
 	}
+	listItemEmptyLines := ctx.OptionBool("list_item_empty_lines", false)
+	strict := ctx.OptionBool("strict", false)
+	breakSpaces := ctx.OptionInt("br_spaces", defaultBreakSpaces)
+	if breakSpaces < 2 {
+		// markdownlint: values below 2 disallow trailing spaces entirely.
+		breakSpaces = 0
+	}
+	breakLines := hardBreakLines(ctx)
+	lineEnds := trailingLineEnds(ctx)
 
 	var diags []lint.Diagnostic
 
@@ -51,7 +72,7 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		if codeLines[lineNum] {
 			continue
 		}
-		if ctx.OptionBool("list_item_empty_lines", false) && isListBlankLine(ctx, lineNum) {
+		if listItemEmptyLines && isListBlankLine(ctx, lineNum) {
 			continue
 		}
 
@@ -63,54 +84,130 @@ func (r *TrailingWhitespaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		if start < 0 || end <= start {
 			continue
 		}
-		breakSpaces := ctx.OptionInt("br_spaces", 0)
-		if breakSpaces >= 2 && end-start == breakSpaces && (!ctx.OptionBool("strict", false) || isHardBreakLine(ctx, lineNum)) {
+		canBreak := breakLines[lineNum]
+		if end-start == breakSpaces && (!strict || canBreak) {
 			continue
 		}
 
-		// Build the fix edit.
-		builder := fix.NewEditBuilder()
-		builder.Delete(start, end)
-
-		// Calculate the column where trailing whitespace starts.
 		line := ctx.File.Lines[lineNum-1]
-		col := start - line.StartOffset + 1
-
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: col,
+			StartColumn: start - line.StartOffset + 1,
 			EndLine:     lineNum,
 			EndColumn:   end - line.StartOffset + 1,
 		}
 
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Trailing whitespace").
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Trailing whitespace").
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove trailing whitespace").
-			WithFix(builder).
-			Build()
-		diags = append(diags, diag)
+			WithSuggestion("Remove trailing whitespace")
+		if builder := trailingWhitespaceFix(ctx.File.Content[start:end], start, end, lineEnds[lineNum], breakSpaces); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags), nil
 }
 
-func isHardBreakLine(ctx *lint.RuleContext, lineNum int) bool {
-	if ctx.IsLineInCodeBlock(lineNum) {
-		return false
+// trailingLineEnd says how the parser reads the line ending after trailing
+// whitespace, which decides whether the whitespace is rendered.
+type trailingLineEnd int
+
+const (
+	// lineEndPlain is a line ending that ends a block or lies outside inline
+	// content, where trailing whitespace is never rendered.
+	lineEndPlain trailingLineEnd = iota
+	// lineEndSoftBreak is a soft line break inside inline content.
+	lineEndSoftBreak
+	// lineEndHardBreak is a hard line break that the trailing whitespace
+	// makes.
+	lineEndHardBreak
+	// lineEndCode is a line ending inside a code span, where it becomes a
+	// space and the trailing whitespace is part of the code text.
+	lineEndCode
+)
+
+// trailingLineEnds classifies the line ending of every line that ends inside
+// inline content: lines ending in a soft or hard break, including breaks in
+// headings and in containers, and lines ending inside a code span.
+func trailingLineEnds(ctx *lint.RuleContext) map[int]trailingLineEnd {
+	ends := make(map[int]trailingLineEnd)
+	_ = mdast.Walk(ctx.Root, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+		switch node.Kind {
+		case mdast.NodeHardBreak:
+			ends[node.SourcePosition().StartLine] = lineEndHardBreak
+		case mdast.NodeSoftBreak:
+			ends[node.SourcePosition().StartLine] = lineEndSoftBreak
+		default:
+		}
+		return nil
+	})
+	for _, span := range ctx.CodeSpans() {
+		pos := span.SourcePosition()
+		for lineNum := pos.StartLine; pos.IsValid() && lineNum < pos.EndLine; lineNum++ {
+			ends[lineNum] = lineEndCode
+		}
+	}
+	return ends
+}
+
+// trailingWhitespaceFix builds the fix for trailing whitespace without changing
+// the rendered output. Whitespace that makes a hard line break is normalized
+// to the configured break spaces, which every renderer reads as a hard break;
+// it is reported without a fix when trailing-space breaks are disallowed
+// (breakSpaces is 0) or already normalized. Before a soft break only a single
+// space is removed: renderers such as pandoc read tabs and wider whitespace as
+// a hard break where goldmark does not. Whitespace inside a code span is code
+// text and is never fixed.
+func trailingWhitespaceFix(trailing []byte, start, end int, lineEnd trailingLineEnd, breakSpaces int) *fix.EditBuilder {
+	builder := fix.NewEditBuilder()
+	switch lineEnd {
+	case lineEndHardBreak:
+		normalized := strings.Repeat(" ", breakSpaces)
+		if breakSpaces < 2 || string(trailing) == normalized {
+			return nil
+		}
+		builder.ReplaceRange(start, end, normalized)
+	case lineEndSoftBreak:
+		if string(trailing) != " " {
+			return nil
+		}
+		builder.Delete(start, end)
+	case lineEndCode:
+		return nil
+	case lineEndPlain:
+		builder.Delete(start, end)
+	}
+	return builder
+}
+
+// hardBreakLines returns the lines where strict mode allows break spaces,
+// as markdownlint decides them: every paragraph line except the last,
+// outside code blocks and outside code spans that continue onto the next
+// line.
+func hardBreakLines(ctx *lint.RuleContext) map[int]bool {
+	lines := make(map[int]bool)
+	for _, paragraph := range ctx.Paragraphs() {
+		pos := paragraph.SourcePosition()
+		if !pos.IsValid() {
+			continue
+		}
+		for lineNum := pos.StartLine; lineNum < pos.EndLine; lineNum++ {
+			lines[lineNum] = true
+		}
 	}
 	for _, span := range ctx.CodeSpans() {
 		pos := span.SourcePosition()
-		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
-			return false
+		for lineNum := pos.StartLine; lineNum < pos.EndLine; lineNum++ {
+			delete(lines, lineNum)
 		}
 	}
-	for _, paragraph := range ctx.Paragraphs() {
-		pos := paragraph.SourcePosition()
-		if pos.StartLine <= lineNum && lineNum < pos.EndLine {
-			return true
+	for lineNum := range lines {
+		if ctx.IsLineInCodeBlock(lineNum) {
+			delete(lines, lineNum)
 		}
 	}
-	return false
+	return lines
 }
 
 func isListBlankLine(ctx *lint.RuleContext, lineNum int) bool {
@@ -144,22 +241,29 @@ func NewFinalNewlineRule() *FinalNewlineRule {
 	}
 }
 
-// Apply checks that the file ends with exactly one newline.
+// Apply checks that the file ends with a newline.
+//
+// Like markdownlint, the rule only requires the last line to be blank, where a
+// line holding only whitespace, blockquote markers, or HTML comments counts as
+// blank. Extra blank lines at the end of the file are reported by MD012, unless
+// the gomdlint-specific max_trailing_blank_lines option is set.
 func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil || len(ctx.File.Content) == 0 {
 		return nil, nil
 	}
 
-	content := ctx.File.Content
-	contentLen := len(content)
+	contentLen := len(ctx.File.Content)
+	lastLine := len(ctx.File.Lines)
 
-	// Check if file ends with a newline.
-	if content[contentLen-1] != '\n' {
+	// A byte order mark is not part of the text, so a file holding only one
+	// is empty.
+	last := lint.RawLineContent(ctx.File, lastLine)
+	last = last[min(len(last), lint.LineTextOffset(ctx.File, lastLine)):]
+	if !isMarkdownlintBlankLine(last) {
 		// Missing final newline.
 		builder := fix.NewEditBuilder()
 		builder.Insert(contentLen, "\n")
 
-		lastLine := len(ctx.File.Lines)
 		pos := mdast.SourcePosition{
 			StartLine:   lastLine,
 			StartColumn: lint.LineLength(ctx.File, lastLine) + 1,
@@ -172,10 +276,14 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			WithSuggestion("Add a newline at end of file").
 			WithFix(builder).
 			Build()
-		return []lint.Diagnostic{diag}, nil
+		return keepSafeFixes(ctx, []lint.Diagnostic{diag}), nil
 	}
 
-	// Check for excessive trailing blank lines.
+	// The trailing blank line limit is a gomdlint extension that markdownlint
+	// does not have, so it only applies when configured explicitly.
+	if ctx.Option("max_trailing_blank_lines", nil) == nil {
+		return nil, nil
+	}
 	maxTrailingBlankLines := ctx.OptionInt("max_trailing_blank_lines", 1)
 
 	// Count trailing blank lines (excluding the final newline on the last non-blank line).
@@ -212,10 +320,51 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			WithSuggestion(fmt.Sprintf("Remove %d trailing blank line(s)", excessCount)).
 			WithFix(builder).
 			Build()
-		return []lint.Diagnostic{diag}, nil
+		return keepSafeFixes(ctx, []lint.Diagnostic{diag}), nil
 	}
 
 	return nil, nil
+}
+
+// isBlankText reports whether the text of a line, after a byte order mark on
+// the first line, is empty or whitespace.
+func isBlankText(file *mdast.FileSnapshot, lineNum int) bool {
+	return len(bytes.TrimSpace(lint.LineText(file, lineNum))) == 0
+}
+
+// isMarkdownlintBlankLine reports whether a line is blank the way markdownlint's
+// isBlankLine helper defines it: empty, whitespace only, or holding nothing but
+// blockquote markers and HTML comments (including unterminated comment parts).
+func isMarkdownlintBlankLine(line []byte) bool {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return true
+	}
+	rest := bytes.ReplaceAll(removeHTMLCommentText(line), []byte(">"), nil)
+	return len(bytes.TrimSpace(rest)) == 0
+}
+
+// removeHTMLCommentText strips HTML comment text from a single line, treating a
+// leading unmatched "-->" or a trailing unmatched "<!--" as part of a comment.
+func removeHTMLCommentText(line []byte) []byte {
+	const (
+		startComment = "<!--"
+		endComment   = "-->"
+	)
+	text := append([]byte(nil), line...)
+	for {
+		start := bytes.Index(text, []byte(startComment))
+		end := bytes.Index(text, []byte(endComment))
+		switch {
+		case end != -1 && (start == -1 || end < start):
+			text = text[end+len(endComment):]
+		case start != -1 && end != -1:
+			text = append(text[:start], text[end+len(endComment):]...)
+		case start != -1:
+			text = text[:start]
+		default:
+			return text
+		}
+	}
 }
 
 // MultipleBlankLinesRule checks for consecutive blank lines.
@@ -242,8 +391,11 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		return nil, nil
 	}
 
+	// markdownlint reads its maximum as Number(maximum || 1), so 0 counts as
+	// 1. A negative maximum counts as 1 too. With no blank line allowed, the
+	// fix would remove the final line ending that MD047 puts back.
 	maxConsecutive := ctx.OptionInt("max_consecutive", 1)
-	if maxConsecutive < 0 {
+	if maxConsecutive < 1 {
 		maxConsecutive = 1
 	}
 
@@ -256,7 +408,9 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			return diags, ctx.Ctx.Err()
 		}
 
-		if lint.IsBlankLine(ctx.File, lineNum) {
+		// Like markdownlint, blank lines inside code blocks are content and
+		// end any streak in progress.
+		if !ctx.IsLineInCodeBlock(lineNum) && isBlankText(ctx.File, lineNum) {
 			if streakCount == 0 {
 				streakStart = lineNum
 			}
@@ -277,7 +431,7 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags), nil
 }
 
 func (r *MultipleBlankLinesRule) createDiagnostic(
@@ -290,6 +444,12 @@ func (r *MultipleBlankLinesRule) createDiagnostic(
 
 	startOffset := ctx.File.Lines[firstExcessLine-1].StartOffset
 	endOffset := ctx.File.Lines[lastExcessLine-1].EndOffset
+	if last := ctx.File.Lines[lastExcessLine-1]; last.EndOffset == last.NewlineStart && firstExcessLine > 1 {
+		// The final line has no line ending of its own (it may be the empty
+		// line after a trailing newline), so deleting it means deleting the
+		// line ending in front of the excess lines instead.
+		startOffset = ctx.File.Lines[firstExcessLine-2].NewlineStart
+	}
 
 	builder := fix.NewEditBuilder()
 	builder.Delete(startOffset, endOffset)

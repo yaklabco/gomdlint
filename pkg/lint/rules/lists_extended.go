@@ -1,9 +1,8 @@
 package rules
 
 import (
-	"bytes"
 	"fmt"
-	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -31,90 +30,190 @@ func NewListIndentRule() *ListIndentRule {
 }
 
 // Apply checks for inconsistent list item indentation.
+//
+// Like markdownlint, every item of a list must start in the column of the
+// first item's marker, and ordered lists may instead right-align their
+// numbers so that the markers end in the same column. Columns count from the
+// content of the enclosing blockquote. Unordered lists are reported without a
+// fix, because MD007 moves their items to the configured indentation; ordered
+// items are moved only when that keeps the structure. A list right inside a
+// blockquote whose first item is indented is not fixed either: MD027 moves
+// that first item in the same pass, and the others would no longer line up
+// with it.
 func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	var diags []lint.Diagnostic
-
-	// Track indentation levels within each list.
-	lists := ctx.Lists()
-	for _, list := range lists {
+	plan := newListShiftPlan(ctx.File)
+	var mismatches []indentMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-
-		listDiags := r.checkList(ctx, list)
-		diags = append(diags, listDiags...)
+		mismatches = append(mismatches, listIndentMismatches(ctx.File, plan, list)...)
 	}
+	fixes := plan.fixes(indentEdits(ctx.File, mismatches, plan.resolve()))
 
-	return diags, nil
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		msg := fmt.Sprintf("List item indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
+		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
+		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
+	}
+	return keepSafeFixes(ctx, diags), nil
 }
 
-func (r *ListIndentRule) checkList(ctx *lint.RuleContext, list *mdast.Node) []lint.Diagnostic {
-	var diags []lint.Diagnostic
+// indentMismatch is a list item whose marker is not in the expected column.
+// The columns are relative to the content of the enclosing blockquote, which
+// starts at byte column base of the marker line.
+type indentMismatch struct {
+	item     *mdast.Node
+	marker   listItemMarker
+	base     int
+	actual   int
+	expected int
+}
+
+// relativeListMarker locates an item's marker and returns it with its column
+// relative to the content of the enclosing blockquote and that content's
+// byte column on the marker line.
+func relativeListMarker(file *mdast.FileSnapshot, item *mdast.Node) (listItemMarker, int, int, bool) {
+	marker, found := findListItemMarker(file, item)
+	if !found {
+		return listItemMarker{}, 0, 0, false
+	}
+	base, ok := blockquoteContentBase(file, item.Parent, marker.Line)
+	if !ok {
+		return listItemMarker{}, 0, 0, false
+	}
+	return marker, marker.Column() - base, base, true
+}
+
+// listIndentMismatches finds the misaligned items of one list and proposes
+// moving ordered items to the expected column.
+func listIndentMismatches(file *mdast.FileSnapshot, plan *listShiftPlan, list *mdast.Node) []indentMismatch {
 	items := lint.ListItems(list)
 	if len(items) < 2 {
-		return diags
+		return nil
 	}
-
-	// Get the indentation of the first item to use as reference.
-	firstItem := items[0]
-	firstPos := firstItem.SourcePosition()
-	if !firstPos.IsValid() {
-		return diags
+	first, expectedIndent, _, found := relativeListMarker(file, items[0])
+	if !found {
+		return nil
 	}
+	ordered := lint.IsOrderedList(list)
+	expectedEnd := expectedIndent + first.Width()
+	endMatching := false
 
-	referenceIndent := r.getItemIndent(ctx.File, firstPos.StartLine)
-
-	// Check remaining items.
-	for i := 1; i < len(items); i++ {
-		item := items[i]
-		pos := item.SourcePosition()
-		if !pos.IsValid() {
+	var mismatches []indentMismatch
+	for _, item := range items[1:] {
+		marker, actual, base, found := relativeListMarker(file, item)
+		if !found {
 			continue
 		}
-
-		indent := r.getItemIndent(ctx.File, pos.StartLine)
-		if indent != referenceIndent {
-			line := ctx.File.Lines[pos.StartLine-1]
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			lineContent := lint.LineContent(ctx.File, pos.StartLine)
-			trimmed := bytes.TrimLeft(lineContent, " \t")
-
-			newLine := strings.Repeat(" ", referenceIndent) + string(trimmed)
-			builder.ReplaceRange(line.StartOffset, line.NewlineStart, newLine)
-
-			diag := lint.NewDiagnostic(r.ID(), item,
-				fmt.Sprintf("List item indentation %d does not match expected %d", indent, referenceIndent)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Indent list item by %d spaces", referenceIndent)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+		mismatch := indentMismatch{item: item, marker: marker, base: base, actual: actual, expected: expectedIndent}
+		if !ordered {
+			if actual != expectedIndent {
+				mismatches = append(mismatches, mismatch)
+			}
+			continue
+		}
+		if actual == expectedIndent && !endMatching {
+			continue
+		}
+		if actual+marker.Width() == expectedEnd {
+			endMatching = true
+			continue
+		}
+		if endMatching {
+			mismatch.expected = expectedEnd - marker.Width()
+		}
+		mismatches = append(mismatches, mismatch)
+		if !firstMarkerFollowsQuoteSpace(list, expectedIndent) {
+			proposeIndentShift(plan, mismatch)
 		}
 	}
-
-	return diags
+	return mismatches
 }
 
-func (r *ListIndentRule) getItemIndent(file *mdast.FileSnapshot, lineNum int) int {
-	content := lint.LineText(file, lineNum)
-	indent := 0
-	for _, ch := range content {
-		switch ch {
-		case ' ':
-			indent++
-		case '\t':
-			indent += 4 // Count tab as 4 spaces.
-		default:
-			return indent
+// firstMarkerFollowsQuoteSpace reports whether the first marker of a list is
+// indented right inside a blockquote, where the indentation is extra space
+// after the blockquote marker that MD027 removes.
+func firstMarkerFollowsQuoteSpace(list *mdast.Node, firstIndent int) bool {
+	return firstIndent > 0 && list.Parent != nil && list.Parent.Kind == mdast.NodeBlockquote
+}
+
+// proposeIndentShift proposes moving an item's marker, and with it its
+// content, to the expected column.
+func proposeIndentShift(plan *listShiftPlan, mismatch indentMismatch) {
+	if mismatch.expected < 0 {
+		return
+	}
+	layout, ok := plan.layout(mismatch.item)
+	if !ok {
+		return
+	}
+	plan.propose(mismatch.item, listShift{
+		markerCol:  mismatch.expected,
+		contentCol: layout.contentCol + mismatch.expected - layout.markerCol,
+	})
+}
+
+// indentEdits returns, for every mismatch whose move the plan accepted, the
+// edit that rewrites the indentation between the blockquote content and the
+// marker. The edit covers the marker too, so that no other list rule changes
+// this marker in the same pass.
+func indentEdits(
+	file *mdast.FileSnapshot,
+	mismatches []indentMismatch,
+	safeShifts map[*mdast.Node]listShift,
+) map[*mdast.Node]fix.TextEdit {
+	edits := make(map[*mdast.Node]fix.TextEdit)
+	for _, mismatch := range mismatches {
+		if shift, ok := safeShifts[mismatch.item]; !ok || shift.markerCol != mismatch.expected {
+			continue
+		}
+		marker := mismatch.marker
+		edits[mismatch.item] = fix.TextEdit{
+			StartOffset: marker.TextStart + mismatch.base,
+			EndOffset:   marker.End,
+			NewText:     strings.Repeat(" ", mismatch.expected) + string(file.Content[marker.Start:marker.End]),
 		}
 	}
-	return indent
+	return edits
+}
+
+// indentDiagnostic reports a misaligned marker. Like markdownlint, the range
+// covers the line from its start through the marker. It carries the fix the
+// plan gave its item, if any.
+func indentDiagnostic(
+	ctx *lint.RuleContext,
+	ruleID string,
+	mismatch indentMismatch,
+	fixes map[*mdast.Node]fix.TextEdit,
+	msg, suggestion string,
+) lint.Diagnostic {
+	marker := mismatch.marker
+	pos := mdast.SourcePosition{
+		StartLine:   marker.Line,
+		StartColumn: 1,
+		EndLine:     marker.Line,
+		EndColumn:   marker.End - marker.LineStart + 1,
+	}
+	diagBuilder := lint.NewDiagnosticAt(ruleID, ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion(suggestion)
+	if edit, ok := fixes[mismatch.item]; ok {
+		diagBuilder = diagBuilder.WithFix(editFix(edit))
+	}
+	return diagBuilder.Build()
+}
+
+// editFix wraps one edit in a fix builder.
+func editFix(edit fix.TextEdit) *fix.EditBuilder {
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(edit.StartOffset, edit.EndOffset, edit.NewText)
+	return builder
 }
 
 // ULIndentRule checks unordered list indentation.
@@ -136,119 +235,79 @@ func NewULIndentRule() *ULIndentRule {
 }
 
 // Apply checks unordered list indentation.
+//
+// Like markdownlint, the rule covers unordered lists whose enclosing lists,
+// up to the nearest blockquote, are all unordered; the nesting depth restarts
+// inside each blockquote and columns count from the blockquote content. All
+// moves are planned together, and only those that keep every item under the
+// same parent are fixed, with moves that depend on each other in one fix.
 func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	indent := ctx.OptionInt("indent", 2)
-	startIndented := ctx.OptionBool("start_indented", false)
-	startIndent := ctx.OptionInt("start_indent", indent)
+	baseIndent := 0
+	if ctx.OptionBool("start_indented", false) {
+		baseIndent = ctx.OptionInt("start_indent", indent)
+	}
 
-	var diags []lint.Diagnostic
-
-	// Only process top-level lists (direct children of document).
-	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
+	plan := newListShiftPlan(ctx.File)
+	var mismatches []indentMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-
-		if child.Kind != mdast.NodeList {
+		if lint.IsOrderedList(list) {
 			continue
 		}
-
-		// Skip ordered lists.
-		if lint.IsOrderedList(child) {
+		nesting, unordered := unorderedListNesting(list)
+		if !unordered {
 			continue
 		}
-
-		listDiags := r.checkULIndent(ctx, child, 0, indent, startIndented, startIndent)
-		diags = append(diags, listDiags...)
-	}
-
-	return diags, nil
-}
-
-func (r *ULIndentRule) checkULIndent(
-	ctx *lint.RuleContext,
-	list *mdast.Node,
-	depth int,
-	indent int,
-	startIndented bool,
-	startIndent int,
-) []lint.Diagnostic {
-	var diags []lint.Diagnostic
-
-	// Calculate expected indentation.
-	var expectedIndent int
-	if depth == 0 {
-		if startIndented {
-			expectedIndent = startIndent
-		} else {
-			expectedIndent = 0
-		}
-	} else {
-		if startIndented {
-			expectedIndent = startIndent + (depth * indent)
-		} else {
-			expectedIndent = depth * indent
-		}
-	}
-
-	items := lint.ListItems(list)
-	for _, item := range items {
-		pos := item.SourcePosition()
-		if !pos.IsValid() {
-			continue
-		}
-
-		actualIndent := r.getItemIndent(ctx.File, pos.StartLine)
-		if actualIndent != expectedIndent {
-			line := ctx.File.Lines[pos.StartLine-1]
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			lineContent := lint.LineText(ctx.File, pos.StartLine)
-			trimmed := bytes.TrimLeft(lineContent, " \t")
-
-			newLine := strings.Repeat(" ", expectedIndent) + string(trimmed)
-			builder.ReplaceRange(line.StartOffset+lint.LineTextOffset(ctx.File, pos.StartLine), line.NewlineStart, newLine)
-
-			diag := lint.NewDiagnostic(r.ID(), item,
-				fmt.Sprintf("Unordered list indentation %d does not match expected %d", actualIndent, expectedIndent)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Indent list item by %d spaces", expectedIndent)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
-
-		// Check nested lists.
-		for child := item.FirstChild; child != nil; child = child.Next {
-			if child.Kind == mdast.NodeList && !lint.IsOrderedList(child) {
-				childDiags := r.checkULIndent(ctx, child, depth+1, indent, startIndented, startIndent)
-				diags = append(diags, childDiags...)
+		expected := baseIndent + nesting*indent
+		for _, item := range lint.ListItems(list) {
+			marker, actual, base, found := relativeListMarker(ctx.File, item)
+			if !found || actual == expected {
+				continue
 			}
+			mismatch := indentMismatch{item: item, marker: marker, base: base, actual: actual, expected: expected}
+			mismatches = append(mismatches, mismatch)
+			proposeIndentShift(plan, mismatch)
 		}
 	}
+	fixes := plan.fixes(indentEdits(ctx.File, mismatches, plan.resolve()))
 
-	return diags
+	sort.Slice(mismatches, func(i, j int) bool {
+		return mismatches[i].marker.Start < mismatches[j].marker.Start
+	})
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		msg := fmt.Sprintf("Unordered list indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
+		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
+		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
+	}
+	return keepSafeFixes(ctx, diags), nil
 }
 
-func (r *ULIndentRule) getItemIndent(file *mdast.FileSnapshot, lineNum int) int {
-	content := lint.LineText(file, lineNum)
-	indent := 0
-	for _, ch := range content {
-		switch ch {
-		case ' ':
-			indent++
-		case '\t':
-			indent += 4
+// unorderedListNesting counts the lists enclosing a list up to the nearest
+// blockquote. It reports false when one of them is ordered, because MD007
+// only covers lists whose parents are all unordered.
+func unorderedListNesting(list *mdast.Node) (int, bool) {
+	nesting := 0
+	for parent := list.Parent; parent != nil; parent = parent.Parent {
+		switch parent.Kind {
+		case mdast.NodeBlockquote:
+			return nesting, true
+		case mdast.NodeList:
+			if lint.IsOrderedList(parent) {
+				return 0, false
+			}
+			nesting++
 		default:
-			return indent
 		}
 	}
-	return indent
+	return nesting, true
 }
 
 // ListMarkerSpaceRule checks for correct spaces after list markers.
@@ -269,10 +328,22 @@ func NewListMarkerSpaceRule() *ListMarkerSpaceRule {
 	}
 }
 
-// listMarkerPattern matches list markers and captures the spaces after.
-var listMarkerPattern = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])(\s+)`)
+// spacingMismatch is a list item whose marker is followed by the wrong
+// number of spaces.
+type spacingMismatch struct {
+	item     *mdast.Node
+	marker   listItemMarker
+	actual   int
+	expected int
+}
 
 // Apply checks for correct spaces after list markers.
+//
+// Like markdownlint, a list uses the single-line setting when every item
+// occupies exactly one line, and the multi-line setting otherwise. Markers are
+// located through the AST, so lists inside blockquotes and lists nested on a
+// shared line are checked too. The fix changes the item's content column, so
+// it is only offered where that keeps the list structure.
 func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -283,78 +354,101 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	olSingle := ctx.OptionInt("ol_single", 1)
 	olMulti := ctx.OptionInt("ol_multi", 1)
 
-	var diags []lint.Diagnostic
-
-	lists := ctx.Lists()
-	for _, list := range lists {
+	plan := newListShiftPlan(ctx.File)
+	var mismatches []spacingMismatch
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
-		}
-
-		isOrdered := lint.IsOrderedList(list)
-		isTight := lint.IsTightList(list)
-
-		var expectedSpaces int
-		if isOrdered {
-			if isTight {
-				expectedSpaces = olSingle
-			} else {
-				expectedSpaces = olMulti
-			}
-		} else {
-			if isTight {
-				expectedSpaces = ulSingle
-			} else {
-				expectedSpaces = ulMulti
-			}
+			return nil, ctx.Ctx.Err()
 		}
 
 		items := lint.ListItems(list)
+		single := listItemsAreSingleLines(ctx.File, list, items)
+		expected := ulMulti
+		switch {
+		case lint.IsOrderedList(list) && single:
+			expected = olSingle
+		case lint.IsOrderedList(list):
+			expected = olMulti
+		case single:
+			expected = ulSingle
+		}
+
 		for _, item := range items {
-			pos := item.SourcePosition()
-			if !pos.IsValid() {
+			marker, found := findListItemMarker(ctx.File, item)
+			if !found || !marker.HasContent() {
 				continue
 			}
-
-			lineContent := lint.LineContent(ctx.File, pos.StartLine)
-			match := listMarkerPattern.FindSubmatch(lineContent)
-			if match == nil {
+			actual := marker.Spacing()
+			if actual > maxListItemSpacing {
+				// The content is indented code that starts one space after
+				// the marker.
+				actual = 1
+			}
+			if actual == expected {
 				continue
 			}
-
-			actualSpaces := len(match[3])
-			if actualSpaces == expectedSpaces {
+			mismatches = append(mismatches, spacingMismatch{item: item, marker: marker, actual: actual, expected: expected})
+			if expected < 1 || expected > maxListItemSpacing || marker.Spacing() > maxListItemSpacing {
 				continue
 			}
-
-			line := ctx.File.Lines[pos.StartLine-1]
-			indent := match[1]
-			marker := match[2]
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			markerEnd := line.StartOffset + len(indent) + len(marker)
-			spacesEnd := markerEnd + actualSpaces
-			builder.ReplaceRange(markerEnd, spacesEnd, strings.Repeat(" ", expectedSpaces))
-
-			diagPos := mdast.SourcePosition{
-				StartLine:   pos.StartLine,
-				StartColumn: len(indent) + len(marker) + 1,
-				EndLine:     pos.StartLine,
-				EndColumn:   len(indent) + len(marker) + actualSpaces + 1,
+			if layout, ok := plan.layout(item); ok {
+				plan.propose(item, listShift{
+					markerCol:  layout.markerCol,
+					contentCol: layout.markerCol + marker.Width() + expected,
+				})
 			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				fmt.Sprintf("List marker space %d does not match expected %d", actualSpaces, expectedSpaces)).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion(fmt.Sprintf("Use %d space(s) after the list marker", expectedSpaces)).
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
 		}
 	}
+	safeShifts := plan.resolve()
+	edits := make(map[*mdast.Node]fix.TextEdit)
+	for _, mismatch := range mismatches {
+		if _, safe := safeShifts[mismatch.item]; safe {
+			// The edit covers the marker too, so that no other list rule
+			// changes this marker in the same pass.
+			marker := mismatch.marker
+			edits[mismatch.item] = fix.TextEdit{
+				StartOffset: marker.Start,
+				EndOffset:   marker.ContentStart,
+				NewText:     string(ctx.File.Content[marker.Start:marker.End]) + strings.Repeat(" ", mismatch.expected),
+			}
+		}
+	}
+	fixes := plan.fixes(edits)
 
-	return diags, nil
+	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		marker := mismatch.marker
+		pos := mdast.SourcePosition{
+			StartLine:   marker.Line,
+			StartColumn: marker.End - marker.LineStart + 1,
+			EndLine:     marker.Line,
+			EndColumn:   marker.ContentStart - marker.LineStart + 1,
+		}
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+			fmt.Sprintf("List marker space %d does not match expected %d", mismatch.actual, mismatch.expected)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(fmt.Sprintf("Use %d space(s) after the list marker", mismatch.expected))
+		if edit, ok := fixes[mismatch.item]; ok {
+			diagBuilder = diagBuilder.WithFix(editFix(edit))
+		}
+		diags = append(diags, diagBuilder.Build())
+	}
+
+	return keepSafeFixes(ctx, diags), nil
+}
+
+// listItemsAreSingleLines reports whether every item of a list occupies one
+// line, which markdownlint checks by comparing the list's line count with its
+// number of items.
+func listItemsAreSingleLines(file *mdast.FileSnapshot, list *mdast.Node, items []*mdast.Node) bool {
+	if len(items) == 0 {
+		return true
+	}
+	firstLine := list.SourcePosition().StartLine
+	if marker, found := findListItemMarker(file, items[0]); found {
+		firstLine = marker.Line
+	}
+	return nodeLastLine(list)-firstLine+1 == len(items)
 }
 
 // BlanksAroundListsRule checks that lists are surrounded by blank lines.
@@ -376,40 +470,56 @@ func NewBlanksAroundListsRule() *BlanksAroundListsRule {
 }
 
 // Apply checks that lists are surrounded by blank lines.
+//
+// Like markdownlint, every list that is not nested in another list is
+// checked, including lists inside blockquotes. A line counts as blank when
+// it is blank within the list's containers (a line holding only '>' inside
+// a blockquote) or holds nothing but blockquote markers and HTML comments.
+// The fix inserts a blank line that keeps the list's containers, such as
+// ">" inside a blockquote.
 func (r *BlanksAroundListsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
-
-	// Find top-level lists only (not nested).
-	for child := ctx.Root.FirstChild; child != nil; child = child.Next {
+	for _, list := range ctx.Lists() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		if child.Kind != mdast.NodeList {
+		if hasListAncestor(list) {
 			continue
 		}
 
-		pos := child.SourcePosition()
+		pos := list.SourcePosition()
 		if !pos.IsValid() {
 			continue
 		}
 
-		// Check for blank line before.
-		if diag := r.checkBlankBefore(ctx, child, pos); diag != nil {
+		if diag := r.checkBlankBefore(ctx, list, pos); diag != nil {
 			diags = append(diags, *diag)
 		}
-
-		// Check for blank line after.
-		if diag := r.checkBlankAfter(ctx, child, pos); diag != nil {
+		if diag := r.checkBlankAfter(ctx, list); diag != nil {
 			diags = append(diags, *diag)
 		}
 	}
 
-	return diags, nil
+	return keepSafeFixes(ctx, diags), nil
+}
+
+// hasListAncestor reports whether a node is nested inside a list.
+func hasListAncestor(node *mdast.Node) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeList {
+			return true
+		}
+	}
+	return false
+}
+
+// isBlankAroundList reports whether a line counts as blank next to a list.
+func isBlankAroundList(file *mdast.FileSnapshot, list *mdast.Node, lineNum int) bool {
+	return lint.IsBlankLineInContainer(file, list, lineNum) || isMarkdownlintBlankLine(lint.LineContent(file, lineNum))
 }
 
 // checkBlankBefore checks if there's a missing blank line before the list.
@@ -418,22 +528,17 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	list *mdast.Node,
 	pos mdast.SourcePosition,
 ) *lint.Diagnostic {
-	if pos.StartLine <= 1 || lint.IsBlankLine(ctx.File, pos.StartLine-1) {
-		return nil
-	}
-
-	// Check if previous sibling exists.
-	if list.Prev == nil {
+	if pos.StartLine <= 1 || isBlankAroundList(ctx.File, list, pos.StartLine-1) {
 		return nil
 	}
 	// A preceding list reports this same boundary from its trailing edge.
-	if list.Prev.Kind == mdast.NodeList {
+	if list.Prev != nil && list.Prev.Kind == mdast.NodeList {
 		return nil
 	}
 
 	line := ctx.File.Lines[pos.StartLine-1]
 	builder := fix.NewEditBuilder()
-	builder.Insert(line.StartOffset, "\n")
+	builder.Insert(line.StartOffset, lint.BlankLineText(ctx.File, list))
 
 	diagPos := mdast.SourcePosition{
 		StartLine:   pos.StartLine,
@@ -451,51 +556,26 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	return &diag
 }
 
-// checkBlankAfter checks the boundary after the complete list, including continuations.
-func (r *BlanksAroundListsRule) checkBlankAfter(
-	ctx *lint.RuleContext,
-	list *mdast.Node,
-	pos mdast.SourcePosition,
-) *lint.Diagnostic {
-	return r.checkBlankAfterNormal(ctx, list, pos)
-}
-
-// checkBlankAfterNormal checks for missing blank line after list using the list's end position.
-// We check the line immediately after the list ends (pos.EndLine + 1), mirroring
-// how checkBlankBefore checks pos.StartLine - 1. This avoids false positives when
-// the next sibling's SourcePosition excludes structural markers (e.g., fenced code
-// blocks report content start, not the opening fence line).
-func (r *BlanksAroundListsRule) checkBlankAfterNormal(
-	ctx *lint.RuleContext,
-	list *mdast.Node,
-	pos mdast.SourcePosition,
-) *lint.Diagnostic {
-	if list.Next == nil {
+// checkBlankAfter checks for a missing blank line after the list. The list
+// span ends at the end of its last line, so the line after it is the first
+// line that follows the list, whether or not the list is the last block of
+// its container.
+func (r *BlanksAroundListsRule) checkBlankAfter(ctx *lint.RuleContext, list *mdast.Node) *lint.Diagnostic {
+	lastLine := nodeLastLine(list)
+	if lastLine >= len(ctx.File.Lines) || isBlankAroundList(ctx.File, list, lastLine+1) {
 		return nil
 	}
 
-	// Check the line immediately after the list ends.
-	checkLine := pos.EndLine + 1
-	if checkLine > len(ctx.File.Lines) || lint.IsBlankLine(ctx.File, checkLine) {
-		return nil
-	}
-
-	// Find the diagnostic line - use the last list item's start line (the actual marker).
-	diagLine := pos.EndLine
+	// Report on the last list item's marker line.
+	diagLine := lastLine
 	if lastItem := list.LastChild; lastItem != nil {
 		if itemPos := lastItem.SourcePosition(); itemPos.IsValid() {
 			diagLine = itemPos.StartLine
 		}
 	}
 
-	return r.createAfterDiagnostic(ctx, diagLine, pos.EndLine)
-}
-
-// createAfterDiagnostic creates a diagnostic for missing blank line after list.
-func (r *BlanksAroundListsRule) createAfterDiagnostic(ctx *lint.RuleContext, diagLine, insertionLine int) *lint.Diagnostic {
-	line := ctx.File.Lines[insertionLine-1]
 	builder := fix.NewEditBuilder()
-	builder.Insert(line.EndOffset, "\n")
+	builder.Insert(ctx.File.Lines[lastLine-1].EndOffset, lint.BlankLineText(ctx.File, list))
 
 	diagPos := mdast.SourcePosition{
 		StartLine:   diagLine,

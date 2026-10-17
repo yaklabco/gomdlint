@@ -11,15 +11,6 @@
   {
     "rule": "MD009",
     "name": "no-trailing-spaces",
-    "line": 4,
-    "column": 13,
-    "message": "Trailing whitespace",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD009",
-    "name": "no-trailing-spaces",
     "line": 5,
     "column": 16,
     "message": "Trailing whitespace",

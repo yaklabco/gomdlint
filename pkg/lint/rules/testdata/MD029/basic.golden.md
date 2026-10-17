@@ -7,5 +7,5 @@
 Another list:
 
 1. Item one
-2. Item two (should be 2)
-3. Item three (should be 3)
+1. Item two (should be 2)
+1. Item three (should be 3)

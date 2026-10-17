@@ -3,8 +3,8 @@
     "rule": "MD013",
     "name": "line-length",
     "line": 5,
-    "column": 121,
-    "message": "Line length 169 exceeds maximum 120",
+    "column": 81,
+    "message": "Line length 169 exceeds maximum 80",
     "severity": "warning",
     "fixable": true
   },
@@ -12,8 +12,8 @@
     "rule": "MD013",
     "name": "line-length",
     "line": 7,
-    "column": 121,
-    "message": "Line length 173 exceeds maximum 120",
+    "column": 81,
+    "message": "Line length 173 exceeds maximum 80",
     "severity": "warning",
     "fixable": true
   }

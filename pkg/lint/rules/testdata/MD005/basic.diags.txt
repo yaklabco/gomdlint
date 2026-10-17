@@ -1,2 +1,2 @@
-basic.input.md:4:2 warning List item indentation 1 does not match expected 0 (MD005/list-indent) [fixable]
-basic.input.md:12:4 warning List item indentation 3 does not match expected 2 (MD005/list-indent) [fixable]
+basic.input.md:4:1 warning List item indentation 1 does not match expected 0 (MD005/list-indent)
+basic.input.md:12:1 warning List item indentation 3 does not match expected 2 (MD005/list-indent)

@@ -1,9 +1,9 @@
 # Multiple Violations
 
-Line one has spaces
+Line one has spaces  
 Line two is clean
-Line three has spaces
+Line three has spaces  
 Line four is clean
-Line five has spaces
+Line five has spaces  
 Line six is clean
-Line seven has spaces
+Line seven has spaces  

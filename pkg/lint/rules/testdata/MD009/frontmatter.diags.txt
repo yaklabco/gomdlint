@@ -1,2 +1,1 @@
 frontmatter.input.md:7:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
-frontmatter.input.md:8:25 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]

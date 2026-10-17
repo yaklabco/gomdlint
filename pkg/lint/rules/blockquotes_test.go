@@ -59,6 +59,110 @@ func TestNoMultipleSpaceBlockquoteRule(t *testing.T) {
 			input:     "",
 			wantDiags: 0,
 		},
+		{
+			// The indentation belongs to the list item, not to the quote.
+			name:      "list item continuation in a blockquote",
+			input:     "> - item\n>\n>   second paragraph\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "nested list in a blockquote",
+			input:     "> - parent\n>   - child\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "extra space in a nested blockquote",
+			input:     "> >  x\n",
+			wantDiags: 1,
+			wantFix:   "> > x\n",
+		},
+		{
+			name:      "extra space before a nested blockquote marker",
+			input:     ">  > x\n",
+			wantDiags: 1,
+			wantFix:   "> > x\n",
+		},
+		{
+			name:      "indented blockquote",
+			input:     "  >  x\n",
+			wantDiags: 1,
+			wantFix:   "  > x\n",
+		},
+		{
+			name:      "extra space before a list marker",
+			input:     ">  - item\n",
+			wantDiags: 1,
+			wantFix:   "> - item\n",
+		},
+		{
+			name:      "list items can be excluded",
+			input:     ">  - item\n",
+			wantDiags: 0,
+			config:    map[string]any{"list_items": false},
+		},
+		{
+			// The indentation of the table rows is the content indentation
+			// of the list item, not extra space after the blockquote marker.
+			name:      "table in a quoted list item",
+			input:     "> - | a |\n>   | - |\n",
+			wantDiags: 0,
+		},
+		{
+			// An item holding a table is not moved, because its rows depend
+			// on its content column.
+			name:      "indented quoted list item holding a table",
+			input:     ">  - | a |\n>    | - |\n",
+			wantDiags: 1,
+			wantFix:   ">  - | a |\n>    | - |\n",
+		},
+		{
+			name:      "lazy line in a quoted list",
+			input:     "> - item\n>  lazy text\n",
+			wantDiags: 1,
+			wantFix:   "> - item\n> lazy text\n",
+		},
+		{
+			name:      "lazy line in a quoted list is a list line",
+			input:     "> - item\n>  lazy text\n",
+			wantDiags: 0,
+			config:    map[string]any{"list_items": false},
+		},
+		{
+			name:      "indented code in a blockquote",
+			input:     ">     code\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "fenced code content in a blockquote",
+			input:     "> ```\n>  code\n> ```\n",
+			wantDiags: 0,
+		},
+		{
+			// Moving a fence changes how much indentation its content keeps.
+			name:      "indented fence is reported without a fix",
+			input:     ">  ```\n>  code\n>  ```\n",
+			wantDiags: 2,
+			wantFix:   ">  ```\n>  code\n>  ```\n",
+		},
+		{
+			name:      "quote line holding only spaces",
+			input:     "> a\n>   \n> b\n",
+			wantDiags: 0,
+		},
+		{
+			// The tab keeps "- second item" paragraph text; removing it would
+			// start a new list item.
+			name:      "no fix when removing the space would start a block",
+			input:     "> -  first item\n> \t- second item\n",
+			wantDiags: 1,
+			wantFix:   "> -  first item\n> \t- second item\n",
+		},
+		{
+			name:      "extra space before a heading",
+			input:     ">  # Heading\n",
+			wantDiags: 1,
+			wantFix:   "> # Heading\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -88,6 +192,14 @@ func TestNoMultipleSpaceBlockquoteRule(t *testing.T) {
 				require.NoError(t, err)
 				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
 				assert.Equal(t, tt.wantFix, string(fixed))
+
+				// The fixed text keeps its structure and leaves nothing to fix.
+				assert.Equal(t, listShape(t, tt.input), listShape(t, string(fixed)))
+				snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
+				require.NoError(t, err)
+				diags2, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg))
+				require.NoError(t, err)
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -102,6 +104,31 @@ func TestULIndentRule(t *testing.T) {
 			input:     "",
 			wantDiags: 0,
 		},
+		{
+			name:      "nested list on the parent marker line",
+			input:     "- - x\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "list in a blockquote measured from the quote",
+			input:     "> - a\n>   - b\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "wrong nesting in a blockquote",
+			input:     "> - a\n>    - b\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "list in a blockquote inside a list item starts a new nesting",
+			input:     "- a\n\n  > - b\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "ordered parent is not checked",
+			input:     "1. a\n   - b\n",
+			wantDiags: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -160,6 +187,50 @@ func TestListMarkerSpaceRule(t *testing.T) {
 		{
 			name:      "no list",
 			input:     "Just some text\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "list inside a blockquote",
+			input:     "> -  item\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "list inside a nested blockquote",
+			input:     "> > -  item\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "ordered list nested on a bullet line",
+			input:     "- 1.  alpha\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "correct spacing inside blockquotes",
+			input:     "> - item\n> > 1. item\n",
+			wantDiags: 0,
+		},
+		{
+			// markdownlint uses the multi-line setting when any item spans
+			// more than one line, even in a tight list.
+			name:      "tight list with a wrapped item uses ul_multi",
+			input:     "- a\n  b\n- c\n",
+			wantDiags: 2,
+			config:    map[string]any{"ul_multi": 2},
+		},
+		{
+			name:      "single-line items use ul_single",
+			input:     "- a\n- c\n",
+			wantDiags: 0,
+			config:    map[string]any{"ul_multi": 2},
+		},
+		{
+			name:      "indented code after the marker counts as one space",
+			input:     "-     code\n",
+			wantDiags: 0,
+		},
+		{
+			name:      "empty item is skipped",
+			input:     "-\n- a\n",
 			wantDiags: 0,
 		},
 	}
@@ -290,16 +361,18 @@ func TestListIndentRule_Fix(t *testing.T) {
 			wantFix:   "* Item 1\n* Item 2\n* Item 3\n",
 		},
 		{
+			// Like markdownlint, MD005 does not fix unordered lists; MD007
+			// moves their items to the configured indentation.
 			name:      "single violation - second item extra indent",
 			input:     "* Item 1\n * Item 2\n* Item 3\n",
 			wantDiags: 1,
-			wantFix:   "* Item 1\n* Item 2\n* Item 3\n",
+			wantFix:   "* Item 1\n * Item 2\n* Item 3\n",
 		},
 		{
 			name:      "multiple violations - varying indentation",
 			input:     "* Item 1\n * Item 2\n  * Item 3\n",
 			wantDiags: 2,
-			wantFix:   "* Item 1\n* Item 2\n* Item 3\n",
+			wantFix:   "* Item 1\n * Item 2\n  * Item 3\n",
 		},
 		{
 			name:      "empty file",
@@ -324,6 +397,64 @@ func TestListIndentRule_Fix(t *testing.T) {
 			input:     "1. Item 1\n 2. Item 2\n1. Item 3\n",
 			wantDiags: 1,
 			wantFix:   "1. Item 1\n2. Item 2\n1. Item 3\n",
+		},
+		{
+			name:      "ordered list nested on a bullet line is aligned",
+			input:     "- 1. alpha\n  2. beta\n",
+			wantDiags: 0,
+			wantFix:   "- 1. alpha\n  2. beta\n",
+		},
+		{
+			name:      "right-aligned numbers are allowed",
+			input:     " 9. nine\n10. ten\n",
+			wantDiags: 0,
+			wantFix:   " 9. nine\n10. ten\n",
+		},
+		{
+			name:      "right-aligned list with a misaligned item",
+			input:     " 9. nine\n10. ten\n 11. eleven\n",
+			wantDiags: 1,
+			wantFix:   " 9. nine\n10. ten\n11. eleven\n",
+		},
+		{
+			name:      "ordered item moved left keeps its continuation",
+			input:     "1. Item 1\n  2. Item 2\n     continued\n",
+			wantDiags: 1,
+			wantFix:   "1. Item 1\n2. Item 2\n     continued\n",
+		},
+		{
+			name:      "ordered item is moved right to the first item column",
+			input:     "  1. Item 1\n2. Item 2\n",
+			wantDiags: 1,
+			wantFix:   "  1. Item 1\n  2. Item 2\n",
+		},
+		{
+			// Moving the item left would leave the nested item four columns
+			// past the content, turning it into paragraph text.
+			name:      "ordered item is not moved when its nested list would break",
+			input:     "1. Item 1\n 2. Item 2\n       - nested\n",
+			wantDiags: 1,
+			wantFix:   "1. Item 1\n 2. Item 2\n       - nested\n",
+		},
+		{
+			name:      "ordered list in a blockquote is fixed",
+			input:     "> 1. Item 1\n>  2. Item 2\n",
+			wantDiags: 1,
+			wantFix:   "> 1. Item 1\n> 2. Item 2\n",
+		},
+		{
+			name:      "ordered list in a nested blockquote is fixed",
+			input:     "> > 1. Item 1\n> >  2. Item 2\n",
+			wantDiags: 1,
+			wantFix:   "> > 1. Item 1\n> > 2. Item 2\n",
+		},
+		{
+			// Without the space after ">", columns still count from the
+			// blockquote content.
+			name:      "blockquote markers without spaces",
+			input:     ">1. Item 1\n> 2. Item 2\n",
+			wantDiags: 0,
+			wantFix:   ">1. Item 1\n> 2. Item 2\n",
 		},
 	}
 
@@ -357,7 +488,7 @@ func TestListIndentRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -415,11 +546,20 @@ func TestULIndentRule_Fix(t *testing.T) {
 			config:    map[string]any{"start_indented": true},
 		},
 		{
+			// Four spaces at the top level make an indented code block, so
+			// the fix is withheld.
 			name:      "start_indented with custom start_indent - violation",
 			input:     "  * Item 1\n",
 			wantDiags: 1,
-			wantFix:   "    * Item 1\n",
+			wantFix:   "  * Item 1\n",
 			config:    map[string]any{"start_indented": true, "start_indent": 4},
+		},
+		{
+			name:      "start_indented with start_indent 3 is fixed",
+			input:     "  * Item 1\n",
+			wantDiags: 1,
+			wantFix:   "   * Item 1\n",
+			config:    map[string]any{"start_indented": true, "start_indent": 3},
 		},
 		{
 			name:      "custom indent=4 - correct",
@@ -434,6 +574,50 @@ func TestULIndentRule_Fix(t *testing.T) {
 			wantDiags: 1,
 			wantFix:   "* Item 1\n    * Nested\n",
 			config:    map[string]any{"indent": 4},
+		},
+		{
+			name:      "indented top-level item keeps its continuation",
+			input:     "   - Item\n     continued\n",
+			wantDiags: 1,
+			wantFix:   "- Item\n     continued\n",
+		},
+		{
+			name:      "whole indented list moves together",
+			input:     "  - Alpha\n    - Beta\n  - Gamma\n   - Delta\n",
+			wantDiags: 4,
+			wantFix:   "- Alpha\n  - Beta\n- Gamma\n- Delta\n",
+		},
+		{
+			// The parent content starts at column 4, so moving the child
+			// to column 2 would make it a sibling of its parent.
+			name:      "no fix when the nested item would leave its parent",
+			input:     "-   Parent\n    - Child\n",
+			wantDiags: 1,
+			wantFix:   "-   Parent\n    - Child\n",
+		},
+		{
+			name:      "nested item in a blockquote is fixed",
+			input:     "> - a\n>    - b\n",
+			wantDiags: 1,
+			wantFix:   "> - a\n>   - b\n",
+		},
+		{
+			name:      "indented list in a blockquote is fixed",
+			input:     ">  - a\n>  - b\n",
+			wantDiags: 2,
+			wantFix:   "> - a\n> - b\n",
+		},
+		{
+			name:      "no fix when a continuation line would become a list item",
+			input:     "  -  first item\n    - second item\n",
+			wantDiags: 1,
+			wantFix:   "  -  first item\n    - second item\n",
+		},
+		{
+			name:      "no fix when the item holds a code block",
+			input:     "   - Item\n\n         code\n",
+			wantDiags: 1,
+			wantFix:   "   - Item\n\n         code\n",
 		},
 	}
 
@@ -471,7 +655,7 @@ func TestULIndentRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -548,6 +732,81 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 			wantDiags: 3,
 			wantFix:   "- Item 1\n+ Item 2\n* Item 3\n",
 		},
+		{
+			name:      "wrapped item is fixed with its continuation",
+			input:     "-  Item one\n   continues\n-  Item two\n",
+			wantDiags: 2,
+			wantFix:   "- Item one\n   continues\n- Item two\n",
+		},
+		{
+			name:      "nested list stays nested when the parent spacing shrinks",
+			input:     "-   Parent\n    - Child\n",
+			wantDiags: 1,
+			wantFix:   "- Parent\n    - Child\n",
+		},
+		{
+			// Narrowing the first item would pull the indented sibling into it.
+			name:      "no fix when a sibling would become nested",
+			input:     "-  Top\n  -  Next\n",
+			wantDiags: 2,
+			wantFix:   "-  Top\n  - Next\n",
+		},
+		{
+			// The paragraph after the list would join the item.
+			name:      "no fix when a following paragraph would join the item",
+			input:     "-  item\n\n  after\n",
+			wantDiags: 1,
+			wantFix:   "-  item\n\n  after\n",
+		},
+		{
+			name:      "no fix when the item holds more than a paragraph and lists",
+			input:     "-  item\n\n   ```\n   code\n   ```\n",
+			wantDiags: 1,
+			wantFix:   "-  item\n\n   ```\n   code\n   ```\n",
+		},
+		{
+			name:      "spacing in a blockquote is fixed",
+			input:     "> -  item\n> -  other\n",
+			wantDiags: 2,
+			wantFix:   "> - item\n> - other\n",
+		},
+		{
+			name:      "spacing in a nested blockquote is fixed",
+			input:     "> > 1.  item\n",
+			wantDiags: 1,
+			wantFix:   "> > 1. item\n",
+		},
+		{
+			// The quoted paragraph after the list would join the narrowed item.
+			name:      "no fix in a blockquote when a following line would join the item",
+			input:     "> -  item\n>\n>   after\n",
+			wantDiags: 1,
+			wantFix:   "> -  item\n>\n>   after\n",
+		},
+		{
+			// The second line is paragraph text only because it is not
+			// indented to the content column; narrowing the item would make it
+			// a nested list item.
+			name:      "no fix when a continuation line would become a list item",
+			input:     "  -  first item\n    - second item\n",
+			wantDiags: 1,
+			wantFix:   "  -  first item\n    - second item\n",
+		},
+		{
+			// The tab after ">" expands past the optional space, so byte
+			// columns cannot tell where the second marker sits.
+			name:      "no fix when a tab follows a blockquote marker",
+			input:     ">-  first item\n>\t- second item\n",
+			wantDiags: 1,
+			wantFix:   ">-  first item\n>\t- second item\n",
+		},
+		{
+			name:      "no fix when the expected spacing would make code",
+			input:     "* Item 1\n",
+			wantDiags: 1,
+			wantFix:   "* Item 1\n",
+			config:    map[string]any{"ul_single": 5},
+		},
 	}
 
 	for _, tt := range tests {
@@ -584,7 +843,7 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -659,6 +918,60 @@ func TestBlanksAroundListsRule_Fix(t *testing.T) {
 			wantDiags: 2,
 			wantFix:   "Text\n\n* List 1\n\nMore text\n\n* List 2\n\nEnd\n",
 		},
+		{
+			name:      "missing blank before a list in a blockquote",
+			input:     "> Text\n> - Item\n",
+			wantDiags: 1,
+			wantFix:   "> Text\n>\n> - Item\n",
+		},
+		{
+			name:      "missing blank after a list in a blockquote",
+			input:     "> - Item\n> # Heading\n",
+			wantDiags: 1,
+			wantFix:   "> - Item\n>\n> # Heading\n",
+		},
+		{
+			name:      "quote marker line counts as blank",
+			input:     "> Text\n>\n> - Item\n>\n> More\n",
+			wantDiags: 0,
+			wantFix:   "> Text\n>\n> - Item\n>\n> More\n",
+		},
+		{
+			name:      "list in a nested blockquote",
+			input:     "> > Text\n> > - Item\n",
+			wantDiags: 1,
+			wantFix:   "> > Text\n> >\n> > - Item\n",
+		},
+		{
+			name:      "list opening a blockquote after a paragraph",
+			input:     "Para\n> - Item\n",
+			wantDiags: 1,
+			wantFix:   "Para\n>\n> - Item\n",
+		},
+		{
+			name:      "list closing a blockquote before a heading",
+			input:     "> - Item\n# Heading\n",
+			wantDiags: 1,
+			wantFix:   "> - Item\n>\n# Heading\n",
+		},
+		{
+			name:      "comment lines count as blank",
+			input:     "<!-- note -->\n- Item\n<!-- end -->\n",
+			wantDiags: 0,
+			wantFix:   "<!-- note -->\n- Item\n<!-- end -->\n",
+		},
+		{
+			name:      "list nested in a list item is not checked",
+			input:     "- a\n  text\n  - b\n",
+			wantDiags: 0,
+			wantFix:   "- a\n  text\n  - b\n",
+		},
+		{
+			name:      "list in a blockquote inside a list item is not checked",
+			input:     "- a\n\n  > text\n  > - b\n",
+			wantDiags: 0,
+			wantFix:   "- a\n\n  > text\n  > - b\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -691,8 +1004,127 @@ func TestBlanksAroundListsRule_Fix(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
+		})
+	}
+}
+
+// listShape renders the nesting of lists, items, paragraphs and other blocks,
+// so that a fix can be checked for keeping the document structure.
+func listShape(t *testing.T, input string) string {
+	t.Helper()
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	var shape strings.Builder
+	var walk func(node *mdast.Node)
+	walk = func(node *mdast.Node) {
+		for child := node.FirstChild; child != nil; child = child.Next {
+			switch {
+			case child.Kind == mdast.NodeList:
+				shape.WriteString("[")
+				walk(child)
+				shape.WriteString("]")
+			case child.Kind == mdast.NodeListItem:
+				shape.WriteString("(")
+				walk(child)
+				shape.WriteString(")")
+			case child.Kind == mdast.NodeParagraph:
+				shape.WriteString("p")
+			case child.IsBlock():
+				shape.WriteString(child.Kind.String())
+				walk(child)
+			}
+		}
+	}
+	walk(snapshot.Root)
+	return shape.String()
+}
+
+// TestListIndentationFixesPreserveStructure applies the MD004, MD005, MD007,
+// MD027, MD029 and MD030 fixes together, the way one fix pass does, and
+// checks that the lists keep their structure.
+func TestListIndentationFixesPreserveStructure(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "indented list with a misaligned sibling",
+			input: "  - Alpha\n    - Beta\n  - Gamma\n   - Delta\n",
+			want:  "- Alpha\n  - Beta\n- Gamma\n- Delta\n",
+		},
+		{
+			name:  "spacing and indentation on the same item",
+			input: "  -   Alpha\n      - Beta\n",
+		},
+		{
+			name:  "sibling indented past a narrowed item",
+			input: "-  Top\n  -  Next\n",
+		},
+		{
+			name:  "ordered list with misaligned items and spacing",
+			input: "1.  One\n 2. Two\n  3.  Three\n",
+		},
+		{
+			name:  "following paragraph close to the content column",
+			input: "   -  Item\n\n  After\n",
+		},
+		{
+			name:  "blockquoted list with misaligned items and spacing",
+			input: ">  -  Alpha\n>     - Beta\n>  -  Gamma\n>   - Delta\n",
+		},
+		{
+			name:  "blockquoted list followed by a lazy line",
+			input: "> -  item\nlazy text\n",
+		},
+		{
+			// Removing the quote space and the marker space in one pass
+			// would move the content column two ways at once.
+			name:  "quote space and marker space on the same item",
+			input: ">   -   a\n>       - b\n",
+		},
+		{
+			// A bullet left unchanged because another rule edits its
+			// marker would split the nested list.
+			name:  "bullet and indentation fixes in one list",
+			input: "- first\n  * second\n   * third\n",
+		},
+		{
+			// Aligning third with second while the quote space before
+			// second is removed would nest third inside second.
+			name:  "alignment with a first item behind extra quote space",
+			input: "> -   first\n>    1. second\n> 1. third\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+
+			var edits []fix.TextEdit
+			rules := []lint.Rule{
+				NewUnorderedListStyleRule(), NewListIndentRule(), NewULIndentRule(),
+				NewNoMultipleSpaceBlockquoteRule(), NewOrderedListIncrementRule(), NewListMarkerSpaceRule(),
+			}
+			for _, rule := range rules {
+				ruleCtx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+				diags, err := rule.Apply(ruleCtx)
+				require.NoError(t, err)
+				for _, diag := range diags {
+					edits = append(edits, diag.FixEdits...)
+				}
+			}
+			accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(tt.input))
+			require.NoError(t, err)
+			fixed := string(fix.ApplyEdits([]byte(tt.input), accepted))
+
+			if tt.want != "" {
+				assert.Equal(t, tt.want, fixed)
+			}
+			assert.Equal(t, listShape(t, tt.input), listShape(t, fixed), "fixed:\n%s", fixed)
 		})
 	}
 }

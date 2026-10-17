@@ -6,7 +6,7 @@
     "column": 2,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD030",

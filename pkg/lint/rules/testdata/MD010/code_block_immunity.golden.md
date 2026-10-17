@@ -3,8 +3,8 @@
 Normal content here.
 
 ```bash
-if [ -f file ]; then
- echo "hello"
+if [	-f file ]; then
+	echo "hello"
 fi
 ```
 

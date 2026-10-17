@@ -1,6 +1,4 @@
+README.input.md:27:81 warning Line length 119 exceeds maximum 80 (MD013/line-length) [fixable]
 README.input.md:69:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
-README.input.md:136:1 warning Multiple consecutive blank lines (found 2, max 1) (MD012/no-multiple-blank-lines) [fixable]
-README.input.md:155:1 warning Multiple consecutive blank lines (found 2, max 1) (MD012/no-multiple-blank-lines) [fixable]
-README.input.md:163:1 warning Multiple consecutive blank lines (found 2, max 1) (MD012/no-multiple-blank-lines) [fixable]
 README.input.md:200:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
-README.input.md:202:1 warning Multiple consecutive blank lines (found 2, max 1) (MD012/no-multiple-blank-lines) [fixable]
+README.input.md:227:81 warning Line length 88 exceeds maximum 80 (MD013/line-length) [fixable]

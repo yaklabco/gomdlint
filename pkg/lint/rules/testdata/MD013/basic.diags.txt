@@ -1,2 +1,2 @@
-basic.input.md:5:121 warning Line length 139 exceeds maximum 120 (MD013/line-length) [fixable]
-basic.input.md:9:121 warning Line length 152 exceeds maximum 120 (MD013/line-length) [fixable]
+basic.input.md:5:81 warning Line length 139 exceeds maximum 80 (MD013/line-length) [fixable]
+basic.input.md:9:81 warning Line length 152 exceeds maximum 80 (MD013/line-length) [fixable]

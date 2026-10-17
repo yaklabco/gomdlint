@@ -1,3 +1,2 @@
 unicode.input.md:3:13 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
-unicode.input.md:4:13 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
 unicode.input.md:5:16 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]

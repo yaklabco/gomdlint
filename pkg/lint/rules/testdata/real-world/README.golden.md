@@ -24,7 +24,8 @@ gomdlint lint --fix              # Lint and auto-fix issues
 
 ### Rule Identifier Format
 
-gomdlint uses human-readable rule names by default for clearer output. You can control the format with `--rule-format`:
+gomdlint uses human-readable rule names by default for clearer output. You can
+control the format with `--rule-format`:
 
 ```bash
 # Human-readable names (default)
@@ -133,6 +134,7 @@ Install prerequisites:
 
 ```bash
 
+
 # Install Go (if not already installed)
 # See https://go.dev/doc/install
 
@@ -151,12 +153,14 @@ List all available tasks:
 
 ```bash
 
+
 stave -l
 ```
 
 Common tasks:
 
 ```bash
+
 
 # Build the project
 stave build
@@ -196,6 +200,7 @@ stave bench
 
 ```
 
+
 gomdlint/
   cmd/
     gomdlint/            # main.go, Cobra root command
@@ -220,7 +225,8 @@ gomdlint/
 
 See [design-docs.md](design-docs.md) for the complete architectural design.
 
-See [implementation-plan.md](implementation-plan.md) for the phased implementation plan.
+See [implementation-plan.md](implementation-plan.md) for the phased
+implementation plan.
 
 ## Status
 

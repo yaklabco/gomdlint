@@ -1,5 +1,14 @@
 [
   {
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 27,
+    "column": 81,
+    "message": "Line length 119 exceeds maximum 80",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
     "rule": "MD040",
     "name": "fenced-code-language",
     "line": 69,
@@ -7,33 +16,6 @@
     "message": "Fenced code block has no language specified",
     "severity": "warning",
     "fixable": false
-  },
-  {
-    "rule": "MD012",
-    "name": "no-multiple-blank-lines",
-    "line": 136,
-    "column": 1,
-    "message": "Multiple consecutive blank lines (found 2, max 1)",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD012",
-    "name": "no-multiple-blank-lines",
-    "line": 155,
-    "column": 1,
-    "message": "Multiple consecutive blank lines (found 2, max 1)",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
-    "rule": "MD012",
-    "name": "no-multiple-blank-lines",
-    "line": 163,
-    "column": 1,
-    "message": "Multiple consecutive blank lines (found 2, max 1)",
-    "severity": "warning",
-    "fixable": true
   },
   {
     "rule": "MD040",
@@ -45,11 +27,11 @@
     "fixable": false
   },
   {
-    "rule": "MD012",
-    "name": "no-multiple-blank-lines",
-    "line": 202,
-    "column": 1,
-    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "rule": "MD013",
+    "name": "line-length",
+    "line": 227,
+    "column": 81,
+    "message": "Line length 88 exceeds maximum 80",
     "severity": "warning",
     "fixable": true
   }

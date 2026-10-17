@@ -4,6 +4,6 @@
 
 > > Inner blockquote is correct.
 
-> >  Inner blockquote with extra space.
+> > Inner blockquote with extra space.
 
-> >  Both levels with extra spaces.
+> > Both levels with extra spaces.

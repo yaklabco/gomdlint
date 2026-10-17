@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD030",
+    "name": "list-marker-space",
+    "line": 3,
+    "column": 4,
+    "message": "List marker space 2 does not match expected 1",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD030",
+    "name": "list-marker-space",
+    "line": 4,
+    "column": 4,
+    "message": "List marker space 2 does not match expected 1",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD030",
+    "name": "list-marker-space",
+    "line": 8,
+    "column": 7,
+    "message": "List marker space 2 does not match expected 1",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD030",
+    "name": "list-marker-space",
+    "line": 12,
+    "column": 5,
+    "message": "List marker space 2 does not match expected 1",
+    "severity": "warning",
+    "fixable": true
+  }
+]
