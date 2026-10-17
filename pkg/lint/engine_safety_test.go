@@ -307,16 +307,31 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 			want:  ">\n",
 		},
 		{
-			name:    "more blank lines win over a longer prefix",
+			// Taking the bare "\n\n" would end the blockquote and start a new
+			// one; the container prefix must survive with the larger count.
+			name:    "the most blank lines keep the container prefix",
 			content: quoted, offset: 6,
 			texts: []string{">\n", "\n\n"},
-			want:  "\n\n",
+			want:  ">\n>\n",
 		},
 		{
-			name:    "more blank lines win whatever the rule order",
+			name:    "the container prefix survives whatever the rule order",
 			content: quoted, offset: 6,
-			texts: []string{"  > >\n", "\n\n\n"},
-			want:  "\n\n\n",
+			texts: []string{"\n\n\n", "  > >\n"},
+			want:  "  > >\n  > >\n  > >\n",
+		},
+		{
+			// Same container: the larger requirement is taken as it is.
+			name:    "prefixes that differ only in trailing space are the same container",
+			content: quoted, offset: 6,
+			texts: []string{"> \n", ">\n>\n"},
+			want:  ">\n>\n",
+		},
+		{
+			name:    "the CRLF container prefix keeps its line ending",
+			content: "> # A\r\n> ## B\r\n", offset: 7,
+			texts: []string{"\n\n", ">\n"},
+			want:  ">\r\n>\r\n",
 		},
 		{
 			name:    "nested containers with indentation",
@@ -347,6 +362,24 @@ func TestEngine_MergesContainerBlankLineInsertions(t *testing.T) {
 				"blank-line insertions at one boundary must insert one blank line")
 		})
 	}
+}
+
+func TestEngine_DifferentContainerBlankLinesConflict(t *testing.T) {
+	t.Parallel()
+
+	// "> >" keeps a nested quote open where ">" would close it: the rules
+	// disagree about the container, so the later fix waits for the next pass.
+	result := lintWithRules(t, "> > # A\n> > ## B\n", true,
+		insertRule("TEST001", 8, "> >\n"),
+		insertRule("TEST002", 8, ">\n"),
+	)
+
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 8, EndOffset: 8, NewText: "> >\n"}}, result.Edits)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 8, EndOffset: 8, NewText: ">\n"},
+	}}, result.SkippedEdits)
+	assert.True(t, result.EditConflicts)
 }
 
 func TestEngine_DoesNotMergeInsertionsWithContent(t *testing.T) {

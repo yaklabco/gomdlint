@@ -271,7 +271,13 @@ func (e *Engine) lintFile(
 		}
 	}
 
-	result.Edits, result.SkippedEdits = resolveFixes(mergeBlankLineInsertions(fixes))
+	merged, conflicting := mergeBlankLineInsertions(fixes)
+	result.Edits, result.SkippedEdits = resolveFixes(merged)
+	for _, pending := range conflicting {
+		for _, edit := range pending.edits {
+			result.SkippedEdits = append(result.SkippedEdits, SkippedEdit{RuleID: pending.ruleID, Edit: edit})
+		}
+	}
 	result.EditConflicts = len(result.SkippedEdits) > 0
 
 	return result, nil
@@ -356,19 +362,29 @@ func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
 }
 
 // mergeBlankLineInsertions combines formatting requirements at the same
-// boundary: of several single-edit fixes that insert only blank lines at
-// one offset, the one asking for the most blank lines is kept (see
-// moreBlankLines). It runs after suppression so disabled findings cannot
-// increase an enabled fix.
-func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
+// boundary: several single-edit fixes that insert only blank lines at one
+// offset become one insertion (see mergeBlankLines). It runs after
+// suppression so disabled findings cannot increase an enabled fix. Fixes
+// whose blank lines belong to a different container than an earlier fix at
+// the same offset are returned separately, as conflicts.
+func mergeBlankLineInsertions(fixes []pendingFix) ([]pendingFix, []pendingFix) {
 	result := make([]pendingFix, 0, len(fixes))
+	var conflicting []pendingFix
 	boundaries := make(map[int]int)
 	for _, pending := range fixes {
 		if len(pending.edits) == 1 && isBlankLineInsertion(pending.edits[0]) {
 			offset := pending.edits[0].StartOffset
 			if idx, ok := boundaries[offset]; ok {
-				if moreBlankLines(pending.edits[0].NewText, result[idx].edits[0].NewText) {
-					result[idx] = pending
+				text, ok := mergeBlankLines(result[idx].edits[0].NewText, pending.edits[0].NewText)
+				if !ok {
+					conflicting = append(conflicting, pending)
+					continue
+				}
+				if text != result[idx].edits[0].NewText {
+					result[idx] = pendingFix{
+						ruleID: result[idx].ruleID,
+						edits:  []fix.TextEdit{{StartOffset: offset, EndOffset: offset, NewText: text}},
+					}
 				}
 				continue
 			}
@@ -376,17 +392,71 @@ func mergeBlankLineInsertions(fixes []pendingFix) []pendingFix {
 		}
 		result = append(result, pending)
 	}
-	return result
+	return result, conflicting
 }
 
-// moreBlankLines reports whether blank-line text a asks for more than b:
-// more line breaks, or as many with a longer container prefix (so ">\n"
-// wins over "\n" inside a blockquote).
-func moreBlankLines(a, b string) bool {
-	if linesA, linesB := strings.Count(a, "\n"), strings.Count(b, "\n"); linesA != linesB {
-		return linesA > linesB
+// blankLines is a blank-line insertion: count lines, each the container
+// prefix followed by the line ending.
+type blankLines struct {
+	prefix string
+	ending string
+	count  int
+}
+
+// parseBlankLines splits a blank-line insertion into its lines. It reports
+// false when the lines do not share one prefix and one line ending.
+func parseBlankLines(text string) (blankLines, bool) {
+	lines := strings.SplitAfter(text, "\n")
+	lines = lines[:len(lines)-1] // text ends with "\n", so the last part is empty
+
+	var parsed blankLines
+	for idx, line := range lines {
+		body := strings.TrimSuffix(line, "\n")
+		ending := "\n"
+		if trimmed, ok := strings.CutSuffix(body, "\r"); ok {
+			body, ending = trimmed, "\r\n"
+		}
+		if idx == 0 {
+			parsed.prefix, parsed.ending = body, ending
+			continue
+		}
+		if body != parsed.prefix || ending != parsed.ending {
+			return blankLines{}, false
+		}
 	}
-	return len(a) > len(b)
+	parsed.count = len(lines)
+	return parsed, true
+}
+
+// mergeBlankLines combines two blank-line insertions at one boundary into
+// one that satisfies both, without losing container markers:
+//   - for the same container (prefixes equal apart from trailing spaces),
+//     the insertion with more lines is kept as it is;
+//   - a bare insertion (no '>' markers) adopts the other's container
+//     prefix, with the larger line count, so ">\n" and "\n\n" give ">\n>\n";
+//   - two different containers cannot both be right, so it reports false.
+func mergeBlankLines(kept, next string) (string, bool) {
+	first, okFirst := parseBlankLines(kept)
+	second, okSecond := parseBlankLines(next)
+	if !okFirst || !okSecond {
+		return "", false
+	}
+
+	firstMarkers := strings.TrimRight(first.prefix, " \t")
+	secondMarkers := strings.TrimRight(second.prefix, " \t")
+	switch {
+	case firstMarkers == secondMarkers:
+		if second.count > first.count {
+			return next, true
+		}
+		return kept, true
+	case firstMarkers == "":
+		return strings.Repeat(second.prefix+second.ending, max(first.count, second.count)), true
+	case secondMarkers == "":
+		return strings.Repeat(first.prefix+first.ending, max(first.count, second.count)), true
+	default:
+		return "", false
+	}
 }
 
 // isBlankLineInsertion reports whether edit only inserts blank lines: text
