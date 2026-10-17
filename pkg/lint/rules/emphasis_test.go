@@ -58,6 +58,423 @@ func TestNoEmphasisAsHeadingRule(t *testing.T) {
 	}
 }
 
+// applyGFMRule parses input as GFM and applies rule with options.
+func applyGFMRule(t *testing.T, rule lint.Rule, input string, options map[string]any) []lint.Diagnostic {
+	t.Helper()
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	var ruleCfg *config.RuleConfig
+	if options != nil {
+		ruleCfg = &config.RuleConfig{Options: options}
+	}
+	cfg := config.NewConfig()
+	cfg.Flavor = config.FlavorGFM
+	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, ruleCfg))
+	require.NoError(t, err)
+	return diags
+}
+
+// TestNoEmphasisAsHeadingRule_MarkdownlintParity verifies MD036 matches
+// markdownlint 0.41 detection and that its fix (a gomdlint extension) is
+// built from the source line and withheld whenever it could change meaning.
+func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{name: "inline code and link are not plain text", input: "**Use `foo` with [docs](https://x.y) now**\n", wantLines: []int{}},
+		{
+			name:      "plain bold paragraph",
+			input:     "**Section Title**\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "## Section Title\n",
+		},
+		{name: "italic paragraph is reported without a fix", input: "_Another section_\n", wantLines: []int{1}},
+		{
+			// Any new heading changes the anchors, and a fragment link might
+			// point to one of them.
+			name:      "no fix that adds an anchor while fragment links exist",
+			input:     "**Heading**\n\nFiller.\n\n[jump](#other)\n",
+			wantLines: []int{1},
+		},
+		{
+			// A heading "Heading" before the existing one would take its
+			// anchor, so the link would point to the new heading.
+			name:      "no fix that takes the anchor of a later heading",
+			input:     "**Heading**\n\nFiller.\n\n## Heading\n\n[jump](#heading)\n",
+			wantLines: []int{1},
+		},
+		{name: "blockquote paragraph", input: "> **Quoted Title**\n", wantLines: []int{}},
+		{name: "list item paragraph", input: "- **Listed Title**\n", wantLines: []int{}},
+		{name: "multi-line emphasis", input: "**Two\nlines**\n", wantLines: []int{}},
+		{name: "strikethrough", input: "~~Struck paragraph~~\n", wantLines: []int{}},
+		{name: "character reference", input: "**Price &amp; Value**\n", wantLines: []int{}},
+		{name: "backslash escape", input: "**Price \\* Value**\n", wantLines: []int{}},
+		{name: "nested emphasis", input: "***Both***\n", wantLines: []int{}},
+		{name: "full-width question mark", input: "**Title\uFF1F**\n", wantLines: []int{}},
+		{
+			name:      "trailing comment is ignored but blocks the fix",
+			input:     "**Title** <!-- note -->\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "indented paragraph",
+			input:     "   **Indented**\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "## Indented\n",
+		},
+		{
+			// "## Item #" would read the "#" as a closing sequence.
+			name:      "trailing hash blocks the fix",
+			input:     "**Item #**\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "level follows the previous heading",
+			input:     "# Title\n\n## Part\n\n__Detail__\n",
+			wantLines: []int{5},
+			wantFix:   true,
+			wantFixed: "# Title\n\n## Part\n\n### Detail\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyGFMRule(t, NewNoEmphasisAsHeadingRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestNoSpaceInEmphasisRule_DelimiterRuns verifies MD037 pairs unmatched
+// delimiter runs like markdownlint 0.41 and reports one diagnostic per pair.
+func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			// Reported like markdownlint, but "2 *3* 4" would turn arithmetic
+			// into emphasis, so no fix is offered for content without letters.
+			name:      "arithmetic is reported without a fix",
+			input:     "See 2 * 3 * 4\n",
+			wantLines: []int{1},
+		},
+		{
+			// Single asterisks with whitespace on both sides read as
+			// multiplication, so no fix is offered.
+			name:      "multiplication is reported without a fix",
+			input:     "The product is a * b * c.\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "single asterisk spaced on one side only",
+			input:     "Some *text * here\n",
+			wantLines: []int{1},
+			wantFixed: "Some *text* here\n",
+		},
+		{
+			name:      "space only after the opening marker",
+			input:     "One-sided ** bold** here\n",
+			wantLines: []int{1},
+			wantFixed: "One-sided **bold** here\n",
+		},
+		{
+			name:      "space only before the closing marker",
+			input:     "And **bold ** too\n",
+			wantLines: []int{1},
+			wantFixed: "And **bold** too\n",
+		},
+		{
+			name:      "pair across lines",
+			input:     "Some ** text\nmore ** here\n",
+			wantLines: []int{1},
+			wantFixed: "Some **text\nmore** here\n",
+		},
+		{name: "escaped markers", input: "Some \\* text \\* here\n", wantLines: []int{}},
+		{name: "single marker", input: "x * y\n", wantLines: []int{}},
+		{name: "runs longer than three", input: "**** x ****\n", wantLines: []int{}},
+		{name: "intraword underscores", input: "snake_case_name and other_var_x\n", wantLines: []int{}},
+		{name: "markers inside strong text", input: "**bold * x * here**\n", wantLines: []int{}},
+		{name: "markers inside link text", input: "[a * x * b](https://example.com)\n", wantLines: []int{}},
+		{
+			name:      "letters between spaced single asterisks",
+			input:     "a * b * c\n",
+			wantLines: []int{1},
+		},
+		{
+			name:      "letters between spaced underscores",
+			input:     "a _ b _ c\n",
+			wantLines: []int{1},
+			wantFixed: "a _b_ c\n",
+		},
+		{
+			name:      "heading",
+			input:     "# Title *x *\n",
+			wantLines: []int{1},
+			wantFixed: "# Title *x*\n",
+		},
+		{
+			name:      "tight list item",
+			input:     "- a *x * b\n",
+			wantLines: []int{1},
+			wantFixed: "- a *x* b\n",
+		},
+		{
+			name:      "blockquote",
+			input:     "> a *x * b\n",
+			wantLines: []int{1},
+			wantFixed: "> a *x* b\n",
+		},
+		{
+			name:      "after inline HTML",
+			input:     "a <b>x</b> ** y** z\n",
+			wantLines: []int{1},
+			wantFixed: "a <b>x</b> **y** z\n",
+		},
+		{
+			name:      "table cell",
+			input:     "| A | B |\n| - | - |\n| a *x * b | c |\n",
+			wantLines: []int{3},
+			wantFixed: "| A | B |\n| - | - |\n| a *x* b | c |\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyGFMRule(t, NewNoSpaceInEmphasisRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFixed != "", diag.HasFix(), "fix offered")
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestEmphasisAndStrongStyle_Fix verifies MD049 and MD050 against
+// markdownlint 0.41, including the fix and the underscore intraword rule.
+func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
+	tests := []struct {
+		name      string
+		rule      lint.Rule
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantFix   bool
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "MD049 consistent",
+			rule:      NewEmphasisStyleRule(),
+			input:     "Some *text* and _more_ here.\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some *text* and *more* here.\n",
+		},
+		{
+			name:      "MD049 asterisk",
+			rule:      NewEmphasisStyleRule(),
+			input:     "Some _text_ here.\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some *text* here.\n",
+		},
+		{
+			name:      "MD049 underscore",
+			rule:      NewEmphasisStyleRule(),
+			input:     "Some *text* here.\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some _text_ here.\n",
+		},
+		{
+			name:      "MD049 underscore ignores intraword emphasis",
+			rule:      NewEmphasisStyleRule(),
+			input:     "foo*bar*baz and *bar*baz\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{},
+		},
+		{
+			name:      "MD049 intraword emphasis still sets the consistent style",
+			rule:      NewEmphasisStyleRule(),
+			input:     "foo*bar*baz and _x_\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "foo*bar*baz and *x*\n",
+		},
+		{
+			// "*a*b*" would end the emphasis at the literal asterisk.
+			name:      "MD049 no fix when the text holds the target marker",
+			rule:      NewEmphasisStyleRule(),
+			input:     "_a*b_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+		},
+		{
+			// "*foo**bar*" would merge the markers into one run.
+			name:      "MD049 no fix next to the target marker",
+			rule:      NewEmphasisStyleRule(),
+			input:     "*foo*_bar_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+		},
+		{
+			// After a letter such as U+00E9, "_foo_" is not emphasis:
+			// underscores cannot open inside a word.
+			name:      "MD049 no fix to underscore after a non-ASCII letter",
+			rule:      NewEmphasisStyleRule(),
+			input:     "\u00E9*foo*\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			// A combining mark is neither whitespace nor punctuation, so an
+			// underscore after it cannot open emphasis.
+			name:      "MD049 no fix to underscore after a combining mark",
+			rule:      NewEmphasisStyleRule(),
+			input:     "e\u0301*word*\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD050 no fix to underscore after a combining mark",
+			rule:      NewStrongStyleRule(),
+			input:     "e\u0301**word**\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			// The link text is the label of a reference whose definition
+			// keeps the asterisks, so the link would disappear.
+			name:      "MD049 no fix to a reference label",
+			rule:      NewEmphasisStyleRule(),
+			input:     "See [*bold*].\n\nOne.\n\nTwo.\n\n[*bold*]: /target\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD050 no fix to a reference label",
+			rule:      NewStrongStyleRule(),
+			input:     "See [**bold**].\n\nOne.\n\nTwo.\n\n[**bold**]: /target\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "MD049 underscore between punctuation",
+			rule:      NewEmphasisStyleRule(),
+			input:     "(*word*)\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "(_word_)\n",
+		},
+		{
+			name:      "MD049 ignores strikethrough",
+			rule:      NewEmphasisStyleRule(),
+			input:     "~~struck~~ and *x*\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "~~struck~~ and _x_\n",
+		},
+		{
+			name:      "MD049 inner emphasis of strong",
+			rule:      NewEmphasisStyleRule(),
+			input:     "**bold _it_ text**\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "**bold *it* text**\n",
+		},
+		{
+			name:      "MD049 emphasis ending with a code span",
+			rule:      NewEmphasisStyleRule(),
+			input:     "_x `c`_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "*x `c`*\n",
+		},
+		{
+			name:      "MD049 emphasis starting with a link",
+			rule:      NewEmphasisStyleRule(),
+			input:     "_[docs](https://example.com) here_\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "*[docs](https://example.com) here*\n",
+		},
+		{
+			name:      "MD050 consistent",
+			rule:      NewStrongStyleRule(),
+			input:     "Some **text** and __more__ here.\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "Some **text** and **more** here.\n",
+		},
+		{
+			name:      "MD050 underscore",
+			rule:      NewStrongStyleRule(),
+			input:     "**text**\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "__text__\n",
+		},
+		{
+			name:      "MD050 underscore ignores intraword strong",
+			rule:      NewStrongStyleRule(),
+			input:     "foo**bar**baz\n",
+			options:   map[string]any{"style": "underscore"},
+			wantLines: []int{},
+		},
+		{
+			name:      "MD050 no fix when the text holds the target marker",
+			rule:      NewStrongStyleRule(),
+			input:     "__a*b__\n",
+			options:   map[string]any{"style": "asterisk"},
+			wantLines: []int{1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyGFMRule(t, tt.rule, tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for _, diag := range diags {
+				assert.Equal(t, tt.wantFix, diag.HasFix())
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestNoSpaceInEmphasisRule(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -225,11 +642,6 @@ func TestStrongStyleRule_Metadata(t *testing.T) {
 }
 
 func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
-	// NOTE: The emphasisSpacePattern regex `(\*{1,2}|_{1,2})\s+([^*_]+)\s+(\*{1,2}|_{1,2})`
-	// is greedy and can match incorrectly when there are multiple emphasis markers on
-	// the same line. For example, in "*valid* and * invalid *", it matches "* and *"
-	// instead of "* invalid *" because [^*_]+ captures everything between any two markers.
-	// This is a known limitation of the rule implementation.
 	tests := []struct {
 		name      string
 		input     string
@@ -237,16 +649,26 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 		wantFix   string
 	}{
 		{
+			// Matched emphasis on the same line does not pair with the
+			// unmatched markers.
+			name:      "valid emphasis before spaced markers",
+			input:     "Some *valid* and *invalid * here.\n",
+			wantDiags: 1,
+			wantFix:   "Some *valid* and *invalid* here.\n",
+		},
+		{
 			name:      "clean input - no spaces in emphasis",
 			input:     "Some *text* here.\n",
 			wantDiags: 0,
 			wantFix:   "Some *text* here.\n",
 		},
 		{
+			// Reported, but single asterisks spaced on both sides could be
+			// multiplication, so the fix is withheld.
 			name:      "single violation - spaces in asterisk emphasis",
 			input:     "Some * text * here.\n",
 			wantDiags: 1,
-			wantFix:   "Some *text* here.\n",
+			wantFix:   "Some * text * here.\n",
 		},
 		{
 			name:      "strong emphasis with spaces",
@@ -268,7 +690,7 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 		},
 		{
 			name:      "multiple lines with violations",
-			input:     "First * line * text.\n\nSecond * para * here.\n",
+			input:     "First *line * text.\n\nSecond * para* here.\n",
 			wantDiags: 2,
 			wantFix:   "First *line* text.\n\nSecond *para* here.\n",
 		},
@@ -279,14 +701,16 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			wantFix:   "",
 		},
 		{
-			name:      "violation at start of line",
+			// "* " at the start of a line is a list item, not emphasis;
+			// rewriting it to "*spaced*" would turn the list into a paragraph.
+			name:      "list marker at start of line",
 			input:     "* spaced * text.\n",
-			wantDiags: 1,
-			wantFix:   "*spaced* text.\n",
+			wantDiags: 0,
+			wantFix:   "* spaced * text.\n",
 		},
 		{
 			name:      "violation at end of line",
-			input:     "text * spaced *\n",
+			input:     "text *spaced *\n",
 			wantDiags: 1,
 			wantFix:   "text *spaced*\n",
 		},
@@ -322,6 +746,9 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
+			if string(fixed) == tt.input {
+				return
+			}
 			snapshot2, err := parser.Parse(context.Background(), "test.md", fixed)
 			require.NoError(t, err)
 			ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
@@ -356,20 +783,20 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			name:      "style mismatch - consistent mode",
 			input:     "Some *text* and _more_ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some *text* and _more_ here.\n",
+			wantFix:   "Some *text* and *more* here.\n",
 		},
 		{
 			name:      "explicit style config - asterisk required",
 			input:     "Some _text_ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some _text_ here.\n",
+			wantFix:   "Some *text* here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
 			name:      "explicit style config - underscore required",
 			input:     "Some *text* here.\n",
 			wantDiags: 1,
-			wantFix:   "Some *text* here.\n",
+			wantFix:   "Some _text_ here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
 		{
@@ -403,7 +830,7 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes (will be empty since buildStyleFix returns nil)
+			// Collect and apply fixes.
 			var allEdits []fix.TextEdit
 			for _, d := range diags {
 				allEdits = append(allEdits, d.FixEdits...)
@@ -440,20 +867,20 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			name:      "style mismatch - consistent mode",
 			input:     "Some **text** and __more__ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some **text** and __more__ here.\n",
+			wantFix:   "Some **text** and **more** here.\n",
 		},
 		{
 			name:      "explicit style config - asterisk required",
 			input:     "Some __text__ here.\n",
 			wantDiags: 1,
-			wantFix:   "Some __text__ here.\n",
+			wantFix:   "Some **text** here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
 			name:      "explicit style config - underscore required",
 			input:     "Some **text** here.\n",
 			wantDiags: 1,
-			wantFix:   "Some **text** here.\n",
+			wantFix:   "Some __text__ here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
 		{
@@ -487,7 +914,7 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes (will be empty since buildStyleFix returns nil)
+			// Collect and apply fixes.
 			var allEdits []fix.TextEdit
 			for _, d := range diags {
 				allEdits = append(allEdits, d.FixEdits...)

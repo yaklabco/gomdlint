@@ -162,15 +162,15 @@ Reference style image:
 
 ### Basic Emphasis
 
-This text has *single asterisk emphasis* and _single underscore emphasis_.
+This text has *single asterisk emphasis* and *single underscore emphasis*.
 
-This text has **double asterisk strong** and __double underscore strong__.
+This text has **double asterisk strong** and **double underscore strong**.
 
 ### Combined Emphasis
 
 This is ***bold and italic*** together.
 
-This is also ___bold and italic___ with underscores.
+This is also ***bold and italic*** with underscores.
 
 And this is **_mixed markers_** for emphasis.
 
@@ -236,7 +236,6 @@ And another:
 ### Blockquote with Other Elements
 
 > ### Heading in Blockquote
-
 >
 > A paragraph with **bold** and *italic* text.
 >

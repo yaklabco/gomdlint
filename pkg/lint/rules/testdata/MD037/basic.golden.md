@@ -1,6 +1,6 @@
 # No Space in Emphasis Test
 
-This is *spaced emphasis* that is wrong.
+This is * spaced emphasis * that is wrong.
 
 This is **spaced strong** that is also wrong.
 

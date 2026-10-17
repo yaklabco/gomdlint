@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD020",
+    "name": "no-missing-space-closed-atx",
+    "line": 5,
+    "column": 1,
+    "message": "No space before closing hashes on closed ATX style heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD020",
+    "name": "no-missing-space-closed-atx",
+    "line": 7,
+    "column": 1,
+    "message": "No space inside hashes on closed ATX style heading (both sides)",
+    "severity": "warning",
+    "fixable": false
+  }
+]

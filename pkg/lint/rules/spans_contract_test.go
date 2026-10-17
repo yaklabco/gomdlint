@@ -51,7 +51,8 @@ func TestSetextHeadingBlankLinesFixKeepsUnderline(t *testing.T) {
 
 func TestHeadingAfterSetextHeadingIsAdjacentHeading(t *testing.T) {
 	input := "Setext heading\n==============\n## Next\n\nText.\n"
-	diags := applyCompatibilityRule(t, NewHeadingBlankLinesRule(), input)
+	// Adjacent headings are only exempt in the relaxed (non-markdownlint) mode.
+	diags := applyRuleWithOptions(t, NewHeadingBlankLinesRule(), input, map[string]any{"markdownlint_compatible": false})
 	for _, diag := range diags {
 		require.NotContains(t, diag.Message, "above", "the underline ends the previous heading")
 	}
@@ -183,10 +184,12 @@ func TestMultilineSetextHeadingFragment(t *testing.T) {
 }
 
 func TestEmphasisAsHeadingKeepsWordsAcrossLines(t *testing.T) {
+	// Like markdownlint, MD036 does not report multi-line emphasis, so the
+	// paragraph is never rewritten and no words are lost.
 	input := "# Title\n\n**Bold\ntext**\n\nMore.\n"
 	diags := applyCompatibilityRule(t, NewNoEmphasisAsHeadingRule(), input)
-	require.Len(t, diags, 1)
-	require.Equal(t, "# Title\n\n## Bold text\n\nMore.\n", applyAllFixEdits(t, input, diags))
+	require.Empty(t, diags)
+	require.Equal(t, input, applyAllFixEdits(t, input, diags))
 }
 
 func TestStrikethroughIsNotEmphasisAsHeading(t *testing.T) {

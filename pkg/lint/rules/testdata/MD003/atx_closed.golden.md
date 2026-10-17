@@ -1,6 +1,6 @@
 # ATX Heading #
 
-## Another ATX
+## Another ATX ##
 
 ### Without closing ##
 

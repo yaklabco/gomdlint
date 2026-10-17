@@ -2,4 +2,4 @@
 
 This has **asterisk bold** in the text.
 
-This has __underscore bold__ in the text.
+This has **underscore bold** in the text.

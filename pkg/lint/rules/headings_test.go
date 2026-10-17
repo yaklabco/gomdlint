@@ -184,9 +184,12 @@ func TestHeadingStyleRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
+			// The default style is markdownlint's consistent, where ATX and
+			// closed ATX are different styles.
 			name:      "mixed ATX styles default",
 			input:     "# H1\n\n## H2 ##\n",
-			wantDiags: 0, // By default, ATX and ATX_closed are compatible.
+			wantDiags: 1,
+			wantFix:   "# H1\n\n## H2\n",
 		},
 		{
 			name:      "require closing ATX",
@@ -243,6 +246,318 @@ func TestHeadingStyleRule(t *testing.T) {
 					fixed := fix.ApplyEdits([]byte(tt.input), prepared)
 					assert.Equal(t, tt.wantFix, string(fixed))
 				}
+			}
+		})
+	}
+}
+
+// applyAllEdits applies every fix edit from diags to input.
+func applyAllEdits(t *testing.T, input string, diags []lint.Diagnostic) string {
+	t.Helper()
+	var edits []fix.TextEdit
+	for _, diag := range diags {
+		edits = append(edits, diag.FixEdits...)
+	}
+	prepared, err := fix.PrepareEdits(edits, len(input))
+	require.NoError(t, err)
+	return string(fix.ApplyEdits([]byte(input), prepared))
+}
+
+// diagLines returns the start line of each diagnostic.
+func diagLines(diags []lint.Diagnostic) []int {
+	lines := make([]int, 0, len(diags))
+	for _, diag := range diags {
+		lines = append(lines, diag.StartLine)
+	}
+	return lines
+}
+
+// TestHeadingIncrementRule_FrontMatterTitle verifies the markdownlint default
+// front_matter_title pattern treats a front matter title as the H1.
+func TestHeadingIncrementRule_FrontMatterTitle(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+	}{
+		{
+			name:      "default pattern treats title as H1",
+			input:     "---\ntitle: Test\n---\n\n### Deep\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "default pattern ignores case",
+			input:     "---\nTitle: Test\n---\n\n### Deep\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "quoted JSON title",
+			input:     "{\n\"title\": \"Test\"\n}\n\n### Deep\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "title then H2 is fine",
+			input:     "---\ntitle: Test\n---\n\n## Section\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "no title key",
+			input:     "---\nauthor: Someone\n---\n\n### Deep\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "empty pattern disables",
+			input:     "---\ntitle: Test\n---\n\n### Deep\n",
+			options:   map[string]any{"front_matter_title": ""},
+			wantLines: []int{},
+		},
+		{
+			name:      "false disables",
+			input:     "---\ntitle: Test\n---\n\n### Deep\n",
+			options:   map[string]any{"front_matter_title": false},
+			wantLines: []int{},
+		},
+		{
+			name:      "custom pattern",
+			input:     "---\nname: Test\n---\n\n### Deep\n",
+			options:   map[string]any{"front_matter_title": `^\s*name\s*:`},
+			wantLines: []int{5},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingIncrementRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+		})
+	}
+}
+
+// TestSingleH1Rule_MarkdownlintDefaults verifies markdownlint's MD025
+// semantics: only a title (first content H1 or front matter title) makes
+// later H1 headings violations.
+func TestSingleH1Rule_MarkdownlintDefaults(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantMsgs  []string
+	}{
+		{
+			name:      "front matter title counts as the first H1",
+			input:     "---\ntitle: Test\n---\n\n# First H1\n\nText.\n\n# Second H1\n",
+			wantLines: []int{5, 9},
+			wantMsgs:  []string{"this is H1 #2", "this is H1 #3"},
+		},
+		{
+			name:      "front matter title with a single H1",
+			input:     "---\nTitle: Test\n---\n\n# Only H1\n",
+			wantLines: []int{5},
+		},
+		{
+			name:      "front matter title disabled",
+			input:     "---\ntitle: Test\n---\n\n# First\n\n# Second\n",
+			options:   map[string]any{"front_matter_title": ""},
+			wantLines: []int{7},
+		},
+		{
+			name:      "front matter without title",
+			input:     "---\nauthor: Someone\n---\n\n# First\n\n# Second\n",
+			wantLines: []int{7},
+		},
+		{
+			name:      "preamble before the first H1 means no title",
+			input:     "Intro.\n\n# A\n\n# B\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "leading comment does not count as content",
+			input:     "<!-- comment -->\n# A\n\n# B\n",
+			wantLines: []int{4},
+		},
+		{
+			name:      "title_only false flags every later H1",
+			input:     "Intro.\n\n# A\n\n# B\n",
+			options:   map[string]any{"title_only": false},
+			wantLines: []int{5},
+		},
+		{
+			name:      "front matter title satisfies allow_no_h1",
+			input:     "---\ntitle: Test\n---\n\n## Section\n",
+			options:   map[string]any{"allow_no_h1": false},
+			wantLines: []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewSingleH1Rule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for i, msg := range tt.wantMsgs {
+				if i < len(diags) {
+					assert.Contains(t, diags[i].Message, msg)
+				}
+			}
+		})
+	}
+}
+
+// TestHeadingStyleRule_MarkdownlintStyles verifies MD003 against markdownlint
+// 0.41 for every style value, including the default (consistent).
+func TestHeadingStyleRule_MarkdownlintStyles(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+		wantMsgs  []string
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name:      "default consistent flags closed after open",
+			input:     "# H1\n\n## H2 ##\n",
+			wantLines: []int{3},
+			wantMsgs:  []string{"'atx_closed' does not match expected style 'atx'"},
+			wantFixed: "# H1\n\n## H2\n",
+		},
+		{
+			name:      "default consistent flags open after closed",
+			input:     "# H1 #\n\n## H2\n",
+			wantLines: []int{3},
+			wantFixed: "# H1 #\n\n## H2 ##\n",
+		},
+		{
+			name:      "atx_closed flags plain ATX",
+			input:     "## Plain ATX\n",
+			options:   map[string]any{"style": "atx_closed"},
+			wantLines: []int{1},
+			wantFixed: "## Plain ATX ##\n",
+		},
+		{
+			name:      "atx flags closed ATX",
+			input:     "## Closed ##\n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+			wantFixed: "## Closed\n",
+		},
+		{
+			name:      "atx removes trailing whitespace after closing sequence",
+			input:     "## Closed ##  \n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+			wantFixed: "## Closed\n",
+		},
+		{
+			name:      "setext_with_atx flags ATX H1 without a fix",
+			input:     "# H1\n\n### H3\n",
+			options:   map[string]any{"style": "setext_with_atx"},
+			wantLines: []int{1},
+			wantMsgs:  []string{"expected style 'setext'"},
+		},
+		{
+			name:      "setext_with_atx accepts setext H1 and H2 with ATX H3",
+			input:     "Title\n=====\n\nSub\n---\n\n### H3\n",
+			options:   map[string]any{"style": "setext_with_atx"},
+			wantLines: []int{},
+		},
+		{
+			name:      "setext_with_atx expects open ATX for H3",
+			input:     "### H3 ###\n",
+			options:   map[string]any{"style": "setext_with_atx"},
+			wantLines: []int{1},
+			wantFixed: "### H3\n",
+		},
+		{
+			name:      "setext_with_atx_closed expects closed ATX for H3",
+			input:     "### H3\n",
+			options:   map[string]any{"style": "setext_with_atx_closed"},
+			wantLines: []int{1},
+			wantFixed: "### H3 ###\n",
+		},
+		{
+			name:      "escaped trailing hash is not a closing sequence",
+			input:     "# Learn C\\#\n\n## Plain\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "closed heading in blockquote sets the style",
+			input:     "> ## Quoted ##\n\n## Plain\n",
+			wantLines: []int{3},
+			wantFixed: "> ## Quoted ##\n\n## Plain ##\n",
+		},
+		{
+			name:      "fix keeps the blockquote prefix",
+			input:     "> ## Quoted ##\n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+			wantFixed: "> ## Quoted\n",
+		},
+		{
+			name:      "setext first heading sets the style",
+			input:     "Title\n=====\n\n## Section\n",
+			wantLines: []int{4},
+			wantMsgs:  []string{"'atx' does not match expected style 'setext'"},
+		},
+		{
+			name:      "setext heading starting with a hash",
+			input:     "#hashtag\n===\n\n# ATX\n",
+			wantLines: []int{4},
+		},
+		{
+			name:      "setext heading in a list item",
+			input:     "- Title\n  ===\n\n- # ATX\n",
+			wantLines: []int{4},
+		},
+		{
+			name:      "setext style flags ATX without a fix",
+			input:     "Title\n=====\n\n# ATX\n",
+			options:   map[string]any{"style": "setext"},
+			wantLines: []int{4},
+		},
+		{
+			// Removing the closing "#" would make the literal "#" before it
+			// the closing sequence, dropping it from the heading text.
+			name:      "no fix when removing the closing sequence exposes another",
+			input:     "# Text # #\n",
+			options:   map[string]any{"style": "atx"},
+			wantLines: []int{1},
+		},
+		{
+			name:      "empty heading sets the style",
+			input:     "#\n\n## Closed ##\n",
+			wantLines: []int{3},
+			wantFixed: "#\n\n## Closed\n",
+		},
+		{
+			name:      "require_closing_atx with the default style",
+			input:     "# H1\n\n## H2\n",
+			options:   map[string]any{"require_closing_atx": true},
+			wantLines: []int{1, 3},
+			wantFixed: "# H1 #\n\n## H2 ##\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingStyleRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			for i, msg := range tt.wantMsgs {
+				if i < len(diags) {
+					assert.Contains(t, diags[i].Message, msg)
+				}
+			}
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			fixed := applyAllEdits(t, tt.input, diags)
+			assert.Equal(t, want, fixed)
+
+			// Fixes converge: nothing fixable remains after one pass.
+			for _, diag := range applyRuleWithOptions(t, NewHeadingStyleRule(), fixed, tt.options) {
+				assert.False(t, diag.HasFix(), "fixable diagnostic remains: %s", diag.Message)
 			}
 		})
 	}

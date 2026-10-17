@@ -6,7 +6,7 @@
     "column": 10,
     "message": "Spaces inside emphasis markers",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD037",

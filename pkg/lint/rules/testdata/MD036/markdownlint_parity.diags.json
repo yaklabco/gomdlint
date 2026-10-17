@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD036",
+    "name": "no-emphasis-as-heading",
+    "line": 7,
+    "column": 1,
+    "message": "Emphasis used instead of a heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD036",
+    "name": "no-emphasis-as-heading",
+    "line": 20,
+    "column": 1,
+    "message": "Emphasis used instead of a heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD036",
+    "name": "no-emphasis-as-heading",
+    "line": 22,
+    "column": 1,
+    "message": "Emphasis used instead of a heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

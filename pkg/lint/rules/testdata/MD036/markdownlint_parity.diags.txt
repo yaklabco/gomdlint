@@ -1,0 +1,3 @@
+markdownlint_parity.input.md:7:1 warning Emphasis used instead of a heading (MD036/no-emphasis-as-heading)
+markdownlint_parity.input.md:20:1 warning Emphasis used instead of a heading (MD036/no-emphasis-as-heading)
+markdownlint_parity.input.md:22:1 warning Emphasis used instead of a heading (MD036/no-emphasis-as-heading)

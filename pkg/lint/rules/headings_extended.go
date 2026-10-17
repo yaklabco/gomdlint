@@ -31,89 +31,96 @@ func NewNoMissingSpaceATXRule() *NoMissingSpaceATXRule {
 	}
 }
 
-// atxHeadingNoSpacePattern matches ATX headings without space after hashes.
-// Matches: #Heading, ##Heading, etc. (no space after #).
-var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#{1,6})([^#\s])`)
+// atxHeadingNoSpacePattern matches a line that starts with an ATX opening
+// sequence followed directly by text: #Heading, ##Heading, etc.
+var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#{1,6})[^#\s]`)
+
+// closingHashPattern matches a line that ends with a hash and optional
+// whitespace; such lines look like closed headings, which MD020 handles.
+var closingHashPattern = regexp.MustCompile(`#\s*$`)
+
+// keycapHash is the keycap number sign emoji (#, U+FE0F, U+20E3), which
+// starts with a hash but is not a heading.
+const keycapHash = "#\uFE0F\u20E3"
 
 // Apply checks for missing space after hash on ATX headings.
+//
+// Like markdownlint, the check is line based: the hash must start the line,
+// lines in code and HTML blocks are skipped, and lines ending in a hash are
+// left to MD020 (no-missing-space-closed-atx).
 func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
+	htmlLines := htmlBlockLines(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
-		}
-		if isListContinuationLine(ctx, lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) || htmlLines[lineNum] {
 			continue
 		}
 
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := atxHeadingNoSpacePattern.FindSubmatch(trimmed)
-		if match == nil {
+		lineContent, bom := lint.LineText(ctx.File, lineNum), lint.LineTextOffset(ctx.File, lineNum)
+		match := atxHeadingNoSpacePattern.FindSubmatch(lineContent)
+		if match == nil || closingHashPattern.Match(lineContent) || bytes.HasPrefix(lineContent, []byte(keycapHash)) {
 			continue
 		}
 
-		hashes := string(match[1])
+		hashes := match[1]
 		line := ctx.File.Lines[lineNum-1]
 
-		// Find the position of the hashes in the original line.
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
-			continue
-		}
-
 		// Build fix: insert space after hashes.
-		builder := fix.NewEditBuilder()
-		insertPos := line.StartOffset + hashStart + len(hashes)
-		builder.Insert(insertPos, " ")
+		hashStart := line.StartOffset + bom
+		hashRange := mdast.SourceRange{StartOffset: hashStart, EndOffset: hashStart + len(hashes)}
+		var offered *fix.EditBuilder
+		if intent, ok := lineHeadingIntent(ctx, line, hashStart, headingAttrs(len(hashes), StyleATX), false, hashRange); ok {
+			builder := fix.NewEditBuilder()
+			builder.Insert(hashRange.EndOffset, " ")
+			offered = checker.offer(builder, intent.withLocal(true))
+		}
 
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: hashStart + 1,
+			StartColumn: bom + 1,
 			EndLine:     lineNum,
-			EndColumn:   hashStart + len(hashes) + 2,
+			EndColumn:   bom + len(hashes) + 2,
 		}
 
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 			"No space after hash on ATX style heading").
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Add a space after the hash characters").
-			WithFix(builder).
+			WithFix(offered).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
-func isListContinuationLine(ctx *lint.RuleContext, lineNum int) bool {
-	if lineNum <= 1 || lint.IsBlankLine(ctx.File, lineNum-1) {
-		return false
-	}
-	for _, item := range ctx.ListItems() {
-		pos := item.SourcePosition()
-		if pos.StartLine < lineNum && lineNum <= pos.EndLine {
-			marker := listMarkerPattern.FindIndex(lint.LineContent(ctx.File, pos.StartLine))
-			content := lint.LineContent(ctx.File, lineNum)
-			indent := len(content) - len(bytes.TrimLeft(content, " \t"))
-			if marker != nil && indent >= marker[1] {
-				return true
-			}
+// htmlBlockLines returns the set of lines occupied by HTML blocks.
+func htmlBlockLines(ctx *lint.RuleContext) map[int]bool {
+	lines := make(map[int]bool)
+	for _, block := range ctx.HTMLBlocks() {
+		rng := block.SourceRange()
+		if rng.StartOffset < 0 || rng.EndOffset <= rng.StartOffset {
+			continue
+		}
+		// The block ends on the line holding its last byte, not on the line
+		// its exclusive end offset may touch.
+		first, _ := ctx.File.LineAt(rng.StartOffset)
+		last, _ := ctx.File.LineAt(rng.EndOffset - 1)
+		for line := first; first > 0 && line <= last; line++ {
+			lines[line] = true
 		}
 	}
-	return false
+	return lines
 }
 
 // NoMultipleSpaceATXRule checks for multiple spaces after hash on ATX headings.
@@ -134,69 +141,54 @@ func NewNoMultipleSpaceATXRule() *NoMultipleSpaceATXRule {
 	}
 }
 
-// atxHeadingMultiSpacePattern matches ATX headings with multiple spaces after hashes.
-var atxHeadingMultiSpacePattern = regexp.MustCompile(`^(#{1,6})([ \t]{2,})(\S)`)
-
 // Apply checks for multiple spaces after hash on ATX headings.
+//
+// Like markdownlint, it checks parsed open ATX headings, including headings
+// in blockquotes and lists; closed headings are left to MD021.
 func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		parts, ok := atxHeadingParts(ctx.File, heading)
+		if !ok || !parts.close.IsEmpty() || parts.openSpace.Len() < 2 {
 			continue
 		}
-
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := atxHeadingMultiSpacePattern.FindSubmatch(trimmed)
-		if match == nil {
-			continue
-		}
-
-		hashes := string(match[1])
-		spaces := string(match[2])
-		line := ctx.File.Lines[lineNum-1]
-
-		// Find the position of the hashes in the original line.
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
-			continue
-		}
+		spaces := parts.openSpace
 
 		// Build fix: replace multiple spaces with single space.
 		builder := fix.NewEditBuilder()
-		spaceStart := line.StartOffset + hashStart + len(hashes)
-		spaceEnd := spaceStart + len(spaces)
-		builder.ReplaceRange(spaceStart, spaceEnd, " ")
+		builder.ReplaceRange(spaces.StartOffset, spaces.EndOffset, " ")
 
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: hashStart + len(hashes) + 1,
-			EndLine:     lineNum,
-			EndColumn:   hashStart + len(hashes) + len(spaces) + 1,
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", len(spaces))).
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, spaces),
+			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", spaces.Len())).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the hash characters").
-			WithFix(builder).
+			WithFix(checker.offer(builder, fixIntent{local: true})).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
+}
+
+// rangePosition converts a byte range to a line and column position.
+func rangePosition(file *mdast.FileSnapshot, rng mdast.SourceRange) mdast.SourcePosition {
+	startLine, startColumn := file.LineAt(rng.StartOffset)
+	endLine, endColumn := file.LineAt(rng.EndOffset)
+	return mdast.SourcePosition{
+		StartLine:   startLine,
+		StartColumn: startColumn,
+		EndLine:     endLine,
+		EndColumn:   endColumn,
+	}
 }
 
 // NoMissingSpaceClosedATXRule checks for missing space inside hashes on closed ATX headings.
@@ -217,80 +209,97 @@ func NewNoMissingSpaceClosedATXRule() *NoMissingSpaceClosedATXRule {
 	}
 }
 
-// closedATXPattern matches closed ATX headings.
-var closedATXPattern = regexp.MustCompile(`^(#{1,6})(.+?)(#{1,6})\s*$`)
+// closedATXPattern is markdownlint's MD020 grammar for a closed ATX heading
+// line: opening hashes, optional space, content that neither starts nor ends
+// with a hash, space or backslash, optional space, an optional escaped hash
+// that belongs to the content, closing hashes and trailing whitespace.
+var closedATXPattern = regexp.MustCompile(
+	`^(#+)([ \t]*)([^# \t\\]|[^# \t][^#]*?[^# \t\\])([ \t]*)((?:\\#)?)(#+)(\s*)$`)
+
+// Submatch indexes for closedATXPattern.
+const (
+	closedATXOpen = iota + 1
+	closedATXOpenSpace
+	closedATXContent
+	closedATXCloseSpace
+	closedATXEscape
+	closedATXClose
+	closedATXTrail
+)
 
 // Apply checks for missing space inside hashes on closed ATX headings.
+//
+// Like markdownlint, the check is line based: the hash must start the line
+// and lines in code and HTML blocks are skipped. An escaped hash (\#) is
+// content, so "## Learn C\#" is not a closed heading.
 func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
+	htmlLines := htmlBlockLines(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		if ctx.IsLineInCodeBlock(lineNum) || htmlLines[lineNum] {
 			continue
 		}
 
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := closedATXPattern.FindSubmatch(trimmed)
-		if match == nil {
+		lineContent, bom := lint.LineText(ctx.File, lineNum), lint.LineTextOffset(ctx.File, lineNum)
+		loc := closedATXPattern.FindSubmatchIndex(lineContent)
+		if loc == nil {
 			continue
 		}
+		match := make([][]byte, len(loc)/2)
+		for group := range match {
+			match[group] = lineContent[loc[2*group]:loc[2*group+1]]
+		}
 
-		openHashes := string(match[1])
-		content := match[2]
-		closeHashes := string(match[3])
+		openHashes := match[closedATXOpen]
+		content := match[closedATXContent]
+		escape := match[closedATXEscape]
+		closeHashes := match[closedATXClose]
 
-		// Check if there's no space at the beginning of content.
-		missingOpenSpace := len(content) > 0 && content[0] != ' ' && content[0] != '\t'
-		// Check if there's no space at the end of content.
-		missingCloseSpace := len(content) > 0 && content[len(content)-1] != ' ' && content[len(content)-1] != '\t'
-
+		missingOpenSpace := len(match[closedATXOpenSpace]) == 0
+		missingCloseSpace := len(match[closedATXCloseSpace]) == 0 || len(escape) > 0
 		if !missingOpenSpace && !missingCloseSpace {
 			continue
 		}
 
+		// Build fix. An escaped hash stays attached to the content (markdownlint
+		// moves it after the inserted space, which changes the heading text).
 		line := ctx.File.Lines[lineNum-1]
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
-			continue
+		replacement := string(openHashes) + " " + string(content)
+		if len(escape) > 0 {
+			replacement += string(match[closedATXCloseSpace]) + string(escape)
+		}
+		replacement += " " + string(closeHashes)
+		textStart := line.StartOffset + bom
+		openRange := mdast.SourceRange{
+			StartOffset: textStart + loc[2*closedATXOpen], EndOffset: textStart + loc[2*closedATXOpen+1],
+		}
+		closeRange := mdast.SourceRange{
+			StartOffset: textStart + loc[2*closedATXClose], EndOffset: textStart + loc[2*closedATXClose+1],
+		}
+		var offered *fix.EditBuilder
+		if intent, ok := lineHeadingIntent(ctx, line, textStart,
+			headingAttrs(len(openHashes), StyleATXClosed), true, openRange, closeRange); ok {
+			builder := fix.NewEditBuilder()
+			builder.ReplaceRange(textStart, line.NewlineStart, replacement)
+			offered = checker.offer(builder, intent.withLocal(true))
 		}
 
-		// Build fix.
-		builder := fix.NewEditBuilder()
-		contentStr := strings.TrimSpace(string(content))
-
-		// Calculate positions and build replacement.
-		contentStart := line.StartOffset + hashStart + len(openHashes)
-		contentEnd := contentStart + len(content)
-
-		var newContent string
-		switch {
-		case missingOpenSpace && missingCloseSpace:
-			newContent = " " + contentStr + " "
-		case missingOpenSpace:
-			newContent = " " + string(content)
-		default:
-			newContent = string(content) + " "
-		}
-
-		builder.ReplaceRange(contentStart, contentEnd, newContent)
-
+		closeEnd := bom + len(lineContent) - len(match[closedATXTrail])
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: hashStart + 1,
+			StartColumn: bom + 1,
 			EndLine:     lineNum,
-			EndColumn:   hashStart + len(openHashes) + len(content) + len(closeHashes) + 1,
+			EndColumn:   closeEnd + 1,
 		}
 
 		var msg string
@@ -306,12 +315,12 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Add spaces inside the hash characters").
-			WithFix(builder).
+			WithFix(offered).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // NoMultipleSpaceClosedATXRule checks for multiple spaces inside hashes on closed ATX headings.
@@ -333,72 +342,43 @@ func NewNoMultipleSpaceClosedATXRule() *NoMultipleSpaceClosedATXRule {
 }
 
 // Apply checks for multiple spaces inside hashes on closed ATX headings.
+//
+// Like markdownlint, it checks parsed closed ATX headings, including headings
+// in blockquotes and lists.
 func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines inside code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		parts, ok := atxHeadingParts(ctx.File, heading)
+		if !ok || parts.close.IsEmpty() {
 			continue
 		}
+		openSpaces, closeSpaces := parts.openSpace, parts.closeSpace
 
-		trimmed := bytes.TrimLeft(lineContent, " \t")
-
-		match := closedATXPattern.FindSubmatch(trimmed)
-		if match == nil {
-			continue
-		}
-
-		openHashes := string(match[1])
-		content := match[2]
-		closeHashes := string(match[3])
-
-		// Check for multiple spaces at the beginning.
-		multipleOpenSpaces := len(content) >= 2 &&
-			(content[0] == ' ' || content[0] == '\t') &&
-			(content[1] == ' ' || content[1] == '\t')
-
-		// Check for multiple spaces at the end.
-		multipleCloseSpaces := len(content) >= 2 &&
-			(content[len(content)-1] == ' ' || content[len(content)-1] == '\t') &&
-			(content[len(content)-2] == ' ' || content[len(content)-2] == '\t')
-
+		multipleOpenSpaces := openSpaces.Len() > 1
+		multipleCloseSpaces := closeSpaces.Len() > 1
 		if !multipleOpenSpaces && !multipleCloseSpaces {
-			continue
-		}
-
-		line := ctx.File.Lines[lineNum-1]
-		hashStart := bytes.Index(lineContent, match[1])
-		if hashStart < 0 {
 			continue
 		}
 
 		// Build fix: normalize to single space on each side.
 		builder := fix.NewEditBuilder()
-		contentStr := strings.TrimSpace(string(content))
-
-		contentStart := line.StartOffset + hashStart + len(openHashes)
-		contentEnd := contentStart + len(content)
-
-		newContent := " " + contentStr + " "
-		builder.ReplaceRange(contentStart, contentEnd, newContent)
-
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: hashStart + 1,
-			EndLine:     lineNum,
-			EndColumn:   hashStart + len(openHashes) + len(content) + len(closeHashes) + 1,
+		if multipleOpenSpaces {
+			builder.ReplaceRange(openSpaces.StartOffset, openSpaces.EndOffset, " ")
 		}
+		if multipleCloseSpaces {
+			builder.ReplaceRange(closeSpaces.StartOffset, closeSpaces.EndOffset, " ")
+		}
+
+		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: parts.open.StartOffset, EndOffset: parts.close.EndOffset})
 
 		var msg string
 		switch {
@@ -413,12 +393,12 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space inside the hash characters").
-			WithFix(builder).
+			WithFix(checker.offer(builder, fixIntent{local: true})).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // HeadingStartLeftRule checks that headings start at the beginning of the line.
@@ -439,77 +419,61 @@ func NewHeadingStartLeftRule() *HeadingStartLeftRule {
 	}
 }
 
-// indentedHeadingPattern matches headings that have any leading whitespace.
-var indentedHeadingPattern = regexp.MustCompile(`^([ \t]+)(#{1,6})(\s|$)`)
-
-// codeBlockIndent is the minimum spaces that indicate an indented code block.
-const codeBlockIndent = 4
-
 // Apply checks that headings start at the beginning of the line.
+//
+// Like markdownlint, it checks parsed headings (ATX and setext) and measures
+// indentation from the content column of the heading's containers: the
+// blockquote markers and list item indentation do not count, so a heading
+// at a list item's content column is not reported. The fix deletes only the
+// extra indentation and keeps the container prefix.
 func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
+	checker := newFixChecker(ctx)
 
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, heading := range ctx.Headings() {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		match := indentedHeadingPattern.FindSubmatch(lineContent)
-		if match == nil {
+		start := heading.SourceRange().StartOffset
+		line := lineOf(ctx.File, start)
+		if line == nil {
+			continue
+		}
+		lineNum, _ := ctx.File.LineAt(start)
+		// The container prefix includes a byte order mark that starts the file.
+		prefixEnd := line.StartOffset + len(lint.ContainerPrefix(ctx.File, heading, lineNum))
+		if prefixEnd >= start {
+			continue
+		}
+		indent := ctx.File.Content[prefixEnd:start]
+		if len(bytes.Trim(indent, " \t")) > 0 {
 			continue
 		}
 
-		indent := match[1]
-
-		// Skip if 4+ spaces (would be an indented code block, not a heading).
-		spaceCount := 0
-		for _, ch := range indent {
-			if ch == ' ' {
-				spaceCount++
-			} else if ch == '\t' {
-				// Tab is typically rendered as 4 spaces, so treat it as a potential code block.
-				// However, a tab followed by # is usually an indented heading, not code.
-				// We'll allow tabs to be flagged since they're usually a mistake.
-				break
-			}
-		}
-		if spaceCount >= codeBlockIndent {
-			continue
-		}
-
-		// Also skip lines inside actual code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
-		}
-
-		line := ctx.File.Lines[lineNum-1]
-
-		// Build fix: remove leading whitespace.
+		// Build fix: remove the indentation after the container prefix. A tab
+		// that the containers claim only in part is not in the prefix; the
+		// columns they claim of it are kept as spaces.
+		claimed := len(lint.ContinuationPrefix(ctx.File, heading)) -
+			columnsOf(ctx.File.Content[line.StartOffset+lint.LineTextOffset(ctx.File, lineNum):prefixEnd])
 		builder := fix.NewEditBuilder()
-		builder.Delete(line.StartOffset, line.StartOffset+len(indent))
+		builder.ReplaceRange(prefixEnd, start, strings.Repeat(" ", max(claimed, 0)))
 
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: 1,
-			EndLine:     lineNum,
-			EndColumn:   len(indent) + 1,
-		}
-
+		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: prefixEnd, EndOffset: start})
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 			fmt.Sprintf("Heading is indented by %d character(s)", len(indent))).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove leading whitespace from the heading").
-			WithFix(builder).
+			WithFix(checker.offer(builder, fixIntent{local: true})).
 			Build()
 		diags = append(diags, diag)
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
 }
 
 // NoDuplicateHeadingRule checks for multiple headings with the same content.
@@ -664,13 +628,32 @@ func NewNoTrailingPunctuationRule() *NoTrailingPunctuationRule {
 	}
 }
 
-// defaultPunctuation is the default set of trailing punctuation characters.
-const defaultPunctuation = ".,;:!"
+// defaultPunctuation is markdownlint's default set of trailing punctuation
+// characters: normal and full-width, without the question mark.
+const defaultPunctuation = ".,;:!\u3002\uFF0C\uFF1B\uFF1A\uFF01"
 
-// htmlEntityPattern matches HTML entity references at the end of text.
-var htmlEntityPattern = regexp.MustCompile(`&[a-zA-Z]+;$|&#[0-9]+;$|&#x[0-9a-fA-F]+;$`)
+// htmlEntityPattern matches an HTML entity reference at the end of text
+// (markdownlint's endOfLineHtmlEntityRe).
+var htmlEntityPattern = regexp.MustCompile(
+	`&(?:#\d+|#[xX][\da-fA-F]+|[a-zA-Z]{2,31}|blk\d{2}|emsp1[34]|frac\d{2}|sup\d|there4);$`)
+
+// characterReferencePattern matches a named, decimal or hexadecimal
+// character reference such as "&copy;", "&#169;" or "&#xA9;".
+var characterReferencePattern = regexp.MustCompile(
+	`&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});`)
+
+// gemojiCodePattern matches a GitHub emoji code such as :smile: at the end of
+// text (markdownlint's endOfLineGemojiCodeRe).
+var gemojiCodePattern = regexp.MustCompile(
+	`:(?:[abmovx]|[-+]1|100|1234|(?:1st|2nd|3rd)_place_medal|8ball|clock\d{1,4}|e-mail|non-potable_water|o2|` +
+		`t-rex|u5272|u5408|u55b6|u6307|u6708|u6709|u6e80|u7121|u7533|u7981|u7a7a|[a-z]{2,15}2?|` +
+		`[a-z]{1,14}(?:_[a-z\d]{1,16})+):$`)
 
 // Apply checks for trailing punctuation in headings.
+//
+// Like markdownlint, it checks the raw source of the heading content, so a
+// heading that ends with a code span, link or emphasis is not reported. The
+// fix deletes the trailing punctuation run and any whitespace before it.
 func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -683,65 +666,167 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 
 	headings := ctx.Headings()
 	diags := make([]lint.Diagnostic, 0, len(headings))
+	checker := newFixChecker(ctx)
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return checker.filter(diags), ctx.Ctx.Err()
 		}
 
-		text := lint.HeadingText(heading)
-		if text == "" {
+		content, ok := headingContentRange(ctx.File, heading)
+		if !ok {
+			continue
+		}
+		text := ctx.File.Content[content.StartOffset:content.EndOffset]
+		if htmlEntityPattern.Match(text) || gemojiCodePattern.Match(text) {
 			continue
 		}
 
-		// Check for HTML entity at the end - ignore if present.
-		if htmlEntityPattern.MatchString(text) {
+		punctStart := len(text)
+		for punctStart > 0 {
+			lastRune, size := utf8.DecodeLastRune(text[:punctStart])
+			if lastRune == utf8.RuneError || !strings.ContainsRune(punctuation, lastRune) {
+				break
+			}
+			punctStart -= size
+		}
+		// The semicolon that ends a character reference such as "&copy;"
+		// belongs to the reference, not to the trailing punctuation.
+		for _, ref := range characterReferencePattern.FindAllIndex(text, -1) {
+			if ref[1] > punctStart {
+				punctStart = ref[1]
+			}
+		}
+		if punctStart >= len(text) {
 			continue
 		}
+		run := text[punctStart:]
+		start := content.StartOffset + punctStart
 
-		// Get the last rune.
-		lastRune, _ := utf8.DecodeLastRuneInString(text)
-		if lastRune == utf8.RuneError {
-			continue
-		}
-
-		// Check if it's in the punctuation set.
-		if !strings.ContainsRune(punctuation, lastRune) {
-			continue
-		}
-
-		pos := heading.SourcePosition()
-		line := ctx.File.Lines[pos.StartLine-1]
-		lineContent := lint.LineContent(ctx.File, pos.StartLine)
-
-		// Find the position of the trailing punctuation.
-		// We need to find where the heading text ends in the line.
-		trimmedLine := bytes.TrimRight(lineContent, " \t#\n\r")
-		if len(trimmedLine) == 0 {
-			continue
-		}
-
-		punctPos := len(trimmedLine) - utf8.RuneLen(lastRune)
-
-		// Build fix: remove trailing punctuation.
-		builder := fix.NewEditBuilder()
-		builder.Delete(line.StartOffset+punctPos, line.StartOffset+punctPos+utf8.RuneLen(lastRune))
-
-		diagPos := mdast.SourcePosition{
-			StartLine:   pos.StartLine,
-			StartColumn: punctPos + 1,
-			EndLine:     pos.StartLine,
-			EndColumn:   punctPos + 2,
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-			fmt.Sprintf("Heading ends with trailing punctuation %q", string(lastRune))).
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File,
+			mdast.SourceRange{StartOffset: start, EndOffset: content.EndOffset}),
+			fmt.Sprintf("Heading ends with trailing punctuation %q", run)).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove trailing punctuation from the heading").
-			WithFix(builder).
-			Build()
-		diags = append(diags, diag)
+			WithSuggestion("Remove trailing punctuation from the heading")
+		if builder := trailingPunctuationFix(ctx, checker, heading, content, start); builder != nil {
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
 	}
 
-	return diags, nil
+	return checker.filter(diags), nil
+}
+
+// trailingPunctuationFix deletes the punctuation starting at start, with the
+// backslash that escapes it and the whitespace before them on the same line.
+// It returns nil unless the fix changes nothing but the heading's text, and
+// that only by the deleted characters: removing the punctuation must not
+// leave a setext line blank or turn it into a thematic break, underline or
+// other block, expose a closing hash sequence, leave a backslash showing, or
+// change an anchor that a fragment link uses.
+func trailingPunctuationFix(
+	ctx *lint.RuleContext,
+	checker *fixChecker,
+	heading *mdast.Node,
+	content mdast.SourceRange,
+	start int,
+) *fix.EditBuilder {
+	file := ctx.File
+	line := lineOf(file, start)
+	if line == nil {
+		return nil
+	}
+	lineStart := max(line.StartOffset, content.StartOffset)
+	deleteStart := start
+	if isASCIIPunctuation(file.Content[start]) && escapedAt(file.Content, lineStart, start) {
+		deleteStart--
+	}
+	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
+		deleteStart--
+	}
+	deleted := mdast.SourceRange{StartOffset: deleteStart, EndOffset: content.EndOffset}
+	builder := fix.NewEditBuilder()
+	builder.Delete(deleted.StartOffset, deleted.EndOffset)
+	return checker.offer(builder, changeText(heading, textSub{rng: deleted}).withLocal(true))
+}
+
+// escapedAt reports whether the byte at offset follows an odd number of
+// backslashes, counting back no further than from, so that a backslash
+// escapes it.
+func escapedAt(content []byte, from, offset int) bool {
+	count := 0
+	for pos := offset - 1; pos >= from && content[pos] == '\\'; pos-- {
+		count++
+	}
+	return count%2 == 1
+}
+
+// columnsOf returns the number of columns that text takes from the start of
+// a line, with tab stops of four.
+func columnsOf(text []byte) int {
+	const tabWidth = 4
+	columns := 0
+	for _, b := range text {
+		if b == '\t' {
+			columns += tabWidth - columns%tabWidth
+		} else {
+			columns++
+		}
+	}
+	return columns
+}
+
+// lineHeadingIntent returns the intent of a fix that turns a line, whose
+// text starts at textStart, into an ATX heading with attrs whose text is the
+// line's without the hash sequences in markers. The line may be a paragraph
+// or part of one, which then splits around the heading, or, when
+// atxHeading is true, an ATX heading already. ok is false for other blocks.
+func lineHeadingIntent(
+	ctx *lint.RuleContext,
+	line mdast.LineInfo,
+	textStart int,
+	attrs string,
+	atxHeading bool,
+	markers ...mdast.SourceRange,
+) (fixIntent, bool) {
+	target := leafBlockAt(ctx.Root, textStart)
+	if target == nil {
+		return fixIntent{}, false
+	}
+	subs := make([]textSub, 0, len(markers))
+	for _, marker := range markers {
+		subs = append(subs, textSub{rng: marker})
+	}
+	// The pieces cover whole lines of the target, so that the intents of
+	// fixes to several of its lines can be merged.
+	rng := target.SourceRange()
+	spanStart, spanEnd := lineStartOf(ctx.File, rng.StartOffset), lineEndOf(ctx.File, rng.EndOffset)
+	heading := blockWant{
+		kind:  mdast.NodeHeading,
+		attrs: attrs,
+		from:  mdast.SourceRange{StartOffset: line.StartOffset, EndOffset: line.EndOffset},
+		subs:  subs,
+	}
+	switch {
+	case target.Kind == mdast.NodeHeading && atxHeading && !isSetextHeading(ctx.File, target):
+		heading.from = mdast.SourceRange{StartOffset: spanStart, EndOffset: spanEnd}
+		return fixIntent{target: target, into: []blockWant{heading}}, true
+	case target.Kind != mdast.NodeParagraph:
+		return fixIntent{}, false
+	}
+	var into []blockWant
+	if spanStart < line.StartOffset {
+		into = append(into, blockWant{
+			kind: mdast.NodeParagraph,
+			from: mdast.SourceRange{StartOffset: spanStart, EndOffset: line.StartOffset},
+		})
+	}
+	into = append(into, heading)
+	if line.EndOffset < spanEnd {
+		into = append(into, blockWant{
+			kind: mdast.NodeParagraph,
+			from: mdast.SourceRange{StartOffset: line.EndOffset, EndOffset: spanEnd},
+		})
+	}
+	return fixIntent{target: target, into: into}, true
 }

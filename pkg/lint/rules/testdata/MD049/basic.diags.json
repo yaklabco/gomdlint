@@ -6,6 +6,6 @@
     "column": 10,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   }
 ]
