@@ -127,6 +127,13 @@ func TestNoMissingSpaceATXRule_MarkdownlintParity(t *testing.T) {
 			wantLines: []int{2},
 			wantFixed: "Para\n# tag\n",
 		},
+		{
+			// markdownlint strips a byte order mark before checking line 1.
+			name:      "after a byte order mark",
+			input:     "\uFEFF#Heading\n\nText.\n",
+			wantLines: []int{1},
+			wantFixed: "\uFEFF# Heading\n\nText.\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -410,6 +417,12 @@ func TestNoMissingSpaceClosedATXRule_MarkdownlintParity(t *testing.T) {
 			wantLines: []int{1},
 			wantFixed: "# Heading #\n",
 		},
+		{
+			name:      "after a byte order mark",
+			input:     "\uFEFF#Closed#\n",
+			wantLines: []int{1},
+			wantFixed: "\uFEFF# Closed #\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -660,6 +673,12 @@ func TestHeadingStartLeftRule_Containers(t *testing.T) {
 			input:     "  Title\n  =====\n",
 			wantLines: []int{1},
 			wantFixed: "Title\n  =====\n",
+		},
+		{
+			name:      "indented heading after a byte order mark",
+			input:     "\uFEFF  # Indented\n",
+			wantLines: []int{1},
+			wantFixed: "\uFEFF# Indented\n",
 		},
 	}
 

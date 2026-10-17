@@ -65,7 +65,7 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			continue
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
+		lineContent, bom := lineAfterBOM(ctx.File, lineNum)
 		match := atxHeadingNoSpacePattern.FindSubmatch(lineContent)
 		if match == nil || closingHashPattern.Match(lineContent) || bytes.HasPrefix(lineContent, []byte(keycapHash)) {
 			continue
@@ -76,13 +76,13 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 
 		// Build fix: insert space after hashes.
 		builder := fix.NewEditBuilder()
-		builder.Insert(line.StartOffset+len(hashes), " ")
+		builder.Insert(line.StartOffset+bom+len(hashes), " ")
 
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: 1,
+			StartColumn: bom + 1,
 			EndLine:     lineNum,
-			EndColumn:   len(hashes) + 2,
+			EndColumn:   bom + len(hashes) + 2,
 		}
 
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
@@ -95,6 +95,20 @@ func (r *NoMissingSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	}
 
 	return diags, nil
+}
+
+// utf8BOM is the UTF-8 byte order mark, which markdownlint strips before
+// linting and the parser skips.
+const utf8BOM = "\xEF\xBB\xBF"
+
+// lineAfterBOM returns the content of a 1-based line without a leading byte
+// order mark, which only the first line can hold, and the mark's length.
+func lineAfterBOM(file *mdast.FileSnapshot, lineNum int) ([]byte, int) {
+	content := lint.LineContent(file, lineNum)
+	if lineNum == 1 && bytes.HasPrefix(content, []byte(utf8BOM)) {
+		return content[len(utf8BOM):], len(utf8BOM)
+	}
+	return content, 0
 }
 
 // htmlBlockLines returns the set of lines occupied by HTML blocks.
@@ -247,7 +261,7 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 			continue
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
+		lineContent, bom := lineAfterBOM(ctx.File, lineNum)
 		match := closedATXPattern.FindSubmatch(lineContent)
 		if match == nil {
 			continue
@@ -273,12 +287,12 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 		}
 		replacement += " " + string(closeHashes)
 		builder := fix.NewEditBuilder()
-		builder.ReplaceRange(line.StartOffset, line.NewlineStart, replacement)
+		builder.ReplaceRange(line.StartOffset+bom, line.NewlineStart, replacement)
 
-		closeEnd := len(lineContent) - len(match[closedATXTrail])
+		closeEnd := bom + len(lineContent) - len(match[closedATXTrail])
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: 1,
+			StartColumn: bom + 1,
 			EndLine:     lineNum,
 			EndColumn:   closeEnd + 1,
 		}
@@ -429,7 +443,8 @@ func (r *HeadingStartLeftRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 			continue
 		}
 		lineNum, _ := ctx.File.LineAt(start)
-		prefixEnd := line.StartOffset + len(lint.ContainerPrefix(ctx.File, heading, lineNum))
+		_, bom := lineAfterBOM(ctx.File, lineNum)
+		prefixEnd := line.StartOffset + max(bom, len(lint.ContainerPrefix(ctx.File, heading, lineNum)))
 		if prefixEnd >= start {
 			continue
 		}
