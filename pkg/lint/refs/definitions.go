@@ -236,12 +236,18 @@ func scanDefinitionLabel(text string, pos int) (int, bool) {
 		return 0, false
 	}
 	blank := true
-	for idx := pos + 1; idx < len(text) && idx-pos-1 <= maxLabelLength; idx++ {
+	length := 0
+	for idx := pos + 1; idx < len(text); idx++ {
+		// The limit counts characters, not bytes.
+		if length += runeStarts(text[idx]); length > maxLabelLength {
+			return 0, false
+		}
 		switch ch := text[idx]; ch {
 		case '\\':
 			blank = false
 			if idx+1 < len(text) && mdscan.IsASCIIPunct(text[idx+1]) {
 				idx++
+				length++
 			}
 		case '[':
 			return 0, false

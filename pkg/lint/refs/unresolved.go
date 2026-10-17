@@ -224,15 +224,15 @@ func (c *collector) addUnresolved(
 }
 
 // linkTextLabel returns the link text between two brackets as a label, as
-// written. It is not a label when it holds an unescaped bracket (a bracket
-// inside a code span counts, since a label is raw text) or a link, is
-// blank, or is longer than CommonMark allows.
+// written. It is not a label when it holds an unescaped bracket (a label is
+// raw text, so a bracket and the backslash before it count inside a code
+// span too) or a link, is blank, or is longer than CommonMark allows.
 func (c *collector) linkTextLabel(container *mdast.Node, chars []inlineChar, open, closing int) (string, bool) {
 	for idx := open + 1; idx < closing; idx++ {
 		if chars[idx].opaque {
 			return "", false
 		}
-		if (chars[idx].ch == '[' || chars[idx].ch == ']') && (chars[idx].literal || !isEscapedChar(chars, idx)) {
+		if (chars[idx].ch == '[' || chars[idx].ch == ']') && !isEscapedRaw(chars, idx) {
 			return "", false
 		}
 	}
@@ -274,30 +274,47 @@ func (c *collector) labelSource(container *mdast.Node, chars []inlineChar, open,
 }
 
 // labelEndIndex finds the ']' that closes the link label opened at
-// chars[open]. Labels contain no unescaped brackets or inline nodes.
+// chars[open]. A label is raw text: a backslash escapes the next punctuation
+// character inside a code span too, an unescaped bracket ends the label or
+// makes it invalid, and no more than maxLabelLength characters (not bytes)
+// fit inside. A link or image inside makes it invalid.
 func labelEndIndex(chars []inlineChar, open int) (int, bool) {
-	for idx := open + 1; idx < len(chars) && idx-open-1 <= maxLabelLength; idx++ {
-		if chars[idx].opaque || (chars[idx].literal && (chars[idx].ch == '[' || chars[idx].ch == ']')) {
+	length := 0
+	for idx := open + 1; idx < len(chars); idx++ {
+		char := chars[idx]
+		if char.opaque {
 			return 0, false
 		}
-		if chars[idx].literal {
-			continue
+		if length += runeStarts(char.ch); length > maxLabelLength {
+			return 0, false
 		}
-		switch chars[idx].ch {
+		switch char.ch {
 		case '\\':
 			if idx+1 < len(chars) && !chars[idx+1].opaque && mdscan.IsASCIIPunct(chars[idx+1].ch) {
 				idx++
+				length++
 			}
 		case '[':
 			return 0, false
 		case ']':
-			if strings.TrimSpace(charsText(chars, open+1, idx)) == "" {
+			// An unescaped bracket inside a code span would end the label
+			// inside it, which no parser builds a reference from.
+			if char.literal || strings.TrimSpace(charsText(chars, open+1, idx)) == "" {
 				return 0, false
 			}
 			return idx, true
 		}
 	}
 	return 0, false
+}
+
+// runeStarts returns 1 when ch starts a UTF-8 character and 0 when it
+// continues one, so summing it over bytes counts characters.
+func runeStarts(ch byte) int {
+	if ch&0xC0 == 0x80 {
+		return 0
+	}
+	return 1
 }
 
 // charsText concatenates the characters in chars[from:to], skipping opaque nodes.
@@ -313,6 +330,16 @@ func charsText(chars []inlineChar, from, to int) string {
 
 func isChar(chars []inlineChar, idx int, ch byte) bool {
 	return idx >= 0 && idx < len(chars) && !chars[idx].opaque && !chars[idx].literal && chars[idx].ch == ch
+}
+
+// isEscapedRaw reports whether chars[idx] follows an odd number of
+// backslashes in the raw text, counting those inside code spans.
+func isEscapedRaw(chars []inlineChar, idx int) bool {
+	backslashes := 0
+	for prev := idx - 1; prev >= 0 && !chars[prev].opaque && chars[prev].ch == '\\'; prev-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 // isEscapedChar reports whether chars[idx] follows an odd number of backslashes.

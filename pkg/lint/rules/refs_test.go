@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -383,6 +384,14 @@ func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
 			want: []want{{1, 1, "Reference link uses undefined label [a\\ b]"}}},
 		{name: "quoted label continues without the prefix", markdown: "> See [a\n> b][] here.\n",
 			want: []want{{1, 7, "Reference link uses undefined label [a b]"}}},
+		{name: "label of 400 wide characters", markdown: "See [text][" + strings.Repeat("\u4e2d", 400) + "] here.\n",
+			want: []want{{1, 5, "Reference link uses undefined label [" + strings.Repeat("\u4e2d", 400) + "]"}}},
+		{name: "label longer than 999 characters", markdown: "See [text][" + strings.Repeat("a", 1000) + "] here.\n"},
+		{name: "escaped bracket in a code span of a full label", markdown: "See [text][`a\\]b`] here.\n",
+			want: []want{{1, 5, "Reference link uses undefined label [`a\\]b`]"}}},
+		{name: "escaped bracket in a code span of a collapsed label", markdown: "See [`a\\]b`][] here.\n",
+			want: []want{{1, 5, "Reference link uses undefined label [`a\\]b`]"}}},
+		{name: "defined label with an escaped bracket in a code span", markdown: "See [text][`a\\]b`] here.\n\n[`a\\]b`]: /url\n"},
 		{name: "code span in a collapsed label", markdown: "See [a `code`][] here.\n",
 			want: []want{{1, 5, "Reference link uses undefined label [a `code`]"}}},
 		{name: "strikethrough in a full label", markdown: "See [text][~~missing~~] here.\n\n[missing]: /exists\n",
@@ -448,6 +457,14 @@ func TestLinkImageRefDefsRule_LabelPerLink(t *testing.T) {
 		if got := testHelper(t, rule, markdown); len(got) != 1 {
 			t.Errorf("%q: got %+v, want one unused definition", markdown, got)
 		}
+	}
+	// The length limit on labels counts characters, not bytes.
+	wide := strings.Repeat("\u4e2d", 400)
+	if got := testHelper(t, rule, "Text.\n\n["+wide+"]: /url\n"); len(got) != 1 {
+		t.Errorf("unused definition with a wide label: got %+v, want one", got)
+	}
+	if got := testHelper(t, rule, "See [text]["+wide+"].\n\n["+wide+"]: /url\n"); len(got) != 0 {
+		t.Errorf("used definition with a wide label: got %+v, want none", got)
 	}
 	// The strikethrough markers are part of the label, so the definition of
 	// a label without them is not used.
