@@ -2,7 +2,6 @@ package mdscan
 
 import (
 	"bytes"
-	"regexp"
 	"strings"
 )
 
@@ -75,13 +74,6 @@ func MatchHTML(src []byte, pos int) (HTMLConstruct, bool) {
 	default:
 		return matchHTMLOpenTag(rest, pos)
 	}
-}
-
-// AttributePattern returns markdownlint's getHtmlAttributeRe pattern for an
-// attribute: whitespace, the name, optional whitespace, '=', and a value
-// captured up to a quote, whitespace, or '>'.
-func AttributePattern(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(?i)\s` + regexp.QuoteMeta(name) + `\s*=\s*['"]?([^'"\s>]*)`)
 }
 
 // matchHTMLComment matches "<!-->", "<!--->", or "<!--" ... "-->".

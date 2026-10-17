@@ -49,19 +49,13 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	}
 
 	var urls []bareURL
-	err := mdast.Walk(ctx.Root, func(node *mdast.Node) error {
+	for _, container := range mdast.FindAll(ctx.Root, isTextContainer) {
 		if ctx.Cancelled() {
-			return ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
-		if isTextContainer(node) {
-			scan := &bareURLScan{content: ctx.File.Content}
-			scan.visit(node)
-			urls = append(urls, scan.found...)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		scan := &bareURLScan{content: ctx.File.Content}
+		scan.visit(container)
+		urls = append(urls, scan.found...)
 	}
 
 	diags := make([]lint.Diagnostic, 0, len(urls))

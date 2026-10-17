@@ -49,22 +49,6 @@ const minDockerInstructions = 2
 // detector returns a language, or "" when its signals are absent.
 type detector func(content []byte, lines []string) string
 
-// detectors run in order; the first confident answer wins. YAML runs last
-// because many other formats also parse as YAML.
-var detectors = []detector{
-	detectMarkupProlog,
-	detectDiff,
-	detectJSON,
-	detectGo,
-	detectDockerfile,
-	detectSQL,
-	detectRust,
-	detectCFamily,
-	detectScript,
-	detectPython,
-	detectYAML,
-}
-
 // Detect returns the detected language for code content, or "text" when no
 // strong signal identifies one.
 func Detect(content []byte) string {
@@ -76,6 +60,21 @@ func Detect(content []byte) string {
 		return normalize(lang)
 	}
 
+	// Detectors run in order and the first confident answer wins. YAML runs
+	// last because many other formats also parse as YAML.
+	detectors := []detector{
+		detectMarkupProlog,
+		detectDiff,
+		detectJSON,
+		detectGo,
+		detectDockerfile,
+		detectSQL,
+		detectRust,
+		detectCFamily,
+		detectScript,
+		detectPython,
+		detectYAML,
+	}
 	lines := strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
 	for _, detect := range detectors {
 		if lang := detect(content, lines); lang != "" {
@@ -161,17 +160,12 @@ func detectDockerfile(_ []byte, lines []string) string {
 	return ""
 }
 
-// sqlStatementPatterns match SQL statements written with uppercase keywords,
-// which keeps sentences such as "Select the files from the list" out.
-var sqlStatementPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)^SELECT\s.+?\sFROM\s+\S`),
-	regexp.MustCompile(`^SELECT\s[^\n]*;\s*$`),
-	regexp.MustCompile(`^INSERT\s+INTO\s+\S`),
-	regexp.MustCompile(`^UPDATE\s+\S+\s+SET\s`),
-	regexp.MustCompile(`^DELETE\s+FROM\s+\S`),
-	regexp.MustCompile(`^(CREATE|ALTER|DROP)\s+(TABLE|INDEX|VIEW|DATABASE|SCHEMA)\s`),
-	regexp.MustCompile(`^WITH\s+\w+\s+AS\s*\(`),
-}
+// sqlStatementPattern matches a SQL statement written with uppercase keywords
+// at the start of the text, which keeps sentences such as "Select the files
+// from the list" out.
+var sqlStatementPattern = regexp.MustCompile(`^(?:` +
+	`(?s:SELECT\s.+?\sFROM\s+\S)|SELECT\s[^\n]*;\s*$|INSERT\s+INTO\s+\S|UPDATE\s+\S+\s+SET\s|DELETE\s+FROM\s+\S|` +
+	`(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|VIEW|DATABASE|SCHEMA)\s|WITH\s+\w+\s+AS\s*\()`)
 
 // detectSQL recognizes content whose first statement is an uppercase SQL statement.
 func detectSQL(content []byte, lines []string) string {
@@ -180,26 +174,23 @@ func detectSQL(content []byte, lines []string) string {
 	if first == "" || start < 0 {
 		return ""
 	}
-	statement := string(content[start:])
-	for _, pattern := range sqlStatementPatterns {
-		if pattern.MatchString(statement) {
-			return langSQL
-		}
+	if sqlStatementPattern.Match(content[start:]) {
+		return langSQL
 	}
 	return ""
 }
 
-// rustPatterns match syntax that only Rust uses.
-var rustPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)^\s*(pub(\([^)]*\))?\s+)?(async\s+)?(unsafe\s+)?fn\s+\w+\s*(<[^>]*>)?\s*\(`),
-	regexp.MustCompile(`\b(println|eprintln|format|vec|panic)!\s*[(\[]`),
-	regexp.MustCompile(`(?m)^\s*let\s+mut\s+\w+`),
-	regexp.MustCompile(`(?m)^\s*use\s+(std|crate|super|self)::`),
-}
+// rustPattern matches syntax that only Rust uses: function items, macros,
+// mutable bindings, and crate paths.
+var rustPattern = regexp.MustCompile(`(?m)` +
+	`^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+\w+\s*(?:<[^>]*>)?\s*\(|` +
+	`\b(?:println|eprintln|format|vec|panic)!\s*[(\[]|` +
+	`^\s*let\s+mut\s+\w+|` +
+	`^\s*use\s+(?:std|crate|super|self)::`)
 
 // detectRust recognizes Rust function items, macros, mutable bindings, and paths.
 func detectRust(content []byte, _ []string) string {
-	if matchesAny(content, rustPatterns) {
+	if rustPattern.Match(content) {
 		return langRust
 	}
 	return ""
@@ -222,50 +213,47 @@ func detectCFamily(content []byte, _ []string) string {
 	return langC
 }
 
-// javaScriptPatterns match ECMAScript module syntax, CommonJS, console calls,
-// arrow functions bound with const or let, and function declarations.
-var javaScriptPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)^\s*import\s+[^'"\n]+\s+from\s+['"][^'"\n]+['"]\s*;?\s*$`),
-	regexp.MustCompile(`(?m)^\s*import\s+['"][^'"\n]+['"]\s*;?\s*$`),
-	regexp.MustCompile(`(?m)^\s*export\s+(default|const|let|function|class|async)\s`),
-	regexp.MustCompile(`\brequire\(\s*['"][^'"\n]+['"]\s*\)`),
-	regexp.MustCompile(`\bconsole\.(log|error|warn|info|debug)\([^)\n]*\)`),
-	regexp.MustCompile(`(?m)^\s*(const|let)\s+\w+\s*=\s*(async\s*)?(\([^)]*\)|\w+)\s*=>`),
-	regexp.MustCompile(`(?m)^\s*(async\s+)?function\*?\s+\w+\s*\([^)$]*\)\s*\{`),
-}
+// javaScriptPattern matches ECMAScript module syntax, CommonJS, console
+// calls, arrow functions bound with const or let, and function declarations.
+var javaScriptPattern = regexp.MustCompile(`(?m)` +
+	`^\s*import\s+[^'"\n]+\s+from\s+['"][^'"\n]+['"]\s*;?\s*$|` +
+	`^\s*import\s+['"][^'"\n]+['"]\s*;?\s*$|` +
+	`^\s*export\s+(?:default|const|let|function|class|async)\s|` +
+	`\brequire\(\s*['"][^'"\n]+['"]\s*\)|` +
+	`\bconsole\.(?:log|error|warn|info|debug)\([^)\n]*\)|` +
+	`^\s*(?:const|let)\s+\w+\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>|` +
+	`^\s*(?:async\s+)?function\*?\s+\w+\s*\([^)$]*\)\s*\{`)
 
-// typeScriptPatterns match TypeScript-only declarations and annotations.
-var typeScriptPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)^\s*(export\s+)?(declare\s+)?(interface|enum)\s+\w+[^\n]*\{`),
-	regexp.MustCompile(`(?m)^\s*(export\s+)?type\s+\w+(<[^>]*>)?\s*=`),
-	regexp.MustCompile(`\b(const|let|var)\s+\w+\s*:\s*(string|number|boolean|any|unknown|void|never|object|bigint|symbol)\b`),
-	regexp.MustCompile(`\)\s*:\s*(string|number|boolean|void|Promise<)`),
-	regexp.MustCompile(`[({]\s*\w+\??\s*:\s*(string|number|boolean)\s*[;,)}]`),
-}
+// typeScriptPattern matches TypeScript-only declarations and annotations.
+var typeScriptPattern = regexp.MustCompile(`(?m)` +
+	`^\s*(?:export\s+)?(?:declare\s+)?(?:interface|enum)\s+\w+[^\n]*\{|` +
+	`^\s*(?:export\s+)?type\s+\w+(?:<[^>]*>)?\s*=|` +
+	`\b(?:const|let|var)\s+\w+\s*:\s*(?:string|number|boolean|any|unknown|void|never|object|bigint|symbol)\b|` +
+	`\)\s*:\s*(?:string|number|boolean|void|Promise<)|` +
+	`[({]\s*\w+\??\s*:\s*(?:string|number|boolean)\s*[;,)}]`)
 
 // detectScript recognizes TypeScript by its type syntax, and JavaScript otherwise.
 func detectScript(content []byte, _ []string) string {
 	switch {
-	case matchesAny(content, typeScriptPatterns):
+	case typeScriptPattern.Match(content):
 		return langTypeScript
-	case matchesAny(content, javaScriptPatterns):
+	case javaScriptPattern.Match(content):
 		return langJavaScript
 	}
 	return ""
 }
 
-// pythonPatterns match Python definitions, imports, and the main guard.
-var pythonPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)^\s*(async\s+)?def\s+\w+\s*\(.*\)\s*(->\s*[^:\n]+)?:\s*(#.*)?$`),
-	regexp.MustCompile(`(?m)^\s*class\s+\w+\s*(\([^)\n]*\))?\s*:\s*(#.*)?$`),
-	regexp.MustCompile(`(?m)^from\s+[\w.]+\s+import\s+[\w*, ()]+\s*$`),
-	regexp.MustCompile(`(?m)^import\s+[\w.]+(\s+as\s+\w+)?(\s*,\s*[\w.]+(\s+as\s+\w+)?)*\s*$`),
-	regexp.MustCompile(`(?m)^if\s+__name__\s*==\s*['"]__main__['"]\s*:`),
-}
+// pythonPattern matches Python definitions, imports, and the main guard.
+var pythonPattern = regexp.MustCompile(`(?m)` +
+	`^\s*(?:async\s+)?def\s+\w+\s*\(.*\)\s*(?:->\s*[^:\n]+)?:\s*(?:#.*)?$|` +
+	`^\s*class\s+\w+\s*(?:\([^)\n]*\))?\s*:\s*(?:#.*)?$|` +
+	`^from\s+[\w.]+\s+import\s+[\w*, ()]+\s*$|` +
+	`^import\s+[\w.]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*\s*$|` +
+	`^if\s+__name__\s*==\s*['"]__main__['"]\s*:`)
 
 // detectPython recognizes Python statements that no other common language shares.
 func detectPython(content []byte, _ []string) string {
-	if matchesAny(content, pythonPatterns) {
+	if pythonPattern.Match(content) {
 		return langPython
 	}
 	return ""
@@ -317,15 +305,6 @@ func firstSignificantLine(lines, commentPrefixes []string) string {
 func hasAnyPrefix(text string, prefixes []string) bool {
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchesAny(content []byte, patterns []*regexp.Regexp) bool {
-	for _, pattern := range patterns {
-		if pattern.Match(content) {
 			return true
 		}
 	}

@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -94,7 +95,7 @@ func (r *InlineHTMLRule) elementDiagnostic(
 	allowedSet map[string]bool,
 ) lint.Diagnostic {
 	end := construct.End
-	if newline := strings.IndexAny(string(construct.Text(ctx.File.Content)), "\r\n"); newline >= 0 {
+	if newline := bytes.IndexAny(construct.Text(ctx.File.Content), "\r\n"); newline >= 0 {
 		end = construct.Start + newline
 	}
 	startLine, startColumn := ctx.File.LineAt(construct.Start)

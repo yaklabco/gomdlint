@@ -329,8 +329,8 @@ const tableRulesSample = "# Tables\n\n" +
 	"Para before\n| e | f |\n| --- | --- |\n| `a|b` | x\\|y |\nPara after\n\n" +
 	"| left | right\n| ---- | -----\n| 5    | 6\n"
 
-// applyTableRule runs a table rule on GFM input with options.
-func applyTableRule(t *testing.T, rule lint.Rule, input string, options map[string]any) []lint.Diagnostic {
+// applyTableRule runs a table rule with its default options on GFM input.
+func applyTableRule(t *testing.T, rule lint.Rule, input string) []lint.Diagnostic {
 	t.Helper()
 	snapshot, err := goldmark.New(string(config.FlavorGFM)).Parse(context.Background(), "test.md", []byte(input))
 	if err != nil {
@@ -338,11 +338,7 @@ func applyTableRule(t *testing.T, rule lint.Rule, input string, options map[stri
 	}
 	cfg := config.NewConfig()
 	cfg.Flavor = config.FlavorGFM
-	var ruleCfg *config.RuleConfig
-	if options != nil {
-		ruleCfg = &config.RuleConfig{Options: options}
-	}
-	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, ruleCfg))
+	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
 	if err != nil {
 		t.Fatalf("Apply error: %v", err)
 	}
@@ -375,17 +371,17 @@ func applyDiagFixes(t *testing.T, input string, diags []lint.Diagnostic) string 
 // tables in blockquotes and list items are checked.
 func TestTableRulesFollowParsedTables(t *testing.T) {
 	assert.Equal(t, [][2]int{{6, 1}, {6, 33}, {18, 9}, {29, 1}, {29, 10}, {31, 14}, {32, 14}, {33, 10}},
-		diagPositions(applyTableRule(t, NewTablePipeStyleRule(), tableRulesSample, nil)), "MD055")
+		diagPositions(applyTableRule(t, NewTablePipeStyleRule(), tableRulesSample)), "MD055")
 	assert.Equal(t, [][2]int{{6, 33}, {10, 11}, {11, 7}, {28, 9}, {29, 10}},
-		diagPositions(applyTableRule(t, NewTableColumnCountRule(), tableRulesSample, nil)), "MD056")
+		diagPositions(applyTableRule(t, NewTableColumnCountRule(), tableRulesSample)), "MD056")
 
-	blank := applyTableRule(t, NewTableBlankLinesRule(), tableRulesSample, nil)
+	blank := applyTableRule(t, NewTableBlankLinesRule(), tableRulesSample)
 	assert.Equal(t, [][2]int{{11, 3}, {26, 1}}, diagPositions(blank), "MD058")
 	fixed := applyDiagFixes(t, tableRulesSample, blank)
 	assert.Contains(t, fixed, "> | z |\n>\n> # Quoted heading\n")
 	assert.Contains(t, fixed, "Para before\n\n| e | f |\n")
 
-	alignment := applyTableRule(t, NewTableAlignmentRule(), tableRulesSample, nil)
+	alignment := applyTableRule(t, NewTableAlignmentRule(), tableRulesSample)
 	assert.Equal(t, [][2]int{{4, 1}, {17, 3}}, diagPositions(alignment), "MDL003")
 	fixed = applyDiagFixes(t, tableRulesSample, alignment)
 	assert.Contains(t, fixed, "| a | b |\n| --- | --- |\n")
@@ -404,7 +400,7 @@ func TestTableAlignmentRule_FixKeepsStyle(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			diags := applyTableRule(t, NewTableAlignmentRule(), tt.input, nil)
+			diags := applyTableRule(t, NewTableAlignmentRule(), tt.input)
 			if len(diags) != 1 {
 				t.Fatalf("got %d diagnostics, want 1", len(diags))
 			}

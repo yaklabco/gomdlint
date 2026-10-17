@@ -220,20 +220,21 @@ func matchEmailLiteral(text []byte, pos int, prev byte) (int, bool) {
 	idx++
 	data, dot := false, false
 	var last byte
-	for idx < len(text) {
+scan:
+	for ; idx < len(text); idx++ {
 		ch := text[idx]
-		if ch == '.' {
+		switch {
+		case ch == '.':
 			if idx+1 >= len(text) || !isASCIIAlphanumeric(text[idx+1]) {
-				break
+				break scan
 			}
 			dot = true
-		} else if ch == '-' || ch == '_' || isASCIIAlphanumeric(ch) {
+		case ch == '-' || ch == '_' || isASCIIAlphanumeric(ch):
 			data = true
-		} else {
-			break
+		default:
+			break scan
 		}
 		last = ch
-		idx++
 	}
 	if !data || !dot || !isASCIILetter(last) {
 		return pos, false

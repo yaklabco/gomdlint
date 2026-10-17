@@ -262,10 +262,10 @@ func isGitHubLineReference(id string) bool {
 
 // ExtractFragment extracts the fragment from a URL.
 // Returns empty string if no fragment.
-func ExtractFragment(url string) string {
-	idx := strings.Index(url, "#")
+func ExtractFragment(dest string) string {
+	idx := strings.Index(dest, "#")
 	if idx == -1 {
 		return ""
 	}
-	return url[idx:]
+	return dest[idx:]
 }

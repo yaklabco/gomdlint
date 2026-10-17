@@ -294,10 +294,13 @@ func NewImageAltTextRule() *ImageAltTextRule {
 	}
 }
 
-// Attribute patterns markdownlint uses to decide whether an HTML image has alt text.
+// imgAltAttributePattern and imgAriaHiddenAttributePattern are markdownlint's
+// getHtmlAttributeRe patterns for the attributes that decide whether an HTML
+// image has alt text: whitespace, the name, optional whitespace, '=', and a
+// value captured up to a quote, whitespace, or '>'.
 var (
-	imgAltAttributePattern        = mdscan.AttributePattern("alt")
-	imgAriaHiddenAttributePattern = mdscan.AttributePattern("aria-hidden")
+	imgAltAttributePattern        = regexp.MustCompile(`(?i)\salt\s*=\s*['"]?([^'"\s>]*)`)
+	imgAriaHiddenAttributePattern = regexp.MustCompile(`(?i)\saria-hidden\s*=\s*['"]?([^'"\s>]*)`)
 )
 
 // Apply checks that Markdown images have non-empty alt text and that HTML img
