@@ -629,6 +629,51 @@ func TestRunner_Run_PreviewFixes(t *testing.T) {
 	}
 }
 
+// panicRule is a rule that crashes.
+type panicRule struct {
+	lint.BaseRule
+}
+
+func (r *panicRule) Apply(_ *lint.RuleContext) ([]lint.Diagnostic, error) {
+	panic("rule crashed")
+}
+
+// TestRunner_Run_PanicFailsOnlyThatFile covers a crash while processing one
+// file: the file counts as errored and the others are still linted.
+func TestRunner_Run_PanicFailsOnlyThatFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# Test\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	registry := lint.NewRegistry()
+	registry.Register(&panicRule{BaseRule: lint.NewBaseRule("PANIC001", "panic-rule", "", nil, false)})
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths:      []string{"."},
+		WorkingDir: dir,
+		Config:     config.NewConfig(),
+		Jobs:       1,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Stats.FilesErrored != 2 {
+		t.Errorf("FilesErrored = %d, want 2", result.Stats.FilesErrored)
+	}
+	for idx := range result.Files {
+		if !result.Files[idx].Failed() {
+			t.Errorf("%s did not fail", result.Files[idx].Path)
+		}
+	}
+}
+
 func TestRunner_Run_UnreadableFileFails(t *testing.T) {
 	t.Parallel()
 

@@ -145,20 +145,7 @@ func (r *Runner) worker(
 		default:
 		}
 
-		outcome := FileOutcome{Path: path}
-
-		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
-		if err == nil && preview && pr.FileResult != nil && pr.FixableCount() > 0 {
-			pr.Diff, err = r.previewDiff(ctx, path, cfg, opts)
-		}
-		if err != nil {
-			outcome.Error = err
-		} else {
-			outcome.Result = pr
-			outcome.Exhausted = pr.Exhausted
-			outcome.RemainingEdits = pr.RemainingEdits
-			outcome.FixPasses = pr.FixPasses
-		}
+		outcome := r.processFile(ctx, path, cfg, opts, preview)
 
 		select {
 		case <-ctx.Done():
@@ -166,6 +153,41 @@ func (r *Runner) worker(
 		case outCh <- outcome:
 		}
 	}
+}
+
+// processFile lints one file. A panic while processing it fails that file
+// instead of crashing the run, which would exit with Go's status 2.
+func (r *Runner) processFile(
+	ctx context.Context,
+	path string,
+	cfg *config.Config,
+	opts lint.PipelineOptions,
+	preview bool,
+) FileOutcome {
+	outcome := FileOutcome{Path: path}
+
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				outcome = FileOutcome{Path: path, Error: fmt.Errorf("internal error: %v", recovered)}
+			}
+		}()
+
+		pr, err := r.Pipeline.ProcessFile(ctx, path, cfg, opts)
+		if err == nil && preview && pr.FileResult != nil && pr.FixableCount() > 0 {
+			pr.Diff, err = r.previewDiff(ctx, path, cfg, opts)
+		}
+		if err != nil {
+			outcome.Error = err
+			return
+		}
+		outcome.Result = pr
+		outcome.Exhausted = pr.Exhausted
+		outcome.RemainingEdits = pr.RemainingEdits
+		outcome.FixPasses = pr.FixPasses
+	}()
+
+	return outcome
 }
 
 // previewDiff returns the diff that fixing path would produce, computed in
