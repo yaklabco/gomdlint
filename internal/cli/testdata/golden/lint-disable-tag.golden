@@ -1,0 +1,8 @@
+exit code 0
+-- stdout --
+doc.md (1 issue)
+  doc.md:1:8  warning  no-trailing-punctuation  Heading ends with trailing punctuation "."
+    Suggestion: Remove trailing punctuation from the heading
+
+1 issue (1 warning), in 1 file, 1 fixable
+-- stderr --

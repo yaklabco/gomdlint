@@ -1,0 +1,6 @@
+exit code 74
+-- stdout --
+configured.md: error: parse failure: file configuration: markdownlint-configure-file at line 1: unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys)
+1 file could not be linted (0 files checked, no issues found)
+-- stderr --
+Error: 1 file could not be linted

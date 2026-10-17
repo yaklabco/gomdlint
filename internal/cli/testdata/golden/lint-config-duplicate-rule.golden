@@ -1,0 +1,4 @@
+exit code 65
+-- stdout --
+-- stderr --
+Error: load configuration: load project config: $PROJECT/.gomdlint.yml: rules: "MD013" and "line-length" both configure line-length (MD013); keep one of them

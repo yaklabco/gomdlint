@@ -81,6 +81,18 @@ func TestLintHelpNamesGomdlint(t *testing.T) {
 	assert.Contains(t, got.stdout, "instead of the project config")
 }
 
+// TestLintHelpShowsRuleNamesAndTags covers the help for the rule flags,
+// which take rules by name or ID and markdownlint's tags.
+func TestLintHelpShowsRuleNamesAndTags(t *testing.T) {
+	t.Parallel()
+
+	got := execute(t, "lint", "--help")
+
+	assert.Contains(t, got.stdout, "gomdlint lint --disable line-length")
+	assert.Contains(t, got.stdout, "gomdlint lint --disable whitespace")
+	assert.Contains(t, got.stdout, "rules to disable, by name, ID or tag")
+}
+
 // TestLintTableKeepsCharactersWhole covers table output for a path of wide
 // characters and for a message of two-byte letters too long for its
 // column. Both used to be cut by bytes, in the middle of a character, which

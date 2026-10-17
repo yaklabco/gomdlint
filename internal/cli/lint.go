@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -74,15 +73,22 @@ By default, lints all .md and .markdown files in the current directory
 and subdirectories. Specify paths to lint specific files or directories.
 
 Examples:
-  gomdlint lint                      # Lint current directory
-  gomdlint lint docs/                # Lint docs directory
-  gomdlint lint README.md            # Lint single file
-  gomdlint lint --fix                # Lint and auto-fix issues
-  gomdlint lint --fix --dry-run      # Show fixes without applying
-  gomdlint lint --format diff        # Preview fixes as a diff
-  gomdlint lint --fix --format diff  # Apply fixes and show them as a diff
-  gomdlint lint --format json        # Output as JSON for CI
-  gomdlint lint --strict             # Treat warnings as errors
+  gomdlint lint                        # Lint current directory
+  gomdlint lint docs/                  # Lint docs directory
+  gomdlint lint README.md              # Lint single file
+  gomdlint lint --fix                  # Lint and auto-fix issues
+  gomdlint lint --fix --dry-run        # Show fixes without applying
+  gomdlint lint --format diff          # Preview fixes as a diff
+  gomdlint lint --fix --format diff    # Apply fixes and show them as a diff
+  gomdlint lint --format json          # Output as JSON for CI
+  gomdlint lint --strict               # Treat warnings as errors
+  gomdlint lint --disable line-length  # Skip a rule, by name or ID
+  gomdlint lint --disable whitespace   # Skip every rule a tag covers
+
+--enable, --disable and --fix-rules take rule names and IDs, as
+'gomdlint rules' lists them, and markdownlint's names for the rules. They
+also take markdownlint's tags, such as whitespace or headings, which stand
+for every rule they cover. Case does not matter.
 
 ` + exitCodeHelp
 
@@ -142,7 +148,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	if err := validateLintFlags(flags, cfg.Jobs); err != nil {
 		return err
 	}
-	ruleLists, err := resolveRuleListFlags(flags)
+	ruleLists, err := resolveRuleListFlags(flags, registry)
 	if err != nil {
 		return err
 	}
@@ -364,16 +370,16 @@ func skipWarnings(result *runner.Result) []string {
 	return warnings
 }
 
-// ruleFailures describes each rule that failed on a file, with its cause.
-// They go to stderr, so every output format shows them. The stack of a rule
-// that panicked is in the debug log.
+// ruleFailures describes each rule that failed on a file, with its cause,
+// naming the rule by name, then ID. They go to stderr, so every output
+// format shows them. The stack of a rule that panicked is in the debug log.
 func ruleFailures(result *runner.Result, workDir string) []string {
 	var failures []string
 	for idx := range result.Files {
 		file := &result.Files[idx]
 		for _, ruleErr := range file.RuleErrors {
 			failures = append(failures, fmt.Sprintf("rule %s failed on %s: %v",
-				ruleErr.RuleID, display.Path(file.Path, workDir), ruleErr.Err))
+				lint.RuleLabel(ruleErr.RuleID, ruleErr.RuleName), display.Path(file.Path, workDir), ruleErr.Err))
 		}
 	}
 	return failures
@@ -463,48 +469,61 @@ type ruleLists struct {
 	fix     []string
 }
 
-// resolveRuleListFlags resolves the rule IDs, names and aliases given to
-// --enable, --disable and --fix-rules, rejecting rules that do not exist.
-func resolveRuleListFlags(flags *lintFlags) (ruleLists, error) {
+// listRulesHint ends the error about rule flag values that name no rule.
+const listRulesHint = "Run 'gomdlint rules' to list rules."
+
+// resolveRuleListFlags resolves the values of --enable, --disable and
+// --fix-rules through registry. A value that names no rule or tag is a
+// usage error. The error describes every such value, one per line, with
+// the rules and tags closest to it.
+func resolveRuleListFlags(flags *lintFlags, registry *lint.Registry) (ruleLists, error) {
 	var lists ruleLists
-	var err error
-	if lists.enable, err = canonicalRuleIDs("--enable", flags.enable); err != nil {
-		return lists, err
-	}
-	if lists.disable, err = canonicalRuleIDs("--disable", flags.disable); err != nil {
-		return lists, err
-	}
-	if lists.fix, err = canonicalRuleIDs("--fix-rules", flags.fixRules); err != nil {
-		return lists, err
+	var problems []string
+	lists.enable, problems = resolveRuleList(registry, "--enable", flags.enable, problems)
+	lists.disable, problems = resolveRuleList(registry, "--disable", flags.disable, problems)
+	lists.fix, problems = resolveRuleList(registry, "--fix-rules", flags.fixRules, problems)
+	if len(problems) > 0 {
+		return ruleLists{}, &ExitError{
+			Code: ExitInvalidUsage,
+			Err:  errors.New(strings.Join(append(problems, listRulesHint), "\n")),
+		}
 	}
 	return lists, nil
 }
 
-// canonicalRuleIDs resolves keys given to flag through the rule registry.
-func canonicalRuleIDs(flag string, keys []string) ([]string, error) {
+// resolveRuleList resolves the values of one rule list flag through
+// registry: rule IDs, names and aliases, and markdownlint tags, which stand
+// for every rule they cover. Matching ignores case. It returns the IDs of
+// the rules, each once, in the order given, and appends a description of
+// each value that names no rule or tag to problems.
+func resolveRuleList(registry *lint.Registry, flag string, keys, problems []string) ([]string, []string) {
 	if keys == nil {
-		return nil, nil
+		return nil, problems
 	}
 
 	ids := make([]string, 0, len(keys))
-	var unknown []string
+	listed := make(map[string]bool, len(keys))
+	add := func(rule lint.Rule) {
+		if !listed[rule.ID()] {
+			listed[rule.ID()] = true
+			ids = append(ids, rule.ID())
+		}
+	}
 	for _, key := range keys {
-		rule, ok := lint.DefaultRegistry.Lookup(key)
-		if !ok {
-			unknown = append(unknown, strconv.Quote(key))
+		rule, isRule := registry.Lookup(key)
+		tagged := registry.RulesByTag(key)
+		if !isRule && len(tagged) == 0 {
+			problems = append(problems, flag+": "+lint.UnknownRuleText(key, registry.Closest(key)))
 			continue
 		}
-		ids = append(ids, rule.ID())
+		if isRule {
+			add(rule)
+		}
+		for _, rule := range tagged {
+			add(rule)
+		}
 	}
-
-	switch len(unknown) {
-	case 0:
-		return ids, nil
-	case 1:
-		return nil, usageError("%s: unknown rule %s; run 'gomdlint rules' to list rules", flag, unknown[0])
-	default:
-		return nil, usageError("%s: unknown rules %s; run 'gomdlint rules' to list rules", flag, strings.Join(unknown, ", "))
-	}
+	return ids, problems
 }
 
 // writeMemProfile writes a heap profile to path.
@@ -534,10 +553,10 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 	cmd.Flags().BoolVar(&flags.noDefaultIgnores, "no-default-ignores", false,
 		"lint files in node_modules and vendor directories")
 	cmd.Flags().StringSliceVar(&flags.enable, "enable", nil,
-		"rules to enable, by ID or name (overrides config files)")
+		"rules to enable, by name, ID or tag (overrides config files)")
 	cmd.Flags().StringSliceVar(&flags.disable, "disable", nil,
-		"rules to disable, by ID or name (overrides config files and --enable)")
-	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to these rules, by ID or name")
+		"rules to disable, by name, ID or tag (overrides config files and --enable)")
+	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to these rules, by name, ID or tag")
 	cmd.Flags().BoolVar(&cfg.NoBackups, "no-backups", false, "disable backup creation when fixing")
 	cmd.Flags().StringVar(&flags.flavor, "flavor", string(config.FlavorGFM), "Markdown flavor: commonmark, gfm")
 	cmd.Flags().BoolVar(&flags.strict, "strict", false, "treat warnings as errors for exit code")

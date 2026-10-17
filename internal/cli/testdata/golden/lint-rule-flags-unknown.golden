@@ -1,0 +1,8 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: --enable: unknown rule "MD002"
+--disable: unknown rule "tables" (did you mean the tag "table"?)
+--fix-rules: unknown rule "frobnicate"
+Run 'gomdlint rules' to list rules.
+Run 'gomdlint lint --help' for usage.

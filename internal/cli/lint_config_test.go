@@ -392,6 +392,56 @@ func TestLintRuleListFlags(t *testing.T) {
 			assert.Empty(t, got.stdout)
 		})
 	}
+
+	// A markdownlint tag stands for every rule it covers, in any case.
+	t.Run("disable by tag", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--color", "never", "--disable", "WhiteSpace", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.NotContains(t, got.stdout, "no-trailing-spaces")
+	})
+
+	t.Run("enable by tag overrides a config disable", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":        trailingDoc,
+			".gomdlint.yml": "rules:\n  MD009:\n    enabled: false\n",
+		})
+
+		got := execute(t, "lint", "--color", "never", "--enable", "whitespace", "doc.md")
+
+		assert.Contains(t, got.stdout, "no-trailing-spaces")
+	})
+
+	t.Run("fix-rules by tag", func(t *testing.T) {
+		dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--fix", "--no-backups", "--fix-rules", "whitespace", "doc.md")
+
+		require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Equal(t, fixedDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	})
+
+	t.Run("fix-rules leaves out rules outside the tag", func(t *testing.T) {
+		dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--fix", "--no-backups", "--fix-rules", "headings", "doc.md")
+
+		require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Equal(t, trailingDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	})
+
+	// Inline directives still accept gomdlint's former tags for now, but
+	// the flags take only the tags markdownlint knows.
+	t.Run("former gomdlint tags are unknown", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--disable", "style", "doc.md")
+
+		assert.Equal(t, cli.ExitInvalidUsage, got.code)
+		assert.Contains(t, got.stderr, `unknown rule "style"`)
+	})
 }
 
 // TestLintDryRunSummary covers --fix --dry-run, which writes nothing: the
