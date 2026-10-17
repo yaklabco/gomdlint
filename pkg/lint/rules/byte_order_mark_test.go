@@ -45,7 +45,7 @@ func TestListAndWhitespaceRulesIgnoreByteOrderMark(t *testing.T) {
 			require.Len(t, plain, tt.count, "without a byte order mark")
 			marked := applyRuleWithOptions(t, tt.rule, mdast.ByteOrderMark+tt.input, tt.options)
 			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
-			require.Equal(t, len(filterFixableDiags(plain)), len(filterFixableDiags(marked)), "fixable diagnostics")
+			require.Len(t, filterFixableDiags(marked), len(filterFixableDiags(plain)), "fixable diagnostics")
 			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, tt.input, plain),
 				applyAllFixEdits(t, mdast.ByteOrderMark+tt.input, marked))
 		})
