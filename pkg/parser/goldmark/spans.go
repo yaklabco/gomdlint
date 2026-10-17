@@ -85,8 +85,8 @@ func (k spanKey) recorder(pc parser.Context) *spanRecorder {
 	return rec
 }
 
-// openBlock records the opening line of a block. line and segment are the
-// reader's view of the line before the block parser consumed anything.
+// openBlock records the opening line of a block. segment is the reader's
+// view of the line before the block parser consumed anything.
 func (r *spanRecorder) openBlock(node ast.Node, source []byte, segment text.Segment) {
 	start := segment.Start
 	if _, indented := node.(*ast.CodeBlock); !indented {
