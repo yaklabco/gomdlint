@@ -447,7 +447,56 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
 		},
+		{
+			// A blank line between blocks leaves the structure as it was,
+			// but the element may show it.
+			name:  "inserting a blank line between paragraphs after an open div",
+			input: "<div style=\"white-space: pre\">\n\nalpha\n\nbeta\n",
+			old:   "alpha\n\nbeta", new: "alpha\n\n\nbeta",
+			want: false,
+		},
+		{
+			name:  "changing a container prefix after an open div",
+			input: "<div style=\"white-space: pre\">\n\n>  quoted\n",
+			old:   ">  quoted", new: "> quoted",
+			want: false,
+		},
+		{
+			// The line ending would join the value of the textarea.
+			name:  "adding the final line ending after an open textarea",
+			input: "<textarea>alpha",
+			old:   "alpha", new: "alpha\n",
+			want: false,
+		},
+		{
+			// The parser does not see the byte order mark, so the offsets
+			// it reports start after it.
+			name:  "wrapping before an element after a byte order mark",
+			input: "\uFEFFalpha beta\n\n<textarea>x\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
 	})
+}
+
+// TestKeepSafeFixesLeavesTheRestAfterAnElement checks that from the first raw
+// HTML that may open an element to the end of the file no fix is kept, while
+// fixes before it are judged as usual.
+func TestKeepSafeFixesLeavesTheRestAfterAnElement(t *testing.T) {
+	input := "alpha \nbeta\n\n<div style=\"white-space: pre\">\n\ngamma \ndelta"
+	diags := []lint.Diagnostic{
+		{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "alpha \n", "alpha\n")}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{replaceOnce(t, input, "gamma \n", "gamma\n")}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: len(input), EndOffset: len(input), NewText: "\n"}}},
+	}
+	snapshot := parseForCheck(t, input)
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+
+	kept := keepSafeFixes(ctx, diags)
+	require.Len(t, kept, len(diags))
+	assert.True(t, kept[0].HasFix(), "the fix before the div is judged as usual")
+	assert.False(t, kept[1].HasFix(), "the fix inside the div is not kept")
+	assert.False(t, kept[2].HasFix(), "the final line ending after the div is not kept")
 }
 
 // TestOpensElement checks which raw HTML holds the start tag of an element

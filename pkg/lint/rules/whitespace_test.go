@@ -298,6 +298,33 @@ func TestFinalNewlineRule(t *testing.T) {
 		config    map[string]any
 	}{
 		{
+			// From raw HTML that opens an element to the end of the file
+			// nothing may change: the line ending would join the value of
+			// the textarea.
+			name:      "no fix after an open textarea",
+			input:     "<textarea>alpha",
+			wantDiags: 1,
+			wantFix:   "<textarea>alpha",
+		},
+		{
+			name:      "no fix after an open pre element",
+			input:     "<pre>alpha",
+			wantDiags: 1,
+			wantFix:   "<pre>alpha",
+		},
+		{
+			name:      "no fix after an open styled div",
+			input:     "<div style=\"white-space: pre\">\nalpha",
+			wantDiags: 1,
+			wantFix:   "<div style=\"white-space: pre\">\nalpha",
+		},
+		{
+			name:      "fix after void elements only",
+			input:     "Line<br>\n<img src=\"a.png\">",
+			wantDiags: 1,
+			wantFix:   "Line<br>\n<img src=\"a.png\">\n",
+		},
+		{
 			name:      "file ends with newline",
 			input:     "Hello world\n",
 			wantDiags: 0,
@@ -350,11 +377,12 @@ func TestFinalNewlineRule(t *testing.T) {
 		},
 		{
 			// The paragraph that ends the file closes an element of the
-			// HTML block above it.
-			name:      "final newline after a paragraph that closes an HTML element",
+			// HTML block above it, which the fix check does not decide, so
+			// nothing after the div changes. The end tag must not crash it.
+			name:      "no final newline after a paragraph that closes an HTML element",
 			input:     "<div>\n\nhello </div>",
 			wantDiags: 1,
-			wantFix:   "<div>\n\nhello </div>\n",
+			wantFix:   "<div>\n\nhello </div>",
 		},
 		{
 			name:      "text after comment on last line is not blank",
@@ -406,7 +434,7 @@ func TestFinalNewlineRule(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}
@@ -529,6 +557,19 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 			wantDiags: 1,
 			wantFix:   "Line one\r\n",
 		},
+		{
+			name:      "fix after void elements only",
+			input:     "Line<br>\n\n\n<img src=\"a.png\">\n",
+			wantDiags: 1,
+			wantFix:   "Line<br>\n\n<img src=\"a.png\">\n",
+		},
+		{
+			// The div may show the blank lines between the paragraphs.
+			name:      "no fix after raw HTML that opens an element",
+			input:     "<div style=\"white-space: pre\">\n\nalpha\n\n\nbeta\n",
+			wantDiags: 1,
+			wantFix:   "<div style=\"white-space: pre\">\n\nalpha\n\n\nbeta\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -566,7 +607,7 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 				ruleCtx2 := lint.NewRuleContext(context.Background(), snapshot2, cfg, ruleCfg)
 				diags2, err := rule.Apply(ruleCtx2)
 				require.NoError(t, err)
-				assert.Empty(t, diags2, "fix should be idempotent")
+				assert.Empty(t, filterFixableDiags(diags2), "fix should be idempotent")
 			}
 		})
 	}

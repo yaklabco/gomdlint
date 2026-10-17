@@ -35,6 +35,15 @@ const individualFixChecks = 16
 // A fix that changes no byte at all, such as an empty deletion, is no fix and
 // is removed first.
 //
+// From the first raw HTML that may open an element with content (see
+// opensElement) to the end of the file, every byte must stay as it is, so a
+// fix with an edit there is removed too. Whether whitespace, line endings,
+// blank lines and container markers show inside an element depends on the
+// element, its attributes and CSS, and where it ends depends on how a
+// browser reads the HTML, which no signature models: a final line ending,
+// for one, joins the value of a textarea left open. Fixes before that HTML
+// are judged as usual.
+//
 // The engine may apply only some of the fixes, after a directive, a conflict
 // or the last pass, so every fix must be safe on its own. When a rule reports
 // few fixes, each is checked on its own. With many, each fix that shares a
@@ -65,6 +74,16 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 		flavor = ctx.Config.Flavor
 	}
 	check := newFixCheck(ctx.File, flavor)
+	candidates = slices.DeleteFunc(candidates, func(idx int) bool {
+		if check.reachesElement(diags[idx].FixEdits) {
+			diags[idx].FixEdits = nil
+			return true
+		}
+		return false
+	})
+	if len(candidates) == 0 {
+		return diags
+	}
 
 	shared := check.sharedFixes(diags, candidates)
 	var kept, isolated []int
@@ -246,7 +265,11 @@ type fixCheck struct {
 	file      *mdast.FileSnapshot
 	content   []byte
 	markdowns []goldmark.Markdown
-	baseline  []string
+	// baseline holds the render signatures of the original content, and
+	// elementFrom the offset in it of the first raw HTML that may open an
+	// element with content, or -1. Both are set on first use.
+	baseline    []string
+	elementFrom int
 }
 
 func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
@@ -258,9 +281,10 @@ func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
 }
 
 // keeps reports whether applying edits leaves the render signatures of the
-// document unchanged. The edits must not overlap.
+// document unchanged and the bytes from the first raw HTML that may open an
+// element to the end of the file as they are. The edits must not overlap.
 func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
-	if len(edits) == 0 {
+	if len(edits) == 0 || c.reachesElement(edits) {
 		return false
 	}
 	prepared, err := fix.PrepareEdits(edits, len(c.content))
@@ -268,6 +292,22 @@ func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
 		return false
 	}
 	return c.unchanged(fix.ApplyEdits(c.content, prepared))
+}
+
+// reachesElement reports whether an edit lies at or after the start of the
+// first raw HTML that may open an element with content, from where the file
+// must stay byte for byte the same.
+func (c *fixCheck) reachesElement(edits []fix.TextEdit) bool {
+	c.ensureBaseline()
+	if c.elementFrom < 0 {
+		return false
+	}
+	for _, edit := range edits {
+		if edit.StartOffset >= c.elementFrom || edit.EndOffset > c.elementFrom {
+			return true
+		}
+	}
+	return false
 }
 
 // keepsTogether reports whether the fixes of the given diagnostics, applied
@@ -279,18 +319,24 @@ func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
 		edits = append(edits, diags[idx].FixEdits...)
 	}
 	accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(c.content))
-	if err != nil {
+	if err != nil || c.reachesElement(accepted) {
 		return false
 	}
 	return c.unchanged(fix.ApplyEdits(c.content, accepted))
 }
 
+// ensureBaseline parses the original content once, for its render
+// signatures and the start of the first raw HTML that may open an element.
+func (c *fixCheck) ensureBaseline() {
+	if c.baseline == nil {
+		c.baseline, c.elementFrom = c.signatures(c.content)
+	}
+}
+
 // unchanged reports whether changed renders like the original content.
 func (c *fixCheck) unchanged(changed []byte) bool {
-	if c.baseline == nil {
-		c.baseline = c.signatures(c.content)
-	}
-	candidate := c.signatures(changed)
+	c.ensureBaseline()
+	candidate, _ := c.signatures(changed)
 	for idx := range candidate {
 		if candidate[idx] != c.baseline[idx] {
 			return false
@@ -302,9 +348,15 @@ func (c *fixCheck) unchanged(changed []byte) bool {
 // signatures returns the render signature of content for each parser: its
 // front matter, kept as written, and the signature of the Markdown after it
 // (see goldmarkSignature). A byte order mark is left out, as the parser
-// leaves it out, and the front matter lines are blanked before parsing.
-func (c *fixCheck) signatures(content []byte) []string {
-	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
+// leaves it out, and the front matter lines are blanked before parsing. It
+// also returns the offset in content of the first raw HTML that may open an
+// element with content for any of the parsers, or -1.
+func (c *fixCheck) signatures(content []byte) ([]string, int) {
+	bom := 0
+	if bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
+		bom = len(mdast.ByteOrderMark)
+	}
+	content = content[bom:]
 	frontMatter := frontMatterLength(content)
 	source := bytes.Clone(content)
 	for idx := range frontMatter {
@@ -313,11 +365,15 @@ func (c *fixCheck) signatures(content []byte) []string {
 		}
 	}
 	signatures := make([]string, len(c.markdowns))
+	elementFrom := -1
 	for idx, markdown := range c.markdowns {
 		doc := markdown.Parser().Parse(gmtext.NewReader(source))
 		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source)
+		if start := elementStart(doc, source); start >= 0 && (elementFrom < 0 || bom+start < elementFrom) {
+			elementFrom = bom + start
+		}
 	}
-	return signatures
+	return signatures, elementFrom
 }
 
 // The lines that open and close YAML and TOML front matter.
@@ -370,22 +426,12 @@ func frontMatterLength(content []byte) int {
 // whitespace HTML collapses (spaces, tabs, line endings and form feeds)
 // collapse to one space in other text.
 //
-// Whether whitespace shows inside an HTML element depends on the element,
-// its attributes and CSS, and where the element ends depends on how a
-// browser reads the HTML. The signature models neither. So from the first
-// raw HTML that may open an element with content (see opensElement), every
-// leaf block must stay byte for byte the same: the paragraph, heading or
-// table cell that holds that HTML and every one after it. HTML blocks are
-// always kept as written. Blocks before that HTML keep their fixes, and so
-// does every block of a document without such HTML.
+// The signature does not model how HTML elements show whitespace, so the
+// fix check keeps the file byte for byte the same from the first raw HTML
+// that may open an element with content (see fixCheck.reachesElement).
 func goldmarkSignature(doc gmast.Node, source []byte) string {
 	var out strings.Builder
-	sig := signatureWriter{
-		source:      source,
-		out:         &out,
-		anchors:     make(map[string]int),
-		elementFrom: elementStart(doc, source),
-	}
+	sig := signatureWriter{source: source, out: &out, anchors: make(map[string]int)}
 	sig.blocks(doc)
 	return out.String()
 }
@@ -398,9 +444,6 @@ type signatureWriter struct {
 	out     *strings.Builder
 	text    []byte
 	anchors map[string]int
-	// elementFrom is the offset of the first raw HTML that may open an
-	// element with content, or -1 when there is none.
-	elementFrom int
 }
 
 // blocks writes the children of a container.
@@ -483,25 +526,13 @@ func elementStart(doc gmast.Node, source []byte) int {
 	return start
 }
 
-// rawSource writes the source of a leaf block's inline content, as it is,
-// when the block holds or follows raw HTML that may open an element.
-func (s *signatureWriter) rawSource(leaf gmast.Node) {
-	lines := leaf.Lines()
-	if s.elementFrom < 0 || lines.Len() == 0 || lines.At(lines.Len()-1).Stop <= s.elementFrom {
-		return
-	}
-	fmt.Fprintf(s.out, "\x00raw%q", linesText(lines, s.source))
-}
-
 func (s *signatureWriter) block(node gmast.Node) {
 	switch node := node.(type) {
 	case *gmast.Paragraph, *gmast.TextBlock:
 		s.out.WriteString("P(")
-		s.rawSource(node)
 		s.inlineContent(node)
 	case *gmast.Heading:
 		fmt.Fprintf(s.out, "H%d#%s(", node.Level, s.anchor(headingText(node, s.source)))
-		s.rawSource(node)
 		s.inlineContent(node)
 	case *gmast.List:
 		kind := "UL"
@@ -526,7 +557,6 @@ func (s *signatureWriter) block(node gmast.Node) {
 		fmt.Fprintf(s.out, "B(%q", raw)
 	case *gmextast.TableCell:
 		fmt.Fprintf(s.out, "D%d(", node.Alignment)
-		s.rawSource(node)
 		s.inlineContent(node)
 	default:
 		s.out.WriteString(node.Kind().String() + "(")
