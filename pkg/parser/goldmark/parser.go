@@ -61,6 +61,41 @@ func (p *Parser) Flavor() string {
 //
 // Returns nil and an error if parsing fails or context is cancelled.
 func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileSnapshot, error) {
+	return p.parse(ctx, path, content, nil)
+}
+
+// ParseWithReferences parses content as Parse does, as a part of a larger
+// document: links resolve first through refs, the link reference
+// definitions of that document keyed by normalized label (as goldmark's
+// util.ToLinkReference makes them), and then through the definitions
+// content holds. The definitions are shared, not copied, so a parse costs
+// nothing per definition.
+func (p *Parser) ParseWithReferences(
+	ctx context.Context, path string, content []byte, refs map[string]parser.Reference,
+) (*FileSnapshot, error) {
+	return p.parse(ctx, path, content, refs)
+}
+
+// presetContext is a goldmark parse context whose links resolve through a
+// set of definitions before those the parse adds. goldmark resolves links
+// only through Reference.
+type presetContext struct {
+	parser.Context
+	refs map[string]parser.Reference
+}
+
+//nolint:ireturn // goldmark's parser.Context interface fixes this signature.
+func (c presetContext) Reference(label string) (parser.Reference, bool) {
+	if ref, found := c.refs[label]; found {
+		return ref, true
+	}
+	return c.Context.Reference(label)
+}
+
+// parse is Parse with an optional set of preset definitions.
+func (p *Parser) parse(
+	ctx context.Context, path string, content []byte, refs map[string]parser.Reference,
+) (*FileSnapshot, error) {
 	// Check for early cancellation.
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("parse cancelled: %w", err)
@@ -94,6 +129,9 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 	recorder := newSpanRecorder()
 	pc := parser.NewContext()
 	pc.Set(p.spans.key, recorder)
+	if refs != nil {
+		pc = presetContext{Context: pc, refs: refs}
+	}
 	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(pc))
 
 	// Check for cancellation after parsing.
