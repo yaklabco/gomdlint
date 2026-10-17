@@ -37,9 +37,10 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Fatal("Load() returned nil config")
 	}
 
-	// Check defaults are applied
-	if result.Config.Flavor != config.FlavorCommonMark {
-		t.Errorf("expected flavor %q, got %q", config.FlavorCommonMark, result.Config.Flavor)
+	// Check defaults are applied. The default flavor matches markdownlint,
+	// which always parses GFM tables and autolink literals.
+	if result.Config.Flavor != config.FlavorGFM {
+		t.Errorf("expected flavor %q, got %q", config.FlavorGFM, result.Config.Flavor)
 	}
 }
 

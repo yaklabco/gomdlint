@@ -68,7 +68,7 @@ func generateMinimalTemplate(opts TemplateOptions) ([]byte, error) {
 # command-line flags and cannot be set in this file.
 
 # Markdown flavor: commonmark or gfm
-flavor: commonmark
+flavor: gfm
 
 # Severity for every rule that does not set one: error, warning, or info.
 # Leave it unset to keep each rule's built-in severity.
@@ -114,7 +114,7 @@ func generateFullTemplate(opts TemplateOptions) ([]byte, error) {
 # --fix, --dry-run, --jobs, --format, --enable, --disable and --fix-rules.
 
 # Markdown flavor: commonmark or gfm
-flavor: commonmark
+flavor: gfm
 
 # Severity for every rule that does not set one: error, warning, or info.
 # Leave it unset to keep each rule's built-in severity.
@@ -290,7 +290,7 @@ func templateToJSON(yamlContent []byte) ([]byte, error) {
 	// Build a simple config for JSON. Run-time settings such as fix and
 	// format are command-line flags, so the file does not carry them.
 	cfg := map[string]any{
-		"flavor": "commonmark",
+		"flavor": "gfm",
 		"backups": map[string]any{
 			"enabled": true,
 			"mode":    "sidecar",

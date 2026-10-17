@@ -468,7 +468,7 @@ func addLintFlags(cmd *cobra.Command, cfg *config.Config, flags *lintFlags) {
 		"rules to disable, by ID or name (overrides config files and --enable)")
 	cmd.Flags().StringSliceVar(&flags.fixRules, "fix-rules", nil, "limit auto-fix to these rules, by ID or name")
 	cmd.Flags().BoolVar(&cfg.NoBackups, "no-backups", false, "disable backup creation when fixing")
-	cmd.Flags().StringVar(&flags.flavor, "flavor", "commonmark", "Markdown flavor: commonmark, gfm")
+	cmd.Flags().StringVar(&flags.flavor, "flavor", string(config.FlavorGFM), "Markdown flavor: commonmark, gfm")
 	cmd.Flags().BoolVar(&flags.strict, "strict", false, "treat warnings as errors for exit code")
 	cmd.Flags().BoolVar(&flags.noContext, "no-context", false, "hide source line context in output")
 	cmd.Flags().BoolVar(&flags.compact, "compact", false, "use compact output format")

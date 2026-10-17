@@ -152,6 +152,43 @@ func TestLintAppliesLoneMarkdownlintConfig(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, ".gomdlint.yml"))
 }
 
+// tableDoc has a GFM table row with an extra cell, which MD056 reports when
+// tables are parsed.
+const tableDoc = "# Title\n\n| a | b |\n| - | - |\n| 1 | 2 | 3 |\n"
+
+func TestLintDefaultsToGFM(t *testing.T) {
+	t.Run("tables are checked without --flavor", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": tableDoc})
+
+		got := execute(t, "lint", "--color", "never", "--no-context", "doc.md")
+
+		assert.Contains(t, got.stdout, "table-column-count")
+	})
+
+	t.Run("commonmark remains selectable", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": tableDoc})
+
+		got := execute(t, "lint", "--color", "never", "--no-context", "--flavor", "commonmark", "doc.md")
+
+		assert.NotContains(t, got.stdout, "table-column-count")
+	})
+
+	t.Run("help names the default", func(t *testing.T) {
+		got := execute(t, "lint", "--help")
+
+		assert.Contains(t, got.stdout, `(default "gfm")`)
+	})
+}
+
+func TestInitTemplateUsesGFM(t *testing.T) {
+	dir := inProject(t, nil)
+
+	got := execute(t, "init")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Contains(t, readFile(t, filepath.Join(dir, ".gomdlint.yml")), "\nflavor: gfm\n")
+}
+
 func TestLintFormatFromEnvironment(t *testing.T) {
 	t.Run("selects the format", func(t *testing.T) {
 		inProject(t, map[string]string{"doc.md": trailingDoc})

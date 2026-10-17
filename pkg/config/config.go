@@ -164,7 +164,7 @@ type Config struct {
 // NewConfig returns a Config with sensible defaults.
 func NewConfig() *Config {
 	return &Config{
-		Flavor: FlavorCommonMark,
+		Flavor: FlavorGFM,
 		// No SeverityDefault: rules keep their built-in severities.
 		Rules:          make(map[string]RuleConfig),
 		Ignore:         nil,
