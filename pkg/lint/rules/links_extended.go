@@ -164,9 +164,14 @@ type bareURLScan struct {
 	// consumed is where the last literal ended; no literal starts before it.
 	consumed int
 	// parsed holds the spans of the autolinks the parser made from literals.
-	parsed   []mdast.SourceRange
-	brackets int
-	found    []bareURL
+	parsed []mdast.SourceRange
+	// lineStarts holds the offsets where the inline content of a line
+	// starts: the container's start, and the first node after each line
+	// break. micromark starts its text there, whatever container marker
+	// the source holds before it.
+	lineStarts map[int]bool
+	brackets   int
+	found      []bareURL
 }
 
 // newBareURLScan prepares a scan of a container's inline content.
@@ -175,9 +180,21 @@ func newBareURLScan(file *mdast.FileSnapshot, container *mdast.Node) *bareURLSca
 	if last := container.LastChild; last != nil {
 		scan.limit = last.SourceRange().EndOffset
 	}
+	scan.lineStarts = make(map[int]bool)
+	atLineStart := true
 	_ = mdast.Walk(container, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if node == container {
+			return nil
+		}
 		if isLinkifiedAutolink(file.Content, node) {
 			scan.parsed = append(scan.parsed, node.SourceRange())
+		}
+		switch {
+		case node.Kind == mdast.NodeSoftBreak || node.Kind == mdast.NodeHardBreak:
+			atLineStart = true
+		case atLineStart:
+			scan.lineStarts[node.SourceRange().StartOffset] = true
+			atLineStart = false
 		}
 		return nil
 	})
@@ -272,8 +289,10 @@ func (s *bareURLScan) scanText(start, end int) {
 		if s.brackets > 0 {
 			continue
 		}
+		// At the start of a line's inline content nothing comes before a
+		// literal, as at the start of the document's text.
 		var prev byte
-		if pos > s.textStart {
+		if pos > s.textStart && !s.lineStarts[pos] {
 			prev = s.content[pos-1]
 		}
 		literalEnd, kind := mdscan.MatchAutolinkLiteral(text, pos, prev)

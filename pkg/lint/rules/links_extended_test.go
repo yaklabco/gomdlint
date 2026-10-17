@@ -296,6 +296,47 @@ func TestNoBareURLsRule_WWWLiterals(t *testing.T) {
 	}
 }
 
+// TestNoBareURLsRule_LiteralAtLineStart reports a "www." literal that starts
+// a line's inline content right after a container marker, such as ">" with
+// no space or a table cell's pipe. micromark reads the start of a line as
+// the start of the text there, where a "www." literal may begin, whatever
+// the source holds before it.
+func TestNoBareURLsRule_LiteralAtLineStart(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name    string
+		input   string
+		want    []position
+		flavors []config.Flavor
+	}{
+		{"blockquote without a space", ">www.example.com/a here\n", []position{{1, 2}},
+			[]config.Flavor{config.FlavorCommonMark, config.FlavorGFM}},
+		{"blockquote continuation line", "> text\n>www.example.com/a here\n", []position{{2, 2}},
+			[]config.Flavor{config.FlavorCommonMark, config.FlavorGFM}},
+		{"table cells without padding", "|www.example.com|b|\n|-|-|\n|c|www.example.org|\n", []position{{1, 2}, {3, 4}},
+			[]config.Flavor{config.FlavorGFM}},
+		{"after a byte order mark", mdast.ByteOrderMark + "www.example.com/a here\n", []position{{1, 4}},
+			[]config.Flavor{config.FlavorCommonMark, config.FlavorGFM}},
+	}
+	for _, tt := range tests {
+		for _, flavor := range tt.flavors {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(tt.input))
+				require.NoError(t, err)
+				cfg := config.NewConfig()
+				cfg.Flavor = flavor
+				diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+				require.NoError(t, err)
+				got := make([]position, 0, len(diags))
+				for _, diag := range diags {
+					got = append(got, position{diag.StartLine, diag.StartColumn})
+				}
+				assert.Equal(t, tt.want, got)
+			})
+		}
+	}
+}
+
 func TestNoBareURLsRule_Metadata(t *testing.T) {
 	rule := NewNoBareURLsRule()
 
