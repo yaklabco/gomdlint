@@ -406,11 +406,16 @@ func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
 	return lines
 }
 
+// taskMarkerPattern matches a GFM task list checkbox at the start of the
+// content of a list item.
+var taskMarkerPattern = regexp.MustCompile(`^\[[ \txX]\]`)
+
 // noBreakRanges returns, per line, the byte ranges where inserting a line
 // break would change inline content: code spans (whose whitespace is
 // literal), inline HTML, the destination and title of links and images, and
 // GFM task list checkboxes, which a break between the brackets turns into
-// bracket text.
+// bracket text. Checkboxes are found in the text in every flavor, because
+// GFM renderers show them even when the file is linted as CommonMark.
 func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 	ranges := make(map[int][]offsetRange)
 	add := func(start, end int) {
@@ -443,9 +448,11 @@ func noBreakRanges(ctx *lint.RuleContext) map[int][]offsetRange {
 			add(textEnd, rng.EndOffset)
 		}
 	}
-	for _, checkbox := range mdast.FindByKind(ctx.Root, mdast.NodeTaskCheckbox) {
-		rng := checkbox.SourceRange()
-		add(rng.StartOffset, rng.EndOffset)
+	for _, item := range ctx.ListItems() {
+		marker, found := findListItemMarker(ctx.File, item)
+		if found && marker.HasContent() && taskMarkerPattern.Match(ctx.File.Content[marker.ContentStart:marker.LineEnd]) {
+			add(marker.ContentStart, marker.ContentStart+len("[ ]"))
+		}
 	}
 	return ranges
 }

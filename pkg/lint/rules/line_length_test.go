@@ -566,6 +566,15 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "- [ ] task details are long enough to wrap\n",
 		},
 		{
+			// CommonMark reads "[ ]" as text, but GFM renderers show a
+			// checkbox.
+			name:     "never breaks inside a task list checkbox in CommonMark",
+			input:    "- [ ] task details are long enough to wrap\n",
+			maxLen:   4,
+			wantFix:  false,
+			wantText: "- [ ] task details are long enough to wrap\n",
+		},
+		{
 			name:     "no fix inside code",
 			input:    "```\nthis is code that is long and must not wrap at all\n```\n",
 			maxLen:   30,
@@ -597,6 +606,20 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Unbreakable - - - - - - - - - - - - - - - - - - - - - - end.\n",
 		},
 	})
+}
+
+// TestMaxLineLengthRule_ProtectsTaskCheckboxes checks that the wrap fix never
+// breaks between the brackets of a task list checkbox, in either flavor.
+func TestMaxLineLengthRule_ProtectsTaskCheckboxes(t *testing.T) {
+	for _, flavor := range []string{goldmark.FlavorCommonMark, goldmark.FlavorGFM} {
+		for _, checkbox := range []string{"[ ]", "[x]", "[X]"} {
+			input := "- " + checkbox + " task\n"
+			snapshot, err := goldmark.New(flavor).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			ranges := noBreakRanges(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			assert.Contains(t, ranges[1], offsetRange{start: 2, end: 5}, "%s %q", flavor, checkbox)
+		}
+	}
 }
 
 func TestMaxLineLengthRule_HelperFunctions(t *testing.T) {
