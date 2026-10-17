@@ -128,6 +128,37 @@ func TestCodeFenceStyleWithholdsUnsafeFixes(t *testing.T) {
 	}
 }
 
+func TestCommandsShowOutputReadsTheContentSpan(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		line  int
+		want  string
+	}{
+		{
+			name:  "fence beside a list marker",
+			input: "# Title\n\n- ```sh\n  $ ls\n  ```\n",
+			line:  4,
+			want:  "# Title\n\n- ```sh\n  ls\n  ```\n",
+		},
+		{
+			name:  "top-level fence",
+			input: "# Title\n\n```sh\n$ ls\n$ pwd\n```\n",
+			line:  4,
+			want:  "# Title\n\n```sh\nls\npwd\n```\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyCompatibilityRule(t, NewCommandsShowOutputRule(), tt.input)
+			require.Len(t, diags, 1)
+			require.Equal(t, tt.line, diags[0].StartLine)
+			require.Equal(t, tt.want, applyAllFixEdits(t, tt.input, diags))
+		})
+	}
+	require.Empty(t, applyCompatibilityRule(t, NewCommandsShowOutputRule(), "# Title\n\n```sh\n```\n"), "an empty block has no commands")
+}
+
 func TestFirstLineHeadingSeesLeadingThematicBreak(t *testing.T) {
 	input := "***\n\n# Title\n"
 	diags := applyCompatibilityRule(t, NewFirstLineHeadingRule(), input)

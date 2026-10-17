@@ -397,7 +397,7 @@ func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast
 		return nil
 	}
 
-	contentLines := r.getCodeBlockContentLines(ctx.File, pos)
+	contentLines := r.getCodeBlockContentLines(ctx.File, cb)
 	if len(contentLines) == 0 {
 		return nil
 	}
@@ -491,33 +491,19 @@ type codeLineInfo struct {
 	lineNum     int
 }
 
-func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapshot, pos mdast.SourcePosition) []codeLineInfo {
+// getCodeBlockContentLines returns the lines of the block's content span,
+// so neither fence line is included. A block without code has none.
+func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapshot, cb *mdast.Node) []codeLineInfo {
+	if cb.ContentRange().IsEmpty() {
+		return nil
+	}
+	pos := cb.ContentPosition()
+	if !pos.IsValid() {
+		return nil
+	}
+
 	var lines []codeLineInfo
-
-	// For fenced code blocks, skip the fence lines
-	startLine := pos.StartLine
-	endLine := pos.EndLine
-
-	// Check if first line is a fence
-	if startLine >= 1 && startLine <= len(file.Lines) {
-		firstLineContent := string(lint.LineContent(file, startLine))
-		if strings.HasPrefix(strings.TrimSpace(firstLineContent), "```") ||
-			strings.HasPrefix(strings.TrimSpace(firstLineContent), "~~~") {
-			startLine++
-		}
-	}
-
-	// Check if last line is a fence
-	if endLine >= 1 && endLine <= len(file.Lines) {
-		lastLineContent := string(lint.LineContent(file, endLine))
-		trimmedLast := strings.TrimSpace(lastLineContent)
-		if trimmedLast == "```" || trimmedLast == "~~~" ||
-			strings.HasPrefix(trimmedLast, "```") || strings.HasPrefix(trimmedLast, "~~~") {
-			endLine--
-		}
-	}
-
-	for lineNum := startLine; lineNum <= endLine && lineNum <= len(file.Lines); lineNum++ {
+	for lineNum := pos.StartLine; lineNum <= pos.EndLine && lineNum <= len(file.Lines); lineNum++ {
 		lineInfo := file.Lines[lineNum-1]
 		content := string(file.Content[lineInfo.StartOffset:lineInfo.NewlineStart])
 		lines = append(lines, codeLineInfo{
