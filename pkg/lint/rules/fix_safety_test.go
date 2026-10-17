@@ -152,6 +152,12 @@ func TestVerifyFixes(t *testing.T) {
 			kept: []bool{false, false, true, true, true, true, true, true, true},
 		},
 		{
+			name:  "fixes in one list share its tightness",
+			input: "- a\n\n- b\n- c\n- d\n- e\n- f\n",
+			diags: []lint.Diagnostic{edit(4, 5, ""), edit(21, 21, "\n")},
+			kept:  []bool{false, true},
+		},
+		{
 			name:  "front matter may not change",
 			input: "---\ntitle: x\n---\n\nText\n",
 			diags: []lint.Diagnostic{edit(11, 12, "y")},
