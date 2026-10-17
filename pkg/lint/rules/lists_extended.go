@@ -102,7 +102,7 @@ func (r *ListIndentRule) checkList(ctx *lint.RuleContext, list *mdast.Node) []li
 }
 
 func (r *ListIndentRule) getItemIndent(file *mdast.FileSnapshot, lineNum int) int {
-	content := lint.LineContent(file, lineNum)
+	content := lint.LineText(file, lineNum)
 	indent := 0
 	for _, ch := range content {
 		switch ch {
@@ -208,11 +208,11 @@ func (r *ULIndentRule) checkULIndent(
 
 			// Build fix.
 			builder := fix.NewEditBuilder()
-			lineContent := lint.LineContent(ctx.File, pos.StartLine)
+			lineContent := lint.LineText(ctx.File, pos.StartLine)
 			trimmed := bytes.TrimLeft(lineContent, " \t")
 
 			newLine := strings.Repeat(" ", expectedIndent) + string(trimmed)
-			builder.ReplaceRange(line.StartOffset, line.NewlineStart, newLine)
+			builder.ReplaceRange(line.StartOffset+lint.LineTextOffset(ctx.File, pos.StartLine), line.NewlineStart, newLine)
 
 			diag := lint.NewDiagnostic(r.ID(), item,
 				fmt.Sprintf("Unordered list indentation %d does not match expected %d", actualIndent, expectedIndent)).
@@ -236,7 +236,7 @@ func (r *ULIndentRule) checkULIndent(
 }
 
 func (r *ULIndentRule) getItemIndent(file *mdast.FileSnapshot, lineNum int) int {
-	content := lint.LineContent(file, lineNum)
+	content := lint.LineText(file, lineNum)
 	indent := 0
 	for _, ch := range content {
 		switch ch {

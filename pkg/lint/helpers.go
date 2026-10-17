@@ -91,6 +91,28 @@ func LineContent(file *mdast.FileSnapshot, lineNum int) []byte {
 	return RawLineContent(file, lineNum)
 }
 
+// LineText returns the content of a 1-based line, as LineContent does, without
+// the byte order mark that can start the first line. The parser skips the
+// mark, so a rule that reads a construct from the start of its line must
+// skip it too. LineTextOffset gives the number of bytes left out.
+func LineText(file *mdast.FileSnapshot, lineNum int) []byte {
+	content := LineContent(file, lineNum)
+	if skip := LineTextOffset(file, lineNum); len(content) >= skip {
+		return content[skip:]
+	}
+	return content
+}
+
+// LineTextOffset returns the number of bytes at the start of a 1-based line
+// that come before its text: the length of a byte order mark at the start
+// of the first line, and 0 otherwise.
+func LineTextOffset(file *mdast.FileSnapshot, lineNum int) int {
+	if lineNum != 1 || file == nil || !bytes.HasPrefix(file.Content, []byte(mdast.ByteOrderMark)) {
+		return 0
+	}
+	return len(mdast.ByteOrderMark)
+}
+
 // RawLineContent returns the original bytes of a 1-based line, excluding its newline.
 // Returns nil if the line number is out of range.
 func RawLineContent(file *mdast.FileSnapshot, lineNum int) []byte {

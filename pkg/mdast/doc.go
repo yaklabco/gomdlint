@@ -14,9 +14,10 @@
 // FileSnapshot.Content. Offsets are byte offsets, and ranges are half-open:
 // StartOffset is included and EndOffset is not. Columns derived from them
 // (SourcePosition, ContentPosition) are 1-based byte columns; the end
-// position is exclusive. A leading UTF-8 byte order mark is not parsed as
-// Markdown but stays in the content, so offsets and columns on the first
-// line count its three bytes.
+// position is exclusive. A leading UTF-8 byte order mark (ByteOrderMark) is
+// not parsed as Markdown but stays in the content, so offsets and columns on
+// the first line count its three bytes. Code that reads the first line's
+// text must skip it.
 //
 // The full span (Node.SourceRange, Node.Text, Node.SourcePosition) is the
 // exact source of the construct, including its syntax markers. The content

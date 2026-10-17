@@ -124,7 +124,7 @@ func (p *Parser) Parse(ctx context.Context, path string, content []byte) (*FileS
 }
 
 // utf8BOM is the UTF-8 encoding of the byte order mark U+FEFF.
-const utf8BOM = "\xEF\xBB\xBF"
+const utf8BOM = mdast.ByteOrderMark
 
 // bomLength returns the length of a leading UTF-8 byte order mark.
 func bomLength(content []byte) int {

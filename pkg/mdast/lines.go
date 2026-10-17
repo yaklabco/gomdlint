@@ -2,6 +2,11 @@ package mdast
 
 import "sort"
 
+// ByteOrderMark is the UTF-8 encoding of the byte order mark U+FEFF. A file
+// that starts with it keeps it in its content and its first line, but the
+// mark is not part of the Markdown text, so parsers skip it.
+const ByteOrderMark = "\xEF\xBB\xBF"
+
 // BuildLines constructs line metadata from file content.
 // It handles both LF (\n) and CRLF (\r\n) line endings.
 func BuildLines(content []byte) []LineInfo {

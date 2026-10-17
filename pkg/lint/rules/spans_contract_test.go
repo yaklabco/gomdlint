@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
@@ -246,4 +248,51 @@ func TestTrailingWhitespaceIgnoreCodeBlocksChecksFences(t *testing.T) {
 		lines = append(lines, diag.StartLine)
 	}
 	require.Equal(t, []int{3, 5}, lines, "fence lines are checked; code content is ignored")
+}
+
+// TestRulesIgnoreByteOrderMark checks that a byte order mark before the
+// first line changes neither the diagnostics nor the fixes of rules that
+// read a construct from the start of its line. goldmark parses the content
+// after the mark, so these line scanners must skip it too.
+func TestRulesIgnoreByteOrderMark(t *testing.T) {
+	closingATX := map[string]any{"style": "atx", "require_closing_atx": true}
+	tests := []struct {
+		name    string
+		rule    lint.Rule
+		options map[string]any
+		input   string
+		count   int
+	}{
+		{"MD052 definition on the first line", NewReferenceLinkImagesRule(), nil, "[foo]: /u\n\n[x][foo]\n", 0},
+		{"MD053 unused definition on the first line", NewLinkImageRefDefsRule(), nil, "[foo]: /u\n\nText\n", 1},
+		{"MD003 closed heading on the first line", NewHeadingStyleRule(), closingATX, "# Title #\n\n## Sub\n", 1},
+		{"MD003 open heading on the first line", NewHeadingStyleRule(), closingATX, "# Title\n\n## Sub ##\n", 1},
+		{"MD029 ordered list on the first line", NewOrderedListIncrementRule(), nil, "1. one\n3. two\n", 1},
+		{"MD029 misnumbered item on the first line", NewOrderedListIncrementRule(), map[string]any{"style": "one"}, "2. one\n1. two\n", 1},
+		{"MD007 list on the first line", NewULIndentRule(), map[string]any{"start_indented": true}, "- a\n  - b\n", 2},
+		{"MD005 indented list on the first line", NewListIndentRule(), nil, "  - a\n  - b\n", 0},
+		{
+			"MD060 table on the first line", NewTableColumnStyleRule(),
+			map[string]any{"markdownlint_compatible": true, "style": "compact"},
+			"| a | b |\n| - | - |\n| 1 | 2 |\n", 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plain := applyRuleWithOptions(t, tt.rule, tt.input, tt.options)
+			require.Len(t, plain, tt.count, "without a byte order mark")
+			marked := applyRuleWithOptions(t, tt.rule, mdast.ByteOrderMark+tt.input, tt.options)
+			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
+			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, tt.input, plain), applyAllFixEdits(t, mdast.ByteOrderMark+tt.input, marked))
+		})
+	}
+}
+
+// diagnosticLines describes diagnostics by line and message.
+func diagnosticLines(diags []lint.Diagnostic) []string {
+	described := make([]string, 0, len(diags))
+	for _, diag := range diags {
+		described = append(described, fmt.Sprintf("%d: %s", diag.StartLine, diag.Message))
+	}
+	return described
 }

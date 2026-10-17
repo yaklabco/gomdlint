@@ -50,9 +50,6 @@ const tabWidth = 4
 // maxMarkerIndent is the indentation a blockquote marker may have.
 const maxMarkerIndent = 3
 
-// utf8BOM is the UTF-8 byte order mark, which is not part of a line's text.
-const utf8BOM = "\xEF\xBB\xBF"
-
 // prefixPart is the part of a line that one container claims.
 type prefixPart struct {
 	kind mdast.NodeKind
@@ -168,8 +165,8 @@ func listItemIndent(item *mdast.Node) int {
 // the first line is skipped and counts as part of the prefix.
 func scanPrefix(content []byte, node *mdast.Node, lineNum int) ([]prefixPart, int) {
 	cursor := &lineCursor{content: content}
-	if lineNum == 1 && bytes.HasPrefix(content, []byte(utf8BOM)) {
-		cursor.pos = len(utf8BOM)
+	if lineNum == 1 && bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
+		cursor.pos = len(mdast.ByteOrderMark)
 	}
 	var parts []prefixPart
 	for _, container := range containersOf(node) {

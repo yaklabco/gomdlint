@@ -350,6 +350,11 @@ func (c *collector) collectDefinitionsFromSource() {
 		}
 
 		line := c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
+		if lineNum == 0 {
+			// The parser skips a byte order mark, so a definition can follow
+			// one on the first line.
+			line = bytes.TrimPrefix(line, []byte(mdast.ByteOrderMark))
+		}
 		matches := refDefPattern.FindSubmatch(line)
 		if matches == nil {
 			continue
