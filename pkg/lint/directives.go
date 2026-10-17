@@ -93,9 +93,9 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 				}
 				continue
 			}
-			ids, known := directiveRuleIDs(key, registry)
+			ids, known := configureFileRuleIDs(key, registry)
 			if !known {
-				return nil, fmt.Errorf("markdownlint-configure-file at line %d has unknown key %q", directive.line, key)
+				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.UnknownKeyText(key))
 			}
 			for _, id := range ids {
 				converted := config.MarkdownlintRuleConfig(id, value)
@@ -108,6 +108,19 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		return cfg, nil
 	}
 	return result, nil
+}
+
+// configureFileRuleIDs returns the IDs of the registered rules that key, a
+// key of a markdownlint-configure-file object, names, and whether the key is
+// known. Like markdownlint, which looks each key up whole after only
+// upper-casing it, it reads the key as one word: unlike the parameter of a
+// markdownlint-disable comment, a key of several words names no rules, and
+// an empty key names none rather than all.
+func configureFileRuleIDs(key string, registry *Registry) ([]string, bool) {
+	if !IsSingleWord(key) {
+		return nil, false
+	}
+	return directiveRuleIDs(key, registry)
 }
 
 // directiveRuleIDs returns the IDs of the registered rules that the words of
