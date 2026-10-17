@@ -67,6 +67,11 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	pipelineOpts := lint.PipelineOptionsFromConfig(opts.Config)
 	pipelineOpts.WriteRoots = lint.WriteRoots(opts.WorkingDir, opts.effectivePaths())
 
+	// A run that fixes files records the diff of what it writes; a run that
+	// does not previews the fixes in a dry run.
+	pipelineOpts.Diff = opts.PreviewFixes
+	preview := opts.PreviewFixes && !pipelineOpts.Fix
+
 	// Create channels. Each unit of work is the paths naming one file.
 	workCh := make(chan []string)
 	outCh := make(chan FileOutcome)
@@ -78,7 +83,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts, opts.PreviewFixes)
+			r.worker(ctx, workCh, outCh, opts.Config, pipelineOpts, preview)
 		}()
 	}
 

@@ -87,3 +87,46 @@ func TestLint_FindingsWhoseFixesAreExcludedAreNotFixable(t *testing.T) {
 		assert.Contains(t, got.stdout, "1 issue (1 warnings), in 1 file, 1 fixable\n")
 	})
 }
+
+// TestLint_FixWithDiffFormatShowsTheWrittenChanges covers --fix --format
+// diff: the fixes are written, and the report is the diff of what was
+// written, the same diff that --format diff previews and that --fix
+// --dry-run computes without writing.
+func TestLint_FixWithDiffFormatShowsTheWrittenChanges(t *testing.T) {
+	// Two passes: the style fix and the spacing fix of the closed heading
+	// overlap, so one of them waits for the second pass, and the diff
+	// covers both.
+	const (
+		doc   = "# Title \n\n##  Spaced  ##\n\nText.\n"
+		fixed = "# Title\n\n## Spaced\n\nText.\n"
+	)
+	dir := inProject(t, map[string]string{"doc.md": doc, "clean.md": fixedDoc})
+	path := filepath.Join(dir, "doc.md")
+
+	preview := execute(t, "lint", "--format", "diff", "--color", "never", "doc.md", "clean.md")
+	require.Contains(t, preview.stdout, "diff --git a/doc.md b/doc.md", preview.stderr)
+	require.Equal(t, doc, readFile(t, path), "a preview writes nothing")
+
+	dryRun := execute(t, "lint", "--fix", "--dry-run", "--format", "diff", "--color", "never", "doc.md", "clean.md")
+	assert.Equal(t, preview.stdout, dryRun.stdout, "a dry run shows the previewed diff")
+	require.Equal(t, doc, readFile(t, path), "a dry run writes nothing")
+
+	got := execute(t, "lint", "--fix", "--no-backups", "--format", "diff", "--color", "never", "doc.md", "clean.md")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Equal(t, preview.stdout, got.stdout, "--fix shows the diff of what it wrote")
+	assert.NotContains(t, got.stdout, "clean.md", "a file without fixes has no diff")
+	assert.Contains(t, got.stdout, "1 file changed")
+	assert.Equal(t, fixed, readFile(t, path), "the fixes are written")
+}
+
+// TestLint_FixWithDiffFormatShowsNothingWhenNothingChanges covers --fix
+// --format diff on files without fixes: no diff and no summary.
+func TestLint_FixWithDiffFormatShowsNothingWhenNothingChanges(t *testing.T) {
+	inProject(t, map[string]string{"clean.md": fixedDoc})
+
+	got := execute(t, "lint", "--fix", "--no-backups", "--format", "diff", "--color", "never", "clean.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Empty(t, got.stdout)
+}

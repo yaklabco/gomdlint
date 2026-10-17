@@ -56,9 +56,11 @@ type Options struct {
 	// Config is the resolved configuration for this run.
 	Config *config.Config
 
-	// PreviewFixes attaches to each file with fixable issues the diff that
-	// --fix would apply, without writing anything. Diagnostics still
-	// describe the files as they are. It is meant for runs without Fix.
+	// PreviewFixes attaches to each file the diff of its fixes
+	// (lint.PipelineResult.Diff). In a run without Fix, it is the diff that
+	// --fix would apply, computed without writing anything, and diagnostics
+	// still describe the files as they are. In a run with Fix, it is the
+	// diff of the fixes written, or, in a dry run, computed.
 	PreviewFixes bool
 }
 
