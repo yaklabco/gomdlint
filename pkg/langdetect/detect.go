@@ -60,28 +60,122 @@ func Detect(content []byte) string {
 		return normalize(lang)
 	}
 
-	// Detectors run in order and the first confident answer wins. YAML runs
-	// last because many other formats also parse as YAML.
-	detectors := []detector{
-		detectMarkupProlog,
-		detectDiff,
-		detectJSON,
-		detectGo,
-		detectDockerfile,
-		detectSQL,
-		detectRust,
-		detectCFamily,
-		detectScript,
-		detectPython,
-		detectYAML,
-	}
 	lines := strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
-	for _, detect := range detectors {
+
+	// Structural signals name one language from the start of the content or
+	// from the content as a whole, so the first one found wins.
+	for _, detect := range []detector{detectMarkupProlog, detectDiff, detectJSON, detectGo, detectDockerfile, detectSQL} {
 		if lang := detect(content, lines); lang != "" {
 			return lang
 		}
 	}
+
+	// Statements of one language can sit in another's strings or comments.
+	// Each of these detectors reads its own language's code with strings and
+	// comments blanked out, and they must agree: Python with a JavaScript call
+	// in a comment is not confidently either.
+	found := ""
+	for _, detect := range []detector{detectRust, detectCFamily, detectScript, detectPython} {
+		lang := detect(content, lines)
+		if lang == "" {
+			continue
+		}
+		if found != "" && found != lang {
+			return langText
+		}
+		found = lang
+	}
+	if found != "" {
+		return found
+	}
+
+	// YAML comes last because many other formats also parse as YAML.
+	if lang := detectYAML(content, lines); lang != "" {
+		return lang
+	}
 	return langText
+}
+
+// codeSyntax says where a language keeps string literals and comments.
+type codeSyntax struct {
+	quotes       string   // quote characters of strings that end with their line
+	multiline    string   // quote characters of strings that may span lines
+	triple       bool     // Python's triple-quoted strings
+	lineComments []string // prefixes of comments that run to the end of the line
+	blockComment bool     // C-style /* ... */ comments
+}
+
+// codeView returns content with comments replaced by spaces and the inside
+// of string literals reduced to letters, digits, and underscores (every
+// other character becomes 'x'), so statement patterns match only code while
+// a pattern that needs a string, such as a module name or "__main__", still
+// finds one. Line breaks stay where they are.
+func codeView(content []byte, syntax codeSyntax) []byte {
+	view := bytes.Clone(content)
+	for idx := 0; idx < len(view); {
+		rest := view[idx:]
+		switch {
+		case syntax.blockComment && bytes.HasPrefix(rest, []byte("/*")):
+			end := len(view)
+			if closing := bytes.Index(rest[2:], []byte("*/")); closing >= 0 {
+				end = idx + 2 + closing + 2
+			}
+			blankComment(view, idx, end)
+			idx = end
+		case hasAnyPrefix(string(rest[:min(2, len(rest))]), syntax.lineComments):
+			end := len(view)
+			if newline := bytes.IndexByte(rest, '\n'); newline >= 0 {
+				end = idx + newline
+			}
+			blankComment(view, idx, end)
+			idx = end
+		case syntax.triple && (bytes.HasPrefix(rest, []byte(`"""`)) || bytes.HasPrefix(rest, []byte(`'''`))):
+			idx = blankString(view, idx, string(rest[:3]), true)
+		case strings.IndexByte(syntax.quotes, rest[0]) >= 0:
+			idx = blankString(view, idx, string(rest[:1]), false)
+		case strings.IndexByte(syntax.multiline, rest[0]) >= 0:
+			idx = blankString(view, idx, string(rest[:1]), true)
+		default:
+			idx++
+		}
+	}
+	return view
+}
+
+// blankComment replaces view[from:to] with spaces, keeping line breaks.
+func blankComment(view []byte, from, to int) {
+	for idx := from; idx < to; idx++ {
+		if view[idx] != '\n' && view[idx] != '\r' {
+			view[idx] = ' '
+		}
+	}
+}
+
+// blankString reduces the inside of the string literal that opens with quote
+// at view[open] and returns the offset after it. A backslash escapes the
+// next character. A string that may not span lines ends at the line break.
+func blankString(view []byte, open int, quote string, multiline bool) int {
+	idx := open + len(quote)
+	for idx < len(view) {
+		switch {
+		case bytes.HasPrefix(view[idx:], []byte(quote)):
+			return idx + len(quote)
+		case view[idx] == '\n' && !multiline:
+			return idx
+		case view[idx] == '\\' && idx+1 < len(view) && view[idx+1] != '\n':
+			view[idx], view[idx+1] = 'x', 'x'
+			idx += 2
+			continue
+		case view[idx] != '\n' && view[idx] != '\r' && view[idx] != '_' && !isAlphanumeric(view[idx]):
+			view[idx] = 'x'
+		}
+		idx++
+	}
+	return idx
+}
+
+func isAlphanumeric(ch byte) bool {
+	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
 }
 
 // detectMarkupProlog recognizes documents that open with a PHP tag, an XML
@@ -188,9 +282,10 @@ var rustPattern = regexp.MustCompile(`(?m)` +
 	`^\s*let\s+mut\s+\w+|` +
 	`^\s*use\s+(?:std|crate|super|self)::`)
 
-// detectRust recognizes Rust function items, macros, mutable bindings, and paths.
+// detectRust recognizes Rust function items, macros, mutable bindings, and
+// paths. Single quotes start char literals and lifetimes, not strings.
 func detectRust(content []byte, _ []string) string {
-	if rustPattern.Match(content) {
+	if rustPattern.Match(codeView(content, codeSyntax{quotes: `"`, lineComments: []string{"//"}, blockComment: true})) {
 		return langRust
 	}
 	return ""
@@ -204,10 +299,11 @@ var (
 
 // detectCFamily recognizes C and C++ by their #include directives.
 func detectCFamily(content []byte, _ []string) string {
-	if !cIncludePattern.Match(content) {
+	code := codeView(content, codeSyntax{quotes: `"'`, lineComments: []string{"//"}, blockComment: true})
+	if !cIncludePattern.Match(code) {
 		return ""
 	}
-	if cppPattern.Match(content) {
+	if cppPattern.Match(code) {
 		return langCPP
 	}
 	return langC
@@ -234,10 +330,11 @@ var typeScriptPattern = regexp.MustCompile(`(?m)` +
 
 // detectScript recognizes TypeScript by its type syntax, and JavaScript otherwise.
 func detectScript(content []byte, _ []string) string {
+	code := codeView(content, codeSyntax{quotes: `"'`, multiline: "`", lineComments: []string{"//"}, blockComment: true})
 	switch {
-	case typeScriptPattern.Match(content):
+	case typeScriptPattern.Match(code):
 		return langTypeScript
-	case javaScriptPattern.Match(content):
+	case javaScriptPattern.Match(code):
 		return langJavaScript
 	}
 	return ""
@@ -253,7 +350,7 @@ var pythonPattern = regexp.MustCompile(`(?m)` +
 
 // detectPython recognizes Python statements that no other common language shares.
 func detectPython(content []byte, _ []string) string {
-	if pythonPattern.Match(content) {
+	if pythonPattern.Match(codeView(content, codeSyntax{quotes: `"'`, triple: true, lineComments: []string{"#"}})) {
 		return langPython
 	}
 	return ""

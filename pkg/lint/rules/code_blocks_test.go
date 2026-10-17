@@ -125,6 +125,18 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 			wantFixedLang: "javascript",
 		},
 		{
+			name:          "javascript call inside a python string",
+			input:         "```\ndef example():\n    print(\"console.log(x)\")\n```",
+			wantFix:       true,
+			wantFixedLang: "python",
+		},
+		{
+			name:          "python with a javascript comment line gets no guess",
+			input:         "```\nimport os\n# console.log(x)\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
 			name:          "shell test expression gets no guess",
 			input:         "```\n[ \"$HOME\" = /root ] && echo root\n```",
 			wantFix:       false,

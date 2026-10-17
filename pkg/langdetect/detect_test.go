@@ -125,6 +125,8 @@ func TestDetect_RefusesWeakSignals(t *testing.T) {
 		{"toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\""},
 		{"indented tree", "src/\n  main.go\n  util/\n    helpers.go"},
 		{"unfinished console call in prose", "Open the console.log( file to see output"},
+		{"python with a javascript call in a comment", "import os\n# console.log(x)"},
+		{"python and javascript statements", "import os\nconsole.log(os)"},
 	}
 
 	for _, tt := range tests {
@@ -167,6 +169,9 @@ func TestDetect_ConfidentLanguages(t *testing.T) {
 		{"uppercase sql insert", "INSERT INTO users (id) VALUES (1);", "sql"},
 		{"dockerfile with arg", "ARG BASE=golang\nFROM ${BASE}\nRUN go build", "dockerfile"},
 		{"multi-word language name uses an alias", "#!/usr/bin/env sbcl\n(print 1)", "lisp"},
+		{"python with a javascript call in a string", "def example():\n    print(\"console.log(x)\")", "python"},
+		{"javascript with a python definition in a comment", "// def foo():\nconsole.log(1)", "javascript"},
+		{"rust lifetime is not a string", "fn first<'a>(x: &'a str) -> &'a str {\n    x\n}", "rust"},
 	}
 
 	for _, tt := range tests {
