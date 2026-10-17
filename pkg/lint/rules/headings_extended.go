@@ -703,9 +703,10 @@ func trailingPunctuationFix(
 		deleteStart--
 	}
 	if detectHeadingStyle(file, heading) == StyleSetext {
-		// Only indentation and blockquote markers may precede the content
-		// of a setext continuation line.
-		if len(bytes.TrimLeft(file.Content[line.StartOffset:deleteStart], " \t>")) == 0 {
+		// The line would be left blank within its containers.
+		lineNum, _ := file.LineAt(start)
+		prefixEnd := line.StartOffset + len(lint.ContainerPrefix(file, heading, lineNum))
+		if prefixEnd >= deleteStart || len(bytes.TrimSpace(file.Content[prefixEnd:deleteStart])) == 0 {
 			return nil
 		}
 	}

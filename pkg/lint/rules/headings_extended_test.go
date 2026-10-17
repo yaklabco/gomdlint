@@ -909,6 +909,12 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 			input:     "Heading\n.\n---\n",
 			wantLines: []int{2},
 		},
+		{
+			// "- \n  ---" would turn the heading into a horizontal rule.
+			name:      "setext heading of only punctuation in a list item is not fixed",
+			input:     "- .\n  ---\n",
+			wantLines: []int{1},
+		},
 	}
 
 	for _, tt := range tests {
