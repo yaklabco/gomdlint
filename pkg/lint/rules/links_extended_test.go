@@ -140,6 +140,8 @@ func TestNoBareURLsRule_AutolinkLiterals(t *testing.T) {
 		{"email in parentheses", "Mail (user@example.com) now\n", []position{{1, 7}}, "Mail (<user@example.com>) now\n", ""},
 		{"url after a parenthesis at the line start", "(https://example.com/a) here\n", []position{{1, 2}},
 			"(<https://example.com/a>) here\n", ""},
+		{"blank line between the url and a table", "See https://example.com here\n\n| a | b |\n| - | - |\n",
+			[]position{{1, 5}}, "See <https://example.com> here\n\n| a | b |\n| - | - |\n", ""},
 		{"email with trailing period", "Mail user@example.com.\n", []position{{1, 6}}, "Mail <user@example.com>.\n", ""},
 		{"entity after url", "Go to https://example.com/q?a=1&amp; now\n", []position{{1, 7}},
 			"Go to https://example.com/q?a=1&amp; now\n", ""},
@@ -233,6 +235,7 @@ func TestNoBareURLsRule_FixesAgreeWithTheParser(t *testing.T) {
 		"|%s|b|\n|-|-|\n", "See %s\u00e9 here\n",
 		"|x|%s |\n|-|-|-|\n", "| %s | b |\n|-|-|-|\n", "> | a | b |\n> |---|---|\n|%s|x |\n",
 		"See %s here\n:--\n", "Intro %s\n|a|b|\n|-|-|-|\n",
+		"> See %s here\n>\n> | a | b |\n> | - | - |\n", "See %s here\n    >\n|a|b|\n|-|-|-|\n",
 	}
 	fixes := 0
 	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
@@ -351,12 +354,12 @@ func checkFixConditions(t *testing.T, label, doc string, lineStart, ls, le int, 
 		require.Equal(t, len(trail), bytes.Count(trail, trail[:1]), "%s: a delimiter that could open", label)
 	}
 	// No line of the run around the literal, up to a line of nothing but
-	// spaces, tabs, and blockquote markers, holds a pipe or could be a
-	// delimiter row, so no renderer reads a table there.
+	// spaces and tabs, holds a pipe or could be a delimiter row, so no
+	// renderer reads a table there.
 	lines := strings.Split(doc, "\n")
 	first := strings.Count(doc[:ls], "\n")
 	last := first
-	isBreak := func(line string) bool { return strings.Trim(line, " \t>\r") == "" }
+	isBreak := func(line string) bool { return strings.Trim(line, " \t\r") == "" }
 	for first > 0 && !isBreak(lines[first-1]) {
 		first--
 	}
@@ -543,6 +546,20 @@ func TestNoBareURLsRule_Tables(t *testing.T) {
 			[]position{{4, 3, 19}}, nil},
 		{"tabbed list item in a blockquote", "> -\t|a|b|\n>\t|-|-|\n>\t|x|www.example.com|\n",
 			[]position{{3, 6, 15}}, nil},
+		// Only a blank line ends a run. An indented ">" is paragraph text on
+		// GitHub, where the code span runs on to the third line and holds the
+		// URL; goldmark, which reads the last two lines as a table, leaves the
+		// backtick open, so the URL is a known difference with GFM.
+		{"code span over an indented > line", "`open https://example.com\n    >\n|a|b`|\n|-|-|-|\n",
+			[]position{{1, 7, 19}}, nil},
+		{"code span over a tab-indented > line", "`open https://example.com\n\t>\n|a|b`|\n|-|-|-|\n",
+			[]position{{1, 7, 19}}, nil},
+		{"paragraph that a > line separates from a table in a blockquote",
+			"> See https://example.com here\n>\n> | a | b |\n> | - | - |\n",
+			[]position{{1, 7, 19}}, []position{{1, 7, 19}}},
+		{"paragraph that an unindented > line separates from a table",
+			"See https://example.com here\n>\n| a | b |\n| - | - |\n",
+			[]position{{1, 5, 19}}, []position{{1, 5, 19}}},
 	}
 	for _, tt := range tests {
 		for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {

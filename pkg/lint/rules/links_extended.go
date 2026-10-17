@@ -498,14 +498,16 @@ func (s *bareURLScan) add(start, end int, kind mdscan.LiteralKind, fixable bool)
 }
 
 // tableRuns splits the lines of a file into runs: maximal sequences of lines
-// that hold something besides spaces, tabs, and blockquote markers. Every
-// other line ends a paragraph in every container, so each paragraph, and
-// each table with the paragraph its header row comes from, lies inside one
-// run, as cmark-gfm's try_opening_table_header (which reads the header row
-// from the last line of the paragraph above the delimiter row) and matches
-// (which continues a table only with lines inside its containers) build
-// them. A run could hold a table when one of its lines holds a pipe or could
-// be a delimiter row (see couldHoldTableSyntax).
+// that hold something besides spaces and tabs. A blank line ends every
+// paragraph and table in every container, and no inline construct crosses
+// it, so each paragraph, and each table with the paragraph its header row
+// comes from, lies inside one run, as cmark-gfm's try_opening_table_header
+// (which reads the header row from the last line of the paragraph above the
+// delimiter row) and matches (which continues a table only with the lines
+// after it) build them. Nothing else ends a run: a line of blockquote
+// markers ends a paragraph only when the markers are not indented, and an
+// indented ">" is paragraph text. A run could hold a table when one of its
+// lines holds a pipe or could be a delimiter row (see couldHoldTableSyntax).
 type tableRuns struct {
 	run      []int  // run[line] numbers the run of a 1-based line; -1 between runs
 	tableish []bool // tableish[run] reports whether the run could hold a table
@@ -516,7 +518,7 @@ func newTableRuns(file *mdast.FileSnapshot) tableRuns {
 	current := -1
 	for line := 1; line <= len(file.Lines); line++ {
 		text := lint.LineText(file, line)
-		if len(bytes.Trim(text, " \t>")) == 0 {
+		if len(bytes.Trim(text, " \t")) == 0 {
 			runs.run[line], current = -1, -1
 			continue
 		}
