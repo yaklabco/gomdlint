@@ -63,7 +63,41 @@ func WriteAtomic(ctx context.Context, path string, content []byte, mode os.FileM
 	case existing.IsDir():
 		return fmt.Errorf("%w: %s", ErrIsDirectory, target)
 	}
+	return writeFile(target, content, mode, existing)
+}
 
+// ReplaceFile writes content to path like WriteAtomic, but never follows a
+// symbolic link at path: it is for a path that the caller has already
+// resolved and checked, and it fails with ErrSymlink if a link appeared
+// there since. Hard links, owners and modes are handled as in WriteAtomic.
+func ReplaceFile(ctx context.Context, path string, content []byte, mode os.FileMode) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("replace file: %w", ctx.Err())
+	default:
+	}
+
+	if mode == 0 {
+		mode = DefaultFileMode
+	}
+
+	existing, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		existing = nil
+	case err != nil:
+		return fmt.Errorf("stat %s: %w", path, err)
+	case existing.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%w: %s", ErrSymlink, path)
+	case existing.IsDir():
+		return fmt.Errorf("%w: %s", ErrIsDirectory, path)
+	}
+	return writeFile(path, content, mode, existing)
+}
+
+// writeFile writes content to target, which is not a symbolic link, given
+// its current state (existing is nil when the file does not exist yet).
+func writeFile(target string, content []byte, mode os.FileMode, existing os.FileInfo) error {
 	if existing != nil && hasMultipleLinks(target, existing) {
 		return rewriteInPlace(target, content, mode)
 	}
@@ -132,7 +166,7 @@ func replaceFile(target string, content []byte, mode os.FileMode, existing os.Fi
 		if !restored {
 			// Keep the owner by rewriting the original file in place, if we
 			// may write it. The deferred cleanup removes the temp file.
-			file, err := os.OpenFile(target, os.O_WRONLY, 0)
+			file, err := os.OpenFile(target, os.O_WRONLY|openNoFollow, 0)
 			switch {
 			case err == nil:
 				return rewriteOpenFile(target, file, content, mode)
@@ -182,7 +216,7 @@ type contentWriter interface {
 // it, which keeps its inode, hard links and owner. On failure it tries to
 // put the original content back.
 func rewriteInPlace(target string, content []byte, mode os.FileMode) error {
-	file, err := os.OpenFile(target, os.O_WRONLY, 0)
+	file, err := os.OpenFile(target, os.O_WRONLY|openNoFollow, 0)
 	if err != nil {
 		return fmt.Errorf("open %s for an in-place rewrite: %w", target, err)
 	}

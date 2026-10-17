@@ -7,6 +7,9 @@ import (
 	"syscall"
 )
 
+// openNoFollow is not available on Windows.
+const openNoFollow = 0
+
 // hasMultipleLinks reports whether the file at path has more than one hard
 // link. If the link count cannot be read, the file is treated as having one.
 func hasMultipleLinks(path string, _ os.FileInfo) bool {

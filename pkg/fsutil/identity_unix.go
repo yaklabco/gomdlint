@@ -8,6 +8,11 @@ import (
 	"syscall"
 )
 
+// openNoFollow makes opening a path fail if its last element is a symbolic
+// link, so an in-place rewrite never writes through a link that appeared
+// after the path was checked.
+const openNoFollow = syscall.O_NOFOLLOW
+
 // hasMultipleLinks reports whether the file described by info has more than
 // one hard link.
 func hasMultipleLinks(_ string, info os.FileInfo) bool {

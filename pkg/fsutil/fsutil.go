@@ -86,6 +86,10 @@ var (
 
 	// ErrIsDirectory indicates the path is a directory, not a file.
 	ErrIsDirectory = errors.New("path is a directory")
+
+	// ErrSymlink indicates that ReplaceFile found a symbolic link at a path
+	// that was meant to be resolved already.
+	ErrSymlink = errors.New("path is a symbolic link")
 )
 
 // CheckModified returns true if the file has been modified since the given FileInfo.

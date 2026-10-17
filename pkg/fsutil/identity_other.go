@@ -4,6 +4,9 @@ package fsutil
 
 import "os"
 
+// openNoFollow is not available on these platforms.
+const openNoFollow = 0
+
 // hasMultipleLinks always reports false where link counts are unavailable.
 func hasMultipleLinks(_ string, _ os.FileInfo) bool {
 	return false
