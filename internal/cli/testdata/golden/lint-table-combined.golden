@@ -10,7 +10,7 @@
  W  docs/guide.md  11:9   Heading ends with trailin...  MD026/no-trailing-punctuation           +
  W  docs/guide.md  13:14  Trailing whitespace           MD009/no-trailing-spaces                +
  W  docs/guide.md  14:12  Trailing whitespace           MD009/no-trailing-spaces                +
- W  docs/guide.md  17:1   Unused reference definiti...  MD053/link-image-reference-definitions   
+ W  docs/guide.md  17:1   Unused reference definiti...  MD053/link-image-reference-definitions  +
 ====================================================================================================
  Legend: E = error | W = warning | + = fixable
  2 files checked | 1 error | 9 warnings

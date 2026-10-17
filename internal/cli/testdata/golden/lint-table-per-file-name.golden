@@ -17,9 +17,9 @@ docs/guide.md
  W  11:9        Heading ends with trailing punctuation ":"  no-trailing-punctuation           +
  W  13:14       Trailing whitespace                         no-trailing-spaces                +
  W  14:12       Trailing whitespace                         no-trailing-spaces                +
- W  17:1        Unused reference definition [unused]        link-image-reference-definitions   
+ W  17:1        Unused reference definition [unused]        link-image-reference-definitions  +
 ==================================================================================================
- 1 error | 6 warnings | 5 fixable
+ 1 error | 6 warnings | 6 fixable
 
  Legend: E = error | W = warning | + = fixable
 
