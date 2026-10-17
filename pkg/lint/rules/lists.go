@@ -353,6 +353,10 @@ type numberMismatch struct {
 	orderedItem
 	expected int
 	text     string
+	// startChanges is true when the first item of the list is misnumbered.
+	// The first number is the start the list renders with, so no item of
+	// such a list is renumbered.
+	startChanges bool
 }
 
 // Apply checks ordered list item prefixes.
@@ -360,7 +364,10 @@ type numberMismatch struct {
 // The default style is markdownlint's one_or_ordered: a list is valid when all
 // its items are numbered 1, or when it counts up from 0 or 1. The styles one,
 // ordered and zero force one pattern. Fixes replace only the digits, keep the
-// delimiter, and keep right-aligned or zero-padded numbers aligned.
+// delimiter, and keep right-aligned or zero-padded numbers aligned. A list
+// whose first number is wrong, such as one counting up from 3, is reported
+// like markdownlint does but not fixed, because renumbering its first item
+// would change the number the rendered list starts at.
 func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -383,6 +390,9 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 	plan := newListShiftPlan(ctx.File)
 	if allowRenumbering {
 		for _, mismatch := range mismatches {
+			if mismatch.startChanges {
+				continue
+			}
 			if shift, moves := numberShift(plan, mismatch); moves {
 				plan.propose(mismatch.item, shift)
 			}
@@ -392,26 +402,14 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
 	for _, mismatch := range mismatches {
-		fixable := allowRenumbering && !followsText(ctx.File, mismatch)
-		if shift, moves := numberShift(plan, mismatch); moves {
+		fixable := allowRenumbering && !mismatch.startChanges
+		if shift, moves := numberShift(plan, mismatch); fixable && moves {
 			accepted, ok := safeShifts[mismatch.item]
 			fixable = fixable && ok && accepted == shift
 		}
 		diags = append(diags, r.numberDiagnostic(ctx, mismatch, fixable))
 	}
 	return diags, nil
-}
-
-// followsText reports whether renumbering would make a list that directly
-// follows a non-blank line start at a number other than 1. Only a list
-// starting at 1 can interrupt a paragraph, so the new number could turn the
-// list into paragraph text.
-func followsText(file *mdast.FileSnapshot, mismatch numberMismatch) bool {
-	line := mismatch.marker.Line
-	if mismatch.expected == 1 || previousListItem(mismatch.item) != nil || line <= 1 {
-		return false
-	}
-	return !lint.IsBlankLineInContainer(file, mismatch.item.Parent, line-1)
 }
 
 // orderedListMismatches applies markdownlint's numbering policy to one list.
@@ -458,19 +456,16 @@ func orderedListMismatches(file *mdast.FileSnapshot, list *mdast.Node, style str
 	case orderedStyleOne:
 		expected = 1
 	}
-	if rightAligned && !zeroPrefixed && items[0].found && len(strconv.Itoa(expected)) < len(items[0].marker.NumberText) {
-		// Space padding would move the first marker, which has nothing above
-		// it to align with and could slide under a list that precedes it.
-		rightAligned = false
-	}
+	startChanges := items[0].found && items[0].marker.Number != expected
 
 	var mismatches []numberMismatch
 	for _, item := range items {
 		if item.found && item.marker.Number != expected {
 			mismatches = append(mismatches, numberMismatch{
-				orderedItem: item,
-				expected:    expected,
-				text:        orderedNumberText(expected, item.marker.NumberText, rightAligned, zeroPrefixed),
+				orderedItem:  item,
+				expected:     expected,
+				text:         orderedNumberText(expected, item.marker.NumberText, rightAligned, zeroPrefixed),
+				startChanges: startChanges,
 			})
 		}
 		if listStyle == orderedStyleOrdered {

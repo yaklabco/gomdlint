@@ -238,17 +238,38 @@ func TestOrderedListIncrementRule(t *testing.T) {
 			wantFix:   "1. Item 1\n2. Item 2\n3. Item 3\n",
 		},
 		{
-			// markdownlint expects an incrementing list to start at 0 or 1.
-			name:      "list starting above one is renumbered",
+			// markdownlint expects an incrementing list to start at 0 or 1,
+			// but the first number is the start the list renders with, so
+			// no item of the list is renumbered.
+			name:      "list starting above one is reported without a fix",
 			input:     "5. Item 1\n6. Item 2\n7. Item 3\n",
 			wantDiags: 3,
-			wantFix:   "1. Item 1\n2. Item 2\n3. Item 3\n",
+			wantFix:   "5. Item 1\n6. Item 2\n7. Item 3\n",
 		},
 		{
-			name:      "single item must be one",
+			name:      "list starting above one in a blockquote is reported without a fix",
+			input:     "> 3. Step three\n> 4. Step four\n",
+			wantDiags: 2,
+			wantFix:   "> 3. Step three\n> 4. Step four\n",
+		},
+		{
+			name:      "single item numbered above one is reported without a fix",
 			input:     "2. Item\n",
 			wantDiags: 1,
-			wantFix:   "1. Item\n",
+			wantFix:   "2. Item\n",
+		},
+		{
+			name:      "ones style reports a list starting at zero without a fix",
+			input:     "0. Item\n0. Item\n",
+			wantDiags: 2,
+			wantFix:   "0. Item\n0. Item\n",
+			config:    map[string]any{"style": "one"},
+		},
+		{
+			name:      "zero-based list is renumbered from zero",
+			input:     "0. Item\n2. Item\n",
+			wantDiags: 1,
+			wantFix:   "0. Item\n1. Item\n",
 		},
 		{
 			name:      "incrementing list with a repeated number",
@@ -264,9 +285,16 @@ func TestOrderedListIncrementRule(t *testing.T) {
 		},
 		{
 			name:      "zero style",
+			input:     "0. Item\n1. Item\n",
+			wantDiags: 1,
+			wantFix:   "0. Item\n0. Item\n",
+			config:    map[string]any{"style": "zero"},
+		},
+		{
+			name:      "zero style reports a list starting at one without a fix",
 			input:     "1. Item\n",
 			wantDiags: 1,
-			wantFix:   "0. Item\n",
+			wantFix:   "1. Item\n",
 			config:    map[string]any{"style": "zero"},
 		},
 		{
@@ -299,15 +327,27 @@ func TestOrderedListIncrementRule(t *testing.T) {
 		},
 		{
 			name:      "fix keeps right-aligned numbers aligned",
+			input:     " 1. Item\n 2. Item\n 9. Item\n10. Item\n",
+			wantDiags: 2,
+			wantFix:   " 1. Item\n 2. Item\n 3. Item\n 4. Item\n",
+		},
+		{
+			name:      "right-aligned list starting above one is reported without a fix",
 			input:     " 9. Item\n10. Item\n11. Item\n",
 			wantDiags: 3,
-			wantFix:   " 1. Item\n 2. Item\n 3. Item\n",
+			wantFix:   " 9. Item\n10. Item\n11. Item\n",
 		},
 		{
 			name:      "fix keeps zero-padded numbers padded",
+			input:     "01. Item\n02. Item\n04. Item\n10. Item\n",
+			wantDiags: 2,
+			wantFix:   "01. Item\n02. Item\n03. Item\n04. Item\n",
+		},
+		{
+			name:      "zero-padded list starting above one is reported without a fix",
 			input:     "08. Item\n09. Item\n10. Item\n",
 			wantDiags: 3,
-			wantFix:   "01. Item\n02. Item\n03. Item\n",
+			wantFix:   "08. Item\n09. Item\n10. Item\n",
 		},
 		{
 			name:      "wider number is fixed when nothing depends on the content column",
@@ -316,26 +356,20 @@ func TestOrderedListIncrementRule(t *testing.T) {
 			wantFix:   "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j\n",
 		},
 		{
-			// Padding the first item aligns it with nothing and would move it
-			// under the bullet item above, nesting the ordered list inside it.
-			name:      "first item is not padded",
+			// The first number is the start of the list, so a first item is
+			// neither renumbered nor padded.
+			name:      "first item is neither renumbered nor padded",
 			input:     "- first item\n 10. second item\n",
 			wantDiags: 1,
-			wantFix:   "- first item\n 1. second item\n",
-		},
-		{
-			name:      "single item is renumbered without padding",
-			input:     "10. Item\n",
-			wantDiags: 1,
-			wantFix:   "1. Item\n",
+			wantFix:   "- first item\n 10. second item\n",
 		},
 		{
 			// A space inserted right after ">" becomes the blockquote's
 			// optional space instead of moving the marker.
 			name:      "no padding right after a blockquote marker",
-			input:     "> 9. a\n>10. b\n",
+			input:     "> 1. a\n> 9. b\n>10. c\n",
 			wantDiags: 2,
-			wantFix:   "> 1. a\n>10. b\n",
+			wantFix:   "> 1. a\n> 2. b\n>10. c\n",
 		},
 		{
 			// Only a list starting at 1 can interrupt a paragraph, so "0." would

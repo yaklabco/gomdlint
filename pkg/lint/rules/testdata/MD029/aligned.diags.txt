@@ -1,0 +1,4 @@
+aligned.input.md:5:2 warning Ordered list item numbered 9 should be 3 (MD029/ol-prefix) [fixable]
+aligned.input.md:6:1 warning Ordered list item numbered 10 should be 4 (MD029/ol-prefix) [fixable]
+aligned.input.md:12:1 warning Ordered list item numbered 4 should be 3 (MD029/ol-prefix) [fixable]
+aligned.input.md:13:1 warning Ordered list item numbered 10 should be 4 (MD029/ol-prefix) [fixable]

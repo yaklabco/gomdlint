@@ -6,7 +6,7 @@
     "column": 1,
     "message": "Ordered list item numbered 2 should be 1",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD029",
@@ -33,7 +33,7 @@
     "column": 1,
     "message": "Ordered list item numbered 4 should be 1",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD029",
@@ -42,7 +42,7 @@
     "column": 1,
     "message": "Ordered list item numbered 5 should be 2",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD029",
