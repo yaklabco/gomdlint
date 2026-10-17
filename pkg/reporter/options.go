@@ -59,7 +59,12 @@ type Options struct {
 	// Registry supplies rule metadata (descriptions, tags and default
 	// severities) to formats that describe rules, such as SARIF. When nil,
 	// lint.DefaultRegistry is used.
-	Registry *lint.Registry
+	Registry RuleLookup
+}
+
+// RuleLookup finds a rule by its ID. *lint.Registry implements it.
+type RuleLookup interface {
+	GetByID(id string) (lint.Rule, bool)
 }
 
 // DefaultOptions returns Options with sensible defaults.

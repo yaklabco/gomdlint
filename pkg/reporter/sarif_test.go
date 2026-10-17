@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -91,10 +93,14 @@ func newGitWorkTree(t *testing.T, gitFile bool) string {
 	return root
 }
 
-// fileURIPrefix returns the file URI of an absolute directory whose name needs
-// no percent-encoding, which holds for the temporary directories tests use.
-func fileURIPrefix(dir string) string {
-	return "file://" + filepath.ToSlash(dir)
+// fileURIPrefix returns the file URI of an absolute local path, with three
+// slashes before a Windows drive letter as before a Unix root.
+func fileURIPrefix(path string) string {
+	slashed := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return (&url.URL{Scheme: "file", Path: slashed}).String()
 }
 
 func resultLocations(run reporter.SARIFRun) []reporter.SARIFArtifactLocation {
@@ -671,6 +677,46 @@ func TestSARIFReporter_SuccessfulRun(t *testing.T) {
 	require.Len(t, run.Invocations, 1)
 	assert.True(t, run.Invocations[0].ExecutionSuccessful, "findings do not make a run fail")
 	assert.Empty(t, run.Invocations[0].ToolExecutionNotifications)
+}
+
+// ruleLookup is a minimal rule catalogue for tests.
+type ruleLookup map[string]lint.Rule
+
+func (l ruleLookup) GetByID(id string) (lint.Rule, bool) {
+	rule, ok := l[id]
+	return rule, ok
+}
+
+func TestSARIFReporter_AcceptsAnyRuleLookup(t *testing.T) {
+	t.Parallel()
+
+	custom := lint.NewBaseRule("ZZ001", "custom-rule", "Custom rules are described too", []string{"custom", "custom"}, false)
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "ZZ001", StartLine: 1}),
+	}}
+
+	driver := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: ruleLookup{"ZZ001": &custom}}, result).Runs[0].Tool.Driver
+
+	require.Len(t, driver.Rules, 1)
+	require.NotNil(t, driver.Rules[0].ShortDescription)
+	assert.Equal(t, "Custom rules are described too", driver.Rules[0].ShortDescription.Text)
+	assert.Equal(t, "custom-rule", driver.Rules[0].Name)
+	assert.Equal(t, []any{"custom"}, driver.Rules[0].Properties["tags"], "tags are unique")
+}
+
+func TestSARIFReporter_TypedNilRegistryFallsBackToDefault(t *testing.T) {
+	t.Parallel()
+
+	var registry *lint.Registry
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(newGitWorkTree(t, false), "a.md"), umlautContent, lint.Diagnostic{RuleID: "MD009", StartLine: 3}),
+	}}
+
+	driver := decodeSARIF(t, reporter.Options{Registry: registry}, result).Runs[0].Tool.Driver
+
+	require.Len(t, driver.Rules, 1)
+	assert.NotNil(t, driver.Rules[0].ShortDescription, "the default registry describes MD009")
 }
 
 func TestSARIFReporter_ToolMetadata(t *testing.T) {

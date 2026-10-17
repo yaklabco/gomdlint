@@ -210,13 +210,13 @@ type SARIFInsertedContent struct {
 type SARIFReporter struct {
 	opts     Options
 	out      io.Writer
-	registry *lint.Registry
+	registry RuleLookup
 }
 
 // NewSARIFReporter creates a new SARIF reporter.
 func NewSARIFReporter(opts Options) *SARIFReporter {
 	registry := opts.Registry
-	if registry == nil {
+	if concrete, ok := registry.(*lint.Registry); registry == nil || (ok && concrete == nil) {
 		registry = lint.DefaultRegistry
 	}
 
@@ -244,9 +244,9 @@ func (r *SARIFReporter) Report(_ context.Context, result *runner.Result) (int, e
 }
 
 func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
-	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok {
-		buildInfo = nil
+	var buildInfo *debug.BuildInfo
+	if info, ok := debug.ReadBuildInfo(); ok {
+		buildInfo = info
 	}
 
 	run := SARIFRun{
@@ -325,7 +325,7 @@ func toolVersion(explicit string, buildInfo *debug.BuildInfo) string {
 // sarifRunBuilder accumulates the rules, results and failures of a run.
 type sarifRunBuilder struct {
 	run        *SARIFRun
-	registry   *lint.Registry
+	registry   RuleLookup
 	locator    *artifactLocator
 	described  map[string]bool
 	invocation SARIFInvocation
