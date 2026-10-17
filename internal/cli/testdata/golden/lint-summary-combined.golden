@@ -5,7 +5,7 @@ Rule                                     Count  Errors Warnings  Fixable
 MD009/no-trailing-spaces                     5       0        5        ✓
 MD026/no-trailing-punctuation                3       0        3        ✓
 MD001/heading-increment                      1       1        0         
-MD053/link-image-reference-definitions       1       0        1         
+MD053/link-image-reference-definitions       1       0        1        ✓
 
 Files Summary
 ──────────────────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,2 @@
+basic.input.md:6:2 warning Missing leading pipe: expected leading_and_trailing, found no_leading_or_trailing (MD055/table-pipe-style)
+basic.input.md:6:10 warning Missing trailing pipe: expected leading_and_trailing, found no_leading_or_trailing (MD055/table-pipe-style)

@@ -1,228 +1,264 @@
-// Package langdetect provides language detection for code content.
-// It uses go-enry to detect programming languages from code snippets,
-// primarily for auto-detecting language identifiers in code blocks.
+// Package langdetect names the language of a code block for MD040, which
+// inserts it into a fenced code block that has none.
+//
+// A wrong name is worse than none, so Detect only names a language when the
+// whole block says which one it is, in a way that strings and comments
+// cannot fake: a shebang on the first line, content that parses completely
+// as JSON or as an XML document, a PHP or HTML document opening, a complete
+// unified diff, or a Dockerfile whose first instruction is FROM. Statements
+// of a language never count, because they can appear inside another
+// language's strings and comments. Everything else is "text", and MD040
+// then reports the block without a fix.
 package langdetect
 
 import (
 	"bytes"
+	"encoding/json"
+	"encoding/xml"
+	"errors"
+	"io"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/go-enry/go-enry/v2"
 )
 
-// Language constants for common detected languages.
+// Language identifiers returned by Detect.
 const (
-	langGo         = "go"
-	langPython     = "python"
-	langJavaScript = "javascript"
-	langJSON       = "json"
-	langYAML       = "yaml"
-	langHTML       = "html"
-	langSQL        = "sql"
-	langRust       = "rust"
-	langDockerfile = "dockerfile"
-	langText       = "text"
 	langBash       = "bash"
+	langDiff       = "diff"
+	langDockerfile = "dockerfile"
+	langHTML       = "html"
+	langJSON       = "json"
+	langPHP        = "php"
+	langText       = "text"
+	langXML        = "xml"
 )
 
-// Detect returns the detected language for code content.
-// Returns "text" if detection fails or confidence is low.
+// minDockerInstructions is the number of instructions a Dockerfile needs, so
+// a single line that starts with FROM is not taken for one.
+const minDockerInstructions = 2
+
+// Detect returns the language of a code block, or "text" when the whole
+// block does not name one beyond doubt.
 func Detect(content []byte) string {
-	if len(content) == 0 {
+	if len(bytes.TrimSpace(content)) == 0 {
 		return langText
 	}
-
-	// Strategy 1: Check shebang first (most reliable).
-	if lang, safe := enry.GetLanguageByShebang(content); safe {
-		return normalize(lang)
+	if bytes.HasPrefix(content, []byte("#!")) {
+		if lang, safe := enry.GetLanguageByShebang(content); safe {
+			return normalize(lang)
+		}
+		return langText
 	}
-
-	// Strategy 2: Check for language-specific patterns before using classifier.
-	if lang := detectByPattern(content); lang != "" {
-		return lang
+	trimmed := bytes.TrimSpace(content)
+	lower := bytes.ToLower(trimmed)
+	lines := blockLines(content)
+	switch {
+	case (trimmed[0] == '{' || trimmed[0] == '[') && json.Valid(trimmed):
+		return langJSON
+	case bytes.HasPrefix(trimmed, []byte("<?xml")) && isXMLDocument(trimmed):
+		return langXML
+	case bytes.HasPrefix(lower, []byte("<?php")):
+		return langPHP
+	case bytes.HasPrefix(lower, []byte("<!doctype html")):
+		return langHTML
+	case isUnifiedDiff(lines):
+		return langDiff
+	case isDockerfile(lines):
+		return langDockerfile
 	}
-
-	// Strategy 3: Use classifier with common language candidates.
-	candidates := []string{
-		"Go", "Python", "Shell", "JavaScript", "TypeScript",
-		"Ruby", "Rust", "Java", "C", "C++", "SQL", "JSON",
-		"YAML", "HTML", "CSS", "Markdown", "Dockerfile",
-	}
-
-	// Use classifier - it returns the most probable language.
-	// Only use the result if confidence is high (safe == true).
-	if lang, safe := enry.GetLanguageByClassifier(content, candidates); safe && lang != "" {
-		return normalize(lang)
-	}
-
 	return langText
 }
 
-// detectByPattern checks for language-specific patterns that are highly indicative.
-func detectByPattern(content []byte) string {
-	contentStr := string(content)
-	trimmed := bytes.TrimSpace(content)
-
-	// Check patterns in order of specificity.
-	if lang := detectGo(trimmed); lang != "" {
-		return lang
+// blockLines splits content into lines without line endings, dropping the
+// empty lines at the end.
+func blockLines(content []byte) []string {
+	lines := strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
 	}
-	if lang := detectPython(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectHTML(trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectJSON(trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectDockerfile(content, trimmed); lang != "" {
-		return lang
-	}
-	if lang := detectSQL(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectRust(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectJavaScript(contentStr); lang != "" {
-		return lang
-	}
-	if lang := detectYAML(content); lang != "" {
-		return lang
-	}
-
-	return ""
+	return lines
 }
 
-// detectGo checks for Go language patterns.
-func detectGo(trimmed []byte) string {
-	if bytes.HasPrefix(trimmed, []byte("package ")) {
-		return langGo
-	}
-	return ""
-}
-
-// detectPython checks for Python language patterns.
-func detectPython(contentStr string) string {
-	// def/class definitions with colon.
-	if strings.Contains(contentStr, "def ") && strings.Contains(contentStr, "):") {
-		return langPython
-	}
-	// Python import statements (not Go which uses "import (").
-	if strings.Contains(contentStr, "import ") && !strings.Contains(contentStr, "import (") {
-		if strings.Contains(contentStr, "from ") || strings.HasPrefix(strings.TrimSpace(contentStr), "import ") {
-			return langPython
+// isXMLDocument reports whether content is one well-formed XML document: a
+// single root element with nothing but markup around it.
+func isXMLDocument(content []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(content))
+	depth, roots := 0, 0
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return roots == 1 && depth == 0
 		}
-	}
-	// Python dunder variables.
-	if strings.Contains(contentStr, "__name__") || strings.Contains(contentStr, "__main__") {
-		return langPython
-	}
-	return ""
-}
-
-// detectHTML checks for HTML language patterns.
-func detectHTML(trimmed []byte) string {
-	lowerTrimmed := bytes.ToLower(trimmed)
-	if bytes.Contains(lowerTrimmed, []byte("<!doctype html")) ||
-		bytes.Contains(lowerTrimmed, []byte("<html")) ||
-		bytes.Contains(lowerTrimmed, []byte("<head>")) ||
-		bytes.Contains(lowerTrimmed, []byte("<body>")) {
-		return langHTML
-	}
-	return ""
-}
-
-// detectJSON checks for JSON patterns.
-func detectJSON(trimmed []byte) string {
-	if (bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))) &&
-		bytes.Contains(trimmed, []byte(`"`)) {
-		return langJSON
-	}
-	return ""
-}
-
-// detectDockerfile checks for Dockerfile patterns.
-func detectDockerfile(content, trimmed []byte) string {
-	if bytes.HasPrefix(trimmed, []byte("FROM ")) ||
-		(bytes.Contains(content, []byte("\nFROM ")) && bytes.Contains(content, []byte("\nRUN "))) ||
-		(bytes.Contains(content, []byte("WORKDIR ")) && bytes.Contains(content, []byte("COPY "))) {
-		return langDockerfile
-	}
-	return ""
-}
-
-// detectSQL checks for SQL patterns.
-func detectSQL(contentStr string) string {
-	upper := strings.ToUpper(contentStr)
-	trimmedUpper := strings.TrimSpace(upper)
-	if strings.HasPrefix(trimmedUpper, "SELECT ") ||
-		strings.HasPrefix(trimmedUpper, "INSERT ") ||
-		strings.HasPrefix(trimmedUpper, "UPDATE ") ||
-		strings.HasPrefix(trimmedUpper, "DELETE ") ||
-		strings.HasPrefix(trimmedUpper, "CREATE ") {
-		return langSQL
-	}
-	return ""
-}
-
-// detectRust checks for Rust language patterns.
-func detectRust(contentStr string) string {
-	if strings.Contains(contentStr, "fn main()") ||
-		strings.Contains(contentStr, "println!") ||
-		strings.Contains(contentStr, "let mut ") {
-		return langRust
-	}
-	return ""
-}
-
-// detectJavaScript checks for JavaScript patterns.
-func detectJavaScript(contentStr string) string {
-	if strings.Contains(contentStr, "=>") ||
-		strings.Contains(contentStr, "const ") ||
-		strings.Contains(contentStr, "let ") ||
-		strings.Contains(contentStr, "console.log") {
-		return langJavaScript
-	}
-	return ""
-}
-
-// detectYAML checks for YAML patterns by counting key: value pairs.
-func detectYAML(content []byte) string {
-	lines := bytes.Split(content, []byte("\n"))
-	yamlKeyCount := 0
-
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || bytes.HasPrefix(line, []byte("#")) {
-			continue
+		if err != nil {
+			return false
 		}
-		// Simple key: value (identifier followed by colon and space).
-		// Exclude lines that look like code (contain parentheses, brackets).
-		if bytes.Contains(line, []byte(": ")) {
-			if !bytes.Contains(line, []byte("(")) &&
-				!bytes.Contains(line, []byte("{")) &&
-				!bytes.HasPrefix(line, []byte(`"`)) {
-				yamlKeyCount++
+		switch token := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				roots++
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if depth == 0 && len(bytes.TrimSpace(token)) > 0 {
+				return false
 			}
 		}
-		// YAML list item at root level.
-		if bytes.HasPrefix(line, []byte("- ")) {
-			yamlKeyCount++
-		}
 	}
-
-	if yamlKeyCount >= 2 {
-		return langYAML
-	}
-	return ""
 }
 
-// normalize converts go-enry language names to fence tags.
+var (
+	// diffHunkHeader matches "@@ -start[,count] +start[,count] @@".
+	diffHunkHeader = regexp.MustCompile(`^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@`)
+	// gitHeaderLine matches the extended header lines git writes before a
+	// file's "---" and "+++" lines.
+	gitHeaderLine = regexp.MustCompile(`^(?:diff --git |index |(?:new|deleted) file mode |(?:old|new) mode |` +
+		`similarity index |dissimilarity index |rename (?:from|to) |copy (?:from|to) )`)
+)
+
+// isUnifiedDiff reports whether lines are complete unified diffs and nothing
+// else: one or more file sections, each with optional git header lines, a
+// "---" line, a "+++" line, and hunks whose lines match the counts in their
+// headers.
+func isUnifiedDiff(lines []string) bool {
+	idx, sections := 0, 0
+	for idx < len(lines) {
+		for idx < len(lines) && gitHeaderLine.MatchString(lines[idx]) {
+			idx++
+		}
+		if idx+1 >= len(lines) || !strings.HasPrefix(lines[idx], "--- ") || !strings.HasPrefix(lines[idx+1], "+++ ") {
+			return false
+		}
+		idx += 2
+		hunks := 0
+		for idx < len(lines) {
+			header := diffHunkHeader.FindStringSubmatch(lines[idx])
+			if header == nil {
+				break
+			}
+			next, ok := hunkEnd(lines, idx+1, hunkCount(header[1]), hunkCount(header[2]))
+			if !ok {
+				return false
+			}
+			idx = next
+			hunks++
+		}
+		if hunks == 0 {
+			return false
+		}
+		sections++
+	}
+	return sections > 0
+}
+
+// hunkCount reads the line count of a hunk header range, which is 1 when
+// the header leaves it out.
+func hunkCount(text string) int {
+	if text == "" {
+		return 1
+	}
+	count, err := strconv.Atoi(text)
+	if err != nil {
+		return -1
+	}
+	return count
+}
+
+// hunkEnd consumes the lines of a hunk starting at lines[idx] until the old
+// and new line counts are used up, and returns the index after the hunk. A
+// context line (a space, or nothing left of it) counts for both sides, a
+// "-" line for the old side, a "+" line for the new side, and a "\" line
+// ("\ No newline at end of file") for neither.
+func hunkEnd(lines []string, idx, oldCount, newCount int) (int, bool) {
+	if oldCount < 0 || newCount < 0 {
+		return idx, false
+	}
+	for oldCount > 0 || newCount > 0 {
+		if idx >= len(lines) {
+			return idx, false
+		}
+		line := lines[idx]
+		switch {
+		case line == "" || line[0] == ' ':
+			oldCount--
+			newCount--
+		case line[0] == '-':
+			oldCount--
+		case line[0] == '+':
+			newCount--
+		case line[0] == '\\':
+		default:
+			return idx, false
+		}
+		if oldCount < 0 || newCount < 0 {
+			return idx, false
+		}
+		idx++
+	}
+	for idx < len(lines) && strings.HasPrefix(lines[idx], `\`) {
+		idx++
+	}
+	return idx, true
+}
+
+var (
+	// dockerFrom matches a FROM instruction: an optional platform, an image
+	// reference, and an optional stage name after AS, in either case.
+	dockerFrom = regexp.MustCompile(`^FROM\s+(?:--platform=\S+\s+)?[\w.\-/:@${}]+(?:\s+(?i:as)\s+[\w.\-]+)?\s*$`)
+	// dockerInstruction matches the start of any other instruction.
+	dockerInstruction = regexp.MustCompile(
+		`^(?:FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)(?:\s|$)`)
+)
+
+// isDockerfile reports whether every line is a Dockerfile instruction, a
+// continuation of the one before, a comment, or blank, the first
+// instruction is FROM, and there are at least two instructions.
+func isDockerfile(lines []string) bool {
+	instructions := 0
+	continued := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if continued {
+			continued = strings.HasSuffix(trimmed, `\`)
+			continue
+		}
+		switch {
+		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
+			continue
+		case instructions == 0:
+			if !dockerFrom.MatchString(trimmed) {
+				return false
+			}
+		case !dockerInstruction.MatchString(trimmed):
+			return false
+		}
+		instructions++
+		continued = strings.HasSuffix(trimmed, `\`)
+	}
+	return instructions >= minDockerInstructions
+}
+
+// normalize converts go-enry language names to fence tags. An info string
+// ends its first word at a space, so a name with spaces, such as "Common
+// Lisp", becomes its first alias without one, or the name with hyphens.
 func normalize(lang string) string {
 	if lang == "Shell" {
 		return langBash
 	}
-	return strings.ToLower(lang)
+	name := strings.ToLower(lang)
+	if !strings.ContainsAny(name, " \t") {
+		return name
+	}
+	if info, err := enry.GetLanguageInfo(lang); err == nil {
+		for _, alias := range info.Aliases {
+			if alias != "" && !strings.ContainsAny(alias, " \t") {
+				return alias
+			}
+		}
+	}
+	return strings.Join(strings.Fields(name), "-")
 }

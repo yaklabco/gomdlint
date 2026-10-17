@@ -1,0 +1,4 @@
+info_strings.input.md:6:1 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]
+info_strings.input.md:7:1 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]
+info_strings.input.md:13:1 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]
+info_strings.input.md:18:5 warning Dollar signs used before commands without showing output (MD014/commands-show-output) [fixable]

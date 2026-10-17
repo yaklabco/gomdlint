@@ -3,8 +3,8 @@
     "rule": "MD055",
     "name": "table-pipe-style",
     "line": 3,
-    "column": 1,
-    "message": "Table row pipe style 'leading_and_trailing' does not match expected 'leading_only'",
+    "column": 17,
+    "message": "Unexpected trailing pipe: expected leading_only, found leading_and_trailing",
     "severity": "warning",
     "fixable": false
   },
@@ -13,7 +13,7 @@
     "name": "table-pipe-style",
     "line": 6,
     "column": 1,
-    "message": "Table row pipe style 'no_leading_or_trailing' does not match expected 'leading_only'",
+    "message": "Missing leading pipe: expected leading_only, found no_leading_or_trailing",
     "severity": "warning",
     "fixable": false
   }

@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 6,
+    "column": 3,
+    "message": "Unused reference definition [quoted-spare]",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 9,
+    "column": 3,
+    "message": "Unused reference definition [listed-spare]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 18,
+    "column": 1,
+    "message": "Unused reference definition [multi-spare]",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -4,7 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -82,16 +86,28 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 		wantFixedLang string // Expected language to be inserted
 	}{
 		{
-			name:          "go code",
+			name:          "go statements are not whole-block evidence",
 			input:         "```\npackage main\n\nfunc main() {}\n```",
-			wantFix:       true,
-			wantFixedLang: "go",
+			wantFix:       false,
+			wantFixedLang: "",
 		},
 		{
-			name:          "python code",
+			name:          "python statements are not whole-block evidence",
 			input:         "```\ndef hello():\n    print('hello')\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "shebang names the language",
+			input:         "```\n#!/usr/bin/env python3\nprint('hello')\n```",
 			wantFix:       true,
 			wantFixedLang: "python",
+		},
+		{
+			name:          "complete diff",
+			input:         "```\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n```",
+			wantFix:       true,
+			wantFixedLang: "diff",
 		},
 		{
 			name:          "json code",
@@ -106,14 +122,56 @@ func TestCodeBlockLanguageRule_Autofix(t *testing.T) {
 			wantFixedLang: "",
 		},
 		{
-			name:          "tilde fence go code",
-			input:         "~~~\npackage main\n~~~",
+			name:          "tilde fence json",
+			input:         "~~~\n[1, 2]\n~~~",
 			wantFix:       true,
-			wantFixedLang: "go",
+			wantFixedLang: "json",
 		},
 		{
 			name:          "empty code block",
 			input:         "```\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "es module import gets no guess",
+			input:         "```\nimport React from 'react';\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "javascript call inside a python string gets no guess",
+			input:         "```\ndef example():\n    print(\"console.log(x)\")\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "javascript call in a python comment gets no guess",
+			input:         "```\n# console.log(42)\nprint(42)\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "diff inside a python string gets no guess",
+			input:         "```\ndef patch():\n    return \"\"\"\n--- old\n+++ new\n\"\"\"\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "python with a javascript comment line gets no guess",
+			input:         "```\nimport os\n# console.log(x)\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "shell test expression gets no guess",
+			input:         "```\n[ \"$HOME\" = /root ] && echo root\n```",
+			wantFix:       false,
+			wantFixedLang: "",
+		},
+		{
+			name:          "prose gets no guess",
+			input:         "```\nLet the constant settle before you continue.\n```",
 			wantFix:       false,
 			wantFixedLang: "",
 		},
@@ -284,6 +342,48 @@ func TestCodeBlockStyleRule(t *testing.T) {
 	}
 }
 
+// applyDefaultRule parses CommonMark input and applies a rule with no rule options.
+func applyDefaultRule(t *testing.T, rule lint.Rule, input string) []lint.Diagnostic {
+	t.Helper()
+	snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	if err != nil {
+		t.Fatalf("Apply error: %v", err)
+	}
+	return diags
+}
+
+// TestCodeBlockStyleRule_DefaultConsistent checks the markdownlint default style "consistent".
+func TestCodeBlockStyleRule_DefaultConsistent(t *testing.T) {
+	if diags := applyDefaultRule(t, NewCodeBlockStyleRule(), "Text.\n\n    indented one\n\nText.\n\n    indented two\n"); len(diags) != 0 {
+		t.Errorf("consistent indented blocks: got %d diagnostics, want 0", len(diags))
+	}
+	diags := applyDefaultRule(t, NewCodeBlockStyleRule(), "Text.\n\n    indented\n\nText.\n\n```\nfenced\n```\n")
+	if len(diags) != 1 {
+		t.Fatalf("indented then fenced: got %d diagnostics, want 1", len(diags))
+	}
+	if diags[0].Message != "Code block style 'fenced' does not match expected 'indented'" {
+		t.Errorf("unexpected message %q", diags[0].Message)
+	}
+}
+
+// TestCodeFenceStyleRule_DefaultConsistent checks the markdownlint default style "consistent".
+func TestCodeFenceStyleRule_DefaultConsistent(t *testing.T) {
+	if diags := applyDefaultRule(t, NewCodeFenceStyleRule(), "~~~\none\n~~~\n\n~~~\ntwo\n~~~\n"); len(diags) != 0 {
+		t.Errorf("consistent tilde fences: got %d diagnostics, want 0", len(diags))
+	}
+	diags := applyDefaultRule(t, NewCodeFenceStyleRule(), "~~~\none\n~~~\n\n```\ntwo\n```\n")
+	if len(diags) != 1 {
+		t.Fatalf("tilde then backtick: got %d diagnostics, want 1", len(diags))
+	}
+	if diags[0].Message != "Code fence style 'backtick' does not match expected 'tilde'" {
+		t.Errorf("unexpected message %q", diags[0].Message)
+	}
+}
+
 func TestCodeFenceStyleRule(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -376,103 +476,242 @@ func TestCodeFenceStyleRule(t *testing.T) {
 	}
 }
 
-func TestCommandsShowOutputRule(t *testing.T) {
+// TestCodeFenceStyleRule_SafeFix rewrites the whole opening and closing fence
+// runs and refuses (reports without a fix) when the new fence would change
+// where the code block ends or would not be a fence.
+func TestCodeFenceStyleRule_SafeFix(t *testing.T) {
+	options := map[string]any{"style": "backtick"}
 	tests := []struct {
 		name    string
 		input   string
-		wantN   int
 		wantFix bool
+		fixed   string
+	}{
+		{"simple", "~~~\nx\n~~~\n", true, "```\nx\n```\n"},
+		{"longer closing run", "~~~~~ js\ny\n~~~~~~~~\n", true, "````` js\ny\n````````\n"},
+		{"inside list item", "- item\n\n  ~~~\n  in list\n  ~~~\n", true, "- item\n\n  ```\n  in list\n  ```\n"},
+		{"inside blockquote", "> ~~~\n> quoted\n> ~~~\n", true, "> ```\n> quoted\n> ```\n"},
+		{"unclosed fence", "~~~\nrest of file\n", true, "```\nrest of file\n"},
+		{"empty block", "~~~\n~~~\n", true, "```\n```\n"},
+		{"content holds a backtick fence", "~~~\n```\nnested\n```\n~~~\n", false, ""},
+		{"backtick in info string", "~~~ a`b\nx\n~~~\n", false, ""},
+		{"shorter backtick run in content", "~~~~\n```\nnested\n```\n~~~~\n", true, "````\n```\nnested\n```\n````\n"},
+		{"backtick run with an info string in content", "~~~\n```js\nx\n~~~\n", true, "```\n```js\nx\n```\n"},
+		{"tab-indented backtick run in content", "~~~\n\t```\n~~~\n", true, "```\n\t```\n```\n"},
+		{"empty block with a longer closer", "~~~\n~~~~~\n\nText\n", true, "```\n`````\n\nText\n"},
+		{"backtick in info string without a space", "~~~foo`bar\n~~~\n\nText\n", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), &config.RuleConfig{Options: options})
+			diags, err := NewCodeFenceStyleRule().Apply(ctx)
+			if err != nil {
+				t.Fatalf("Apply error: %v", err)
+			}
+			if len(diags) != 1 {
+				t.Fatalf("got %d diagnostics, want 1: %+v", len(diags), diags)
+			}
+			if diags[0].HasFix() != tt.wantFix {
+				t.Fatalf("HasFix = %v, want %v", diags[0].HasFix(), tt.wantFix)
+			}
+			if !tt.wantFix {
+				return
+			}
+			prepared, err := fix.PrepareEdits(diags[0].FixEdits, len(tt.input))
+			if err != nil {
+				t.Fatalf("PrepareEdits error: %v", err)
+			}
+			if got := string(fix.ApplyEdits([]byte(tt.input), prepared)); got != tt.fixed {
+				t.Errorf("fixed = %q, want %q", got, tt.fixed)
+			}
+		})
+	}
+}
+
+// TestCommandsShowOutputRule follows markdownlint MD014: every code block is
+// checked regardless of its info string, the block is reported only when every
+// non-blank line starts with "$" and whitespace, and each such line gets its
+// own diagnostic and fix.
+func TestCommandsShowOutputRule(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  []position
+		fixed string
 	}{
 		{
-			name:    "all dollar signs no output",
-			input:   "```sh\n$ ls\n$ cat foo\n$ less bar\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "all dollar signs no output",
+			input: "```sh\n$ ls\n$ cat foo\n$ less bar\n```\n",
+			want:  []position{{2, 1}, {3, 1}, {4, 1}},
+			fixed: "```sh\nls\ncat foo\nless bar\n```\n",
 		},
 		{
-			name:    "dollar signs with output",
-			input:   "```bash\n$ ls\nfoo bar\n$ cat foo\nHello world\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "dollar signs with output",
+			input: "```bash\n$ ls\nfoo bar\n$ cat foo\nHello world\n```\n",
 		},
 		{
-			name:    "no dollar signs",
-			input:   "```sh\nls\ncat foo\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "no dollar signs",
+			input: "```sh\nls\ncat foo\n```\n",
 		},
 		{
-			name:    "mixed with output",
-			input:   "```bash\n$ mkdir test\nmkdir: created directory 'test'\n$ ls test\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "any info string is checked",
+			input: "```go\n$ go test ./...\n```\n",
+			want:  []position{{2, 1}},
+			fixed: "```go\ngo test ./...\n```\n",
 		},
 		{
-			name:    "non-shell code block",
-			input:   "```go\n$ not a command\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "info string with attributes",
+			input: "```bash title=\"setup\"\n$ make\n```\n",
+			want:  []position{{2, 1}},
+			fixed: "```bash title=\"setup\"\nmake\n```\n",
 		},
 		{
-			name:    "console block all dollar",
-			input:   "```console\n$ echo hello\n$ pwd\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "powershell block",
+			input: "```powershell\n$ Get-ChildItem\n```\n",
+			want:  []position{{2, 1}},
+			fixed: "```powershell\nGet-ChildItem\n```\n",
 		},
 		{
-			name:    "zsh block all dollar",
-			input:   "```zsh\n$ cd /tmp\n$ ls\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "no info string",
+			input: "```\n$ echo hello\n$ pwd\n```\n",
+			want:  []position{{2, 1}, {3, 1}},
+			fixed: "```\necho hello\npwd\n```\n",
 		},
 		{
-			name:    "terminal block all dollar",
-			input:   "```terminal\n$ npm install\n$ npm test\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "indented code block",
+			input: "Text.\n\n    $ ls\n    $ pwd\n",
+			want:  []position{{3, 5}, {4, 5}},
+			fixed: "Text.\n\n    ls\n    pwd\n",
 		},
 		{
-			name:    "empty code block",
-			input:   "```sh\n```",
-			wantN:   0,
-			wantFix: false,
+			name:  "leading whitespace and several spaces after the dollar",
+			input: "```sh\n  $   ls\n```\n",
+			want:  []position{{2, 3}},
+			fixed: "```sh\n  ls\n```\n",
 		},
 		{
-			name:    "blank lines in code",
-			input:   "```sh\n$ echo 1\n\n$ echo 2\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "dollar without following whitespace is output",
+			input: "```sh\n$ echo $HOME\n$HOME\n```\n",
 		},
 		{
-			name:    "single dollar command",
-			input:   "```sh\n$ pwd\n```",
-			wantN:   1,
-			wantFix: true,
+			name:  "bare dollar line is output",
+			input: "```sh\n$ echo\n$\n```\n",
+		},
+		{
+			name:  "empty code block",
+			input: "```sh\n```\n",
+		},
+		{
+			name:  "blank lines in code",
+			input: "```sh\n$ echo 1\n\n$ echo 2\n```\n",
+			want:  []position{{2, 1}, {4, 1}},
+			fixed: "```sh\necho 1\n\necho 2\n```\n",
+		},
+		{
+			name:  "fenced block in list item",
+			input: "- item\n\n  ```sh\n  $ ls\n  ```\n",
+			want:  []position{{4, 3}},
+			fixed: "- item\n\n  ```sh\n  ls\n  ```\n",
+		},
+		{
+			name:  "fenced block in blockquote",
+			input: "> ```sh\n> $ ls\n> $ pwd\n> ```\n",
+			want:  []position{{2, 3}, {3, 3}},
+			fixed: "> ```sh\n> ls\n> pwd\n> ```\n",
+		},
+		{
+			name:  "fence on the first line of a list item",
+			input: "- ```sh\n  $ ls\n  ```\n",
+			want:  []position{{2, 3}},
+			fixed: "- ```sh\n  ls\n  ```\n",
+		},
+		{
+			name:  "whitespace-only line is output",
+			input: "```sh\n$ ls\n   \n$ pwd\n```\n",
+		},
+		{
+			name:  "fence indentation is not content",
+			input: " ```sh\n $ ls\n \n $ pwd\n ```\n",
+			want:  []position{{2, 2}, {4, 2}},
+			fixed: " ```sh\n ls\n \n pwd\n ```\n",
+		},
+		{
+			name:  "indented code whitespace beyond the indent is output",
+			input: "    $ ls\n      \n    $ pwd\n",
+		},
+		{
+			name:  "indented code line of only its indent is blank",
+			input: "    $ ls\n    \n    $ pwd\n",
+			want:  []position{{1, 5}, {3, 5}},
+			fixed: "    ls\n    \n    pwd\n",
+		},
+		{
+			name:  "indented code short whitespace line is blank",
+			input: "    $ ls\n  \n    $ pwd\n",
+			want:  []position{{1, 5}, {3, 5}},
+			fixed: "    ls\n  \n    pwd\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parser := goldmark.New(string(config.FlavorCommonMark))
-			snapshot, err := parser.Parse(context.Background(), "test.md", []byte(tt.input))
+			diags := applyDefaultRule(t, NewCommandsShowOutputRule(), tt.input)
+			if len(diags) != len(tt.want) {
+				t.Fatalf("got %d diagnostics, want %d: %+v", len(diags), len(tt.want), diags)
+			}
+			var edits []fix.TextEdit
+			for idx, want := range tt.want {
+				if diags[idx].StartLine != want.line || diags[idx].StartColumn != want.column {
+					t.Errorf("diagnostic %d at %d:%d, want %d:%d",
+						idx, diags[idx].StartLine, diags[idx].StartColumn, want.line, want.column)
+				}
+				if len(diags[idx].FixEdits) == 0 {
+					t.Errorf("diagnostic %d has no fix", idx)
+				}
+				edits = append(edits, diags[idx].FixEdits...)
+			}
+			if len(tt.want) == 0 {
+				return
+			}
+			prepared, err := fix.PrepareEdits(edits, len(tt.input))
 			if err != nil {
-				t.Fatalf("parse error: %v", err)
+				t.Fatalf("PrepareEdits error: %v", err)
 			}
-
-			rule := NewCommandsShowOutputRule()
-			ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
-			diags, err := rule.Apply(ctx)
-			if err != nil {
-				t.Fatalf("Apply error: %v", err)
-			}
-
-			if len(diags) != tt.wantN {
-				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
-			}
-
-			if tt.wantFix && len(diags) > 0 && len(diags[0].FixEdits) == 0 {
-				t.Error("expected fix edits, got none")
+			if got := string(fix.ApplyEdits([]byte(tt.input), prepared)); got != tt.fixed {
+				t.Errorf("fixed = %q, want %q", got, tt.fixed)
 			}
 		})
+	}
+}
+
+// TestCommandsShowOutputRule_PromptThatLooksLikeAFence covers a prompt line
+// whose command is a fence: removing its prompt would close the code block
+// there and turn the lines after it into other blocks. Both prompts are
+// reported, as markdownlint does, but the fix check withholds that line's
+// fix, so the block still ends where it does now.
+func TestCommandsShowOutputRule_PromptThatLooksLikeAFence(t *testing.T) {
+	tests := []struct {
+		name, input, fixed string
+	}{
+		{"backtick fence", "```sh\n$ ```\n$ pwd\n```\n", "```sh\n$ ```\npwd\n```\n"},
+		{"tilde fence", "~~~sh\n$ ~~~\n$ pwd\n~~~\n", "~~~sh\n$ ~~~\npwd\n~~~\n"},
+		{"four-backtick fence", "````sh\n$ ````\n$ pwd\n````\n", "````sh\n$ ````\npwd\n````\n"},
+	}
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		for _, tt := range tests {
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				diags, err := NewCommandsShowOutputRule().Apply(fixSafetyContext(t, flavor, tt.input))
+				require.NoError(t, err)
+				require.Len(t, diags, 2)
+				assert.Equal(t, []int{2, 3}, []int{diags[0].StartLine, diags[1].StartLine})
+				assert.False(t, diags[0].HasFix(), "removing the prompt would close the fence")
+				assert.Equal(t, tt.fixed, applyAllFixEdits(t, tt.input, diags))
+			})
+		}
 	}
 }

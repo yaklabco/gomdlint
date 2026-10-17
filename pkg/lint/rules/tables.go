@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
@@ -10,6 +9,140 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
+
+// The table rules work on the tables the parser recognized (GFM), so text
+// that only looks like a table is ignored, rows the parser absorbed into a
+// table count as rows, and tables inside blockquotes and list items are
+// checked. Positions follow markdownlint.
+
+// tableRow is one row of a parsed table as written in the source: the header
+// row, the delimiter row, or a body row.
+type tableRow struct {
+	line      int
+	start     int   // offset of the row's first character
+	end       int   // offset after the row's last non-whitespace character
+	leading   bool  // the row starts with a pipe
+	trailing  bool  // the row ends with an unescaped pipe
+	pipes     []int // offsets of the unescaped pipes
+	delimiter bool
+}
+
+// cellCount returns the number of cells in the row, as GFM counts them.
+func (row tableRow) cellCount() int {
+	count := len(row.pipes) + 1
+	if row.leading {
+		count--
+	}
+	if row.trailing && (len(row.pipes) > 1 || !row.leading) {
+		count--
+	}
+	return count
+}
+
+// cellStart returns the offset where cell idx begins: the pipe before it, or
+// the row start for a first cell without a leading pipe.
+func (row tableRow) cellStart(idx int) int {
+	if !row.leading {
+		idx--
+	}
+	if idx < 0 {
+		return row.start
+	}
+	return row.pipes[idx]
+}
+
+// cells returns the start and end offsets of each cell's text, between pipes.
+func (row tableRow) cells() [][2]int {
+	bounds := make([]int, 0, len(row.pipes)+2)
+	if !row.leading {
+		bounds = append(bounds, row.start-1)
+	}
+	bounds = append(bounds, row.pipes...)
+	if !row.trailing {
+		bounds = append(bounds, row.end)
+	}
+	cells := make([][2]int, 0, len(bounds))
+	for idx := 0; idx+1 < len(bounds); idx++ {
+		cells = append(cells, [2]int{bounds[idx] + 1, bounds[idx+1]})
+	}
+	return cells
+}
+
+// parseTableRowText finds the pipes of a row whose text is content[start:]
+// up to the end of the line. A pipe escaped with a backslash is cell content;
+// a pipe inside a code span still separates cells, as in GFM.
+func parseTableRowText(content []byte, start int) tableRow {
+	end := start
+	for end < len(content) && content[end] != '\n' && content[end] != '\r' {
+		end++
+	}
+	for end > start && (content[end-1] == ' ' || content[end-1] == '\t') {
+		end--
+	}
+	row := tableRow{start: start, end: end}
+	for pos := start; pos < end; pos++ {
+		switch content[pos] {
+		case '\\':
+			pos++
+		case '|':
+			row.pipes = append(row.pipes, pos)
+		}
+	}
+	row.leading = len(row.pipes) > 0 && row.pipes[0] == start
+	row.trailing = len(row.pipes) > 0 && row.pipes[len(row.pipes)-1] == end-1
+	return row
+}
+
+// tableRows returns the rows of a parsed table in source order, or nil when
+// the header and delimiter rows have different cell counts: GFM requires them
+// to match, so such text is not a table on GitHub or in markdownlint, though
+// the parser accepts a header with fewer cells. The delimiter row has no node
+// of its own: it is the line after the header row.
+func tableRows(file *mdast.FileSnapshot, table *mdast.Node) []tableRow {
+	rows := parsedTableRows(file, table)
+	if len(rows) < 2 || rows[0].cellCount() != rows[1].cellCount() {
+		return nil
+	}
+	return rows
+}
+
+// isGFMTable reports whether a parsed table is a table under GFM's rules.
+func isGFMTable(file *mdast.FileSnapshot, table *mdast.Node) bool {
+	return tableRows(file, table) != nil
+}
+
+func parsedTableRows(file *mdast.FileSnapshot, table *mdast.Node) []tableRow {
+	var rows []tableRow
+	for node := table.FirstChild; node != nil; node = node.Next {
+		if node.Kind != mdast.NodeTableRow {
+			continue
+		}
+		start := node.SourceRange().StartOffset
+		line, _ := file.LineAt(start)
+		row := parseTableRowText(file.Content, start)
+		row.line = line
+		rows = append(rows, row)
+		if node != table.FirstChild || line >= len(file.Lines) {
+			continue
+		}
+		delimiterLine := line + 1
+		delimiterStart := file.Lines[delimiterLine-1].StartOffset + len(lint.ContainerPrefix(file, table, delimiterLine))
+		for delimiterStart < len(file.Content) && (file.Content[delimiterStart] == ' ' || file.Content[delimiterStart] == '\t') {
+			delimiterStart++
+		}
+		delimiter := parseTableRowText(file.Content, delimiterStart)
+		delimiter.line = delimiterLine
+		delimiter.delimiter = true
+		rows = append(rows, delimiter)
+	}
+	return rows
+}
+
+// tablePosition returns the position of one character at offset.
+func tablePosition(file *mdast.FileSnapshot, offset int) mdast.SourcePosition {
+	line, column := file.LineAt(offset)
+	return mdast.SourcePosition{StartLine: line, StartColumn: column, EndLine: line, EndColumn: column + 1}
+}
 
 // TablePipeStyleRule checks for consistent leading/trailing pipe style in tables.
 type TablePipeStyleRule struct {
@@ -45,104 +178,68 @@ const (
 	PipeStyleNoLeadingOrTrailing PipeStyle = "no_leading_or_trailing"
 )
 
-// Apply checks table pipe style consistency.
+// pipeStyleOf returns the style of a row's outer pipes.
+func pipeStyleOf(leading, trailing bool) PipeStyle {
+	switch {
+	case leading && trailing:
+		return PipeStyleLeadingAndTrailing
+	case leading:
+		return PipeStyleLeadingOnly
+	case trailing:
+		return PipeStyleTrailingOnly
+	default:
+		return PipeStyleNoLeadingOrTrailing
+	}
+}
+
+// Apply checks every row of every table, the delimiter row included, against
+// the configured style or, by default, the style of the document's first row.
+// A missing or unexpected leading pipe is reported at the start of the row and
+// a trailing one at its last character.
 func (r *TablePipeStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Skip if not GFM flavor.
-	if ctx.Config != nil && ctx.Config.Flavor != config.FlavorGFM {
-		return nil, nil
-	}
-
-	configStyle := PipeStyle(ctx.OptionString("style", string(PipeStyleConsistent)))
+	// Like markdownlint, a style expects each pipe unless it rules that pipe
+	// out, so an unknown style expects both.
+	expected := PipeStyle(ctx.OptionString("style", string(PipeStyleConsistent)))
+	expectLeading := expected != PipeStyleNoLeadingOrTrailing && expected != PipeStyleTrailingOnly
+	expectTrailing := expected != PipeStyleNoLeadingOrTrailing && expected != PipeStyleLeadingOnly
 
 	var diags []lint.Diagnostic
-	var expectedStyle PipeStyle
-
-	if configStyle != PipeStyleConsistent {
-		expectedStyle = configStyle
-	}
-
-	// Find tables by looking for delimiter rows.
-	lineNum := 1
-	for lineNum <= len(ctx.File.Lines) {
+	for _, table := range ctx.Tables() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		content := lint.LineContent(ctx.File, lineNum)
-		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
-			lineNum++
-			continue
-		}
-
-		// Found a table. Check all rows including header.
-		tableStart := lineNum - 1 // Header row
-		if tableStart < 1 {
-			tableStart = lineNum
-		}
-
-		tableEnd := lineNum
-		for tableEnd+1 <= len(ctx.File.Lines) {
-			nextContent := lint.LineContent(ctx.File, tableEnd+1)
-			if !isTableRow(nextContent) {
-				break
+		for _, row := range tableRows(ctx.File, table) {
+			actual := pipeStyleOf(row.leading, row.trailing)
+			if expected == PipeStyleConsistent {
+				expected, expectLeading, expectTrailing = actual, row.leading, row.trailing
 			}
-			tableEnd++
-		}
-
-		// Check all rows in the table
-		for rowNum := tableStart; rowNum <= tableEnd; rowNum++ {
-			rowContent := lint.LineContent(ctx.File, rowNum)
-			trimmed := bytes.TrimSpace(rowContent)
-			if len(trimmed) == 0 {
-				continue
+			if row.leading != expectLeading {
+				diags = append(diags, r.pipeDiagnostic(ctx, row.start, "leading", expectLeading, expected, actual))
 			}
-
-			hasLeading := len(trimmed) > 0 && trimmed[0] == '|'
-			hasTrailing := len(trimmed) > 0 && trimmed[len(trimmed)-1] == '|'
-
-			var detectedStyle PipeStyle
-			switch {
-			case hasLeading && hasTrailing:
-				detectedStyle = PipeStyleLeadingAndTrailing
-			case hasLeading:
-				detectedStyle = PipeStyleLeadingOnly
-			case hasTrailing:
-				detectedStyle = PipeStyleTrailingOnly
-			default:
-				detectedStyle = PipeStyleNoLeadingOrTrailing
-			}
-
-			// Set expected style from first row if consistent mode
-			if expectedStyle == "" {
-				expectedStyle = detectedStyle
-				continue
-			}
-
-			// Check for style mismatch
-			if detectedStyle != expectedStyle {
-				pos := mdast.SourcePosition{
-					StartLine:   rowNum,
-					StartColumn: 1,
-					EndLine:     rowNum,
-					EndColumn:   len(rowContent),
-				}
-				diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-					fmt.Sprintf("Table row pipe style '%s' does not match expected '%s'", detectedStyle, expectedStyle)).
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion(fmt.Sprintf("Use %s pipe style for all table rows", expectedStyle)).
-					Build()
-				diags = append(diags, diag)
+			if row.trailing != expectTrailing {
+				diags = append(diags, r.pipeDiagnostic(ctx, row.end-1, "trailing", expectTrailing, expected, actual))
 			}
 		}
-
-		lineNum = tableEnd + 1
 	}
-
 	return diags, nil
+}
+
+func (r *TablePipeStyleRule) pipeDiagnostic(
+	ctx *lint.RuleContext, offset int, side string, wanted bool, expected, actual PipeStyle,
+) lint.Diagnostic {
+	problem := "Unexpected"
+	if wanted {
+		problem = "Missing"
+	}
+	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, tablePosition(ctx.File, offset),
+		fmt.Sprintf("%s %s pipe: expected %s, found %s", problem, side, expected, actual)).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion(fmt.Sprintf("Use %s pipe style for all table rows", expected)).
+		Build()
 }
 
 // TableColumnCountRule checks for consistent column counts in GFM tables.
@@ -163,85 +260,48 @@ func NewTableColumnCountRule() *TableColumnCountRule {
 	}
 }
 
-// DefaultEnabled returns true only for GFM flavor.
+// DefaultEnabled returns true.
 func (r *TableColumnCountRule) DefaultEnabled() bool {
 	return true
 }
 
-// Apply checks table column consistency. Skipped if not GFM flavor.
+// Apply reports rows with a different number of cells than the header row.
+// A row with too few cells is reported at its last character; a row with
+// too many at the start of its first extra cell.
 func (r *TableColumnCountRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Skip if not GFM flavor.
-	if ctx.Config != nil && ctx.Config.Flavor != config.FlavorGFM {
-		return nil, nil
-	}
-
 	var diags []lint.Diagnostic
-
-	// Find table-like structures by looking for delimiter rows.
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, table := range ctx.Tables() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		content := lint.LineContent(ctx.File, lineNum)
-		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
+		rows := tableRows(ctx.File, table)
+		if len(rows) == 0 {
 			continue
 		}
-
-		// Found delimiter row, check header and data rows.
-		delimColCount := countTableColumns(content)
-
-		// Check header row (line before delimiter).
-		if lineNum > 1 {
-			headerContent := lint.LineContent(ctx.File, lineNum-1)
-			if isTableRow(headerContent) {
-				headerColCount := countTableColumns(headerContent)
-				if headerColCount != delimColCount {
-					pos := mdast.SourcePosition{
-						StartLine:   lineNum - 1,
-						StartColumn: 1,
-						EndLine:     lineNum - 1,
-						EndColumn:   len(headerContent),
-					}
-					diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-						fmt.Sprintf("Table header has %d columns, delimiter has %d", headerColCount, delimColCount)).
-						WithSeverity(config.SeverityWarning).
-						WithSuggestion("Ensure all rows have the same number of columns").
-						Build()
-					diags = append(diags, diag)
-				}
+		expected := rows[0].cellCount()
+		for _, row := range rows {
+			actual := row.cellCount()
+			var offset int
+			var msg string
+			switch {
+			case actual < expected:
+				offset, msg = row.end-1, "Too few cells, row will be missing data"
+			case actual > expected:
+				offset, msg = row.cellStart(expected), "Too many cells, extra data will be missing"
+			default:
+				continue
 			}
-		}
-
-		// Check data rows (lines after delimiter).
-		for dataLine := lineNum + 1; dataLine <= len(ctx.File.Lines); dataLine++ {
-			dataContent := lint.LineContent(ctx.File, dataLine)
-			if !isTableRow(dataContent) {
-				break
-			}
-
-			dataColCount := countTableColumns(dataContent)
-			if dataColCount != delimColCount {
-				pos := mdast.SourcePosition{
-					StartLine:   dataLine,
-					StartColumn: 1,
-					EndLine:     dataLine,
-					EndColumn:   len(dataContent),
-				}
-				diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-					fmt.Sprintf("Table row has %d columns, expected %d", dataColCount, delimColCount)).
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion("Ensure all rows have the same number of columns").
-					Build()
-				diags = append(diags, diag)
-			}
+			diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, tablePosition(ctx.File, offset),
+				fmt.Sprintf("%s: expected %d, found %d", msg, expected, actual)).
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion("Give every row as many cells as the header row").
+				Build())
 		}
 	}
-
 	return diags, nil
 }
 
@@ -263,127 +323,55 @@ func NewTableAlignmentRule() *TableAlignmentRule {
 	}
 }
 
-// DefaultEnabled returns true only for GFM flavor.
+// DefaultEnabled returns true.
 func (r *TableAlignmentRule) DefaultEnabled() bool {
 	return true
 }
 
-// Apply checks table delimiter row formatting.
+// Apply reports delimiter rows with a cell of fewer than min_dashes dashes.
+// The fix lengthens only those dash runs and keeps the alignment colons,
+// padding, pipes, and container prefix as written.
 func (r *TableAlignmentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Skip if not GFM flavor.
-	if ctx.Config != nil && ctx.Config.Flavor != config.FlavorGFM {
-		return nil, nil
-	}
-
 	minDashes := ctx.OptionInt("min_dashes", 3)
-
 	var diags []lint.Diagnostic
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, table := range ctx.Tables() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		content := lint.LineContent(ctx.File, lineNum)
-		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
+		var delimiter *tableRow
+		for _, row := range tableRows(ctx.File, table) {
+			if row.delimiter {
+				delimiter = &row
+				break
+			}
+		}
+		if delimiter == nil {
 			continue
 		}
-
-		// Check each cell in the delimiter row.
-		cells := splitTableCells(content)
-		for _, cell := range cells {
-			cell = bytes.TrimSpace(cell)
-			if len(cell) == 0 {
+		builder := fix.NewEditBuilder()
+		for _, cell := range delimiter.cells() {
+			text := string(ctx.File.Content[cell[0]:cell[1]])
+			first, last := strings.IndexByte(text, '-'), strings.LastIndexByte(text, '-')
+			if first < 0 || last-first+1 >= minDashes {
 				continue
 			}
-
-			// Count dashes.
-			dashes := 0
-			for _, ch := range cell {
-				if ch == '-' {
-					dashes++
-				}
-			}
-
-			if dashes < minDashes {
-				pos := mdast.SourcePosition{
-					StartLine:   lineNum,
-					StartColumn: 1,
-					EndLine:     lineNum,
-					EndColumn:   len(content),
-				}
-
-				// Build fix.
-				builder := r.buildAlignmentFix(ctx.File, lineNum, minDashes)
-
-				diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-					fmt.Sprintf("Table delimiter has fewer than %d dashes", minDashes)).
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion(fmt.Sprintf("Use at least %d dashes in delimiter cells", minDashes))
-
-				if builder != nil {
-					diagBuilder = diagBuilder.WithFix(builder)
-				}
-
-				diags = append(diags, diagBuilder.Build())
-				break // One diagnostic per line.
-			}
+			builder.ReplaceRange(cell[0]+first, cell[0]+last+1, strings.Repeat("-", minDashes))
 		}
-	}
-
-	return diags, nil
-}
-
-func (r *TableAlignmentRule) buildAlignmentFix(
-	file *mdast.FileSnapshot,
-	lineNum int,
-	minDashes int,
-) *fix.EditBuilder {
-	if file == nil || lineNum < 1 || lineNum > len(file.Lines) {
-		return nil
-	}
-
-	content := lint.LineContent(file, lineNum)
-	cells := splitTableCells(content)
-
-	newCells := make([]string, 0, len(cells))
-	for _, cell := range cells {
-		cell = bytes.TrimSpace(cell)
-		if len(cell) == 0 {
-			newCells = append(newCells, strings.Repeat("-", minDashes))
+		if len(builder.Edits) == 0 {
 			continue
 		}
-
-		// Preserve alignment markers.
-		leftAlign := cell[0] == ':'
-		rightAlign := cell[len(cell)-1] == ':'
-
-		dashes := strings.Repeat("-", minDashes)
-		var newCell string
-		switch {
-		case leftAlign && rightAlign:
-			newCell = ":" + dashes + ":"
-		case leftAlign:
-			newCell = ":" + dashes
-		case rightAlign:
-			newCell = dashes + ":"
-		default:
-			newCell = dashes
-		}
-		newCells = append(newCells, newCell)
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, tablePosition(ctx.File, delimiter.start),
+			fmt.Sprintf("Table delimiter has fewer than %d dashes", minDashes)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(fmt.Sprintf("Use at least %d dashes in delimiter cells", minDashes)).
+			WithFix(builder).
+			Build())
 	}
-
-	newContent := "| " + strings.Join(newCells, " | ") + " |"
-	line := file.Lines[lineNum-1]
-
-	builder := fix.NewEditBuilder()
-	builder.ReplaceRange(line.StartOffset, line.NewlineStart, newContent)
-
-	return builder
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 // TableBlankLinesRule ensures blank lines around tables.
@@ -404,7 +392,7 @@ func NewTableBlankLinesRule() *TableBlankLinesRule {
 	}
 }
 
-// DefaultEnabled returns true only for GFM flavor.
+// DefaultEnabled returns true.
 func (r *TableBlankLinesRule) DefaultEnabled() bool {
 	return true
 }
@@ -414,170 +402,51 @@ func (r *TableBlankLinesRule) DefaultSeverity() config.Severity {
 	return config.SeverityInfo
 }
 
-// Apply checks for blank lines around tables.
+// Apply checks the lines before and after each table. Like markdownlint, a
+// line holding only blockquote markers, whitespace, or HTML comments is
+// blank, and the fix inserts a blank line that keeps the enclosing
+// blockquotes whole. Text directly after a table is one of its rows.
 func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Skip if not GFM flavor.
-	if ctx.Config != nil && ctx.Config.Flavor != config.FlavorGFM {
-		return nil, nil
-	}
-
 	var diags []lint.Diagnostic
-
-	// Find tables by looking for delimiter rows.
-	lineNum := 1
-	for lineNum <= len(ctx.File.Lines) {
+	inserted := blankLineInserts{}
+	for _, table := range ctx.Tables() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		content := lint.LineContent(ctx.File, lineNum)
-		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
-			lineNum++
+		pos := table.SourcePosition()
+		rows := tableRows(ctx.File, table)
+		if !pos.IsValid() || len(rows) == 0 {
 			continue
 		}
+		blankLine := lint.BlankLineText(ctx.File, table)
 
-		// Found a table. Determine its extent.
-		tableStart := lineNum - 1 // Header row.
-		if tableStart < 1 {
-			tableStart = lineNum
+		if pos.StartLine > 1 && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, pos.StartLine-1)) {
+			builder := inserted.insert(ctx.File.Lines[pos.StartLine-1].StartOffset, blankLine)
+			diags = append(diags, r.blankLineDiagnostic(ctx, rows[0].start, "before", builder))
 		}
-
-		tableEnd := lineNum
-		for tableEnd+1 <= len(ctx.File.Lines) {
-			nextContent := lint.LineContent(ctx.File, tableEnd+1)
-			if !isTableRow(nextContent) {
-				break
-			}
-			tableEnd++
+		if pos.EndLine < len(ctx.File.Lines) && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, pos.EndLine+1)) {
+			builder := inserted.insert(ctx.File.Lines[pos.EndLine].StartOffset, blankLine)
+			diags = append(diags, r.blankLineDiagnostic(ctx, rows[len(rows)-1].start, "after", builder))
 		}
-
-		// Check blank line before.
-		if tableStart > 1 && !lint.IsBlankLine(ctx.File, tableStart-1) && !lint.IsCommentLine(ctx.File, tableStart-1) {
-			pos := mdast.SourcePosition{
-				StartLine:   tableStart,
-				StartColumn: 1,
-				EndLine:     tableStart,
-				EndColumn:   1,
-			}
-
-			builder := fix.NewEditBuilder()
-			line := ctx.File.Lines[tableStart-1]
-			builder.Insert(line.StartOffset, "\n")
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-				"Missing blank line before table").
-				WithSeverity(config.SeverityInfo).
-				WithSuggestion("Add a blank line before the table").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
-
-		// Check blank line after.
-		if tableEnd < len(ctx.File.Lines) && !lint.IsBlankLine(ctx.File, tableEnd+1) && !lint.IsCommentLine(ctx.File, tableEnd+1) {
-			pos := mdast.SourcePosition{
-				StartLine:   tableEnd,
-				StartColumn: 1,
-				EndLine:     tableEnd,
-				EndColumn:   1,
-			}
-
-			builder := fix.NewEditBuilder()
-			line := ctx.File.Lines[tableEnd-1]
-			builder.Insert(line.EndOffset, "\n")
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-				"Missing blank line after table").
-				WithSeverity(config.SeverityInfo).
-				WithSuggestion("Add a blank line after the table").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
-		}
-
-		lineNum = tableEnd + 1
 	}
-
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
-// isTableDelimiterRow checks if a line is a table delimiter row (| --- | --- |).
-func isTableDelimiterRow(content []byte) bool {
-	trimmed := bytes.TrimSpace(content)
-	if len(trimmed) == 0 {
-		return false
+func (r *TableBlankLinesRule) blankLineDiagnostic(
+	ctx *lint.RuleContext, offset int, side string, builder *fix.EditBuilder,
+) lint.Diagnostic {
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, tablePosition(ctx.File, offset),
+		"Missing blank line "+side+" table").
+		WithSeverity(config.SeverityInfo).
+		WithSuggestion("Add a blank line " + side + " the table")
+	if builder != nil {
+		diagBuilder = diagBuilder.WithFix(builder)
 	}
-
-	// Must contain pipes and dashes.
-	hasPipe := bytes.Contains(trimmed, []byte("|"))
-	hasDash := bytes.Contains(trimmed, []byte("-"))
-	if !hasPipe || !hasDash {
-		return false
-	}
-
-	// Check that it only contains valid delimiter characters.
-	for _, ch := range trimmed {
-		switch ch {
-		case '|', '-', ':', ' ', '\t':
-			continue
-		default:
-			return false
-		}
-	}
-
-	return true
-}
-
-// isTableRow checks if a line looks like a table row.
-func isTableRow(content []byte) bool {
-	trimmed := bytes.TrimSpace(content)
-	if len(trimmed) == 0 {
-		return false
-	}
-
-	// Must start and end with pipe (or start/end with content and have pipes).
-	return bytes.Contains(trimmed, []byte("|"))
-}
-
-// countTableColumns counts the number of columns in a table row.
-func countTableColumns(content []byte) int {
-	cells := splitTableCells(content)
-	return len(cells)
-}
-
-// splitTableCells splits a table row into cells.
-func splitTableCells(content []byte) [][]byte {
-	trimmed := bytes.TrimSpace(content)
-
-	// Remove leading and trailing pipes.
-	if len(trimmed) > 0 && trimmed[0] == '|' {
-		trimmed = trimmed[1:]
-	}
-	if len(trimmed) > 0 && trimmed[len(trimmed)-1] == '|' {
-		trimmed = trimmed[:len(trimmed)-1]
-	}
-
-	if len(trimmed) == 0 {
-		return nil
-	}
-
-	var cells [][]byte
-	start := 0
-	for idx := 0; idx < len(trimmed); idx++ {
-		if trimmed[idx] == '\\' && idx+1 < len(trimmed) {
-			idx++
-			continue
-		}
-		if trimmed[idx] == '|' {
-			cells = append(cells, trimmed[start:idx])
-			start = idx + 1
-		}
-	}
-	return append(cells, trimmed[start:])
+	return diagBuilder.Build()
 }
 
 // TableColumnStyleRule checks for consistent column spacing style in tables.
@@ -617,139 +486,18 @@ const (
 	ColumnStyleTight ColumnStyle = "tight"
 )
 
-// Apply checks table column spacing style.
+// Apply checks table column spacing. With style "any", markdownlint checks
+// each table against every style and reports the closest one; setting
+// markdownlint_compatible to false instead allows any spacing. The aligned,
+// compact, and tight styles are always checked like markdownlint.
 func (r *TableColumnStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	// Skip if not GFM flavor.
-	if ctx.Config != nil && ctx.Config.Flavor != config.FlavorGFM {
+	configStyle := ColumnStyle(ctx.OptionString("style", string(ColumnStyleAny)))
+	if configStyle == ColumnStyleAny && !ctx.OptionBool("markdownlint_compatible", true) {
 		return nil, nil
 	}
-
-	configStyle := ColumnStyle(ctx.OptionString("style", string(ColumnStyleAny)))
-	if ctx.OptionBool("markdownlint_compatible", false) {
-		return r.applyMarkdownlintStyle(ctx, configStyle)
-	}
-	if configStyle == ColumnStyleAny {
-		return nil, nil // Any style is allowed
-	}
-
-	var diags []lint.Diagnostic
-
-	// Find tables by looking for delimiter rows.
-	lineNum := 1
-	for lineNum <= len(ctx.File.Lines) {
-		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
-		}
-
-		content := lint.LineContent(ctx.File, lineNum)
-		if ctx.IsLineInCodeBlock(lineNum) || !isTableDelimiterRow(content) {
-			lineNum++
-			continue
-		}
-
-		// Found a table. Check all rows.
-		tableStart := lineNum - 1 // Header row
-		if tableStart < 1 {
-			tableStart = lineNum
-		}
-
-		tableEnd := lineNum
-		for tableEnd+1 <= len(ctx.File.Lines) {
-			nextContent := lint.LineContent(ctx.File, tableEnd+1)
-			if !isTableRow(nextContent) {
-				break
-			}
-			tableEnd++
-		}
-
-		// Check style of each row
-		for rowNum := tableStart; rowNum <= tableEnd; rowNum++ {
-			rowContent := lint.LineContent(ctx.File, rowNum)
-			detectedStyle := r.detectColumnStyle(rowContent)
-
-			if detectedStyle != configStyle {
-				pos := mdast.SourcePosition{
-					StartLine:   rowNum,
-					StartColumn: 1,
-					EndLine:     rowNum,
-					EndColumn:   len(rowContent),
-				}
-				diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-					fmt.Sprintf("Table column style '%s' does not match expected '%s'", detectedStyle, configStyle)).
-					WithSeverity(config.SeverityWarning).
-					WithSuggestion(fmt.Sprintf("Use %s column style", configStyle)).
-					Build()
-				diags = append(diags, diag)
-			}
-		}
-
-		lineNum = tableEnd + 1
-	}
-
-	return diags, nil
-}
-
-func (r *TableColumnStyleRule) detectColumnStyle(content []byte) ColumnStyle {
-	cells := splitTableCells(content)
-	if len(cells) == 0 {
-		return ColumnStyleCompact
-	}
-
-	// Check if all cells have consistent padding
-	hasLeadingSpace := true
-	hasTrailingSpace := true
-	allPaddedSame := true
-	firstPadding := -1
-
-	for _, cell := range cells {
-		if len(cell) == 0 {
-			continue
-		}
-
-		leadingSpaces := 0
-		for _, ch := range cell {
-			if ch != ' ' {
-				break
-			}
-			leadingSpaces++
-		}
-
-		trailingSpaces := 0
-		for i := len(cell) - 1; i >= 0; i-- {
-			if cell[i] != ' ' {
-				break
-			}
-			trailingSpaces++
-		}
-
-		if leadingSpaces == 0 {
-			hasLeadingSpace = false
-		}
-		if trailingSpaces == 0 {
-			hasTrailingSpace = false
-		}
-
-		totalPadding := leadingSpaces + trailingSpaces
-		if firstPadding < 0 {
-			firstPadding = totalPadding
-		} else if totalPadding != firstPadding {
-			allPaddedSame = false
-		}
-	}
-
-	switch {
-	case !hasLeadingSpace && !hasTrailingSpace:
-		return ColumnStyleTight
-	case hasLeadingSpace && hasTrailingSpace && allPaddedSame:
-		if firstPadding == 2 { // Single space on each side
-			return ColumnStyleCompact
-		}
-		return ColumnStyleAligned
-	default:
-		return ColumnStyleCompact
-	}
+	return r.applyMarkdownlintStyle(ctx, configStyle)
 }

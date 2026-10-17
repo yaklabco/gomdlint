@@ -132,30 +132,35 @@ func TestCodeFenceStyleWithholdsUnsafeFixes(t *testing.T) {
 }
 
 func TestCommandsShowOutputReadsTheContentSpan(t *testing.T) {
+	// markdownlint reports each prompt line, so a block gives one
+	// diagnostic per command.
 	tests := []struct {
 		name  string
 		input string
-		line  int
+		lines []int
 		want  string
 	}{
 		{
 			name:  "fence beside a list marker",
 			input: "# Title\n\n- ```sh\n  $ ls\n  ```\n",
-			line:  4,
+			lines: []int{4},
 			want:  "# Title\n\n- ```sh\n  ls\n  ```\n",
 		},
 		{
 			name:  "top-level fence",
 			input: "# Title\n\n```sh\n$ ls\n$ pwd\n```\n",
-			line:  4,
+			lines: []int{4, 5},
 			want:  "# Title\n\n```sh\nls\npwd\n```\n",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			diags := applyCompatibilityRule(t, NewCommandsShowOutputRule(), tt.input)
-			require.Len(t, diags, 1)
-			require.Equal(t, tt.line, diags[0].StartLine)
+			lines := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				lines = append(lines, diag.StartLine)
+			}
+			require.Equal(t, tt.lines, lines)
 			require.Equal(t, tt.want, applyAllFixEdits(t, tt.input, diags))
 		})
 	}

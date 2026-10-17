@@ -4,7 +4,10 @@
 package refs
 
 import (
+	"net/url"
 	"strings"
+
+	"github.com/yuin/goldmark/util"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -55,6 +58,14 @@ type ReferenceDefinition struct {
 
 	// UsageCount tracks how many times this definition is referenced.
 	UsageCount int
+
+	// Lines holds the first and last 1-based line of the definition.
+	Lines [2]int
+
+	// Removable reports whether deleting the definition's lines leaves the
+	// rest of the document's structure unchanged: the lines hold nothing but
+	// the definition and its container prefix, and no list item marker.
+	Removable bool
 }
 
 // ReferenceUsage represents a link or image in the document.
@@ -85,11 +96,17 @@ type ReferenceUsage struct {
 	// Position in source.
 	Position mdast.SourcePosition
 
-	// Node is the original AST node.
+	// Node is the original AST node. For an unresolved reference it is the
+	// text node where the reference starts.
 	Node *mdast.Node
 
 	// ResolvedDefinition points to the matching definition (if any).
 	ResolvedDefinition *ReferenceDefinition
+
+	// Unresolved is true for reference syntax the parser left as text
+	// because no definition matched its label, such as [text][missing].
+	// Unresolved usages are not links or images.
+	Unresolved bool
 }
 
 // IsSameFileFragment returns true if this is a same-file anchor reference.
@@ -139,8 +156,18 @@ func (c *Context) ResolveLabel(label string) *ReferenceDefinition {
 	return c.Definitions[normalized]
 }
 
-// ValidateFragment checks if a fragment references a valid anchor.
+// ValidateFragment checks if a fragment references a valid anchor. The
+// fragment may be percent-encoded, as browsers decode it before matching ids.
 func (c *Context) ValidateFragment(fragment string) bool {
+	return c.validateFragment(fragment, c.Anchors.Has)
+}
+
+// ValidateFragmentIgnoreCase is ValidateFragment with case-insensitive anchor matching.
+func (c *Context) ValidateFragmentIgnoreCase(fragment string) bool {
+	return c.validateFragment(fragment, c.Anchors.HasIgnoreCase)
+}
+
+func (c *Context) validateFragment(fragment string, has func(string) bool) bool {
 	if fragment == "" {
 		return true // No fragment is always valid
 	}
@@ -163,8 +190,11 @@ func (c *Context) ValidateFragment(fragment string) bool {
 		return true
 	}
 
-	// Check against anchor map
-	return c.Anchors.Has(id)
+	if has(id) {
+		return true
+	}
+	decoded, err := url.PathUnescape(id)
+	return err == nil && decoded != id && has(decoded)
 }
 
 // UnusedDefinitions returns definitions with zero usage count.
@@ -200,14 +230,11 @@ func (c *Context) UnresolvedUsages() []*ReferenceUsage {
 	return unresolved
 }
 
-// NormalizeLabel normalizes a reference label for matching.
-// Per CommonMark: case-insensitive, collapse whitespace.
+// NormalizeLabel normalizes a reference label for matching, exactly as the
+// parser does when it resolves references: trim, apply Unicode full case
+// folding (so "Straße" matches "STRASSE"), and collapse whitespace.
 func NormalizeLabel(label string) string {
-	// Lowercase
-	label = strings.ToLower(label)
-	// Collapse whitespace
-	label = strings.Join(strings.Fields(label), " ")
-	return label
+	return util.ToLinkReference([]byte(label))
 }
 
 // isGitHubLineReference checks for GitHub's line/column reference syntax.
@@ -235,10 +262,10 @@ func isGitHubLineReference(id string) bool {
 
 // ExtractFragment extracts the fragment from a URL.
 // Returns empty string if no fragment.
-func ExtractFragment(url string) string {
-	idx := strings.Index(url, "#")
+func ExtractFragment(dest string) string {
+	idx := strings.Index(dest, "#")
 	if idx == -1 {
 		return ""
 	}
-	return url[idx:]
+	return dest[idx:]
 }

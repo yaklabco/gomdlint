@@ -99,15 +99,6 @@
     "fixable": true
   },
   {
-    "rule": "MD031",
-    "name": "blanks-around-fences",
-    "line": 245,
-    "column": 1,
-    "message": "Missing blank line before fenced code block",
-    "severity": "warning",
-    "fixable": true
-  },
-  {
     "rule": "MD013",
     "name": "line-length",
     "line": 278,

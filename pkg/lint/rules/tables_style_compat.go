@@ -16,6 +16,9 @@ func (r *TableColumnStyleRule) applyMarkdownlintStyle(ctx *lint.RuleContext, sty
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
+		if !isGFMTable(ctx.File, table) {
+			continue
+		}
 		pos := table.SourcePosition()
 		var best []lint.Diagnostic
 		selected := false

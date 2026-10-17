@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD040",
+    "name": "fenced-code-language",
+    "line": 5,
+    "column": 3,
+    "message": "Fenced code block has no language specified",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD040",
+    "name": "fenced-code-language",
+    "line": 11,
+    "column": 3,
+    "message": "Fenced code block has no language specified",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD040",
+    "name": "fenced-code-language",
+    "line": 17,
+    "column": 1,
+    "message": "Fenced code block has no language specified",
+    "severity": "warning",
+    "fixable": false
+  }
+]

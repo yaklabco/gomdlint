@@ -1,0 +1,2 @@
+fragments.input.md:3:21 warning Link has empty fragment (MD042/no-empty-links)
+fragments.input.md:7:11 warning Link has empty fragment (MD042/no-empty-links)

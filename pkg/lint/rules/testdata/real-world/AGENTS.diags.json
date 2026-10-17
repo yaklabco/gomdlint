@@ -12,19 +12,19 @@
     "rule": "MD031",
     "name": "blanks-around-fences",
     "line": 25,
-    "column": 1,
+    "column": 4,
     "message": "Missing blank line before fenced code block",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD031",
     "name": "blanks-around-fences",
     "line": 30,
-    "column": 1,
+    "column": 4,
     "message": "Missing blank line after fenced code block",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD032",

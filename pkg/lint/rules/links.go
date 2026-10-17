@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -30,14 +33,20 @@ func NewReversedLinkRule() *ReversedLinkRule {
 	}
 }
 
-// reversedLinkPattern matches (text)[url] patterns.
-var reversedLinkPattern = regexp.MustCompile(`\(([^)]*)\)\[([^\]]*)\]`)
+// reversedLinkPattern is markdownlint's reversedLinkRe, anchored at a "("
+// that no backslash escapes: "(text)" without parentheses inside, then
+// "[destination]" that does not start like a footnote label. Its lookahead,
+// which rejects a match followed by "(", is checked by reversedLinkAt.
+var reversedLinkPattern = regexp.MustCompile(`^\(([^()]+)\)\[([^\]^][^\]]*)\]`)
 
-// reversedLinkMatchIndices is the minimum number of submatch indices required.
-// Pattern has 2 capture groups: full (0:1), text (2:3), url (4:5).
+// reversedLinkMatchIndices is the number of submatch indices
+// reversedLinkPattern produces: the match, the text, and the destination.
 const reversedLinkMatchIndices = 6
 
-// Apply checks for reversed link syntax in the file content.
+// Apply checks for reversed link syntax in the file content, as markdownlint
+// does: lines in code blocks and matches that overlap a code span are
+// skipped, and so are matches followed by "(" or whose text or destination
+// ends with a backslash.
 func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
@@ -55,31 +64,20 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			continue
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		matches := reversedLinkPattern.FindAllSubmatchIndex(lineContent, -1)
-
-		for _, match := range matches {
-			if len(match) < reversedLinkMatchIndices {
+		lineContent := lint.LineText(ctx.File, lineNum)
+		lineStart := ctx.File.Lines[lineNum-1].StartOffset + lint.LineTextOffset(ctx.File, lineNum)
+		for pos := 0; pos < len(lineContent); pos++ {
+			end, text, url, ok := reversedLinkAt(lineContent, pos)
+			if !ok {
 				continue
 			}
-
-			// match[0]:match[1] = full match
-			// match[2]:match[3] = text (inside parens)
-			// match[4]:match[5] = url (inside brackets)
-			text := string(lineContent[match[2]:match[3]])
-			url := string(lineContent[match[4]:match[5]])
-
-			line := ctx.File.Lines[lineNum-1]
-			startOffset := line.StartOffset + match[0]
-			endOffset := line.StartOffset + match[1]
-			inCode := false
-			for _, span := range ctx.CodeSpans() {
-				if span.SourceRange().Contains(startOffset) {
-					inCode = true
-					break
-				}
+			start := pos
+			pos = end - 1 // Like a global regexp, the next match starts after this one.
+			if strings.HasSuffix(text, "\\") || strings.HasSuffix(url, "\\") {
+				continue
 			}
-			if inCode {
+			startOffset, endOffset := lineStart+start, lineStart+end
+			if overlapsCodeSpan(ctx, startOffset, endOffset) {
 				continue
 			}
 
@@ -88,11 +86,13 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			newText := fmt.Sprintf("[%s](%s)", text, url)
 			builder.ReplaceRange(startOffset, endOffset, newText)
 
+			startLine, startColumn := ctx.File.LineAt(startOffset)
+			endLine, endColumn := ctx.File.LineAt(endOffset)
 			pos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: match[0] + 1,
-				EndLine:     lineNum,
-				EndColumn:   match[1],
+				StartLine:   startLine,
+				StartColumn: startColumn,
+				EndLine:     endLine,
+				EndColumn:   endColumn,
 			}
 
 			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
@@ -105,7 +105,35 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{reversedLinks: true}), nil
+}
+
+// reversedLinkAt matches a reversed link starting at line[pos]: a "(" that
+// no backslash escapes, matching reversedLinkPattern and not followed by
+// "(". It returns the offset after the match, the text, and the destination.
+func reversedLinkAt(line []byte, pos int) (int, string, string, bool) {
+	if line[pos] != '(' || (pos > 0 && line[pos-1] == '\\') {
+		return 0, "", "", false
+	}
+	match := reversedLinkPattern.FindSubmatchIndex(line[pos:])
+	if len(match) < reversedLinkMatchIndices {
+		return 0, "", "", false
+	}
+	end := pos + match[1]
+	if end < len(line) && line[end] == '(' {
+		return 0, "", "", false
+	}
+	return end, string(line[pos+match[2] : pos+match[3]]), string(line[pos+match[4] : pos+match[5]]), true
+}
+
+// overlapsCodeSpan reports whether content[start:end] overlaps a code span.
+func overlapsCodeSpan(ctx *lint.RuleContext, start, end int) bool {
+	for _, span := range ctx.CodeSpans() {
+		if source := span.SourceRange(); source.StartOffset < end && start < source.EndOffset {
+			return true
+		}
+	}
+	return false
 }
 
 // LinkSpacesRule detects spaces inside link text: [ text ] instead of [text].
@@ -126,7 +154,9 @@ func NewLinkSpacesRule() *LinkSpacesRule {
 	}
 }
 
-// Apply checks for spaces inside link text.
+// Apply checks the raw link text between the brackets for leading or trailing
+// whitespace. Like markdownlint, the fix removes the spaces and tabs beside
+// each bracket but never a line ending.
 func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -139,39 +169,92 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		text := lint.LinkText(link)
-		if text == "" {
+		if isAutolinkNode(link) {
 			continue
 		}
 
-		trimmed := strings.TrimSpace(text)
-		if text == trimmed {
+		start, end, ok := linkTextSpan(ctx.File.Content, link)
+		if !ok {
 			continue
 		}
+		text := string(ctx.File.Content[start:end])
+		allLeading := len(text) - len(strings.TrimLeftFunc(text, unicode.IsSpace))
+		allTrailing := len(text) - len(strings.TrimRightFunc(text, unicode.IsSpace))
+		leading := len(text) - len(strings.TrimLeftFunc(text, isSameLineSpace))
+		trailing := len(text) - len(strings.TrimRightFunc(text, isSameLineSpace))
 
-		// Text has leading or trailing spaces.
-		hasLeading := len(text) > 0 && (text[0] == ' ' || text[0] == '\t')
-		hasTrailing := len(text) > 0 && (text[len(text)-1] == ' ' || text[len(text)-1] == '\t')
-
-		var msg string
-		switch {
-		case hasLeading && hasTrailing:
-			msg = "Link text has leading and trailing spaces"
-		case hasLeading:
-			msg = "Link text has leading spaces"
-		default:
-			msg = "Link text has trailing spaces"
+		// Each side is reported where its spaces are. Without spaces on the
+		// bracket's own line (the text starts or ends with a line ending),
+		// the side is reported where the whitespace ends, without a fix.
+		if allLeading > 0 {
+			at, deleteTo := start+allLeading, start
+			if leading > 0 {
+				at, deleteTo = start, start+leading
+			}
+			diags = append(diags, r.spaceDiagnostic(ctx, at, start, deleteTo, "Link text has leading spaces"))
 		}
-
-		diag := lint.NewDiagnostic(r.ID(), link, msg).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Remove spaces from link text").
-			Build()
-		diags = append(diags, diag)
+		if allTrailing > 0 {
+			at, deleteFrom := end-allTrailing, end
+			if trailing > 0 && leading < len(text) {
+				at, deleteFrom = end-trailing, end-trailing
+			}
+			// A backslash left before the closing bracket would escape it.
+			if escapesNext(ctx.File.Content, start, deleteFrom) {
+				deleteFrom = end
+			}
+			diags = append(diags, r.spaceDiagnostic(ctx, at, deleteFrom, end, "Link text has trailing spaces"))
+		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{linkTextSpace: true}), nil
+}
+
+// spaceDiagnostic reports spaces at offset at, with a fix that deletes
+// content[from:to] when that range is not empty.
+func (r *LinkSpacesRule) spaceDiagnostic(ctx *lint.RuleContext, at, from, to int, msg string) lint.Diagnostic {
+	line, column := ctx.File.LineAt(at)
+	pos := mdast.SourcePosition{StartLine: line, StartColumn: column, EndLine: line, EndColumn: column + 1}
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Remove spaces from link text")
+	if from < to {
+		builder := fix.NewEditBuilder()
+		builder.Delete(from, to)
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build()
+}
+
+// escapesNext reports whether content[from:at] ends with an odd number of
+// backslashes, so that the last one escapes the character placed at at.
+func escapesNext(content []byte, from, at int) bool {
+	count := 0
+	for idx := at - 1; idx >= from && content[idx] == '\\'; idx-- {
+		count++
+	}
+	return count%2 == 1
+}
+
+// isSameLineSpace reports whether r is whitespace other than a line ending.
+func isSameLineSpace(r rune) bool {
+	return r != '\n' && r != '\r' && unicode.IsSpace(r)
+}
+
+// isAutolinkNode reports whether a link node is an autolink, which has no link text brackets.
+func isAutolinkNode(node *mdast.Node) bool {
+	return node.Inline != nil && node.Inline.Link != nil && node.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink
+}
+
+// linkTextSpan returns the byte range of the text between the brackets of a
+// link or image: its content span. It reports false when the span is not
+// enclosed by brackets.
+func linkTextSpan(content []byte, node *mdast.Node) (int, int, bool) {
+	text := node.ContentRange()
+	if text.StartOffset < 1 || text.EndOffset >= len(content) ||
+		content[text.StartOffset-1] != '[' || content[text.EndOffset] != ']' {
+		return 0, 0, false
+	}
+	return text.StartOffset, text.EndOffset, true
 }
 
 // EmptyLinkRule detects links with empty destination or text.
@@ -192,7 +275,10 @@ func NewEmptyLinkRule() *EmptyLinkRule {
 	}
 }
 
-// Apply checks for empty links.
+// Apply checks for links whose destination is empty or an empty fragment
+// ("#"), as markdownlint does: an inline link is empty when its destination
+// is missing or "#", and a reference link when its definition's destination
+// is "#". Links with empty text but a destination are not empty.
 func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -206,29 +292,27 @@ func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) 
 			return diags, ctx.Ctx.Err()
 		}
 
-		dest := lint.LinkDestination(link)
-		text := lint.LinkText(link)
-
-		emptyDest := dest == ""
-		emptyText := len(bytes.TrimSpace([]byte(text))) == 0
-
-		if !emptyDest && !emptyText {
+		style := mdast.RefStyleInline
+		if link.Inline != nil && link.Inline.Link != nil {
+			style = link.Inline.Link.ReferenceStyle
+		}
+		if style == mdast.RefStyleAutolink {
 			continue
 		}
 
 		var msg string
-		switch {
-		case emptyDest && emptyText:
-			msg = "Link has empty text and destination"
-		case emptyDest:
+		switch destination := strings.TrimSpace(lint.LinkDestination(link)); {
+		case destination == "#":
+			msg = "Link has empty fragment"
+		case destination == "" && style == mdast.RefStyleInline:
 			msg = "Link has empty destination"
 		default:
-			msg = "Link has empty text"
+			continue
 		}
 
 		diag := lint.NewDiagnostic(r.ID(), link, msg).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Provide both link text and destination").
+			WithSuggestion("Provide a link destination").
 			Build()
 		diags = append(diags, diag)
 	}
@@ -254,7 +338,17 @@ func NewImageAltTextRule() *ImageAltTextRule {
 	}
 }
 
-// Apply checks that all images have non-empty alt text.
+// imgAltAttributePattern and imgAriaHiddenAttributePattern are markdownlint's
+// getHtmlAttributeRe patterns for the attributes that decide whether an HTML
+// image has alt text: whitespace, the name, optional whitespace, '=', and a
+// value captured up to a quote, whitespace, or '>'.
+var (
+	imgAltAttributePattern        = regexp.MustCompile(`(?i)\salt\s*=\s*['"]?([^'"\s>]*)`)
+	imgAriaHiddenAttributePattern = regexp.MustCompile(`(?i)\saria-hidden\s*=\s*['"]?([^'"\s>]*)`)
+)
+
+// Apply checks that Markdown images have non-empty alt text and that HTML img
+// elements have an alt attribute or are hidden with aria-hidden="true".
 func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -280,7 +374,72 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		diags = append(diags, diag)
 	}
 
+	if ctx.File == nil {
+		return diags, nil
+	}
+	for _, image := range r.htmlImages(ctx) {
+		if ctx.Cancelled() {
+			return diags, ctx.Ctx.Err()
+		}
+		construct, tag := image.construct, image.construct.Text(image.source)
+		if imgAltAttributePattern.Match(tag) {
+			continue
+		}
+		if hidden := imgAriaHiddenAttributePattern.FindSubmatch(tag); hidden != nil &&
+			strings.EqualFold(string(hidden[1]), "true") {
+			continue
+		}
+		startLine, startColumn := ctx.File.LineAt(construct.Start)
+		endLine, endColumn := ctx.File.LineAt(construct.End)
+		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "HTML image is missing alt text").
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Add an alt attribute to the img element").
+			Build())
+	}
+
+	sortDiagnosticsByPosition(diags)
 	return diags, nil
+}
+
+// sortDiagnosticsByPosition orders diagnostics by start line, then start column.
+func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
+	sort.SliceStable(diags, func(i, j int) bool {
+		if diags[i].StartLine != diags[j].StartLine {
+			return diags[i].StartLine < diags[j].StartLine
+		}
+		return diags[i].StartColumn < diags[j].StartColumn
+	})
+}
+
+// htmlImages returns the opening img tags in HTML blocks and inline HTML.
+func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
+	var images []htmlImage
+	keep := func(source []byte, construct mdscan.HTMLConstruct) {
+		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
+			images = append(images, htmlImage{construct: construct, source: source})
+		}
+	}
+	for _, block := range ctx.HTMLBlocks() {
+		span := block.SourceRange()
+		source := htmlSource(ctx.File, block)
+		for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
+			keep(source, construct)
+		}
+	}
+	for _, inline := range ctx.HTMLInlines() {
+		source := htmlSource(ctx.File, inline)
+		if construct, ok := htmlNodeConstruct(source, inline); ok {
+			keep(source, construct)
+		}
+	}
+	return images
+}
+
+// htmlImage is an img element and the source its attributes are read from.
+type htmlImage struct {
+	construct mdscan.HTMLConstruct
+	source    []byte
 }
 
 // LinkDestinationStyleRule enforces link destination style (relative vs absolute).

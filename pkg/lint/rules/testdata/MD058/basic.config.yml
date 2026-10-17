@@ -1,4 +1,0 @@
-# Kept on CommonMark: under GFM, the text right after the table is a table
-# row, but MD058 reports a missing blank line after the table, which
-# markdownlint does not. Remove once MD058 follows GFM table rows.
-flavor: commonmark

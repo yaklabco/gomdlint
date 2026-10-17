@@ -165,7 +165,9 @@ func (rc *RuleContext) OptionStringSlice(key string, defaultValue []string) []st
 // and document anchors needed by reference-tracking rules (MD051-MD054).
 func (rc *RuleContext) RefContext() *refs.Context {
 	if rc.refCtx == nil {
-		rc.refCtx = refs.Collect(rc.Root, rc.File)
+		rc.refCtx = refs.CollectWithPrefix(rc.Root, rc.File, func(node *mdast.Node, line int) int {
+			return len(ContainerPrefix(rc.File, node, line))
+		})
 	}
 	return rc.refCtx
 }

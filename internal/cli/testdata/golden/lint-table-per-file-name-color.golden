@@ -17,9 +17,9 @@
 [93m W  11:9        Heading ends with trailing punctuation ":"  no-trailing-punctuation           [92m+[0m[0m
 [93m W  13:14       Trailing whitespace                         no-trailing-spaces                [92m+[0m[0m
 [93m W  14:12       Trailing whitespace                         no-trailing-spaces                [92m+[0m[0m
-[93m W  17:1        Unused reference definition [unused]        link-image-reference-definitions   [0m
+[93m W  17:1        Unused reference definition [unused]        link-image-reference-definitions  [92m+[0m[0m
 [90m==================================================================================================[0m
- [1;91m1 error[0m | [1;93m6 warnings[0m | [92m5 fixable[0m
+ [1;91m1 error[0m | [1;93m6 warnings[0m | [92m6 fixable[0m
 
  [3;90mLegend: [0m[91mE[0m[3;90m = error[0m[3;90m | [0m[93mW[0m[3;90m = warning[0m[3;90m | [0m[92m+[0m[3;90m = fixable[0m
 

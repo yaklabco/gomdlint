@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 4,
+    "column": 1,
+    "message": "Missing blank line before table",
+    "severity": "info",
+    "fixable": true
+  }
+]

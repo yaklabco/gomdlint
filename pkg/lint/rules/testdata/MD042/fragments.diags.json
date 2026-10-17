@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD042",
+    "name": "no-empty-links",
+    "line": 3,
+    "column": 21,
+    "message": "Link has empty fragment",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD042",
+    "name": "no-empty-links",
+    "line": 7,
+    "column": 11,
+    "message": "Link has empty fragment",
+    "severity": "warning",
+    "fixable": false
+  }
+]

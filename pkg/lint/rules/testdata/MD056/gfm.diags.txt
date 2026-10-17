@@ -1,3 +1,3 @@
-gfm.input.md:6:1 warning Table row has 2 columns, expected 3 (MD056/table-column-count)
-gfm.input.md:7:1 warning Table row has 4 columns, expected 3 (MD056/table-column-count)
-gfm.input.md:15:1 warning Table row has 3 columns, expected 4 (MD056/table-column-count)
+gfm.input.md:6:18 warning Too few cells, row will be missing data: expected 3, found 2 (MD056/table-column-count)
+gfm.input.md:7:26 warning Too many cells, extra data will be missing: expected 3, found 4 (MD056/table-column-count)
+gfm.input.md:15:22 warning Too few cells, row will be missing data: expected 4, found 3 (MD056/table-column-count)

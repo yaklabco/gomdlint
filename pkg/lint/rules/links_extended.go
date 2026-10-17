@@ -1,11 +1,16 @@
 package rules
 
 import (
+	"bytes"
 	"regexp"
+	"strings"
+
+	gmutil "github.com/yuin/goldmark/util"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -27,117 +32,526 @@ func NewNoBareURLsRule() *NoBareURLsRule {
 	}
 }
 
-// bareURLPattern matches bare URLs and emails without consuming boundary characters.
-// Boundary validation (angle brackets, parens, brackets) is done in code after matching.
-var bareURLPattern = regexp.MustCompile(`https?://[^\s<>\[\]()]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
+// bareURL is an autolink literal found in inline text.
+type bareURL struct {
+	start, end int
+	kind       mdscan.LiteralKind
+	// fixable reports whether wrapping the literal in angle brackets keeps
+	// its link in every renderer (see fixEligible).
+	fixable bool
+}
 
-var emailCheckPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-
-// Apply checks for bare URLs without angle brackets.
+// Apply reports bare URLs and email addresses the way markdownlint does: the
+// GFM autolink literals that a port of micromark's grammar finds in inline
+// text, with trailing punctuation and unbalanced parentheses left out. URLs in
+// link text, code spans, autolinks, raw HTML, the content of inline HTML
+// elements, HTML blocks, code blocks, and reference definitions are not bare.
+// Like every rule, MD034 follows the parser's blocks, so it reads the cells of
+// every table goldmark reads, including tables that micromark refuses and
+// rows that goldmark takes in lazily. The fix wraps a URL or email address in
+// angle brackets. It is attached only where GitHub, markdownlint, and the
+// parser that the fix check uses must all link the same address before and
+// after it (see fixEligible), and never in a table or in a run of lines that
+// could hold one (see tableRuns); every other literal, and every "www."
+// address, which without a scheme would not become an autolink, is reported
+// without a fix.
 func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	var diags []lint.Diagnostic
-	definitionLines := make(map[int]bool)
-	for _, definition := range ctx.RefContext().AllDefinitions {
-		definitionLines[definition.LineNumber] = true
-	}
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	runs := newTableRuns(ctx.File)
+	var urls []bareURL
+	for _, container := range mdast.FindAll(ctx.Root, isTextContainer) {
 		if ctx.Cancelled() {
-			return diags, ctx.Ctx.Err()
+			return nil, ctx.Ctx.Err()
 		}
+		scan := newBareURLScan(ctx.File, container)
+		scan.fixesAllowed = container.Kind != mdast.NodeTableCell && !runs.touch(container)
+		scan.visit(container)
+		urls = append(urls, scan.found...)
+	}
 
-		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) || definitionLines[lineNum] {
-			continue
+	diags := make([]lint.Diagnostic, 0, len(urls))
+	for _, url := range urls {
+		startLine, startColumn := ctx.File.LineAt(url.start)
+		endLine, endColumn := ctx.File.LineAt(url.end)
+		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+
+		literal := ctx.File.Content[url.start:url.end]
+		msg, suggestion := "Bare URL used", "Wrap the URL/email in angle brackets"
+		safe := angleBracketsKeepLiteral(url.kind, literal)
+		switch {
+		case url.kind == mdscan.LiteralWWW:
+			// Angle brackets only make an autolink with a scheme, so there is no safe fix.
+			suggestion = "Write the address with a scheme in angle brackets, such as <https://www.example.com>"
+		case url.kind == mdscan.LiteralEmail && !safe:
+			msg, suggestion = "Bare email address used", "Write the address as a link, such as [text](mailto:...)"
+		case url.kind == mdscan.LiteralEmail:
+			msg = "Bare email address used"
+		case !safe:
+			suggestion = "Write the URL as a link with its <, >, and backslash characters percent-encoded"
 		}
-
-		lineContent := lint.LineContent(ctx.File, lineNum)
-
-		// Skip lines that are already autolinks.
-		if isAutolinkLine(lineContent) {
-			continue
-		}
-
-		matches := bareURLPattern.FindAllIndex(lineContent, -1)
-
-		for _, match := range matches {
-			urlStart, urlEnd := match[0], match[1]
-			url := string(lineContent[urlStart:urlEnd])
-
-			// Skip if the URL is inside a code span.
-			if r.isInsideCodeSpan(lineContent, urlStart) {
-				continue
-			}
-
-			// Skip if preceded by <, (, or [ (autolink, markdown link, or reference).
-			if urlStart > 0 {
-				prev := lineContent[urlStart-1]
-				if prev == '<' || prev == '(' || prev == '[' {
-					continue
-				}
-			}
-
-			// Skip if followed by >, ), or ] (closing autolink, link, or reference).
-			if urlEnd < len(lineContent) {
-				next := lineContent[urlEnd]
-				if next == '>' || next == ')' || next == ']' {
-					continue
-				}
-			}
-
-			line := ctx.File.Lines[lineNum-1]
-
-			// Build fix: wrap in angle brackets.
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(suggestion)
+		if safe && url.fixable {
 			builder := fix.NewEditBuilder()
-			builder.ReplaceRange(line.StartOffset+urlStart, line.StartOffset+urlEnd, "<"+url+">")
+			builder.ReplaceRange(url.start, url.end, "<"+string(literal)+">")
+			diagBuilder = diagBuilder.WithFix(builder)
+		}
+		diags = append(diags, diagBuilder.Build())
+	}
+	sortDiagnosticsByPosition(diags)
+	return verifyFixes(ctx, diags, fixAllowance{autolinks: true}), nil
+}
 
-			diagPos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: urlStart + 1,
-				EndLine:     lineNum,
-				EndColumn:   urlEnd + 1,
-			}
+// emailAutolinkPattern is the CommonMark grammar for the address inside an
+// email autolink, which is stricter than a GFM email literal: its domain
+// labels hold only letters, digits, and inner hyphens.
+var emailAutolinkPattern = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@" +
+	`[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
 
-			var msg string
-			if isEmail(url) {
-				msg = "Bare email address used"
-			} else {
-				msg = "Bare URL used"
-			}
+// angleBracketsKeepLiteral reports whether wrapping an autolink literal in
+// angle brackets makes an autolink to the same address. A URI autolink
+// cannot hold '<', '>', spaces, or ASCII control characters, and reads a
+// backslash or an entity reference as written where the literal's text read
+// it as an escape or a character (GitHub decodes "&copy;" in a GFM literal
+// too). A "www." literal has no scheme, so brackets never make it an
+// autolink.
+func angleBracketsKeepLiteral(kind mdscan.LiteralKind, literal []byte) bool {
+	switch kind {
+	case mdscan.LiteralURL:
+		return !bytes.ContainsAny(literal, "<>\\ ") && !bytes.ContainsFunc(literal, isASCIIControl) &&
+			bytes.Equal(renderedText(literal), gmutil.EscapeHTML(literal))
+	case mdscan.LiteralEmail:
+		return emailAutolinkPattern.Match(literal)
+	case mdscan.LiteralNone, mdscan.LiteralWWW:
+	}
+	return false
+}
 
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos, msg).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Wrap the URL/email in angle brackets").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+// isASCIIControl reports whether r is an ASCII control character.
+func isASCIIControl(r rune) bool {
+	return r < ' ' || r == 0x7f
+}
+
+// isTextContainer reports whether a block's children are inline content: a
+// paragraph, heading, or table cell. Link and image text is never searched.
+func isTextContainer(node *mdast.Node) bool {
+	if node.IsInline() {
+		return false
+	}
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if child.IsInline() {
+			return true
 		}
 	}
-
-	return diags, nil
+	return false
 }
 
-func (r *NoBareURLsRule) isInsideCodeSpan(line []byte, pos int) bool {
-	// Count backticks before the position.
-	backticks := 0
-	for i := 0; i < pos && i < len(line); i++ {
-		if line[i] == '`' {
-			backticks++
+// bareURLScan walks one container's inline nodes in order, tracking the
+// unclosed '[' that suppress autolink literals, like micromark.
+type bareURLScan struct {
+	file    *mdast.FileSnapshot
+	content []byte
+	// textStart is where the document's text starts: after a byte order
+	// mark, which the parser skips, so nothing comes before a literal there.
+	textStart int
+	// limit is where the container's inline content ends. A literal can run
+	// on past the text it starts in, over markup the parser read there.
+	limit int
+	// consumed is where the last literal ended; no literal starts before it.
+	consumed int
+	// parsed holds the spans of the autolinks the parser made from literals.
+	parsed []mdast.SourceRange
+	// lineStarts holds the offsets where the inline content of a line
+	// starts: the container's start, and the first node after each line
+	// break. micromark starts its text there, whatever container marker
+	// the source holds before it.
+	lineStarts map[int]bool
+	// fixesAllowed reports whether the container may get fixes at all: it is
+	// no table cell and its run of lines could hold no table.
+	fixesAllowed bool
+	brackets     int
+	found        []bareURL
+}
+
+// newBareURLScan prepares a scan of a container's inline content.
+func newBareURLScan(file *mdast.FileSnapshot, container *mdast.Node) *bareURLScan {
+	scan := &bareURLScan{file: file, content: file.Content, textStart: lint.LineTextOffset(file, 1)}
+	if last := container.LastChild; last != nil {
+		scan.limit = last.SourceRange().EndOffset
+	}
+	scan.lineStarts = make(map[int]bool)
+	atLineStart := true
+	_ = mdast.Walk(container, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if node == container {
+			return nil
+		}
+		if isLinkifiedAutolink(file.Content, node) {
+			scan.parsed = append(scan.parsed, node.SourceRange())
+		}
+		switch {
+		case node.Kind == mdast.NodeSoftBreak || node.Kind == mdast.NodeHardBreak:
+			atLineStart = true
+		case atLineStart:
+			scan.lineStarts[node.SourceRange().StartOffset] = true
+			atLineStart = false
+		}
+		return nil
+	})
+	return scan
+}
+
+func (s *bareURLScan) visit(parent *mdast.Node) {
+	children := parent.Children()
+	for idx := 0; idx < len(children); idx++ {
+		child := children[idx]
+		switch {
+		case s.isLiteralText(child):
+			last := idx
+			for last+1 < len(children) && s.isLiteralText(children[last+1]) &&
+				children[last+1].SourceRange().StartOffset == children[last].SourceRange().EndOffset {
+				last++
+			}
+			s.scanText(children[idx].SourceRange().StartOffset, children[last].SourceRange().EndOffset)
+			idx = last
+		case child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong || child.Kind == mdast.NodeStrikethrough:
+			s.visit(child)
+		case child.Kind == mdast.NodeHTMLInline:
+			idx = skipHTMLElementContent(s.file, children, idx)
 		}
 	}
-	// Odd number of backticks means we're inside a code span.
-	return backticks%2 == 1
 }
 
-func isAutolinkLine(line []byte) bool {
-	// Simple check for <url> pattern.
-	return len(line) >= 2 && line[0] == '<' && line[len(line)-1] == '>'
+// isLiteralText reports whether a node's source is text in which the GFM
+// grammar looks for literals: a text node, or an autolink the parser made
+// from a literal. Adjacent ones are searched together, so a literal the
+// parser ended early or late is still read whole.
+func (s *bareURLScan) isLiteralText(node *mdast.Node) bool {
+	return (node.Kind == mdast.NodeText && node.Inline != nil) || isLinkifiedAutolink(s.content, node)
 }
 
-func isEmail(s string) bool {
-	return emailCheckPattern.MatchString(s)
+// isLinkifiedAutolink reports whether a node is an autolink the parser made
+// from a GFM literal rather than one written in angle brackets.
+func isLinkifiedAutolink(content []byte, node *mdast.Node) bool {
+	span := node.SourceRange()
+	return isAutolinkNode(node) && !span.IsEmpty() && content[span.StartOffset] != '<'
+}
+
+// skipHTMLElementContent returns the index of the closing tag that matches the
+// opening tag at children[idx], or idx when there is none, so the element's
+// content is skipped as markdownlint does.
+func skipHTMLElementContent(file *mdast.FileSnapshot, children []*mdast.Node, idx int) int {
+	open, ok := htmlNodeConstruct(htmlSource(file, children[idx]), children[idx])
+	if !ok || !open.IsOpeningElement() {
+		return idx
+	}
+	depth := 1
+	for next := idx + 1; next < len(children); next++ {
+		if children[next].Kind != mdast.NodeHTMLInline {
+			continue
+		}
+		tag, ok := htmlNodeConstruct(htmlSource(file, children[next]), children[next])
+		if !ok || !strings.EqualFold(tag.Name, open.Name) {
+			continue
+		}
+		if !tag.Closing {
+			depth++
+			continue
+		}
+		depth--
+		if depth == 0 {
+			return next
+		}
+	}
+	return idx
+}
+
+// scanText searches the text content[start:end] for autolink literals,
+// skipping backslash escapes and counting brackets. A literal may run on past
+// the text, over markup the parser read there; the parser then read it
+// differently, so it gets no fix.
+func (s *bareURLScan) scanText(start, end int) {
+	text := s.content[:max(s.limit, end)]
+	for pos := max(start, s.consumed); pos < end; pos++ {
+		switch ch := text[pos]; {
+		case ch == '\\' && pos+1 < end && mdscan.IsASCIIPunct(text[pos+1]):
+			pos++
+			continue
+		case ch == '[':
+			s.brackets++
+			continue
+		case ch == ']':
+			if s.brackets > 0 {
+				s.brackets--
+			}
+			continue
+		}
+		if s.brackets > 0 {
+			continue
+		}
+		// At the start of a line's inline content nothing comes before a
+		// literal, as at the start of the document's text.
+		var prev byte
+		if pos > s.textStart && !s.lineStarts[pos] {
+			prev = s.content[pos-1]
+		}
+		literalEnd, kind := mdscan.MatchAutolinkLiteral(text, pos, prev)
+		if kind == mdscan.LiteralNone {
+			continue
+		}
+		fixable := s.fixesAllowed && literalEnd <= end && s.parsedAgrees(pos, literalEnd) &&
+			s.fixEligible(pos, literalEnd, kind)
+		s.add(pos, literalEnd, kind, fixable)
+		s.consumed = literalEnd
+		pos = literalEnd - 1
+	}
+}
+
+// parsedAgrees reports whether the parser read content[start:end] the way the
+// GFM grammar did: no autolink the parser made overlaps it, or one has
+// exactly its span.
+func (s *bareURLScan) parsedAgrees(start, end int) bool {
+	for _, span := range s.parsed {
+		overlaps := span.StartOffset < end && start < span.EndOffset
+		if overlaps && (span.StartOffset != start || span.EndOffset != end) {
+			return false
+		}
+	}
+	return true
+}
+
+// strippedTrail are the trailing punctuation characters that may follow a
+// literal whose fix is attached: cmark-gfm's autolink_delim strips each of
+// them from the end of a URL (a ")" only while more close than open), and
+// micromark's trail reads each as trailing punctuation.
+const strippedTrail = ".,:;!?*_~\"')"
+
+// fixEligible reports whether wrapping the literal content[start:end] in
+// angle brackets keeps the link GitHub shows. GitHub renders with
+// cmark-gfm, whose autolink extension (extensions/autolink.c) reads
+// literals its own way: url_match scans the raw text from the scheme to
+// ASCII whitespace or "<" and autolink_delim then strips trailing
+// punctuation, while postprocess_text finds emails in text that has been
+// decoded. markdownlint reports what micromark finds, and the fix check
+// sees only what goldmark parses. Rather than model where the three
+// differ, the fix is attached only where none of their differences can
+// reach the literal, which every condition below secures:
+//
+//   - The literal is printable ASCII without "&", "\", "<", ">", quotes,
+//     backticks, or "|". So cmark_clean_autolink, which decodes the character
+//     references inside an autolink, leaves its address as written; no
+//     Unicode table (cmark-gfm's is_valid_hostchar, micromark's
+//     unicodeWhitespace and unicodePunctuation) applies to it; and nothing
+//     in it starts other syntax.
+//   - Its run of non-blank characters starts with it, or with a "(" right
+//     before it, and that run starts a line's inline content or follows an
+//     ASCII space, tab, or line ending. So url_match rewinds over the
+//     scheme alone (it rewinds over letters), postprocess_text rewinds over
+//     the local part alone (it rewinds over letters, digits, ".", "+", "-",
+//     "_", and a "mailto:" or "xmpp:" right before them, raw or written as a
+//     character reference), and no cmark-gfm link that started earlier in
+//     the run takes the literal in, since those end only at ASCII
+//     whitespace or "<". micromark's checks of the character before a
+//     literal pass on all of these.
+//   - After it come an ASCII space, tab, or line ending or the end of the
+//     file, or a run of strippedTrail characters followed by one of those.
+//     So url_match runs exactly to the end of that run, autolink_delim
+//     strips exactly the run, micromark's trail reads it as trailing
+//     punctuation, and postprocess_text, whose domain scan stops at each of
+//     those characters, decodes nothing that could extend an address. The
+//     end of a table cell is not enough: where goldmark reads a table that
+//     cmark-gfm does not, the pipe after the cell is text to cmark-gfm,
+//     which url_match runs on over. A ")" is in the run only when the
+//     literal has no unbalanced
+//     "(", or autolink_delim would keep one. A run that starts with "*",
+//     "_", or "~" holds nothing else, so the ">" that the fix puts before
+//     it cannot make that delimiter run able to open emphasis or
+//     strikethrough. A URL that ends with its domain is followed by no "_",
+//     which check_domain would count in the domain's last segment and
+//     refuse the link for.
+//   - No table is involved (checked through fixesAllowed): the literal is in
+//     no table cell, and no line of its run of lines (see tableRuns) holds a
+//     pipe or could be a delimiter row. GitHub splits a row into cells only
+//     at pipes, and it reads a table only where a delimiter row follows the
+//     header row in the same run, so outside such runs every parser gives
+//     the literal the same inline content, whatever goldmark made of tables
+//     elsewhere.
+//   - An email also makes a CommonMark email autolink (checked in Apply).
+//     Every "_" in it sits between letters or digits, so the emphasis that
+//     cmark-gfm parses before postprocess_text cannot split it, and no
+//     "www." starts it or follows a "_" in it, where www_match, which runs
+//     during inline parsing, would link a "www." address first.
+func (s *bareURLScan) fixEligible(start, end int, kind mdscan.LiteralKind) bool {
+	if kind != mdscan.LiteralURL && kind != mdscan.LiteralEmail {
+		return false
+	}
+	literal := s.content[start:end]
+	if !isPlainLiteral(literal) || !s.plainBefore(start) || !s.plainAfter(literal, end, kind) {
+		return false
+	}
+	return kind != mdscan.LiteralEmail || isPlainEmail(literal)
+}
+
+// isPlainLiteral reports whether a literal is printable ASCII without
+// characters that decoding or other syntax reads, a table's pipe among them.
+func isPlainLiteral(literal []byte) bool {
+	for _, ch := range literal {
+		if ch <= ' ' || ch >= 0x7f || strings.IndexByte("&\\<>\"'`|", ch) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// plainBefore reports whether the literal at content[start] starts its run
+// of non-blank characters, or follows a "(" that does.
+func (s *bareURLScan) plainBefore(start int) bool {
+	if s.startsRun(start) {
+		return true
+	}
+	return s.content[start-1] == '(' && s.startsRun(start-1)
+}
+
+// startsRun reports whether content[pos] starts the inline content of a line
+// or follows an ASCII space, tab, or line ending.
+func (s *bareURLScan) startsRun(pos int) bool {
+	return pos <= s.textStart || s.lineStarts[pos] || isASCIIBlank(s.content[pos-1])
+}
+
+// plainAfter reports whether the literal, which ends at content[end], is
+// followed by ASCII whitespace or the end of the file, after at most a run
+// of trailing punctuation that both GFM grammars strip.
+func (s *bareURLScan) plainAfter(literal []byte, end int, kind mdscan.LiteralKind) bool {
+	stop := end
+	for stop < len(s.content) && strings.IndexByte(strippedTrail, s.content[stop]) >= 0 {
+		stop++
+	}
+	if stop < len(s.content) && !isASCIIBlank(s.content[stop]) {
+		return false
+	}
+	trail := s.content[end:stop]
+	switch {
+	case bytes.IndexByte(trail, ')') >= 0 && bytes.Count(literal, []byte("(")) > bytes.Count(literal, []byte(")")):
+		return false
+	case len(trail) > 0 && strings.IndexByte("*_~", trail[0]) >= 0 && bytes.Count(trail, trail[:1]) != len(trail):
+		return false
+	case kind == mdscan.LiteralURL && !urlHasPath(literal) && bytes.IndexByte(trail, '_') >= 0:
+		return false
+	}
+	return true
+}
+
+// urlHasPath reports whether a URL literal goes on after its domain, whose
+// characters are letters, digits, ".", "_", and "-".
+func urlHasPath(literal []byte) bool {
+	domain := literal[bytes.Index(literal, []byte("://"))+len("://"):]
+	for _, ch := range domain {
+		if !isASCIILetter(ch) && !isASCIIDigit(ch) && ch != '.' && ch != '_' && ch != '-' {
+			return true
+		}
+	}
+	return false
+}
+
+// isPlainEmail reports whether an email literal is read alike by cmark-gfm,
+// whose emphasis and www_match run before it looks for emails.
+func isPlainEmail(literal []byte) bool {
+	lower := bytes.ToLower(literal)
+	if bytes.HasPrefix(lower, []byte("www.")) || bytes.Contains(lower, []byte("_www.")) {
+		return false
+	}
+	for idx := 0; idx < len(literal); idx++ {
+		if literal[idx] != '_' {
+			continue
+		}
+		run := idx
+		for idx < len(literal) && literal[idx] == '_' {
+			idx++
+		}
+		if run == 0 || idx == len(literal) || !isASCIIAlnumByte(literal[run-1]) || !isASCIIAlnumByte(literal[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isASCIIAlnumByte reports whether ch is an ASCII letter or digit.
+func isASCIIAlnumByte(ch byte) bool {
+	return isASCIILetter(ch) || isASCIIDigit(ch)
+}
+
+// isASCIIBlank reports whether ch is an ASCII space, tab, or line ending.
+func isASCIIBlank(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+}
+
+// add records a literal unless it sits between '<' and '>', which markdownlint
+// ignores (micromark issue 164).
+func (s *bareURLScan) add(start, end int, kind mdscan.LiteralKind, fixable bool) {
+	if start > 0 && end < len(s.content) && s.content[start-1] == '<' && s.content[end] == '>' {
+		return
+	}
+	s.found = append(s.found, bareURL{start: start, end: end, kind: kind, fixable: fixable})
+}
+
+// tableRuns splits the lines of a file into runs: maximal sequences of lines
+// that hold something besides spaces and tabs. A blank line ends every
+// paragraph and table in every container, and no inline construct crosses
+// it, so each paragraph, and each table with the paragraph its header row
+// comes from, lies inside one run, as cmark-gfm's try_opening_table_header
+// (which reads the header row from the last line of the paragraph above the
+// delimiter row) and matches (which continues a table only with the lines
+// after it) build them. Nothing else ends a run: a line of blockquote
+// markers ends a paragraph only when the markers are not indented, and an
+// indented ">" is paragraph text. A run could hold a table when one of its
+// lines holds a pipe or could be a delimiter row (see couldHoldTableSyntax).
+type tableRuns struct {
+	run      []int  // run[line] numbers the run of a 1-based line; -1 between runs
+	tableish []bool // tableish[run] reports whether the run could hold a table
+}
+
+func newTableRuns(file *mdast.FileSnapshot) tableRuns {
+	runs := tableRuns{run: make([]int, len(file.Lines)+1)}
+	current := -1
+	for line := 1; line <= len(file.Lines); line++ {
+		text := lint.LineText(file, line)
+		if len(bytes.Trim(text, " \t")) == 0 {
+			runs.run[line], current = -1, -1
+			continue
+		}
+		if current < 0 {
+			current = len(runs.tableish)
+			runs.tableish = append(runs.tableish, false)
+		}
+		runs.run[line] = current
+		runs.tableish[current] = runs.tableish[current] || couldHoldTableSyntax(text)
+	}
+	return runs
+}
+
+// touch reports whether a line of node lies in a run that could hold a table.
+func (runs tableRuns) touch(node *mdast.Node) bool {
+	pos := node.SourcePosition()
+	for line := max(pos.StartLine, 1); line <= pos.EndLine && line < len(runs.run); line++ {
+		if run := runs.run[line]; run >= 0 && runs.tableish[run] {
+			return true
+		}
+	}
+	return false
+}
+
+// couldHoldTableSyntax reports whether a line holds a pipe, which splits a
+// table row into cells, or could be a GFM delimiter row once blockquote
+// markers and indentation are left out: nothing but "-", ":", "|", and
+// cmark-gfm's spacechar (space, tab, vertical tab, form feed), with at least
+// one "-", as scan_table_start reads it.
+func couldHoldTableSyntax(line []byte) bool {
+	if bytes.IndexByte(line, '|') >= 0 {
+		return true
+	}
+	rest := bytes.TrimLeft(line, " \t>")
+	return bytes.IndexByte(rest, '-') >= 0 && len(bytes.Trim(rest, "-: \t\v\f")) == 0
 }

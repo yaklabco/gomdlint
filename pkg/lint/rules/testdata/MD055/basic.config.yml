@@ -1,4 +1,0 @@
-# Kept on CommonMark: under GFM, MD055 reports one finding for a row that
-# lacks both pipes, where markdownlint reports the missing leading and
-# trailing pipes separately. Remove once MD055 matches markdownlint.
-flavor: commonmark

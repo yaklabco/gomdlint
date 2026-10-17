@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -101,7 +102,7 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{codeInfo: true}), nil
 }
 
 // buildLanguageFix detects the language and creates a fix to insert it.
@@ -200,7 +201,7 @@ func (r *CodeBlockStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		return nil, nil
 	}
 
-	configStyle := CodeBlockStyle(ctx.OptionString("style", string(CodeBlockFenced)))
+	configStyle := CodeBlockStyle(ctx.OptionString("style", string(CodeBlockConsistent)))
 	effectiveStyle := configStyle
 	if configStyle == CodeBlockConsistent {
 		effectiveStyle = "" // Will be set from first code block.
@@ -279,7 +280,7 @@ func (r *CodeFenceStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		return nil, nil
 	}
 
-	configStyle := FenceStyle(ctx.OptionString("style", string(FenceBacktick)))
+	configStyle := FenceStyle(ctx.OptionString("style", string(FenceConsistent)))
 	effectiveStyle := configStyle
 	effectiveChar := byte('`')
 
@@ -344,7 +345,7 @@ func (r *CodeFenceStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
 // CommandsShowOutputRule checks for unnecessary dollar signs in shell code blocks.
@@ -365,124 +366,118 @@ func NewCommandsShowOutputRule() *CommandsShowOutputRule {
 	}
 }
 
-// Apply checks for unnecessary dollar signs in code blocks.
+// dollarCommandPattern is markdownlint's dollarCommandRe: optional
+// indentation, then a dollar sign followed by whitespace.
+var dollarCommandPattern = regexp.MustCompile(`^(\s*)(\$\s+)`)
+
+// dollarCommandIndices is the number of submatch indices dollarCommandPattern produces.
+const dollarCommandIndices = 6
+
+// codeTabWidth is the tab stop CommonMark uses to measure indentation.
+const codeTabWidth = 4
+
+// Apply reports dollar-sign prompts in code blocks that show no output. Like
+// markdownlint, every fenced and indented code block is checked whatever its
+// info string, a block is reported only when every non-blank line starts with
+// "$" and whitespace, and each of those lines gets its own diagnostic and fix.
+// A line is blank when nothing is left once the block's own indentation is
+// removed; whitespace beyond it is code, which counts as output.
 func (r *CommandsShowOutputRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
-	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
-
-	for _, cb := range codeBlocks {
+	for _, cb := range ctx.CodeBlocks() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		if diag := r.checkCodeBlock(ctx, cb); diag != nil {
-			diags = append(diags, *diag)
-		}
+		diags = append(diags, r.checkCodeBlock(ctx, cb)...)
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{prompts: true}), nil
 }
 
-func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast.Node) *lint.Diagnostic {
+func (r *CommandsShowOutputRule) checkCodeBlock(ctx *lint.RuleContext, cb *mdast.Node) []lint.Diagnostic {
+	type dollarLine struct {
+		line    codeLineInfo
+		indices []int
+	}
+	var commands []dollarLine
+	indent := codeIndent(ctx.File, cb)
+	for _, line := range codeBlockContentLines(ctx.File, cb) {
+		if isBlankCodeLine(line.content, indent) {
+			continue
+		}
+		indices := dollarCommandPattern.FindStringSubmatchIndex(line.content)
+		if len(indices) < dollarCommandIndices {
+			return nil // A line without a prompt is output, so the prompts are justified.
+		}
+		commands = append(commands, dollarLine{line: line, indices: indices})
+	}
+
+	diags := make([]lint.Diagnostic, 0, len(commands))
+	for _, command := range commands {
+		promptStart := command.line.startOffset + command.indices[4]
+		promptEnd := command.line.startOffset + command.indices[5]
+		startLine, startColumn := ctx.File.LineAt(promptStart)
+		endLine, endColumn := ctx.File.LineAt(promptEnd)
+		pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+		builder := fix.NewEditBuilder()
+		builder.Delete(promptStart, promptEnd)
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+			"Dollar signs used before commands without showing output").
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Remove the dollar sign prompt from command-only code blocks").
+			WithFix(builder).
+			Build())
+	}
+	return diags
+}
+
+// codeBlockIndent is the indentation that makes an indented code block.
+const codeBlockIndent = 4
+
+// codeIndent returns how many columns of indentation belong to a code block
+// rather than to its code: four for an indented block, or the indentation of
+// a fenced block's opening fence after its container prefix.
+func codeIndent(file *mdast.FileSnapshot, cb *mdast.Node) int {
+	if lint.IsIndentedCodeBlock(cb) {
+		return codeBlockIndent
+	}
 	pos := cb.SourcePosition()
-	if !pos.IsValid() {
-		return nil
+	line := lint.RawLineContent(file, pos.StartLine)
+	if !pos.IsValid() || line == nil {
+		return 0
 	}
-
-	if !r.isShellCodeBlock(cb) {
-		return nil
-	}
-
-	contentLines := r.getCodeBlockContentLines(ctx.File, cb)
-	if len(contentLines) == 0 {
-		return nil
-	}
-
-	if !r.hasOnlyDollarCommands(contentLines) {
-		return nil
-	}
-
-	builder := r.buildDollarRemovalFix(contentLines)
-	// Report at the first command line: the content span of the code block.
-	diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, cb.ContentPosition(),
-		"Dollar signs used before commands without showing output").
-		WithSeverity(config.SeverityWarning).
-		WithSuggestion("Remove dollar signs from command-only code blocks").
-		WithFix(builder).
-		Build()
-	return &diag
-}
-
-func (r *CommandsShowOutputRule) isShellCodeBlock(cb *mdast.Node) bool {
-	info := strings.ToLower(lint.CodeBlockInfo(cb))
-	return info == "" || info == "sh" || info == "shell" || info == "bash" ||
-		info == "zsh" || info == "console" || info == "terminal"
-}
-
-func (r *CommandsShowOutputRule) startsWithDollar(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "$ ") || strings.HasPrefix(trimmed, "$\t") || trimmed == "$"
-}
-
-func (r *CommandsShowOutputRule) hasOnlyDollarCommands(lines []codeLineInfo) bool {
-	hasAnyCommand := false
-
-	for lineIdx, line := range lines {
-		trimmed := strings.TrimSpace(line.content)
-		if trimmed == "" {
-			continue
+	indent := 0
+	for _, ch := range line[min(len(lint.ContainerPrefix(file, cb, pos.StartLine)), len(line)):] {
+		if ch != ' ' {
+			break
 		}
+		indent++
+	}
+	return indent
+}
 
-		if !r.startsWithDollar(trimmed) {
+// isBlankCodeLine reports whether a code line, read after its container
+// prefix, holds nothing beyond indent columns of spaces and tabs.
+func isBlankCodeLine(content string, indent int) bool {
+	column := 0
+	for idx := range len(content) {
+		switch content[idx] {
+		case ' ':
+			column++
+		case '\t':
+			column += codeTabWidth - column%codeTabWidth
+		default:
 			return false
 		}
-		hasAnyCommand = true
-
-		// Check if there's output after this command
-		if r.hasOutputAfter(lines, lineIdx) {
+		if column > indent {
 			return false
 		}
 	}
-
-	return hasAnyCommand
-}
-
-func (r *CommandsShowOutputRule) hasOutputAfter(lines []codeLineInfo, startIdx int) bool {
-	for j := startIdx + 1; j < len(lines); j++ {
-		nextTrimmed := strings.TrimSpace(lines[j].content)
-		if nextTrimmed == "" {
-			continue
-		}
-		// If next non-empty line doesn't start with $, it's output
-		return !r.startsWithDollar(nextTrimmed)
-	}
-	return false
-}
-
-func (r *CommandsShowOutputRule) buildDollarRemovalFix(lines []codeLineInfo) *fix.EditBuilder {
-	builder := fix.NewEditBuilder()
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line.content)
-		if trimmed == "" {
-			continue
-		}
-
-		dollarIdx := strings.Index(line.content, "$")
-		if dollarIdx < 0 {
-			continue
-		}
-
-		removeEnd := dollarIdx + 1
-		if removeEnd < len(line.content) && (line.content[removeEnd] == ' ' || line.content[removeEnd] == '\t') {
-			removeEnd++
-		}
-		builder.Delete(line.startOffset+dollarIdx, line.startOffset+removeEnd)
-	}
-	return builder
+	return true
 }
 
 type codeLineInfo struct {
@@ -491,10 +486,11 @@ type codeLineInfo struct {
 	lineNum     int
 }
 
-// getCodeBlockContentLines returns the lines of the block's content span,
-// so neither fence line is included. A block without code has none.
-func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapshot, cb *mdast.Node) []codeLineInfo {
-	if cb.ContentRange().IsEmpty() {
+// codeBlockContentLines returns the lines of a code block's content span,
+// excluding fence lines. Each line starts after the prefix of the enclosing
+// blockquotes and list items, so it begins with the code's own indentation.
+func codeBlockContentLines(file *mdast.FileSnapshot, cb *mdast.Node) []codeLineInfo {
+	if file == nil || cb.ContentRange().IsEmpty() {
 		return nil
 	}
 	pos := cb.ContentPosition()
@@ -505,14 +501,13 @@ func (r *CommandsShowOutputRule) getCodeBlockContentLines(file *mdast.FileSnapsh
 	var lines []codeLineInfo
 	for lineNum := pos.StartLine; lineNum <= pos.EndLine && lineNum <= len(file.Lines); lineNum++ {
 		lineInfo := file.Lines[lineNum-1]
-		content := string(file.Content[lineInfo.StartOffset:lineInfo.NewlineStart])
+		start := lineInfo.StartOffset + len(lint.ContainerPrefix(file, cb, lineNum))
 		lines = append(lines, codeLineInfo{
-			content:     content,
-			startOffset: lineInfo.StartOffset,
+			content:     string(file.Content[start:lineInfo.NewlineStart]),
+			startOffset: start,
 			lineNum:     lineNum,
 		})
 	}
-
 	return lines
 }
 
@@ -525,34 +520,38 @@ func (r *CodeFenceStyleRule) buildFenceFix(
 		return nil
 	}
 
+	fenceLength := lint.CodeFenceLength(cb)
+	span := cb.SourceRange()
+	if fenceLength < 3 || span.StartOffset+fenceLength > len(file.Content) || !lint.IsFencedCodeBlock(cb) {
+		return nil
+	}
 	pos := cb.SourcePosition()
-	if !pos.IsValid() || pos.EndLine > len(file.Lines) || cb.Block == nil || cb.Block.CodeBlock == nil {
+	if !pos.IsValid() || pos.EndLine > len(file.Lines) {
 		return nil
 	}
-	attrs := cb.Block.CodeBlock
+	closed := cb.Block.CodeBlock.Closed
 
-	// The full span of a fenced code block starts at its opening fence.
-	opening := cb.SourceRange().StartOffset
-	if attrs.FenceLength < 3 || opening+attrs.FenceLength > len(file.Content) {
+	// A backtick fence cannot have a backtick in its info string.
+	if expectedChar == '`' && strings.Contains(lint.CodeBlockInfo(cb), "`") {
 		return nil
 	}
-	// The converted block must parse the same: a backtick fence cannot have
-	// a backtick in its info string, and a line of code that starts with a
-	// run of the new fence character could close the block early.
-	if expectedChar == '`' && strings.ContainsRune(attrs.Info, '`') {
-		return nil
+
+	// The new fence must not be closed early by a content line.
+	lastContentLine := pos.EndLine
+	if closed {
+		lastContentLine--
 	}
-	if codeHoldsFenceRun(file, cb, expectedChar) {
-		return nil
+	for line := pos.StartLine + 1; line <= lastContentLine; line++ {
+		if closesFence(file, cb, line, expectedChar, fenceLength) {
+			return nil
+		}
 	}
 
 	builder := fix.NewEditBuilder()
-	builder.ReplaceRange(opening, opening+attrs.FenceLength, strings.Repeat(string(expectedChar), attrs.FenceLength))
+	builder.ReplaceRange(span.StartOffset, span.StartOffset+fenceLength, strings.Repeat(string(expectedChar), fenceLength))
 
-	// The closing fence may be longer than the opening one: replace its
-	// whole run.
-	if attrs.Closed {
-		start, end, ok := closingFenceRun(file, cb, pos.EndLine, attrs.FenceChar)
+	if closed && pos.EndLine > pos.StartLine {
+		start, end, ok := fenceRun(file, cb, pos.EndLine)
 		if !ok {
 			return nil
 		}
@@ -562,38 +561,32 @@ func (r *CodeFenceStyleRule) buildFenceFix(
 	return builder
 }
 
-// closingFenceRun returns the byte range of the run of fence characters on
-// the closing line of a fenced code block, after its container prefix and
-// indentation.
-func closingFenceRun(file *mdast.FileSnapshot, cb *mdast.Node, lineNum int, fenceChar byte) (int, int, bool) {
+// fenceRun returns the offsets of the run of fence characters that starts a
+// line after its container prefix and up to three spaces of indentation.
+func fenceRun(file *mdast.FileSnapshot, cb *mdast.Node, lineNum int) (int, int, bool) {
 	line := file.Lines[lineNum-1]
 	start := line.StartOffset + len(lint.ContainerPrefix(file, cb, lineNum))
-	for start < line.NewlineStart && (file.Content[start] == ' ' || file.Content[start] == '\t') {
+	for indent := 0; indent < 3 && start < line.NewlineStart && file.Content[start] == ' '; indent++ {
 		start++
 	}
+	if start >= line.NewlineStart || (file.Content[start] != '`' && file.Content[start] != '~') {
+		return 0, 0, false
+	}
 	end := start
-	for end < line.NewlineStart && file.Content[end] == fenceChar {
+	for end < line.NewlineStart && file.Content[end] == file.Content[start] {
 		end++
 	}
-	return start, end, end-start >= 3
+	return start, end, true
 }
 
-// codeHoldsFenceRun reports whether a line of the code block's content
-// starts, after its container prefix and indentation, with three or more of
-// fenceChar.
-func codeHoldsFenceRun(file *mdast.FileSnapshot, cb *mdast.Node, fenceChar byte) bool {
-	pos := cb.SourcePosition()
-	last := pos.EndLine
-	if cb.Block.CodeBlock.Closed {
-		last--
+// closesFence reports whether a content line would close a fence of
+// fenceChar repeated fenceLength times: a run at least that long followed by
+// nothing but spaces or tabs.
+func closesFence(file *mdast.FileSnapshot, cb *mdast.Node, lineNum int, fenceChar byte, fenceLength int) bool {
+	start, end, ok := fenceRun(file, cb, lineNum)
+	if !ok || file.Content[start] != fenceChar || end-start < fenceLength {
+		return false
 	}
-	fence := []byte{fenceChar, fenceChar, fenceChar}
-	for lineNum := pos.StartLine + 1; lineNum <= last; lineNum++ {
-		content := lint.RawLineContent(file, lineNum)
-		rest := bytes.TrimLeft(content[len(lint.ContainerPrefix(file, cb, lineNum)):], " \t")
-		if bytes.HasPrefix(rest, fence) {
-			return true
-		}
-	}
-	return false
+	rest := file.Content[end:file.Lines[lineNum-1].NewlineStart]
+	return len(bytes.Trim(rest, " \t")) == 0
 }

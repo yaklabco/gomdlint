@@ -16,14 +16,5 @@
     "message": "Link text 'more' is not descriptive",
     "severity": "warning",
     "fixable": false
-  },
-  {
-    "rule": "MD059",
-    "name": "descriptive-link-text",
-    "line": 11,
-    "column": 5,
-    "message": "Link text 'this link' is not descriptive",
-    "severity": "warning",
-    "fixable": false
   }
 ]

@@ -197,9 +197,10 @@ func TestAnchorMap_GenerateAnchor(t *testing.T) {
 		{"punctuation", "Don't Panic!", "dont-panic"},
 		{"c++", "C++ Guide", "c-guide"},
 		{"underscores", "foo_bar_baz", "foo_bar_baz"},
-		{"multiple spaces", "hello   world", "hello-world"},
-		{"leading trailing spaces", "  hello  ", "hello"},
-		{"emoji", "Hello World 🎉", "hello-world"},
+		// github-slugger turns every space into a hyphen and never trims or collapses.
+		{"multiple spaces", "hello   world", "hello---world"},
+		{"leading trailing spaces", "  hello  ", "--hello--"},
+		{"emoji", "Hello World 🎉", "hello-world-"},
 		{"only special", "!!!???", ""},
 	}
 
@@ -211,6 +212,217 @@ func TestAnchorMap_GenerateAnchor(t *testing.T) {
 				t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.expected)
 			}
 		})
+	}
+}
+
+// TestGenerateAnchor_GitHubSlugger checks github-slugger semantics: lowercase,
+// drop everything except letters, marks, numbers, connector punctuation,
+// hyphens and spaces, then turn each space into a hyphen. Nothing is trimmed
+// or collapsed.
+func TestGenerateAnchor_GitHubSlugger(t *testing.T) {
+	tests := []struct {
+		text string
+		want string
+	}{
+		{"A - B", "a---b"},
+		{"--flag option", "--flag-option"},
+		{"हिन्दी", "हिन्दी"},
+		{"Café Menu", "café-menu"},
+		{"Hello World 🎉", "hello-world-"},
+		{"hello   world", "hello---world"},
+		{"Tab\tseparated", "tabseparated"},
+		{"snake_case_name", "snake_case_name"},
+		{"Version 1.0.0", "version-100"},
+		{"Don't Panic!", "dont-panic"},
+		{"!!!???", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			if got := NewAnchorMap().GenerateAnchor(tt.text); got != tt.want {
+				t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerateAnchor_GitHubSluggerDuplicates checks that a suffixed slug that
+// collides with a later heading's slug keeps counting, as github-slugger does.
+func TestGenerateAnchor_GitHubSluggerDuplicates(t *testing.T) {
+	anchors := NewAnchorMap()
+	got := []string{anchors.GenerateAnchor("Foo"), anchors.GenerateAnchor("Foo"), anchors.GenerateAnchor("Foo 1")}
+	want := []string{"foo", "foo-1", "foo-1-1"}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Errorf("anchor %d = %q, want %q", idx, got[idx], want[idx])
+		}
+	}
+
+	anchors = NewAnchorMap()
+	got = []string{anchors.GenerateAnchor("Foo 1"), anchors.GenerateAnchor("Foo"), anchors.GenerateAnchor("Foo")}
+	want = []string{"foo-1", "foo", "foo-2"}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Errorf("anchor %d = %q, want %q", idx, got[idx], want[idx])
+		}
+	}
+}
+
+func TestContext_ValidateFragmentPercentEncoded(t *testing.T) {
+	ctx := NewContext(nil)
+	ctx.Anchors.AddFromHeading("Café Menu", mdast.SourcePosition{})
+
+	for _, fragment := range []string{"#café-menu", "#caf%C3%A9-menu", "#caf%c3%a9-menu"} {
+		if !ctx.ValidateFragment(fragment) {
+			t.Errorf("ValidateFragment(%q) = false, want true", fragment)
+		}
+	}
+	for _, fragment := range []string{"#cafe-menu", "#caf%zz-menu"} {
+		if ctx.ValidateFragment(fragment) {
+			t.Errorf("ValidateFragment(%q) = true, want false", fragment)
+		}
+	}
+	if !ctx.ValidateFragmentIgnoreCase("#CAF%C3%A9-Menu") {
+		t.Error("ValidateFragmentIgnoreCase(\"#CAF%C3%A9-Menu\") = false, want true")
+	}
+}
+
+func TestCollect_HeadingTextForAnchors(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		want     string
+	}{
+		{"code span with leading hyphens", "## `--flag` option\n", "--flag-option"},
+		{"escaped punctuation", "## Learn C\\#\n", "learn-c"},
+		{"entity reference", "## Tom &amp; Jerry\n", "tom--jerry"},
+		{"link text counts", "## [Docs](https://example.com) page\n", "docs-page"},
+		{"image alt text does not count", "## ![logo](logo.png) Title\n", "-title"},
+		{"emphasis markers do not count", "## *Important* note\n", "important-note"},
+		{"inline html does not count", "## <span>Styled</span> heading\n", "styled-heading"},
+		{"multi-line setext heading", "First\nsecond line\n---\n", "firstsecond-line"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New("gfm").Parse(context.Background(), "test.md", []byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			refCtx := Collect(file.Root, file)
+			if !refCtx.Anchors.Has(tt.want) {
+				var ids []string
+				for _, anchor := range refCtx.Anchors.All() {
+					ids = append(ids, anchor.ID)
+				}
+				t.Errorf("anchor %q not found; anchors: %q", tt.want, ids)
+			}
+		})
+	}
+}
+
+func TestCollect_UnresolvedReferences(t *testing.T) {
+	type found struct {
+		style ReferenceStyle
+		label string
+		image bool
+	}
+	tests := []struct {
+		name     string
+		markdown string
+		want     []found
+	}{
+		{"full", "[text][label]\n", []found{{StyleFull, "label", false}}},
+		{"collapsed", "[label][]\n", []found{{StyleCollapsed, "label", false}}},
+		{"shortcut", "[label]\n", []found{{StyleShortcut, "label", false}}},
+		{"image", "![alt][pic]\n", []found{{StyleFull, "pic", true}}},
+		{"escaped image marker", "\\![alt][pic]\n", []found{{StyleFull, "pic", false}}},
+		{"nested brackets in link text", "[a [b] c][d]\n", []found{{StyleShortcut, "b", false}, {StyleFull, "d", false}}},
+		{"brackets cannot form a shortcut label", "[a [b] c]\n", []found{{StyleShortcut, "b", false}}},
+		{"emphasis inside link text", "[*em*][ref]\n", []found{{StyleFull, "ref", false}}},
+		{"code span in a collapsed label", "[a `code`][]\n", []found{{StyleCollapsed, "a `code`", false}}},
+		{"emphasis delimiters stay in a label", "[*a*][]\n", []found{{StyleCollapsed, "*a*", false}}},
+		{"emphasis in a full label", "[t][*x*]\n", []found{{StyleFull, "*x*", false}}},
+		{"bracket inside a code span makes no label", "[a `]` b][]\n", nil},
+		{"raw HTML in a shortcut label", "[a <b>x</b>]\n", []found{{StyleShortcut, "a <b>x</b>", false}}},
+		{"multi-line code span keeps its padding", "[a ` x\ny `][]\n", []found{{StyleCollapsed, "a ` x\ny `", false}}},
+		{"hard break backslash stays in the label", "[a\\\nb][]\n", []found{{StyleCollapsed, "a\\\nb", false}}},
+		{"failed inline link falls back to a shortcut", "[text](\n", []found{{StyleShortcut, "text", false}}},
+		{"autolink text is not searched", "<https://example.com/[a][b]>\n", nil},
+		{"code span", "`[text][label]`\n", nil},
+		{"blank label", "[ ]\n", nil},
+		{"resolved reference is not unresolved", "[text][ok]\n\n[ok]: https://example.com\n", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			var got []found
+			for _, usage := range Collect(file.Root, file).Usages {
+				if usage.Unresolved {
+					got = append(got, found{usage.Style, usage.Label, usage.IsImage})
+				}
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+			for idx := range tt.want {
+				if got[idx] != tt.want[idx] {
+					t.Errorf("reference %d = %+v, want %+v", idx, got[idx], tt.want[idx])
+				}
+			}
+		})
+	}
+}
+
+func TestCollect_Definitions(t *testing.T) {
+	markdown := "Para text\n[notadef]: /in-paragraph\n\n" +
+		"> [quoted]: /quoted \"Quoted title\"\n" +
+		"- [listed]: </listed>\n\n" +
+		"[multi\nline]:\n  /multi\n  'Multi title'\n" +
+		"[next]: /next (Paren title)\n" +
+		"[raw]: https://x.example/a>\n" +
+		"[bad]: /dest trailing\n"
+	file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(markdown))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	type want struct {
+		label, destination, title string
+		lines                     [2]int
+		removable                 bool
+	}
+	expected := []want{
+		{"quoted", "/quoted", "Quoted title", [2]int{4, 4}, true},
+		{"listed", "/listed", "", [2]int{5, 5}, false},
+		{"multi\nline", "/multi", "Multi title", [2]int{7, 10}, true},
+		{"next", "/next", "Paren title", [2]int{11, 11}, true},
+		{"raw", "https://x.example/a>", "", [2]int{12, 12}, true},
+	}
+	defs := Collect(file.Root, file).AllDefinitions
+	if len(defs) != len(expected) {
+		var labels []string
+		for _, def := range defs {
+			labels = append(labels, def.Label)
+		}
+		t.Fatalf("got definitions %q, want %d", labels, len(expected))
+	}
+	for idx, exp := range expected {
+		def := defs[idx]
+		got := want{def.Label, def.Destination, def.Title, def.Lines, def.Removable}
+		if got != exp {
+			t.Errorf("definition %d = %+v, want %+v", idx, got, exp)
+		}
+	}
+	if defs[2].NormalizedLabel != "multi line" {
+		t.Errorf("NormalizedLabel = %q, want %q", defs[2].NormalizedLabel, "multi line")
+	}
+}
+
+func TestNormalizeLabel_UnicodeCaseFolding(t *testing.T) {
+	if NormalizeLabel("Straße") != NormalizeLabel("STRASSE") {
+		t.Errorf("NormalizeLabel(%q) = %q, NormalizeLabel(%q) = %q, want equal",
+			"Straße", NormalizeLabel("Straße"), "STRASSE", NormalizeLabel("STRASSE"))
 	}
 }
 
@@ -421,5 +633,50 @@ func TestCollect_DefinitionAfterByteOrderMark(t *testing.T) {
 	}
 	if len(ctx.Usages) != 1 || ctx.Usages[0].ResolvedDefinition != def {
 		t.Errorf("Expected [x][foo] to resolve to the definition on line 1")
+	}
+}
+
+// TestJSToLower mirrors JavaScript's String.prototype.toLowerCase, which
+// github-slugger and markdownlint use: full case mapping, so U+0130 becomes
+// "i" and a combining dot above, and a capital sigma at the end of a word
+// becomes the final sigma.
+func TestJSToLower(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"Hello World", "hello world"},
+		{"İ", "i̇"},
+		{"ΟΣ", "ος"},
+		{"ΣΑ", "σα"},
+		{"Σ", "σ"},
+		{"A.Σ", "a.ς"},
+		{"ΟΔΟΣ ΚΑΙ ΣΟΦΙΑ", "οδος και σοφια"},
+		{"ΑΣ́", "ας́"},
+		{"Σ́Α", "σ́α"},
+		{"x Σ y", "x σ y"},
+		{"ǅ", "ǆ"},
+		{"ẞ", "ß"},
+		{"AΣͅ", "aςͅ"},
+		{"Σ.", "σ."},
+		{"AΣ.B", "aσ.b"},
+	}
+	for _, tt := range tests {
+		if got := jsToLower(tt.in); got != tt.want {
+			t.Errorf("jsToLower(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestGenerateAnchor_JavaScriptLowercase(t *testing.T) {
+	tests := []struct {
+		text, want string
+	}{
+		{"İ", "i̇"},
+		{"ΟΣ", "ος"},
+	}
+	for _, tt := range tests {
+		if got := NewAnchorMap().GenerateAnchor(tt.text); got != tt.want {
+			t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.want)
+		}
 	}
 }

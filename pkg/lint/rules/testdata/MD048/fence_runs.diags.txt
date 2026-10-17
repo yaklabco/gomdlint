@@ -1,0 +1,4 @@
+fence_runs.input.md:11:1 warning Code fence style 'tilde' does not match expected 'backtick' (MD048/code-fence-style) [fixable]
+fence_runs.input.md:17:1 warning Code fence style 'tilde' does not match expected 'backtick' (MD048/code-fence-style)
+fence_runs.input.md:25:1 warning Code fence style 'tilde' does not match expected 'backtick' (MD048/code-fence-style)
+fence_runs.input.md:31:3 warning Code fence style 'tilde' does not match expected 'backtick' (MD048/code-fence-style) [fixable]

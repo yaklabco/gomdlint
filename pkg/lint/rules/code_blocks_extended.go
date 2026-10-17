@@ -1,8 +1,9 @@
 package rules
 
 import (
-	"regexp"
-	"strings"
+	"bytes"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -37,6 +38,7 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	includeListItems := ctx.OptionBool("list_items", true)
 
 	var diags []lint.Diagnostic
+	inserted := blankLineInserts{}
 
 	codeBlocks := ctx.CodeBlocks()
 	for _, cb := range codeBlocks {
@@ -44,8 +46,9 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip indented code blocks.
-		if lint.IsIndentedCodeBlock(cb) {
+		// Only fenced code blocks have fences to surround. This also makes
+		// sure the block has code block attributes.
+		if !lint.IsFencedCodeBlock(cb) {
 			continue
 		}
 
@@ -63,62 +66,65 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		// to the closing fence (or the last content line when unclosed).
 		fenceOpenLine := pos.StartLine
 		fenceCloseLine := pos.EndLine
-
-		// Validate fence lines exist.
 		if fenceOpenLine < 1 || fenceCloseLine > len(ctx.File.Lines) {
 			continue
 		}
+		blankLine := lint.BlankLineText(ctx.File, cb)
 
-		// Check for blank line before the opening fence.
-		// Need blank on fenceOpenLine - 1 (the line before the fence).
-		if fenceOpenLine > 1 && !lint.IsBlankLine(ctx.File, fenceOpenLine-1) {
-			fenceLine := ctx.File.Lines[fenceOpenLine-1]
-
-			builder := fix.NewEditBuilder()
-			builder.Insert(fenceLine.StartOffset, "\n")
-
+		if fenceOpenLine > 1 && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, fenceOpenLine-1)) {
+			at := ctx.File.Lines[fenceOpenLine-1].StartOffset
 			diagPos := mdast.SourcePosition{
-				StartLine:   fenceOpenLine,
-				StartColumn: 1,
-				EndLine:     fenceOpenLine,
-				EndColumn:   1,
+				StartLine: fenceOpenLine, StartColumn: pos.StartColumn, EndLine: fenceOpenLine, EndColumn: pos.StartColumn,
 			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				"Missing blank line before fenced code block").
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Add a blank line before the fenced code block").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+			diags = append(diags, r.blankLineDiagnostic(ctx, diagPos, "before", inserted.insert(at, blankLine)))
 		}
 
-		// Check for blank line after the closing fence.
-		// Need blank on fenceCloseLine + 1 (the line after the fence).
-		if fenceCloseLine < len(ctx.File.Lines) && !lint.IsBlankLine(ctx.File, fenceCloseLine+1) {
-			fenceLine := ctx.File.Lines[fenceCloseLine-1]
-
-			builder := fix.NewEditBuilder()
-			builder.Insert(fenceLine.EndOffset, "\n")
-
-			diagPos := mdast.SourcePosition{
-				StartLine:   fenceCloseLine,
-				StartColumn: 1,
-				EndLine:     fenceCloseLine,
-				EndColumn:   1,
+		// Like markdownlint, a block whose last line is blank needs no blank after it.
+		if fenceCloseLine < len(ctx.File.Lines) && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, fenceCloseLine+1)) &&
+			!isMarkdownlintBlankLine(lint.LineContent(ctx.File, fenceCloseLine)) {
+			column := 1
+			var builder *fix.EditBuilder
+			// After an unclosed fence, an inserted line would become code.
+			if cb.Block.CodeBlock.Closed {
+				if start, _, ok := fenceRun(ctx.File, cb, fenceCloseLine); ok {
+					column = start - ctx.File.Lines[fenceCloseLine-1].StartOffset + 1
+				}
+				builder = inserted.insert(ctx.File.Lines[fenceCloseLine].StartOffset, blankLine)
 			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				"Missing blank line after fenced code block").
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Add a blank line after the fenced code block").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+			diagPos := mdast.SourcePosition{StartLine: fenceCloseLine, StartColumn: column, EndLine: fenceCloseLine, EndColumn: column}
+			diags = append(diags, r.blankLineDiagnostic(ctx, diagPos, "after", builder))
 		}
 	}
 
-	return diags, nil
+	return verifyFixes(ctx, diags, fixAllowance{}), nil
+}
+
+func (r *BlanksAroundFencesRule) blankLineDiagnostic(
+	ctx *lint.RuleContext, pos mdast.SourcePosition, side string, builder *fix.EditBuilder,
+) lint.Diagnostic {
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Missing blank line "+side+" fenced code block").
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Add a blank line " + side + " the fenced code block")
+	if builder != nil {
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build()
+}
+
+// blankLineInserts hands out insertion fixes, at most one per offset, so the
+// blank line between two adjacent fences is inserted once.
+type blankLineInserts map[int]bool
+
+// insert returns a fix that inserts text at offset, or nil when an earlier
+// fix already inserts there.
+func (inserts blankLineInserts) insert(offset int, text string) *fix.EditBuilder {
+	if inserts[offset] {
+		return nil
+	}
+	inserts[offset] = true
+	builder := fix.NewEditBuilder()
+	builder.Insert(offset, text)
+	return builder
 }
 
 func (r *BlanksAroundFencesRule) isInListItem(node *mdast.Node) bool {
@@ -148,137 +154,204 @@ func NewNoSpaceInCodeRule() *NoSpaceInCodeRule {
 	}
 }
 
-// codeSpanPattern matches inline code spans with their content.
-var codeSpanPattern = regexp.MustCompile("`+[^`]+`+")
-
-// Apply checks for spaces inside code span elements.
+// Apply reports code spans with spaces beside the backticks, following
+// markdownlint: one space of padding on both sides is part of the syntax and
+// allowed, a space that separates a backtick in the content from the
+// delimiter is allowed, and content made only of spaces is allowed.
 func (r *NoSpaceInCodeRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, span := range ctx.CodeSpans() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
+		diags = append(diags, r.checkCodeSpan(ctx, span)...)
+	}
+	return verifyFixes(ctx, diags, fixAllowance{codeSpanSpace: true}), nil
+}
 
-		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
-			continue
+// checkCodeSpan reports the extra space at the start and at the end of a code
+// span separately, each at the spaces its fix deletes, like markdownlint.
+func (r *NoSpaceInCodeRule) checkCodeSpan(ctx *lint.RuleContext, span *mdast.Node) []lint.Diagnostic {
+	inner := span.ContentRange()
+	if inner.IsEmpty() {
+		return nil
+	}
+	tokens := codeTextTokens(ctx.File, span, inner.StartOffset, inner.EndOffset)
+	datas, paddings := resolveCodeText(tokens)
+	if len(datas) == 0 {
+		return nil
+	}
+	content := ctx.File.Content
+	hasPadding := len(paddings) == 2
+
+	// A space that separates a backtick in the content from the delimiter
+	// is kept. It may be a multibyte space such as a no-break space, so the
+	// kept character's whole encoding is left out of the count.
+	startData := datas[0]
+	startSpaces, startNext := leadingSpaceRun(content[startData.start:startData.end])
+	startBacktick := startNext == '`'
+	startCount := startSpaces
+	if startBacktick && !hasPadding {
+		_, kept := utf8.DecodeLastRune(content[startData.start : startData.start+startSpaces])
+		startCount -= kept
+	}
+
+	endData := datas[len(datas)-1]
+	endSpaces, endPrev := trailingSpaceRun(content[endData.start:endData.end])
+	endBacktick := endPrev == '`'
+	endCount := endSpaces
+	if endBacktick && !hasPadding {
+		_, kept := utf8.DecodeRune(content[endData.end-endSpaces : endData.end])
+		endCount -= kept
+	}
+
+	removePadding := startCount > 0 && endCount > 0 && hasPadding && !startBacktick && !endBacktick
+
+	var diags []lint.Diagnostic
+	if startCount > 0 {
+		from, to := startData.start, startData.start+startCount
+		if removePadding {
+			from = paddings[0].start
 		}
+		diags = append(diags, r.spaceDiagnostic(ctx, from, to, "Excessive leading space inside code span"))
+	}
+	if endCount > 0 {
+		from, to := endData.end-endCount, endData.end
+		if removePadding {
+			to = paddings[1].end
+		}
+		diags = append(diags, r.spaceDiagnostic(ctx, from, to, "Excessive trailing space inside code span"))
+	}
+	return diags
+}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		matches := codeSpanPattern.FindAllIndex(lineContent, -1)
+// spaceDiagnostic reports the spaces in content[from:to] with a fix that
+// deletes them, unless the range holds a line ending, which a fix must not join.
+func (r *NoSpaceInCodeRule) spaceDiagnostic(ctx *lint.RuleContext, from, to int, msg string) lint.Diagnostic {
+	startLine, startColumn := ctx.File.LineAt(from)
+	endLine, endColumn := ctx.File.LineAt(to)
+	pos := mdast.SourcePosition{StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn}
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Remove extra spaces from inside the code span")
+	if from < to && !bytes.ContainsAny(ctx.File.Content[from:to], "\r\n") {
+		builder := fix.NewEditBuilder()
+		builder.Delete(from, to)
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build()
+}
 
-		for _, match := range matches {
-			start, end := match[0], match[1]
-			codeSpan := string(lineContent[start:end])
+// codeTextKind classifies a piece of code span content the way micromark does.
+type codeTextKind int
 
-			// Extract content between backticks.
-			content := extractCodeSpanContent(codeSpan)
-			if content == "" {
-				continue
+const (
+	codeTextData codeTextKind = iota
+	codeTextSpace
+	codeTextLineEnding
+	codeTextPadding
+)
+
+// codeTextToken is a piece of code span content with absolute offsets.
+type codeTextToken struct {
+	kind       codeTextKind
+	start, end int
+}
+
+// codeTextTokens splits the content of a code span into micromark's code text
+// tokens: one token per space, one per line ending, and runs of other
+// characters. Container prefixes and the indentation that paragraphs strip
+// from continuation lines are not content.
+func codeTextTokens(file *mdast.FileSnapshot, span *mdast.Node, start, end int) []codeTextToken {
+	content := file.Content
+	var tokens []codeTextToken
+	for pos := start; pos < end; {
+		switch ch := content[pos]; ch {
+		case '\r', '\n':
+			lineEnd := pos + 1
+			if ch == '\r' && lineEnd < end && content[lineEnd] == '\n' {
+				lineEnd++
 			}
-
-			// Check for leading/trailing spaces.
-			trimmed := strings.Trim(content, " ")
-			hasLeading := len(content) > 0 && content[0] == ' '
-			hasTrailing := len(content) > 0 && content[len(content)-1] == ' '
-
-			// Allow single space padding if content contains backticks.
-			if strings.Contains(trimmed, "`") {
-				// Single space on each side is allowed for backtick-containing content.
-				if len(content) >= 2 && content[0] == ' ' && content[len(content)-1] == ' ' {
-					innerContent := content[1 : len(content)-1]
-					if !strings.HasPrefix(innerContent, " ") && !strings.HasSuffix(innerContent, " ") {
-						continue
-					}
+			tokens = append(tokens, codeTextToken{kind: codeTextLineEnding, start: pos, end: lineEnd})
+			pos = lineEnd
+			if pos < end {
+				lineNum, _ := file.LineAt(pos)
+				pos += len(lint.ContainerPrefix(file, span, lineNum))
+				for pos < end && (content[pos] == ' ' || content[pos] == '\t') {
+					pos++
 				}
 			}
-
-			// Only spaces content is allowed.
-			if len(strings.TrimSpace(content)) == 0 {
-				continue
+		case ' ':
+			tokens = append(tokens, codeTextToken{kind: codeTextSpace, start: pos, end: pos + 1})
+			pos++
+		default:
+			dataEnd := pos
+			for dataEnd < end && content[dataEnd] != ' ' && content[dataEnd] != '\r' && content[dataEnd] != '\n' {
+				dataEnd++
 			}
+			tokens = append(tokens, codeTextToken{kind: codeTextData, start: pos, end: dataEnd})
+			pos = dataEnd
+		}
+	}
+	return tokens
+}
 
-			// Check for excessive spaces.
-			leadingSpaces := len(content) - len(strings.TrimLeft(content, " "))
-			trailingSpaces := len(content) - len(strings.TrimRight(content, " "))
-
-			if leadingSpaces <= 1 && trailingSpaces <= 1 {
-				// Single space padding is allowed.
-				continue
+// resolveCodeText applies micromark's resolveCodeText: when the content starts
+// and ends with a space or line ending and has data in between, those two
+// become padding; then runs of spaces and data merge into data tokens.
+func resolveCodeText(tokens []codeTextToken) ([]codeTextToken, []codeTextToken) {
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	head, tail := 0, len(tokens)-1
+	var paddings []codeTextToken
+	if head < tail && tokens[head].kind != codeTextData && tokens[tail].kind != codeTextData {
+		for idx := head + 1; idx < tail; idx++ {
+			if tokens[idx].kind == codeTextData {
+				paddings = []codeTextToken{tokens[head], tokens[tail]}
+				head++
+				tail--
+				break
 			}
-
-			if !hasLeading && !hasTrailing {
-				continue
-			}
-
-			line := ctx.File.Lines[lineNum-1]
-			diagPos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: start + 1,
-				EndLine:     lineNum,
-				EndColumn:   end + 1,
-			}
-
-			var msg string
-			switch {
-			case hasLeading && hasTrailing && (leadingSpaces > 1 || trailingSpaces > 1):
-				msg = "Excessive spaces inside code span"
-			case hasLeading && leadingSpaces > 1:
-				msg = "Excessive leading space inside code span"
-			case hasTrailing && trailingSpaces > 1:
-				msg = "Excessive trailing space inside code span"
-			default:
-				continue
-			}
-
-			// Build fix.
-			builder := fix.NewEditBuilder()
-			backtickCount := countLeadingBackticks(codeSpan)
-			backticks := strings.Repeat("`", backtickCount)
-			fixedContent := backticks + strings.TrimSpace(content) + backticks
-			builder.ReplaceRange(line.StartOffset+start, line.StartOffset+end, fixedContent)
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos, msg).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Remove extra spaces from inside the code span").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
 		}
 	}
 
-	return diags, nil
-}
-
-func extractCodeSpanContent(span string) string {
-	// Count leading backticks.
-	backtickCount := countLeadingBackticks(span)
-	if backtickCount == 0 {
-		return ""
-	}
-
-	// Remove leading and trailing backticks.
-	content := span[backtickCount:]
-	if len(content) < backtickCount {
-		return ""
-	}
-	content = content[:len(content)-backtickCount]
-
-	return content
-}
-
-func countLeadingBackticks(s string) int {
-	count := 0
-	for _, ch := range s {
-		if ch != '`' {
-			break
+	var datas []codeTextToken
+	for idx := head; idx <= tail; idx++ {
+		if tokens[idx].kind == codeTextLineEnding {
+			continue
 		}
-		count++
+		merged := tokens[idx]
+		for idx+1 <= tail && tokens[idx+1].kind != codeTextLineEnding {
+			idx++
+			merged.end = tokens[idx].end
+		}
+		merged.kind = codeTextData
+		datas = append(datas, merged)
 	}
-	return count
+	return datas, paddings
+}
+
+// leadingSpaceRun returns the length of the whitespace that starts text when
+// a non-space character follows it, and that character.
+func leadingSpaceRun(text []byte) (int, byte) {
+	trimmed := bytes.TrimLeftFunc(text, unicode.IsSpace)
+	if len(trimmed) == 0 || len(trimmed) == len(text) {
+		return 0, 0
+	}
+	return len(text) - len(trimmed), trimmed[0]
+}
+
+// trailingSpaceRun returns the length of the whitespace that ends text when a
+// non-space character precedes it, and that character.
+func trailingSpaceRun(text []byte) (int, byte) {
+	trimmed := bytes.TrimRightFunc(text, unicode.IsSpace)
+	if len(trimmed) == 0 || len(trimmed) == len(text) {
+		return 0, 0
+	}
+	return len(text) - len(trimmed), trimmed[len(trimmed)-1]
 }

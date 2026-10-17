@@ -127,9 +127,9 @@ func GFMAuthoringPack() Pack {
 			"MD022": enabled("info"),    // blanks-around-headings
 
 			// GFM tables.
-			"MDL002": enabled("warning"), // table-column-count
+			"MD056":  enabled("warning"), // table-column-count
 			"MDL003": enabled("warning"), // table-alignment
-			"MDL004": enabled("info"),    // table-blank-lines
+			"MD058":  enabled("info"),    // blanks-around-tables
 
 			// Links and images.
 			"MD042": enabled("warning"), // no-empty-links

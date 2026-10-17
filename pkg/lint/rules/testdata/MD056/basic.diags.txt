@@ -1,1 +1,1 @@
-basic.input.md:5:1 warning Table row has 2 columns, expected 3 (MD056/table-column-count)
+basic.input.md:5:15 warning Too few cells, row will be missing data: expected 3, found 2 (MD056/table-column-count)

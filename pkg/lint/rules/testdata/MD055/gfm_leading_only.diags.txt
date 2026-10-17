@@ -1,2 +1,2 @@
-gfm_leading_only.input.md:3:1 warning Table row pipe style 'leading_and_trailing' does not match expected 'leading_only' (MD055/table-pipe-style)
-gfm_leading_only.input.md:6:1 warning Table row pipe style 'no_leading_or_trailing' does not match expected 'leading_only' (MD055/table-pipe-style)
+gfm_leading_only.input.md:3:17 warning Unexpected trailing pipe: expected leading_only, found leading_and_trailing (MD055/table-pipe-style)
+gfm_leading_only.input.md:6:1 warning Missing leading pipe: expected leading_only, found no_leading_or_trailing (MD055/table-pipe-style)

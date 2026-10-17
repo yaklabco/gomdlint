@@ -1,3 +1,2 @@
 basic.input.md:5:14 warning Link text 'click here' is not descriptive (MD059/descriptive-link-text)
 basic.input.md:7:6 warning Link text 'more' is not descriptive (MD059/descriptive-link-text)
-basic.input.md:9:5 warning Link text 'this link' is not descriptive (MD059/descriptive-link-text)

@@ -9,7 +9,7 @@ echo "detectable as bash"
 
 Second block:
 
-```go
+```
 package main
 
 func main() {

@@ -5,21 +5,39 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
-// Collect walks the AST and source to build a reference Context.
+// LinePrefix returns the length of the container prefix at the start of a
+// 1-based line, for content inside node: the blockquote markers and list
+// item indentation that belong to the containers, not to the content.
+type LinePrefix func(node *mdast.Node, line int) int
+
+// Collect walks the AST and source to build a reference Context. A label
+// read from the source keeps whole continuation lines; CollectWithPrefix
+// leaves out their container prefixes.
 func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
+	return CollectWithPrefix(root, file, nil)
+}
+
+// CollectWithPrefix builds a reference Context like Collect, using prefix
+// (which may be nil) to leave the container prefix of each continuation
+// line out of labels read from the source.
+func CollectWithPrefix(root *mdast.Node, file *mdast.FileSnapshot, prefix LinePrefix) *Context {
 	if root == nil || file == nil {
 		return NewContext(file)
 	}
 
 	coll := &collector{
-		ctx:  NewContext(file),
-		root: root,
+		ctx:    NewContext(file),
+		root:   root,
+		prefix: prefix,
 	}
 	coll.collect(root)
-	coll.collectDefinitionsFromSource()
+	coll.collectUnresolvedReferences()
+	coll.collectDefinitions()
 	coll.resolveReferences()
 
 	return coll.ctx
@@ -27,8 +45,9 @@ func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
 
 // collector builds a Context by walking the AST and source.
 type collector struct {
-	ctx  *Context
-	root *mdast.Node
+	ctx    *Context
+	root   *mdast.Node
+	prefix LinePrefix
 }
 
 // collect walks the AST to collect anchors and usages.
@@ -62,22 +81,65 @@ func (c *collector) collectHeadingAnchor(node *mdast.Node) {
 	c.ctx.Anchors.AddFromHeading(text, pos)
 }
 
-// extractHeadingText extracts plain text from a heading node.
-// This includes text from inline code spans, which contribute to anchor generation.
+// HeadingAnchors returns the anchor of every heading under root, in document
+// order, as GitHub generates them and as MD051 checks fragments against:
+// from the same heading text, with github-slugger's duplicate suffixes.
+func HeadingAnchors(root *mdast.Node) []string {
+	anchors := NewAnchorMap()
+	var ids []string
+	_ = mdast.Walk(root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if node.Kind == mdast.NodeHeading {
+			if text := extractHeadingText(node); text != "" {
+				ids = append(ids, anchors.GenerateAnchor(text))
+			}
+		}
+		return nil
+	})
+	return ids
+}
+
+// extractHeadingText returns the text GitHub derives a heading's anchor from:
+// the rendered text content. Text has its backslash escapes and entity
+// references resolved, code spans contribute their content, and images and
+// raw HTML contribute nothing. Line breaks contribute nothing either; the
+// slug would drop the line ending anyway.
 func extractHeadingText(node *mdast.Node) string {
 	if node == nil || node.Kind != mdast.NodeHeading {
 		return ""
 	}
 
 	var buf bytes.Buffer
-	_ = mdast.Walk(node, func(n *mdast.Node) error { //nolint:errcheck // visitor never returns error
-		// Both NodeText and NodeCodeSpan store their content in Inline.Text
-		if (n.Kind == mdast.NodeText || n.Kind == mdast.NodeCodeSpan) && n.Inline != nil {
-			buf.Write(n.Inline.Text)
+	var collect func(parent *mdast.Node)
+	collect = func(parent *mdast.Node) {
+		for child := parent.FirstChild; child != nil; child = child.Next {
+			switch child.Kind {
+			case mdast.NodeImage, mdast.NodeHTMLInline:
+				continue
+			case mdast.NodeText, mdast.NodeSoftBreak, mdast.NodeHardBreak:
+				// Break nodes may carry the text that precedes the line ending.
+				if child.Inline != nil {
+					buf.Write(renderedText(child.Inline.Text))
+				}
+			case mdast.NodeCodeSpan:
+				if child.Inline != nil {
+					buf.Write(child.Inline.Text)
+				}
+			default:
+				collect(child)
+			}
 		}
-		return nil
-	})
+	}
+	collect(node)
 	return buf.String()
+}
+
+// renderedText resolves backslash escapes and entity references in raw text
+// the way a renderer does, and drops line endings.
+func renderedText(raw []byte) []byte {
+	text := bytes.TrimRight(raw, "\r\n")
+	text = util.UnescapePunctuations(text)
+	text = util.ResolveNumericReferences(text)
+	return util.ResolveEntityNames(text)
 }
 
 // collectLinkUsage records a link or image usage.
@@ -99,7 +161,7 @@ func (c *collector) collectLinkUsage(node *mdast.Node, isImage bool) {
 	}
 
 	// Detect reference style by examining source
-	style, label := c.detectLinkStyle(node, isImage)
+	style, label := detectLinkStyle(node)
 	usage.Style = style
 	usage.Label = label
 	usage.NormalizedLabel = NormalizeLabel(label)
@@ -123,133 +185,28 @@ func extractLinkText(node *mdast.Node) string {
 	return buf.String()
 }
 
-// referenceLabel returns the label a collapsed or shortcut reference is
-// matched by: its link text as written in the source, such as "**foo**" for
-// "[**foo**][]", falling back to the rendered text.
-func referenceLabel(node *mdast.Node) string {
-	if label := node.Inline.Link.ReferenceLabel; label != "" {
-		return label
-	}
-	return extractLinkText(node)
-}
-
-// detectLinkStyle examines the source to determine the link's syntax style.
-func (c *collector) detectLinkStyle(node *mdast.Node, isImage bool) (ReferenceStyle, string) {
-	// First check if the mapper already detected the style
-	if node.Inline != nil && node.Inline.Link != nil {
-		mdastStyle := node.Inline.Link.ReferenceStyle
-		switch mdastStyle {
-		case mdast.RefStyleAutolink:
-			return StyleAutolink, ""
-		case mdast.RefStyleFull:
-			return StyleFull, node.Inline.Link.ReferenceLabel
-		case mdast.RefStyleCollapsed:
-			return StyleCollapsed, referenceLabel(node)
-		case mdast.RefStyleShortcut:
-			return StyleShortcut, referenceLabel(node)
-		}
-	}
-
-	pos := node.SourcePosition()
-	if !pos.IsValid() || c.ctx.File == nil {
+// detectLinkStyle returns the reference syntax the parser recorded for a link
+// or image and the label it was resolved with: the second bracket pair of a
+// full reference, or the link text of a collapsed or shortcut one, as
+// written and without the container prefix of a continuation line, such as
+// "> " inside a blockquote.
+func detectLinkStyle(node *mdast.Node) (ReferenceStyle, string) {
+	if node.Inline == nil || node.Inline.Link == nil {
 		return StyleInline, ""
 	}
-
-	// Get the source line containing the link
-	if pos.StartLine < 1 || pos.StartLine > len(c.ctx.File.Lines) {
-		return StyleInline, ""
+	link := node.Inline.Link
+	switch link.ReferenceStyle {
+	case mdast.RefStyleAutolink:
+		return StyleAutolink, ""
+	case mdast.RefStyleFull:
+		return StyleFull, link.ReferenceLabel
+	case mdast.RefStyleCollapsed:
+		return StyleCollapsed, link.ReferenceLabel
+	case mdast.RefStyleShortcut:
+		return StyleShortcut, link.ReferenceLabel
+	case mdast.RefStyleInline:
 	}
-
-	lineInfo := c.ctx.File.Lines[pos.StartLine-1]
-	line := c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
-
-	// Look for reference patterns in the line
-	// This is a simplified heuristic based on source inspection
-	text := extractLinkText(node)
-
-	// Check for full reference: [text][label]
-	if idx := findFullReference(line, text); idx >= 0 {
-		label := extractFullReferenceLabel(line, idx, len(text))
-		if label != "" {
-			return StyleFull, label
-		}
-	}
-
-	// Check for collapsed reference: [label][]
-	if isCollapsedReference(line, text) {
-		return StyleCollapsed, text
-	}
-
-	// Check for shortcut reference: [label] (no following brackets or parens)
-	if isShortcutReference(line, text, isImage) {
-		return StyleShortcut, text
-	}
-
-	// Default to inline
 	return StyleInline, ""
-}
-
-// findFullReference looks for [text][label] pattern.
-func findFullReference(line []byte, _ string) int {
-	// Look for ][
-	pattern := "]" + "["
-	idx := bytes.Index(line, []byte(pattern))
-	return idx
-}
-
-// extractFullReferenceLabel extracts the label from [text][label].
-func extractFullReferenceLabel(line []byte, closeBracketIdx, _ int) string {
-	// Find the opening [ of the label part
-	start := closeBracketIdx + 2 // Skip ][
-	if start >= len(line) {
-		return ""
-	}
-
-	// Find closing ]
-	end := bytes.IndexByte(line[start:], ']')
-	if end < 0 {
-		return ""
-	}
-
-	return string(line[start : start+end])
-}
-
-// isCollapsedReference checks for [label][] pattern.
-func isCollapsedReference(line []byte, text string) bool {
-	pattern := "[" + text + "][]"
-	return bytes.Contains(line, []byte(pattern))
-}
-
-// isShortcutReference checks for [label] without following () or [].
-func isShortcutReference(line []byte, text string, isImage bool) bool {
-	// Build the pattern to look for
-	var prefix string
-	if isImage {
-		prefix = "!["
-	} else {
-		prefix = "["
-	}
-	pattern := prefix + text + "]"
-	patternBytes := []byte(pattern)
-
-	idx := bytes.Index(line, patternBytes)
-	if idx < 0 {
-		return false
-	}
-
-	// Check what follows the closing bracket
-	afterIdx := idx + len(patternBytes)
-	if afterIdx >= len(line) {
-		return true // Nothing follows - shortcut
-	}
-
-	nextChar := line[afterIdx]
-	// If followed by ( or [, it's inline or full reference
-	if nextChar == '(' || nextChar == '[' {
-		return false
-	}
-
-	return true
 }
 
 // collectHTMLAnchors extracts id and name attributes from HTML.
@@ -302,102 +259,6 @@ func (c *collector) extractHTMLAttribute(content []byte, attr string, source Anc
 			c.ctx.Anchors.Add(anchor)
 		}
 	}
-}
-
-// Reference definition pattern: [label]: destination "optional title"
-// Matches at start of line (with up to 3 spaces indent).
-var refDefPattern = regexp.MustCompile(
-	`^\s{0,3}\[([^\]]+)\]:\s*(\S+)(?:\s+"([^"]*)"|\s+'([^']*)'|\s+\(([^)]*)\))?\s*$`,
-)
-
-// buildCodeBlockLines returns a set of line numbers that are inside code blocks.
-// These lines should be skipped when scanning for reference definitions.
-func (c *collector) buildCodeBlockLines() map[int]struct{} {
-	lines := make(map[int]struct{})
-	if c.root == nil {
-		return lines
-	}
-
-	//nolint:errcheck // Walk visitor never returns error in this usage
-	mdast.Walk(c.root, func(node *mdast.Node) error {
-		if node.Kind == mdast.NodeCodeBlock {
-			pos := node.SourcePosition()
-			if pos.IsValid() {
-				for line := pos.StartLine; line <= pos.EndLine; line++ {
-					lines[line] = struct{}{}
-				}
-			}
-		}
-		return nil
-	})
-
-	return lines
-}
-
-// collectDefinitionsFromSource parses reference definitions from the source.
-func (c *collector) collectDefinitionsFromSource() {
-	if c.ctx.File == nil || len(c.ctx.File.Content) == 0 {
-		return
-	}
-
-	// Build set of lines inside code blocks - these cannot contain reference definitions
-	codeBlockLines := c.buildCodeBlockLines()
-
-	for lineNum, lineInfo := range c.ctx.File.Lines {
-		// Skip lines inside code blocks (lineNum is 0-indexed, positions are 1-indexed)
-		if _, inCodeBlock := codeBlockLines[lineNum+1]; inCodeBlock {
-			continue
-		}
-
-		line := c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
-		if lineNum == 0 {
-			// The parser skips a byte order mark, so a definition can follow
-			// one on the first line.
-			line = bytes.TrimPrefix(line, []byte(mdast.ByteOrderMark))
-		}
-		matches := refDefPattern.FindSubmatch(line)
-		if matches == nil {
-			continue
-		}
-
-		label := string(matches[1])
-		normalized := NormalizeLabel(label)
-
-		// Extract title from whichever group matched
-		title := coalesce(string(matches[3]), string(matches[4]), string(matches[5]))
-
-		def := &ReferenceDefinition{
-			Label:           label,
-			NormalizedLabel: normalized,
-			Destination:     string(matches[2]),
-			Title:           title,
-			LineNumber:      lineNum + 1,
-			Position: mdast.SourcePosition{
-				StartLine:   lineNum + 1,
-				EndLine:     lineNum + 1,
-				StartColumn: 1,
-			},
-		}
-
-		// Check for duplicates
-		if _, exists := c.ctx.Definitions[normalized]; exists {
-			def.IsDuplicate = true
-		} else {
-			c.ctx.Definitions[normalized] = def
-		}
-
-		c.ctx.AllDefinitions = append(c.ctx.AllDefinitions, def)
-	}
-}
-
-// coalesce returns the first non-empty string.
-func coalesce(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // resolveReferences links usages to their definitions and updates usage counts.

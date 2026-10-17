@@ -5,7 +5,7 @@ Rule                               Count  Errors Warnings  Fixable
 no-trailing-spaces                     5       0        5        ✓
 no-trailing-punctuation                3       0        3        ✓
 heading-increment                      1       1        0         
-link-image-reference-definitions       1       0        1         
+link-image-reference-definitions       1       0        1        ✓
 
 Files Summary
 ──────────────────────────────────────────────────────────────────────────────────────────

@@ -32,4 +32,3 @@ Here is a [link to example][example-ref].
 
 ## Unused Reference (should be flagged)
 
-[unused-ref]: https://unused.example.com

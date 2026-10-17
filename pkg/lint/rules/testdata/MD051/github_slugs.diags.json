@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD051",
+    "name": "link-fragments",
+    "line": 24,
+    "column": 59,
+    "message": "Link fragment '#a-b' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

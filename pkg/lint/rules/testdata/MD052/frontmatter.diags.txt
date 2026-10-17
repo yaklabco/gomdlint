@@ -1,0 +1,3 @@
+frontmatter.input.md:7:11 warning Reference link uses undefined label [nonexistent] (MD052/reference-links-images)
+frontmatter.input.md:9:12 warning Reference image uses undefined label [missing-ref] (MD052/reference-links-images)
+frontmatter.input.md:11:9 warning Reference link uses undefined label [also-missing] (MD052/reference-links-images)

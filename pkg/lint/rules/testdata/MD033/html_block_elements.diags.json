@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD033",
+    "name": "no-inline-html",
+    "line": 3,
+    "column": 1,
+    "message": "HTML element 'details' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "no-inline-html",
+    "line": 4,
+    "column": 1,
+    "message": "HTML element 'summary' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "no-inline-html",
+    "line": 10,
+    "column": 1,
+    "message": "HTML element 'div' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD033",
+    "name": "no-inline-html",
+    "line": 10,
+    "column": 6,
+    "message": "HTML element 'span' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  }
+]

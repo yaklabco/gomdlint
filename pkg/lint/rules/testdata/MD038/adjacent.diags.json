@@ -3,7 +3,7 @@
     "rule": "MD038",
     "name": "no-space-in-code",
     "line": 3,
-    "column": 36,
+    "column": 37,
     "message": "Excessive leading space inside code span",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD038",
     "name": "no-space-in-code",
     "line": 3,
-    "column": 48,
+    "column": 52,
     "message": "Excessive trailing space inside code span",
     "severity": "warning",
     "fixable": true
@@ -21,8 +21,8 @@
     "rule": "MD038",
     "name": "no-space-in-code",
     "line": 5,
-    "column": 19,
-    "message": "Excessive spaces inside code span",
+    "column": 20,
+    "message": "Excessive leading space inside code span",
     "severity": "warning",
     "fixable": true
   },
@@ -30,8 +30,26 @@
     "rule": "MD038",
     "name": "no-space-in-code",
     "line": 5,
-    "column": 33,
-    "message": "Excessive spaces inside code span",
+    "column": 25,
+    "message": "Excessive trailing space inside code span",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD038",
+    "name": "no-space-in-code",
+    "line": 5,
+    "column": 34,
+    "message": "Excessive leading space inside code span",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD038",
+    "name": "no-space-in-code",
+    "line": 5,
+    "column": 39,
+    "message": "Excessive trailing space inside code span",
     "severity": "warning",
     "fixable": true
   }

@@ -2,15 +2,6 @@
   {
     "rule": "MD042",
     "name": "no-empty-links",
-    "line": 7,
-    "column": 21,
-    "message": "Link has empty text",
-    "severity": "warning",
-    "fixable": false
-  },
-  {
-    "rule": "MD042",
-    "name": "no-empty-links",
     "line": 9,
     "column": 21,
     "message": "Link has empty destination",
