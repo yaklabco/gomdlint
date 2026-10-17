@@ -1091,12 +1091,18 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 				outline.fragments = true
 			}
 		case mdast.NodeHTMLBlock:
-			if !lint.IsHTMLComment(node) && tagsMayHoldHash(source) {
+			if tagsMayHoldHash(source) {
 				outline.fragments = true
 			}
 		case mdast.NodeHTMLInline:
-			if !bytes.HasPrefix(source, []byte("<!--")) && mayHoldHash(source) {
-				outline.fragments = true
+			if !bytes.HasPrefix(source, []byte("<!--")) {
+				outline.fragments = outline.fragments || mayHoldHash(source)
+				break
+			}
+			// A comment that is not well formed is not skipped: it and the
+			// rest of the inline content after it count as live markup.
+			if end, ok := wellFormedComment(source); !ok || end != len(source) {
+				outline.fragments = outline.fragments || mayHoldHash(doc.Content[rng.StartOffset:inlineContentEnd(node)])
 			}
 		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
 			// Raw HTML that the parser did not read as a tag, such as an
@@ -1113,19 +1119,20 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 // tagsMayHoldHash reports whether a tag in text, raw HTML, holds "#" or a
 // character reference that could stand for it. Attributes are not parsed: a
 // tag runs from "<" and a letter, "/", "!" or "?" to the first ">" outside
-// quotes, or to the end of text, and is taken whole. Comments and the text
-// between tags are left out.
+// quotes, or to the end of text, and is taken whole. The text between tags
+// is left out, and so are well-formed comments; anything else that starts
+// with "<!--" counts as live markup to the end of text.
 func tagsMayHoldHash(text []byte) bool {
 	for idx := 0; idx+1 < len(text); idx++ {
 		if text[idx] != '<' {
 			continue
 		}
 		if bytes.HasPrefix(text[idx:], []byte("<!--")) {
-			end := bytes.Index(text[idx+len("<!--"):], []byte("-->"))
-			if end < 0 {
-				return false
+			end, ok := wellFormedComment(text[idx:])
+			if !ok {
+				return mayHoldHash(text[idx:])
 			}
-			idx += len("<!--") + end + len("-->") - 1
+			idx += end - 1
 			continue
 		}
 		if next := text[idx+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {
@@ -1138,6 +1145,37 @@ func tagsMayHoldHash(text []byte) bool {
 		idx = end - 1
 	}
 	return false
+}
+
+// wellFormedComment reports whether text starts with an HTML comment that
+// every browser ends at the same place: "<!--", content that neither starts
+// with ">" or "->" nor holds "--", and the first "-->". end is the offset
+// after the comment.
+func wellFormedComment(text []byte) (int, bool) {
+	opener, closer := []byte("<!--"), []byte("-->")
+	if !bytes.HasPrefix(text, opener) {
+		return 0, false
+	}
+	length := bytes.Index(text[len(opener):], closer)
+	if length < 0 {
+		return 0, false
+	}
+	content := text[len(opener) : len(opener)+length]
+	if bytes.HasPrefix(content, []byte(">")) || bytes.HasPrefix(content, []byte("->")) || bytes.Contains(content, []byte("--")) {
+		return 0, false
+	}
+	return len(opener) + length + len(closer), true
+}
+
+// inlineContentEnd returns where the paragraph, heading or table cell that
+// holds node ends, or where node ends when none does.
+func inlineContentEnd(node *mdast.Node) int {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if hasInlineContent(parent.Kind) {
+			return parent.SourceRange().EndOffset
+		}
+	}
+	return node.SourceRange().EndOffset
 }
 
 // textTagsMayHoldHash reports whether the inline content of container holds

@@ -1139,6 +1139,15 @@ func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
 		{name: "escaped tag", input: "# Foo !\n\n\\<a href=\"#foo-\">jump\n", wantFix: true},
 		{name: "hash in element text", input: "# Foo !\n\n<div>\n#hashtag text\n</div>\n", wantFix: true},
 		{name: "hash in a comment", input: "# Foo !\n\n<!-- #note -->\n", wantFix: true},
+		{name: "hash in an inline comment", input: "# Foo !\n\nText <!-- #note --> here.\n", wantFix: true},
+		// Browsers end a comment at "--!>", and read "<!-->" and "<!--->" as
+		// empty comments, so the links after them are live.
+		{name: "comment that browsers end at --!>", input: "# Foo !\n\n<!-- comment --!><a href=\"#foo-\">jump</a>\n"},
+		{name: "empty comment <!-->", input: "# Foo !\n\n<!--> <a href=\"#foo-\">jump</a>\n"},
+		{name: "empty comment <!--->", input: "# Foo !\n\n<!---> <a href=\"#foo-\">jump</a>\n"},
+		{name: "comment holding --", input: "# Foo !\n\n<!-- a -- b --> <a href=\"#foo-\">jump</a>\n"},
+		{name: "unterminated comment before a link", input: "# Foo !\n\n<!-- open\n<a href=\"#foo-\">jump</a>\n"},
+		{name: "empty inline comment before a link", input: "# Foo !\n\nText <!--> <a href=\"#foo-\">jump</a>\n"},
 	}
 	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
 		for _, tt := range tests {
