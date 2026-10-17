@@ -4,7 +4,7 @@
 
 Some text.
 
-## Plain Section Title
+**Plain Section Title**
 
 More text.
 

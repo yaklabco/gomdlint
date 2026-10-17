@@ -1068,7 +1068,7 @@ type docOutline struct {
 	blocks      []blockSummary
 	// fragments is true when the document holds anything that could be a
 	// fragment reference: a link or image whose destination holds "#", or
-	// raw HTML, comments included, that holds "#" or a character reference.
+	// any raw HTML at all, comments included.
 	fragments bool
 }
 
@@ -1091,15 +1091,14 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 				outline.fragments = true
 			}
 		case mdast.NodeHTMLBlock, mdast.NodeHTMLInline:
-			// Raw HTML is not interpreted: a hash anywhere in it counts, in
-			// tags, text and comments alike.
-			if mayHoldHash(source) {
-				outline.fragments = true
-			}
+			// Raw HTML can run on past the Markdown block that holds it, as a
+			// tag that a blank line cuts in two does, so any of it may refer
+			// to an anchor, wherever a hash is.
+			outline.fragments = true
 		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
-			// Raw HTML that the parser did not read as such, such as an
-			// unterminated tag, is text of inline content.
-			if textHTMLMayHoldHash(doc.Content, node) {
+			// So may raw HTML that the parser did not read as such, such as
+			// an unterminated tag in text.
+			if textHasRawHTML(doc.Content, node) {
 				outline.fragments = true
 			}
 		}
@@ -1108,13 +1107,11 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 	return outline
 }
 
-// textHTMLMayHoldHash reports whether the inline content of container could
-// hold raw HTML that the parser did not read as such, with "#" or a
-// character reference that could stand for it: whether the text from the
-// first "<" that could start a tag, outside code spans and the inline HTML
-// the parser read and not escaped by a backslash, to the end of the
-// container holds one.
-func textHTMLMayHoldHash(content []byte, container *mdast.Node) bool {
+// textHasRawHTML reports whether the inline content of container holds, in
+// its text, a "<" that could start raw HTML: one followed by a letter, "/",
+// "!" or "?", outside code spans, autolinks and link destinations, and not
+// escaped by a backslash.
+func textHasRawHTML(content []byte, container *mdast.Node) bool {
 	rng := container.SourceRange()
 	if rng.StartOffset < 0 || rng.EndOffset > len(content) {
 		return false
@@ -1122,19 +1119,38 @@ func textHTMLMayHoldHash(content []byte, container *mdast.Node) bool {
 	var parsed []mdast.SourceRange
 	//nolint:errcheck // Walk visitor never returns error.
 	_ = mdast.Walk(container, func(node *mdast.Node) error {
-		if node.Kind == mdast.NodeCodeSpan || node.Kind == mdast.NodeHTMLInline {
-			parsed = append(parsed, node.SourceRange())
+		full, inner := node.SourceRange(), node.ContentRange()
+		switch {
+		case node.Kind == mdast.NodeCodeSpan, node.Kind == mdast.NodeHTMLInline, isAutolink(node):
+			parsed = append(parsed, full)
+		case node.Kind == mdast.NodeLink || node.Kind == mdast.NodeImage:
+			// The destination and title follow the link text.
+			parsed = append(parsed, mdast.SourceRange{StartOffset: inner.EndOffset, EndOffset: full.EndOffset})
 		}
 		return nil
 	})
+	slices.SortFunc(parsed, func(a, b mdast.SourceRange) int { return a.StartOffset - b.StartOffset })
 	text := content[:rng.EndOffset]
 	for idx := rng.StartOffset; idx+1 < len(text); idx++ {
-		if text[idx] != '<' || escapedAt(text, rng.StartOffset, idx) ||
-			insideRanges(parsed, mdast.SourceRange{StartOffset: idx, EndOffset: idx + 1}) {
+		if text[idx] != '<' || escapedAt(text, rng.StartOffset, idx) || insideSorted(parsed, idx) {
 			continue
 		}
 		if next := text[idx+1]; isASCIILetter(next) || next == '/' || next == '!' || next == '?' {
-			return mayHoldHash(text[idx:])
+			return true
+		}
+	}
+	return false
+}
+
+// insideSorted reports whether offset lies in one of ranges, which are
+// sorted by start and may nest.
+func insideSorted(ranges []mdast.SourceRange, offset int) bool {
+	for _, rng := range ranges {
+		if rng.StartOffset > offset {
+			return false
+		}
+		if offset < rng.EndOffset {
+			return true
 		}
 	}
 	return false

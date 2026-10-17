@@ -116,10 +116,11 @@ func TestNoMissingSpaceATXRule_MarkdownlintParity(t *testing.T) {
 		{name: "keycap emoji", input: "#\uFE0F\u20E3 keycap\n", wantLines: []int{}},
 		{name: "seven hashes are never a heading", input: "#######seven\n", wantLines: []int{}},
 		{
+			// Reported; the fix would add a heading anchor, which raw HTML
+			// might refer to.
 			name:      "heading after a one-line comment",
 			input:     "<!-- c -->\n#Heading\n",
 			wantLines: []int{2},
-			wantFixed: "<!-- c -->\n# Heading\n",
 		},
 		{
 			name:      "paragraph continuation line",
@@ -1148,7 +1149,15 @@ func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
 		{name: "comment opener inside script", input: "# Foo !\n\n<script>\n<!-- </script><a href=\"#foo-\">jump</a> -->\n"},
 		{name: "comment opener inside textarea", input: "# Foo !\n\n<textarea>\n<!-- </textarea><a href=\"#foo-\">jump</a> -->\n"},
 		{name: "comment opener inside an inline textarea", input: "# Foo !\n\nA <textarea><!-- </textarea><a href=\"#foo-\">jump</a> --> b\n"},
-		{name: "raw HTML without a hash", input: "# Foo !\n\n<div>\n<!-- note -->\ntext\n</div>\n", wantFix: true},
+		// Any raw HTML at all may refer to anchors: HTML can run on across a
+		// blank line that ends the HTML block.
+		{name: "raw HTML without a hash", input: "# Foo !\n\n<div>\n<!-- note -->\ntext\n</div>\n"},
+		{name: "tag that a blank line cuts in two", input: "# Foo !\n\n<div>\n<a title=\"\n\nx\" href=#foo- ><b>jump</b></a>\n</div>\n"},
+		{name: "inline tag without a hash", input: "# Foo !\n\nSome <b>bold</b> text.\n"},
+		{name: "autolink", input: "# Foo !\n\nSee <https://example.com>.\n", wantFix: true},
+		{name: "angle-bracket link destination", input: "# Foo !\n\nSee [it](<https://example.com>).\n", wantFix: true},
+		{name: "escaped tag without a hash", input: "# Foo !\n\nSee \\<b> here.\n", wantFix: true},
+		{name: "tag in a code span without a hash", input: "# Foo !\n\nSee `<b>` here.\n", wantFix: true},
 		// Browsers end a comment at "--!>", and read "<!-->" and "<!--->" as
 		// empty comments, so the links after them are live.
 		{name: "comment that browsers end at --!>", input: "# Foo !\n\n<!-- comment --!><a href=\"#foo-\">jump</a>\n"},
