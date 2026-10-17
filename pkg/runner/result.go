@@ -62,7 +62,13 @@ type Stats struct {
 	// FilesModified is the number of files that were modified by fixes.
 	FilesModified int
 
-	// DiagnosticsFixed is the total number of issues fixed across all files.
+	// FilesWithPendingFixes is the number of files whose fixes were
+	// computed but not written, as in a dry run.
+	FilesWithPendingFixes int
+
+	// DiagnosticsFixed is the number of fix edits applied across all files,
+	// in memory for a dry run. The pipeline reports edits, not the
+	// diagnostics they fixed, so one diagnostic may count more than once.
 	DiagnosticsFixed int
 }
 
@@ -120,8 +126,11 @@ func (r *Result) accumulate(outcome FileOutcome) {
 		r.Stats.FilesSkipped++
 	}
 
-	if outcome.Result.Written {
+	switch {
+	case outcome.Result.Written:
 		r.Stats.FilesModified++
+	case outcome.Result.Modified && !outcome.Result.Skipped:
+		r.Stats.FilesWithPendingFixes++
 	}
 
 	// Track total edits applied (issues fixed).

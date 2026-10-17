@@ -37,14 +37,15 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 	}
 
 	if stats.DiagnosticsTotal == 0 {
-		msg := s.Success.Render("No issues found") + s.Dim.Render(" ("+checked+")")
+		head := "No issues found"
+		if stats.FilesWithPendingFixes > 0 {
+			// A dry run: the issues are still in the files.
+			head = "No issues would remain"
+		}
+		msg := s.Success.Render(head) + s.Dim.Render(" ("+checked+")")
 		// Show fixes applied even when no issues remain
 		if stats.DiagnosticsFixed > 0 {
-			fileWord := wordFiles
-			if stats.FilesModified == 1 {
-				fileWord = wordFile
-			}
-			msg += ", " + s.Success.Render(fmt.Sprintf("%d fixed in %d %s", stats.DiagnosticsFixed, stats.FilesModified, fileWord))
+			msg += ", " + s.formatFixed(stats)
 		}
 		return msg + "\n"
 	}
@@ -90,11 +91,7 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 
 	// Issues fixed (if any)
 	if stats.DiagnosticsFixed > 0 {
-		fixedFileWord := wordFiles
-		if stats.FilesModified == 1 {
-			fixedFileWord = wordFile
-		}
-		parts = append(parts, s.Success.Render(fmt.Sprintf("%d fixed in %d %s", stats.DiagnosticsFixed, stats.FilesModified, fixedFileWord)))
+		parts = append(parts, s.formatFixed(stats))
 	}
 
 	if stats.FilesErrored > 0 {
@@ -102,6 +99,21 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 	}
 
 	return strings.Join(parts, ", ") + "\n"
+}
+
+// formatFixed describes the fixes of a run: those written as applied, and
+// those a dry run computed without writing as fixes that would be applied.
+func (s *Styles) formatFixed(stats runner.Stats) string {
+	noun := "fixes"
+	if stats.DiagnosticsFixed == 1 {
+		noun = "fix"
+	}
+	if stats.FilesWithPendingFixes > 0 {
+		return s.Success.Render(fmt.Sprintf("%d %s would be applied in %d %s",
+			stats.DiagnosticsFixed, noun, stats.FilesWithPendingFixes, filesNoun(stats.FilesWithPendingFixes)))
+	}
+	return s.Success.Render(fmt.Sprintf("%d %s applied in %d %s",
+		stats.DiagnosticsFixed, noun, stats.FilesModified, filesNoun(stats.FilesModified)))
 }
 
 // FormatSummary formats run statistics as a summary block.

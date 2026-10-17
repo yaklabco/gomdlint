@@ -341,6 +341,19 @@ func TestLintRuleListFlags(t *testing.T) {
 	}
 }
 
+// TestLintDryRunSummary covers --fix --dry-run, which writes nothing: the
+// summary says what would be fixed, not that anything was.
+func TestLintDryRunSummary(t *testing.T) {
+	dir := inProject(t, map[string]string{"a.md": "# T\n\ntext"})
+
+	got := execute(t, "lint", "--fix", "--dry-run", "--color", "never", "a.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Contains(t, got.stdout, "1 fix would be applied in 1 file")
+	assert.NotContains(t, got.stdout, "fixed in 0 files")
+	assert.Equal(t, "# T\n\ntext", readFile(t, filepath.Join(dir, "a.md")))
+}
+
 func TestLintFixCreatesBackupsByDefault(t *testing.T) {
 	dir := inProject(t, map[string]string{"doc.md": trailingDoc})
 

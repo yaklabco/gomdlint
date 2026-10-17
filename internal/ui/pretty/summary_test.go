@@ -184,7 +184,7 @@ func TestFormatSummaryOneLine_WithModified(t *testing.T) {
 	result := styles.FormatSummaryOneLine(stats)
 
 	assert.Contains(t, result, "5 issues")
-	assert.Contains(t, result, "7 fixed in 2 files")
+	assert.Contains(t, result, "7 fixes applied in 2 files")
 }
 
 func TestFormatSummaryOneLine_NoFixable(t *testing.T) {
@@ -235,6 +235,37 @@ func TestFormatSummaryOneLine_ErroredFiles(t *testing.T) {
 
 		assert.Contains(t, result, "1 issue")
 		assert.Contains(t, result, "2 files could not be linted")
+	})
+}
+
+// TestFormatSummaryOneLine_DryRun covers fixes computed but not written:
+// the summary says what would change instead of what was fixed.
+func TestFormatSummaryOneLine_DryRun(t *testing.T) {
+	styles := pretty.NewStyles(false)
+
+	t.Run("no issues would remain", func(t *testing.T) {
+		result := styles.FormatSummaryOneLine(runner.Stats{
+			FilesProcessed:        1,
+			DiagnosticsFixed:      1,
+			FilesWithPendingFixes: 1,
+			DiagnosticsBySeverity: map[string]int{},
+		})
+
+		assert.Equal(t, "No issues would remain (1 file checked), 1 fix would be applied in 1 file\n", result)
+	})
+
+	t.Run("issues would remain", func(t *testing.T) {
+		result := styles.FormatSummaryOneLine(runner.Stats{
+			FilesProcessed:        2,
+			FilesWithIssues:       1,
+			DiagnosticsTotal:      1,
+			DiagnosticsFixed:      3,
+			FilesWithPendingFixes: 2,
+			DiagnosticsBySeverity: map[string]int{"warning": 1},
+		})
+
+		assert.Contains(t, result, "3 fixes would be applied in 2 files")
+		assert.NotContains(t, result, "fixed in")
 	})
 }
 

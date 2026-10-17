@@ -558,6 +558,11 @@ func TestRunner_Run_DryRun(t *testing.T) {
 		t.Errorf("FilesModified = %d, want 0 for dry-run", result.Stats.FilesModified)
 	}
 
+	// The fix is pending instead.
+	if result.Stats.FilesWithPendingFixes != 1 {
+		t.Errorf("FilesWithPendingFixes = %d, want 1 for dry-run", result.Stats.FilesWithPendingFixes)
+	}
+
 	// Verify file was NOT changed.
 	content, err := os.ReadFile(mdFile)
 	if err != nil {
