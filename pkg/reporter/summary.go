@@ -141,8 +141,8 @@ func (r *SummaryRenderer) renderRuleTable(rules []analysis.RuleAnalysis) {
 		if ruleName == "" {
 			ruleName = rule.RuleID
 		}
-		if len(ruleName) > maxRuleNameLength {
-			ruleName = ruleName[:maxRuleNameLength] + ellipsis
+		if displaywidth.String(ruleName) > maxRuleNameLength {
+			ruleName = displaywidth.TruncateString(ruleName, maxRuleNameLength+displaywidth.String(ellipsis), ellipsis)
 		}
 
 		// Pad first, then style
