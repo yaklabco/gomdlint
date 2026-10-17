@@ -32,7 +32,7 @@ type TableRow struct {
 	File     string
 	Location string
 	Message  string
-	RuleID   string
+	Rule     string // The rule identifier, in the table's rule format.
 	Severity config.Severity
 	Fixable  bool
 }
@@ -42,10 +42,12 @@ type TableFormatter struct {
 	styles       *Styles
 	colorEnabled bool
 	termWidth    int
+	ruleFormat   config.RuleFormat
 }
 
-// NewTableFormatter creates a new table formatter.
-func NewTableFormatter(styles *Styles, colorEnabled bool, termWidth int) *TableFormatter {
+// NewTableFormatter creates a new table formatter whose RULE column names
+// rules in ruleFormat.
+func NewTableFormatter(styles *Styles, colorEnabled bool, termWidth int, ruleFormat config.RuleFormat) *TableFormatter {
 	if termWidth <= 0 {
 		termWidth = defaultTermWidth
 	}
@@ -53,6 +55,7 @@ func NewTableFormatter(styles *Styles, colorEnabled bool, termWidth int) *TableF
 		styles:       styles,
 		colorEnabled: colorEnabled,
 		termWidth:    termWidth,
+		ruleFormat:   ruleFormat,
 	}
 }
 
@@ -118,15 +121,8 @@ func (t *TableFormatter) FormatFileTable(file runner.FileOutcome) string {
 
 	// Collect rows for this file only
 	rows := make([]TableRow, 0, len(diagnostics))
-	for _, diag := range diagnostics {
-		rows = append(rows, TableRow{
-			File:     file.Path,
-			Location: fmt.Sprintf("%d:%d", diag.StartLine, diag.StartColumn),
-			Message:  diag.Message,
-			RuleID:   diag.RuleID,
-			Severity: diag.Severity,
-			Fixable:  len(diag.FixEdits) > 0,
-		})
+	for idx := range diagnostics {
+		rows = append(rows, DiagnosticToTableRow(file.Path, &diagnostics[idx], t.ruleFormat))
 	}
 
 	// Calculate column widths for this file (without FILE column since it's shown in header)
@@ -172,8 +168,8 @@ func (t *TableFormatter) calculateColumnWidthsForRows(rows []TableRow) perFileCo
 		if len(row.Message) > widths.message {
 			widths.message = len(row.Message)
 		}
-		if len(row.RuleID) > widths.rule {
-			widths.rule = len(row.RuleID)
+		if len(row.Rule) > widths.rule {
+			widths.rule = len(row.Rule)
 		}
 	}
 
@@ -214,7 +210,7 @@ func (t *TableFormatter) formatPerFileSeparator(widths perFileColumnWidths, char
 func (t *TableFormatter) formatPerFileRow(row TableRow, widths perFileColumnWidths) string {
 	loc := truncateString(row.Location, widths.loc)
 	message := truncateString(row.Message, widths.message)
-	ruleID := truncateString(row.RuleID, widths.rule)
+	rule := truncateString(row.Rule, widths.rule)
 
 	fixable := " "
 	if row.Fixable {
@@ -224,7 +220,7 @@ func (t *TableFormatter) formatPerFileRow(row TableRow, widths perFileColumnWidt
 	content := fmt.Sprintf(" %-*s  %-*s  %-*s  %s",
 		widths.loc, loc,
 		widths.message, message,
-		widths.rule, ruleID,
+		widths.rule, rule,
 		fixable,
 	)
 
@@ -282,15 +278,8 @@ func (t *TableFormatter) collectRows(result *runner.Result) [][]TableRow {
 		}
 
 		rows := make([]TableRow, 0, len(diagnostics))
-		for _, diag := range diagnostics {
-			rows = append(rows, TableRow{
-				File:     file.Path,
-				Location: fmt.Sprintf("%d:%d", diag.StartLine, diag.StartColumn),
-				Message:  diag.Message,
-				RuleID:   diag.RuleID,
-				Severity: diag.Severity,
-				Fixable:  len(diag.FixEdits) > 0,
-			})
+		for idx := range diagnostics {
+			rows = append(rows, DiagnosticToTableRow(file.Path, &diagnostics[idx], t.ruleFormat))
 		}
 
 		if len(rows) > 0 {
@@ -322,8 +311,8 @@ func (t *TableFormatter) calculateColumnWidths(groups [][]TableRow) columnWidths
 			if len(row.Message) > widths.message {
 				widths.message = len(row.Message)
 			}
-			if len(row.RuleID) > widths.rule {
-				widths.rule = len(row.RuleID)
+			if len(row.Rule) > widths.rule {
+				widths.rule = len(row.Rule)
 			}
 		}
 	}
@@ -383,7 +372,7 @@ func (t *TableFormatter) formatRow(row TableRow, widths columnWidths) string {
 	file := truncateFilePath(row.File, widths.file)
 	loc := truncateString(row.Location, widths.loc)
 	message := truncateString(row.Message, widths.message)
-	ruleID := truncateString(row.RuleID, widths.rule)
+	rule := truncateString(row.Rule, widths.rule)
 
 	// Build the row content
 	fixable := " "
@@ -395,7 +384,7 @@ func (t *TableFormatter) formatRow(row TableRow, widths columnWidths) string {
 		widths.file, file,
 		widths.loc, loc,
 		widths.message, message,
-		widths.rule, ruleID,
+		widths.rule, rule,
 		fixable,
 	)
 
@@ -502,13 +491,14 @@ func truncateFilePath(path string, maxLen int) string {
 	return "..." + path[len(path)-maxLen+3:]
 }
 
-// DiagnosticToTableRow converts a lint diagnostic to a table row.
-func DiagnosticToTableRow(path string, diag *lint.Diagnostic) TableRow {
+// DiagnosticToTableRow converts a lint diagnostic to a table row, naming its
+// rule in ruleFormat.
+func DiagnosticToTableRow(path string, diag *lint.Diagnostic, ruleFormat config.RuleFormat) TableRow {
 	return TableRow{
 		File:     path,
 		Location: fmt.Sprintf("%d:%d", diag.StartLine, diag.StartColumn),
 		Message:  diag.Message,
-		RuleID:   diag.RuleID,
+		Rule:     config.FormatRuleID(ruleFormat, diag.RuleID, diag.RuleName),
 		Severity: diag.Severity,
 		Fixable:  len(diag.FixEdits) > 0,
 	}

@@ -34,7 +34,7 @@ func NewTableReporter(opts Options) *TableReporter {
 	return &TableReporter{
 		opts:      opts,
 		styles:    styles,
-		formatter: pretty.NewTableFormatter(styles, colorEnabled, termWidth),
+		formatter: pretty.NewTableFormatter(styles, colorEnabled, termWidth, opts.RuleFormat),
 		out:       opts.Writer,
 	}
 }
