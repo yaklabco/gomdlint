@@ -242,7 +242,6 @@ And another:
 > - List item one
 > - List item two
 >
-
 > ```go
 > // Code in blockquote
 > fmt.Println("Quoted code")

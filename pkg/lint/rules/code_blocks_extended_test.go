@@ -232,6 +232,71 @@ func TestBlanksAroundFencesRule_Fix(t *testing.T) {
 	}
 }
 
+// TestBlanksAroundFencesRule_Containers follows markdownlint MD031: a line
+// holding only blockquote markers, whitespace, or HTML comments is blank, and
+// the fix inserts a blank line that keeps the enclosing blockquotes whole.
+func TestBlanksAroundFencesRule_Containers(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		lines []int
+		fixed string
+	}{
+		{
+			name:  "blockquote",
+			input: "> Text\n> ```\n> code\n> ```\n> More\n",
+			lines: []int{2, 4},
+			fixed: "> Text\n>\n> ```\n> code\n> ```\n>\n> More\n",
+		},
+		{
+			name:  "blockquote marker lines are blank",
+			input: "> ## Quoted\n>\n> ```\n> code\n> ```\n>\n> Para\n",
+		},
+		{
+			name:  "list item",
+			input: "- item\n  ```\n  code\n  ```\n- next\n",
+			lines: []int{2, 4},
+			fixed: "- item\n\n  ```\n  code\n  ```\n\n- next\n",
+		},
+		{
+			name:  "comment line is blank",
+			input: "<!-- comment -->\n```\nafter comment\n```\n",
+		},
+		{
+			name:  "nested blockquotes",
+			input: "> > text\n> > ```\n> > x\n> > ```\n> > tail\n",
+			lines: []int{2, 4},
+			fixed: "> > text\n> >\n> > ```\n> > x\n> > ```\n> >\n> > tail\n",
+		},
+		{
+			name:  "empty fenced block",
+			input: "Para before\n```\n```\nPara after\n",
+			lines: []int{2, 3},
+			fixed: "Para before\n\n```\n```\n\nPara after\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+			diags, err := NewBlanksAroundFencesRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			require.NoError(t, err)
+			require.Len(t, diags, len(tt.lines), "diagnostics: %+v", diags)
+			var edits []fix.TextEdit
+			for idx, line := range tt.lines {
+				assert.Equal(t, line, diags[idx].StartLine, "diagnostic %d line", idx)
+				edits = append(edits, diags[idx].FixEdits...)
+			}
+			if len(tt.lines) == 0 {
+				return
+			}
+			prepared, err := fix.PrepareEdits(edits, len(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.fixed, string(fix.ApplyEdits([]byte(tt.input), prepared)))
+		})
+	}
+}
+
 // TestNoSpaceInCodeRule_MarkdownlintSemantics follows markdownlint MD038: a
 // single space of padding is allowed only on both sides, a space that
 // separates a backtick in the content from the delimiter is allowed, and

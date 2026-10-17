@@ -2,6 +2,7 @@ package rules
 
 import (
 	"bytes"
+	"strings"
 	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -37,6 +38,7 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	includeListItems := ctx.OptionBool("list_items", true)
 
 	var diags []lint.Diagnostic
+	inserted := blankLineInserts{}
 
 	codeBlocks := ctx.CodeBlocks()
 	for _, cb := range codeBlocks {
@@ -63,62 +65,98 @@ func (r *BlanksAroundFencesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		// to the closing fence (or the last content line when unclosed).
 		fenceOpenLine := pos.StartLine
 		fenceCloseLine := pos.EndLine
-
-		// Validate fence lines exist.
 		if fenceOpenLine < 1 || fenceCloseLine > len(ctx.File.Lines) {
 			continue
 		}
+		blankLine := lint.BlankLineText(ctx.File, cb)
 
-		// Check for blank line before the opening fence.
-		// Need blank on fenceOpenLine - 1 (the line before the fence).
-		if fenceOpenLine > 1 && !lint.IsBlankLine(ctx.File, fenceOpenLine-1) {
-			fenceLine := ctx.File.Lines[fenceOpenLine-1]
-
-			builder := fix.NewEditBuilder()
-			builder.Insert(fenceLine.StartOffset, "\n")
-
+		if fenceOpenLine > 1 && !isFenceBlankLine(ctx.File, fenceOpenLine-1) {
+			at := ctx.File.Lines[fenceOpenLine-1].StartOffset
 			diagPos := mdast.SourcePosition{
-				StartLine:   fenceOpenLine,
-				StartColumn: 1,
-				EndLine:     fenceOpenLine,
-				EndColumn:   1,
+				StartLine: fenceOpenLine, StartColumn: pos.StartColumn, EndLine: fenceOpenLine, EndColumn: pos.StartColumn,
 			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				"Missing blank line before fenced code block").
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Add a blank line before the fenced code block").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+			diags = append(diags, r.blankLineDiagnostic(ctx, diagPos, "before", inserted.insert(at, blankLine)))
 		}
 
-		// Check for blank line after the closing fence.
-		// Need blank on fenceCloseLine + 1 (the line after the fence).
-		if fenceCloseLine < len(ctx.File.Lines) && !lint.IsBlankLine(ctx.File, fenceCloseLine+1) {
-			fenceLine := ctx.File.Lines[fenceCloseLine-1]
-
-			builder := fix.NewEditBuilder()
-			builder.Insert(fenceLine.EndOffset, "\n")
-
-			diagPos := mdast.SourcePosition{
-				StartLine:   fenceCloseLine,
-				StartColumn: 1,
-				EndLine:     fenceCloseLine,
-				EndColumn:   1,
+		// Like markdownlint, a block whose last line is blank needs no blank after it.
+		if fenceCloseLine < len(ctx.File.Lines) && !isFenceBlankLine(ctx.File, fenceCloseLine+1) &&
+			!isFenceBlankLine(ctx.File, fenceCloseLine) {
+			column := 1
+			var builder *fix.EditBuilder
+			// After an unclosed fence, an inserted line would become code.
+			if cb.Block.CodeBlock.Closed {
+				if start, _, ok := fenceRun(ctx.File, cb, fenceCloseLine); ok {
+					column = start - ctx.File.Lines[fenceCloseLine-1].StartOffset + 1
+				}
+				builder = inserted.insert(ctx.File.Lines[fenceCloseLine].StartOffset, blankLine)
 			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, diagPos,
-				"Missing blank line after fenced code block").
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Add a blank line after the fenced code block").
-				WithFix(builder).
-				Build()
-			diags = append(diags, diag)
+			diagPos := mdast.SourcePosition{StartLine: fenceCloseLine, StartColumn: column, EndLine: fenceCloseLine, EndColumn: column}
+			diags = append(diags, r.blankLineDiagnostic(ctx, diagPos, "after", builder))
 		}
 	}
 
 	return diags, nil
+}
+
+func (r *BlanksAroundFencesRule) blankLineDiagnostic(
+	ctx *lint.RuleContext, pos mdast.SourcePosition, side string, builder *fix.EditBuilder,
+) lint.Diagnostic {
+	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Missing blank line "+side+" fenced code block").
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Add a blank line " + side + " the fenced code block")
+	if builder != nil {
+		diagBuilder = diagBuilder.WithFix(builder)
+	}
+	return diagBuilder.Build()
+}
+
+// blankLineInserts hands out insertion fixes, at most one per offset, so the
+// blank line between two adjacent fences is inserted once.
+type blankLineInserts map[int]bool
+
+// insert returns a fix that inserts text at offset, or nil when an earlier
+// fix already inserts there.
+func (inserts blankLineInserts) insert(offset int, text string) *fix.EditBuilder {
+	if inserts[offset] {
+		return nil
+	}
+	inserts[offset] = true
+	builder := fix.NewEditBuilder()
+	builder.Insert(offset, text)
+	return builder
+}
+
+// isFenceBlankLine reports whether a line counts as blank next to a fence,
+// as markdownlint's isBlankLine decides: nothing but whitespace remains once
+// HTML comments and blockquote markers are removed. Lines outside the file
+// are blank.
+func isFenceBlankLine(file *mdast.FileSnapshot, lineNum int) bool {
+	if lineNum < 1 || lineNum > len(file.Lines) {
+		return true
+	}
+	line := string(lint.LineContent(file, lineNum))
+	return strings.TrimSpace(strings.ReplaceAll(removeHTMLComments(line), ">", "")) == ""
+}
+
+// removeHTMLComments removes HTML comments from a line the way markdownlint
+// does, including an unmatched "-->" before any "<!--" and an unmatched
+// "<!--" at the end.
+func removeHTMLComments(line string) string {
+	const startComment, endComment = "<!--", "-->"
+	for {
+		start := strings.Index(line, startComment)
+		end := strings.Index(line, endComment)
+		switch {
+		case end != -1 && (start == -1 || end < start):
+			line = line[end+len(endComment):]
+		case start != -1 && end != -1:
+			line = line[:start] + line[end+len(endComment):]
+		case start != -1:
+			line = line[:start]
+		default:
+			return line
+		}
+	}
 }
 
 func (r *BlanksAroundFencesRule) isInListItem(node *mdast.Node) bool {

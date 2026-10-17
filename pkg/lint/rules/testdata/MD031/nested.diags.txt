@@ -1,2 +1,2 @@
-nested.input.md:4:1 warning Missing blank line before fenced code block (MD031/blanks-around-fences) [fixable]
-nested.input.md:6:1 warning Missing blank line after fenced code block (MD031/blanks-around-fences) [fixable]
+nested.input.md:4:3 warning Missing blank line before fenced code block (MD031/blanks-around-fences) [fixable]
+nested.input.md:6:3 warning Missing blank line after fenced code block (MD031/blanks-around-fences) [fixable]
