@@ -392,7 +392,7 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
 	for _, mismatch := range mismatches {
-		fixable := allowRenumbering
+		fixable := allowRenumbering && !followsText(ctx.File, mismatch)
 		if shift, moves := numberShift(plan, mismatch); moves {
 			accepted, ok := safeShifts[mismatch.item]
 			fixable = fixable && ok && accepted == shift
@@ -400,6 +400,18 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 		diags = append(diags, r.numberDiagnostic(ctx, mismatch, fixable))
 	}
 	return diags, nil
+}
+
+// followsText reports whether renumbering would make a list that directly
+// follows a non-blank line start at a number other than 1. Only a list
+// starting at 1 can interrupt a paragraph, so the new number could turn the
+// list into paragraph text.
+func followsText(file *mdast.FileSnapshot, mismatch numberMismatch) bool {
+	line := mismatch.marker.Line
+	if mismatch.expected == 1 || previousListItem(mismatch.item) != nil || line <= 1 {
+		return false
+	}
+	return !lint.IsBlankLineInContainer(file, mismatch.item.Parent, line-1)
 }
 
 // orderedListMismatches applies markdownlint's numbering policy to one list.
@@ -445,6 +457,11 @@ func orderedListMismatches(file *mdast.FileSnapshot, list *mdast.Node, style str
 		expected = 0
 	case orderedStyleOne:
 		expected = 1
+	}
+	if rightAligned && !zeroPrefixed && items[0].found && len(strconv.Itoa(expected)) < len(items[0].marker.NumberText) {
+		// Space padding would move the first marker, which has nothing above
+		// it to align with and could slide under a list that precedes it.
+		rightAligned = false
 	}
 
 	var mismatches []numberMismatch
@@ -512,6 +529,11 @@ func numberShift(plan *listShiftPlan, mismatch numberMismatch) (listShift, bool)
 		return listShift{}, false
 	}
 	layout, ok := plan.layout(mismatch.item)
+	// A space inserted right after ">" would become the blockquote's
+	// optional space rather than move the marker.
+	if padding > 0 && mismatch.marker.Start > 0 && plan.file.Content[mismatch.marker.Start-1] == '>' {
+		ok = false
+	}
 	if !ok {
 		// Without a layout the shift cannot be checked; propose an impossible
 		// one so that the fix is withheld.

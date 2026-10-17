@@ -316,6 +316,37 @@ func TestOrderedListIncrementRule(t *testing.T) {
 			wantFix:   "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n9. i\n10. j\n",
 		},
 		{
+			// Padding the first item aligns it with nothing and would move it
+			// under the bullet item above, nesting the ordered list inside it.
+			name:      "first item is not padded",
+			input:     "- first item\n 10. second item\n",
+			wantDiags: 1,
+			wantFix:   "- first item\n 1. second item\n",
+		},
+		{
+			name:      "single item is renumbered without padding",
+			input:     "10. Item\n",
+			wantDiags: 1,
+			wantFix:   "1. Item\n",
+		},
+		{
+			// A space inserted right after ">" becomes the blockquote's
+			// optional space instead of moving the marker.
+			name:      "no padding right after a blockquote marker",
+			input:     "> 9. a\n>10. b\n",
+			wantDiags: 2,
+			wantFix:   "> 1. a\n>10. b\n",
+		},
+		{
+			// Only a list starting at 1 can interrupt a paragraph, so "0." would
+			// turn the list into paragraph text.
+			name:      "no fix that stops a list from interrupting a paragraph",
+			input:     "Para\n1. item\n",
+			wantDiags: 1,
+			wantFix:   "Para\n1. item\n",
+			config:    map[string]any{"style": "zero"},
+		},
+		{
 			// Widening "9." to "10." moves the content column past the
 			// nested list, which would then leave the item.
 			name:      "wider number is not fixed when it would move nested content",

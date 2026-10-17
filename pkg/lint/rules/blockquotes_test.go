@@ -135,6 +135,14 @@ func TestNoMultipleSpaceBlockquoteRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
+			// The tab keeps "- second item" paragraph text; removing it would
+			// start a new list item.
+			name:      "no fix when removing the space would start a block",
+			input:     "> -  first item\n> \t- second item\n",
+			wantDiags: 1,
+			wantFix:   "> -  first item\n> \t- second item\n",
+		},
+		{
 			name:      "extra space before a heading",
 			input:     ">  # Heading\n",
 			wantDiags: 1,

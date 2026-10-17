@@ -608,6 +608,12 @@ func TestULIndentRule_Fix(t *testing.T) {
 			wantFix:   "> - a\n> - b\n",
 		},
 		{
+			name:      "no fix when a continuation line would become a list item",
+			input:     "  -  first item\n    - second item\n",
+			wantDiags: 1,
+			wantFix:   "  -  first item\n    - second item\n",
+		},
+		{
 			name:      "no fix when the item holds a code block",
 			input:     "   - Item\n\n         code\n",
 			wantDiags: 1,
@@ -776,6 +782,23 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 			input:     "> -  item\n>\n>   after\n",
 			wantDiags: 1,
 			wantFix:   "> -  item\n>\n>   after\n",
+		},
+		{
+			// The second line is paragraph text only because it is not
+			// indented to the content column; narrowing the item would make it
+			// a nested list item.
+			name:      "no fix when a continuation line would become a list item",
+			input:     "  -  first item\n    - second item\n",
+			wantDiags: 1,
+			wantFix:   "  -  first item\n    - second item\n",
+		},
+		{
+			// The tab after ">" expands past the optional space, so byte
+			// columns cannot tell where the second marker sits.
+			name:      "no fix when a tab follows a blockquote marker",
+			input:     ">-  first item\n>\t- second item\n",
+			wantDiags: 1,
+			wantFix:   ">-  first item\n>\t- second item\n",
 		},
 		{
 			name:      "no fix when the expected spacing would make code",

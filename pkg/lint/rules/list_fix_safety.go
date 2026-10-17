@@ -2,6 +2,7 @@ package rules
 
 import (
 	"bytes"
+	"math"
 	"sort"
 	"strings"
 
@@ -17,9 +18,6 @@ const maxListItemSpacing = 4
 // maxBlockIndent is the deepest indentation, relative to its container, at
 // which a line can still start a list item or other block.
 const maxBlockIndent = 3
-
-// tabStop is the CommonMark tab stop width.
-const tabStop = 4
 
 // listItemLayout is the column layout of a list item on its marker line.
 //
@@ -131,7 +129,9 @@ func (p *listShiftPlan) orderedShiftItems() []*mdast.Node {
 // in the same list at the same depth and keeps every surrounding line where
 // it is. Only items whose content is a paragraph on the marker line followed
 // by nested lists are moved; anything else may depend on the content column
-// in ways this check does not model.
+// in ways this check does not model. A paragraph line that looks like the
+// start of a block is paragraph text only because of where it sits, so an
+// item holding one keeps its content column.
 func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 	layout, ok := p.layout(item)
 	if !ok || !isSimpleListItem(item, layout.marker.Line) {
@@ -141,6 +141,9 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 		return false
 	}
 	if shift.markerCol < 0 || shift.contentCol <= shift.markerCol {
+		return false
+	}
+	if shift.contentCol != layout.contentCol && hasDormantBlockStart(p.file, item.FirstChild, layout.marker.Line) {
 		return false
 	}
 
@@ -158,6 +161,13 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 	if prev := previousListItem(item); prev != nil {
 		prevShift, ok := p.final(prev)
 		if !ok || shift.markerCol >= prevShift.contentCol {
+			return false
+		}
+	} else if before := list.Prev; before != nil && before.Kind == mdast.NodeList {
+		// The first item must not move under the last item of the list
+		// before it, which would take it in.
+		lastShift, ok := p.final(lastListItem(before))
+		if !ok || shift.markerCol >= lastShift.contentCol {
 			return false
 		}
 	}
@@ -192,7 +202,8 @@ func (p *listShiftPlan) keepsStructure(item *mdast.Node, shift listShift) bool {
 // firstColumnAfter returns the column, relative to the blockquote content of
 // list, of the first non-blank line after the given line. Lines outside that
 // blockquote, such as lazy continuation lines, cannot join the list and are
-// not reported.
+// not reported. A line whose indentation holds a tab reports an unreachable
+// column, so that callers treat it as unsafe.
 func (p *listShiftPlan) firstColumnAfter(list *mdast.Node, lineNum int) (int, bool) {
 	for next := lineNum + 1; next <= len(p.file.Lines); next++ {
 		if lint.IsBlankLineInContainer(p.file, list, next) {
@@ -202,17 +213,12 @@ func (p *listShiftPlan) firstColumnAfter(list *mdast.Node, lineNum int) (int, bo
 		if !ok {
 			return 0, false
 		}
-		col := 0
-		for _, char := range lint.RawLineContent(p.file, next)[base:] {
-			switch char {
-			case ' ':
-				col++
-			case '\t':
-				col += tabStop - col%tabStop
-			default:
-				return col, true
-			}
+		content := lint.RawLineContent(p.file, next)
+		indentEnd := len(content) - len(bytes.TrimLeft(content[base:], " \t"))
+		if bytes.IndexByte(content[:indentEnd], '\t') >= 0 {
+			return math.MaxInt, true
 		}
+		return indentEnd - base, true
 	}
 	return 0, false
 }
@@ -224,7 +230,10 @@ func computeListItemLayout(file *mdast.FileSnapshot, item *mdast.Node) (listItem
 		return listItemLayout{}, false
 	}
 	base, ok := blockquoteContentBase(file, item.Parent, marker.Line)
-	if !ok || bytes.IndexByte(file.Content[marker.LineStart+base:marker.ContentStart], '\t') >= 0 {
+	// A tab anywhere before the content, even inside the blockquote prefix,
+	// expands to a tab stop, so byte columns would not match the columns
+	// CommonMark uses.
+	if !ok || base > marker.Column() || bytes.IndexByte(file.Content[marker.LineStart:marker.ContentStart], '\t') >= 0 {
 		return listItemLayout{}, false
 	}
 	spacing := marker.Spacing()
@@ -317,6 +326,31 @@ func previousListItem(item *mdast.Node) *mdast.Node {
 		}
 	}
 	return nil
+}
+
+// lastListItem returns the last item of a list, or nil.
+func lastListItem(list *mdast.Node) *mdast.Node {
+	for child := list.LastChild; child != nil; child = child.Prev {
+		if child.Kind == mdast.NodeListItem {
+			return child
+		}
+	}
+	return nil
+}
+
+// hasDormantBlockStart reports whether a paragraph line after the first, on
+// the lines that follow startLine, begins like a block (a list item, heading,
+// quote, fence, thematic break or HTML block) once its container prefix and
+// indentation are removed.
+func hasDormantBlockStart(file *mdast.FileSnapshot, paragraph *mdast.Node, startLine int) bool {
+	for lineNum := startLine + 1; lineNum <= nodeLastLine(paragraph); lineNum++ {
+		content := lint.RawLineContent(file, lineNum)
+		rest := bytes.TrimLeft(content[len(lint.ContainerPrefix(file, paragraph, lineNum)):], " \t")
+		if len(rest) > 0 && wrapContinuationStartsBlock(string(rest)) {
+			return true
+		}
+	}
+	return false
 }
 
 // nextListItem returns the list item after item in its list.

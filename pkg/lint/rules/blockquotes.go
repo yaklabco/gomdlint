@@ -40,8 +40,12 @@ type quoteSpace struct {
 	item    *mdast.Node
 	inList  bool
 	// unsafe is true when the whitespace indents a code fence or an HTML
-	// block, whose indentation is part of the content.
+	// block, whose indentation is part of the content, or when it keeps a
+	// paragraph line that looks like a block start from starting a block.
 	unsafe bool
+	// startsBlock is true when the text after the whitespace looks like the
+	// start of a block.
+	startsBlock bool
 }
 
 // Apply checks for multiple spaces after blockquote symbol.
@@ -74,6 +78,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 		}
 		items := quoteListItems(quote)
 		unsafeLines := quoteVerbatimLines(quote)
+		continuation := quoteContinuationLines(quote)
 		for lineNum := pos.StartLine; lineNum <= nodeLastLine(quote); lineNum++ {
 			if codeLines[lineNum] {
 				continue
@@ -82,7 +87,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 			if !ok || (!includeListItems && (finding.item != nil || finding.inList)) {
 				continue
 			}
-			finding.unsafe = unsafeLines[lineNum]
+			finding.unsafe = unsafeLines[lineNum] || (continuation[lineNum] && finding.startsBlock)
 			if finding.item != nil {
 				proposeQuoteSpaceShift(plan, finding)
 			}
@@ -136,11 +141,12 @@ func extraQuoteSpace(file *mdast.FileSnapshot, quote *mdast.Node, items []*mdast
 	}
 
 	finding := quoteSpace{
-		quote:   quote,
-		lineNum: lineNum,
-		start:   file.Lines[lineNum-1].StartOffset + start,
-		end:     file.Lines[lineNum-1].StartOffset + end,
-		spaces:  end - start,
+		quote:       quote,
+		lineNum:     lineNum,
+		start:       file.Lines[lineNum-1].StartOffset + start,
+		end:         file.Lines[lineNum-1].StartOffset + end,
+		spaces:      end - start,
+		startsBlock: wrapContinuationStartsBlock(string(content[end:])),
 	}
 	if prefix[len(prefix)-1] == ' ' || prefix[len(prefix)-1] == '\t' {
 		finding.spaces++
@@ -195,6 +201,23 @@ func proposeQuoteSpaceShift(plan *listShiftPlan, finding quoteSpace) {
 	}
 	width := finding.end - finding.start
 	plan.propose(finding.item, listShift{markerCol: layout.markerCol - width, contentCol: layout.contentCol - width})
+}
+
+// quoteContinuationLines returns the lines of a blockquote that continue a
+// paragraph rather than start one.
+func quoteContinuationLines(quote *mdast.Node) map[int]bool {
+	lines := make(map[int]bool)
+	_ = mdast.Walk(quote, func(node *mdast.Node) error { //nolint:errcheck // Visitor never returns an error.
+		if node.Kind != mdast.NodeParagraph || nearestBlockquote(node) != quote {
+			return nil
+		}
+		pos := node.SourcePosition()
+		for line := pos.StartLine + 1; pos.IsValid() && line <= nodeLastLine(node); line++ {
+			lines[line] = true
+		}
+		return nil
+	})
+	return lines
 }
 
 // quoteVerbatimLines returns the lines of a blockquote whose indentation is
