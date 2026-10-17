@@ -421,7 +421,7 @@ func computeListItemLayout(file *mdast.FileSnapshot, item *mdast.Node) (listItem
 	// A tab anywhere before the content, even inside the blockquote prefix,
 	// expands to a tab stop, so byte columns would not match the columns
 	// CommonMark uses.
-	if !ok || base > marker.Column() || bytes.IndexByte(file.Content[marker.LineStart:marker.ContentStart], '\t') >= 0 {
+	if !ok || base > marker.Column() || bytes.IndexByte(file.Content[marker.TextStart:marker.ContentStart], '\t') >= 0 {
 		return listItemLayout{}, false
 	}
 	spacing := marker.Spacing()
@@ -439,9 +439,10 @@ func computeListItemLayout(file *mdast.FileSnapshot, item *mdast.Node) (listItem
 
 // blockquoteContentBase returns the byte column where the content of the
 // nearest blockquote enclosing node starts on a line: the length of the
-// container prefix up to and including that blockquote's marker. It is 0
-// when node is not inside a blockquote, and false when the line does not
-// continue the blockquote.
+// container prefix up to and including that blockquote's marker, counted
+// from the text of the line, after a byte order mark. It is 0 when node is
+// not inside a blockquote, and false when the line does not continue the
+// blockquote.
 func blockquoteContentBase(file *mdast.FileSnapshot, node *mdast.Node, lineNum int) (int, bool) {
 	child := node
 	depth := 0
@@ -461,7 +462,7 @@ func blockquoteContentBase(file *mdast.FileSnapshot, node *mdast.Node, lineNum i
 	if strings.Count(string(prefix), ">") < depth {
 		return 0, false
 	}
-	return len(prefix), true
+	return len(prefix) - lint.LineTextOffset(file, lineNum), true
 }
 
 // sameBlockquote reports whether two nodes have the same nearest enclosing
@@ -498,7 +499,7 @@ func isSimpleListItem(item *mdast.Node, markerLine int) bool {
 // content and a marker is plain indentation, so that changing it moves only
 // this marker.
 func markerIndentEditable(file *mdast.FileSnapshot, layout listItemLayout) bool {
-	for offset := layout.marker.LineStart + layout.base; offset < layout.marker.Start; offset++ {
+	for offset := layout.marker.TextStart + layout.base; offset < layout.marker.Start; offset++ {
 		if file.Content[offset] != ' ' {
 			return false
 		}

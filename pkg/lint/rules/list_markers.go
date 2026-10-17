@@ -3,6 +3,7 @@ package rules
 import (
 	"strconv"
 
+	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -17,6 +18,10 @@ type listItemMarker struct {
 
 	// LineStart is the byte offset where that line begins.
 	LineStart int
+
+	// TextStart is the byte offset where the text of that line begins: after
+	// a byte order mark on the first line, and at LineStart otherwise.
+	TextStart int
 
 	// LineEnd is the byte offset where the line's content ends (its newline
 	// offset, or the end of the file).
@@ -45,8 +50,15 @@ type listItemMarker struct {
 	Delimiter byte
 }
 
-// Column returns the 0-based byte column of the marker within its line.
+// Column returns the 0-based byte column of the marker within the text of
+// its line, which leaves out a byte order mark.
 func (m listItemMarker) Column() int {
+	return m.Start - m.TextStart
+}
+
+// ByteColumn returns the 0-based byte column of the marker from the start of
+// its line, the column diagnostics report.
+func (m listItemMarker) ByteColumn() int {
 	return m.Start - m.LineStart
 }
 
@@ -79,8 +91,9 @@ func findListItemMarker(file *mdast.FileSnapshot, item *mdast.Node) (listItemMar
 		return listItemMarker{}, false
 	}
 	line := file.Lines[pos.StartLine-1]
+	textStart := line.StartOffset + lint.LineTextOffset(file, pos.StartLine)
 	start := item.SourceRange().StartOffset
-	if start < line.StartOffset || start > line.NewlineStart || !markerBoundaryBefore(file.Content, line, start) {
+	if start < textStart || start > line.NewlineStart || !markerBoundaryBefore(file.Content, textStart, start) {
 		return listItemMarker{}, false
 	}
 	marker, ok := readListMarker(file.Content, line, start)
@@ -88,6 +101,7 @@ func findListItemMarker(file *mdast.FileSnapshot, item *mdast.Node) (listItemMar
 		return listItemMarker{}, false
 	}
 	marker.Line = pos.StartLine
+	marker.TextStart = textStart
 	return marker, true
 }
 
@@ -97,7 +111,7 @@ func readListMarker(content []byte, line mdast.LineInfo, start int) (listItemMar
 	if start >= line.NewlineStart {
 		return listItemMarker{}, false
 	}
-	marker := listItemMarker{LineStart: line.StartOffset, LineEnd: line.NewlineStart, Start: start}
+	marker := listItemMarker{LineStart: line.StartOffset, TextStart: line.StartOffset, LineEnd: line.NewlineStart, Start: start}
 	switch content[start] {
 	case '-', '+', '*':
 		marker.Bullet = content[start]
@@ -134,8 +148,8 @@ func readListMarker(content []byte, line mdast.LineInfo, start int) (listItemMar
 
 // markerBoundaryBefore reports whether a marker may start at offset: at the
 // line start or after whitespace or a blockquote marker.
-func markerBoundaryBefore(content []byte, line mdast.LineInfo, offset int) bool {
-	if offset == line.StartOffset {
+func markerBoundaryBefore(content []byte, textStart, offset int) bool {
+	if offset == textStart {
 		return true
 	}
 	prev := content[offset-1]

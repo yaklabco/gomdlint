@@ -230,7 +230,7 @@ func (r *UnorderedListStyleRule) bulletDiagnostics(ctx *lint.RuleContext, mismat
 		var diagBuilder *lint.DiagnosticBuilder
 		switch {
 		case mismatch.found:
-			column := mismatch.marker.Column() + 1
+			column := mismatch.marker.ByteColumn() + 1
 			pos := mdast.SourcePosition{
 				StartLine: mismatch.marker.Line, StartColumn: column,
 				EndLine: mismatch.marker.Line, EndColumn: column + 1,
@@ -614,9 +614,9 @@ func (r *OrderedListIncrementRule) numberDiagnostic(ctx *lint.RuleContext, misma
 	marker := mismatch.marker
 	pos := mdast.SourcePosition{
 		StartLine:   marker.Line,
-		StartColumn: marker.Column() + 1,
+		StartColumn: marker.ByteColumn() + 1,
 		EndLine:     marker.Line,
-		EndColumn:   marker.Column() + 1 + marker.Width(),
+		EndColumn:   marker.ByteColumn() + 1 + marker.Width(),
 	}
 	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 		fmt.Sprintf("Ordered list item numbered %d should be %d", marker.Number, mismatch.expected)).

@@ -84,7 +84,8 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			return diags, ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
+		lineContent := lint.LineText(ctx.File, lineNum)
+		textOffset := lint.LineTextOffset(ctx.File, lineNum)
 
 		// Check if line is in a code block.
 		if info, inCodeBlock := codeBlockInfo[lineNum]; inCodeBlock {
@@ -98,10 +99,10 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			}
 		}
 
-		line := ctx.File.Lines[lineNum-1]
+		textStart := ctx.File.Lines[lineNum-1].StartOffset + textOffset
 
 		// Find all tabs in the line, outside excluded code spans.
-		tabPositions := findTabPositions(lineContent, line.StartOffset, codeSpans)
+		tabPositions := findTabPositions(lineContent, textStart, codeSpans)
 		if len(tabPositions) == 0 {
 			continue
 		}
@@ -110,7 +111,7 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		structureEnd := tabStructureEnd(ctx.File, lineNum, lineContent, codeBlockByLine[lineNum])
 		builder := fix.NewEditBuilder()
 		for _, tabPos := range tabPositions {
-			offset := line.StartOffset + tabPos
+			offset := textStart + tabPos
 			spaces := spacesPerTab
 			if tabPos < structureEnd {
 				spaces = tabWidth - visualColumn(lineContent[:tabPos])%tabWidth
@@ -122,9 +123,9 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		firstTabPos := tabPositions[0]
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: firstTabPos + 1,
+			StartColumn: textOffset + firstTabPos + 1,
 			EndLine:     lineNum,
-			EndColumn:   firstTabPos + 2,
+			EndColumn:   textOffset + firstTabPos + 2,
 		}
 
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Hard tab character found").
@@ -138,14 +139,14 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	return keepSafeFixes(ctx, diags, fixCheckOptions{codeWhitespace: true}), nil
 }
 
-// tabStructureEnd returns the byte index where the part of a line that
-// CommonMark measures in columns ends. On a code line it is the container
-// prefix, followed for indented code by the four columns of code
-// indentation. On other lines it is the leading run of whitespace,
-// blockquote markers and list markers.
+// tabStructureEnd returns the byte index in the text of a line, after a
+// byte order mark, where the part that CommonMark measures in columns ends.
+// On a code line it is the container prefix, followed for indented code by
+// the four columns of code indentation. On other lines it is the leading run
+// of whitespace, blockquote markers and list markers.
 func tabStructureEnd(file *mdast.FileSnapshot, lineNum int, content []byte, codeBlock *mdast.Node) int {
 	if codeBlock != nil {
-		end := len(lint.ContainerPrefix(file, codeBlock, lineNum))
+		end := len(lint.ContainerPrefix(file, codeBlock, lineNum)) - lint.LineTextOffset(file, lineNum)
 		if !lint.IsIndentedCodeBlock(codeBlock) {
 			return end
 		}

@@ -255,7 +255,11 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	contentLen := len(ctx.File.Content)
 	lastLine := len(ctx.File.Lines)
 
-	if !isMarkdownlintBlankLine(lint.RawLineContent(ctx.File, lastLine)) {
+	// A byte order mark is not part of the text, so a file holding only one
+	// is empty.
+	last := lint.RawLineContent(ctx.File, lastLine)
+	last = last[min(len(last), lint.LineTextOffset(ctx.File, lastLine)):]
+	if !isMarkdownlintBlankLine(last) {
 		// Missing final newline.
 		builder := fix.NewEditBuilder()
 		builder.Insert(contentLen, "\n")
@@ -320,6 +324,12 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	}
 
 	return nil, nil
+}
+
+// isBlankText reports whether the text of a line, after a byte order mark on
+// the first line, is empty or whitespace.
+func isBlankText(file *mdast.FileSnapshot, lineNum int) bool {
+	return len(bytes.TrimSpace(lint.LineText(file, lineNum))) == 0
 }
 
 // isMarkdownlintBlankLine reports whether a line is blank the way markdownlint's
@@ -397,7 +407,7 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 
 		// Like markdownlint, blank lines inside code blocks are content and
 		// end any streak in progress.
-		if !ctx.IsLineInCodeBlock(lineNum) && lint.IsBlankLine(ctx.File, lineNum) {
+		if !ctx.IsLineInCodeBlock(lineNum) && isBlankText(ctx.File, lineNum) {
 			if streakCount == 0 {
 				streakStart = lineNum
 			}

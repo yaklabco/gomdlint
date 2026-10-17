@@ -175,7 +175,7 @@ func indentEdits(
 		}
 		marker := mismatch.marker
 		edits[mismatch.item] = fix.TextEdit{
-			StartOffset: marker.LineStart + mismatch.base,
+			StartOffset: marker.TextStart + mismatch.base,
 			EndOffset:   marker.End,
 			NewText:     strings.Repeat(" ", mismatch.expected) + string(file.Content[marker.Start:marker.End]),
 		}

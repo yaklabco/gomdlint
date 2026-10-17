@@ -317,7 +317,7 @@ func (r *NoBlanksBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 			return diags, ctx.Ctx.Err()
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
+		lineContent := lint.LineText(ctx.File, lineNum)
 
 		// Skip lines of code.
 		if codeLines[lineNum] {

@@ -113,7 +113,8 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		if !checked || maxLength <= 0 {
 			continue
 		}
-		line := string(lint.LineContent(ctx.File, lineNum))
+		line := string(lint.LineText(ctx.File, lineNum))
+		textOffset := lint.LineTextOffset(ctx.File, lineNum)
 		length := markdownlintTextLength(line)
 		if length <= maxLength {
 			continue
@@ -127,9 +128,9 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: markdownlintByteLimit(line, maxLength) + 1,
+			StartColumn: textOffset + markdownlintByteLimit(line, maxLength) + 1,
 			EndLine:     lineNum,
-			EndColumn:   len(line) + 1,
+			EndColumn:   textOffset + len(line) + 1,
 		}
 
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
@@ -332,7 +333,7 @@ func wrappableLines(ctx *lint.RuleContext) map[int]*mdast.Node {
 		last := nodeLastLine(paragraph)
 		tableLike := false
 		for line := pos.StartLine; line <= last; line++ {
-			content := lint.LineContent(ctx.File, line)
+			content := lint.LineText(ctx.File, line)
 			if strings.Contains(string(content), "|") && tableDelimiterRowPattern.Match(content) {
 				tableLike = true
 				break
@@ -408,11 +409,13 @@ func (s *lineLengthScan) wrapFix(lineNum, maxLength int) *fix.EditBuilder {
 		return nil
 	}
 	info := s.ctx.File.Lines[lineNum-1]
-	content := string(s.ctx.File.Content[info.StartOffset:info.NewlineStart])
+	textOffset := lint.LineTextOffset(s.ctx.File, lineNum)
+	textStart := info.StartOffset + textOffset
+	content := string(s.ctx.File.Content[textStart:info.NewlineStart])
 	if isTableLine(content) {
 		return nil
 	}
-	containerEnd := len(lint.ContainerPrefix(s.ctx.File, paragraph, lineNum))
+	containerEnd := len(lint.ContainerPrefix(s.ctx.File, paragraph, lineNum)) - textOffset
 	contentStart := containerEnd
 	for contentStart < len(content) && (content[contentStart] == ' ' || content[contentStart] == '\t') {
 		contentStart++
@@ -443,7 +446,7 @@ func (s *lineLengthScan) wrapFix(lineNum, maxLength int) *fix.EditBuilder {
 			if markdownlintTextLength(head) > maxLength {
 				break
 			}
-			if s.safeBreak(lineNum, info.StartOffset, content, run) {
+			if s.safeBreak(lineNum, textStart, content, run) {
 				best = idx
 			}
 		}
@@ -451,7 +454,7 @@ func (s *lineLengthScan) wrapFix(lineNum, maxLength int) *fix.EditBuilder {
 			break
 		}
 		run := runs[best]
-		builder.ReplaceRange(info.StartOffset+run.start, info.StartOffset+run.end, "\n"+prefix)
+		builder.ReplaceRange(textStart+run.start, textStart+run.end, "\n"+prefix)
 		segment = run.end
 	}
 	if len(builder.Edits) == 0 {
