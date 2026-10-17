@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -209,6 +210,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	var diags []lint.Diagnostic
+	removal := newDefinitionRemoval(ctx, refCtx.AllDefinitions)
 
 	for _, def := range refCtx.AllDefinitions {
 		if ctx.Cancelled() {
@@ -232,7 +234,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position, fmt.Sprintf(msg, def.Label)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion)
-		if builder := removeDefinitionFix(ctx.File, def); builder != nil {
+		if builder := removal.fix(def); builder != nil {
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
@@ -241,17 +243,94 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	return diags, nil
 }
 
-// removeDefinitionFix deletes the lines of a definition, line endings
-// included, when nothing else on them would be lost. A byte order mark
-// before the first line stays.
-func removeDefinitionFix(file *mdast.FileSnapshot, def *refs.ReferenceDefinition) *fix.EditBuilder {
+// definitionRemoval builds the MD053 fix, which deletes a definition's lines.
+type definitionRemoval struct {
+	file *mdast.FileSnapshot
+	// columns maps the first line of each definition to the column it starts at.
+	columns map[int]int
+	// absorbers are the lists and indented code blocks, which can take in
+	// what follows them once a definition no longer separates them.
+	absorbers []*mdast.Node
+}
+
+func newDefinitionRemoval(ctx *lint.RuleContext, defs []*refs.ReferenceDefinition) *definitionRemoval {
+	columns := make(map[int]int, len(defs))
+	for _, def := range defs {
+		columns[def.Lines[0]] = def.Position.StartColumn
+	}
+	return &definitionRemoval{
+		file:    ctx.File,
+		columns: columns,
+		absorbers: mdast.FindAll(ctx.Root, func(node *mdast.Node) bool {
+			return node.Kind == mdast.NodeList || lint.IsIndentedCodeBlock(node)
+		}),
+	}
+}
+
+// fix deletes the lines of a definition, line endings included, when nothing
+// else on them would be lost and the blocks around them parse the same
+// without them. A byte order mark before the first line stays.
+func (d *definitionRemoval) fix(def *refs.ReferenceDefinition) *fix.EditBuilder {
 	first, last := def.Lines[0], def.Lines[1]
-	if !def.Removable || first < 1 || last < first || last > len(file.Lines) {
+	if !def.Removable || first < 1 || last < first || last > len(d.file.Lines) || !d.keepsStructure(def) {
 		return nil
 	}
 	builder := fix.NewEditBuilder()
-	builder.Delete(file.Lines[first-1].StartOffset+lint.LineTextOffset(file, first), file.Lines[last-1].EndOffset)
+	builder.Delete(d.file.Lines[first-1].StartOffset+lint.LineTextOffset(d.file, first), d.file.Lines[last-1].EndOffset)
 	return builder
+}
+
+// keepsStructure reports whether the blocks around a definition parse the
+// same once its lines are deleted. The line after it continues the
+// definition's paragraph, so it must be blank or start another definition at
+// the same column: anything else could start a different block once it
+// follows a blank line (indented code, an ordered list not starting at 1)
+// or leave its blockquote as a lazy line. After a list or an indented code
+// block, the next non-blank line must also start such a definition, or the
+// document must end, because the list could take in a list item or
+// indented text and two indented code blocks would merge into one.
+func (d *definitionRemoval) keepsStructure(def *refs.ReferenceDefinition) bool {
+	first, last := def.Lines[0], def.Lines[1]
+	startsSibling := func(line int) bool {
+		column, ok := d.columns[line]
+		return ok && column == def.Position.StartColumn
+	}
+	if next := last + 1; next <= len(d.file.Lines) && !d.isBlank(next) && !startsSibling(next) {
+		return false
+	}
+	prev := first - 1
+	for prev >= 1 && d.isBlank(prev) {
+		prev--
+	}
+	if prev < 1 || !d.absorbs(prev, first) {
+		return true
+	}
+	next := last + 1
+	for next <= len(d.file.Lines) && d.isBlank(next) {
+		next++
+	}
+	return next > len(d.file.Lines) || startsSibling(next)
+}
+
+// absorbs reports whether line prev belongs to a list or an indented code
+// block that does not also hold line first.
+func (d *definitionRemoval) absorbs(prev, first int) bool {
+	for _, node := range d.absorbers {
+		pos := node.SourcePosition()
+		if !pos.IsValid() || prev < pos.StartLine || prev > pos.EndLine {
+			continue
+		}
+		if first < pos.StartLine || first > pos.EndLine {
+			return true
+		}
+	}
+	return false
+}
+
+// isBlank reports whether a line holds nothing but spaces, tabs, and
+// blockquote markers, so it is blank inside its blockquotes.
+func (d *definitionRemoval) isBlank(line int) bool {
+	return len(bytes.Trim(lint.LineContent(d.file, line), " \t\r>")) == 0
 }
 
 // LinkImageStyleRule enforces consistent link/image syntax styles (MD054).

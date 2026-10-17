@@ -473,6 +473,48 @@ func TestLinkImageRefDefsRule_ParsedDefinitions(t *testing.T) {
 			want:     []string{"Unused reference definition [spare]"},
 			fixed:    "---\ntitle: x\n---\n\n",
 		},
+		{
+			name:     "definitions after a list are removed",
+			markdown: "- a\n\n[one]: https://a.example\n[two]: https://b.example\n",
+			want:     []string{"Unused reference definition [one]", "Unused reference definition [two]"},
+			fixed:    "- a\n\n",
+		},
+		{
+			name:     "definition followed by another definition is removed",
+			markdown: "[a]: https://a.example\n[b]: https://b.example\n\nUse [b].\n",
+			want:     []string{"Unused reference definition [a]"},
+			fixed:    "[b]: https://b.example\n\nUse [b].\n",
+		},
+		{
+			name:     "definition between two lists keeps its line",
+			markdown: "- a\n\n[unused]: https://example.com\n- b\n",
+			want:     []string{"Unused reference definition [unused]"},
+			fixed:    "- a\n\n[unused]: https://example.com\n- b\n",
+		},
+		{
+			name:     "definition before an indented definition after a list keeps its line",
+			markdown: "- a\n\n[one]: https://a.example\n  [two]: https://b.example\n",
+			want:     []string{"Unused reference definition [one]", "Unused reference definition [two]"},
+			fixed:    "- a\n\n[one]: https://a.example\n",
+		},
+		{
+			name:     "definition between indented code blocks keeps its line",
+			markdown: "    code1\n\n[unused]: https://example.com\n\n    code2\n",
+			want:     []string{"Unused reference definition [unused]"},
+			fixed:    "    code1\n\n[unused]: https://example.com\n\n    code2\n",
+		},
+		{
+			name:     "definition followed by paragraph text keeps its line",
+			markdown: "Text.\n\n[unused]: https://example.com\n    indented\n",
+			want:     []string{"Unused reference definition [unused]"},
+			fixed:    "Text.\n\n[unused]: https://example.com\n    indented\n",
+		},
+		{
+			name:     "quoted definition followed by a lazy line keeps its line",
+			markdown: "> [unused]: https://example.com\nlazy\n",
+			want:     []string{"Unused reference definition [unused]"},
+			fixed:    "> [unused]: https://example.com\nlazy\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
