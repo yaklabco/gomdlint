@@ -177,6 +177,8 @@ func TestRunner_Run_FixesSymlinkTargetsOnlyInsideTheLintedPaths(t *testing.T) {
 	got, err := os.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "x\n", string(got))
+	assert.Zero(t, result.Stats.DiagnosticsFixed, "a refused write fixes nothing")
+	assert.Equal(t, 1, result.Stats.DiagnosticsTotal, "the unfixed finding is still counted")
 
 	// Naming the link explicitly allows writing its target.
 	result, err = lintRunner.Run(context.Background(), runner.Options{Paths: []string{"link.md"}, WorkingDir: dir, Config: cfg})
@@ -187,6 +189,46 @@ func TestRunner_Run_FixesSymlinkTargetsOnlyInsideTheLintedPaths(t *testing.T) {
 	got, err = os.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "y\n", string(got))
+}
+
+func TestRunner_Run_DoesNotFixThroughFollowedDirectoryLinks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "doc.md")
+	require.NoError(t, os.WriteFile(target, []byte("x\n"), 0o644))
+	if err := os.Symlink(outside, filepath.Join(dir, "sub")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	xToY := newContentRule("TEST001", func(content []byte) ([]lint.Diagnostic, error) {
+		idx := bytes.IndexByte(content, 'x')
+		if idx < 0 {
+			return nil, nil
+		}
+		return []lint.Diagnostic{{RuleID: "TEST001", Message: "x", StartLine: 1,
+			FixEdits: []fix.TextEdit{{StartOffset: idx, EndOffset: idx + 1, NewText: "y"}}}}, nil
+	})
+	registry := lint.NewRegistry()
+	registry.Register(xToY)
+	lintRunner := runner.New(lint.NewPipeline(lint.NewEngine(&mockParser{}, registry)))
+
+	cfg := config.NewConfig()
+	cfg.Fix = true
+	cfg.NoBackups = true
+
+	result, err := lintRunner.Run(context.Background(), runner.Options{
+		Paths: []string{"."}, WorkingDir: dir, FollowSymlinks: true, Config: cfg,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, result.Files, 1, "the linked directory is followed for linting")
+	require.NotNil(t, result.Files[0].Result)
+	assert.True(t, result.Files[0].Result.Skipped)
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(got), "a followed directory link must not lead a fix outside the linted paths")
 }
 
 func TestResult_HasRuleErrors(t *testing.T) {

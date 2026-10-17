@@ -66,7 +66,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	// Get pipeline options from config. Fixes only follow a symbolic link to
 	// a file inside the paths being linted.
 	pipelineOpts := lint.PipelineOptionsFromConfig(opts.Config)
-	pipelineOpts.SymlinkRoots = lint.SymlinkRoots(opts.WorkingDir, opts.effectivePaths())
+	pipelineOpts.WriteRoots = lint.WriteRoots(opts.WorkingDir, opts.effectivePaths())
 
 	// Create channels. Each unit of work is the paths naming one file.
 	workCh := make(chan []string)

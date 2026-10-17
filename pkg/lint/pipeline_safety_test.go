@@ -276,7 +276,7 @@ func TestPipeline_WritesSymlinkTargetsOnlyInsideTheRoots(t *testing.T) {
 			}
 
 			pipeline := newTestPipeline(replaceFirstRule("TEST001", "x", "y"))
-			opts := lint.PipelineOptions{Fix: true, SymlinkRoots: tt.roots(linkDir, targetDir)}
+			opts := lint.PipelineOptions{Fix: true, WriteRoots: tt.roots(linkDir, targetDir)}
 
 			result, err := pipeline.ProcessFile(context.Background(), link, fixConfig(), opts)
 			require.NoError(t, err)
@@ -296,11 +296,89 @@ func TestPipeline_WritesSymlinkTargetsOnlyInsideTheRoots(t *testing.T) {
 			assert.True(t, result.Skipped)
 			assert.Contains(t, result.SkipReason, "outside the linted paths")
 			assert.Equal(t, "x", string(got), "a target outside the linted paths must not be written")
+
+			// The result describes the file as it is, not a fix that was refused.
+			assert.Equal(t, "x", string(result.Snapshot.Content))
+			require.Len(t, result.Diagnostics, 1, "the unfixed finding is still reported")
+			assert.False(t, result.Modified)
+			assert.Nil(t, result.ModifiedContent)
+			assert.Zero(t, result.FixPasses)
+			assert.Zero(t, result.TotalEditsApplied)
+			assert.Empty(t, result.Edits)
 		})
 	}
 }
 
-func TestSymlinkRoots(t *testing.T) {
+func TestPipeline_DoesNotWriteThroughSymlinkedDirectories(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "doc.md")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+	if err := os.Symlink(outside, filepath.Join(root, "sub")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	pipeline := newTestPipeline(replaceFirstRule("TEST001", "x", "y"))
+	opts := lint.PipelineOptions{Fix: true, WriteRoots: []string{root}}
+
+	// The file itself is not a link; a directory on its path is.
+	result, err := pipeline.ProcessFile(context.Background(), filepath.Join(root, "sub", "doc.md"), fixConfig(), opts)
+	require.NoError(t, err)
+
+	assert.True(t, result.Skipped)
+	assert.False(t, result.Written)
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(got), "a file reached through a directory link outside the roots must not be written")
+}
+
+func TestPipeline_RefusesWhenThePathIsRetargetedDuringProcessing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.md")
+	other := filepath.Join(dir, "other.md")
+	link := filepath.Join(dir, "link.md")
+	require.NoError(t, os.WriteFile(first, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(other, []byte("other x"), 0o644))
+	if err := os.Symlink(first, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	// Point the link at another file while the fixed content is re-linted,
+	// after the file was read and before it is written.
+	parses := 0
+	parser := &mockParser{}
+	retargeting := &mockParser{parseFunc: func(ctx context.Context, path string, content []byte) (*mdast.FileSnapshot, error) {
+		parses++
+		if parses == 2 {
+			require.NoError(t, os.Remove(link))
+			require.NoError(t, os.Symlink(other, link))
+		}
+		return parser.Parse(ctx, path, content)
+	}}
+	registry := lint.NewRegistry()
+	registry.Register(replaceFirstRule("TEST001", "x", "y"))
+	pipeline := lint.NewPipeline(lint.NewEngine(retargeting, registry))
+
+	result, err := pipeline.ProcessFile(context.Background(), link, fixConfig(),
+		lint.PipelineOptions{Fix: true, WriteRoots: []string{dir}})
+	require.NoError(t, err)
+
+	assert.True(t, result.Skipped)
+	assert.False(t, result.Written)
+	assert.Zero(t, result.TotalEditsApplied, "a refused write reports no applied fixes")
+	got, err := os.ReadFile(other)
+	require.NoError(t, err)
+	assert.Equal(t, "other x", string(got), "the fix of one file must never land in another")
+	got, err = os.ReadFile(first)
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(got))
+}
+
+func TestWriteRoots(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
@@ -319,8 +397,8 @@ func TestSymlinkRoots(t *testing.T) {
 		return resolvedPath
 	}
 
-	assert.Equal(t, []string{resolved(workDir)}, lint.SymlinkRoots(workDir, []string{"."}))
-	assert.Equal(t, []string{resolved(docs), resolved(target)}, lint.SymlinkRoots(workDir, []string{"docs", link}),
+	assert.Equal(t, []string{resolved(workDir)}, lint.WriteRoots(workDir, []string{"."}))
+	assert.Equal(t, []string{resolved(docs), resolved(target)}, lint.WriteRoots(workDir, []string{"docs", link}),
 		"relative paths resolve from the working directory and a named link resolves to its target")
 }
 
