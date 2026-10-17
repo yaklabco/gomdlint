@@ -47,8 +47,11 @@ func TestSetMatch(t *testing.T) {
 		// A trailing slash matches directories only.
 		{pattern: "build/", path: "build", isDir: true, want: true},
 		{pattern: "build/", path: "build", isDir: false, want: false},
-		// A leading "./" is the base directory.
+		// A leading "./" or "/" is the base directory.
 		{pattern: "./docs/**", path: "docs/a.md", want: true},
+		{pattern: "/docs/*.md", path: "docs/a.md", want: true},
+		{pattern: "/docs/*.md", path: "x/docs/a.md", want: false},
+		{pattern: "/CHANGELOG.md", path: "pkg/CHANGELOG.md", want: false},
 		// Paths outside the base directory never match relative patterns.
 		{pattern: "**/a.md", path: "../other/a.md", want: false},
 		// Character classes.
@@ -69,15 +72,23 @@ func TestSetMatch(t *testing.T) {
 	}
 }
 
-func TestSetMatchAbsolutePattern(t *testing.T) {
+// TestSetMatchAnchoredPatterns covers patterns tied to the base directory:
+// a leading slash anchors a pattern there, as in .gitignore, and an
+// absolute path inside the base directory means the same location.
+func TestSetMatchAnchoredPatterns(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	set, err := ignore.NewSet(filepath.Join(dir, "elsewhere"), []string{filepath.ToSlash(dir) + "/docs/**"})
+	base := t.TempDir()
+	set, err := ignore.NewSet(base, []string{
+		"/docs/**",
+		filepath.Join(base, "drafts") + string(filepath.Separator) + "**",
+	})
 	require.NoError(t, err)
 
-	assert.True(t, set.Match(filepath.Join(dir, "docs", "a.md"), false))
-	assert.False(t, set.Match(filepath.Join(dir, "a.md"), false))
+	assert.True(t, set.Match(filepath.Join(base, "docs", "a.md"), false))
+	assert.False(t, set.Match(filepath.Join(base, "sub", "docs", "a.md"), false), "anchored to the base")
+	assert.True(t, set.Match(filepath.Join(base, "drafts", "x.md"), false))
+	assert.False(t, set.Match(filepath.Join(base, "sub", "drafts", "x.md"), false))
 }
 
 func TestSetMatchWithParents(t *testing.T) {

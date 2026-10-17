@@ -27,8 +27,9 @@ type Options struct {
 	//
 	// Patterns use forward slashes and match whole path segments: "*" stays
 	// within a segment and a "**" segment matches any number of segments.
-	// A pattern without a slash matches a name at any depth, and a trailing
-	// slash matches directories only.
+	// As in .gitignore, a pattern without a slash matches a name at any
+	// depth, a slash at the start or in the middle anchors it to
+	// IgnoreBaseDir, and a trailing slash matches directories only.
 	ExcludeGlobs []string
 
 	// IgnoreBaseDir is the directory relative ExcludeGlobs are resolved

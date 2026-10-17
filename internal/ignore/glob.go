@@ -84,74 +84,70 @@ func relSegments(base, target string) ([]string, bool) {
 	}
 }
 
-// absSegments returns the segments of an absolute path.
-func absSegments(abs string) []string {
-	return strings.Split(strings.TrimPrefix(filepath.ToSlash(abs), "/"), "/")
-}
+// compileGlob compiles one of gomdlint's ignore patterns for base, the
+// directory it is relative to. An empty base skips the conversion of
+// absolute paths, which is enough to check the syntax.
+func compileGlob(base, raw string) (pattern, error) {
+	text := raw
+	if base != "" && filepath.IsAbs(raw) {
+		// An absolute path inside base names the same place as the
+		// anchored relative pattern.
+		if rel, err := filepath.Rel(base, raw); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			text = "/" + rel
+		}
+	}
+	text = filepath.ToSlash(text)
 
-// globPattern pairs a compiled pattern with how its paths are measured.
-type globPattern struct {
-	pattern
-	absolute bool
-}
-
-// compileGlob compiles one of gomdlint's ignore patterns.
-func compileGlob(raw string) (globPattern, error) {
-	text := filepath.ToSlash(raw)
-	absolute := filepath.IsAbs(raw) || strings.HasPrefix(text, "/")
-
-	var compiled globPattern
-	compiled.absolute = absolute
+	var compiled pattern
 	if strings.HasSuffix(text, "/") {
 		compiled.dirOnly = true
 		text = strings.TrimRight(text, "/")
 	}
-	if absolute {
-		text = strings.TrimPrefix(text, "/")
-	} else {
-		text = strings.TrimPrefix(text, "./")
-	}
+	// Like .gitignore, a slash at the start or in the middle anchors the
+	// pattern to base; without one the pattern matches at any depth.
+	anchored := strings.Contains(text, "/")
+	text = strings.TrimPrefix(strings.TrimPrefix(text, "/"), "./")
 	if text == "" {
-		return globPattern{}, fmt.Errorf("ignore pattern %q matches nothing", raw)
+		return pattern{}, fmt.Errorf("ignore pattern %q matches nothing", raw)
 	}
 
 	compiled.segments = strings.Split(text, "/")
-	if !absolute && !strings.Contains(text, "/") {
-		// Like .gitignore, a pattern without a slash matches at any depth.
+	if !anchored {
 		compiled.segments = append([]string{doubleStar}, compiled.segments...)
 	}
 	if err := validateSegments(compiled.segments); err != nil {
-		return globPattern{}, fmt.Errorf("ignore pattern %q: %w", raw, err)
+		return pattern{}, fmt.Errorf("ignore pattern %q: %w", raw, err)
 	}
 	return compiled, nil
 }
 
 // ValidatePattern reports whether raw is a well-formed ignore pattern.
 func ValidatePattern(raw string) error {
-	_, err := compileGlob(raw)
+	_, err := compileGlob("", raw)
 	return err
 }
 
 // Set is a list of gomdlint ignore patterns resolved against a base
-// directory.
+// directory, and matches paths inside it.
 //
 // Patterns use forward slashes. "*", "?" and "[...]" match within one path
 // segment, and a "**" segment matches any number of segments, including
-// none, so "vendor/**" matches the vendor directory itself. A pattern
-// without a slash matches a name at any depth, a trailing slash matches
-// directories only, and a leading "./" stands for the base directory.
-// Relative patterns match paths inside the base directory; absolute
-// patterns match absolute paths.
+// none, so "vendor/**" matches the vendor directory itself. As in
+// .gitignore, a pattern without a slash matches a name at any depth, a
+// slash at the start or in the middle anchors the pattern to the base
+// directory, and a trailing slash matches directories only. A leading "./"
+// also stands for the base directory, and an absolute path inside it works
+// like the anchored relative pattern.
 type Set struct {
 	base     string
-	patterns []globPattern
+	patterns []pattern
 }
 
 // NewSet compiles patterns relative to base, an absolute directory.
 func NewSet(base string, patterns []string) (*Set, error) {
-	set := &Set{base: base, patterns: make([]globPattern, 0, len(patterns))}
+	set := &Set{base: base, patterns: make([]pattern, 0, len(patterns))}
 	for _, raw := range patterns {
-		compiled, err := compileGlob(raw)
+		compiled, err := compileGlob(base, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -167,17 +163,12 @@ func (s *Set) Match(target string, isDir bool) bool {
 		return false
 	}
 	rel, inside := relSegments(s.base, target)
-	abs := absSegments(target)
+	if !inside || len(rel) == 0 {
+		return false
+	}
 	for _, compiled := range s.patterns {
-		switch {
-		case compiled.absolute:
-			if compiled.matches(abs, isDir) {
-				return true
-			}
-		case inside && len(rel) > 0:
-			if compiled.matches(rel, isDir) {
-				return true
-			}
+		if compiled.matches(rel, isDir) {
+			return true
 		}
 	}
 	return false
