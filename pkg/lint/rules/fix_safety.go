@@ -234,7 +234,11 @@ func blockOutlineAttrs(file *mdast.FileSnapshot, node *mdast.Node, allow fixAllo
 		return sourceWithoutPrefixes(file, node)
 	case mdast.NodeTable:
 		if block != nil && block.Table != nil {
-			return fmt.Sprint(block.Table.Alignments)
+			names := make([]string, 0, len(block.Table.Alignments))
+			for _, alignment := range block.Table.Alignments {
+				names = append(names, alignment.String())
+			}
+			return strings.Join(names, ",")
 		}
 	case mdast.NodeTableRow, mdast.NodeTableCell:
 		if block != nil && block.Table != nil {
@@ -268,11 +272,11 @@ func codeBlockOutline(file *mdast.FileSnapshot, node *mdast.Node, allow fixAllow
 	return kind + "\x00" + info + "\x00" + code.String()
 }
 
-// stripColumns removes up to columns columns of leading spaces and tabs from
-// a line, keeping the rest of a tab that reaches past them as spaces.
+// stripColumns removes leading spaces and tabs from a line, up to the given
+// width in columns, keeping the rest of a tab that reaches past it as spaces.
 func stripColumns(line string, columns int) string {
 	column := 0
-	for idx := 0; idx < len(line); idx++ {
+	for idx := range len(line) {
 		next := column
 		switch line[idx] {
 		case ' ':

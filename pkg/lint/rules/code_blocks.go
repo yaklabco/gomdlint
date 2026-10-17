@@ -464,7 +464,7 @@ func codeIndent(file *mdast.FileSnapshot, cb *mdast.Node) int {
 // prefix, holds nothing beyond indent columns of spaces and tabs.
 func isBlankCodeLine(content string, indent int) bool {
 	column := 0
-	for idx := 0; idx < len(content); idx++ {
+	for idx := range len(content) {
 		switch content[idx] {
 		case ' ':
 			column++
