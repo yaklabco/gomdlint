@@ -57,31 +57,6 @@ func padLeft(s string, width int) string {
 	return strings.Repeat(" ", width-shown) + s
 }
 
-// truncateLeft shortens text to at most maxWidth display cells by replacing
-// its beginning with an ellipsis, so the end of a path (the file name) stays
-// visible. It drops whole grapheme clusters and never splits a character.
-func truncateLeft(text string, maxWidth int) string {
-	if displaywidth.String(text) <= maxWidth {
-		return text
-	}
-
-	var starts, widths []int
-	graphemes := displaywidth.StringGraphemes(text)
-	for offset := 0; graphemes.Next(); offset += len(graphemes.Value()) {
-		starts = append(starts, offset)
-		widths = append(widths, graphemes.Width())
-	}
-
-	budget := maxWidth - displaywidth.String(ellipsis)
-	keepFrom := len(text)
-	for idx := len(starts) - 1; idx >= 0 && widths[idx] <= budget; idx-- {
-		budget -= widths[idx]
-		keepFrom = starts[idx]
-	}
-
-	return ellipsis + text[keepFrom:]
-}
-
 // SummaryRenderer formats results as aggregated summary tables.
 type SummaryRenderer struct {
 	opts   Options
@@ -217,7 +192,7 @@ func (r *SummaryRenderer) renderFileTable(files []analysis.FileAnalysis, separat
 
 	// Rows
 	for _, file := range files {
-		path := truncateLeft(file.Path, maxFilePathLength)
+		path := pretty.TruncateStart(file.Path, maxFilePathLength, ellipsis)
 
 		// Pad first, then style
 		paddedPath := padRight(path, fileColWidth)

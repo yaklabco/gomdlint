@@ -300,17 +300,3 @@ func TestSummaryRenderer_RuleFormat(t *testing.T) {
 		})
 	}
 }
-
-func TestTruncateLeft(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "short.md", truncateLeft("short.md", 10), "text that fits is unchanged")
-	assert.Equal(t, "…cdef.md", truncateLeft("abcdef.md", 8))
-	assert.Equal(t, "…文档.md", truncateLeft("长长文档.md", 8), "wide characters take two cells")
-	assert.Equal(t, "…档.md", truncateLeft("长长文档.md", 7), "a wide character that does not fit is dropped whole")
-	for width := 1; width <= 12; width++ {
-		got := truncateLeft("/srv/文档/résumé.md", width)
-		assert.LessOrEqual(t, displaywidth.String(got), max(width, 1), "width %d gave %q", width, got)
-		assert.True(t, utf8.ValidString(got), "width %d gave %q", width, got)
-	}
-}
