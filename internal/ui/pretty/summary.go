@@ -101,10 +101,7 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 	var parts []string
 
 	// Total issues
-	issueWord := "issues"
-	if stats.DiagnosticsTotal == 1 {
-		issueWord = "issue"
-	}
+	issues := Count(stats.DiagnosticsTotal, "issue", "issues")
 
 	// Build severity breakdown
 	var severityParts []string
@@ -120,17 +117,13 @@ func (s *Styles) FormatSummaryOneLine(stats runner.Stats) string {
 
 	// Main count with severity breakdown
 	if len(severityParts) > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s (%s)", stats.DiagnosticsTotal, issueWord, strings.Join(severityParts, ", ")))
+		parts = append(parts, issues+" ("+strings.Join(severityParts, ", ")+")")
 	} else {
-		parts = append(parts, fmt.Sprintf("%d %s", stats.DiagnosticsTotal, issueWord))
+		parts = append(parts, issues)
 	}
 
 	// Files with issues
-	fileWord := wordFiles
-	if stats.FilesWithIssues == 1 {
-		fileWord = wordFile
-	}
-	parts = append(parts, fmt.Sprintf("in %d %s", stats.FilesWithIssues, fileWord))
+	parts = append(parts, "in "+Count(stats.FilesWithIssues, wordFile, wordFiles))
 
 	// Fixable count
 	if stats.DiagnosticsFixable > 0 {

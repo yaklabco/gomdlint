@@ -218,11 +218,8 @@ func (r *SummaryRenderer) renderTotals(totals analysis.Totals) {
 	parts := make([]string, 0, totalPartsCapacity)
 
 	// Total issues
-	issueWord := "issues"
-	if totals.Issues == 1 {
-		issueWord = "issue"
-	}
-	parts = append(parts, fmt.Sprintf("%d %s", totals.Issues, issueWord))
+	issues := pretty.Count(totals.Issues, "issue", "issues")
+	parts = append(parts, issues)
 
 	// Severity breakdown
 	var severityParts []string
@@ -236,15 +233,11 @@ func (r *SummaryRenderer) renderTotals(totals analysis.Totals) {
 		severityParts = append(severityParts, r.styles.Info.Render(pretty.SeverityCount(totals.Infos, config.SeverityInfo)))
 	}
 	if len(severityParts) > 0 {
-		parts[0] = fmt.Sprintf("%d %s (%s)", totals.Issues, issueWord, strings.Join(severityParts, ", "))
+		parts[0] = issues + " (" + strings.Join(severityParts, ", ") + ")"
 	}
 
 	// Files with issues
-	fileWord := "files"
-	if totals.FilesWithIssues == 1 {
-		fileWord = "file"
-	}
-	parts = append(parts, fmt.Sprintf("in %d %s", totals.FilesWithIssues, fileWord))
+	parts = append(parts, "in "+pretty.Count(totals.FilesWithIssues, "file", "files"))
 
 	line := strings.Join(parts, " ")
 	if failures := r.styles.FormatFailures(totals.FilesErrored, totals.RuleErrors); len(failures) > 0 {
