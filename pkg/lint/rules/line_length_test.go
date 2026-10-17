@@ -622,13 +622,57 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Before <textarea/>alpha beta gamma delta epsilon zeta eta theta.</textarea> after.\n",
 		},
 		{
-			name: "only the paragraph without inline HTML is wrapped",
+			name: "only the paragraph before inline HTML is wrapped",
+			input: "Some words come first and fill the line with plain words after.\n\n" +
+				"Some words come first and fill the line <b>bold words here</b> after.\n",
+			maxLen:  50,
+			wantFix: true,
+			wantText: "Some words come first and fill the line with plain\nwords after.\n\n" +
+				"Some words come first and fill the line <b>bold words here</b> after.\n",
+		},
+		{
+			name: "no fix for a paragraph after inline HTML",
 			input: "Some words come first and fill the line <b>bold words here</b> after.\n\n" +
 				"Some words come first and fill the line with plain words after.\n",
 			maxLen:  50,
-			wantFix: true,
+			wantFix: false,
 			wantText: "Some words come first and fill the line <b>bold words here</b> after.\n\n" +
-				"Some words come first and fill the line with plain\nwords after.\n",
+				"Some words come first and fill the line with plain words after.\n",
+		},
+		{
+			name:     "no fix inside a styled div left open",
+			input:    "<div style=\"white-space: pre\">\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "<div style=\"white-space: pre\">\n\nalpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "no fix in a textarea after a lookalike end tag",
+			input:    "Open <textarea>here </textareax>\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "Open <textarea>here </textareax>\n\nalpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "no fix after a pre whose title holds its end tag",
+			input:    "<pre title=\"</pre>\">\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "<pre title=\"</pre>\">\n\nalpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "no fix after a tag in a malformed comment",
+			input:    "<!-- a --!> <pre> -->\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "<!-- a --!> <pre> -->\n\nalpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "wraps after void elements only",
+			input:    "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  true,
+			wantText: "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta gamma\ndelta epsilon\n",
 		},
 		{
 			name:     "no fix inside code",
@@ -664,17 +708,67 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 	})
 }
 
-// TestMaxLineLengthRule_SkipsParagraphsWithInlineHTML checks that the wrap fix
-// is never offered for a paragraph holding inline raw HTML, whose elements
-// may show the line breaks of their text, while other paragraphs stay
-// wrappable.
-func TestMaxLineLengthRule_SkipsParagraphsWithInlineHTML(t *testing.T) {
-	input := "Text with <span>an element</span> in it.\n\nPlain text only.\n"
-	snapshot, err := goldmark.New(goldmark.FlavorCommonMark).Parse(context.Background(), "test.md", []byte(input))
-	require.NoError(t, err)
-	lines := wrappableLines(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
-	assert.NotContains(t, lines, 1, "the paragraph with inline HTML")
-	assert.Contains(t, lines, 3, "the paragraph without HTML")
+// TestMaxLineLengthRule_SkipsParagraphsFromTheFirstElement checks that the
+// wrap fix is never offered for a paragraph that holds or follows raw HTML
+// opening an element with content, which may show the line breaks of the
+// text in it, while paragraphs before that HTML, and paragraphs of documents
+// whose HTML holds only void elements, stay wrappable.
+func TestMaxLineLengthRule_SkipsParagraphsFromTheFirstElement(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		wrappable, kept []int
+	}{
+		{
+			name:      "inline element",
+			input:     "Plain text first.\n\nText with <span>an element</span> in it.\n\nPlain text after.\n",
+			wrappable: []int{1},
+			kept:      []int{3, 5},
+		},
+		{
+			name:  "styled div left open",
+			input: "<div style=\"white-space: pre\">\n\nalpha beta gamma delta epsilon\n",
+			kept:  []int{3},
+		},
+		{
+			name:  "lookalike end tag",
+			input: "Open <textarea>here </textareax>\n\nalpha beta\n",
+			kept:  []int{1, 3},
+		},
+		{
+			name:  "end tag in an attribute value",
+			input: "<pre title=\"</pre>\">\n\nalpha beta\n",
+			kept:  []int{3},
+		},
+		{
+			name:  "tag in a malformed comment",
+			input: "<!-- a --!> <pre> -->\n\nalpha beta\n",
+			kept:  []int{3},
+		},
+		{
+			name:      "comment without tags",
+			input:     "<!-- markdownlint-disable-next-line MD013 -->\n\nalpha beta\n",
+			wrappable: []int{3},
+		},
+		{
+			name:      "void elements only",
+			input:     "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta\n",
+			wrappable: []int{1, 5},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(goldmark.FlavorCommonMark).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+			lines := wrappableLines(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			for _, line := range tt.wrappable {
+				assert.Contains(t, lines, line, "line %d is wrappable", line)
+			}
+			for _, line := range tt.kept {
+				assert.NotContains(t, lines, line, "line %d is kept as written", line)
+			}
+		})
+	}
 }
 
 // TestMaxLineLengthRule_ProtectsTaskCheckboxes checks that the wrap fix never

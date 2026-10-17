@@ -304,10 +304,17 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: false,
 		},
 		{
-			name:  "wrapping a paragraph without HTML next to one with HTML",
-			input: "Before <b>bold</b> after.\n\nalpha beta\n",
+			name:  "wrapping a paragraph without HTML before one with HTML",
+			input: "alpha beta\n\nBefore <b>bold</b> after.\n",
 			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
+		},
+		{
+			// Whether the bold element was closed is not decided.
+			name:  "wrapping a paragraph without HTML after one with HTML",
+			input: "Before <b>bold</b> after.\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
 		},
 		{
 			// The tags in the textarea are text, which no tag matching
@@ -337,11 +344,10 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			want: false,
 		},
 		{
-			// The end of the first paragraph closes the span.
 			name:  "wrapping in a paragraph after an unclosed span",
 			input: "Open <span>here\n\nalpha beta\n",
 			old:   "alpha beta", new: "alpha\nbeta",
-			want: true,
+			want: false,
 		},
 		{
 			// A textarea takes all the HTML that follows it as its text.
@@ -373,16 +379,109 @@ func TestFixCheckKeepsRawHTML(t *testing.T) {
 			name:  "wrapping Markdown after a closed HTML block",
 			input: "<div>x</div>\n\nalpha beta\n",
 			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping after a script that holds a tag",
+			input: "<script>\nvar x = '<div style=\"a\">';\n</script>\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// Nothing after the div closes it.
+			name:  "wrapping Markdown inside a styled div left open",
+			input: "<div style=\"white-space: pre\">\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// "</textareax>" does not end the textarea.
+			name:  "wrapping in a textarea after a lookalike end tag",
+			input: "Open <textarea>here </textareax>\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// The end tag in the attribute value does not end the pre.
+			name:  "wrapping after a pre whose title holds its end tag",
+			input: "<pre title=\"</pre>\">\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			// Browsers end the comment at "--!>", so the pre is an element
+			// for them.
+			name:  "wrapping after a tag in a malformed comment",
+			input: "<!-- a --!> <pre> -->\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: false,
+		},
+		{
+			name:  "wrapping before an element opens",
+			input: "alpha beta\n\n<div style=\"white-space: pre\">\n\ntext\n",
+			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
 		},
 		{
-			// The div inside the script is script text, not an element.
-			name:  "wrapping after a script that holds a tag",
-			input: "<script>\nvar x = '<div style=\"a\">';\n</script>\n\nalpha beta\n",
+			name:  "wrapping after a comment without tags",
+			input: "<!-- markdownlint-disable-next-line MD013 -->\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			// Void elements have no content to keep whitespace in.
+			name:  "wrapping after a line break element",
+			input: "Line<br>\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			name:  "wrapping after an image element",
+			input: "<img src=\"a.png\" alt=\"x\">\n\nalpha beta\n",
+			old:   "alpha beta", new: "alpha\nbeta",
+			want: true,
+		},
+		{
+			name:  "wrapping in a paragraph with a line break element",
+			input: "Line<br/> alpha beta\n",
 			old:   "alpha beta", new: "alpha\nbeta",
 			want: true,
 		},
 	})
+}
+
+// TestOpensElement checks which raw HTML holds the start tag of an element
+// with content, which could keep the whitespace of the text after it.
+func TestOpensElement(t *testing.T) {
+	tests := map[string]bool{
+		"<br>":                      false,
+		"<BR/>":                     false,
+		"<img src=\"a.png\">":       false,
+		"<hr>":                      false,
+		"<input type=\"checkbox\">": false,
+		"<wbr>":                     false,
+		"<param name=\"x\">":        false,
+		"<keygen>":                  false,
+		"</div>":                    false,
+		"<!-- comment -->":          false,
+		"<!DOCTYPE html>":           false,
+		"<?php echo 1; ?>":          false,
+		"a < b":                     false,
+		"<1>":                       false,
+		"<div>":                     true,
+		"<span>":                    true,
+		"<textarea/>":               true,
+		"<pre title=\"</pre>\">":    true,
+		"<!-- <pre> -->":            true,
+		"<!-- a --!> <pre> -->":     true,
+		"<br-x>":                    true,
+		"<brx>":                     true,
+		"<img alt=\"<b>\">":         true,
+		"<div":                      true,
+	}
+	for raw, want := range tests {
+		assert.Equal(t, want, opensElement([]byte(raw)), "%q", raw)
+	}
 }
 
 // TestFixCheckSurvivesUnbalancedHTML runs every fixing rule of this file set

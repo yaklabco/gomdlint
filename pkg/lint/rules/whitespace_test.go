@@ -224,12 +224,19 @@ func TestTrailingWhitespaceRule(t *testing.T) {
 			config:    map[string]any{"ignore_code_blocks": false},
 		},
 		{
-			// A paragraph with inline HTML must stay byte for byte the
-			// same; the one without keeps its fix.
-			name:      "fix only in the paragraph without inline HTML",
+			// The paragraph holding the first inline HTML that opens an
+			// element, and every one after it, must stay byte for byte the
+			// same; the one before it keeps its fix.
+			name:      "fix only in the paragraph before inline HTML",
+			input:     "plain   \nmore\n\nText <b>x</b>   \nmore\n",
+			wantDiags: 2,
+			wantFix:   "plain  \nmore\n\nText <b>x</b>   \nmore\n",
+		},
+		{
+			name:      "no fix in a paragraph after inline HTML",
 			input:     "Text <b>x</b>   \nmore\n\nplain   \nmore\n",
 			wantDiags: 2,
-			wantFix:   "Text <b>x</b>   \nmore\n\nplain  \nmore\n",
+			wantFix:   "Text <b>x</b>   \nmore\n\nplain   \nmore\n",
 		},
 		{
 			// Raw HTML is passed through as written, and <pre> keeps the

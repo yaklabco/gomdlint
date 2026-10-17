@@ -3,7 +3,6 @@ package rules
 import (
 	"bytes"
 	"fmt"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -372,17 +371,21 @@ func frontMatterLength(content []byte) int {
 // collapse to one space in other text.
 //
 // Whether whitespace shows inside an HTML element depends on the element,
-// its attributes and CSS, which the signature does not try to model. So the
-// source of a leaf block (a paragraph, heading or table cell) must stay byte
-// for byte the same when raw HTML could put its text inside an element: when
-// the block holds inline raw HTML, when it lies between an HTML block and
-// later raw HTML in the same container, which could open and close an
-// element around it, and when it follows raw HTML that opens a raw text or
-// preformatted element, such as a textarea or pre, that is not closed in the
-// same HTML block.
+// its attributes and CSS, and where the element ends depends on how a
+// browser reads the HTML. The signature models neither. So from the first
+// raw HTML that may open an element with content (see opensElement), every
+// leaf block must stay byte for byte the same: the paragraph, heading or
+// table cell that holds that HTML and every one after it. HTML blocks are
+// always kept as written. Blocks before that HTML keep their fixes, and so
+// does every block of a document without such HTML.
 func goldmarkSignature(doc gmast.Node, source []byte) string {
 	var out strings.Builder
-	sig := signatureWriter{source: source, out: &out, anchors: make(map[string]int)}
+	sig := signatureWriter{
+		source:      source,
+		out:         &out,
+		anchors:     make(map[string]int),
+		elementFrom: elementStart(doc, source),
+	}
 	sig.blocks(doc)
 	return out.String()
 }
@@ -395,81 +398,99 @@ type signatureWriter struct {
 	out     *strings.Builder
 	text    []byte
 	anchors map[string]int
-	// wrapped counts the containers on the way to the current block that
-	// lie between an HTML block and later raw HTML.
-	wrapped int
-	// rawTextOpened is true once raw HTML has opened a raw text or
-	// preformatted element that may run to the end of the document.
-	rawTextOpened bool
+	// elementFrom is the offset of the first raw HTML that may open an
+	// element with content, or -1 when there is none.
+	elementFrom int
 }
 
-// blocks writes the children of a container. A child that lies between the
-// first HTML block of the container and the last child holding raw HTML may
-// be inside an element that the raw HTML opens and closes.
+// blocks writes the children of a container.
 func (s *signatureWriter) blocks(parent gmast.Node) {
-	firstHTMLBlock, lastRawHTML := -1, -1
-	idx := 0
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
-		if _, ok := node.(*gmast.HTMLBlock); ok && firstHTMLBlock < 0 {
-			firstHTMLBlock = idx
-		}
-		if holdsRawHTML(node) {
-			lastRawHTML = idx
-		}
-		idx++
-	}
-	idx = 0
-	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
-		wrapped := firstHTMLBlock >= 0 && firstHTMLBlock < idx && idx < lastRawHTML
-		if wrapped {
-			s.wrapped++
-		}
 		s.block(node)
-		if wrapped {
-			s.wrapped--
-		}
-		idx++
 	}
 }
 
-// holdsRawHTML reports whether a node is an HTML block or holds raw HTML.
-func holdsRawHTML(node gmast.Node) bool {
-	found := false
-	_ = gmast.Walk(node, func(child gmast.Node, _ bool) (gmast.WalkStatus, error) { //nolint:errcheck // Visitor never returns an error.
-		switch child.(type) {
-		case *gmast.HTMLBlock, *gmast.RawHTML:
-			found = true
-			return gmast.WalkStop, nil
-		default:
-			return gmast.WalkContinue, nil
-		}
-	})
-	return found
-}
-
-// rawSource writes the source of a leaf block's inline content, as it is,
-// when the block must stay byte for byte the same.
-func (s *signatureWriter) rawSource(leaf gmast.Node) {
-	if s.wrapped > 0 || s.rawTextOpened || holdsRawHTML(leaf) {
-		fmt.Fprintf(s.out, "\x00raw%q", linesText(leaf.Lines(), s.source))
+// isVoidElement reports whether a tag name names an HTML element that has
+// no content and no end tag.
+func isVoidElement(name string) bool {
+	switch strings.ToLower(name) {
+	case "area", "base", "br", "col", "embed", "hr", "img", "input", "keygen", "link", "meta", "param", "source",
+		"track", "wbr":
+		return true
+	default:
+		return false
 	}
 }
 
-// rawTextStartPattern matches the start tag of an element whose content
-// keeps its whitespace or is raw text up to its end tag. HTML does not
-// self-close these elements, so "<textarea/>" starts one too.
-var rawTextStartPattern = regexp.MustCompile(`(?i)<(script|style|textarea|title|xmp|plaintext|iframe|noembed|noframes|noscript|pre|listing)(?:[\s/>]|$)`)
-
-// opensRawText reports whether raw HTML starts a raw text or preformatted
-// element without its end tag after it.
-func opensRawText(raw string) bool {
-	lower := strings.ToLower(raw)
-	for _, match := range rawTextStartPattern.FindAllStringSubmatchIndex(raw, -1) {
-		if !strings.Contains(lower[match[1]:], "</"+lower[match[2]:match[3]]) {
+// opensElement reports whether raw HTML may open an element with content: it
+// holds "<" followed by an ASCII letter, and the tag name that starts there,
+// which runs to whitespace, "/" or ">", is not a void element. Comments are
+// not skipped, because browsers end a malformed comment where CommonMark
+// does not, which can reveal a tag inside it, and nothing tells whether the
+// element is closed later.
+func opensElement(raw []byte) bool {
+	for idx := 0; idx+1 < len(raw); idx++ {
+		if raw[idx] != '<' || !isASCIILetter(raw[idx+1]) {
+			continue
+		}
+		end := idx + 1
+		for end < len(raw) && !strings.ContainsRune(" \t\n\r\f/>", rune(raw[end])) {
+			end++
+		}
+		if !isVoidElement(string(raw[idx+1 : end])) {
 			return true
 		}
 	}
 	return false
+}
+
+// elementStart returns the offset where the first raw HTML, an HTML block or
+// inline HTML, that may open an element with content starts, or -1.
+func elementStart(doc gmast.Node, source []byte) int {
+	start := -1
+	_ = gmast.Walk(doc, func(node gmast.Node, entering bool) (gmast.WalkStatus, error) { //nolint:errcheck // Visitor never returns an error.
+		if !entering {
+			return gmast.WalkContinue, nil
+		}
+		var segments []gmtext.Segment
+		switch node := node.(type) {
+		case *gmast.HTMLBlock:
+			for idx := range node.Lines().Len() {
+				segments = append(segments, node.Lines().At(idx))
+			}
+			if node.HasClosure() {
+				segments = append(segments, node.ClosureLine)
+			}
+		case *gmast.RawHTML:
+			for idx := range node.Segments.Len() {
+				segments = append(segments, node.Segments.At(idx))
+			}
+		default:
+			return gmast.WalkContinue, nil
+		}
+		if len(segments) == 0 || (start >= 0 && segments[0].Start >= start) {
+			return gmast.WalkSkipChildren, nil
+		}
+		var raw []byte
+		for _, segment := range segments {
+			raw = append(raw, segment.Value(source)...)
+		}
+		if opensElement(raw) {
+			start = segments[0].Start
+		}
+		return gmast.WalkSkipChildren, nil
+	})
+	return start
+}
+
+// rawSource writes the source of a leaf block's inline content, as it is,
+// when the block holds or follows raw HTML that may open an element.
+func (s *signatureWriter) rawSource(leaf gmast.Node) {
+	lines := leaf.Lines()
+	if s.elementFrom < 0 || lines.Len() == 0 || lines.At(lines.Len()-1).Stop <= s.elementFrom {
+		return
+	}
+	fmt.Fprintf(s.out, "\x00raw%q", linesText(lines, s.source))
 }
 
 func (s *signatureWriter) block(node gmast.Node) {
@@ -503,9 +524,6 @@ func (s *signatureWriter) block(node gmast.Node) {
 			raw += "\n" + strings.TrimRight(string(node.ClosureLine.Value(s.source)), "\r\n")
 		}
 		fmt.Fprintf(s.out, "B(%q", raw)
-		if opensRawText(raw) {
-			s.rawTextOpened = true
-		}
 	case *gmextast.TableCell:
 		fmt.Fprintf(s.out, "D%d(", node.Alignment)
 		s.rawSource(node)
@@ -646,9 +664,6 @@ func (s *signatureWriter) inline(node gmast.Node) {
 			raw.Write(segment.Value(s.source))
 		}
 		s.token(fmt.Sprintf("\x00html%q", raw.String()))
-		if rawTextStartPattern.MatchString(raw.String()) {
-			s.rawTextOpened = true
-		}
 	case *gmast.AutoLink:
 		s.token(fmt.Sprintf("\x00autolink%q", node.URL(s.source)))
 	case *gmast.Link:
