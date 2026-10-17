@@ -142,7 +142,8 @@ type Config struct {
 	// Format specifies the output format.
 	Format OutputFormat `mapstructure:"-" yaml:"-"`
 
-	// RuleFormat controls how rule identifiers appear in output.
+	// RuleFormat controls how human-readable output names rules. It comes
+	// from --rule-format or GOMDLINT_RULE_FORMAT; config files cannot set it.
 	RuleFormat RuleFormat `mapstructure:"-" yaml:"-"`
 
 	// Jobs specifies the number of parallel workers.
