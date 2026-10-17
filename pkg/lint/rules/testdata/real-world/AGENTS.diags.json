@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 25,
     "column": 1,
     "message": "Missing blank line before fenced code block",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 30,
     "column": 1,
     "message": "Missing blank line after fenced code block",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD032",
-    "name": "",
+    "name": "blanks-around-lists",
     "line": 36,
     "column": 1,
     "message": "Missing blank line before list",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD047",
-    "name": "",
+    "name": "single-trailing-newline",
     "line": 40,
     "column": 1,
     "message": "Too many trailing blank lines (found 2, max 1)",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 41,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 2, max 1)",

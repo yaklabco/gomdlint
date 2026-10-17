@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD042",
-    "name": "",
+    "name": "no-empty-links",
     "line": 7,
     "column": 21,
     "message": "Link has empty text",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD042",
-    "name": "",
+    "name": "no-empty-links",
     "line": 9,
     "column": 21,
     "message": "Link has empty destination",

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 8,
     "column": 1,
     "message": "Missing blank line before fenced code block",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 10,
     "column": 1,
     "message": "Missing blank line after fenced code block",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 12,
     "column": 1,
     "message": "Missing blank line before fenced code block",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 14,
     "column": 1,
     "message": "Missing blank line after fenced code block",

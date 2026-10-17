@@ -1,0 +1,5 @@
+flavor: gfm
+rules:
+  MD060:
+    options:
+      markdownlint_compatible: true

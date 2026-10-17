@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD026",
-    "name": "",
+    "name": "no-trailing-punctuation",
     "line": 1,
     "column": 22,
     "message": "Heading ends with trailing punctuation \".\"",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD026",
-    "name": "",
+    "name": "no-trailing-punctuation",
     "line": 3,
     "column": 22,
     "message": "Heading ends with trailing punctuation \",\"",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD026",
-    "name": "",
+    "name": "no-trailing-punctuation",
     "line": 5,
     "column": 27,
     "message": "Heading ends with trailing punctuation \";\"",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD026",
-    "name": "",
+    "name": "no-trailing-punctuation",
     "line": 7,
     "column": 24,
     "message": "Heading ends with trailing punctuation \":\"",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD026",
-    "name": "",
+    "name": "no-trailing-punctuation",
     "line": 9,
     "column": 31,
     "message": "Heading ends with trailing punctuation \"!\"",

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD001",
-    "name": "",
+    "name": "heading-increment",
     "line": 7,
     "column": 5,
     "message": "Heading level jumped from H1 to H3",

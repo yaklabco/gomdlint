@@ -2,10 +2,14 @@ package rules
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,33 +126,13 @@ func runPerRuleGoldenTest(t *testing.T, tc GoldenTestCase, updateGolden bool) {
 	input, err := os.ReadFile(tc.InputPath)
 	require.NoError(t, err, "failed to read input file: %s", tc.InputPath)
 
-	// Parse markdown
-	parser := goldmark.New(string(config.FlavorCommonMark))
-	snapshot, err := parser.Parse(context.Background(), filepath.Base(tc.InputPath), input)
-	require.NoError(t, err, "failed to parse input file: %s", tc.InputPath)
+	// Lint with the case's configuration and only its rule enabled
+	run := mustGoldenRun(t, tc)
+	result := run.mustLintFile(t, filepath.Base(tc.InputPath), input)
 
-	// Get the specific rule
-	rule := getRuleByID(t, tc.RuleID)
-
-	// Create rule context and run the rule
-	cfg := config.NewConfig()
-	ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-	ruleCtx.Registry = lint.DefaultRegistry
-
-	diags, err := rule.Apply(ruleCtx)
-	require.NoError(t, err, "rule %s failed to apply", tc.RuleID)
-
-	// Compare diagnostics
-	compareDiags(t, diags, tc, updateGolden)
-
-	// Apply fixes and compare golden output
-	if len(diags) > 0 {
-		fixedContent := applyAllFixes(t, input, diags)
-		compareWithGolden(t, fixedContent, tc.GoldenPath, updateGolden)
-	} else {
-		// No diagnostics means no changes expected
-		compareWithGolden(t, input, tc.GoldenPath, updateGolden)
-	}
+	// Compare diagnostics and the output after applying the fixes
+	compareDiags(t, result.Diagnostics, tc, updateGolden)
+	compareWithGolden(t, fix.ApplyEdits(input, result.Edits), tc.GoldenPath, updateGolden)
 }
 
 // runRealWorldGoldenTest executes a single real-world golden test.
@@ -159,43 +143,17 @@ func runRealWorldGoldenTest(t *testing.T, tc GoldenTestCase, updateGolden bool) 
 	input, err := os.ReadFile(tc.InputPath)
 	require.NoError(t, err, "failed to read input file: %s", tc.InputPath)
 
-	// Parse markdown
-	parser := goldmark.New(string(config.FlavorCommonMark))
-
-	// Get all enabled rules
-	rules := getEnabledRules(t)
-	cfg := config.NewConfig()
-
-	// Run all rules and collect diagnostics
-	allDiags := make([]lint.Diagnostic, 0, len(rules))
-	for _, rule := range rules {
-		// Re-parse for each rule to avoid state issues
-		snapshot, parseErr := parser.Parse(context.Background(), filepath.Base(tc.InputPath), input)
-		require.NoError(t, parseErr)
-
-		ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-		ruleCtx.Registry = lint.DefaultRegistry
-
-		diags, applyErr := rule.Apply(ruleCtx)
-		require.NoError(t, applyErr, "rule %s failed to apply", rule.ID())
-
-		allDiags = append(allDiags, diags...)
-	}
+	// Lint with the case's configuration and the default-enabled rules
+	run := mustGoldenRun(t, tc)
+	result := run.mustLintFile(t, filepath.Base(tc.InputPath), input)
 
 	// Sort diagnostics by line, column for consistent output
-	sortDiagnostics(allDiags)
+	diags := result.Diagnostics
+	sortDiagnostics(diags)
 
-	// Compare diagnostics
-	compareDiags(t, allDiags, tc, updateGolden)
-
-	// Apply fixes and compare golden output
-	if len(allDiags) > 0 {
-		fixedContent := applyAllFixes(t, input, allDiags)
-		compareWithGolden(t, fixedContent, tc.GoldenPath, updateGolden)
-	} else {
-		// No diagnostics means no changes expected
-		compareWithGolden(t, input, tc.GoldenPath, updateGolden)
-	}
+	// Compare diagnostics and the output after applying the fixes
+	compareDiags(t, diags, tc, updateGolden)
+	compareWithGolden(t, fix.ApplyEdits(input, result.Edits), tc.GoldenPath, updateGolden)
 }
 
 // runRoundTripTest verifies that applying fixes results in zero fixable diagnostics.
@@ -206,106 +164,30 @@ func runRoundTripTest(t *testing.T, tc GoldenTestCase) {
 	input, err := os.ReadFile(tc.InputPath)
 	require.NoError(t, err, "failed to read input file: %s", tc.InputPath)
 
-	// Parse markdown
-	parser := goldmark.New(string(config.FlavorCommonMark))
-	snapshot, err := parser.Parse(context.Background(), filepath.Base(tc.InputPath), input)
-	require.NoError(t, err, "failed to parse input file: %s", tc.InputPath)
-
-	cfg := config.NewConfig()
-
-	// Determine which rules to run
-	var rules []lint.Rule
-	if tc.RuleID != "" {
-		rules = []lint.Rule{getRuleByID(t, tc.RuleID)}
-	} else {
-		rules = getEnabledRules(t)
-	}
-
-	// Run all rules and collect diagnostics
-	allDiags := make([]lint.Diagnostic, 0, len(rules))
-	for _, rule := range rules {
-		ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, nil)
-		ruleCtx.Registry = lint.DefaultRegistry
-
-		diags, applyErr := rule.Apply(ruleCtx)
-		require.NoError(t, applyErr, "rule %s failed to apply", rule.ID())
-
-		allDiags = append(allDiags, diags...)
-	}
+	// Lint with the case's configuration and rules
+	run := mustGoldenRun(t, tc)
+	name := filepath.Base(tc.InputPath)
+	first := run.mustLintFile(t, name, input)
 
 	// Check if there are any fixable diagnostics
-	fixableCount := countFixableDiags(allDiags)
-	if fixableCount == 0 {
+	if countFixableDiags(first.Diagnostics) == 0 {
 		// No fixable diagnostics, round-trip test passes trivially
 		return
 	}
 
-	// Apply all fixes
-	fixedContent := applyAllFixes(t, input, allDiags)
-
-	// Re-parse and re-run rules
-	snapshot2, err := parser.Parse(context.Background(), filepath.Base(tc.InputPath), fixedContent)
-	require.NoError(t, err, "failed to parse fixed content")
-
-	var secondPassDiags []lint.Diagnostic
-	for _, rule := range rules {
-		ruleCtx := lint.NewRuleContext(context.Background(), snapshot2, cfg, nil)
-		ruleCtx.Registry = lint.DefaultRegistry
-
-		diags, err := rule.Apply(ruleCtx)
-		require.NoError(t, err, "rule %s failed to apply on second pass", rule.ID())
-
-		secondPassDiags = append(secondPassDiags, diags...)
-	}
+	// Apply the fixes and lint the fixed content again
+	fixedContent := fix.ApplyEdits(input, first.Edits)
+	second := run.mustLintFile(t, name, fixedContent)
 
 	// Assert zero fixable diagnostics remain
-	remainingFixable := filterFixableDiags(secondPassDiags)
+	remainingFixable := filterFixableDiags(second.Diagnostics)
 	if len(remainingFixable) > 0 {
 		t.Errorf("Round-trip test failed: %d fixable diagnostics remain after applying fixes", len(remainingFixable))
 		for _, d := range remainingFixable {
-			t.Logf("  %s:%d:%d %s (%s)", filepath.Base(tc.InputPath), d.StartLine, d.StartColumn, d.Message, d.RuleName)
+			t.Logf("  %s", formatDiagLine(name, diagFromLint(d)))
 		}
 		t.Logf("Fixed content:\n%s", string(fixedContent))
 	}
-}
-
-// applyAllFixes applies all fix edits from diagnostics to the input content.
-// Uses PrepareEditsFiltered to handle overlapping deletions by merging them.
-func applyAllFixes(t *testing.T, input []byte, diags []lint.Diagnostic) []byte {
-	t.Helper()
-
-	// Count total edits for preallocation
-	totalEdits := 0
-	for _, diag := range diags {
-		totalEdits += len(diag.FixEdits)
-	}
-
-	// Collect all edits
-	allEdits := make([]fix.TextEdit, 0, totalEdits)
-	for _, diag := range diags {
-		allEdits = append(allEdits, diag.FixEdits...)
-	}
-
-	if len(allEdits) == 0 {
-		return input
-	}
-
-	// Prepare and apply edits, merging overlapping deletions
-	accepted, skipped, merged, err := fix.PrepareEditsFiltered(allEdits, len(input))
-	if err != nil {
-		// Validation error (not conflicts - those are filtered)
-		t.Logf("Warning: edit validation failed: %v", err)
-		return input
-	}
-
-	if len(skipped) > 0 {
-		t.Logf("Note: %d edits skipped due to conflicts (non-deletions that overlap)", len(skipped))
-	}
-	if merged > 0 {
-		t.Logf("Note: %d overlapping deletions were merged", merged)
-	}
-
-	return fix.ApplyEdits(input, accepted)
 }
 
 // sortDiagnostics sorts diagnostics by line, then column, then rule ID.
@@ -358,22 +240,29 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 		}
 	})
 
-	t.Run("itoa", func(t *testing.T) {
-		tests := []struct {
-			input int
-			want  string
-		}{
-			{0, "0"},
-			{1, "1"},
-			{10, "10"},
-			{123, "123"},
-			{-5, "-5"},
+	t.Run("renderDiagsTxt", func(t *testing.T) {
+		diag := lint.Diagnostic{
+			RuleID:      "MD009",
+			RuleName:    "no-trailing-spaces",
+			Message:     "Trailing whitespace",
+			Severity:    config.SeverityWarning,
+			StartLine:   3,
+			StartColumn: 30,
 		}
+		fixable := diag
+		fixable.StartLine = 5
+		fixable.FixEdits = []fix.TextEdit{{StartOffset: 1, EndOffset: 2}}
 
-		for _, tt := range tests {
-			got := itoa(tt.input)
-			assert.Equal(t, tt.want, got)
-		}
+		assert.Equal(t, "basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces)\n"+
+			"basic.input.md:5:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]\n",
+			string(renderDiagsTxt("basic.input.md", []lint.Diagnostic{diag, fixable})))
+		assert.Empty(t, renderDiagsTxt("basic.input.md", nil))
+	})
+
+	t.Run("diagFromLint", func(t *testing.T) {
+		got := diagFromLint(lint.Diagnostic{RuleID: "MD009", RuleName: "no-trailing-spaces"})
+		assert.Equal(t, "MD009", got.Rule)
+		assert.Equal(t, "no-trailing-spaces", got.Name)
 	})
 
 	t.Run("testdataDir", func(t *testing.T) {
@@ -388,5 +277,372 @@ func TestGoldenTestInfrastructure(t *testing.T) {
 		cases := discoverTestCases(t, baseDir)
 		// Just verify it returns a slice (possibly empty)
 		assert.NotNil(t, cases)
+	})
+
+	t.Run("discoverTestCases_sidecar", func(t *testing.T) {
+		baseDir := t.TempDir()
+		ruleDir := filepath.Join(baseDir, "MD043")
+		require.NoError(t, os.MkdirAll(ruleDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(ruleDir, "required.input.md"), []byte("# Title\n"), 0o644))
+
+		cases := discoverTestCases(t, baseDir)
+		require.Len(t, cases, 1)
+		assert.Equal(t, filepath.Join(ruleDir, "required"+goldenConfigSuffix), cases[0].ConfigPath)
+	})
+
+	t.Run("discoverTestCases_unsupported_directory", func(t *testing.T) {
+		baseDir := t.TempDir()
+		for _, rel := range []string{"MD043/a.input.md", "real-world/b.input.md", "MD05S/c.input.md", "notes/d.input.md"} {
+			path := filepath.Join(baseDir, rel)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			require.NoError(t, os.WriteFile(path, []byte("# Title\n"), 0o644))
+		}
+
+		var names []string
+		for _, tc := range discoverTestCases(t, baseDir) {
+			names = append(names, tc.Name)
+		}
+		assert.ElementsMatch(t, []string{filepath.Join("MD043", "a"), filepath.Join("real-world", "b")}, names)
+	})
+}
+
+// writeSidecar writes sidecar content to a fresh temporary file and returns its path.
+func writeSidecar(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "case"+goldenConfigSuffix)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	return path
+}
+
+// absentSidecar returns the path of a sidecar that does not exist.
+func absentSidecar(t *testing.T) string {
+	t.Helper()
+
+	return filepath.Join(t.TempDir(), "absent"+goldenConfigSuffix)
+}
+
+// TestGoldenSidecarConfig verifies loading of per-fixture sidecar configuration.
+func TestGoldenSidecarConfig(t *testing.T) {
+	t.Run("missing sidecar uses product defaults", func(t *testing.T) {
+		cfg, err := loadGoldenConfig(absentSidecar(t))
+		require.NoError(t, err)
+
+		assert.Equal(t, config.NewConfig(), cfg)
+	})
+
+	t.Run("flavor and rule options", func(t *testing.T) {
+		content := `flavor: gfm
+rules:
+  MD043:
+    options:
+      headings:
+        - "# Title"
+        - "*"
+      match_case: true
+  MD013:
+    options:
+      line_length: 100
+`
+		cfg, err := loadGoldenConfig(writeSidecar(t, content))
+		require.NoError(t, err)
+
+		assert.Equal(t, config.FlavorGFM, cfg.Flavor)
+		assert.Equal(t, map[string]any{"headings": []any{"# Title", "*"}, "match_case": true}, cfg.Rules["MD043"].Options)
+		assert.Equal(t, map[string]any{"line_length": 100}, cfg.Rules["MD013"].Options)
+		assert.Len(t, cfg.Rules, 2)
+
+		// Option values have the types that product config loading produces.
+		product, err := config.FromYAML([]byte(content))
+		require.NoError(t, err)
+		require.Len(t, product.Rules, 2)
+		for ruleID, ruleCfg := range product.Rules {
+			assert.Equal(t, ruleCfg.Options, cfg.Rules[ruleID].Options, "options of %s", ruleID)
+		}
+	})
+
+	t.Run("explicit commonmark flavor", func(t *testing.T) {
+		cfg, err := loadGoldenConfig(writeSidecar(t, "flavor: commonmark\n"))
+		require.NoError(t, err)
+
+		assert.Equal(t, config.FlavorCommonMark, cfg.Flavor)
+	})
+
+	t.Run("errors name the first bad rule in ID order", func(t *testing.T) {
+		path := writeSidecar(t, "rules:\n  MD999:\n    options:\n      a: 1\n  MD998:\n    options:\n      a: 1\n")
+		for range 20 {
+			_, err := loadGoldenConfig(path)
+			require.ErrorContains(t, err, "rules.MD998:")
+		}
+	})
+
+	invalid := []struct {
+		name    string
+		content string
+		wantIs  error
+		wantErr string
+	}{
+		{name: "empty file", content: "", wantIs: errEmptySidecar},
+		{name: "comment only", content: "# nothing configured\n", wantIs: errEmptySidecar},
+		{name: "flavor without a value", content: "flavor:\n", wantIs: errEmptySidecar},
+		{name: "second document", content: "flavor: gfm\n---\nflavor: commonmark\n", wantIs: errMultipleDocuments},
+		{name: "misspelled key", content: "flavour: gfm\n", wantErr: "flavour"},
+		{name: "unsupported config key", content: "severity_default: error\n", wantErr: "severity_default"},
+		{name: "unsupported rule key", content: "rules:\n  MD009:\n    severity: error\n", wantErr: "severity"},
+		{name: "invalid flavor", content: "flavor: markdown\n", wantErr: `"markdown"`},
+		{name: "unknown rule", content: "rules:\n  MD999:\n    options:\n      style: x\n", wantErr: "rules.MD999: unknown rule"},
+		{name: "rule name instead of ID", content: "rules:\n  proper-names:\n    options:\n      names: [GitHub]\n", wantErr: "use the rule ID MD044"},
+		{name: "rule without options", content: "rules:\n  MD009: {}\n", wantErr: "rules.MD009 sets no options"},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadGoldenConfig(writeSidecar(t, tt.content))
+			if tt.wantIs != nil {
+				require.ErrorIs(t, err, tt.wantIs)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestGoldenRun verifies how a case is prepared from its sidecar and directory.
+func TestGoldenRun(t *testing.T) {
+	table := []byte("| a | b |\n| - | - |\n| 1 | 2 |\n")
+
+	t.Run("parser follows the product default flavor", func(t *testing.T) {
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: "MD056"})
+
+		assert.Equal(t, string(config.NewConfig().Flavor), run.parser.Flavor())
+	})
+
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run("sidecar flavor "+string(flavor), func(t *testing.T) {
+			run := mustGoldenRun(t, GoldenTestCase{ConfigPath: writeSidecar(t, "flavor: "+string(flavor)+"\n"), RuleID: "MD056"})
+
+			snapshot, err := run.parser.Parse(context.Background(), "table.input.md", table)
+			require.NoError(t, err)
+			wantTables := 0
+			if flavor == config.FlavorGFM {
+				wantTables = 1
+			}
+			assert.Len(t, lint.NewRuleContext(context.Background(), snapshot, run.cfg, nil).Tables(), wantTables)
+			assert.Equal(t, flavor, run.cfg.Flavor)
+		})
+	}
+
+	t.Run("per-rule case runs its rule even when disabled by default", func(t *testing.T) {
+		sidecar := writeSidecar(t, "rules:\n  MD044:\n    options:\n      names: [GitHub]\n")
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: sidecar, RuleID: "MD044"})
+
+		result := run.mustLintFile(t, "names.input.md", []byte("# Title\n\nUse github here.\n"))
+		require.Len(t, result.Diagnostics, 1)
+		assert.Equal(t, 3, result.Diagnostics[0].StartLine)
+	})
+
+	t.Run("per-rule case runs no other rule", func(t *testing.T) {
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: "MD047"})
+
+		// MD009 would report the trailing spaces.
+		result := run.mustLintFile(t, "spaces.input.md", []byte("# Title\n\nTrailing   \n"))
+		assert.Empty(t, result.Diagnostics)
+	})
+
+	t.Run("real-world case runs the default-enabled rules", func(t *testing.T) {
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), IsRealWorld: true})
+
+		assert.Equal(t, defaultEnabledRules(lint.DefaultRegistry), run.rules)
+	})
+
+	t.Run("options for rules the case does not run are rejected", func(t *testing.T) {
+		sidecar := writeSidecar(t, `rules:
+  MD043:
+    options:
+      headings: ["# Title"]
+  MD044:
+    options:
+      names: [GitHub]
+`)
+
+		_, err := newGoldenRun(GoldenTestCase{ConfigPath: sidecar, RuleID: "MD044"})
+		require.ErrorContains(t, err, "configures rules the case does not run: MD043")
+
+		_, err = newGoldenRun(GoldenTestCase{ConfigPath: sidecar, IsRealWorld: true})
+		require.ErrorContains(t, err, "configures rules the case does not run: MD043, MD044")
+	})
+
+	t.Run("invalid sidecar is rejected", func(t *testing.T) {
+		_, err := newGoldenRun(GoldenTestCase{ConfigPath: writeSidecar(t, "flavour: gfm\n"), RuleID: "MD009"})
+		require.ErrorContains(t, err, "flavour")
+	})
+
+	t.Run("case that is neither per-rule nor real-world is rejected", func(t *testing.T) {
+		_, err := newGoldenRun(GoldenTestCase{Name: "MD05S/case", ConfigPath: absentSidecar(t)})
+		require.ErrorContains(t, err, "MD05S/case")
+	})
+}
+
+// stubRule is a lint.Rule that returns a fixed result.
+type stubRule struct {
+	lint.BaseRule
+
+	diags []lint.Diagnostic
+	err   error
+}
+
+// Apply returns a copy of the stub's diagnostics and its error.
+func (r *stubRule) Apply(_ *lint.RuleContext) ([]lint.Diagnostic, error) {
+	return slices.Clone(r.diags), r.err
+}
+
+// newStubRule returns a stub rule MD999 named stub-rule.
+func newStubRule(diags ...lint.Diagnostic) *stubRule {
+	return &stubRule{BaseRule: lint.NewBaseRule("MD999", "stub-rule", "Stub rule", nil, false), diags: diags}
+}
+
+// stubRun returns a run whose registry holds only the given rule.
+func stubRun(rule *stubRule) goldenRun {
+	registry := lint.NewRegistry()
+	registry.Register(rule)
+	cfg := config.NewConfig()
+
+	return goldenRun{cfg: cfg, parser: goldmark.New(string(cfg.Flavor)), registry: registry, rules: []lint.Rule{rule}}
+}
+
+// TestGoldenLintFile verifies that golden cases record what the engine reports.
+func TestGoldenLintFile(t *testing.T) {
+	content := []byte("# Title\n")
+
+	t.Run("engine fills the rule name and resolves the severity", func(t *testing.T) {
+		rule := newStubRule(lint.Diagnostic{RuleID: "MD999", Message: "stub", Severity: config.SeverityError, StartLine: 1, StartColumn: 1})
+
+		result, err := stubRun(rule).lintFile("stub.input.md", content)
+		require.NoError(t, err)
+		require.Len(t, result.Diagnostics, 1)
+		assert.Equal(t, "stub-rule", result.Diagnostics[0].RuleName)
+		assert.Equal(t, config.SeverityWarning, result.Diagnostics[0].Severity)
+	})
+
+	t.Run("inline directives apply", func(t *testing.T) {
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: "MD009"})
+
+		result := run.mustLintFile(t, "directive.input.md", []byte("# Title\n\n<!-- markdownlint-disable MD009 -->\nTrailing   \n"))
+		assert.Empty(t, result.Diagnostics)
+	})
+
+	t.Run("bare enable directive runs no other rule", func(t *testing.T) {
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: "MD047"})
+
+		// The bare enable turns every rule on, and MD009 would report the trailing spaces.
+		enableAll := []byte("# Title\n\n<!-- markdownlint-disable -->\n<!-- markdownlint-enable -->\nTrailing   \n")
+		result := run.mustLintFile(t, "enable.input.md", enableAll)
+		assert.Empty(t, result.Diagnostics)
+	})
+
+	directives := []struct {
+		name    string
+		ruleID  string
+		key     string
+		content string
+	}{
+		{name: "legacy alias", ruleID: "MD022", key: "blanks-around-headings", content: "# Title\nText right below the heading.\n"},
+		{name: "rule name", ruleID: "MD009", key: "no-trailing-spaces", content: "# Title\n\nTrailing   \n"},
+		{name: "tag", ruleID: "MD009", key: "whitespace", content: "# Title\n\nTrailing   \n"},
+	}
+	for _, tt := range directives {
+		t.Run("directive by "+tt.name, func(t *testing.T) {
+			run := mustGoldenRun(t, GoldenTestCase{ConfigPath: absentSidecar(t), RuleID: tt.ruleID})
+
+			require.NotEmpty(t, run.mustLintFile(t, "plain.input.md", []byte(tt.content)).Diagnostics)
+			disabled := "<!-- markdownlint-disable " + tt.key + " -->\n" + tt.content
+			assert.Empty(t, run.mustLintFile(t, "directive.input.md", []byte(disabled)).Diagnostics)
+		})
+	}
+
+	t.Run("another rule's ID is rejected", func(t *testing.T) {
+		rule := newStubRule(lint.Diagnostic{RuleID: "MD001", Message: "stub", StartLine: 1, StartColumn: 1})
+
+		_, err := stubRun(rule).lintFile("stub.input.md", content)
+		require.ErrorContains(t, err, "labelled MD001/stub-rule")
+	})
+
+	t.Run("another rule's name is rejected", func(t *testing.T) {
+		rule := newStubRule(lint.Diagnostic{RuleID: "MD999", RuleName: "other-name", Message: "stub", StartLine: 1, StartColumn: 1})
+
+		_, err := stubRun(rule).lintFile("stub.input.md", content)
+		require.ErrorContains(t, err, "labelled MD999/other-name")
+	})
+
+	t.Run("rule errors are rejected", func(t *testing.T) {
+		rule := newStubRule()
+		rule.err = errors.New("stub failure")
+
+		_, err := stubRun(rule).lintFile("stub.input.md", content)
+		require.ErrorContains(t, err, "stub failure")
+	})
+}
+
+// strayTestdataFiles returns the files under baseDir that belong to no
+// discovered case, so the harness never reads them. Hidden files are ignored.
+func strayTestdataFiles(t *testing.T, baseDir string) []string {
+	t.Helper()
+
+	known := make(map[string]bool)
+	for _, tc := range discoverTestCases(t, baseDir) {
+		for _, path := range []string{tc.InputPath, tc.GoldenPath, tc.DiagsJSONPath, tc.DiagsTxtPath, tc.ConfigPath} {
+			known[path] = true
+		}
+	}
+
+	var stray []string
+	err := filepath.WalkDir(baseDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") && !known[path] {
+			stray = append(stray, path)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	return stray
+}
+
+// TestGoldenTestdataFiles verifies that every file under testdata belongs to a
+// case. A misnamed or orphaned sidecar, a file in a nested directory, or a
+// golden left behind by a renamed input would otherwise be ignored.
+func TestGoldenTestdataFiles(t *testing.T) {
+	t.Run("testdata", func(t *testing.T) {
+		assert.Empty(t, strayTestdataFiles(t, testdataDir(t)))
+	})
+
+	t.Run("stray files are found", func(t *testing.T) {
+		baseDir := t.TempDir()
+		write := func(rel string) string {
+			path := filepath.Join(baseDir, rel)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			require.NoError(t, os.WriteFile(path, []byte("# Title\n"), 0o644))
+			return path
+		}
+
+		write("MD043/case.input.md")
+		write("MD043/case.config.yml")
+		write("MD043/case.golden.md")
+		write("MD043/.DS_Store")
+		want := []string{
+			write("MD043/case.config.yaml"),
+			write("MD043/orphan.config.yml"),
+			write("MD043/renamed.golden.md"),
+			write("MD043/nested/deep.input.md"),
+			write("top.config.yml"),
+			// No runner compares cases in a directory that is neither a rule ID nor real-world.
+			write("MD05S/case.input.md"),
+			write("MD05S/case.golden.md"),
+			write("MD05S/case.diags.json"),
+		}
+
+		assert.ElementsMatch(t, want, strayTestdataFiles(t, baseDir))
 	})
 }

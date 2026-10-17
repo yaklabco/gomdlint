@@ -1,2 +1,2 @@
-frontmatter.input.md:7:9 warning Link text has leading and trailing spaces ()
-frontmatter.input.md:9:9 warning Link text has trailing spaces ()
+frontmatter.input.md:7:9 warning Link text has leading and trailing spaces (MD039/no-space-in-links)
+frontmatter.input.md:9:9 warning Link text has trailing spaces (MD039/no-space-in-links)

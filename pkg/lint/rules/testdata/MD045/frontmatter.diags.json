@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD045",
-    "name": "",
+    "name": "no-alt-text",
     "line": 7,
     "column": 36,
     "message": "Image is missing alt text",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD045",
-    "name": "",
+    "name": "no-alt-text",
     "line": 9,
     "column": 33,
     "message": "Image is missing alt text",

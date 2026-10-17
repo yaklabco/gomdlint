@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD051",
-    "name": "",
+    "name": "link-fragments",
     "line": 27,
     "column": 3,
     "message": "Link fragment '#nonexistent-heading' does not match any heading",

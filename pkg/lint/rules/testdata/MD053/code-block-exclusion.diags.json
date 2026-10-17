@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD053",
-    "name": "",
+    "name": "link-image-reference-definitions",
     "line": 35,
     "column": 1,
     "message": "Unused reference definition [unused-ref]",

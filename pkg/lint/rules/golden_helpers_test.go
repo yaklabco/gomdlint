@@ -3,13 +3,13 @@ package rules
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -30,6 +30,10 @@ type GoldenTestCase struct {
 
 	// DiagsTxtPath is the path to the expected diagnostics text file.
 	DiagsTxtPath string
+
+	// ConfigPath is the path to the optional sidecar configuration file.
+	// The file need not exist; without it the case uses the product defaults.
+	ConfigPath string
 
 	// RuleID is the rule to test (empty means run all rules).
 	RuleID string
@@ -64,7 +68,8 @@ func diagFromLint(diag lint.Diagnostic) DiagExpectation {
 
 // discoverTestCases walks the testdata directory and discovers all test cases.
 // Per-rule directories (like MD001, MD031) run only that specific rule.
-// The real-world directory runs all enabled rules.
+// The real-world directory runs all enabled rules. Other directories are
+// skipped, because no runner would compare their files.
 func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 	t.Helper()
 
@@ -86,11 +91,16 @@ func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 		dirName := entry.Name()
 		dirPath := filepath.Join(baseDir, dirName)
 
-		// Determine if this is a rule-specific directory or real-world
+		// Only rule directories and real-world have a runner that compares
+		// their files. TestGoldenTestdataFiles reports files anywhere else.
 		isRealWorld := dirName == "real-world"
 		ruleID := ""
-		if !isRealWorld && isRuleID(dirName) {
+		switch {
+		case isRealWorld:
+		case isRuleID(dirName):
 			ruleID = dirName
+		default:
+			continue
 		}
 
 		// Find all *.input.md files in this directory
@@ -108,6 +118,7 @@ func discoverTestCases(t *testing.T, baseDir string) []GoldenTestCase {
 				GoldenPath:    filepath.Join(dirPath, baseName+".golden.md"),
 				DiagsJSONPath: filepath.Join(dirPath, baseName+".diags.json"),
 				DiagsTxtPath:  filepath.Join(dirPath, baseName+".diags.txt"),
+				ConfigPath:    filepath.Join(dirPath, baseName+goldenConfigSuffix),
 				RuleID:        ruleID,
 				IsRealWorld:   isRealWorld,
 			}
@@ -204,73 +215,28 @@ func writeDiagsJSON(t *testing.T, path string, diags []lint.Diagnostic) {
 	t.Logf("Updated golden file: %s", path)
 }
 
-// writeDiagsTxt writes diagnostics to a human-readable text file.
-func writeDiagsTxt(t *testing.T, path string, diags []lint.Diagnostic, filename string) {
-	t.Helper()
-
-	var buf bytes.Buffer
-	for _, diag := range diags {
-		fixable := ""
-		if diag.HasFix() {
-			fixable = " [fixable]"
-		}
-		// Format: file.input.md:2:1 warning Message (rule-name)%s
-		_, err := buf.WriteString(filename)
-		require.NoError(t, err)
-		_, err = buf.WriteString(":")
-		require.NoError(t, err)
-		_, err = buf.WriteString(itoa(diag.StartLine))
-		require.NoError(t, err)
-		_, err = buf.WriteString(":")
-		require.NoError(t, err)
-		_, err = buf.WriteString(itoa(diag.StartColumn))
-		require.NoError(t, err)
-		_, err = buf.WriteString(" ")
-		require.NoError(t, err)
-		_, err = buf.WriteString(string(diag.Severity))
-		require.NoError(t, err)
-		_, err = buf.WriteString(" ")
-		require.NoError(t, err)
-		_, err = buf.WriteString(diag.Message)
-		require.NoError(t, err)
-		_, err = buf.WriteString(" (")
-		require.NoError(t, err)
-		_, err = buf.WriteString(diag.RuleName)
-		require.NoError(t, err)
-		_, err = buf.WriteString(")")
-		require.NoError(t, err)
-		_, err = buf.WriteString(fixable)
-		require.NoError(t, err)
-		_, err = buf.WriteString("\n")
-		require.NoError(t, err)
+// formatDiagLine renders one diagnostic as a line of a .diags.txt file:
+//
+//	basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
+func formatDiagLine(filename string, diag DiagExpectation) string {
+	fixable := ""
+	if diag.Fixable {
+		fixable = " [fixable]"
 	}
 
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("failed to create directory for %s: %v", path, err)
-	}
-
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		t.Fatalf("failed to write diagnostics text %s: %v", path, err)
-	}
-
-	t.Logf("Updated golden file: %s", path)
+	return fmt.Sprintf("%s:%d:%d %s %s (%s/%s)%s",
+		filename, diag.Line, diag.Column, diag.Severity, diag.Message, diag.Rule, diag.Name, fixable)
 }
 
-// itoa converts an integer to a string without importing strconv.
-func itoa(num int) string {
-	if num == 0 {
-		return "0"
+// renderDiagsTxt renders the contents of a .diags.txt file, one line per diagnostic.
+func renderDiagsTxt(filename string, diags []lint.Diagnostic) []byte {
+	var buf bytes.Buffer
+	for _, diag := range diags {
+		buf.WriteString(formatDiagLine(filename, diagFromLint(diag)))
+		buf.WriteByte('\n')
 	}
-	if num < 0 {
-		return "-" + itoa(-num)
-	}
-	var digits []byte
-	for num > 0 {
-		digits = append([]byte{byte('0' + num%10)}, digits...)
-		num /= 10
-	}
-	return string(digits)
+
+	return buf.Bytes()
 }
 
 // writeGoldenFile writes content to a golden file.
@@ -322,19 +288,23 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 	t.Helper()
 
 	inputFilename := filepath.Base(tc.InputPath)
+	actualTxt := renderDiagsTxt(inputFilename, actual)
 
 	if update {
 		writeDiagsJSON(t, tc.DiagsJSONPath, actual)
-		writeDiagsTxt(t, tc.DiagsTxtPath, actual, inputFilename)
+		writeGoldenFile(t, tc.DiagsTxtPath, actualTxt)
 		return
 	}
+
+	// The text file renders the same diagnostics; a stale one fails too.
+	compareWithGolden(t, actualTxt, tc.DiagsTxtPath, false)
 
 	expected := loadExpectedDiags(t, tc.DiagsJSONPath)
 	if expected == nil {
 		t.Errorf("Diagnostics JSON file does not exist: %s\nRun with -update flag to create it.", tc.DiagsJSONPath)
 		t.Logf("Actual diagnostics: %d", len(actual))
 		for _, d := range actual {
-			t.Logf("  %s:%d:%d %s %s (%s)", inputFilename, d.StartLine, d.StartColumn, d.Severity, d.Message, d.RuleName)
+			t.Logf("  %s", formatDiagLine(inputFilename, diagFromLint(d)))
 		}
 		return
 	}
@@ -344,11 +314,11 @@ func compareDiags(t *testing.T, actual []lint.Diagnostic, tc GoldenTestCase, upd
 		t.Errorf("Diagnostic count mismatch: got %d, want %d", len(actual), len(expected))
 		t.Logf("Expected diagnostics:")
 		for _, d := range expected {
-			t.Logf("  %s:%d:%d %s %s (%s)", inputFilename, d.Line, d.Column, d.Severity, d.Message, d.Name)
+			t.Logf("  %s", formatDiagLine(inputFilename, d))
 		}
 		t.Logf("Actual diagnostics:")
 		for _, d := range actual {
-			t.Logf("  %s:%d:%d %s %s (%s)", inputFilename, d.StartLine, d.StartColumn, d.Severity, d.Message, d.RuleName)
+			t.Logf("  %s", formatDiagLine(inputFilename, diagFromLint(d)))
 		}
 		return
 	}
@@ -407,32 +377,6 @@ func showDiff(t *testing.T, expected, actual []byte) {
 	if diffBuf.Len() > 0 {
 		t.Logf("Diff (- expected, + actual):\n%s", diffBuf.String())
 	}
-}
-
-// getRuleByID gets a rule by its ID from the default registry.
-func getRuleByID(t *testing.T, ruleID string) lint.Rule {
-	t.Helper()
-
-	rule, ok := lint.DefaultRegistry.GetByID(ruleID)
-	if !ok {
-		t.Fatalf("rule %s not found in registry", ruleID)
-	}
-
-	return rule
-}
-
-// getEnabledRules returns all default-enabled rules from the registry.
-func getEnabledRules(t *testing.T) []lint.Rule {
-	t.Helper()
-
-	var enabled []lint.Rule
-	for _, rule := range lint.DefaultRegistry.Rules() {
-		if rule.DefaultEnabled() {
-			enabled = append(enabled, rule)
-		}
-	}
-
-	return enabled
 }
 
 // filterFixableDiags returns only diagnostics that have fixes.

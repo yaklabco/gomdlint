@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD032",
-    "name": "",
+    "name": "blanks-around-lists",
     "line": 6,
     "column": 1,
     "message": "Missing blank line before list",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD032",
-    "name": "",
+    "name": "blanks-around-lists",
     "line": 13,
     "column": 1,
     "message": "Missing blank line before list",

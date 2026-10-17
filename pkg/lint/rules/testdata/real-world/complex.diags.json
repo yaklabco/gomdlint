@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD004",
-    "name": "",
+    "name": "unordered-list-style",
     "line": 46,
     "column": 3,
     "message": "Unordered list bullet '*' does not match expected '-'",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD004",
-    "name": "",
+    "name": "unordered-list-style",
     "line": 47,
     "column": 3,
     "message": "Unordered list bullet '*' does not match expected '-'",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD040",
-    "name": "",
+    "name": "fenced-code-language",
     "line": 114,
     "column": 1,
     "message": "Fenced code block has no language specified",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD046",
-    "name": "",
+    "name": "code-block-style",
     "line": 123,
     "column": 5,
     "message": "Code block style 'indented' does not match expected 'fenced'",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD049",
-    "name": "",
+    "name": "emphasis-style",
     "line": 165,
     "column": 47,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
@@ -46,7 +46,7 @@
   },
   {
     "rule": "MD050",
-    "name": "",
+    "name": "strong-style",
     "line": 167,
     "column": 48,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
@@ -55,7 +55,7 @@
   },
   {
     "rule": "MD049",
-    "name": "",
+    "name": "emphasis-style",
     "line": 173,
     "column": 17,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
@@ -64,7 +64,7 @@
   },
   {
     "rule": "MD050",
-    "name": "",
+    "name": "strong-style",
     "line": 173,
     "column": 17,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
@@ -73,7 +73,7 @@
   },
   {
     "rule": "MD049",
-    "name": "",
+    "name": "emphasis-style",
     "line": 175,
     "column": 16,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
@@ -82,7 +82,7 @@
   },
   {
     "rule": "MD035",
-    "name": "",
+    "name": "hr-style",
     "line": 189,
     "column": 1,
     "message": "Horizontal rule style \"***\" does not match expected \"---\"",
@@ -91,7 +91,7 @@
   },
   {
     "rule": "MD035",
-    "name": "",
+    "name": "hr-style",
     "line": 193,
     "column": 1,
     "message": "Horizontal rule style \"___\" does not match expected \"---\"",
@@ -100,7 +100,7 @@
   },
   {
     "rule": "MD022",
-    "name": "",
+    "name": "heading-blank-lines",
     "line": 238,
     "column": 7,
     "message": "Heading needs 1 blank line(s) below, found 0",
@@ -109,7 +109,7 @@
   },
   {
     "rule": "MD031",
-    "name": "",
+    "name": "blanks-around-fences",
     "line": 245,
     "column": 1,
     "message": "Missing blank line before fenced code block",

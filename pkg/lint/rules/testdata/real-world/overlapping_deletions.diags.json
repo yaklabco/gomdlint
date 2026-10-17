@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 5,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 3, max 1)",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 9,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 3, max 1)",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 13,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 4, max 1)",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD047",
-    "name": "",
+    "name": "single-trailing-newline",
     "line": 17,
     "column": 1,
     "message": "Too many trailing blank lines (found 4, max 1)",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD012",
-    "name": "",
+    "name": "no-multiple-blank-lines",
     "line": 18,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 4, max 1)",

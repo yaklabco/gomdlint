@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD039",
-    "name": "",
+    "name": "no-space-in-links",
     "line": 3,
     "column": 9,
     "message": "Link text has leading and trailing spaces",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD039",
-    "name": "",
+    "name": "no-space-in-links",
     "line": 5,
     "column": 9,
     "message": "Link text has leading spaces",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD039",
-    "name": "",
+    "name": "no-space-in-links",
     "line": 7,
     "column": 9,
     "message": "Link text has trailing spaces",

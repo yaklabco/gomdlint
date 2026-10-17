@@ -1,7 +1,7 @@
 [
   {
     "rule": "MDL001",
-    "name": "",
+    "name": "link-destination-style",
     "line": 5,
     "column": 5,
     "message": "Link uses absolute URL, but relative URLs are expected",

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD005",
-    "name": "",
+    "name": "list-indent",
     "line": 4,
     "column": 4,
     "message": "List item indentation 1 does not match expected 0",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD005",
-    "name": "",
+    "name": "list-indent",
     "line": 12,
     "column": 6,
     "message": "List item indentation 3 does not match expected 2",

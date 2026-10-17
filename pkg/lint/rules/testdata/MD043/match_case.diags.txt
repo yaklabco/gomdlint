@@ -1,0 +1,1 @@
+match_case.input.md:4:1 warning Expected heading "## Overview", found "## overview" (MD043/required-headings)

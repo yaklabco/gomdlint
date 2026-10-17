@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD029",
-    "name": "",
+    "name": "ol-prefix",
     "line": 8,
     "column": 4,
     "message": "Ordered list item numbered 1 should be 2",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD029",
-    "name": "",
+    "name": "ol-prefix",
     "line": 9,
     "column": 4,
     "message": "Ordered list item numbered 1 should be 3",

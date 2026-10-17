@@ -1,0 +1,1 @@
+mismatch_setext.input.md:7:1 warning Expected heading "## Usage", found "## Installation" (MD043/required-headings)

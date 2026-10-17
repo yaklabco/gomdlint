@@ -1,0 +1,7 @@
+rules:
+  MD043:
+    options:
+      headings:
+        - "# Project"
+        - "## Overview"
+        - "## Usage"

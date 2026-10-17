@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD018",
-    "name": "",
+    "name": "no-missing-space-atx",
     "line": 5,
     "column": 1,
     "message": "No space after hash on ATX style heading",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD018",
-    "name": "",
+    "name": "no-missing-space-atx",
     "line": 9,
     "column": 1,
     "message": "No space after hash on ATX style heading",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD018",
-    "name": "",
+    "name": "no-missing-space-atx",
     "line": 13,
     "column": 1,
     "message": "No space after hash on ATX style heading",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD018",
-    "name": "",
+    "name": "no-missing-space-atx",
     "line": 17,
     "column": 1,
     "message": "No space after hash on ATX style heading",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD018",
-    "name": "",
+    "name": "no-missing-space-atx",
     "line": 21,
     "column": 1,
     "message": "No space after hash on ATX style heading",

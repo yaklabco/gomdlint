@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD050",
-    "name": "",
+    "name": "strong-style",
     "line": 5,
     "column": 12,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",

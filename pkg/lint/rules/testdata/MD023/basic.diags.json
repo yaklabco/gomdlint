@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD023",
-    "name": "",
+    "name": "heading-start-left",
     "line": 3,
     "column": 1,
     "message": "Heading is indented by 1 character(s)",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD023",
-    "name": "",
+    "name": "heading-start-left",
     "line": 5,
     "column": 1,
     "message": "Heading is indented by 2 character(s)",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD023",
-    "name": "",
+    "name": "heading-start-left",
     "line": 7,
     "column": 1,
     "message": "Heading is indented by 3 character(s)",

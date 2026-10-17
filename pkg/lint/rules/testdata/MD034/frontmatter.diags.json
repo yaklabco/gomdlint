@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD034",
-    "name": "",
+    "name": "no-bare-urls",
     "line": 7,
     "column": 7,
     "message": "Bare URL used",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD034",
-    "name": "",
+    "name": "no-bare-urls",
     "line": 9,
     "column": 7,
     "message": "Bare URL used",

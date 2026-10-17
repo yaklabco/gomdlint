@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD011",
-    "name": "",
+    "name": "no-reversed-links",
     "line": 7,
     "column": 11,
     "message": "Reversed link syntax detected",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD011",
-    "name": "",
+    "name": "no-reversed-links",
     "line": 11,
     "column": 9,
     "message": "Reversed link syntax detected",

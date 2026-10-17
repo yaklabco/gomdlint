@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD046",
-    "name": "",
+    "name": "code-block-style",
     "line": 15,
     "column": 5,
     "message": "Code block style 'indented' does not match expected 'fenced'",

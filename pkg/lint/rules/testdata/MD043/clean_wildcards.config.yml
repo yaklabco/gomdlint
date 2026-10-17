@@ -1,0 +1,9 @@
+rules:
+  MD043:
+    options:
+      headings:
+        - "?"
+        - "## Description"
+        - "*"
+        - "## License"
+        - "+"

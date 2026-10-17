@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD030",
-    "name": "",
+    "name": "list-marker-space",
     "line": 3,
     "column": 2,
     "message": "List marker space 2 does not match expected 1",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD030",
-    "name": "",
+    "name": "list-marker-space",
     "line": 4,
     "column": 4,
     "message": "List marker space 2 does not match expected 1",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD030",
-    "name": "",
+    "name": "list-marker-space",
     "line": 5,
     "column": 4,
     "message": "List marker space 2 does not match expected 1",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD030",
-    "name": "",
+    "name": "list-marker-space",
     "line": 7,
     "column": 3,
     "message": "List marker space 2 does not match expected 1",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD030",
-    "name": "",
+    "name": "list-marker-space",
     "line": 8,
     "column": 5,
     "message": "List marker space 2 does not match expected 1",

@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD033",
-    "name": "",
+    "name": "no-inline-html",
     "line": 3,
     "column": 22,
     "message": "HTML element 'br' is not allowed",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD033",
-    "name": "",
+    "name": "no-inline-html",
     "line": 5,
     "column": 12,
     "message": "HTML element 'div' is not allowed",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD033",
-    "name": "",
+    "name": "no-inline-html",
     "line": 7,
     "column": 5,
     "message": "HTML element 'em' is not allowed",

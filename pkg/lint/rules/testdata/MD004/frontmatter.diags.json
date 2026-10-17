@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD004",
-    "name": "",
+    "name": "unordered-list-style",
     "line": 10,
     "column": 3,
     "message": "Unordered list bullet '*' does not match expected '-'",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD004",
-    "name": "",
+    "name": "unordered-list-style",
     "line": 11,
     "column": 3,
     "message": "Unordered list bullet '*' does not match expected '-'",

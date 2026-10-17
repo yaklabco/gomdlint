@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD040",
-    "name": "",
+    "name": "fenced-code-language",
     "line": 8,
     "column": 1,
     "message": "Fenced code block has no language specified",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD040",
-    "name": "",
+    "name": "fenced-code-language",
     "line": 12,
     "column": 1,
     "message": "Fenced code block has no language specified",

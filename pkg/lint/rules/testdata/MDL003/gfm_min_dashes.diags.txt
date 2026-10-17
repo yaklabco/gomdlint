@@ -1,0 +1,1 @@
+gfm_min_dashes.input.md:4:1 warning Table delimiter has fewer than 4 dashes (MDL003/table-alignment) [fixable]

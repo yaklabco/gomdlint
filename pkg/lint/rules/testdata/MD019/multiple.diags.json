@@ -1,7 +1,7 @@
 [
   {
     "rule": "MD019",
-    "name": "",
+    "name": "no-multiple-space-atx",
     "line": 5,
     "column": 3,
     "message": "Multiple spaces (2) after hash on ATX style heading",
@@ -10,7 +10,7 @@
   },
   {
     "rule": "MD019",
-    "name": "",
+    "name": "no-multiple-space-atx",
     "line": 9,
     "column": 4,
     "message": "Multiple spaces (3) after hash on ATX style heading",
@@ -19,7 +19,7 @@
   },
   {
     "rule": "MD019",
-    "name": "",
+    "name": "no-multiple-space-atx",
     "line": 13,
     "column": 5,
     "message": "Multiple spaces (2) after hash on ATX style heading",
@@ -28,7 +28,7 @@
   },
   {
     "rule": "MD019",
-    "name": "",
+    "name": "no-multiple-space-atx",
     "line": 17,
     "column": 6,
     "message": "Multiple spaces (4) after hash on ATX style heading",
@@ -37,7 +37,7 @@
   },
   {
     "rule": "MD019",
-    "name": "",
+    "name": "no-multiple-space-atx",
     "line": 21,
     "column": 7,
     "message": "Multiple spaces (2) after hash on ATX style heading",
