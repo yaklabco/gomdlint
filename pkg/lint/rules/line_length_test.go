@@ -260,16 +260,52 @@ func TestMaxLineLengthRule_DiagnosticPosition(t *testing.T) {
 	assert.Equal(t, len(strings.Repeat("é ", 50))+1, diags[0].EndColumn)
 }
 
+// maxLineLengthAutofixCase is one MD013 wrap fix scenario.
+type maxLineLengthAutofixCase struct {
+	name     string
+	flavor   string
+	input    string
+	maxLen   int
+	options  map[string]any
+	wantFix  bool
+	wantText string // expected text after applying fix
+}
+
+// runMaxLineLengthAutofix applies the MD013 fixes for a scenario and checks
+// the fixed text and that no fixable diagnostic is left.
+func runMaxLineLengthAutofix(t *testing.T, tests []maxLineLengthAutofixCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flavor := tt.flavor
+			if flavor == "" {
+				flavor = goldmark.FlavorCommonMark
+			}
+			options := map[string]any{"max": tt.maxLen}
+			for key, value := range tt.options {
+				options[key] = value
+			}
+			diags := applyMaxLineLength(t, flavor, tt.input, options)
+
+			var edits []fix.TextEdit
+			for _, diag := range diags {
+				edits = append(edits, diag.FixEdits...)
+			}
+			assert.Equal(t, tt.wantFix, len(edits) > 0, "fix presence mismatch")
+
+			prepared, err := fix.PrepareEdits(edits, len(tt.input))
+			require.NoError(t, err)
+			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+			assert.Equal(t, tt.wantText, string(fixed), "fixed text mismatch")
+
+			// The fixed text has no fixable line length diagnostics left.
+			assert.Empty(t, filterFixableDiags(applyMaxLineLength(t, flavor, string(fixed), options)))
+		})
+	}
+}
+
 func TestMaxLineLengthRule_Autofix(t *testing.T) {
-	tests := []struct {
-		name     string
-		flavor   string
-		input    string
-		maxLen   int
-		options  map[string]any
-		wantFix  bool
-		wantText string // expected text after applying fix
-	}{
+	runMaxLineLengthAutofix(t, []maxLineLengthAutofixCase{
 		{
 			name:     "paragraph wraps at word boundary",
 			input:    "This is a very long line that exceeds the maximum allowed length for a line in this markdown file.\n",
@@ -365,6 +401,21 @@ func TestMaxLineLengthRule_Autofix(t *testing.T) {
 				"and on and on and on and on and on and\n" +
 				"on and on.\n",
 		},
+		{
+			name:     "gomdlint measuring mode wraps too",
+			input:    "This is a very long line that exceeds the maximum allowed length for a line in this markdown file.\n",
+			maxLen:   50,
+			options:  map[string]any{"markdownlint_compatible": false},
+			wantFix:  true,
+			wantText: "This is a very long line that exceeds the maximum\nallowed length for a line in this markdown file.\n",
+		},
+	})
+}
+
+// TestMaxLineLengthRule_AutofixSafety covers the breaks the wrap fix never
+// makes and the lines it leaves alone.
+func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
+	runMaxLineLengthAutofix(t, []maxLineLengthAutofixCase{
 		{
 			name:     "never starts a line with a list marker",
 			input:    "Plain text runs on until it is clear - yes it is over now.\n",
@@ -497,43 +548,7 @@ func TestMaxLineLengthRule_Autofix(t *testing.T) {
 			wantFix:  false,
 			wantText: "Unbreakable - - - - - - - - - - - - - - - - - - - - - - end.\n",
 		},
-		{
-			name:     "gomdlint measuring mode wraps too",
-			input:    "This is a very long line that exceeds the maximum allowed length for a line in this markdown file.\n",
-			maxLen:   50,
-			options:  map[string]any{"markdownlint_compatible": false},
-			wantFix:  true,
-			wantText: "This is a very long line that exceeds the maximum\nallowed length for a line in this markdown file.\n",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			flavor := tt.flavor
-			if flavor == "" {
-				flavor = goldmark.FlavorCommonMark
-			}
-			options := map[string]any{"max": tt.maxLen}
-			for key, value := range tt.options {
-				options[key] = value
-			}
-			diags := applyMaxLineLength(t, flavor, tt.input, options)
-
-			var edits []fix.TextEdit
-			for _, diag := range diags {
-				edits = append(edits, diag.FixEdits...)
-			}
-			assert.Equal(t, tt.wantFix, len(edits) > 0, "fix presence mismatch")
-
-			prepared, err := fix.PrepareEdits(edits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
-			assert.Equal(t, tt.wantText, string(fixed), "fixed text mismatch")
-
-			// The fixed text has no fixable line length diagnostics left.
-			assert.Empty(t, filterFixableDiags(applyMaxLineLength(t, flavor, string(fixed), options)))
-		})
-	}
+	})
 }
 
 func TestMaxLineLengthRule_HelperFunctions(t *testing.T) {
