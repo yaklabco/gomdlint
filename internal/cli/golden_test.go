@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,14 +22,30 @@ import (
 // Read every changed golden file before committing it.
 var update = flag.Bool("update", false, "write the output of golden tests to their golden files")
 
-// testdataPath returns the absolute path of elem under testdata. Tests that
-// change into a project directory resolve their testdata paths first.
-func testdataPath(t *testing.T, elem ...string) string {
+// testdataDir is the absolute path of testdata, resolved when the package
+// loads, before any test changes into a project directory.
+var testdataDir = func() string {
+	dir, err := filepath.Abs("testdata")
+	if err != nil {
+		panic(err)
+	}
+	return dir
+}()
+
+// testdataPath returns the absolute path of elem under testdata, whatever
+// the current directory.
+func testdataPath(elem ...string) string {
+	return filepath.Join(append([]string{testdataDir}, elem...)...)
+}
+
+// skipOnWindows skips a test whose golden output holds slash-separated
+// paths, which Windows prints with backslashes.
+func skipOnWindows(t *testing.T) {
 	t.Helper()
 
-	path, err := filepath.Abs(filepath.Join(append([]string{"testdata"}, elem...)...))
-	require.NoError(t, err)
-	return path
+	if runtime.GOOS == "windows" {
+		t.Skip("golden files hold slash-separated paths")
+	}
 }
 
 // readProject returns the files under dir by slash-separated relative path,
@@ -76,8 +93,8 @@ func assertGolden(t *testing.T, path, got string) {
 // each human output format with each rule identifier format, and compares
 // the output with testdata/golden/lint-<format>-<rule format>.golden.
 func TestLintOutputGolden(t *testing.T) {
-	project := readProject(t, testdataPath(t, "project"))
-	goldenDir := testdataPath(t, "golden")
+	skipOnWindows(t)
+	project := readProject(t, testdataPath("project"))
 
 	for _, format := range []string{"text", "table", "summary"} {
 		for _, ruleFormat := range []string{"name", "id", "combined"} {
@@ -89,7 +106,7 @@ func TestLintOutputGolden(t *testing.T) {
 
 				assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
 				assert.Empty(t, got.stderr)
-				assertGolden(t, filepath.Join(goldenDir, name+".golden"), got.stdout)
+				assertGolden(t, testdataPath("golden", name+".golden"), got.stdout)
 			})
 		}
 	}
@@ -98,14 +115,13 @@ func TestLintOutputGolden(t *testing.T) {
 // TestLintRuleFormatDefaultsToName covers lint without --rule-format, which
 // names rules as --rule-format name does.
 func TestLintRuleFormatDefaultsToName(t *testing.T) {
-	project := readProject(t, testdataPath(t, "project"))
-	want := readFile(t, testdataPath(t, "golden", "lint-text-name.golden"))
-	inProject(t, project)
+	skipOnWindows(t)
+	inProject(t, readProject(t, testdataPath("project")))
 
 	got := execute(t, "lint", "--color", "never")
 
 	assert.Equal(t, cli.ExitLintErrors, got.code, got.stderr)
-	assert.Equal(t, want, got.stdout)
+	assert.Equal(t, readFile(t, testdataPath("golden", "lint-text-name.golden")), got.stdout)
 }
 
 // TestLintRuleFormatFromEnvironment covers GOMDLINT_RULE_FORMAT, which sets
@@ -113,10 +129,11 @@ func TestLintRuleFormatDefaultsToName(t *testing.T) {
 // given. Like GOMDLINT_FORMAT, an invalid value is a configuration error,
 // and the flag wins over the environment, even over an invalid value.
 func TestLintRuleFormatFromEnvironment(t *testing.T) {
-	project := readProject(t, testdataPath(t, "project"))
+	skipOnWindows(t)
+	project := readProject(t, testdataPath("project"))
 	golden := func(t *testing.T, name string) string {
 		t.Helper()
-		return readFile(t, testdataPath(t, "golden", name+".golden"))
+		return readFile(t, testdataPath("golden", name+".golden"))
 	}
 
 	for _, format := range []string{"text", "table", "summary"} {
@@ -171,7 +188,7 @@ func TestLintRuleFormatFromEnvironment(t *testing.T) {
 // JSON and SARIF always carry both the rule ID and the rule name, and a
 // diff names no rules.
 func TestLintMachineFormatsIgnoreRuleFormat(t *testing.T) {
-	project := readProject(t, testdataPath(t, "project"))
+	project := readProject(t, testdataPath("project"))
 
 	for _, format := range []string{"json", "sarif", "diff"} {
 		t.Run(format, func(t *testing.T) {
