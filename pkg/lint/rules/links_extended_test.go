@@ -382,3 +382,23 @@ func TestNoBareURLsRule_ByteOrderMark(t *testing.T) {
 		})
 	}
 }
+
+// TestNoBareURLsRule_EntityInURL withholds the fix when the URL holds an
+// entity reference: as text the entity is decoded ("a©b"), but an
+// autolink shows and links to it as written. GitHub decodes it in a GFM
+// literal too, so the fix is withheld under both flavors.
+func TestNoBareURLsRule_EntityInURL(t *testing.T) {
+	input := "See https://example.com/a&copy;b now.\n"
+	for _, flavor := range []config.Flavor{config.FlavorCommonMark, config.FlavorGFM} {
+		t.Run(string(flavor), func(t *testing.T) {
+			snapshot, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			cfg := config.NewConfig()
+			cfg.Flavor = flavor
+			diags, err := NewNoBareURLsRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+			require.NoError(t, err)
+			require.Len(t, diags, 1)
+			assert.False(t, diags[0].HasFix(), "angle brackets would change the shown text and the destination")
+		})
+	}
+}

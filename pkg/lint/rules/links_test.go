@@ -539,3 +539,15 @@ func TestReversedLinkRule_MarkdownlintMatches(t *testing.T) {
 	}
 	assert.Equal(t, want, got)
 }
+
+// TestLinkSpacesRule_FixKeepsAnchors withholds the fix for spaces in link
+// text inside a heading, since trimming them changes the heading's anchor.
+func TestLinkSpacesRule_FixKeepsAnchors(t *testing.T) {
+	input := "# [ x](url)\n\n[link](#-x)\n"
+	snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	diags, err := NewLinkSpacesRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.False(t, diags[0].HasFix())
+}

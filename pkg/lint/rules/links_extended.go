@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	gmutil "github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -103,13 +105,15 @@ var emailAutolinkPattern = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+
 // angleBracketsKeepLiteral reports whether wrapping an autolink literal in
 // angle brackets makes an autolink to the same address. A URI autolink
 // cannot hold '<', '>', spaces, or ASCII control characters, and reads a
-// backslash as part of the address where the literal's text read it as an
-// escape. A "www." literal has no scheme, so brackets never make it an
+// backslash or an entity reference as written where the literal's text read
+// it as an escape or a character (GitHub decodes "&copy;" in a GFM literal
+// too). A "www." literal has no scheme, so brackets never make it an
 // autolink.
 func angleBracketsKeepLiteral(kind mdscan.LiteralKind, literal []byte) bool {
 	switch kind {
 	case mdscan.LiteralURL:
-		return !bytes.ContainsAny(literal, "<>\\ ") && !bytes.ContainsFunc(literal, isASCIIControl)
+		return !bytes.ContainsAny(literal, "<>\\ ") && !bytes.ContainsFunc(literal, isASCIIControl) &&
+			bytes.Equal(renderedText(literal), gmutil.EscapeHTML(literal))
 	case mdscan.LiteralEmail:
 		return emailAutolinkPattern.Match(literal)
 	case mdscan.LiteralNone, mdscan.LiteralWWW:

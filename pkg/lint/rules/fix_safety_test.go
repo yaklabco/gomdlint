@@ -103,6 +103,39 @@ func TestVerifyFixes(t *testing.T) {
 			diags:  []lint.Diagnostic{edit(16, 17, "--:")},
 			kept:   []bool{false},
 		},
+		{
+			name:  "a reference label may not change, even to a label with the same destination",
+			input: "[` foo`][]\n\n[` foo`]: /url\n[`foo`]: /url\n",
+			allow: fixAllowance{codeSpanSpace: true},
+			diags: []lint.Diagnostic{edit(2, 3, "")},
+			kept:  []bool{false},
+		},
+		{
+			name:  "removing a definition a link uses is withheld",
+			input: "[a][]\n\n[a]: /x\n",
+			diags: []lint.Diagnostic{edit(7, 15, "")},
+			kept:  []bool{false},
+		},
+		{
+			name:  "removing an unused definition keeps every link",
+			input: "[a][]\n\n[a]: /x\n[b]: /y\n",
+			diags: []lint.Diagnostic{edit(15, 23, "")},
+			kept:  []bool{true},
+		},
+		{
+			name:  "an autolink must show the text it replaces, entities decoded",
+			input: "See https://example.com/a&copy;b now.\n",
+			allow: fixAllowance{autolinks: true},
+			diags: []lint.Diagnostic{edit(4, 32, "<https://example.com/a&copy;b>")},
+			kept:  []bool{false},
+		},
+		{
+			name:  "a heading anchor may not change",
+			input: "# ` x`\n\n[link](#-x)\n",
+			allow: fixAllowance{codeSpanSpace: true},
+			diags: []lint.Diagnostic{edit(3, 4, "")},
+			kept:  []bool{false},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

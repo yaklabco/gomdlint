@@ -65,6 +65,23 @@ func (c *collector) collectHeadingAnchor(node *mdast.Node) {
 	c.ctx.Anchors.AddFromHeading(text, pos)
 }
 
+// HeadingAnchors returns the anchor of every heading under root, in document
+// order, as GitHub generates them and as MD051 checks fragments against:
+// from the same heading text, with github-slugger's duplicate suffixes.
+func HeadingAnchors(root *mdast.Node) []string {
+	anchors := NewAnchorMap()
+	var ids []string
+	_ = mdast.Walk(root, func(node *mdast.Node) error { //nolint:errcheck // visitor never returns error
+		if node.Kind == mdast.NodeHeading {
+			if text := extractHeadingText(node); text != "" {
+				ids = append(ids, anchors.GenerateAnchor(text))
+			}
+		}
+		return nil
+	})
+	return ids
+}
+
 // extractHeadingText returns the text GitHub derives a heading's anchor from:
 // the rendered text content. Text has its backslash escapes and entity
 // references resolved, code spans contribute their content, and images and

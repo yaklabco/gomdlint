@@ -478,3 +478,23 @@ func TestNoSpaceInCodeRule_Fix(t *testing.T) {
 		})
 	}
 }
+
+// TestNoSpaceInCodeRule_FixKeepsLinksAndAnchors withholds fixes that would
+// change which definition a reference resolves to or a heading's anchor.
+func TestNoSpaceInCodeRule_FixKeepsLinksAndAnchors(t *testing.T) {
+	for name, input := range map[string]string{
+		"code span in a reference label": "[` foo`][]\n\n[` foo`]: /url\n[`foo`]: /url\n",
+		"code span in a heading":         "# ` x`\n\n[link](#-x)\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			snapshot, err := goldmark.New(string(config.FlavorGFM)).Parse(context.Background(), "test.md", []byte(input))
+			require.NoError(t, err)
+			cfg := config.NewConfig()
+			cfg.Flavor = config.FlavorGFM
+			diags, err := NewNoSpaceInCodeRule().Apply(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
+			require.NoError(t, err)
+			require.Len(t, diags, 1, "the spaces are still reported")
+			assert.False(t, diags[0].HasFix())
+		})
+	}
+}

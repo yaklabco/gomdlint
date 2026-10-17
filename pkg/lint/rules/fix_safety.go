@@ -1,13 +1,19 @@
 package rules
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"slices"
 	"strings"
 
+	gmhtml "github.com/yuin/goldmark/renderer/html"
+	gmutil "github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -130,22 +136,36 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 // documentOutline returns a canonical description of a parsed document: each
 // block's kind, its rendering attributes (heading level, list kind, start and
 // tightness, code block kind, info and code, table alignments) and children,
-// and the text of its inline content. Source positions, markers and spacing
-// that do not change the rendered document are left out, so two documents
-// that render the same have the same outline.
+// the text of its inline content as it renders (escapes and entity
+// references resolved), each link's destination and title, and, for a
+// reference link, the label it resolves with. The anchors GitHub generates
+// for the headings follow, since a link anywhere may point at them. Source
+// positions, markers and spacing that do not change the rendered document
+// are left out, so two documents that render the same have the same outline.
 func documentOutline(file *mdast.FileSnapshot, allow fixAllowance) string {
 	var out strings.Builder
 	writeOutline(&out, file, file.Root, allow)
+	writeOutlineItem(&out, "anchors", strings.Join(refs.HeadingAnchors(file.Root), "\x00"))
 	return out.String()
+}
+
+// renderedText returns text as goldmark renders a text node: backslash
+// escapes and entity references resolved, and HTML special characters escaped.
+func renderedText(text []byte) []byte {
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+	gmhtml.DefaultWriter.Write(writer, text)
+	_ = writer.Flush() // A bytes.Buffer never fails to write.
+	return buf.Bytes()
 }
 
 func writeOutline(out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, allow fixAllowance) {
 	switch node.Kind {
 	case mdast.NodeText:
 		if node.Inline != nil {
-			out.Write(node.Inline.Text)
+			out.Write(renderedText(node.Inline.Text))
 		} else {
-			out.Write(node.Text())
+			out.Write(renderedText(node.Text()))
 		}
 	case mdast.NodeSoftBreak:
 		out.WriteString("\n")
@@ -180,13 +200,15 @@ func writeOutlineItem(out *strings.Builder, name, attrs string) {
 	fmt.Fprintf(out, "%s%s %q%s", outlineOpen, name, attrs, outlineClose)
 }
 
-// writeLinkOutline writes a link or image: its destination, title, and text.
+// writeLinkOutline writes a link or image: its destination, title, the
+// label a reference link resolves with, and its text.
 func writeLinkOutline(out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, allow fixAllowance) {
-	if allow.autolinks && isAutolinkNode(node) {
-		// An autolink shows its address, so it reads as that text.
-		for child := node.FirstChild; child != nil; child = child.Next {
-			writeOutline(out, file, child, allow)
-		}
+	var link mdast.LinkAttrs
+	if node.Inline != nil && node.Inline.Link != nil {
+		link = *node.Inline.Link
+	}
+	if isAutolinkNode(node) {
+		writeAutolinkOutline(out, node, link, allow)
 		return
 	}
 	var inner strings.Builder
@@ -197,17 +219,43 @@ func writeLinkOutline(out *strings.Builder, file *mdast.FileSnapshot, node *mdas
 	if allow.linkTextSpace {
 		text = strings.TrimSpace(text)
 	}
-	destination, title := "", ""
-	if node.Inline != nil && node.Inline.Link != nil {
-		destination, title = node.Inline.Link.Destination, node.Inline.Link.Title
+	label := ""
+	switch link.ReferenceStyle {
+	case mdast.RefStyleFull, mdast.RefStyleCollapsed, mdast.RefStyleShortcut:
+		// A fix that changes the label could make the link resolve to
+		// another definition, even one with the same destination today.
+		label = refs.NormalizeLabel(link.ReferenceLabel)
+	case mdast.RefStyleInline, mdast.RefStyleAutolink:
 	}
-	if allow.reversedLinks && node.Kind == mdast.NodeLink && title == "" {
+	if allow.reversedLinks && node.Kind == mdast.NodeLink && link.Title == "" && label == "" {
 		// Read a link the way its reversed form was written as text.
-		fmt.Fprintf(out, "(%s)[%s]", text, destination)
+		fmt.Fprintf(out, "(%s)[%s]", text, gmutil.EscapeHTML([]byte(link.Destination)))
 		return
 	}
-	writeOutlineItem(out, node.Kind.String(), destination+"\x00"+title)
+	writeOutlineItem(out, node.Kind.String(), link.Destination+"\x00"+link.Title+"\x00"+label)
 	out.WriteString(text)
+	out.WriteString(outlineClose)
+}
+
+// writeAutolinkOutline writes an autolink: its destination and the address it
+// shows, which goldmark renders as written, without resolving escapes or
+// entity references. When the rule may turn text into an autolink, one that
+// links to the address it shows reads as that text, so the text it replaced
+// must render the same.
+func writeAutolinkOutline(out *strings.Builder, node *mdast.Node, link mdast.LinkAttrs, allow fixAllowance) {
+	var label []byte
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if child.Inline != nil {
+			label = append(label, child.Inline.Text...)
+		}
+	}
+	shown := gmutil.EscapeHTML(label)
+	if allow.autolinks && (link.Destination == string(label) || link.Destination == "http://"+string(label)) {
+		out.Write(shown)
+		return
+	}
+	writeOutlineItem(out, "autolink", link.Destination)
+	out.Write(shown)
 	out.WriteString(outlineClose)
 }
 
