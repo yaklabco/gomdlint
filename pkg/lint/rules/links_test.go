@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -500,4 +503,39 @@ func TestLinkDestinationStyleRule_DefaultDisabled(t *testing.T) {
 	if rule.DefaultEnabled() {
 		t.Error("LinkDestinationStyleRule should be disabled by default")
 	}
+}
+
+// TestReversedLinkRule_MarkdownlintMatches finds reversed links the way
+// markdownlint does: the text holds no parentheses, the opening parenthesis
+// is not escaped, neither part ends with a backslash, the destination is not
+// a footnote label, no "(" follows, and code spans are not searched. In
+// "(a)[b](c)[d]" the "(c)" is also the destination of the link "[b](c)", so
+// the fix, which would break that link, is withheld.
+func TestReversedLinkRule_MarkdownlintMatches(t *testing.T) {
+	type position struct {
+		line, column int
+		fixable      bool
+	}
+	input := "(text)[url]\n\n" +
+		"(a)[b] and (c)[d]\n\n" +
+		"[t](bad dest (text)[https://example.com]\n\n" +
+		"\\(text)[url]\n\n" +
+		"(text)[url](x)\n\n" +
+		"(text\\)[url]\n\n" +
+		"(text)[^1]\n\n" +
+		"`(text)[url]` and `x (text)`[url]\n\n" +
+		"(a (b) c)[url]\n\n" +
+		"x(text)[url]\n\n" +
+		"(a)[b](c)[d]\n\n" +
+		"(x\\)[y](a)[b]\n"
+	want := []position{{1, 1, true}, {3, 1, true}, {3, 12, true}, {5, 14, true}, {19, 2, true}, {21, 7, false}, {23, 8, false}}
+	snapshot, err := goldmark.New(string(config.FlavorCommonMark)).Parse(context.Background(), "test.md", []byte(input))
+	require.NoError(t, err)
+	diags, err := NewReversedLinkRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	require.NoError(t, err)
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn, diag.HasFix()})
+	}
+	assert.Equal(t, want, got)
 }

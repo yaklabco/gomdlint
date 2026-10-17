@@ -33,14 +33,20 @@ func NewReversedLinkRule() *ReversedLinkRule {
 	}
 }
 
-// reversedLinkPattern matches (text)[url] patterns.
-var reversedLinkPattern = regexp.MustCompile(`\(([^)]*)\)\[([^\]]*)\]`)
+// reversedLinkPattern is markdownlint's reversedLinkRe, anchored at a "("
+// that no backslash escapes: "(text)" without parentheses inside, then
+// "[destination]" that does not start like a footnote label. Its lookahead,
+// which rejects a match followed by "(", is checked by reversedLinkAt.
+var reversedLinkPattern = regexp.MustCompile(`^\(([^()]+)\)\[([^\]^][^\]]*)\]`)
 
-// reversedLinkMatchIndices is the minimum number of submatch indices required.
-// Pattern has 2 capture groups: full (0:1), text (2:3), url (4:5).
+// reversedLinkMatchIndices is the number of submatch indices
+// reversedLinkPattern produces: the match, the text, and the destination.
 const reversedLinkMatchIndices = 6
 
-// Apply checks for reversed link syntax in the file content.
+// Apply checks for reversed link syntax in the file content, as markdownlint
+// does: lines in code blocks and matches that overlap a code span are
+// skipped, and so are matches followed by "(" or whose text or destination
+// ends with a backslash.
 func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil {
 		return nil, nil
@@ -58,31 +64,20 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			continue
 		}
 
-		lineContent := lint.LineContent(ctx.File, lineNum)
-		matches := reversedLinkPattern.FindAllSubmatchIndex(lineContent, -1)
-
-		for _, match := range matches {
-			if len(match) < reversedLinkMatchIndices {
+		lineContent := lint.LineText(ctx.File, lineNum)
+		lineStart := ctx.File.Lines[lineNum-1].StartOffset + lint.LineTextOffset(ctx.File, lineNum)
+		for pos := 0; pos < len(lineContent); pos++ {
+			end, text, url, ok := reversedLinkAt(lineContent, pos)
+			if !ok {
 				continue
 			}
-
-			// match[0]:match[1] = full match
-			// match[2]:match[3] = text (inside parens)
-			// match[4]:match[5] = url (inside brackets)
-			text := string(lineContent[match[2]:match[3]])
-			url := string(lineContent[match[4]:match[5]])
-
-			line := ctx.File.Lines[lineNum-1]
-			startOffset := line.StartOffset + match[0]
-			endOffset := line.StartOffset + match[1]
-			inCode := false
-			for _, span := range ctx.CodeSpans() {
-				if span.SourceRange().Contains(startOffset) {
-					inCode = true
-					break
-				}
+			start := pos
+			pos = end - 1 // Like a global regexp, the next match starts after this one.
+			if strings.HasSuffix(text, "\\") || strings.HasSuffix(url, "\\") {
+				continue
 			}
-			if inCode {
+			startOffset, endOffset := lineStart+start, lineStart+end
+			if overlapsCodeSpan(ctx, startOffset, endOffset) {
 				continue
 			}
 
@@ -91,11 +86,13 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			newText := fmt.Sprintf("[%s](%s)", text, url)
 			builder.ReplaceRange(startOffset, endOffset, newText)
 
+			startLine, startColumn := ctx.File.LineAt(startOffset)
+			endLine, endColumn := ctx.File.LineAt(endOffset)
 			pos := mdast.SourcePosition{
-				StartLine:   lineNum,
-				StartColumn: match[0] + 1,
-				EndLine:     lineNum,
-				EndColumn:   match[1],
+				StartLine:   startLine,
+				StartColumn: startColumn,
+				EndLine:     endLine,
+				EndColumn:   endColumn,
 			}
 
 			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
@@ -109,6 +106,34 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	}
 
 	return verifyFixes(ctx, diags, fixAllowance{reversedLinks: true}), nil
+}
+
+// reversedLinkAt matches a reversed link starting at line[pos]: a "(" that
+// no backslash escapes, matching reversedLinkPattern and not followed by
+// "(". It returns the offset after the match, the text, and the destination.
+func reversedLinkAt(line []byte, pos int) (int, string, string, bool) {
+	if line[pos] != '(' || (pos > 0 && line[pos-1] == '\\') {
+		return 0, "", "", false
+	}
+	match := reversedLinkPattern.FindSubmatchIndex(line[pos:])
+	if len(match) < reversedLinkMatchIndices {
+		return 0, "", "", false
+	}
+	end := pos + match[1]
+	if end < len(line) && line[end] == '(' {
+		return 0, "", "", false
+	}
+	return end, string(line[pos+match[2] : pos+match[3]]), string(line[pos+match[4] : pos+match[5]]), true
+}
+
+// overlapsCodeSpan reports whether content[start:end] overlaps a code span.
+func overlapsCodeSpan(ctx *lint.RuleContext, start, end int) bool {
+	for _, span := range ctx.CodeSpans() {
+		if source := span.SourceRange(); source.StartOffset < end && start < source.EndOffset {
+			return true
+		}
+	}
+	return false
 }
 
 // LinkSpacesRule detects spaces inside link text: [ text ] instead of [text].
