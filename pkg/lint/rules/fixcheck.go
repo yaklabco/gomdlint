@@ -1068,7 +1068,7 @@ type docOutline struct {
 	blocks      []blockSummary
 	// fragments is true when the document holds anything that could be a
 	// fragment reference: a link or image whose destination holds "#", or
-	// a raw HTML tag that holds "#" or a character reference.
+	// raw HTML outside comments that holds "#" or a character reference.
 	fragments bool
 }
 
@@ -1090,9 +1090,18 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 			if strings.Contains(lint.LinkDestination(node), "#") || mayHoldHash(source) {
 				outline.fragments = true
 			}
-		case mdast.NodeHTMLBlock, mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
-			// Raw HTML is in HTML blocks and in inline content.
-			if tagsMayHoldHash(source) {
+		case mdast.NodeHTMLBlock:
+			if !lint.IsHTMLComment(node) && tagsMayHoldHash(source) {
+				outline.fragments = true
+			}
+		case mdast.NodeHTMLInline:
+			if !bytes.HasPrefix(source, []byte("<!--")) && mayHoldHash(source) {
+				outline.fragments = true
+			}
+		case mdast.NodeParagraph, mdast.NodeHeading, mdast.NodeTableCell:
+			// Raw HTML that the parser did not read as a tag, such as an
+			// unterminated one, is text of inline content.
+			if textTagsMayHoldHash(doc.Content, node) {
 				outline.fragments = true
 			}
 		}
@@ -1101,11 +1110,11 @@ func outlineOf(doc *mdast.FileSnapshot) docOutline {
 	return outline
 }
 
-// tagsMayHoldHash reports whether a tag in text, raw HTML or Markdown with
-// inline HTML, holds "#" or a character reference that could stand for it.
-// Attributes are not parsed: a tag runs from "<" and a letter, "/", "!" or
-// "?" to the first ">" outside quotes, or to the end of text, and is taken
-// whole. Comments and the text between tags are left out.
+// tagsMayHoldHash reports whether a tag in text, raw HTML, holds "#" or a
+// character reference that could stand for it. Attributes are not parsed: a
+// tag runs from "<" and a letter, "/", "!" or "?" to the first ">" outside
+// quotes, or to the end of text, and is taken whole. Comments and the text
+// between tags are left out.
 func tagsMayHoldHash(text []byte) bool {
 	for idx := 0; idx+1 < len(text); idx++ {
 		if text[idx] != '<' {
@@ -1117,6 +1126,42 @@ func tagsMayHoldHash(text []byte) bool {
 				return false
 			}
 			idx += len("<!--") + end + len("-->") - 1
+			continue
+		}
+		if next := text[idx+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {
+			continue
+		}
+		end := tagEnd(text, idx)
+		if mayHoldHash(text[idx:end]) {
+			return true
+		}
+		idx = end - 1
+	}
+	return false
+}
+
+// textTagsMayHoldHash reports whether the inline content of container holds
+// a tag in its text, outside code spans and the inline HTML the parser
+// read, that holds "#" or a character reference that could stand for it.
+// A "<" that a backslash escapes starts no tag. A tag runs to the first ">"
+// outside quotes, or to the end of the container, and is taken whole.
+func textTagsMayHoldHash(content []byte, container *mdast.Node) bool {
+	rng := container.SourceRange()
+	if rng.StartOffset < 0 || rng.EndOffset > len(content) {
+		return false
+	}
+	var parsed []mdast.SourceRange
+	//nolint:errcheck // Walk visitor never returns error.
+	_ = mdast.Walk(container, func(node *mdast.Node) error {
+		if node.Kind == mdast.NodeCodeSpan || node.Kind == mdast.NodeHTMLInline {
+			parsed = append(parsed, node.SourceRange())
+		}
+		return nil
+	})
+	text := content[:rng.EndOffset]
+	for idx := rng.StartOffset; idx+1 < len(text); idx++ {
+		if text[idx] != '<' || escapedAt(text, rng.StartOffset, idx) ||
+			insideRanges(parsed, mdast.SourceRange{StartOffset: idx, EndOffset: idx + 1}) {
 			continue
 		}
 		if next := text[idx+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {

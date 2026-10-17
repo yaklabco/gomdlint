@@ -1133,6 +1133,10 @@ func TestNoTrailingPunctuationRule_FragmentsInRawHTML(t *testing.T) {
 		{name: "tag spanning lines in an HTML block", input: "# Foo !\n\n<div>\n<a\nhref=\"#foo-\">jump</a>\n</div>\n"},
 		{name: "tag spanning lines in a paragraph", input: "# Foo !\n\nSee <a\nhref=\"#foo-\">jump</a>.\n"},
 		{name: "quoted greater-than sign before the hash", input: "# Foo !\n\n<div>\n<a title=\">\" href=\"#foo-\">jump</a>\n</div>\n"},
+		{name: "comment opener in a code span before a tag", input: "# Foo !\n\n`<!--` <a href=\"#foo-\">jump</a>\n"},
+		{name: "escaped comment opener before a tag", input: "# Foo !\n\n\\<!-- <a href=\"#foo-\">jump</a>\n"},
+		{name: "tag in a code span", input: "# Foo !\n\n`<a href=\"#foo-\">`\n", wantFix: true},
+		{name: "escaped tag", input: "# Foo !\n\n\\<a href=\"#foo-\">jump\n", wantFix: true},
 		{name: "hash in element text", input: "# Foo !\n\n<div>\n#hashtag text\n</div>\n", wantFix: true},
 		{name: "hash in a comment", input: "# Foo !\n\n<!-- #note -->\n", wantFix: true},
 	}
