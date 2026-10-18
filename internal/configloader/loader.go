@@ -466,11 +466,11 @@ func isTerminal(stream any) bool {
 // configuration layer to the canonical names that the rule's catalog entry
 // declares, such as max for markdownlint's line_length (see
 // lint.Registry.NormalizeOptions), so that layers merge option by option
-// whatever spelling each uses. A value of the wrong type is dropped, so the
-// rule uses its default, and an unknown option is kept, unread; the file's
-// warnings report both. Two spellings of one option in one rule's settings
-// are an error: either value could win. Options of a key that names no
-// rule stay as they are.
+// whatever spelling each uses. A value of the wrong type is dropped, as if
+// the layer did not set it, and an unknown option is kept, unread; the
+// file's warnings report both. Two spellings of one option in one rule's
+// settings are an error: either value could win. Options of a key that
+// names no rule stay as they are.
 func normalizeRuleOptions(cfg *config.Config, registry *lint.Registry) error {
 	for _, section := range []struct {
 		name  string

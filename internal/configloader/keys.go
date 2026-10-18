@@ -133,7 +133,7 @@ type optionWarning struct {
 // optionWarnings describes the problems of option, an entry under the
 // options of rule: an option that the rule does not read, with the closest
 // spellings, a value of the wrong type, or a list with items of the wrong
-// type, which loading drops so that the rule uses its default, and a value
+// type, which loading drops, as if the file did not set it, and a value
 // that the option does not allow. A warning about an item of a list names
 // the item's line. Two spellings of one option fail loading instead (see
 // normalizeRuleOptions).

@@ -58,6 +58,32 @@ func TestLoad_OptionSpellingsMergeByOption(t *testing.T) {
 	assert.Equal(t, map[string]any{"max": 100, "strict": true}, merged.Rules["MD013"].Options)
 }
 
+// TestLoad_WrongTypeCountsAsUnset checks that a value of the wrong type,
+// which the file's warnings report as ignored, counts as unset when layers
+// merge: the option keeps the value of the layer before, as if the project
+// config did not set it.
+func TestLoad_WrongTypeCountsAsUnset(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	user := filepath.Join(dir, "user.yml")
+	project := filepath.Join(dir, "project.yml")
+	require.NoError(t, os.WriteFile(user, []byte(
+		"rules:\n  MD013:\n    options:\n      max: 90\n  MD033:\n    options:\n      allowed_elements: [br]\n"), 0o600))
+	require.NoError(t, os.WriteFile(project, []byte(
+		"rules:\n  MD013:\n    options:\n      max: eighty\n      tables: \"no\"\n"+
+			"  MD033:\n    options:\n      allowed_elements: [1]\n"), 0o600))
+
+	userCfg, _, err := loadConfigFile(user)
+	require.NoError(t, err)
+	projectCfg, _, err := loadConfigFile(project)
+	require.NoError(t, err)
+
+	merged := merge(userCfg, projectCfg)
+	assert.Equal(t, map[string]any{"max": 90}, merged.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"allowed_elements": []any{"br"}}, merged.Rules["MD033"].Options)
+}
+
 // TestLoad_WarnsAboutOptions checks the warnings about rule options that
 // a rule cannot use: an unknown option, with the closest spelling, a value
 // of the wrong type, which is dropped so the rule uses its default, and a

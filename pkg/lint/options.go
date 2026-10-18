@@ -167,8 +167,8 @@ const (
 
 	// OptionIssueWrongType marks a value of the wrong type, or an item of
 	// the wrong type in a list (see OptionIssue.Item). NormalizeOptions
-	// drops the option either way, so the rule uses its default: a list
-	// with a wrong item is a value of the wrong type.
+	// drops the option either way, as if the options did not set it: a
+	// list with a wrong item is a value of the wrong type.
 	OptionIssueWrongType
 
 	// OptionIssueNotAllowed marks a string that the option does not allow.
@@ -288,9 +288,9 @@ func describeOptionValue(value any) string {
 //
 //   - a key that is an alias, such as markdownlint's spelling, becomes the
 //     canonical name, and an inverted alias's boolean value is negated;
-//   - a value of the wrong type is dropped, so the rule uses the option's
-//     default, and so is a list with an item of the wrong type, with an
-//     issue for each such item;
+//   - a value of the wrong type is dropped, as if options did not set it,
+//     and so is a list with an item of the wrong type, with an issue for
+//     each such item;
 //   - a string that the option does not allow is kept, because rules treat
 //     such values as markdownlint does;
 //   - of two spellings of one option, the canonical one is kept;
