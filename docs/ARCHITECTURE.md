@@ -915,7 +915,12 @@ replaces project discovery. A markdownlint config is read as
 markdownlint-cli2 reads one that it finds, whatever its name
 (`lint.ReadMarkdownlintConfig`). The reader tries JSON with comments and
 trailing commas first, which `internal/jsonc` blanks for the JSON decoder,
-and YAML second.
+and YAML second. yaml.v3 parses the YAML into nodes, and
+`pkg/lint/markdownlint_yaml.go` turns them into values as js-yaml 5.4.1's
+core schema reads them for markdownlint-cli2: plain scalars as YAML 1.2
+reads them, every key a string, a key written twice an error anywhere in
+the document, only the core schema's tags, and no merge keys. gomdlint's
+own config files keep their own YAML decoder.
 
 ### Per-Rule Resolution
 

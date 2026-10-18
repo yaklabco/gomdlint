@@ -366,6 +366,17 @@ formats change. The first entries under Changed may need action.
   the other keys still apply. Of two spellings of one option, markdownlint's
   applies. The comments accept JSON with comments and trailing commas, and
   YAML, as markdownlint-cli2 does.
+- YAML in markdownlint configs and `markdownlint-configure-file` comments
+  reads as js-yaml 5 reads it for markdownlint-cli2, with YAML 1.2's core
+  schema. `0b0` is a string, which turns a rule on, where gomdlint read the
+  number 0, which turned it off. A numeric key is a string, so a rule's
+  object with one, such as `{line_length: 200, 0: x}`, keeps its other
+  options, where gomdlint lost the whole object. A `%YAML 1.2` directive
+  loads, where gomdlint failed. An unknown tag such as `!unknown`, and a
+  key written twice anywhere in the file, even inside a list or as `16`
+  and `0x10`, are errors, which gomdlint ignored or accepted. A merge key
+  (`<<`) is an ordinary key, which names no rule, so the settings it would
+  merge no longer apply, as in markdownlint-cli2 0.23.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up
   after wide characters and tabs.

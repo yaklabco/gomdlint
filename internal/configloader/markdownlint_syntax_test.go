@@ -340,3 +340,54 @@ func TestLoad_AppliesMarkdownlintConfigWithTrailingCommas(t *testing.T) {
 	assert.False(t, *rule.Enabled)
 	assert.InDelta(t, 3, result.Config.Rules["MD009"].Options["br_spaces"], 0)
 }
+
+// TestConvertMarkdownlintConfig_YAMLAsJSYAMLReadsIt covers YAML that
+// markdownlint-cli2 0.23.3 reads with js-yaml 5.4.1's core schema, where
+// gomdlint used to decode YAML 1.1 with yaml.v3. 0b0 is a string, which
+// turns no-trailing-spaces (MD009) on, and 0o0 is the number 0, which turns
+// no-hard-tabs (MD010) off. A numeric key is a string, so line-length
+// (MD013) reads its object, with line_length 200, and warns about the
+// option named 0 on its line, where gomdlint used to lose the whole object.
+// A %YAML directive of version 1.2 loads, where gomdlint used to fail.
+func TestConvertMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
+	t.Parallel()
+
+	result := convertFile(t, ".markdownlint.yaml", "MD009: 0b0\nMD010: 0o0\nMD013:\n  line_length: 200\n  0: ignored\n")
+
+	assert.True(t, ruleRuns(t, result, "MD009"))
+	assert.False(t, ruleRuns(t, result, "MD010"))
+	assert.True(t, ruleRuns(t, result, "MD013"))
+	assert.EqualValues(t, 200, result.Config.Rules["MD013"].Options["max"])
+	assert.Equal(t, []string{`unknown option "0" for line-length; it is ignored`}, result.Warnings)
+	assert.Equal(t, 5, result.WarningLine(0))
+
+	result = convertFile(t, ".markdownlint.yaml", "%YAML 1.2\n---\nMD013: false\n")
+
+	assert.True(t, lineLengthOff(t, result))
+	assert.Empty(t, result.Warnings)
+}
+
+// TestConvertMarkdownlintConfig_YAMLThatJSYAMLRejects covers YAML that
+// js-yaml 5.4.1 rejects, so markdownlint-cli2 0.23.3 fails to load the
+// config: an unknown tag, which gomdlint used to ignore, a tag that the
+// core schema lacks, keys that are duplicates once they are strings, and a
+// key written twice in a list, which gomdlint used to load, from a JSON
+// file name too, as a list that holds no settings.
+func TestConvertMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ file, content string }{
+		{".markdownlint.yaml", "!unknown {MD013: false}\n"},
+		{".markdownlint.yaml", "MD013: !!binary aGk=\n"},
+		{".markdownlint.yaml", "0x10: a\n16: b\nMD013: false\n"},
+		{".markdownlint.yaml", "- MD013: true\n  MD013: false\n"},
+		{".markdownlint.json", "- MD013: true\n  MD013: false\n"},
+	} {
+		path := filepath.Join(t.TempDir(), tt.file)
+		require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o600))
+
+		_, err := ConvertMarkdownlintConfig(path)
+
+		assert.Error(t, err, tt.content)
+	}
+}

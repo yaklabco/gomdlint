@@ -319,7 +319,7 @@ func (l *sourceLocator) entry(mapping *yaml.Node, name string) *writtenEntry {
 	}
 	index, indexed := l.taken[mapping]
 	if !indexed {
-		entries := writtenEntries(mapping)
+		entries := markdownlintEntries(mapping)
 		l.reads += len(entries)
 		index = indexTakenEntries(entries)
 		if l.taken == nil {
@@ -330,21 +330,38 @@ func (l *sourceLocator) entry(mapping *yaml.Node, name string) *writtenEntry {
 	return index[name]
 }
 
+// markdownlintEntries lists the entries written in mapping itself, each
+// named by the text of its key. js-yaml 5, which markdownlint-cli2 reads
+// YAML with, reads a merge key (<<) as an ordinary key, so a merged mapping
+// brings in no entries, and JSON has no merge keys. A key that js-yaml
+// reads as another string, such as 0x10 as "16", is not found by that
+// string, which leaves a warning about it without a line.
+func markdownlintEntries(mapping *yaml.Node) []writtenEntry {
+	if mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	entries := make([]writtenEntry, 0, len(mapping.Content)/2)
+	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
+		key := mapping.Content[idx]
+		named := key
+		for named.Kind == yaml.AliasNode && named.Alias != nil {
+			named = named.Alias
+		}
+		if named.Kind == yaml.ScalarNode {
+			entries = append(entries, writtenEntry{name: named.Value, key: key, value: mapping.Content[idx+1]})
+		}
+	}
+	return entries
+}
+
 // indexTakenEntries indexes entries, the entries of a mapping as
-// writtenEntries lists them, by name, keeping for each name the entry
-// whose value the config takes: the last one written in the mapping
-// itself, since JSON keeps the last of a key written twice and YAML has
-// no key twice, or else the first that a merge key brings in, as YAML
-// takes it.
+// markdownlintEntries lists them, by name, keeping for each name the entry
+// whose value the config takes: the last one written, since JSON keeps the
+// last of a key written twice, and YAML has no key twice.
 func indexTakenEntries(entries []writtenEntry) map[string]*writtenEntry {
 	index := make(map[string]*writtenEntry, len(entries))
 	for idx := range entries {
-		entry := &entries[idx]
-		// A mapping's own entry replaces any entry before it. A merged
-		// entry is kept only when it is the first entry with its name.
-		if _, found := index[entry.name]; !found || entry.merge == nil {
-			index[entry.name] = entry
-		}
+		index[entries[idx].name] = &entries[idx]
 	}
 	return index
 }

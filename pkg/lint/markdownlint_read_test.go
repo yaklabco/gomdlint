@@ -57,9 +57,10 @@ func TestReadMarkdownlintConfig(t *testing.T) {
 			syntax: lint.MarkdownlintYAML, keys: []string{"MD013"}, values: []any{false},
 		},
 		{
+			// js-yaml 5's core schema reads a merge key as an ordinary key.
 			name: "YAML merge key", text: "x: &ws\n  whitespace: false\n<<: *ws\nMD009: true\n",
-			syntax: lint.MarkdownlintYAML, keys: []string{"x", "whitespace", "MD009"},
-			values: []any{map[string]any{"whitespace": false}, false, true},
+			syntax: lint.MarkdownlintYAML, keys: []string{"x", "<<", "MD009"},
+			values: []any{map[string]any{"whitespace": false}, map[string]any{"whitespace": false}, true},
 		},
 	}
 

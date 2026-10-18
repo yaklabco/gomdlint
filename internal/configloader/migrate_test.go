@@ -598,11 +598,10 @@ func convertFile(t *testing.T, name, content string) *MigrationResult {
 // of markdownlint-cli2 read it. For each JSON config, markdownlint 0.41.1
 // leaves MD009 on exactly when md009 is set, and markdownlint-cli2 0.23.3
 // does the same for the JSONC and YAML files. markdownlint-cli2 reads YAML
-// with js-yaml 5, which reads a merge key (<<) as an ordinary key that
-// names nothing, while gomdlint applies merge keys, as YAML 1.1 and js-yaml
-// 4 do, with the merged keys in the place of the merge key and a key
-// written in the mapping keeping the first place of the merged key it
-// replaces, as js-yaml 4 orders them.
+// with js-yaml 5 and its core schema, which reads a merge key (<<) as an
+// ordinary key that names nothing, so a merge changes no rule, and gomdlint
+// reads it the same way. gomdlint used to apply merge keys, as YAML 1.1 and
+// js-yaml 4 do.
 func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 	t.Parallel()
 
@@ -629,7 +628,7 @@ func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 		{name: "YAML rule after tag", file: ".markdownlint.yml", content: "whitespace: false\nMD009: true\n", md009: true},
 		{
 			name: "YAML merge after rule", file: ".markdownlint.yaml",
-			content: "x: &ws\n  whitespace: false\nMD009: true\n<<: *ws\n",
+			content: "x: &ws\n  whitespace: false\nMD009: true\n<<: *ws\n", md009: true,
 		},
 		{
 			name: "YAML merge before rule", file: ".markdownlint.yaml",
@@ -637,15 +636,15 @@ func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 		},
 		{
 			name: "YAML key replacing a merged key", file: ".markdownlint.yaml",
-			content: "x: &m\n  MD009: false\n  whitespace: false\n<<: *m\nMD009: true\n",
+			content: "x: &m\n  MD009: false\n  whitespace: false\n<<: *m\nMD009: true\n", md009: true,
 		},
 		{
 			name: "YAML merges in sequence", file: ".markdownlint.yaml",
-			content: "a: &a\n  MD009: true\nb: &b\n  whitespace: false\n  MD009: false\n<<: [*a, *b]\n",
+			content: "a: &a\n  MD009: true\nb: &b\n  whitespace: false\n  MD009: false\n<<: [*a, *b]\n", md009: true,
 		},
 		{
 			name: "YAML mapping merged twice", file: ".markdownlint.yaml",
-			content: "a: &a\n  MD009: true\nb: &b\n  <<: *a\n  whitespace: false\n<<: [*b, *a]\n",
+			content: "a: &a\n  MD009: true\nb: &b\n  <<: *a\n  whitespace: false\n<<: [*b, *a]\n", md009: true,
 		},
 	}
 	for _, tt := range tests {
@@ -654,9 +653,21 @@ func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 
 			result := convertFile(t, tt.file, tt.content)
 
-			requireRuleEnabled(t, result, "MD009", tt.md009)
+			assert.Equal(t, tt.md009, ruleRuns(t, result, "MD009"))
 		})
 	}
+}
+
+// ruleRuns reports whether result runs the rule with the given ID: as its
+// own setting says, or else as the baseline that every rule gets says.
+func ruleRuns(t *testing.T, result *MigrationResult, ruleID string) bool {
+	t.Helper()
+	rule, ok := result.Config.Rules[ruleID]
+	if !ok {
+		rule = result.Config.RuleDefaults[ruleID]
+	}
+	require.NotNil(t, rule.Enabled, ruleID)
+	return *rule.Enabled
 }
 
 // TestConvertMarkdownlintConfig_DefaultKey covers markdownlint's default

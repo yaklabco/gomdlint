@@ -1,0 +1,722 @@
+package lint
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"math/big"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
+)
+
+// markdownlint-cli2 0.23.3 reads YAML with js-yaml 5.4.1's load and its
+// default schema, the core schema, which knows the tags str, seq, map,
+// null, bool, int and float, and reads plain scalars as YAML 1.2's core
+// schema does. Its mappings are JavaScript objects, so every key becomes a
+// string, and a key whose string repeats another's is an error. This file
+// reads markdownlint YAML into the same values: yaml.v3 parses the text into
+// nodes, and the converter below gives each node js-yaml's value, without
+// yaml.v3's own decoding, which reads scalars as YAML 1.1 does, applies
+// merge keys, and compares every pair of keys of a mapping.
+
+// yamlMaxDepth is js-yaml's maxDepth: a node may sit at most this many
+// levels deep, counting the document's root as the first level.
+const yamlMaxDepth = 100
+
+// jsNull is null as JavaScript writes it, which String(null) gives.
+const jsNull = "null"
+
+// errMoreDocuments reports YAML text that holds more than one document.
+var errMoreDocuments = errors.New("expected one document, but found more")
+
+// errDirectivesEnd reports directives that no "---" follows.
+var errDirectivesEnd = errors.New("directives end mark is expected")
+
+// The patterns of js-yaml 5.4.1's core schema (src/tag/scalar/*_core.ts).
+var (
+	// yamlImplicitInt is the int tag's pattern for a plain scalar.
+	yamlImplicitInt = regexp.MustCompile(`^(?:0o[0-7]+|0x[0-9a-fA-F]+|[-+]?[0-9]+)$`)
+
+	// yamlExplicitInt is its pattern for a scalar tagged !!int.
+	yamlExplicitInt = regexp.MustCompile(`^(?:[-+]?0b[0-1]+|[-+]?0o[0-7]+|[-+]?0x[0-9a-fA-F]+|[-+]?[0-9]+)$`)
+
+	// yamlFloat is the float tag's pattern, tagged or not.
+	yamlFloat = regexp.MustCompile(`^(?:[-+]?[0-9]+(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?|[-+]?\.[0-9]+(?:[eE][-+]?[0-9]+)?|` +
+		`[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$`)
+
+	// yamlVersion is the form of the argument of a %YAML directive.
+	yamlVersion = regexp.MustCompile(`^([0-9]+)\.[0-9]+$`)
+)
+
+// readMarkdownlintYAML reads text as a markdownlint configuration in YAML,
+// as js-yaml 5.4.1's load reads it with its default core schema. The text
+// must hold one document, or none, and nothing after it but comments and
+// an end marker: yaml.v3 alone would ignore a second document, or text
+// after a mapping in flow style, such as {"MD013": false} trailing. The
+// whole document is read, so an error anywhere in it, such as a key
+// written twice in a list, rejects the text, as in js-yaml, even when the
+// document holds no object.
+func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
+	text, err := jsYAMLPrologue(text)
+	if err != nil {
+		return nil, err
+	}
+	source := &MarkdownlintSource{Settings: &MarkdownlintSettings{}, Syntax: MarkdownlintYAML}
+	decoder := yaml.NewDecoder(bytes.NewReader(text))
+	var doc yaml.Node
+	if err := decoder.Decode(&doc); errors.Is(err, io.EOF) {
+		return source, nil // Empty text, or nothing but comments.
+	} else if err != nil {
+		return nil, err //nolint:wrapcheck // The caller says what it read.
+	}
+	if err := decoder.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, err //nolint:wrapcheck // The caller says what it read.
+		}
+		return nil, errMoreDocuments
+	}
+	if len(doc.Content) == 0 {
+		return source, nil
+	}
+
+	converter := newYAMLConverter(text)
+	root := doc.Content[0]
+	if root.Kind == yaml.MappingNode {
+		settings, err := converter.root(root)
+		if err != nil {
+			return nil, err
+		}
+		source.Settings = settings
+		return source, nil
+	}
+	value, err := converter.value(root, 1)
+	if err != nil {
+		return nil, err
+	}
+	switch value.(type) {
+	case nil, map[string]any:
+		// Null, or a scalar tagged !!map, which holds no keys.
+	case []any:
+		source.NotObject = kindList
+	case string:
+		source.NotObject = kindString
+	case float64:
+		source.NotObject = kindNumber
+	case bool:
+		source.NotObject = kindBoolean
+	default:
+		source.NotObject = kindOther
+	}
+	return source, nil
+}
+
+// jsYAMLPrologue returns text with the directives at its start that js-yaml
+// accepts and yaml.v3 does not made acceptable to yaml.v3, keeping every
+// byte's offset. js-yaml accepts a %YAML directive of any version 1.x and
+// ignores directives other than %YAML and %TAG, while yaml.v3, a port of
+// libyaml, accepts version 1.1 only and rejects other directives. So the
+// version of a %YAML directive that js-yaml accepts becomes 1.1, and an
+// unknown directive becomes a comment. js-yaml requires the "---" that ends
+// the directives, which a directive turned comment no longer makes yaml.v3
+// check, so its absence is an error here. Directives that js-yaml rejects
+// stay as they are, and yaml.v3 rejects them too.
+//
+// js-yaml counts no indentation on the first line of the text, which no
+// line break precedes, so a directive or a document marker there may
+// follow spaces, as in the parameter of a configure-file comment, which
+// starts after the space that ends the comment's kind. yaml.v3 requires
+// them at the start of the line, so such a line's leading whitespace moves
+// to its end.
+func jsYAMLPrologue(text []byte) ([]byte, error) {
+	start := 0
+	if bytes.HasPrefix(text, []byte("\ufeff")) {
+		start = len("\ufeff")
+	}
+	var rewritten []byte
+	if first := text[start:lineEnd(text, start)]; len(first) > 0 && (first[0] == ' ' || first[0] == '\t') {
+		content := bytes.TrimLeft(first, " \t")
+		if bytes.HasPrefix(content, []byte("%")) || isDocumentStart(content) || isDocumentEnd(content) {
+			rewritten = bytes.Clone(text)
+			copy(rewritten[start:], content)
+			copy(rewritten[start+len(content):start+len(first)], first[:len(first)-len(content)])
+			text = rewritten
+		}
+	}
+	directives := false
+	for pos := start; pos < len(text); {
+		end := lineEnd(text, pos)
+		line := text[pos:end]
+		next := end
+		if next < len(text) && text[next] == '\r' && next+1 < len(text) && text[next+1] == '\n' {
+			next++
+		}
+		if next < len(text) {
+			next++
+		}
+
+		trimmed := bytes.TrimLeft(line, " \t")
+		switch {
+		case len(trimmed) == 0 || trimmed[0] == '#':
+		case line[0] == '%':
+			directives = true
+			if replacement := rewriteDirective(line); replacement != nil {
+				if rewritten == nil {
+					rewritten = bytes.Clone(text)
+				}
+				copy(rewritten[pos:end], replacement)
+			}
+		default:
+			if directives && !isDocumentStart(line) {
+				return nil, errDirectivesEnd
+			}
+			if rewritten != nil {
+				return rewritten, nil
+			}
+			return text, nil
+		}
+		pos = next
+	}
+	if directives {
+		return nil, errDirectivesEnd
+	}
+	if rewritten != nil {
+		return rewritten, nil
+	}
+	return text, nil
+}
+
+// rewriteDirective returns the line of a directive as yaml.v3 should read
+// it, or nil when it should read the line as it is (see jsYAMLPrologue).
+// The result has the line's length.
+func rewriteDirective(line []byte) []byte {
+	fields := strings.Fields(string(line[1:]))
+	name, args := "", fields
+	if len(fields) > 0 && !strings.HasPrefix(fields[0], "#") {
+		name, args = fields[0], fields[1:]
+	}
+	for idx, arg := range args {
+		if strings.HasPrefix(arg, "#") {
+			args = args[:idx]
+			break
+		}
+	}
+	switch name {
+	case "":
+		return nil // js-yaml rejects a directive without a name.
+	case "TAG":
+		return nil
+	case "YAML":
+		match := yamlVersion.FindStringSubmatch(strings.Join(args, " "))
+		if len(args) != 1 || match == nil {
+			return nil
+		}
+		if major, err := strconv.Atoi(match[1]); err != nil || major != 1 {
+			return nil
+		}
+		at := bytes.Index(line, []byte(args[0]))
+		replacement := bytes.Clone(line)
+		copy(replacement[at:at+len(args[0])], "1.1"+strings.Repeat(" ", len(args[0])-len("1.1")))
+		return replacement
+	default:
+		replacement := bytes.Clone(line)
+		replacement[0] = '#' // js-yaml ignores the directive.
+		return replacement
+	}
+}
+
+// lineEnd returns the offset of the line feed or carriage return that ends
+// the line that starts at start, or the end of text.
+func lineEnd(text []byte, start int) int {
+	if end := bytes.IndexAny(text[start:], "\r\n"); end >= 0 {
+		return start + end
+	}
+	return len(text)
+}
+
+// isDocumentStart reports whether line starts with the marker "---" that
+// starts a document, followed by whitespace or nothing.
+func isDocumentStart(line []byte) bool {
+	return isMarker(line, "---")
+}
+
+// isDocumentEnd reports whether line starts with the marker "..." that ends
+// a document, followed by whitespace or nothing.
+func isDocumentEnd(line []byte) bool {
+	return isMarker(line, "...")
+}
+
+// isMarker reports whether line starts with marker, followed by whitespace
+// or nothing.
+func isMarker(line []byte, marker string) bool {
+	return bytes.HasPrefix(line, []byte(marker)) && (len(line) == len(marker) || line[3] == ' ' || line[3] == '\t')
+}
+
+// yamlConverter converts the nodes of one YAML document to the values that
+// js-yaml 5.4.1 reads from them with its default core schema.
+type yamlConverter struct {
+	// text is the document's text, in which nodes have their positions.
+	text []byte
+
+	// lineStarts holds the offset of the start of each line of text, as
+	// yaml.v3 counts lines, to find a node from its position.
+	lineStarts []int
+
+	// done holds the values of the anchored nodes converted so far. js-yaml
+	// reads an alias as the value of its anchor itself, so values shared
+	// this way are converted once, however many aliases repeat them.
+	done map[*yaml.Node]any
+
+	// converting holds the anchored nodes whose conversion is under way.
+	converting map[*yaml.Node]bool
+}
+
+// newYAMLConverter returns a converter for the nodes of a document of text.
+func newYAMLConverter(text []byte) *yamlConverter {
+	return &yamlConverter{text: text, done: make(map[*yaml.Node]any), converting: make(map[*yaml.Node]bool)}
+}
+
+// root converts node, the mapping at the root of a document, into
+// settings, keeping its keys in the order they are written.
+func (c *yamlConverter) root(node *yaml.Node) (*MarkdownlintSettings, error) {
+	c.enter(node)
+	pairs, err := c.mapping(node, 1)
+	c.leave(node, pairsValue(pairs))
+	if err != nil {
+		return nil, err
+	}
+	settings := &MarkdownlintSettings{}
+	for _, pair := range pairs {
+		settings.Set(pair.Key, pair.Value)
+	}
+	return settings, nil
+}
+
+// enter records that node's conversion is under way, when aliases may name
+// it.
+func (c *yamlConverter) enter(node *yaml.Node) {
+	if node.Anchor != "" {
+		c.converting[node] = true
+	}
+}
+
+// leave records value as the value of node, when aliases may name it.
+func (c *yamlConverter) leave(node *yaml.Node, value any) {
+	if node.Anchor != "" {
+		delete(c.converting, node)
+		c.done[node] = value
+	}
+}
+
+// value converts node, which sits depth levels deep in the document. A
+// mapping becomes a map[string]any, a sequence a []any, and a scalar nil,
+// a bool, a float64 or a string.
+func (c *yamlConverter) value(node *yaml.Node, depth int) (any, error) {
+	if node.Kind == yaml.AliasNode {
+		return c.alias(node), nil
+	}
+	if depth > yamlMaxDepth {
+		return nil, fmt.Errorf("line %d: nesting exceeded the maximum depth of %d", node.Line, yamlMaxDepth)
+	}
+	c.enter(node)
+	var value any
+	var err error
+	switch node.Kind {
+	case yaml.MappingNode:
+		var pairs []MarkdownlintSetting
+		pairs, err = c.mapping(node, depth)
+		value = pairsValue(pairs)
+	case yaml.SequenceNode:
+		value, err = c.sequence(node, depth)
+	default:
+		value, err = c.scalar(node)
+	}
+	c.leave(node, value)
+	return value, err
+}
+
+// alias returns the value of the node that node, an alias, names. js-yaml
+// reads an alias inside the node it names as a value that holds itself;
+// that reads as an empty collection of the node's kind here, so that no
+// value holds a cycle.
+func (c *yamlConverter) alias(node *yaml.Node) any {
+	target := node.Alias
+	if value, ok := c.done[target]; ok {
+		return value
+	}
+	if target.Kind == yaml.MappingNode {
+		return map[string]any{}
+	}
+	return []any{}
+}
+
+// pairsValue returns the pairs of a mapping as a map.
+func pairsValue(pairs []MarkdownlintSetting) map[string]any {
+	value := make(map[string]any, len(pairs))
+	for _, pair := range pairs {
+		value[pair.Key] = pair.Value
+	}
+	return value
+}
+
+// mapping converts the pairs of node, a mapping that sits depth levels deep,
+// in the order they are written. Each key becomes a string, as the key of a
+// JavaScript object does (see jsString), and a key whose string repeats an
+// earlier one's is an error, found in constant time per key.
+func (c *yamlConverter) mapping(node *yaml.Node, depth int) ([]MarkdownlintSetting, error) {
+	if node.Style&yaml.TaggedStyle != 0 && node.Tag != "!!map" {
+		return nil, fmt.Errorf("line %d: unknown mapping tag %s", node.Line, node.Tag)
+	}
+	pairs := make([]MarkdownlintSetting, 0, len(node.Content)/2)
+	seen := make(map[string]bool, len(node.Content)/2)
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode, valueNode := node.Content[idx], node.Content[idx+1]
+		key, err := c.value(keyNode, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		name, ok := jsString(key)
+		if !ok {
+			return nil, fmt.Errorf("line %d: a mapping or a sequence cannot be a key", keyNode.Line)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("line %d: duplicated mapping key %q", keyNode.Line, name)
+		}
+		seen[name] = true
+		value, err := c.value(valueNode, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		pairs = append(pairs, MarkdownlintSetting{Key: name, Value: value})
+	}
+	return pairs, nil
+}
+
+// sequence converts the items of node, a sequence that sits depth levels
+// deep.
+func (c *yamlConverter) sequence(node *yaml.Node, depth int) ([]any, error) {
+	if node.Style&yaml.TaggedStyle != 0 && node.Tag != "!!seq" {
+		return nil, fmt.Errorf("line %d: unknown sequence tag %s", node.Line, node.Tag)
+	}
+	items := make([]any, len(node.Content))
+	for idx, item := range node.Content {
+		value, err := c.value(item, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		items[idx] = value
+	}
+	return items, nil
+}
+
+// scalar converts node, a scalar, as js-yaml's core schema reads it. A
+// quoted scalar, a block scalar and a scalar with the non-specific tag !
+// are strings. A plain scalar resolves to null, a bool, an int or a float
+// when its text has one of their forms (see implicitScalar), and is a
+// string otherwise. An explicit tag must be one that the schema knows.
+func (c *yamlConverter) scalar(node *yaml.Node) (any, error) {
+	if node.Style&yaml.TaggedStyle != 0 {
+		return explicitScalar(node)
+	}
+	if node.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) != 0 ||
+		c.nonSpecific(node) {
+		return node.Value, nil
+	}
+	return implicitScalar(node.Value), nil
+}
+
+// nonSpecific reports whether node, a plain scalar that yaml.v3 records no
+// tag for, has the non-specific tag ! in the text, which yaml.v3 does not
+// record: whether the node starts with !, after its anchor if it has one.
+func (c *yamlConverter) nonSpecific(node *yaml.Node) bool {
+	at, ok := c.offset(node.Line, node.Column)
+	if !ok {
+		return false
+	}
+	if node.Anchor != "" && at < len(c.text) && c.text[at] == '&' {
+		at += 1 + len(node.Anchor)
+		for at < len(c.text) && (c.text[at] == ' ' || c.text[at] == '\t') {
+			at++
+		}
+	}
+	return at < len(c.text) && c.text[at] == '!' &&
+		(at+1 == len(c.text) || strings.IndexByte(" \t\r\n", c.text[at+1]) >= 0)
+}
+
+// offset returns the offset in the converter's text of the character at
+// line and column, both counted from 1 as yaml.v3 counts them: lines end at
+// a line feed, a carriage return or both, or at the characters U+0085,
+// U+2028 and U+2029, and columns count characters.
+func (c *yamlConverter) offset(line, column int) (int, bool) {
+	if c.lineStarts == nil {
+		c.lineStarts = yamlLineStarts(c.text)
+	}
+	if line < 1 || line > len(c.lineStarts) || column < 1 {
+		return 0, false
+	}
+	at := c.lineStarts[line-1]
+	for range column - 1 {
+		if at >= len(c.text) {
+			return 0, false
+		}
+		_, size := utf8.DecodeRune(c.text[at:])
+		at += size
+	}
+	return at, true
+}
+
+// yamlLineStarts returns the offset of the start of each line of text, with
+// lines broken as yaml.v3 breaks them (see yamlConverter.offset).
+func yamlLineStarts(text []byte) []int {
+	starts := []int{0}
+	if bytes.HasPrefix(text, []byte("\ufeff")) {
+		starts[0] = len("\ufeff")
+	}
+	for at := starts[0]; at < len(text); {
+		char, size := utf8.DecodeRune(text[at:])
+		at += size
+		switch char {
+		case '\r':
+			if at < len(text) && text[at] == '\n' {
+				at++
+			}
+		case '\n', '\u0085', '\u2028', '\u2029':
+		default:
+			continue
+		}
+		starts = append(starts, at)
+	}
+	return starts
+}
+
+// explicitScalar converts node, a scalar with an explicit tag, as js-yaml's
+// core schema reads it: str keeps the text, null, bool, int and float
+// require text of their forms, and map and seq an empty text, which gives
+// an empty collection. Every other tag is unknown.
+func explicitScalar(node *yaml.Node) (any, error) {
+	value := node.Value
+	switch node.Tag {
+	case "!!str":
+		return value, nil
+	case "!!null":
+		if isYAMLNull(value) {
+			return nil, nil //nolint:nilnil // nil is the null that the tag asks for.
+		}
+	case "!!bool":
+		if boolean, ok := yamlBool(value); ok {
+			return boolean, nil
+		}
+	case "!!int":
+		if yamlExplicitInt.MatchString(value) {
+			if number, ok := yamlInt(value); ok {
+				return number, nil
+			}
+		}
+	case "!!float":
+		if number, ok := yamlFloatValue(value); ok {
+			return number, nil
+		}
+	case "!!map":
+		if value == "" {
+			return map[string]any{}, nil
+		}
+	case "!!seq":
+		if value == "" {
+			return []any{}, nil
+		}
+	default:
+		return nil, fmt.Errorf("line %d: unknown scalar tag %s", node.Line, node.Tag)
+	}
+	return nil, fmt.Errorf("line %d: cannot read %q with the explicit tag %s", node.Line, value, node.Tag)
+}
+
+// implicitScalar converts the text of a plain scalar as js-yaml's core
+// schema resolves it: null, a bool, an int or a float when the text has
+// one of their forms, each tried only for the first characters it can start
+// with, and a string otherwise.
+func implicitScalar(text string) any {
+	if text == "" {
+		return nil
+	}
+	switch first := text[0]; {
+	case first == '~' || first == 'n' || first == 'N':
+		if isYAMLNull(text) {
+			return nil
+		}
+	case first == 't' || first == 'T' || first == 'f' || first == 'F':
+		if boolean, ok := yamlBool(text); ok {
+			return boolean
+		}
+	case first == '-' || first == '+' || '0' <= first && first <= '9':
+		if yamlImplicitInt.MatchString(text) {
+			if number, ok := yamlInt(text); ok {
+				return number
+			}
+		}
+		if number, ok := yamlFloatValue(text); ok {
+			return number
+		}
+	case first == '.':
+		if number, ok := yamlFloatValue(text); ok {
+			return number
+		}
+	}
+	return text
+}
+
+// isYAMLNull reports whether text is a null of js-yaml's core schema.
+func isYAMLNull(text string) bool {
+	switch text {
+	case "", "~", jsNull, "Null", "NULL":
+		return true
+	}
+	return false
+}
+
+// yamlBool returns the bool of js-yaml's core schema that text spells, and
+// whether it spells one.
+func yamlBool(text string) (bool, bool) {
+	switch text {
+	case "true", "True", "TRUE":
+		return true, true
+	case "false", "False", "FALSE":
+		return false, true
+	}
+	return false, false
+}
+
+// yamlInt returns the number that text, which matches one of the int tag's
+// patterns, holds, as js-yaml's parseYamlInteger reads it: a sign, then a
+// binary, octal or hexadecimal number after 0b, 0o or 0x, or a decimal one,
+// rounded to the nearest float64. A number too large for a float64 is no
+// int, as in js-yaml, which leaves it to the next tag.
+func yamlInt(text string) (float64, bool) {
+	sign := 1.0
+	switch text[0] {
+	case '-':
+		sign, text = -1, text[1:]
+	case '+':
+		text = text[1:]
+	}
+	const decimal = 10
+	base := decimal
+	for _, prefix := range []struct {
+		text string
+		base int
+	}{{"0b", 2}, {"0o", 8}, {"0x", 16}} {
+		if strings.HasPrefix(text, prefix.text) {
+			text, base = text[len(prefix.text):], prefix.base
+			break
+		}
+	}
+	var number float64
+	if base == decimal {
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
+			return 0, false
+		}
+		number = parsed
+	} else {
+		integer, ok := new(big.Int).SetString(text, base)
+		if !ok {
+			return 0, false
+		}
+		number, _ = new(big.Float).SetInt(integer).Float64()
+	}
+	if math.IsInf(number, 0) {
+		return 0, false
+	}
+	return sign * number, true
+}
+
+// yamlFloatValue returns the number that text holds as a float of js-yaml's
+// core schema, and whether it holds one: a decimal number, .inf or .nan,
+// in the cases that the pattern allows. A number too large for a float64 is
+// no float, as in js-yaml, so the text stays a string.
+func yamlFloatValue(text string) (float64, bool) {
+	if !yamlFloat.MatchString(text) {
+		return 0, false
+	}
+	lower := strings.ToLower(text)
+	sign := 1.0
+	switch lower[0] {
+	case '-':
+		sign, lower = -1, lower[1:]
+	case '+':
+		lower = lower[1:]
+	}
+	switch lower {
+	case ".inf":
+		return math.Inf(int(sign)), true
+	case ".nan":
+		return math.NaN(), true
+	}
+	number, err := strconv.ParseFloat(lower, 64)
+	if (err != nil && !errors.Is(err, strconv.ErrRange)) || math.IsInf(number, 0) {
+		return 0, false
+	}
+	return sign * number, true
+}
+
+// jsString returns the string that JavaScript's String gives value, a
+// scalar's value, as the key of an object, and false for a mapping or a
+// sequence, which js-yaml's objects do not take as keys.
+func jsString(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case nil:
+		return jsNull, true
+	case bool:
+		return strconv.FormatBool(typed), true
+	case float64:
+		return jsNumberString(typed), true
+	}
+	return "", false
+}
+
+// jsNumberString returns the string that JavaScript's Number.prototype
+// .toString gives number: the shortest digits that read back as it, in
+// plain notation from 1e-7 up to 1e21 and in exponential notation outside,
+// with NaN, Infinity and -Infinity, and 0 for -0.
+func jsNumberString(number float64) string {
+	switch {
+	case math.IsNaN(number):
+		return "NaN"
+	case math.IsInf(number, 1):
+		return "Infinity"
+	case math.IsInf(number, -1):
+		return "-Infinity"
+	case number == 0:
+		return "0"
+	case number < 0:
+		return "-" + jsNumberString(-number)
+	}
+	mantissa, exponent, _ := strings.Cut(strconv.FormatFloat(number, 'e', -1, 64), "e")
+	digits := strings.Replace(mantissa, ".", "", 1)
+	power, _ := strconv.Atoi(exponent) //nolint:errcheck // FormatFloat writes a valid exponent.
+	// The number is 0.digits times 10 to the power point.
+	point, count := power+1, len(digits)
+	switch {
+	case count <= point && point <= 21:
+		return digits + strings.Repeat("0", point-count)
+	case 0 < point && point <= 21:
+		return digits[:point] + "." + digits[point:]
+	case -6 < point && point <= 0:
+		return "0." + strings.Repeat("0", -point) + digits
+	}
+	sign := "+"
+	if point-1 < 0 {
+		sign = "-"
+	}
+	shown := digits[:1]
+	if count > 1 {
+		shown += "." + digits[1:]
+	}
+	return shown + "e" + sign + strconv.Itoa(int(math.Abs(float64(point-1))))
+}

@@ -263,6 +263,74 @@ func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt covers YAML that
+// markdownlint-cli2 0.23.3 reads with js-yaml 5.4.1's core schema, where
+// gomdlint used to decode YAML 1.1 with yaml.v3. 0b0 is a string, which
+// turns no-trailing-spaces (MD009) on, and 0o0 is the number 0, which turns
+// it off. A numeric key is a string, so an option named 0 is one that MD009
+// does not read, with a warning, and the rest of MD009's object applies,
+// where gomdlint used to lose the whole object. A %YAML directive of
+// version 1.2 loads, where gomdlint used to stop with a config error.
+// markdownlint-cli2 reports trailingSpaceDoc's trailing space with the
+// first config only.
+func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
+	tests := []struct {
+		name, settings, warning string
+		want                    []string
+	}{
+		{name: "0b0", settings: "MD009: 0b0\n", want: []string{"MD009"}},
+		{name: "0o0", settings: "MD009: 0o0\n"},
+		{name: "numeric key", settings: "MD009: {enabled: false, 0: x}\n", warning: `unknown option "0" for no-trailing-spaces`},
+		{name: "YAML 1.2", settings: "%YAML 1.2\n---\nMD009: false\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint.yaml", tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+				if tt.warning == "" {
+					assert.NotContains(t, warnings, "WARN")
+				} else {
+					assert.Contains(t, warnings, tt.warning)
+				}
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_YAMLThatJSYAMLRejects covers YAML that js-yaml
+// 5.4.1 rejects, so markdownlint-cli2 0.23.3 stops with an error: an unknown
+// tag, which gomdlint used to ignore, a tag that the core schema lacks,
+// keys that are duplicates once they are strings, and a key written twice
+// in a list, which gomdlint used to load from a JSON file name as a list
+// that holds no settings. gomdlint stops with a config error.
+func TestMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
+	tests := []struct {
+		name, file, settings, want string
+	}{
+		{name: "unknown tag", file: ".markdownlint.yaml", settings: "!unknown {MD009: false}\n", want: "unknown mapping tag !unknown"},
+		{name: "binary", file: ".markdownlint.yaml", settings: "MD009: !!binary aGk=\n", want: "unknown scalar tag !!binary"},
+		{
+			name: "numeric duplicate", file: ".markdownlint.yaml", settings: "0x10: a\n16: b\nMD009: false\n",
+			want: `line 2: duplicated mapping key "16"`,
+		},
+		{name: "duplicate in a list", file: ".markdownlint.json", settings: "- MD009: true\n  MD009: false\n", want: ".markdownlint.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": trailingSpaceDoc, tt.file: tt.settings})
+
+			got := execute(t, "lint", "doc.md")
+
+			assert.Equal(t, cli.ExitConfigError, got.code)
+			assert.Contains(t, got.stderr, tt.want)
+		})
+	}
+}
+
 // TestMarkdownlintConfig_SeverityAsMarkdownlintReadsIt covers the severity
 // key of a rule's object in a markdownlint config, which markdownlint
 // 0.41.1 reads as "warning" when it is exactly that, and as "error"

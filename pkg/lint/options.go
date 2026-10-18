@@ -282,7 +282,7 @@ func quotedChoices(words []string, conjunction string) string {
 func describeOptionValue(value any) string {
 	switch typed := value.(type) {
 	case nil:
-		return "null"
+		return jsNull
 	case string:
 		return strconv.Quote(typed)
 	}

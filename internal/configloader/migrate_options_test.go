@@ -126,13 +126,16 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 			lines: []int{4},
 		},
 		{
-			name: "YAML merged option", file: ".markdownlint.yaml",
+			// js-yaml 5, which markdownlint-cli2 reads YAML with, reads a
+			// merge key as an ordinary key, here an option that line-length
+			// does not read, so the merged line_length is never read.
+			name: "YAML merge key", file: ".markdownlint.yaml",
 			content: "base: &length\n  line_length: oops\nMD013:\n  <<: *length\n  tables: false\n",
 			warnings: []string{
 				`unknown rule "base"; it is ignored`,
-				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 			},
-			lines: []int{0, 2},
+			lines: []int{0, 4},
 		},
 		{
 			name: "JSON with comments", file: ".markdownlint.jsonc",
@@ -157,35 +160,36 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 			lines:    []int{4},
 		},
 		{
-			name: "YAML option over a merged one", file: ".markdownlint.yaml",
+			name: "YAML option beside a merge key", file: ".markdownlint.yaml",
 			content: "base: &length\n  line_length: 1\nMD013:\n  <<: *length\n  line_length: oops\n",
 			warnings: []string{
 				`unknown rule "base"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
 			},
-			lines: []int{0, 5},
+			lines: []int{0, 4, 5},
 		},
 		{
-			name: "YAML first of two merged options", file: ".markdownlint.yaml",
+			name: "YAML merge key with two mappings", file: ".markdownlint.yaml",
 			content: "earlier: &earlier\n  line_length: oops\nlater: &later\n  line_length: 1\n" +
 				"MD013:\n  <<: [*earlier, *later]\n",
 			warnings: []string{
 				`unknown rule "earlier"; it is ignored`,
 				`unknown rule "later"; it is ignored`,
-				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 			},
-			lines: []int{0, 0, 2},
+			lines: []int{0, 0, 6},
 		},
 		{
-			name: "YAML option merged through a merged mapping", file: ".markdownlint.yaml",
+			name: "YAML merge key with a merged mapping", file: ".markdownlint.yaml",
 			content: "inner: &inner\n  line_length: oops\nouter: &outer\n  <<: *inner\n  tables: false\n" +
 				"MD013:\n  <<: [*outer, {line_length: 1}]\n",
 			warnings: []string{
 				`unknown rule "inner"; it is ignored`,
 				`unknown rule "outer"; it is ignored`,
-				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 			},
-			lines: []int{0, 0, 2},
+			lines: []int{0, 0, 7},
 		},
 	}
 

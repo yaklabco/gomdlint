@@ -5,11 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"maps"
-	"slices"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/internal/jsonc"
 )
@@ -95,9 +90,10 @@ func NotObjectText(notObject string) string {
 // keys, so a key written twice keeps its first place and takes its last
 // value. Text that holds nothing but whitespace and comments holds no
 // settings, as markdownlint-cli2 reads it. Failing that, the text is read
-// as YAML, with the keys of a mapping in the order of yamlKeyOrder. YAML
-// rejects a key written twice. markdownlint-cli2 tries TOML between the
-// two, which gomdlint does not read.
+// as YAML, as js-yaml 5.4.1 reads it with its default core schema (see
+// readMarkdownlintYAML), with the keys of a mapping in the order they are
+// written. YAML rejects a key written twice. markdownlint-cli2 tries TOML
+// between the two, which gomdlint does not read.
 //
 // A value other than an object, such as a list, a string or a number,
 // holds no settings, since markdownlint reads it as an object without
@@ -149,141 +145,4 @@ func jsonValueKind(text []byte) string {
 	default:
 		return kindNumber
 	}
-}
-
-// errMoreDocuments reports YAML text that holds more than one document.
-var errMoreDocuments = errors.New("expected one document, but found more")
-
-// readMarkdownlintYAML reads text as a markdownlint configuration in YAML.
-// As js-yaml's load, which markdownlint-cli2 calls, the text must hold one
-// document, or none, and nothing after it but comments and an end marker:
-// yaml.Unmarshal would ignore a second document, or text after a mapping
-// in flow style, such as {"MD013": false} trailing.
-func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
-	source := &MarkdownlintSource{Settings: &MarkdownlintSettings{}, Syntax: MarkdownlintYAML}
-	decoder := yaml.NewDecoder(bytes.NewReader(text))
-	var doc yaml.Node
-	if err := decoder.Decode(&doc); errors.Is(err, io.EOF) {
-		return source, nil // Empty text, or nothing but comments.
-	} else if err != nil {
-		return nil, err //nolint:wrapcheck // The caller says what it read.
-	}
-	if err := decoder.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return nil, err //nolint:wrapcheck // The caller says what it read.
-		}
-		return nil, errMoreDocuments
-	}
-	if len(doc.Content) == 0 {
-		return source, nil
-	}
-	root := doc.Content[0]
-	switch {
-	case root.Kind == yaml.MappingNode:
-		settings, err := markdownlintYAMLSettings(root)
-		if err != nil {
-			return nil, err
-		}
-		source.Settings = settings
-	case root.Kind == yaml.SequenceNode:
-		source.NotObject = kindList
-	case root.ShortTag() != "!!null":
-		source.NotObject = yamlScalarKind(root)
-	}
-	return source, nil
-}
-
-// yamlScalarKind describes the kind of the value of node, a YAML scalar
-// that is not null.
-func yamlScalarKind(node *yaml.Node) string {
-	switch node.ShortTag() {
-	case "!!str":
-		return kindString
-	case "!!int", "!!float":
-		return kindNumber
-	case "!!bool":
-		return kindBoolean
-	default:
-		return kindOther
-	}
-}
-
-// markdownlintYAMLSettings reads root, the mapping of a markdownlint config
-// in YAML, into its settings: the keys of the mapping in the order of
-// yamlKeyOrder, with the values that decoding gives them. Decoding rejects
-// a key written twice.
-func markdownlintYAMLSettings(root *yaml.Node) (*MarkdownlintSettings, error) {
-	var values map[string]any
-	if err := root.Decode(&values); err != nil {
-		return nil, err //nolint:wrapcheck // The caller says what it read.
-	}
-	settings := &MarkdownlintSettings{}
-	for _, key := range yamlKeyOrder(root) {
-		if value, ok := values[key]; ok {
-			settings.Set(key, value)
-			delete(values, key)
-		}
-	}
-	// The order holds every key that decoding reads. Should one be missing,
-	// it still applies, after the others.
-	for _, key := range slices.Sorted(maps.Keys(values)) {
-		settings.Set(key, values[key])
-	}
-	return settings, nil
-}
-
-// yamlKeyOrder returns the keys of node, a YAML mapping or an alias of one,
-// in the order in which js-yaml 4 adds them to an object: each key written
-// in the mapping in its place, and the keys of the mappings that a merge key
-// (<<) brings in, in their own order, in the place of the merge key. A key
-// comes once, in its first place, which keeps it when a later entry
-// replaces its value. Decoding gives a key written in the mapping the value
-// written with it, and a merged key the value of the first mapping that
-// brings it in, as js-yaml 4 does too.
-//
-// Each mapping is walked once. Its keys, and those of the mappings it
-// merges, have their places once it has been walked, so a later merge of it
-// adds nothing, and a mapping that merges itself ends the walk there.
-func yamlKeyOrder(node *yaml.Node) []string {
-	var keys []string
-	seen := make(map[string]bool)
-	walked := make(map[*yaml.Node]bool)
-	var walk func(node *yaml.Node)
-	walk = func(node *yaml.Node) {
-		for node != nil && node.Kind == yaml.AliasNode {
-			node = node.Alias
-		}
-		if node == nil || node.Kind != yaml.MappingNode || walked[node] {
-			return
-		}
-		walked[node] = true
-
-		for idx := 0; idx+1 < len(node.Content); idx += 2 {
-			key, value := node.Content[idx], node.Content[idx+1]
-			if isYAMLMergeKey(key) {
-				sources := []*yaml.Node{value}
-				if value.Kind == yaml.SequenceNode {
-					sources = value.Content
-				}
-				for _, source := range sources {
-					walk(source)
-				}
-				continue
-			}
-			var name string
-			if key.Decode(&name) == nil && !seen[name] {
-				seen[name] = true
-				keys = append(keys, name)
-			}
-		}
-	}
-	walk(node)
-	return keys
-}
-
-// isYAMLMergeKey reports whether key is a merge key, as YAML decoding
-// tells one: the plain scalar <<, or << tagged !!merge. A quoted "<<" is an
-// ordinary key.
-func isYAMLMergeKey(key *yaml.Node) bool {
-	return key.Kind == yaml.ScalarNode && key.Value == "<<" && key.ShortTag() == "!!merge"
 }

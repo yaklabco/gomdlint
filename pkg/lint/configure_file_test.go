@@ -34,8 +34,9 @@ func configuredDoc(parameter string) string {
 
 // TestEngineConfigureFileReadsJSONCAndYAML covers parameters that
 // markdownlint-cli2's JSONC parser reads, with comments or a trailing
-// comma, and parameters that only its YAML parser reads. Each turns MD009
-// off without a notice.
+// comma, and parameters that only its YAML parser reads, among them one
+// with a %YAML directive of version 1.2, which gomdlint used to ignore.
+// Each turns MD009 off without a notice.
 func TestEngineConfigureFileReadsJSONCAndYAML(t *testing.T) {
 	for _, parameter := range []string{
 		`{"MD009": false,}`,
@@ -43,6 +44,7 @@ func TestEngineConfigureFileReadsJSONCAndYAML(t *testing.T) {
 		`{"MD009": false} // off`,
 		`{ MD009: false }`,
 		`MD009: false`,
+		"%YAML 1.2\n---\nMD009: false\n",
 	} {
 		t.Run(parameter, func(t *testing.T) {
 			result := lintDefault(t, configuredDoc(parameter))
@@ -54,7 +56,9 @@ func TestEngineConfigureFileReadsJSONCAndYAML(t *testing.T) {
 }
 
 // TestEngineConfigureFileIgnoresWhatNoParserReads covers parameters that
-// neither JSON with comments nor YAML reads. The comment changes nothing,
+// neither JSON with comments nor YAML reads, as js-yaml 5.4.1 reads YAML
+// for markdownlint-cli2, which rejects an unknown tag and a key written
+// twice, where gomdlint used to apply them. The comment changes nothing,
 // so MD009 reports, and it gets a notice with the JSON error.
 func TestEngineConfigureFileIgnoresWhatNoParserReads(t *testing.T) {
 	tests := []struct {
@@ -63,6 +67,8 @@ func TestEngineConfigureFileIgnoresWhatNoParserReads(t *testing.T) {
 		{parameter: `{"MD009": false`, problem: "unexpected end of JSON input"},
 		{parameter: `{"MD009": false} trailing`, problem: "invalid character 't' after top-level value"},
 		{parameter: `{"MD009": false,,}`, problem: "invalid character ',' looking for beginning of object key string"},
+		{parameter: `!unknown {MD009: false}`, problem: "invalid character '!' looking for beginning of value"},
+		{parameter: `{MD009: false, MD009: false}`, problem: "invalid character 'M' looking for beginning of object key string"},
 	}
 
 	for _, tt := range tests {
@@ -113,6 +119,40 @@ func TestEngineConfigureFileIgnoresValuesOtherThanAnObject(t *testing.T) {
 				Directive: "markdownlint-configure-file",
 				Message:   "markdownlint-configure-file: " + tt.held + " instead of an object of settings; it is ignored",
 			}}, result.Notices)
+		})
+	}
+}
+
+// TestEngineConfigureFileReadsYAMLScalarsAsJSYAMLReadsThem covers YAML
+// parameters that markdownlint-cli2 0.23.3 reads with js-yaml 5.4.1's core
+// schema, where gomdlint used to decode YAML 1.1 with yaml.v3: 0b0 is a
+// string, which turns MD009 on, and 0o0 is the number 0, which turns it
+// off. A numeric key is a string, so an option named 0 is one that MD009
+// does not read, with a notice, and the rest of MD009's object applies.
+func TestEngineConfigureFileReadsYAMLScalarsAsJSYAMLReadsThem(t *testing.T) {
+	tests := []struct {
+		parameter string
+		lines     []int
+		notices   []string
+	}{
+		{parameter: "MD009: 0b0", lines: []int{5}},
+		{parameter: "MD009: 0o0"},
+		{
+			parameter: "{MD009: {enabled: false, 0: x}}",
+			notices:   []string{`markdownlint-configure-file: unknown option "0" for no-trailing-spaces; it is ignored`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.parameter, func(t *testing.T) {
+			result := lintDefault(t, configuredDoc(tt.parameter))
+
+			assert.Equal(t, tt.lines, reportedLines(t, configuredDoc(tt.parameter), "MD009"))
+			var messages []string
+			for _, notice := range result.Notices {
+				messages = append(messages, notice.Message)
+			}
+			assert.Equal(t, tt.notices, messages)
 		})
 	}
 }
