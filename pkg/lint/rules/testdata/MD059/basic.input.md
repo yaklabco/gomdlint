@@ -1,6 +1,6 @@
 # Descriptive Link Text
 
-<!-- NOTE: MD059 is opt-in. It checks for generic link text. -->
+<!-- NOTE: MD059 checks for generic link text. -->
 
 For details, [click here](https://example.com) to visit.
 

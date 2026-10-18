@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 
+	gmutil "github.com/yuin/goldmark/util"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -381,7 +383,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		construct, tag := image.construct, image.construct.Text(image.source)
+		construct, tag := image.construct, image.tag
 		if imgAltAttributePattern.Match(tag) {
 			continue
 		}
@@ -413,33 +415,42 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 }
 
 // htmlImages returns the opening img tags in HTML blocks and inline HTML.
+// The sources come from htmlSources, so the file is not copied for each
+// element.
 func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 	var images []htmlImage
+	sources := htmlSources{file: ctx.File}
 	keep := func(source []byte, construct mdscan.HTMLConstruct) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
-			images = append(images, htmlImage{construct: construct, source: source})
+			// The source is valid only while it is read, so the image keeps
+			// its own copy of the tag.
+			images = append(images, htmlImage{construct: construct, tag: bytes.Clone(construct.Text(source))})
 		}
 	}
 	for _, block := range ctx.HTMLBlocks() {
 		span := block.SourceRange()
-		source := htmlSource(ctx.File, block)
-		for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
-			keep(source, construct)
-		}
+		sources.with(block, func(source []byte) {
+			for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
+				keep(source, construct)
+			}
+		})
 	}
 	for _, inline := range ctx.HTMLInlines() {
-		source := htmlSource(ctx.File, inline)
-		if construct, ok := htmlNodeConstruct(source, inline); ok {
-			keep(source, construct)
-		}
+		sources.with(inline, func(source []byte) {
+			if construct, ok := htmlNodeConstruct(source, inline); ok {
+				keep(source, construct)
+			}
+		})
 	}
 	return images
 }
 
-// htmlImage is an img element and the source its attributes are read from.
+// htmlImage is an img element and its tag, read from the source that
+// htmlSources gives it, with the attributes that decide whether the image
+// has alt text.
 type htmlImage struct {
 	construct mdscan.HTMLConstruct
-	source    []byte
+	tag       []byte
 }
 
 // LinkDestinationStyleRule enforces link destination style (relative vs absolute).
@@ -472,11 +483,6 @@ const (
 	LinkDestConsistent LinkDestStyle = "consistent"
 )
 
-// DefaultEnabled returns false for this optional rule.
-func (r *LinkDestinationStyleRule) DefaultEnabled() bool {
-	return false
-}
-
 // Apply checks link destination style consistency.
 func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
@@ -497,7 +503,7 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 			return diags, ctx.Ctx.Err()
 		}
 
-		dest := lint.LinkDestination(link)
+		dest := resolvedDestination(link)
 		if dest == "" {
 			continue
 		}
@@ -507,7 +513,11 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 			continue
 		}
 
-		isAbsolute := isAbsoluteURL(dest)
+		// An autolink is always absolute: CommonMark autolinks need a scheme,
+		// and email autolinks, which the parser gives without one, render
+		// as mailto: links. Other links are classified by their destination,
+		// so an autolink and an inline link to the same URI agree.
+		isAbsolute := isAutolinkNode(link) || isAbsoluteDestination(dest)
 		detectedStyle := LinkDestRelative
 		if isAbsolute {
 			detectedStyle = LinkDestAbsolute
@@ -539,14 +549,32 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 	return diags, nil
 }
 
-// isAbsoluteURL returns true if the URL is absolute (has a scheme).
-func isAbsoluteURL(url string) bool {
-	// Check for common schemes.
-	return strings.HasPrefix(url, "http://") ||
-		strings.HasPrefix(url, "https://") ||
-		strings.HasPrefix(url, "ftp://") ||
-		strings.HasPrefix(url, "mailto:") ||
-		strings.HasPrefix(url, "tel:") ||
-		strings.HasPrefix(url, "file://") ||
-		strings.Contains(url, "://")
+// uriSchemePattern matches a URI scheme and its colon at the start of a link
+// destination, as CommonMark defines a scheme for autolinks: an ASCII letter
+// followed by 1 to 31 letters, digits, "+", "." or "-".
+var uriSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]{1,31}:`)
+
+// isAbsoluteDestination reports whether MDL001 counts a link destination as
+// absolute. A destination is absolute when it starts with a URI scheme, such
+// as https:, mailto:, sms: or urn:, or when it starts with "//", a
+// network-path reference that names its own host and keeps the page's
+// scheme. A scheme has at least two characters, so a Windows drive letter,
+// as in C:\docs or C:/docs, starts a relative path. A destination such as
+// localhost:8080 starts with the scheme "localhost", as browsers and
+// CommonMark autolinks read it, so it is absolute; a local server's address
+// written with http:// reads the same way.
+func isAbsoluteDestination(dest string) bool {
+	return strings.HasPrefix(dest, "//") || uriSchemePattern.MatchString(dest)
+}
+
+// resolvedDestination returns a link's destination as the renderer reads
+// it. The parser keeps a destination as written, so backslash escapes and
+// entity and numeric character references are resolved here with
+// goldmark's own functions, in the order its HTML renderer applies them.
+// Percent-encoding stays as written, so https%3A//x starts no scheme.
+func resolvedDestination(link *mdast.Node) string {
+	dest := []byte(lint.LinkDestination(link))
+	dest = gmutil.UnescapePunctuations(dest)
+	dest = gmutil.ResolveNumericReferences(dest)
+	return string(gmutil.ResolveEntityNames(dest))
 }

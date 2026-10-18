@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,13 +13,17 @@ import (
 	"github.com/yaklabco/gomdlint/internal/cli"
 )
 
-// shorthandDoc has findings for line-length (MD013), which is on by
-// default, no-inline-html (MD033), which is off by default, and
-// no-trailing-spaces (MD009).
+// shorthandDoc has findings for line-length (MD013), no-inline-html (MD033)
+// and no-trailing-spaces (MD009), which are all on by default.
 const shorthandDoc = "# Title\n\n" +
 	"This line is long enough to go past the default line length limit, whether that limit is eighty " +
 	"or one hundred and twenty characters.\n\n" +
 	"Some <b>bold</b> text. \n"
+
+// userConfigWithoutHTML is a user config, at the path where inProject's
+// XDG_CONFIG_HOME puts it, that turns no-inline-html off, so that "true"
+// in a project config has a rule to turn back on.
+var userConfigWithoutHTML = map[string]string{".xdg/gomdlint/config.yaml": "rules:\n  no-inline-html: false\n"}
 
 // reportedRules returns the rule IDs that a JSON report names.
 func reportedRules(t *testing.T, report string) map[string]bool {
@@ -44,7 +49,9 @@ func reportedRules(t *testing.T, report string) map[string]bool {
 
 // TestLint_RuleBooleanShorthand covers rules set to true or false in a
 // gomdlint config, as markdownlint allows: false turns a rule off, true
-// turns one on, in YAML and in JSON.
+// turns one on, in YAML and in JSON. Every rule these tests use is on by
+// default, so a user config turns no-inline-html off for the project
+// config to turn back on.
 func TestLint_RuleBooleanShorthand(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -58,7 +65,9 @@ func TestLint_RuleBooleanShorthand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inProject(t, map[string]string{"doc.md": shorthandDoc, tt.file: tt.config})
+			files := map[string]string{"doc.md": shorthandDoc, tt.file: tt.config}
+			maps.Copy(files, userConfigWithoutHTML)
+			inProject(t, files)
 
 			got := execute(t, "lint", "--config", tt.file, "--format", "json", "doc.md")
 
@@ -72,6 +81,17 @@ func TestLint_RuleBooleanShorthand(t *testing.T) {
 
 		got := execute(t, "lint", "--format", "json", "doc.md")
 
+		assert.Equal(t, map[string]bool{"MD009": true, "MD013": true, "MD033": true}, reportedRules(t, got.stdout))
+	})
+
+	t.Run("the user config alone turns no-inline-html off", func(t *testing.T) {
+		files := map[string]string{"doc.md": shorthandDoc}
+		maps.Copy(files, userConfigWithoutHTML)
+		inProject(t, files)
+
+		got := execute(t, "lint", "--format", "json", "doc.md")
+
+		require.Empty(t, got.stderr)
 		assert.Equal(t, map[string]bool{"MD009": true, "MD013": true}, reportedRules(t, got.stdout))
 	})
 }

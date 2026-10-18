@@ -61,12 +61,13 @@ func (r *NoBareURLsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	}
 
 	runs := newTableRuns(ctx.File)
+	sources := &htmlSources{file: ctx.File}
 	var urls []bareURL
 	for _, container := range mdast.FindAll(ctx.Root, isTextContainer) {
 		if ctx.Cancelled() {
 			return nil, ctx.Ctx.Err()
 		}
-		scan := newBareURLScan(ctx.File, container)
+		scan := newBareURLScan(ctx.File, container, sources)
 		scan.fixesAllowed = container.Kind != mdast.NodeTableCell && !runs.touch(container)
 		scan.visit(container)
 		urls = append(urls, scan.found...)
@@ -155,6 +156,10 @@ func isTextContainer(node *mdast.Node) bool {
 type bareURLScan struct {
 	file    *mdast.FileSnapshot
 	content []byte
+	// sources reads the HTML tags whose element content is skipped. It is
+	// shared by the scans of all containers, so the file is copied at most
+	// once for the tags that span lines in a blockquote.
+	sources *htmlSources
 	// textStart is where the document's text starts: after a byte order
 	// mark, which the parser skips, so nothing comes before a literal there.
 	textStart int
@@ -178,8 +183,8 @@ type bareURLScan struct {
 }
 
 // newBareURLScan prepares a scan of a container's inline content.
-func newBareURLScan(file *mdast.FileSnapshot, container *mdast.Node) *bareURLScan {
-	scan := &bareURLScan{file: file, content: file.Content, textStart: lint.LineTextOffset(file, 1)}
+func newBareURLScan(file *mdast.FileSnapshot, container *mdast.Node, sources *htmlSources) *bareURLScan {
+	scan := &bareURLScan{file: file, content: file.Content, sources: sources, textStart: lint.LineTextOffset(file, 1)}
 	if last := container.LastChild; last != nil {
 		scan.limit = last.SourceRange().EndOffset
 	}
@@ -220,7 +225,7 @@ func (s *bareURLScan) visit(parent *mdast.Node) {
 		case child.Kind == mdast.NodeEmphasis || child.Kind == mdast.NodeStrong || child.Kind == mdast.NodeStrikethrough:
 			s.visit(child)
 		case child.Kind == mdast.NodeHTMLInline:
-			idx = skipHTMLElementContent(s.file, children, idx)
+			idx = skipHTMLElementContent(s.sources, children, idx)
 		}
 	}
 }
@@ -243,8 +248,8 @@ func isLinkifiedAutolink(content []byte, node *mdast.Node) bool {
 // skipHTMLElementContent returns the index of the closing tag that matches the
 // opening tag at children[idx], or idx when there is none, so the element's
 // content is skipped as markdownlint does.
-func skipHTMLElementContent(file *mdast.FileSnapshot, children []*mdast.Node, idx int) int {
-	open, ok := htmlNodeConstruct(htmlSource(file, children[idx]), children[idx])
+func skipHTMLElementContent(sources *htmlSources, children []*mdast.Node, idx int) int {
+	open, ok := sources.construct(children[idx])
 	if !ok || !open.IsOpeningElement() {
 		return idx
 	}
@@ -253,7 +258,7 @@ func skipHTMLElementContent(file *mdast.FileSnapshot, children []*mdast.Node, id
 		if children[next].Kind != mdast.NodeHTMLInline {
 			continue
 		}
-		tag, ok := htmlNodeConstruct(htmlSource(file, children[next]), children[next])
+		tag, ok := sources.construct(children[next])
 		if !ok || !strings.EqualFold(tag.Name, open.Name) {
 			continue
 		}

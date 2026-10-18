@@ -341,6 +341,66 @@ func TestLinkImageStyleRule(t *testing.T) {
 	}
 }
 
+// TestLinkImageStyleRule_URLInline checks url_inline: false the way
+// markdownlint 0.41 decides it. A link, not an image, without a title,
+// whose text is its destination, is reported when autolinks are allowed and
+// the destination could be written as a CommonMark autolink: a scheme of 2
+// to 32 characters in any case, then no spaces, control characters, "<" or
+// ">".
+func TestLinkImageStyleRule_URLInline(t *testing.T) {
+	urlInline := map[string]any{"url_inline": false}
+	tests := []struct {
+		name     string
+		markdown string
+		options  map[string]any
+		want     int
+	}{
+		{name: "https", markdown: "[https://example.com](https://example.com)\n", want: 1},
+		{name: "mailto", markdown: "[mailto:team@example.com](mailto:team@example.com)\n", want: 1},
+		{name: "uppercase mailto", markdown: "[MAILTO:team@example.com](MAILTO:team@example.com)\n", want: 1},
+		{name: "sms", markdown: "[sms:+15551234567](sms:+15551234567)\n", want: 1},
+		{name: "urn", markdown: "[urn:isbn:0451450523](urn:isbn:0451450523)\n", want: 1},
+		{name: "vscode", markdown: "[vscode:extension/ms-python.python](vscode:extension/ms-python.python)\n", want: 1},
+		// Like markdownlint, the label is compared as written, so formatting
+		// or an escape in it makes it differ from the destination, and an
+		// autolink would lose them.
+		{name: "bold label", markdown: "[**sms:+15551234567**](sms:+15551234567)\n"},
+		{name: "emphasis label", markdown: "[*https://example.com*](https://example.com)\n"},
+		{name: "underscore strong label", markdown: "[__https://example.com__](https://example.com)\n"},
+		{name: "code span label", markdown: "[`https://example.com`](https://example.com)\n"},
+		{name: "escaped label", markdown: "[sms\\:+15551234567](sms:+15551234567)\n"},
+		{name: "same escape in label and destination", markdown: "[https://example.com/a\\_b](https://example.com/a\\_b)\n", want: 1},
+		{name: "destination in angle brackets", markdown: "[https://example.com](<https://example.com>)\n", want: 1},
+		{name: "protocol-relative is not an autolink", markdown: "[//cdn.example.com/a.js](//cdn.example.com/a.js)\n"},
+		{name: "relative path", markdown: "[docs/a.md](docs/a.md)\n"},
+		{name: "space in the destination", markdown: "[https://example.com/a b](<https://example.com/a b>)\n"},
+		{name: "image", markdown: "![https://example.com/a.png](https://example.com/a.png)\n"},
+		{name: "title", markdown: "[https://example.com](https://example.com \"Title\")\n"},
+		{
+			name:     "autolinks not allowed",
+			markdown: "[https://example.com](https://example.com)\n",
+			options:  map[string]any{"url_inline": false, "autolink": false},
+		},
+		// Two deliberate differences from markdownlint, which asks whether a
+		// browser could parse the destination as a URL. A one-letter scheme
+		// is a Windows drive and cannot start an autolink, and http:// with
+		// no host is a valid autolink.
+		{name: "one-letter scheme", markdown: "[c:x](c:x)\n"},
+		{name: "scheme without a host", markdown: "[http://](http://)\n", want: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			options := tt.options
+			if options == nil {
+				options = urlInline
+			}
+			diags := testHelperWithOptions(t, NewLinkImageStyleRule(), tt.markdown, options)
+			assert.Len(t, diags, tt.want, "diagnostics: %+v", diags)
+		})
+	}
+}
+
 // TestReferenceLinkImagesRule_Undefined reports full and collapsed references
 // whose label has no definition. The parser leaves such references as text.
 func TestReferenceLinkImagesRule_Undefined(t *testing.T) {
@@ -765,27 +825,17 @@ func TestRuleMetadata(t *testing.T) {
 	}
 }
 
-func TestOptionalRulesDefaultDisabled(t *testing.T) {
-	// These rules should be disabled by default
-	optionalRules := []lint.Rule{
-		NewLinkImageStyleRule(),
-		NewDescriptiveLinkTextRule(),
-	}
-
-	for _, rule := range optionalRules {
-		if rule.DefaultEnabled() {
-			t.Errorf("%s.DefaultEnabled() = true, want false", rule.ID())
-		}
-	}
-
-	// These rules should be enabled by default
-	enabledRules := []lint.Rule{
+// TestReferenceRulesDefaultEnabled checks that the link and reference rules
+// run by default, as in markdownlint. MD054 allows every style by default,
+// so it reports nothing until an option disallows one.
+func TestReferenceRulesDefaultEnabled(t *testing.T) {
+	for _, rule := range []lint.Rule{
 		NewLinkFragmentsRule(),
 		NewReferenceLinkImagesRule(),
 		NewLinkImageRefDefsRule(),
-	}
-
-	for _, rule := range enabledRules {
+		NewLinkImageStyleRule(),
+		NewDescriptiveLinkTextRule(),
+	} {
 		if !rule.DefaultEnabled() {
 			t.Errorf("%s.DefaultEnabled() = false, want true", rule.ID())
 		}

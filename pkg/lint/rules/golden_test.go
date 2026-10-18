@@ -437,7 +437,7 @@ func TestGoldenRun(t *testing.T) {
 		})
 	}
 
-	t.Run("per-rule case runs its rule even when disabled by default", func(t *testing.T) {
+	t.Run("per-rule case runs its rule with the sidecar's options", func(t *testing.T) {
 		sidecar := writeSidecar(t, "rules:\n  MD044:\n    options:\n      names: [GitHub]\n")
 		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: sidecar, RuleID: "MD044"})
 
@@ -472,9 +472,23 @@ func TestGoldenRun(t *testing.T) {
 
 		_, err := newGoldenRun(GoldenTestCase{ConfigPath: sidecar, RuleID: "MD044"})
 		require.ErrorContains(t, err, "configures rules the case does not run: MD043")
+	})
 
-		_, err = newGoldenRun(GoldenTestCase{ConfigPath: sidecar, IsRealWorld: true})
-		require.ErrorContains(t, err, "configures rules the case does not run: MD043, MD044")
+	// Every rule runs by default, so a real-world case runs MD043 and MD044
+	// too, and its sidecar can give them the options they need to check
+	// anything.
+	t.Run("real-world case takes options for every rule", func(t *testing.T) {
+		sidecar := writeSidecar(t, "rules:\n  MD044:\n    options:\n      names: [GitHub]\n")
+		run := mustGoldenRun(t, GoldenTestCase{ConfigPath: sidecar, IsRealWorld: true})
+
+		result := run.mustLintFile(t, "names.input.md", []byte("# Title\n\nUse github here.\n"))
+		var lines []int
+		for _, diag := range result.Diagnostics {
+			if diag.RuleID == "MD044" {
+				lines = append(lines, diag.StartLine)
+			}
+		}
+		assert.Equal(t, []int{3}, lines)
 	})
 
 	t.Run("invalid sidecar is rejected", func(t *testing.T) {
