@@ -53,13 +53,13 @@ func TestOptionTypeAccepts(t *testing.T) {
 		},
 		{
 			typ:      lint.OptionStringList,
-			accepted: []any{[]any{}, []any{"a", "b"}, []string{"a"}, []any{1}},
-			rejected: []any{"a", 1, true, map[string]any{"a": 1}},
+			accepted: []any{[]any{}, []any{"a", "b"}, []string{"a"}},
+			rejected: []any{"a", 1, true, map[string]any{"a": 1}, []any{1}, []any{"a", 2}, []any{nil}, []int{1}},
 		},
 		{
 			typ:      lint.OptionIntegerOrList,
-			accepted: []any{1, -1, float64(2), []any{1, 2}, []int{1}},
-			rejected: []any{"1", 1.5, true},
+			accepted: []any{1, -1, float64(2), []any{}, []any{1, float64(2)}, []int{1}},
+			rejected: []any{"1", 1.5, true, []any{1, 2.5}, []any{"1"}, []any{nil}, []string{"1"}},
 		},
 		{
 			typ:      lint.OptionStringOrFalse,
@@ -195,6 +195,28 @@ func TestNormalizeOptions(t *testing.T) {
 			issues: []lint.OptionIssue{{
 				Kind: lint.OptionIssueConflict, Key: "ignore_tables", Other: "tables", Value: true, Option: lengthSpecs()[1],
 			}},
+		},
+		{
+			name:    "an item of the wrong type drops the whole list, as a scalar of the wrong type is dropped",
+			options: map[string]any{"names": []any{"Go", 42}, "style": "dash"},
+			want:    map[string]any{"style": "dash"},
+			issues: []lint.OptionIssue{{
+				Kind: lint.OptionIssueWrongType, Key: "names", Value: 42, Item: 2, Option: lengthSpecs()[3],
+			}},
+		},
+		{
+			name:    "each item of the wrong type is reported",
+			options: map[string]any{"lines_above": []any{1, 2.5, "3"}},
+			want:    map[string]any{},
+			issues: []lint.OptionIssue{
+				{Kind: lint.OptionIssueWrongType, Key: "lines_above", Value: 2.5, Item: 2, Option: lengthSpecs()[4]},
+				{Kind: lint.OptionIssueWrongType, Key: "lines_above", Value: "3", Item: 3, Option: lengthSpecs()[4]},
+			},
+		},
+		{
+			name:    "a whole number written as a float is an integer item",
+			options: map[string]any{"lines_above": []any{1, float64(2)}},
+			want:    map[string]any{"lines_above": []any{1, float64(2)}},
 		},
 	}
 
@@ -345,6 +367,16 @@ func TestOptionIssueText(t *testing.T) {
 			name:  "two spellings",
 			issue: lint.OptionIssue{Kind: lint.OptionIssueConflict, Key: "line_length", Other: "max", Option: specs[0]},
 			want:  `"line_length" and "max" both set line-length option "max"; keep one of them`,
+		},
+		{
+			name:  "an item of a list of strings",
+			issue: lint.OptionIssue{Kind: lint.OptionIssueWrongType, Key: "names", Value: 42, Item: 2, Option: specs[3]},
+			want:  `line-length option "names" item 2 must be a string, not 42; the option is ignored`,
+		},
+		{
+			name:  "an item of a list of integers",
+			issue: lint.OptionIssue{Kind: lint.OptionIssueWrongType, Key: "lines_above", Value: 2.5, Item: 1, Option: specs[4]},
+			want:  `line-length option "lines_above" item 1 must be an integer, not 2.5; the option is ignored`,
 		},
 	}
 

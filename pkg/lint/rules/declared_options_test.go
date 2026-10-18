@@ -51,6 +51,36 @@ func TestRulesRegisteredAloneReadMarkdownlintSpellings(t *testing.T) {
 	}
 }
 
+// TestListOptionWithAWrongItemKeepsTheDefault lints with list options that
+// hold an item of the wrong type. The whole option is dropped, as a value
+// of the wrong type is, so each rule uses its default: MD022 asks for one
+// blank line above every heading instead of reading 2.5 as 2, and MD059
+// reports its default texts instead of nothing.
+func TestListOptionWithAWrongItemKeepsTheDefault(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(NewHeadingBlankLinesRule())
+	registry.Register(NewDescriptiveLinkTextRule())
+
+	cfg := config.NewConfig()
+	cfg.Rules = map[string]config.RuleConfig{
+		"MD022": {Options: map[string]any{"lines_above": []any{1, 2.5}}},
+		"MD059": {Options: map[string]any{"patterns": []any{42}}},
+	}
+	input := "# Title\n\nText.\n\n## Section\n\n[here](https://example.com/a)\n"
+
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+		context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	require.Empty(t, result.RuleErrors)
+
+	lines := make(map[string][]int)
+	for _, diag := range result.Diagnostics {
+		lines[diag.RuleID] = append(lines[diag.RuleID], diag.StartLine)
+	}
+	assert.Empty(t, lines["MD022"], "one blank line above the heading is the default")
+	assert.Equal(t, []int{7}, lines["MD059"], "here is one of the default texts")
+}
+
 // TestBuiltInRulesDeclareTheirOptions checks that every built-in rule
 // declares its options itself, as its catalog entry declares them, so that
 // a registry that holds the rule without the entry still knows them.

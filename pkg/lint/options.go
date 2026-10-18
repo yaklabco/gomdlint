@@ -41,9 +41,9 @@ const (
 
 // Accepts reports whether value is a value of the type, as a configuration
 // file holds one: a whole number as an int, or as a float64 such as 1e2,
-// and a list as a []any or a typed slice. Null, which leaves an option
-// unset, suits every type. The type of a list's items is not checked:
-// rules skip items of another type, as markdownlint does.
+// and a list as a []any, or as a []string or []int, whose items all have
+// the type of the list's items. Null, which leaves an option unset, suits
+// every type, but not an item of a list.
 func (t OptionType) Accepts(value any) bool {
 	if value == nil {
 		return true
@@ -58,15 +58,17 @@ func (t OptionType) Accepts(value any) bool {
 		_, ok := value.(string)
 		return ok
 	case OptionStringList:
-		switch value.(type) {
-		case []any, []string:
+		if _, ok := value.([]string); ok {
 			return true
 		}
-		return false
+		items, ok := value.([]any)
+		return ok && len(t.wrongItems(items)) == 0
 	case OptionIntegerOrList:
-		switch value.(type) {
-		case []any, []int:
+		if _, ok := value.([]int); ok {
 			return true
+		}
+		if items, ok := value.([]any); ok {
+			return len(t.wrongItems(items)) == 0
 		}
 		return isWholeNumber(value)
 	case OptionStringOrFalse:
@@ -79,6 +81,35 @@ func (t OptionType) Accepts(value any) bool {
 		return false
 	}
 	return false
+}
+
+// wrongItems returns the positions, counted from 0, of the items that do
+// not have the type of the items of a list of type t, a list type. It
+// returns none for a type that is no list.
+func (t OptionType) wrongItems(items []any) []int {
+	var wrong []int
+	for idx, item := range items {
+		switch t {
+		case OptionStringList:
+			if _, ok := item.(string); !ok {
+				wrong = append(wrong, idx)
+			}
+		case OptionIntegerOrList:
+			if !isWholeNumber(item) {
+				wrong = append(wrong, idx)
+			}
+		}
+	}
+	return wrong
+}
+
+// itemTypeText describes the type of the items of a list of type t, a list
+// type, in prose.
+func (t OptionType) itemTypeText() string {
+	if t == OptionStringList {
+		return OptionString.typeText()
+	}
+	return OptionInteger.typeText()
 }
 
 // isWholeNumber reports whether value is a whole number that rules read as
@@ -135,8 +166,10 @@ const (
 	// rule never reads it.
 	OptionIssueUnknown OptionIssueKind = iota + 1
 
-	// OptionIssueWrongType marks a value of the wrong type. NormalizeOptions
-	// drops it, so the rule uses the option's default.
+	// OptionIssueWrongType marks a value of the wrong type, or an item of
+	// the wrong type in a list (see OptionIssue.Item). NormalizeOptions
+	// drops the option either way, so the rule uses its default: a list
+	// with a wrong item is a value of the wrong type.
 	OptionIssueWrongType
 
 	// OptionIssueNotAllowed marks a string that the option does not allow.
@@ -162,8 +195,14 @@ type OptionIssue struct {
 	// Other is, for OptionIssueConflict, the second of the two spellings.
 	Other string
 
-	// Value is the value written under Key.
+	// Value is the value written under Key, or, for an issue about one
+	// item of a list (see Item), that item.
 	Value any
+
+	// Item is, for an OptionIssueWrongType about one item of a list, the
+	// item's position, counted from 1. It is 0 for an issue about the
+	// whole value.
+	Item int
 
 	// Option is the option that Key spells. It is the zero OptionSpec for
 	// OptionIssueUnknown.
@@ -185,6 +224,7 @@ type OptionIssue struct {
 //
 //	unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored
 //	line-length option "max" must be an integer, not "100px"; it is ignored
+//	heading-blank-lines option "lines_above" item 2 must be an integer, not 2.5; the option is ignored
 //	ul-style option "style" must be one of "consistent", "dash" or "plus", not "dashes" (did you mean "dash"?)
 //	"line_length" and "max" both set line-length option "max"; keep one of them
 func (issue OptionIssue) Text(ruleName string) string {
@@ -199,6 +239,10 @@ func (issue OptionIssue) Text(ruleName string) string {
 		}
 		return text + "; it is ignored"
 	case OptionIssueWrongType:
+		if issue.Item > 0 {
+			return fmt.Sprintf("%s option %q item %d must be %s, not %s; the option is ignored",
+				ruleName, issue.Key, issue.Item, issue.Option.Type.itemTypeText(), describeOptionValue(issue.Value))
+		}
 		return fmt.Sprintf("%s option %q must be %s, not %s; it is ignored",
 			ruleName, issue.Key, issue.Option.Type.typeText(), describeOptionValue(issue.Value))
 	case OptionIssueNotAllowed:
@@ -246,7 +290,8 @@ func describeOptionValue(value any) string {
 //   - a key that is an alias, such as markdownlint's spelling, becomes the
 //     canonical name, and an inverted alias's boolean value is negated;
 //   - a value of the wrong type is dropped, so the rule uses the option's
-//     default;
+//     default, and so is a list with an item of the wrong type, with an
+//     issue for each such item;
 //   - a string that the option does not allow is kept, because rules treat
 //     such values as markdownlint does;
 //   - of two spellings of one option, the canonical one is kept;
@@ -379,7 +424,7 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 			}
 		}
 		if !spec.Type.Accepts(value) {
-			issues = append(issues, OptionIssue{Kind: OptionIssueWrongType, Key: key, Value: options[key], Option: spec})
+			issues = append(issues, wrongTypeIssues(key, options[key], spec)...)
 			changed = true
 			continue
 		}
@@ -410,6 +455,24 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 		normalized[t.specs[index].Name] = value
 	}
 	return normalized, issues
+}
+
+// wrongTypeIssues describes value, the value of the wrong type that key
+// sets for spec: one issue for each item of the wrong type in a list, or
+// one for the whole value.
+func wrongTypeIssues(key string, value any, spec OptionSpec) []OptionIssue {
+	if items, ok := value.([]any); ok {
+		if wrong := spec.Type.wrongItems(items); len(wrong) > 0 {
+			issues := make([]OptionIssue, len(wrong))
+			for idx, item := range wrong {
+				issues[idx] = OptionIssue{
+					Kind: OptionIssueWrongType, Key: key, Value: items[item], Item: item + 1, Option: spec,
+				}
+			}
+			return issues
+		}
+	}
+	return []OptionIssue{{Kind: OptionIssueWrongType, Key: key, Value: value, Option: spec}}
 }
 
 // canonical reports whether options need no change and have no problem:

@@ -104,6 +104,36 @@ rule_defaults:
 		"a value outside the allowed ones is kept for the rule")
 }
 
+// TestLoad_WarnsAboutOptionListItems checks lists whose items have the
+// wrong type: each such item gets a warning that names the option, the
+// item's position, counted from 1, and the item's line, and the option is
+// dropped, as a value of the wrong type is, so the rule uses its default.
+func TestLoad_WarnsAboutOptionListItems(t *testing.T) {
+	t.Parallel()
+
+	content := `rules:
+  heading-blank-lines:
+    options:
+      lines_above: [1, 2.5]
+  descriptive-link-text:
+    options:
+      patterns:
+        - here
+        - 42
+        - true
+`
+	result, err := loadProject(t, content)
+	require.NoError(t, err, "option problems do not fail loading")
+
+	assert.Equal(t, []string{
+		`.gomdlint.yml:4: heading-blank-lines option "lines_above" item 2 must be an integer, not 2.5; the option is ignored`,
+		`.gomdlint.yml:9: descriptive-link-text option "patterns" item 2 must be a string, not 42; the option is ignored`,
+		`.gomdlint.yml:10: descriptive-link-text option "patterns" item 3 must be a string, not true; the option is ignored`,
+	}, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+	assert.Empty(t, result.Config.Rules["MD022"].Options)
+	assert.Empty(t, result.Config.Rules["MD059"].Options)
+}
+
 // TestLoad_WarnsAboutOptionsInJSON checks the same warnings for a JSON
 // config file, with the lines of its keys.
 func TestLoad_WarnsAboutOptionsInJSON(t *testing.T) {

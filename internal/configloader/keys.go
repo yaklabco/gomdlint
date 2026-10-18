@@ -110,8 +110,8 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 							prefix+nested.name, prefix+"options"))
 					case nested.name == "options" && isRule:
 						for _, option := range mappingEntries(nested.value, nested.through) {
-							for _, message := range optionWarnings(registry, known, option) {
-								warn(option, message)
+							for _, warning := range optionWarnings(registry, known, option) {
+								warn(warning.at, warning.message)
 							}
 						}
 					}
@@ -123,22 +123,47 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 	return warnings
 }
 
+// optionWarning is a warning about an option of a rule, with the entry
+// whose place it names.
+type optionWarning struct {
+	at      keyEntry
+	message string
+}
+
 // optionWarnings describes the problems of option, an entry under the
 // options of rule: an option that the rule does not read, with the closest
-// spellings, a value of the wrong type, which loading drops so that the
-// rule uses its default, and a value that the option does not allow. Two
-// spellings of one option fail loading instead (see normalizeRuleOptions).
-func optionWarnings(registry *lint.Registry, rule lint.Rule, option keyEntry) []string {
+// spellings, a value of the wrong type, or a list with items of the wrong
+// type, which loading drops so that the rule uses its default, and a value
+// that the option does not allow. A warning about an item of a list names
+// the item's line. Two spellings of one option fail loading instead (see
+// normalizeRuleOptions).
+func optionWarnings(registry *lint.Registry, rule lint.Rule, option keyEntry) []optionWarning {
 	var value any
 	if err := option.value.Decode(&value); err != nil {
 		return nil // Loading has decoded the file, so this does not happen.
 	}
 	_, issues, _ := registry.NormalizeOptions(rule.ID(), map[string]any{option.name: value})
-	messages := make([]string, 0, len(issues))
+	warnings := make([]optionWarning, 0, len(issues))
 	for _, issue := range issues {
-		messages = append(messages, issue.Text(rule.Name()))
+		at := option
+		if line := itemLine(option.value, issue.Item); line > 0 {
+			at.line = line
+		}
+		warnings = append(warnings, optionWarning{at: at, message: issue.Text(rule.Name())})
 	}
-	return messages
+	return warnings
+}
+
+// itemLine returns the line of item, counted from 1, of node, a sequence
+// or an alias to one, or 0 when node holds no such item.
+func itemLine(node *yaml.Node, item int) int {
+	for node != nil && node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	if node == nil || node.Kind != yaml.SequenceNode || item < 1 || item > len(node.Content) {
+		return 0
+	}
+	return node.Content[item-1].Line
 }
 
 // keyEntry is a key that decoding reads from a mapping, with its value and

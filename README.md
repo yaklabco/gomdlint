@@ -460,8 +460,11 @@ the rule does not read, with the closest names, such as `unknown option
 "stirct" for line-length (did you mean "strict"?)`. It also gets one for a
 value of the wrong type, which the rule ignores in favour of its default,
 and for a value outside the option's allowed values, such as a `style`
-that the rule does not know. A markdownlint config that gomdlint migrates
-or translates for a run gets these warnings too.
+that the rule does not know. A list with an item of the wrong type, such
+as `lines_above: [1, 2.5]`, counts as a value of the wrong type: each such
+item gets a warning, and the rule uses the option's default. A markdownlint
+config that gomdlint migrates or translates for a run gets these warnings
+too.
 
 ### Precedence
 
