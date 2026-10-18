@@ -58,8 +58,9 @@ func TestMarkdownlintRuleConfigEnabled(t *testing.T) {
 // the rules on when the value is truthy in JavaScript, and makes them
 // warnings for "warning" and errors otherwise. It takes nothing else from
 // the value, so an object turns the rules on whatever it holds, and the
-// rule keeps its option defaults, which are markdownlint's, so the settings
-// set no option.
+// rule keeps markdownlint's option defaults: without a normalizer, which
+// gives the options that every setting writes out, the settings hold no
+// option.
 func TestMarkdownlintDefaultRuleConfig(t *testing.T) {
 	t.Parallel()
 
@@ -86,7 +87,7 @@ func TestMarkdownlintDefaultRuleConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := config.MarkdownlintDefaultRuleConfig("MD009", tt.value)
+			got := config.MarkdownlintDefaultRuleConfig("MD009", tt.value, nil)
 
 			require.NotNil(t, got.Enabled)
 			assert.Equal(t, tt.enabled, *got.Enabled)
@@ -146,9 +147,9 @@ func TestMarkdownlintRuleConfig(t *testing.T) {
 	}
 }
 
-// TestMarkdownlintRuleConfigSetsOnlyWrittenOptions checks that the
-// translation adds no option the value leaves out: the rules' defaults are
-// markdownlint's, so an option left out behaves as in markdownlint.
+// TestMarkdownlintRuleConfigSetsOnlyWrittenOptions checks that, without a
+// normalizer, the translation adds no option that the value leaves out: the
+// options that every setting writes out come from the normalizer.
 func TestMarkdownlintRuleConfigSetsOnlyWrittenOptions(t *testing.T) {
 	t.Parallel()
 
@@ -160,8 +161,9 @@ func TestMarkdownlintRuleConfigSetsOnlyWrittenOptions(t *testing.T) {
 }
 
 // TestMarkdownlintRuleConfigNormalizesOptions checks that the options pass
-// through the normalizer, which gets the rule's ID, and that options it
-// leaves empty are no options.
+// through the normalizer, which gets the rule's ID, that options it leaves
+// empty are no options, and that a value without options asks it for the
+// options that every setting of the rule writes out.
 func TestMarkdownlintRuleConfigNormalizesOptions(t *testing.T) {
 	t.Parallel()
 
@@ -182,10 +184,16 @@ func TestMarkdownlintRuleConfigNormalizesOptions(t *testing.T) {
 		func(string, map[string]any) map[string]any { return map[string]any{} })
 	assert.Nil(t, empty.Options)
 
-	called := false
-	config.MarkdownlintRuleConfig("MD013", true, func(string, map[string]any) map[string]any {
-		called = true
-		return nil
-	})
-	assert.False(t, called, "a value without options has none to normalize")
+	pins := func(_ string, options map[string]any) map[string]any {
+		assert.Empty(t, options, "the value writes no options")
+		return map[string]any{"max": 80}
+	}
+	for _, value := range []any{true, false, nil, "warning", float64(0)} {
+		assert.Equal(t, map[string]any{"max": 80}, config.MarkdownlintRuleConfig("MD013", value, pins).Options, "%#v", value)
+		assert.Equal(t, map[string]any{"max": 80}, config.MarkdownlintDefaultRuleConfig("MD013", value, pins).Options,
+			"default %#v", value)
+	}
+	assert.Equal(t, map[string]any{"max": 80},
+		config.MarkdownlintDefaultRuleConfig("MD013", map[string]any{"line_length": 100}, pins).Options,
+		"the default key writes no options of its own")
 }

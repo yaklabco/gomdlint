@@ -133,10 +133,55 @@ func legacyTruthy(value any) bool {
 	}
 }
 
+// legacyMarkdownlintDefaultRuleConfig is config.MarkdownlintDefaultRuleConfig
+// on main at 580bd58, unchanged apart from the names it calls.
+func legacyMarkdownlintDefaultRuleConfig(ruleID string, value any) config.RuleConfig {
+	switch text, isText := value.(string); {
+	case isText && text == "warning":
+		return legacyMarkdownlintRuleConfig(ruleID, "warning")
+	case legacyTruthy(value):
+		return legacyMarkdownlintRuleConfig(ruleID, true)
+	default:
+		return legacyMarkdownlintRuleConfig(ruleID, false)
+	}
+}
+
 // legacyTranslator translates rules as migration did on main at 580bd58,
 // before the catalog declared options.
-func legacyTranslator(_ *lint.Registry, ruleID string, value any) (config.RuleConfig, []lint.OptionIssue) {
-	return legacyMarkdownlintRuleConfig(ruleID, value), nil
+func legacyTranslator() markdownlintTranslator {
+	return markdownlintTranslator{
+		rule: func(_ *lint.Registry, ruleID string, value any) (config.RuleConfig, []lint.OptionIssue) {
+			return legacyMarkdownlintRuleConfig(ruleID, value), nil
+		},
+		defaultRule: func(_ *lint.Registry, ruleID string, value any) config.RuleConfig {
+			return legacyMarkdownlintDefaultRuleConfig(ruleID, value)
+		},
+	}
+}
+
+// lowerLayer is a configuration layer under a markdownlint config, such as
+// a user config: it sets options of the rules that #42's translation writes
+// options for, both options that it writes and options that it leaves out.
+func lowerLayer() *config.Config {
+	return &config.Config{
+		RuleDefaults: map[string]config.RuleConfig{
+			"MD001": {Options: map[string]any{"front_matter_title": "^name:"}},
+			"MD004": {Options: map[string]any{"style": "dash"}},
+			"MD009": {Options: map[string]any{"br_spaces": 4, "strict": true}},
+			"MD013": {Options: map[string]any{"max": 20, "ignore_urls": true, "stern": true}},
+			"MD022": {Options: map[string]any{"markdownlint_compatible": false, "lines_above": 2}},
+		},
+		Rules: map[string]config.RuleConfig{
+			"MD024": {Options: map[string]any{"siblings_only": true}},
+			"MD025": {Options: map[string]any{"title_only": false, "level": 2}},
+			"MD029": {Options: map[string]any{"style": "ordered"}},
+			"MD033": {Options: map[string]any{"allowed_elements": []any{"br"}}},
+			"MD046": {Options: map[string]any{"style": "indented"}},
+			"MD048": {Options: map[string]any{"style": "tilde"}},
+			"MD059": {Options: map[string]any{"patterns": []any{"x"}, "markdownlint_compatible": false}},
+			"MD060": {Options: map[string]any{"markdownlint_compatible": false, "style": "tight"}},
+		},
+	}
 }
 
 // markdownlintFixture is a markdownlint config file.
@@ -359,12 +404,14 @@ func TestMarkdownlintTranslationKeepsEffectiveOptions(t *testing.T) {
 			source := filepath.Join(dir, fixture.file)
 			require.NoError(t, os.WriteFile(source, []byte(fixture.content), 0o600))
 
-			legacy, err := convertMarkdownlintConfig(source, legacyTranslator)
+			legacy, err := convertMarkdownlintConfig(source, legacyTranslator())
 			require.NoError(t, err)
 			converted, err := ConvertMarkdownlintConfig(source)
 			require.NoError(t, err)
 			want := effectiveOptions(t, legacy.Config)
 			assert.Equal(t, want, effectiveOptions(t, converted.Config), "the translation")
+			assert.Equal(t, effectiveOptions(t, merge(lowerLayer(), legacy.Config)),
+				effectiveOptions(t, merge(lowerLayer(), converted.Config)), "the translation over a lower layer")
 
 			direct, err := Load(context.Background(), LoadOptions{
 				WorkingDir: dir, IgnoreEnv: true, IgnoreUserConfig: true, IgnoreSystemConfig: true, NonInteractive: true,
@@ -383,5 +430,37 @@ func TestMarkdownlintTranslationKeepsEffectiveOptions(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, want, effectiveOptions(t, loaded.Config), "the migrated config")
 		})
+	}
+}
+
+// TestMarkdownlintTranslationWritesWhat42Wrote checks the settings that the
+// catalog-driven translation gives each rule against #42's, for a rule key
+// and for the default key, with every kind of value: the same state, the
+// same severity and the same options, including the defaults that #42
+// wrote out for some options of some rules, which replace the options of a
+// lower configuration layer. Options that are nil and options that are
+// empty count as the same: both write options: {} and set nothing.
+func TestMarkdownlintTranslationWritesWhat42Wrote(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	values := []any{true, false, nil, "warning", "", float64(0), map[string]any{}, map[string]any{"enabled": false}}
+	encode := func(cfg config.RuleConfig) string {
+		if cfg.Options == nil {
+			cfg.Options = map[string]any{}
+		}
+		encoded, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		return string(encoded)
+	}
+	for _, id := range registry.IDs() {
+		for _, value := range values {
+			converted, issues := registry.MarkdownlintRuleConfig(id, value)
+			assert.Empty(t, issues, "%s %#v", id, value)
+			assert.Equal(t, encode(legacyMarkdownlintRuleConfig(id, value)), encode(converted), "%s %#v", id, value)
+			assert.Equal(t, encode(legacyMarkdownlintDefaultRuleConfig(id, value)),
+				encode(registry.MarkdownlintDefaultRuleConfig(id, value)), "%s default %#v", id, value)
+		}
 	}
 }

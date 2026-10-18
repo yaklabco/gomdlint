@@ -539,6 +539,47 @@ func TestRegistryMarkdownlintRuleConfig(t *testing.T) {
 	assert.Empty(t, issues)
 }
 
+// TestRegistryMarkdownlintRuleConfigWritesPinnedOptions checks the options
+// that every markdownlint setting of a rule writes out: the defaults of the
+// options that its declaration marks MarkdownlintPinned, whatever the value
+// and under the default key too, with the options that a setting gives
+// over them, each setting with its own copy of the defaults.
+func TestRegistryMarkdownlintRuleConfigWritesPinnedOptions(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	registry.Register(&optionRule{id: "MD033", name: "no-inline-html"})
+	registry.Describe(lint.RuleMeta{ID: "MD033", Name: "no-inline-html", OptionsDeclared: true, Options: []lint.OptionSpec{
+		{Name: "allowed_elements", Type: lint.OptionStringList, Default: []string{"br"}, MarkdownlintPinned: true},
+		{Name: "table_allowed_elements", Type: lint.OptionStringList, Default: []string{}},
+	}})
+	pinned := map[string]any{"allowed_elements": []string{"br"}}
+
+	values := []any{true, false, nil, "warning", "", float64(0), map[string]any{}, map[string]any{"enabled": false}}
+	for _, value := range values {
+		cfg, issues := registry.MarkdownlintRuleConfig("MD033", value)
+		assert.Equal(t, pinned, cfg.Options, "%#v", value)
+		assert.Empty(t, issues, "%#v", value)
+		assert.Equal(t, pinned, registry.MarkdownlintDefaultRuleConfig("MD033", value).Options, "default key %#v", value)
+	}
+
+	cfg, issues := registry.MarkdownlintRuleConfig("MD033", map[string]any{
+		"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"},
+	})
+	assert.Equal(t, map[string]any{"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"}}, cfg.Options,
+		"the options of the setting win")
+	assert.Empty(t, issues)
+
+	cfg, _ = registry.MarkdownlintRuleConfig("MD033", true)
+	cfg.Options["allowed_elements"].([]string)[0] = "hr"
+	assert.Equal(t, pinned, registry.MarkdownlintDefaultRuleConfig("MD033", true).Options, "each setting has its own copy")
+	meta, ok := registry.Meta("MD033")
+	require.True(t, ok)
+	assert.Equal(t, []string{"br"}, meta.Options[0].Default, "the declaration keeps its default")
+
+	assert.Nil(t, registry.MarkdownlintDefaultRuleConfig("MD404", true).Options, "an unknown rule writes no options")
+}
+
 // TestResolveRulesNormalizesOptions covers the options that rules see: the
 // canonical spellings, whatever spelling the configuration used, with
 // rules overriding rule_defaults option by option.

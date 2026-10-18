@@ -494,14 +494,13 @@ project has no gomdlint config, gomdlint translates a markdownlint config
 that it finds and applies it for the run. It offers to save the translation
 only when stdin and stderr are both terminals.
 
-Migration writes whether markdownlint runs each rule into `rule_defaults`,
-with the settings of the source file under `rules`. Options are written
-under gomdlint's names, such as `max` for `line_length`, and options that
-the source leaves out keep gomdlint's defaults, which are markdownlint's.
-An option that the rule does not read is left out with a warning. It writes
-no other setting, so `ignore`, `flavor`, `backups` and the other settings of
-a user or system config still apply after migration, as they do while
-gomdlint translates the markdownlint config for each run. As in
+Migration writes markdownlint's rule defaults and translated options into
+`rule_defaults`, with the settings of the source file under `rules`. It
+writes no other setting, so `ignore`, `flavor`, `backups` and the other
+settings of a user or system config still apply after migration, as they do
+while gomdlint translates the markdownlint config for each run. Options are
+written under gomdlint's names, such as `max` for `line_length`, and an
+option that the rule does not read is left out with a warning. As in
 markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.

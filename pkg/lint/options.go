@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -310,33 +309,50 @@ func NormalizeOptions(specs []OptionSpec, options map[string]any) (map[string]an
 // rewritten through the rule's declared options, as NormalizeOptions does:
 // markdownlint's spellings become canonical names, and options that the
 // rule does not read are left out, as markdownlint ignores them. The
-// issues report each option left out or kept in doubt, and two spellings
-// of one option. A rule whose entry does not declare its options keeps
-// them as written.
+// options marked MarkdownlintPinned are set to their defaults under the
+// options that value writes, whatever value is, so that the setting
+// replaces them in a lower configuration layer. The issues report each
+// option left out or kept in doubt, and two spellings of one option. A
+// rule that declares no options keeps them as written.
 func (r *Registry) MarkdownlintRuleConfig(id string, value any) (config.RuleConfig, []OptionIssue) {
 	var issues []OptionIssue
 	cfg := config.MarkdownlintRuleConfig(id, value, func(ruleID string, options map[string]any) map[string]any {
-		normalized, found, declared := r.NormalizeOptions(ruleID, options)
-		if !declared {
+		table := r.lookups().options[ruleID]
+		if table == nil {
 			return options
 		}
+		normalized, found := table.normalize(options)
 		issues = found
-		var known map[string]any
+		unknown := make(map[string]bool)
 		for _, issue := range found {
-			if issue.Kind != OptionIssueUnknown {
-				continue
+			if issue.Kind == OptionIssueUnknown {
+				unknown[issue.Key] = true
 			}
-			if known == nil {
-				known = maps.Clone(normalized)
+		}
+		translated := table.pinned()
+		for key, option := range normalized {
+			if !unknown[key] {
+				translated[key] = option
 			}
-			delete(known, issue.Key)
 		}
-		if known != nil {
-			return known
-		}
-		return normalized
+		return translated
 	})
 	return cfg, issues
+}
+
+// MarkdownlintDefaultRuleConfig converts value, the value of the default key
+// of a markdownlint configuration, to the settings that it gives the
+// registered rule with the given ID (see config.MarkdownlintDefaultRuleConfig):
+// the rule's state and severity, and the options marked MarkdownlintPinned,
+// set to their defaults. The value itself writes no options.
+func (r *Registry) MarkdownlintDefaultRuleConfig(id string, value any) config.RuleConfig {
+	return config.MarkdownlintDefaultRuleConfig(id, value, func(ruleID string, options map[string]any) map[string]any {
+		table := r.lookups().options[ruleID]
+		if table == nil {
+			return options
+		}
+		return table.pinned()
+	})
 }
 
 // optionTable indexes the options that one rule declares by spelling.
@@ -504,6 +520,19 @@ func (t *optionTable) canonical(options map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// pinned returns a new map of the table's options that every markdownlint
+// setting of the rule writes out (OptionSpec.MarkdownlintPinned), each set
+// to a copy of its default.
+func (t *optionTable) pinned() map[string]any {
+	pinned := make(map[string]any)
+	for _, spec := range t.specs {
+		if spec.MarkdownlintPinned {
+			pinned[spec.Name] = cloneOptionValue(spec.Default)
+		}
+	}
+	return pinned
 }
 
 // allSpellings lists the names and aliases of the table's options.

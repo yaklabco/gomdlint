@@ -12,11 +12,15 @@ const MarkdownlintFrontMatterTitlePattern = `^\s*"?title"?\s*[:=]`
 // markdownlint configuration.
 const markdownlintWarning = string(SeverityWarning)
 
-// OptionNormalizer rewrites options, the options of the rule with the given
-// ID as a configuration writes them, to the names that the rule reads,
-// such as max for markdownlint's line_length. The lint package's Registry
-// supplies one from the rule catalog, which this package cannot import
-// (see lint.Registry.MarkdownlintRuleConfig).
+// OptionNormalizer returns the options that the rule with the given ID gets
+// from a setting in a markdownlint configuration, given options, the
+// options that the setting writes, which are none for a setting that is no
+// object: those options rewritten to the names that the rule reads, such
+// as max for markdownlint's line_length, over the options that every
+// markdownlint setting of the rule writes out (see
+// lint.OptionSpec.MarkdownlintPinned). The lint package's Registry supplies
+// one from the rule catalog, which this package cannot import (see
+// lint.Registry.MarkdownlintRuleConfig).
 type OptionNormalizer func(ruleID string, options map[string]any) map[string]any
 
 // MarkdownlintDefaultRuleConfig converts the value of markdownlint's default
@@ -26,15 +30,16 @@ type OptionNormalizer func(ruleID string, options map[string]any) map[string]any
 // and the empty string, and it reports warnings for "warning" and errors
 // otherwise. Nothing else comes from the value, so an object turns the rule
 // on whatever it holds, and the rule keeps its option defaults, which are
-// markdownlint's.
-func MarkdownlintDefaultRuleConfig(ruleID string, value any) RuleConfig {
+// markdownlint's. normalize, when not nil, gives the options that every
+// setting of the rule writes out.
+func MarkdownlintDefaultRuleConfig(ruleID string, value any, normalize OptionNormalizer) RuleConfig {
 	switch text, isText := value.(string); {
 	case isText && text == markdownlintWarning:
-		return MarkdownlintRuleConfig(ruleID, markdownlintWarning, nil)
+		return MarkdownlintRuleConfig(ruleID, markdownlintWarning, normalize)
 	case markdownlintTruthy(value):
-		return MarkdownlintRuleConfig(ruleID, true, nil)
+		return MarkdownlintRuleConfig(ruleID, true, normalize)
 	default:
-		return MarkdownlintRuleConfig(ruleID, false, nil)
+		return MarkdownlintRuleConfig(ruleID, false, normalize)
 	}
 }
 
@@ -72,15 +77,16 @@ func markdownlintTruthy(value any) bool {
 // rule off, a string turns it on, with warnings when it is "warning", and
 // an object turns it on unless its enabled key is present and falsy. An
 // object also takes its severity key, and holds the rule's options under
-// its other keys. normalize, when not nil, rewrites those options to the
-// names the rule reads, from the rule's declared options.
-//
-// The settings hold only what value sets: an option that value leaves out
-// keeps the rule's default, which is markdownlint's.
+// its other keys. normalize, when not nil, gives the options that the rule
+// gets from those options, and from a value that holds none: they are
+// rewritten to the names the rule reads, over the options that every
+// markdownlint setting of the rule writes out, from the rule's declared
+// options. Without normalize, the settings hold the options as written.
 func MarkdownlintRuleConfig(ruleID string, value any, normalize OptionNormalizer) RuleConfig {
 	enabled := true
 	severity := string(SeverityError)
 	cfg := RuleConfig{Enabled: &enabled, Severity: &severity}
+	options := make(map[string]any)
 	switch typed := value.(type) {
 	case string:
 		*cfg.Enabled = typed != ""
@@ -88,7 +94,6 @@ func MarkdownlintRuleConfig(ruleID string, value any, normalize OptionNormalizer
 			severity = typed
 		}
 	case map[string]any:
-		options := make(map[string]any, len(typed))
 		for key, option := range typed {
 			switch key {
 			case "enabled":
@@ -101,15 +106,15 @@ func MarkdownlintRuleConfig(ruleID string, value any, normalize OptionNormalizer
 				options[key] = option
 			}
 		}
-		if normalize != nil && len(options) > 0 {
-			options = normalize(ruleID, options)
-		}
-		if len(options) > 0 {
-			cfg.Options = options
-		}
 	default:
 		// Booleans, null, numbers and arrays, as JavaScript tests them.
 		*cfg.Enabled = markdownlintTruthy(value)
+	}
+	if normalize != nil {
+		options = normalize(ruleID, options)
+	}
+	if len(options) > 0 {
+		cfg.Options = options
 	}
 	return cfg
 }

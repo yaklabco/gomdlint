@@ -710,7 +710,8 @@ func TestConvertMarkdownlintConfig_DefaultKey(t *testing.T) {
 			assert.Equal(t, tt.enabled, *baseline.Enabled)
 			require.NotNil(t, baseline.Severity)
 			assert.Equal(t, cmp.Or(tt.severity, "error"), *baseline.Severity)
-			assert.Nil(t, baseline.Options, "the default sets no options")
+			assert.Equal(t, map[string]any{"ignore_code_blocks": true, "br_spaces": 2}, baseline.Options,
+				"the default sets no options")
 			assert.False(t, *result.Config.RuleDefaults["MDL001"].Enabled, "markdownlint never runs gomdlint's rules")
 		})
 	}

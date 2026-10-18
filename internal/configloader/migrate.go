@@ -55,10 +55,17 @@ func (r *MigrationResult) addWarning(line int, message string) {
 	r.Warnings = append(r.Warnings, message)
 }
 
-// ruleTranslator converts the setting of the rule with the given ID in a
-// markdownlint configuration to gomdlint's settings, and reports the
-// problems that its options hold.
-type ruleTranslator func(registry *lint.Registry, ruleID string, value any) (config.RuleConfig, []lint.OptionIssue)
+// markdownlintTranslator converts the settings of rules in a markdownlint
+// configuration to gomdlint's settings.
+type markdownlintTranslator struct {
+	// rule converts the setting of the rule with the given ID under a key
+	// that names it, and reports the problems that its options hold.
+	rule func(registry *lint.Registry, ruleID string, value any) (config.RuleConfig, []lint.OptionIssue)
+
+	// defaultRule converts the value of the default key for the rule with
+	// the given ID.
+	defaultRule func(registry *lint.Registry, ruleID string, value any) config.RuleConfig
+}
 
 // ConvertMarkdownlintConfig converts a markdownlint config file to gomdlint
 // format. As in markdownlint 0.41.1, the default key, the first key named
@@ -73,15 +80,20 @@ type ruleTranslator func(registry *lint.Registry, ruleID string, value any) (con
 // spellings become gomdlint's canonical names, such as max for
 // line_length, and options that the rule does not read, or whose values
 // have the wrong type, are left out with a warning, as markdownlint ignores
-// them. Options that the source leaves out keep the rules' defaults, which
-// are markdownlint's. Two spellings of one option are an error.
+// them. Every setting of some rules also writes out markdownlint's
+// defaults for some of their options (see lint.OptionSpec.MarkdownlintPinned),
+// so that it replaces them in a lower configuration layer, as gomdlint's
+// translation always has. Two spellings of one option are an error.
 func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
-	return convertMarkdownlintConfig(path, (*lint.Registry).MarkdownlintRuleConfig)
+	return convertMarkdownlintConfig(path, markdownlintTranslator{
+		rule:        (*lint.Registry).MarkdownlintRuleConfig,
+		defaultRule: (*lint.Registry).MarkdownlintDefaultRuleConfig,
+	})
 }
 
 // convertMarkdownlintConfig implements ConvertMarkdownlintConfig, with
-// translate converting the setting of each rule that a key names.
-func convertMarkdownlintConfig(path string, translate ruleTranslator) (*MigrationResult, error) {
+// translate converting the settings of the rules.
+func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*MigrationResult, error) {
 	result := &MigrationResult{
 		SourcePath: path,
 	}
@@ -115,7 +127,7 @@ func convertMarkdownlintConfig(path string, translate ruleTranslator) (*Migratio
 		if lint.IsGomdlintOnlyRule(id) {
 			value = false // markdownlint does not run gomdlint's own rules.
 		}
-		cfg.RuleDefaults[id] = config.MarkdownlintDefaultRuleConfig(id, value)
+		cfg.RuleDefaults[id] = translate.defaultRule(registry, id, value)
 	}
 
 	conversion := &markdownlintConversion{
@@ -335,7 +347,7 @@ func stripJSONComments(content []byte) []byte {
 // configuration into cfg, recording warnings in result.
 type markdownlintConversion struct {
 	registry  *lint.Registry
-	translate ruleTranslator
+	translate markdownlintTranslator
 	cfg       *config.Config
 	result    *MigrationResult
 	locate    sourceLocator
@@ -345,7 +357,7 @@ type markdownlintConversion struct {
 // returns the problems its options hold, other than two spellings of one
 // option, which are an error.
 func (c *markdownlintConversion) rule(id string, value any) (config.RuleConfig, []lint.OptionIssue, error) {
-	converted, issues := c.translate(c.registry, id, value)
+	converted, issues := c.translate.rule(c.registry, id, value)
 	for _, issue := range issues {
 		if issue.Kind == lint.OptionIssueConflict {
 			return config.RuleConfig{}, nil, errors.New(issue.Text(c.ruleName(id)))

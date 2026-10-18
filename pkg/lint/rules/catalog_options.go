@@ -25,12 +25,17 @@ const (
 //
 // Every default equals the rule's own, which matches markdownlint 0.41.
 // Options that markdownlint lacks are gomdlint-only, and their defaults
-// keep markdownlint's behaviour.
+// keep markdownlint's behaviour. The options that gomdlint's translation of
+// markdownlint settings has always written out, for MD001, MD004, MD009,
+// MD013, MD022, MD025, MD029, MD033, MD046, MD048, MD059 and MD060, are
+// marked MarkdownlintPinned, so that a markdownlint setting still replaces
+// them in a lower configuration layer.
 //
 //nolint:funlen,maintidx // One entry per rule: a table, not logic.
 func catalogOptions() map[string][]lint.OptionSpec {
 	return map[string][]lint.OptionSpec{
-		"MD001": {frontMatterTitleOption("counts as the top-level heading, so the first heading may be a level 2 heading")},
+		"MD001": {markdownlintPinned(frontMatterTitleOption(
+			"counts as the top-level heading, so the first heading may be a level 2 heading"))},
 		"MD003": {
 			{
 				Name: "style", Type: lint.OptionString, Default: string(StyleConsistent),
@@ -43,7 +48,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			},
 		},
 		"MD004": {{
-			Name: "style", Type: lint.OptionString, Default: string(BulletConsistent),
+			Name: "style", Type: lint.OptionString, Default: string(BulletConsistent), MarkdownlintPinned: true,
 			Values: []string{"consistent", "asterisk", "plus", "dash", "sublist"},
 			Description: "Bullet to require. consistent takes the bullet of the first list, and sublist " +
 				"gives each nesting level a bullet that differs from its parent level's.",
@@ -65,7 +70,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		},
 		"MD009": {
 			{
-				Name: "br_spaces", Type: lint.OptionInteger, Default: defaultBreakSpaces,
+				Name: "br_spaces", Type: lint.OptionInteger, Default: defaultBreakSpaces, MarkdownlintPinned: true,
 				Description: "Trailing spaces allowed for a hard line break. Values below 2 allow none.",
 			},
 			{
@@ -78,7 +83,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			},
 			{
 				Name: "ignore_code_blocks", Aliases: []lint.OptionAlias{{Name: "code_blocks", Inverted: true}},
-				Type: lint.OptionBoolean, Default: true,
+				Type: lint.OptionBoolean, Default: true, MarkdownlintPinned: true,
 				Description: "Skip the lines of code blocks.",
 			},
 		},
@@ -104,7 +109,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD013": {
 			{
 				Name: "max", Aliases: []lint.OptionAlias{{Name: "line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, Description: "Most characters allowed on a line.",
+				Default: defaultMaxLineLength, MarkdownlintPinned: true, Description: "Most characters allowed on a line.",
 			},
 			{
 				Name: "heading_max", Aliases: []lint.OptionAlias{{Name: "heading_line_length"}}, Type: lint.OptionInteger,
@@ -116,7 +121,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			},
 			{
 				Name: "ignore_code_blocks", Aliases: []lint.OptionAlias{{Name: "code_blocks", Inverted: true}},
-				Type: lint.OptionBoolean, Default: false, Description: "Skip code blocks.",
+				Type: lint.OptionBoolean, Default: false, MarkdownlintPinned: true, Description: "Skip code blocks.",
 			},
 			{
 				Name: "ignore_tables", Aliases: []lint.OptionAlias{{Name: "tables", Inverted: true}},
@@ -127,7 +132,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 				Type: lint.OptionBoolean, Default: false, Description: "Skip headings.",
 			},
 			{
-				Name: "ignore_urls", Type: lint.OptionBoolean, Default: false, GomdlintOnly: true,
+				Name: "ignore_urls", Type: lint.OptionBoolean, Default: false, GomdlintOnly: true, MarkdownlintPinned: true,
 				Description: "Skip lines that contain a URL.",
 			},
 			{
@@ -141,7 +146,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 					"unless the line has no space to wrap at.",
 			},
 			{
-				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true,
+				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true, MarkdownlintPinned: true,
 				Description: "Allow what markdownlint allows over the limit: reference definitions, lines that hold " +
 					"only a link, and a last word that starts within the limit. With false, every line over the limit is reported.",
 			},
@@ -167,7 +172,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 				Description: "Require blank lines above a heading that directly follows front matter.",
 			},
 			{
-				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true,
+				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true, MarkdownlintPinned: true,
 				Description: "Require blank lines between adjacent headings, as markdownlint does. " +
 					"With false, a heading may touch another heading.",
 			},
@@ -184,7 +189,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			},
 			frontMatterTitleOption("counts as the title, so every heading of the title's level is reported"),
 			{
-				Name: "title_only", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true,
+				Name: "title_only", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true, MarkdownlintPinned: true,
 				Description: "Report more title headings only when the first one is the document's title, " +
 					"its first content. With false, every title heading after the first is reported.",
 			},
@@ -204,7 +209,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD028": {},
 		"MD029": {
 			{
-				Name: "style", Type: lint.OptionString, Default: orderedStyleOneOrOrdered,
+				Name: "style", Type: lint.OptionString, Default: orderedStyleOneOrOrdered, MarkdownlintPinned: true,
 				Values: []string{"one", "ordered", "one_or_ordered", "zero"},
 				Description: "Numbering to require: all ones, increasing numbers, all zeros, " +
 					"or one_or_ordered, which accepts either of the first two.",
@@ -227,7 +232,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD032": {},
 		"MD033": {
 			{
-				Name: "allowed_elements", Type: lint.OptionStringList, Default: []string{},
+				Name: "allowed_elements", Type: lint.OptionStringList, Default: []string{}, MarkdownlintPinned: true,
 				Description: "HTML elements to allow, in any case.",
 			},
 			{
@@ -296,7 +301,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		},
 		"MD045": {},
 		"MD046": {{
-			Name: "style", Type: lint.OptionString, Default: string(CodeBlockConsistent),
+			Name: "style", Type: lint.OptionString, Default: string(CodeBlockConsistent), MarkdownlintPinned: true,
 			Values:      []string{"consistent", "fenced", "indented"},
 			Description: "Code block style to require. consistent takes the style of the first block.",
 		}},
@@ -305,7 +310,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			Description: "Most blank lines allowed at the end of the file. Unset, any number is allowed.",
 		}},
 		"MD048": {{
-			Name: "style", Type: lint.OptionString, Default: string(FenceConsistent),
+			Name: "style", Type: lint.OptionString, Default: string(FenceConsistent), MarkdownlintPinned: true,
 			Values:      []string{"consistent", "backtick", "tilde"},
 			Description: "Fence character to require. consistent takes the fence of the first block.",
 		}},
@@ -354,11 +359,11 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD059": {
 			{
 				Name: "patterns", Aliases: []lint.OptionAlias{{Name: "prohibited_texts"}}, Type: lint.OptionStringList,
-				Default:     getDefaultGenericPatterns(),
+				Default: getDefaultGenericPatterns(), MarkdownlintPinned: true,
 				Description: "Link texts to report, compared in any case.",
 			},
 			{
-				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true,
+				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true, MarkdownlintPinned: true,
 				Description: "Compare link text as markdownlint does, ignoring punctuation, " +
 					"and skip links whose text holds code or HTML.",
 			},
@@ -376,7 +381,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 					"to line up with those of the header row.",
 			},
 			{
-				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true,
+				Name: "markdownlint_compatible", Type: lint.OptionBoolean, Default: true, GomdlintOnly: true, MarkdownlintPinned: true,
 				Description: "With the style any, report padding that matches no style, as markdownlint does. " +
 					"With false, any padding is allowed.",
 			},
@@ -392,6 +397,13 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			Description: "Fewest dashes allowed in a cell of a table's delimiter row.",
 		}},
 	}
+}
+
+// markdownlintPinned marks spec as an option that every markdownlint setting
+// of its rule writes out (see lint.OptionSpec.MarkdownlintPinned).
+func markdownlintPinned(spec lint.OptionSpec) lint.OptionSpec {
+	spec.MarkdownlintPinned = true
+	return spec
 }
 
 // frontMatterTitleOption is the front_matter_title option of MD001, MD025

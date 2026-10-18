@@ -88,8 +88,9 @@ func TestRuleOptionMessagesGolden(t *testing.T) {
 
 // TestMigrateWritesCanonicalOptionNames checks the config that migrate
 // writes: options under gomdlint's canonical names, an inverted spelling
-// with the opposite value, and no option that the source leaves out or
-// that no rule reads.
+// with the opposite value, markdownlint's defaults for the options that
+// every setting of the rule writes out, as #42's migration did, and no
+// option that no rule reads.
 func TestMigrateWritesCanonicalOptionNames(t *testing.T) {
 	inProject(t, map[string]string{".markdownlint.json": optionMarkdownlintConfig})
 
@@ -101,7 +102,9 @@ func TestMigrateWritesCanonicalOptionNames(t *testing.T) {
 	content := string(written)
 	assert.Contains(t, content, "max: 40")
 	assert.Contains(t, content, "ignore_tables: true")
-	for _, absent := range []string{"line_length", "tables: false", "stirct", "br_spcaes", "ignore_urls", "markdownlint_compatible"} {
+	assert.Contains(t, content, "ignore_urls: false")
+	assert.Contains(t, content, "markdownlint_compatible: true")
+	for _, absent := range []string{"line_length", "tables: false", "stirct", "br_spcaes"} {
 		assert.NotContains(t, content, absent)
 	}
 }

@@ -23,28 +23,35 @@ func TestConvertMarkdownlintConfig_OptionSpellings(t *testing.T) {
 	}`)
 
 	assert.Empty(t, result.Warnings)
-	assert.Equal(t, map[string]any{"ignore_code_blocks": false}, result.Config.Rules["MD009"].Options)
+	assert.Equal(t, map[string]any{"ignore_code_blocks": false, "br_spaces": 2}, result.Config.Rules["MD009"].Options)
 	assert.Equal(t, map[string]any{
 		"max": float64(100), "heading_max": float64(90), "code_block_max": float64(120),
 		"ignore_tables": true, "ignore_headings": false,
+		"ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true,
 	}, result.Config.Rules["MD013"].Options)
 	assert.Equal(t, map[string]any{"max_consecutive": float64(2)}, result.Config.Rules["MD012"].Options)
-	assert.Equal(t, map[string]any{"patterns": []any{"details"}}, result.Config.Rules["MD059"].Options)
+	assert.Equal(t, map[string]any{"patterns": []any{"details"}, "markdownlint_compatible": true},
+		result.Config.Rules["MD059"].Options)
 }
 
-// TestConvertMarkdownlintConfig_OptionsKeepDefaults checks that migration
-// writes only the options that the source sets: every rule's defaults are
-// markdownlint's, so options left out need no value.
-func TestConvertMarkdownlintConfig_OptionsKeepDefaults(t *testing.T) {
+// TestConvertMarkdownlintConfig_OptionsWrittenOut checks that, as #42's
+// migration did, every setting of some rules writes out markdownlint's
+// defaults for some of their options, in rules and in rule_defaults, so
+// that the setting replaces them in a lower configuration layer, and that
+// a setting of any other rule writes no option that the source leaves out.
+func TestConvertMarkdownlintConfig_OptionsWrittenOut(t *testing.T) {
 	t.Parallel()
 
-	result := convertSettings(t, `{"MD013": true, "MD009": {"enabled": true}}`)
+	result := convertSettings(t, `{"MD013": true, "MD009": {"enabled": true}, "MD003": true}`)
 
-	assert.Nil(t, result.Config.Rules["MD013"].Options)
-	assert.Nil(t, result.Config.Rules["MD009"].Options)
-	for id, baseline := range result.Config.RuleDefaults {
-		assert.Nil(t, baseline.Options, "rule_defaults.%s", id)
-	}
+	md013 := map[string]any{"max": 80, "ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true}
+	md009 := map[string]any{"ignore_code_blocks": true, "br_spaces": 2}
+	assert.Equal(t, md013, result.Config.Rules["MD013"].Options)
+	assert.Equal(t, md009, result.Config.Rules["MD009"].Options)
+	assert.Nil(t, result.Config.Rules["MD003"].Options)
+	assert.Equal(t, md013, result.Config.RuleDefaults["MD013"].Options)
+	assert.Equal(t, md009, result.Config.RuleDefaults["MD009"].Options)
+	assert.Nil(t, result.Config.RuleDefaults["MD003"].Options)
 }
 
 // TestConvertMarkdownlintConfig_OptionWarnings checks the warnings about
@@ -67,7 +74,9 @@ func TestConvertMarkdownlintConfig_OptionWarnings(t *testing.T) {
 			`not "dashes" (did you mean "dash"?)`,
 		`unknown option "indent" for list-indent (it has no options); it is ignored`,
 	}, result.Warnings, "in the order the keys are written")
-	assert.Nil(t, result.Config.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{
+		"max": 80, "ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true,
+	}, result.Config.Rules["MD013"].Options, "the options that every setting of the rule writes out")
 	assert.Nil(t, result.Config.Rules["MD005"].Options)
 	assert.Equal(t, map[string]any{"style": "dashes"}, result.Config.Rules["MD004"].Options)
 }
@@ -84,7 +93,7 @@ func TestConvertMarkdownlintConfig_TagOptions(t *testing.T) {
 	assert.Equal(t, []string{
 		`unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored`,
 	}, result.Warnings)
-	assert.Equal(t, map[string]any{"br_spaces": float64(3)}, result.Config.Rules["MD009"].Options)
+	assert.Equal(t, map[string]any{"br_spaces": float64(3), "ignore_code_blocks": true}, result.Config.Rules["MD009"].Options)
 	assert.Nil(t, result.Config.Rules["MD010"].Options, "an option of another rule configures nothing")
 }
 
