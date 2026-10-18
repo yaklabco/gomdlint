@@ -1,8 +1,10 @@
 package configloader
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -146,6 +148,43 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 			warnings: []string{`line-length option "tables" must be true or false, not "no"; it is ignored`},
 			lines:    []int{4},
 		},
+		{
+			name: "JSON option written twice", file: ".markdownlint.json",
+			content:  "{\n  \"MD013\": {\n    \"tables\": 1,\n    \"tables\": \"no\"\n  }\n}\n",
+			warnings: []string{`line-length option "tables" must be true or false, not "no"; it is ignored`},
+			lines:    []int{4},
+		},
+		{
+			name: "YAML option over a merged one", file: ".markdownlint.yaml",
+			content: "base: &length\n  line_length: 1\nMD013:\n  <<: *length\n  line_length: oops\n",
+			warnings: []string{
+				`unknown rule "base"; it is ignored`,
+				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+			},
+			lines: []int{0, 5},
+		},
+		{
+			name: "YAML first of two merged options", file: ".markdownlint.yaml",
+			content: "earlier: &earlier\n  line_length: oops\nlater: &later\n  line_length: 1\n" +
+				"MD013:\n  <<: [*earlier, *later]\n",
+			warnings: []string{
+				`unknown rule "earlier"; it is ignored`,
+				`unknown rule "later"; it is ignored`,
+				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+			},
+			lines: []int{0, 0, 2},
+		},
+		{
+			name: "YAML option merged through a merged mapping", file: ".markdownlint.yaml",
+			content: "inner: &inner\n  line_length: oops\nouter: &outer\n  <<: *inner\n  tables: false\n" +
+				"MD013:\n  <<: [*outer, {line_length: 1}]\n",
+			warnings: []string{
+				`unknown rule "inner"; it is ignored`,
+				`unknown rule "outer"; it is ignored`,
+				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+			},
+			lines: []int{0, 0, 2},
+		},
 	}
 
 	for _, tt := range tests {
@@ -161,6 +200,35 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 			}
 			assert.Equal(t, tt.lines, lines)
 		})
+	}
+}
+
+// TestSourceLocatorReadsEachEntryOnce guards the cost of placing option
+// warnings: however many warnings name keys of one mapping, lookups read
+// each entry of the config once, so placing a warning for every option of
+// a rule takes time linear in the size of the config, not quadratic.
+func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
+	t.Parallel()
+
+	const options = 300
+	var content strings.Builder
+	content.WriteString("MD013:\n")
+	for idx := range options {
+		fmt.Fprintf(&content, "  option_%03d: %d\n", idx, idx)
+	}
+
+	locate := newSourceLocator(".markdownlint.yaml", []byte(content.String()))
+	for idx := range options {
+		require.Equal(t, idx+2, locate.optionLine("MD013", fmt.Sprintf("option_%03d", idx), 0))
+	}
+	assert.Zero(t, locate.optionLine("MD013", "absent", 0))
+	assert.Zero(t, locate.optionLine("MD999", "option_000", 0))
+	assert.LessOrEqual(t, locate.reads, options+1, "the rule key and each option, read once")
+
+	result := convertFile(t, ".markdownlint.yaml", content.String())
+	require.Len(t, result.Warnings, options)
+	for idx := range result.Warnings {
+		assert.Equal(t, idx+2, result.WarningLine(idx), result.Warnings[idx])
 	}
 }
 

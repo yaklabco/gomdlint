@@ -350,7 +350,7 @@ type markdownlintConversion struct {
 	translate markdownlintTranslator
 	cfg       *config.Config
 	result    *MigrationResult
-	locate    sourceLocator
+	locate    *sourceLocator
 }
 
 // rule converts value, the setting of the rule with the given ID, and
@@ -386,41 +386,50 @@ type sourceLocator struct {
 	// root is the config's top-level mapping, or nil when the source holds
 	// none.
 	root *yaml.Node
+
+	// taken indexes, for each mapping that a lookup has searched, the
+	// entries whose values the config takes, by name (see
+	// indexTakenEntries), so that each mapping is read once, however many
+	// warnings name its keys.
+	taken map[*yaml.Node]map[string]*writtenEntry
+
+	// reads counts the written entries that indexing has read.
+	reads int
 }
 
 // newSourceLocator reads content, the markdownlint config at path, into a
 // tree of nodes that record their lines: as JSON with comments for a name
 // that ends in .json or .jsonc, which jsonDocument reads, and as YAML
 // otherwise. Content that it cannot read has no lines to find.
-func newSourceLocator(path string, content []byte) sourceLocator {
+func newSourceLocator(path string, content []byte) *sourceLocator {
 	var doc *yaml.Node
 	if IsJSONConfig(path) {
 		parsed, err := jsonDocument(stripJSONComments(content))
 		if err != nil {
-			return sourceLocator{}
+			return &sourceLocator{}
 		}
 		doc = parsed
 	} else {
 		doc = &yaml.Node{}
 		if err := yaml.Unmarshal(content, doc); err != nil {
-			return sourceLocator{}
+			return &sourceLocator{}
 		}
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return sourceLocator{}
+		return &sourceLocator{}
 	}
-	return sourceLocator{root: doc.Content[0]}
+	return &sourceLocator{root: doc.Content[0]}
 }
 
 // optionLine returns the line of option, a key under the config's key key,
 // or, when item is not 0, the line of the option's item at that position,
 // counted from 1. It returns 0 when the source does not show it.
-func (l sourceLocator) optionLine(key, option string, item int) int {
-	setting := takenSourceEntry(l.root, key)
+func (l *sourceLocator) optionLine(key, option string, item int) int {
+	setting := l.entry(l.root, key)
 	if setting == nil {
 		return 0
 	}
-	entry := takenSourceEntry(setting.value, option)
+	entry := l.entry(setting.value, option)
 	if entry == nil {
 		return 0
 	}
@@ -430,28 +439,46 @@ func (l sourceLocator) optionLine(key, option string, item int) int {
 	return entry.key.Line
 }
 
-// takenSourceEntry returns the entry for name of mapping, a mapping or an
-// alias to one, whose value the config takes: the last one written in the
-// mapping itself, since JSON keeps the last of a key written twice and
-// YAML has no key twice, or else the first that a merge key brings in, as
-// YAML takes it. It returns nil when there is none.
-func takenSourceEntry(mapping *yaml.Node, name string) *writtenEntry {
-	var own, merged *writtenEntry
-	entries := writtenEntries(mapping)
+// entry returns the entry for name of mapping, a mapping or an alias to
+// one, whose value the config takes (see indexTakenEntries), or nil when
+// there is none. The first lookup in a mapping indexes its entries.
+func (l *sourceLocator) entry(mapping *yaml.Node, name string) *writtenEntry {
+	for mapping != nil && mapping.Kind == yaml.AliasNode {
+		mapping = mapping.Alias
+	}
+	if mapping == nil {
+		return nil
+	}
+	index, indexed := l.taken[mapping]
+	if !indexed {
+		entries := writtenEntries(mapping)
+		l.reads += len(entries)
+		index = indexTakenEntries(entries)
+		if l.taken == nil {
+			l.taken = make(map[*yaml.Node]map[string]*writtenEntry)
+		}
+		l.taken[mapping] = index
+	}
+	return index[name]
+}
+
+// indexTakenEntries indexes entries, the entries of a mapping as
+// writtenEntries lists them, by name, keeping for each name the entry
+// whose value the config takes: the last one written in the mapping
+// itself, since JSON keeps the last of a key written twice and YAML has
+// no key twice, or else the first that a merge key brings in, as YAML
+// takes it.
+func indexTakenEntries(entries []writtenEntry) map[string]*writtenEntry {
+	index := make(map[string]*writtenEntry, len(entries))
 	for idx := range entries {
 		entry := &entries[idx]
-		switch {
-		case entry.name != name:
-		case entry.merge == nil:
-			own = entry
-		case merged == nil:
-			merged = entry
+		// A mapping's own entry replaces any entry before it. A merged
+		// entry is kept only when it is the first entry with its name.
+		if _, found := index[entry.name]; !found || entry.merge == nil {
+			index[entry.name] = entry
 		}
 	}
-	if own != nil {
-		return own
-	}
-	return merged
+	return index
 }
 
 // processRuleKey applies key, one key of the markdownlint config, and its
