@@ -45,10 +45,11 @@ import (
 // A candidate's region runs from the start of its marker line, whose
 // blockquote markers and indentation decide how wide a tab between the
 // brackets is, through the end of the line holding the "]", line ending
-// included. When nothing but spaces and tabs follows the "]", the region
-// takes the next line too, since micromark reads a checkbox there only
-// when more of the paragraph follows; when a line ending follows the "[",
-// it takes the two lines after it.
+// included, and the line after it: micromark reads a checkbox before only
+// spaces and tabs only when more of the paragraph follows, and none in a
+// paragraph that the next line makes a setext heading or a table. When a
+// line ending follows the "[", the "]" can start the next line, so the
+// region takes the two lines after the "[".
 
 // checkboxRegion is the source range of one or more checkbox candidates.
 type checkboxRegion struct {
@@ -388,19 +389,14 @@ func candidateEnd(text []byte, idx int) (int, bool) {
 		return 0, false
 	}
 	if len(text) == 1 {
-		// A line ending follows the "[": the "]" can start the next line,
-		// and the line after it decides as below.
+		// A line ending follows the "[": the "]" can start the next line.
 		return idx + 2, true
 	}
 	_, size := utf8.DecodeRune(text[1:])
-	closing := 1 + size
-	if closing >= len(text) || text[closing] != ']' {
+	if closing := 1 + size; closing >= len(text) || text[closing] != ']' {
 		return 0, false
 	}
-	if len(bytes.Trim(text[closing+1:], " \t")) == 0 {
-		return idx + 1, true
-	}
-	return idx, true
+	return idx + 1, true
 }
 
 // mergeRegions merges sorted regions that overlap or touch.

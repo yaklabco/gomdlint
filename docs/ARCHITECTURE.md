@@ -341,10 +341,9 @@ checkboxes in different places, so the guard reads no renderer's rules.
 It takes a lexical superset of both: in a list item's first lines up to a
 blank line or the next item, a line whose text starts with `[`, one
 character or a line ending, and `]`. A fix may not change the text from the
-start of the item's marker line through the line holding the `]` (and the
-line after it when nothing follows the `]`), join that marker line to the
-line before, or leave the lines around it with a candidate they did not
-have.
+start of the item's marker line through the line after the one holding the
+`]`, join that marker line to the line before, or leave the lines around it
+with a candidate they did not have.
 
 Fixes of different rules can each be safe and still corrupt a file
 together. One rule removing `$` prompts in a code block while another

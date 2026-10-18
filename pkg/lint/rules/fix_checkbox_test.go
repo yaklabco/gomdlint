@@ -106,7 +106,7 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 		{name: "md010 tab after text", input: "- [x] a\tb\n", micromark: 1, cmark: 1},
 		{name: "md009 text after", input: "- [x] task   \n", micromark: 1, cmark: 1},
 		{name: "md032 list after paragraph", input: "Text\n- [x] a\n- [ ] b\nMore\n", want: "Text\n\n- [x] a\n- [ ] b\nMore\n", micromark: 2, cmark: 2},
-		{name: "md012 blank lines in item", input: "- [x] a\n\n\n  b\n", want: "- [x] a\n\n  b\n", micromark: 1, cmark: 1},
+		{name: "md012 blank lines in item", input: "- [x] a\n\n\n  b\n", micromark: 1, cmark: 1},
 		{name: "md047 final newline", input: "- [x] a", micromark: 1, cmark: 1},
 		{name: "blank first line", input: "-\n  [x] done\n", micromark: 1, cmark: 0},
 		{name: "blank first line, trailing tab", input: "-\t\n  [x] done\n", micromark: 0, cmark: 0},

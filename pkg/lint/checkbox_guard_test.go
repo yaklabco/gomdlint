@@ -33,7 +33,7 @@ func TestCheckboxCandidateRegions(t *testing.T) {
 		{name: "last line", input: "- [x]", regions: []string{"- [x]"}},
 		{
 			name: "blank first line", input: "text\n- \n  [x] task\nnext\n",
-			regions: []string{"- \n  [x] task\n"},
+			regions: []string{"- \n  [x] task\nnext\n"},
 		},
 		{
 			name: "after a definition", input: "- [cc]: /url\n  [x] done\n",
@@ -52,7 +52,7 @@ func TestCheckboxCandidateRegions(t *testing.T) {
 			regions: []string{"- [x] b\n"},
 		},
 		{name: "ten digits are no marker", input: "1234567890. [x] a\n"},
-		{name: "carriage returns", input: "- [x] a\r\n- b\r\n", regions: []string{"- [x] a\r\n"}},
+		{name: "carriage returns", input: "- [x] a\r\n- b\r\n", regions: []string{"- [x] a\r\n- b\r\n"}},
 		{name: "byte order mark", input: "\ufeff- [x] a\n", regions: []string{"\ufeff- [x] a\n"}},
 		{name: "marker without a space", input: "-[x] a\n"},
 	}
@@ -101,7 +101,8 @@ func TestCheckboxGuardWithholds(t *testing.T) {
 			name: "blank line before a task list", input: "a\n- [x] b\n", old: "a\n", new: "a\n\n",
 			want: false,
 		},
-		{name: "line after the region", input: "- [x] b\n  c  \n", old: "c  \n", new: "c\n", want: false},
+		{name: "line after the brackets' line", input: "- [x] b\n  c  \n", old: "c  \n", new: "c\n", want: true},
+		{name: "line after the region", input: "- [x] b\n  c\n  d  \n", old: "d  \n", new: "d\n", want: false},
 		{name: "unrelated line", input: "text  \n\n- [x] b\n", old: "text  \n", new: "text\n", want: false},
 		{name: "ordinary list item", input: "-  a\n", old: "-  a", new: "- a", want: false},
 		{
@@ -134,9 +135,9 @@ func TestCheckboxGuardWithholds(t *testing.T) {
 // while text that joins the marker line does not, and an insertion after
 // the region's last line ending touches nothing.
 func TestCheckboxGuardInsertions(t *testing.T) {
-	input := "a\n- [x] b\nc\n"
+	input := "a\n- [x] b\nc\nd\n"
 	regionStart := strings.Index(input, "- [x]")
-	regionEnd := strings.Index(input, "c\n")
+	regionEnd := strings.Index(input, "d\n")
 	guard := newCheckboxGuard([]byte(input))
 	insert := func(offset int, text string) bool {
 		return guard.withholds([]fix.TextEdit{{StartOffset: offset, EndOffset: offset, NewText: text}})
