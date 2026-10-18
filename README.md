@@ -234,6 +234,9 @@ or the exit code, even with `--strict`.
 
 `markdownlint-configure-file` accepts a JSON object of markdownlint settings and
 applies it to the whole file. Invalid JSON and unknown rule keys fail that file.
+markdownlint applies the object's keys in the order they are written, while
+gomdlint applies the keys that name rules after the others, so a rule's own
+setting wins over its tag's wherever it is written.
 Migration does not evaluate JavaScript configuration or resolve `extends`.
 
 Override configuration via command line (`--enable`, `--disable`) or environment variables (`GOMDLINT_*`).

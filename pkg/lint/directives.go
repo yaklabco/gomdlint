@@ -217,8 +217,10 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 
 // configureFile applies the markdownlint-configure-file comments among
 // directives to cfg and returns the result, which is cfg itself when there
-// are none. A key that names no rule or tag is an error. Each key that is a
-// deprecated tag gets a notice, which configureFile records on its comment.
+// are none. A key that names no rule or tag is an error. A key that is a
+// deprecated tag gets a notice, which configureFile records on its comment,
+// once for a tag that the comment's keys repeat in any spelling that
+// markdownlint reads as the same word.
 func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
 	var result *config.Config
 	for idx := range directives {
@@ -239,21 +241,23 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		if raw == nil {
 			return nil, fmt.Errorf("markdownlint-configure-file at line %d must contain a JSON object", directive.line)
 		}
-		keys := slices.Sorted(maps.Keys(raw))
-		slices.SortStableFunc(keys, func(a, b string) int {
-			_, aRule := registry.Lookup(a)
-			_, bRule := registry.Lookup(b)
-			if aRule == bRule {
-				return 0
+		// markdownlint applies the keys in the order they are written, which
+		// a Go map loses. gomdlint applies them in a fixed order instead: the
+		// keys that name no rule (the default key and tags) first, then the
+		// rule keys, each group in byte order, so that a rule's own setting
+		// wins over its tag's wherever it is written.
+		var tagKeys, ruleKeys []string
+		for _, key := range slices.Sorted(maps.Keys(raw)) {
+			if ruleKey(key, registry) {
+				ruleKeys = append(ruleKeys, key)
+			} else {
+				tagKeys = append(tagKeys, key)
 			}
-			if aRule {
-				return 1
-			}
-			return -1
-		})
-		for _, key := range keys {
+		}
+		var noticed wordSet // The deprecated tags with a notice.
+		for _, key := range slices.Concat(tagKeys, ruleKeys) {
 			value := raw[key]
-			if strings.EqualFold(key, "default") {
+			if markdownlintKey(key) == "default" {
 				if result.RuleDefaults == nil {
 					result.RuleDefaults = make(map[string]config.RuleConfig)
 				}
@@ -268,10 +272,9 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 			}
 			rules, meaning := lookupWord(key, registry)
 			if meaning == unknownWord {
-				suggestions := registry.markdownlintSuggestions(registry.Closest(key))
-				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.unknownKeyText(key, suggestions))
+				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.configureFileKeyText(key))
 			}
-			if meaning == formerTag {
+			if meaning == formerTag && noticed.add(key) {
 				directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, key, rules))
 			}
 			for _, id := range sortedIDs(rules) {
@@ -287,52 +290,115 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 	return result, nil
 }
 
+// markdownlintKey returns the key by which markdownlint knows word, a word
+// of a markdownlint comment or a key of a markdownlint-configure-file
+// object. markdownlint upper-cases each word and key with JavaScript's
+// toUpperCase before it compares them, so two words mean the same exactly
+// when their upper case is the same. The key is that upper case with its
+// ASCII letters written in lower case, as the registry keeps identifiers.
+// Beyond ASCII, toUpperCase turns ten characters into ASCII letters (see
+// asciiUpperCase) and leaves others, such as the Kelvin sign and the dotted
+// capital I, as they are, where strings.ToLower, which the registry's
+// foldKey uses, turns them into k and i. The key writes every other
+// character in its simple upper case, as toUpperCase does, except for the
+// few characters whose full upper case is longer than one character and not
+// ASCII, such as U+0149, which toUpperCase expands. Go's Unicode tables can
+// also lag the JavaScript engine's, so a character that only a newer
+// version of Unicode gives an upper case, such as U+0264, keeps its own. In
+// both cases two spellings can have different keys where markdownlint reads
+// one word. Such a key is not ASCII and names nothing in either tool, so at
+// most the spelling gets a notice of its own.
+//
+// Everything that compares the words of comments or the keys of
+// configure-file objects goes through this key: their resolution
+// (lookupWord), the order of configure-file keys (ruleKey), the default
+// key, the deduplication of notices (wordSet), the suggestions for unknown
+// words (Registry.markdownlintSuggestions) and the words of remedies
+// (Registry.markdownlintTerm). Registry.Closest, which ranks the
+// suggestions, lower-cases the key once more with foldKey. That decides no
+// word's meaning; it only lets a word with a Kelvin sign be offered its
+// ASCII spelling.
+func markdownlintKey(word string) string {
+	if isASCII(word) {
+		return strings.ToLower(word)
+	}
+
+	var key strings.Builder
+	for _, char := range word {
+		letters, special := asciiUpperCase(char)
+		switch {
+		case char < utf8.RuneSelf:
+			key.WriteRune(unicode.ToLower(char))
+		case special:
+			key.WriteString(letters)
+		default:
+			key.WriteRune(unicode.ToUpper(char))
+		}
+	}
+	return key.String()
+}
+
+// wordSet holds words of markdownlint comments, or keys of configure-file
+// objects, by their keys (see markdownlintKey), so that it holds a word once
+// in every spelling that markdownlint reads as the same word.
+type wordSet map[string]bool
+
+// add adds word to the set, making the set when it is nil, and reports
+// whether the set lacked word.
+func (s *wordSet) add(word string) bool {
+	key := markdownlintKey(word)
+	if (*s)[key] {
+		return false
+	}
+	if *s == nil {
+		*s = make(wordSet)
+	}
+	(*s)[key] = true
+	return true
+}
+
+// isASCII reports whether text holds nothing but ASCII.
+func isASCII(text string) bool {
+	for idx := range len(text) {
+		if text[idx] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// lookupKey returns the key of word (see markdownlintKey), and whether that
+// key can name a rule or a tag: it is not empty and holds no whitespace, and
+// it is ASCII, as every rule identifier and tag is.
+func lookupKey(word string) (string, bool) {
+	key := markdownlintKey(word)
+	return key, IsSingleWord(key) && isASCII(key)
+}
+
 // lookupWord returns the registered rules that word, one word of a
 // markdownlint comment or a key of a markdownlint-configure-file object,
-// names, and how it names them. markdownlint looks each up whole, after it
-// upper-cases it with JavaScript's toUpperCase (see markdownlintKey). A word
-// that is empty or holds whitespace names no rules: so a configure-file key
-// of several words names none, and an empty key none rather than all. A
-// comment's parameter splits into words at JavaScript's whitespace, so its
-// words can hold only the whitespace that Go counts and JavaScript does not,
-// the next-line character U+0085.
+// names, and how it names them. markdownlint looks each up whole by its key
+// (see markdownlintKey). A word that is empty or holds whitespace names no
+// rules, so a configure-file key of several words names none, and an empty
+// key none rather than all.
 func lookupWord(word string, registry *Registry) ([]Rule, wordMeaning) {
-	key, ok := markdownlintKey(word)
-	if !ok || !IsSingleWord(word) {
+	key, ok := lookupKey(word)
+	if !ok {
 		return nil, unknownWord
 	}
 	return directiveRules(key, registry)
 }
 
-// markdownlintKey returns word in lower case as markdownlint compares it
-// with rule names, aliases and tags, which are all ASCII. markdownlint
-// upper-cases the word with JavaScript's toUpperCase, which turns ten
-// characters beyond ASCII into ASCII letters (see asciiUpperCase) and
-// leaves the others, such as the Kelvin sign or the dotted capital I, as
-// they are, unlike Go's case folding. It reports false for a word that
-// holds such a character, which names nothing.
-func markdownlintKey(word string) (string, bool) {
-	ascii := true
-	for idx := 0; idx < len(word) && ascii; idx++ {
-		ascii = word[idx] < utf8.RuneSelf
+// ruleKey reports whether key, a key of a markdownlint-configure-file
+// object, identifies a registered rule by its ID, name or an alias, as
+// lookupWord reads it, rather than a tag or nothing.
+func ruleKey(key string, registry *Registry) bool {
+	identity, ok := lookupKey(key)
+	if !ok {
+		return false
 	}
-	if ascii {
-		return strings.ToLower(word), true
-	}
-
-	var key strings.Builder
-	for _, char := range word {
-		if char < utf8.RuneSelf {
-			key.WriteRune(unicode.ToLower(char))
-			continue
-		}
-		letters, ok := asciiUpperCase(char)
-		if !ok {
-			return "", false
-		}
-		key.WriteString(letters)
-	}
-	return key.String(), true
+	_, isRule := registry.Lookup(identity)
+	return isRule
 }
 
 // asciiUpperCase returns, in lower case, the ASCII letters that JavaScript's
@@ -382,13 +448,13 @@ const (
 	formerTag
 )
 
-// isFormerTag reports whether word is one of gomdlint's former tags, in any
-// case: the tags that its built-in rules report themselves that
-// markdownlint does not have. Directives resolved tags through Rule.Tags
-// before they used markdownlint's tags, so these still work there, with a
-// notice, until a later release.
-func isFormerTag(word string) bool {
-	switch foldKey(word) {
+// isFormerTag reports whether key, the key of a word (see lookupKey), is
+// one of gomdlint's former tags: the tags that its built-in rules report
+// themselves that markdownlint does not have. Directives resolved tags
+// through Rule.Tags before they used markdownlint's tags, so these still
+// work there, with a notice, until a later release.
+func isFormerTag(key string) bool {
+	switch key {
 	case "style", "lists", "layout", "metadata", "gfm", "tables":
 		return true
 	default:
@@ -396,31 +462,31 @@ func isFormerTag(word string) bool {
 	}
 }
 
-// directiveRules returns the registered rules that one word of a
-// markdownlint comment names, and how it names them. The word names the
-// rule it identifies and the rules its tag covers. Tags come from the
-// rules' catalog entries, which carry markdownlint's tags. A word that is an
-// identifier or a tag in the catalog names only those rules, even when none
-// of them is registered, so that a registry holding some of the rules
-// resolves it as the full one does. Any other word falls back to the tags
-// that rules report themselves through Rule.Tags, so that gomdlint's former
-// tags, such as style, keep working for now, as do the tags of rules
-// without catalog entries.
-func directiveRules(word string, registry *Registry) ([]Rule, wordMeaning) {
-	rules := registry.RulesByTag(word)
-	rule, isRule := registry.Lookup(word)
+// directiveRules returns the registered rules that key, the key of one
+// word of a markdownlint comment (see lookupKey), names, and how it names
+// them. The word names the rule it identifies and the rules its tag covers.
+// Tags come from the rules' catalog entries, which carry markdownlint's
+// tags. A word that is an identifier or a tag in the catalog names only
+// those rules, even when none of them is registered, so that a registry
+// holding some of the rules resolves it as the full one does. Any other
+// word falls back to the tags that rules report themselves through
+// Rule.Tags, so that gomdlint's former tags, such as style, keep working for
+// now, as do the tags of rules without catalog entries.
+func directiveRules(key string, registry *Registry) ([]Rule, wordMeaning) {
+	rules := registry.RulesByTag(key)
+	rule, isRule := registry.Lookup(key)
 	if isRule {
 		rules = append(rules, rule)
 	}
-	if isRule || registry.inCatalog(word) {
+	if isRule || registry.inCatalog(key) {
 		return rules, knownWord
 	}
 
-	rules = registry.rulesByOwnTag(word)
+	rules = registry.rulesByOwnTag(key)
 	switch {
 	case len(rules) == 0:
 		return nil, unknownWord
-	case isFormerTag(word):
+	case isFormerTag(key):
 		return rules, formerTag
 	default:
 		return rules, knownWord
@@ -437,35 +503,89 @@ func sortedIDs(rules []Rule) []string {
 	return slices.Compact(ids)
 }
 
-// markdownlintName returns the name that a markdownlint comment should use
-// for rule, which markdownlint reads too: the name markdownlint lists first
-// for the rule (RuleMeta.MarkdownlintName), or the rule's own name when that
-// is markdownlint's first name, when markdownlint lacks the rule, or when
-// the rule has no catalog entry.
-func (r *Registry) markdownlintName(rule Rule) string {
-	id, own := rule.ID(), rule.Name() // Outside the lock: a rule may use the registry.
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return cmp.Or(r.meta[id].MarkdownlintName, own, id)
+// markdownlintTerm returns how a markdownlint comment, or a key of a
+// configure-file object, should write word, a word that names a rule or a
+// tag, so that markdownlint reads it too: as written, unless it names a
+// rule by gomdlint's own name for it where that is not the name
+// markdownlint lists first, and then by the name markdownlint lists first
+// (RuleMeta.MarkdownlintName). Words compare by their keys (see
+// markdownlintKey), and the catalog answers for every rule it describes,
+// registered or not. Every message that says what to write in a
+// markdownlint comment names rules through it or through
+// markdownlintRuleName, its counterpart for rules in hand: the remedies of
+// configure-file errors through it, and suggestions and the rules of a
+// former tag through markdownlintRuleName.
+func (r *Registry) markdownlintTerm(word string) string {
+	key, ok := lookupKey(word)
+	if !ok {
+		return word
+	}
+	return cmp.Or(r.lookups().markdownlintNames[key], word)
 }
 
-// markdownlintSuggestions returns suggestions, from Closest, with each rule
-// named as a markdownlint comment should name it (see markdownlintName).
-// Tags keep their names, which are markdownlint's.
-func (r *Registry) markdownlintSuggestions(suggestions []Suggestion) []Suggestion {
+// markdownlintRuleName returns the name that a markdownlint comment should
+// use for the registered rule with the given ID and name: the name that
+// markdownlint lists first for that ID (RuleMeta.MarkdownlintName), or else
+// its name as markdownlintTerm writes it, or its ID when it has no name.
+// Both ways give the same name for a built-in rule, whose name is its
+// catalog entry's. The ID comes first for a library's rule registered under
+// a built-in ID with a name of its own, which markdownlint does not know.
+func (r *Registry) markdownlintRuleName(id, name string) string {
+	r.mu.RLock()
+	term := r.meta[id].MarkdownlintName
+	r.mu.RUnlock()
+	if term != "" {
+		return term
+	}
+	return cmp.Or(r.markdownlintTerm(name), id)
+}
+
+// markdownlintName is markdownlintRuleName for rule.
+func (r *Registry) markdownlintName(rule Rule) string {
+	return r.markdownlintRuleName(rule.ID(), rule.Name()) // Outside the lock: a rule may use the registry.
+}
+
+// markdownlintSuggestions returns the rules and tags that word, a word of a
+// markdownlint comment or a key of a configure-file object that names
+// nothing, most likely means: those that Closest offers for the word as
+// markdownlint reads it, its key (see markdownlintKey), with each rule named
+// as a markdownlint comment should name it (see markdownlintRuleName). Tags
+// keep their names, which are markdownlint's.
+func (r *Registry) markdownlintSuggestions(word string) []Suggestion {
+	suggestions := r.Closest(markdownlintKey(word))
 	if len(suggestions) == 0 {
 		return nil
 	}
 	named := make([]Suggestion, len(suggestions))
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	for idx, suggestion := range suggestions {
 		if !suggestion.IsTag() {
-			suggestion.Name = cmp.Or(r.meta[suggestion.RuleID].MarkdownlintName, suggestion.Name)
+			suggestion.Name = r.markdownlintRuleName(suggestion.RuleID, suggestion.Name)
 		}
 		named[idx] = suggestion
 	}
 	return named
+}
+
+// configureFileKeyText describes key, a key of a markdownlint-configure-file
+// object that names no rule or tag, for an error, as UnknownKeyText does
+// for configuration files, but in the terms of a markdownlint comment. A
+// key of several words that each name a rule or tag gets a note that says
+// to write them as separate keys, and any other key the closest rules and
+// tags; both name each rule as markdownlint names it (see markdownlintTerm).
+func (r *Registry) configureFileKeyText(key string) string {
+	words := strings.FieldsFunc(key, isJSWhitespace)
+	terms := make([]string, len(words))
+	for idx, word := range words {
+		if _, meaning := lookupWord(word, r); meaning != knownWord {
+			terms = nil
+			break
+		}
+		terms[idx] = r.markdownlintTerm(word)
+	}
+	if len(terms) >= 2 {
+		return severalWordsKeyText(key, terms)
+	}
+	return UnknownRuleText(key, r.markdownlintSuggestions(key))
 }
 
 // wordResolver resolves the words of the markdownlint comments of one file.
@@ -474,9 +594,9 @@ func (r *Registry) markdownlintSuggestions(suggestions []Suggestion) []Suggestio
 type wordResolver struct {
 	registry *Registry
 
-	// closest maps a lower-cased unknown word to the suggestions for it:
-	// Registry.Closest's, named as markdownlint names the rules. It is nil
-	// until a comment has an unknown word.
+	// closest maps the key of an unknown word (see markdownlintKey) to the
+	// suggestions for it: Registry.Closest's, named as markdownlint names
+	// the rules. It is nil until a comment has an unknown word.
 	closest map[string][]Suggestion
 }
 
@@ -493,7 +613,8 @@ type resolvedWord struct {
 // parameter has no words, and the notices about its words. As in
 // markdownlint, the words are the parts of a parameter between runs of
 // JavaScript's whitespace, each a rule ID, name or alias, or a tag, in any
-// case (see lookupWord), and words that are not known are ignored.
+// spelling that markdownlint reads as it (see lookupWord), and words that
+// are not known are ignored.
 //
 // A comment whose parameter holds the start of the next comment shares that
 // comment's "-->", so its parameter is its own segment, up to the end of the
@@ -502,8 +623,8 @@ type resolvedWord struct {
 // rules of its segment and those of the next comment's parameter. A word
 // that names no rule or tag, or that is a former tag, gets one notice, on
 // the last comment before it that takes rules, once for a word that the
-// comment holds more than once in any case. So the work and the notices grow
-// with the length of text rather than with the square of the number of
+// comment holds more than once (see wordSet). So the work and the notices
+// grow with the length of text rather than with the square of the number of
 // nested comments.
 func (w *wordResolver) resolveComments(text string, matches []directiveMatch, directives []inlineDirective) {
 	var (
@@ -566,27 +687,20 @@ func mergeIDs(ids []string, words []resolvedWord) []string {
 // notices returns the notices of directive about the words of its segment,
 // then about the words of the segments in pending, which hold them last
 // first: one for each word that names no rule or tag and for each former
-// tag, once for a word that they hold more than once in any case.
+// tag, once for a word that they hold more than once in any spelling that
+// markdownlint reads as the same word (see wordSet).
 func (w *wordResolver) notices(directive *inlineDirective, segment []resolvedWord, pending [][]resolvedWord) []Notice {
 	var notices []Notice
-	var noticed map[string]bool // Lower-cased words with a notice, once one has.
+	var noticed wordSet // The words with a notice.
 	add := func(word resolvedWord) {
-		if word.meaning == knownWord {
+		if word.meaning == knownWord || !noticed.add(word.word) {
 			return
 		}
-		key := foldKey(word.word)
-		if noticed[key] {
-			return
-		}
-		if noticed == nil {
-			noticed = make(map[string]bool)
-		}
-		noticed[key] = true
 		if word.meaning == formerTag {
 			notices = append(notices, deprecatedTagNotice(w.registry, directive, word.word, word.rules))
 			return
 		}
-		notices = append(notices, unknownRuleNotice(directive, word.word, w.suggestions(key)))
+		notices = append(notices, unknownRuleNotice(directive, word.word, w.suggestions(word.word)))
 	}
 	for _, word := range segment {
 		add(word)
@@ -599,13 +713,14 @@ func (w *wordResolver) notices(directive *inlineDirective, segment []resolvedWor
 	return notices
 }
 
-// suggestions returns the rules and tags that key, a lower-cased unknown
-// word, most likely means, named as markdownlint names them, computing them
-// once per word.
-func (w *wordResolver) suggestions(key string) []Suggestion {
+// suggestions returns the rules and tags that word, an unknown word, most
+// likely means (see Registry.markdownlintSuggestions), computing them once
+// per key.
+func (w *wordResolver) suggestions(word string) []Suggestion {
+	key := markdownlintKey(word)
 	suggestions, ok := w.closest[key]
 	if !ok {
-		suggestions = w.registry.markdownlintSuggestions(w.registry.Closest(key))
+		suggestions = w.registry.markdownlintSuggestions(key)
 		if w.closest == nil {
 			w.closest = make(map[string][]Suggestion)
 		}

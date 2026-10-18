@@ -171,6 +171,32 @@ func TestEngineDirectiveWordsFoldCaseAsMarkdownlint(t *testing.T) {
 	}
 }
 
+// TestEngineConfigureFileRuleKeysInAnySpelling covers the order in which a
+// configure-file comment applies its keys: tags first, then rules, so that
+// a rule's own setting wins over its tag's. A rule key counts as one in
+// every spelling that markdownlint reads as the rule, as it does when the
+// key resolves. Each document writes the rule key last, so markdownlint,
+// which applies keys in the order they are written, applies it last too:
+// markdownlint 0.41.1 reports MD009 on line 5 for each of them.
+func TestEngineConfigureFileRuleKeysInAnySpelling(t *testing.T) {
+	for _, key := range []string{"no-trailing-spaces", "NO-TRAILING-SPACES", "no-trailing-\u017fpaces", "no-tra\u0131ling-spaces"} {
+		t.Run(key, func(t *testing.T) {
+			input := "# T\n\n<!-- markdownlint-configure-file " +
+				"{\"default\": false, \"whitespace\": false, \"" + key + "\": true} -->\n\nbad \n"
+
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+				context.Background(), "test.md", []byte(input), config.NewConfig())
+			require.NoError(t, err)
+
+			var got []string
+			for _, diag := range result.Diagnostics {
+				got = append(got, fmt.Sprintf("%d:%s", diag.StartLine, diag.RuleID))
+			}
+			assert.Equal(t, []string{"5:MD009"}, got)
+		})
+	}
+}
+
 func TestEngineDirectiveCanEnableConfiguredDisabledRule(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())

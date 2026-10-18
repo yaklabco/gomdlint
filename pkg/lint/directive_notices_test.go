@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"slices"
 	"strings"
@@ -383,6 +384,116 @@ func TestEngineNestedDirectiveNotices(t *testing.T) {
 	}
 }
 
+// TestEngineConfigureFileSeveralWordsKeySaysWhatToWrite covers the error
+// for a configure-file key of several words that each name a rule or tag,
+// which names nothing, because markdownlint reads it as one name. The
+// remedy names each rule as markdownlint names it, so that the keys it
+// suggests work in markdownlint too, and keeps every other word as written.
+func TestEngineConfigureFileSeveralWordsKeySaysWhatToWrite(t *testing.T) {
+	tests := []struct {
+		key, want string
+		without   string // A text that the error must not hold.
+	}{
+		{
+			key: "unordered-list-style MD009",
+			want: `unknown rule "unordered-list-style MD009" ` +
+				`(a key names one rule or tag; write "ul-style" and "MD009" as separate keys)`,
+		},
+		{
+			key: "Unordered-List-Style md009 WHITESPACE",
+			want: `unknown rule "Unordered-List-Style md009 WHITESPACE" ` +
+				`(a key names one rule or tag; write "ul-style", "md009" and "WHITESPACE" as separate keys)`,
+		},
+		{
+			// A word with a Kelvin sign names nothing, in markdownlint too, so
+			// writing the words as separate keys would not help.
+			key:     "no-multiple-blan\u212as MD009",
+			want:    "unknown rule \"no-multiple-blan\u212as MD009\"",
+			without: "separate keys",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			parameter, err := json.Marshal(map[string]bool{tt.key: false})
+			require.NoError(t, err)
+			input := "<!-- markdownlint-configure-file " + string(parameter) + " -->\n- one\n"
+
+			_, err = lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+				context.Background(), "test.md", []byte(input), config.NewConfig())
+
+			require.ErrorContains(t, err, "markdownlint-configure-file at line 1: "+tt.want)
+			if tt.without != "" {
+				assert.NotContains(t, err.Error(), tt.without)
+			}
+		})
+	}
+}
+
+// TestEngineDirectiveNoticesDedupeAsMarkdownlintReads covers a comment that
+// repeats a word in another spelling. The spellings count as one word
+// exactly when markdownlint reads them as one, after upper-casing them with
+// JavaScript's toUpperCase, as when the words resolve. The notice keeps the
+// first spelling.
+func TestEngineDirectiveNoticesDedupeAsMarkdownlintReads(t *testing.T) {
+	tests := []struct {
+		name, words string
+		want        []string
+	}{
+		{name: "long s and capitals", words: "\u017ftyle STYLE", want: []string{"\u017ftyle"}},
+		{name: "dotted capital I", words: "FROB\u0130NCATE frobincate", want: []string{"FROB\u0130NCATE", "frobincate"}},
+		{name: "Kelvin sign", words: "frob\u212a frobk", want: []string{"frob\u212a", "frobk"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lintDefault(t, "# Title\n\n<!-- markdownlint-disable "+tt.words+" -->\n")
+
+			var got []string
+			for _, notice := range result.Notices {
+				got = append(got, notice.Name)
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestEngineConfigureFileNoticesDedupeAsMarkdownlintReads covers a
+// configure-file comment whose keys repeat a former tag in spellings that
+// markdownlint reads as one word: the comment gets one notice for them, as
+// a comment of another kind does for its words. The keys apply in the order
+// of their spelling, and the notice names the first.
+func TestEngineConfigureFileNoticesDedupeAsMarkdownlintReads(t *testing.T) {
+	result := lintDefault(t, "# Title\n\n<!-- markdownlint-configure-file "+
+		"{\"lists\": false, \"LISTS\": false, \"li\u017fts\": false} -->\n")
+
+	var got []string
+	for _, notice := range result.Notices {
+		got = append(got, notice.Name)
+	}
+	assert.Equal(t, []string{"LISTS"}, got)
+}
+
+// TestEngineDirectiveNoticeSuggestionsReadWordsAsMarkdownlintDoes covers the
+// suggestions for an unknown word with a character that markdownlint
+// upper-cases into ASCII letters, such as the long s. They are the
+// suggestions for the word as markdownlint reads it, so every spelling of
+// the word gets the same ones, in any order.
+func TestEngineDirectiveNoticeSuggestionsReadWordsAsMarkdownlintDoes(t *testing.T) {
+	for _, words := range [][2]string{
+		{"ul-\u017ftyel", "UL-STYEL"},
+		{"UL-STYEL", "ul-\u017ftyel"},
+	} {
+		t.Run(words[0]+" then "+words[1], func(t *testing.T) {
+			result := lintDefault(t, "# Title\n\n<!-- markdownlint-disable "+words[0]+" -->\n\n"+
+				"<!-- markdownlint-disable "+words[1]+" -->\n")
+
+			require.Len(t, result.Notices, 2)
+			for _, notice := range result.Notices {
+				assert.Equal(t, []string{"ul-style"}, notice.Suggestions, notice.Name)
+			}
+		})
+	}
+}
+
 // TestEngineDirectiveNoticeSuggestions covers the suggestions that notices
 // offer: the closest rules and tags, as unknown keys elsewhere get them, and
 // none when too many are as close. A rule is offered by the name that
@@ -430,14 +541,20 @@ func TestEngineDirectiveNoticeSuggestions(t *testing.T) {
 
 // TestEngineConfigureFileSuggestsMarkdownlintNames covers the error for an
 // unknown key of a configure-file comment, which offers the rule by
-// markdownlint's name, as notices in markdownlint comments do.
+// markdownlint's name, as notices in markdownlint comments do, for the key
+// as markdownlint reads it.
 func TestEngineConfigureFileSuggestsMarkdownlintNames(t *testing.T) {
-	input := "<!-- markdownlint-configure-file {\"ul-styel\": false} -->\n- one\n"
+	for _, key := range []string{"ul-styel", "UL-STYEL", "ul-\u017ftyel"} {
+		t.Run(key, func(t *testing.T) {
+			input := "<!-- markdownlint-configure-file {\"" + key + "\": false} -->\n- one\n"
 
-	_, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
-		context.Background(), "test.md", []byte(input), config.NewConfig())
+			_, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+				context.Background(), "test.md", []byte(input), config.NewConfig())
 
-	require.ErrorContains(t, err, `markdownlint-configure-file at line 1: unknown rule "ul-styel" (did you mean "ul-style"?)`)
+			require.ErrorContains(t, err,
+				"markdownlint-configure-file at line 1: unknown rule \""+key+"\" (did you mean \"ul-style\"?)")
+		})
+	}
 }
 
 // TestEngineDirectiveNoticesInPartialRegistries lints with a registry that

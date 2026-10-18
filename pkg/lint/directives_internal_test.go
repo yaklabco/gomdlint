@@ -113,6 +113,118 @@ func TestWordResolverRuleList(t *testing.T) {
 	}
 }
 
+// identityRegistry holds three rules with catalog entries, two of which
+// markdownlint knows by other names.
+func identityRegistry() *Registry {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD004", name: "unordered-list-style"})
+	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+	reg.Register(&mockRule{id: "MD012", name: "no-multiple-blank-lines"})
+	reg.Describe(RuleMeta{
+		ID: "MD004", Name: "unordered-list-style", Aliases: []string{"ul-style"}, MarkdownlintName: "ul-style",
+		Tags: []string{"bullet", "ul"},
+	})
+	reg.Describe(RuleMeta{ID: "MD009", Name: "no-trailing-spaces", Tags: []string{"whitespace"}})
+	reg.Describe(RuleMeta{
+		ID: "MD012", Name: "no-multiple-blank-lines", Aliases: []string{"no-multiple-blanks"}, MarkdownlintName: "no-multiple-blanks",
+		Tags: []string{"whitespace", "blank_lines"},
+	})
+	return reg
+}
+
+// TestKeyIdentityAgrees runs spellings of a rule's name through the three
+// places that compare the words of markdownlint comments and the keys of
+// configure-file objects: resolution, the order of configure-file keys and
+// the deduplication of notices. They use one key identity, markdownlint's,
+// so they agree on whether each spelling means the same as the ASCII one.
+func TestKeyIdentityAgrees(t *testing.T) {
+	registry := identityRegistry()
+	tests := []struct {
+		name, ascii, spelling string
+		same                  bool
+	}{
+		{name: "ASCII case", ascii: "no-trailing-spaces", spelling: "No-Trailing-SPACES", same: true},
+		{name: "long s", ascii: "no-trailing-spaces", spelling: "no-trailing-\u017fpaces", same: true},
+		{name: "dotless i", ascii: "no-trailing-spaces", spelling: "no-tra\u0131ling-spaces", same: true},
+		{name: "Kelvin sign", ascii: "no-multiple-blanks", spelling: "no-multiple-blan\u212as"},
+		{name: "dotted capital I", ascii: "no-trailing-spaces", spelling: "NO-TRA\u0130LING-SPACES"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			asciiRules, asciiMeaning := lookupWord(tt.ascii, registry)
+			require.Equal(t, knownWord, asciiMeaning)
+			rules, meaning := lookupWord(tt.spelling, registry)
+			if tt.same {
+				assert.Equal(t, sortedIDs(asciiRules), sortedIDs(rules), "resolution")
+			} else {
+				assert.Equal(t, unknownWord, meaning, "resolution")
+			}
+
+			require.True(t, ruleKey(tt.ascii, registry))
+			assert.Equal(t, tt.same, ruleKey(tt.spelling, registry), "the order of configure-file keys")
+
+			wantNotices := 2
+			if tt.same {
+				wantNotices = 1
+			}
+			directive := resolveOne(registry, tt.ascii+"-x "+tt.spelling+"-x")
+			assert.Len(t, directive.notices, wantNotices, "deduplication of notices")
+		})
+	}
+}
+
+// TestMarkdownlintTerm covers how a remedy writes a word for a markdownlint
+// comment: a rule named by gomdlint's own name, in any spelling that means
+// it, becomes markdownlint's name for the rule, and every other word stays
+// as written.
+func TestMarkdownlintTerm(t *testing.T) {
+	registry := identityRegistry()
+	tests := map[string]string{
+		"unordered-list-style":         "ul-style",
+		"Unordered-List-\u017ftyle":    "ul-style",
+		"no-multiple-blank-lines":      "no-multiple-blanks",
+		"UL-STYLE":                     "UL-STYLE",
+		"md012":                        "md012",
+		"No-Trailing-Spaces":           "No-Trailing-Spaces",
+		"whitespace":                   "whitespace",
+		"frobnicate":                   "frobnicate",
+		"unordered-list-\u212a":        "unordered-list-\u212a",
+		"no-multiple-blan\u212a-lines": "no-multiple-blan\u212a-lines",
+	}
+	for word, want := range tests {
+		t.Run(word, func(t *testing.T) {
+			assert.Equal(t, want, registry.markdownlintTerm(word))
+		})
+	}
+}
+
+// TestMarkdownlintNameFollowsTheRuleID covers how notices name a rule in
+// hand, as a former tag lists it or a suggestion offers it: by
+// markdownlint's name for the rule's ID, even when the rule registered
+// under that ID has a name of its own, which markdownlint does not know.
+// A rule without a catalog entry keeps its own name, and a rule without a
+// name is named by its ID.
+func TestMarkdownlintNameFollowsTheRuleID(t *testing.T) {
+	registry := NewRegistry()
+	listStyle := &mockRule{id: "MD004", name: "my-list-style"}
+	custom := &mockRule{id: "X001", name: "custom-rule"}
+	nameless := &mockRule{id: "X002"}
+	for _, rule := range []Rule{listStyle, custom, nameless} {
+		registry.Register(rule)
+	}
+	registry.Describe(RuleMeta{
+		ID: "MD004", Name: "unordered-list-style", Aliases: []string{"ul-style"}, MarkdownlintName: "ul-style",
+	})
+
+	assert.Equal(t, "ul-style", registry.markdownlintName(listStyle))
+	assert.Equal(t, "custom-rule", registry.markdownlintName(custom))
+	assert.Equal(t, "X002", registry.markdownlintName(nameless))
+
+	suggestions := registry.markdownlintSuggestions("my-list-styel")
+	require.Len(t, suggestions, 1)
+	assert.Equal(t, Suggestion{Name: "ul-style", RuleID: "MD004"}, suggestions[0])
+}
+
 // TestFindDirectives covers where comments start, their kinds, and where
 // their parameters end: at the next "-->" after the kind, which a comment
 // inside another comment's parameter shares. The search resumes right after

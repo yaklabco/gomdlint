@@ -38,9 +38,9 @@ type Registry struct {
 	byName map[string]Rule
 	meta   map[string]RuleMeta // rule ID -> catalog entry
 
-	// index serves Lookup, RulesByTag and Suggest. Every change sets it to
-	// nil, and the next lookup builds a new one. A built index never
-	// changes, so a reader may use it after releasing the lock.
+	// index serves every lookup of identifiers, tags and names. Every
+	// change sets it to nil, and the next lookup builds a new one. A built
+	// index never changes, so a reader may use it after releasing the lock.
 	index *ruleIndex
 }
 
@@ -60,6 +60,12 @@ type ruleIndex struct {
 	// catalog holds the IDs, names, aliases and tags of every catalog
 	// entry, whether or not its rule is registered.
 	catalog map[string]bool
+
+	// markdownlintNames maps the key (see markdownlintKey) of a catalog
+	// entry's own name to markdownlint's name for its rule
+	// (RuleMeta.MarkdownlintName), for every entry that has one, whether or
+	// not its rule is registered.
+	markdownlintNames map[string]string
 
 	// tagNames lists the keys of tags in order.
 	tagNames []string
@@ -405,17 +411,25 @@ func (r *Registry) buildIndex() *ruleIndex {
 		ownTags: make(map[string][]Rule),
 		catalog: make(map[string]bool),
 		rules:   make([]indexedRule, 0, len(ids)),
+
+		markdownlintNames: make(map[string]string),
 	}
 
 	// The catalog's words come from every entry, registered or not, so that
 	// a word means the same in a registry that holds only some of the rules.
-	for _, meta := range r.meta {
+	// Entries arrive in ID order, and the first claim on a name wins.
+	for _, id := range slices.Sorted(maps.Keys(r.meta)) {
+		meta := r.meta[id]
 		for _, words := range [][]string{{meta.ID, meta.Name}, meta.Aliases, meta.Tags} {
 			for _, word := range words {
 				if key := foldKey(word); key != "" {
 					index.catalog[key] = true
 				}
 			}
+		}
+		key := markdownlintKey(meta.Name)
+		if _, taken := index.markdownlintNames[key]; key != "" && !taken && meta.MarkdownlintName != "" {
+			index.markdownlintNames[key] = meta.MarkdownlintName
 		}
 	}
 

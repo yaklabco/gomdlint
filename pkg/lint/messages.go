@@ -64,20 +64,19 @@ func IsSingleWord(key string) bool {
 // words that each name a rule or tag gets a note instead: such a key names
 // nothing, because markdownlint reads it as one name.
 func (r *Registry) UnknownKeyText(key string) string {
-	return r.unknownKeyText(key, r.Closest(key))
-}
-
-// unknownKeyText is UnknownKeyText offering suggestions, the rules and tags
-// closest to key, unless key holds several words that each name a rule or a
-// tag.
-func (r *Registry) unknownKeyText(key string, suggestions []Suggestion) string {
 	words := strings.Fields(key)
 	if len(words) < 2 || !r.allKnown(words) {
-		return UnknownRuleText(key, suggestions)
+		return UnknownRuleText(key, r.Closest(key))
 	}
+	return severalWordsKeyText(key, words)
+}
 
-	quoted := make([]string, len(words))
-	for idx, word := range words {
+// severalWordsKeyText describes key, a key of several words that each name a
+// rule or tag, which names nothing, because markdownlint reads a key as one
+// name. It says to write the words of writeAs as separate keys.
+func severalWordsKeyText(key string, writeAs []string) string {
+	quoted := make([]string, len(writeAs))
+	for idx, word := range writeAs {
 		quoted[idx] = strconv.Quote(word)
 	}
 	return fmt.Sprintf("unknown rule %q (a key names one rule or tag; write %s as separate keys)",
