@@ -309,8 +309,9 @@ formats change. The first entries under Changed may need action.
 - The `default` key of a markdownlint config matches in any case, and the
   first one wins, as in markdownlint. `{"Default": false}` used to warn
   about an unknown rule and leave every rule on. The default key and rule
-  keys read their values as JavaScript tests them, so `0`, `""` and
-  `{"enabled": null}` turn rules off, and an object as the default turns
+  keys read their values as JavaScript tests them, so `0` and `""` turn
+  rules off. A rule's object turns the rule off when its `enabled` key is
+  `null` or another false value, while any object as the default turns
   every rule on without setting options.
 - Migrated and applied markdownlint configs compare keys by their
   JavaScript upper case, as markdownlint does and as markdownlint comments

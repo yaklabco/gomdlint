@@ -476,7 +476,9 @@ overrides an earlier one for the rules both name. For example,
 `{"MD009": true, "whitespace": false}` turns `no-trailing-spaces` (MD009)
 off. The first `default` key, in any case, sets every rule's baseline
 before the other keys apply. A value that JavaScript reads as false, such
-as `0`, `""` or `null`, turns rules off, and an object turns them on.
+as `0`, `""` or `null`, turns rules off. A rule's object turns the rule off
+only when its `enabled` key holds such a value, and an object as the
+default always turns the rules on.
 
 ### markdownlint Comments
 
