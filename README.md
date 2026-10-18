@@ -431,6 +431,38 @@ closest rules, such as `unknown rule "no-trailling-spaces" (did you mean
 line. Shell completion offers rule names, IDs, markdownlint's names and
 tags for the three flags.
 
+### Rule Options
+
+A rule's options go under its `options` key. Every option that markdownlint
+documents works under markdownlint's name, so markdownlint's documentation
+of a rule's parameters holds for gomdlint too. Nine options have a gomdlint
+name that differs, and gomdlint accepts both spellings:
+
+| Rule | gomdlint name | markdownlint name |
+| --- | --- | --- |
+| `no-trailing-spaces` (MD009) | `ignore_code_blocks` | `code_blocks`, inverted |
+| `no-multiple-blank-lines` (MD012) | `max_consecutive` | `maximum` |
+| `line-length` (MD013) | `max` | `line_length` |
+| `line-length` (MD013) | `heading_max` | `heading_line_length` |
+| `line-length` (MD013) | `code_block_max` | `code_block_line_length` |
+| `line-length` (MD013) | `ignore_code_blocks` | `code_blocks`, inverted |
+| `line-length` (MD013) | `ignore_tables` | `tables`, inverted |
+| `line-length` (MD013) | `ignore_headings` | `headings`, inverted |
+| `descriptive-link-text` (MD059) | `patterns` | `prohibited_texts` |
+
+An inverted name holds the opposite value, so `tables: false` means
+`ignore_tables: true`. Setting both spellings of one option for a rule is
+an error. Options that markdownlint lacks keep markdownlint's behaviour by
+default.
+
+A config file gets a warning, with its path and line, for an option that
+the rule does not read, with the closest names, such as `unknown option
+"stirct" for line-length (did you mean "strict"?)`. It also gets one for a
+value of the wrong type, which the rule ignores in favour of its default,
+and for a value outside the option's allowed values, such as a `style`
+that the rule does not know. A markdownlint config that gomdlint migrates
+or translates for a run gets these warnings too.
+
 ### Precedence
 
 Settings apply in this order, each layer overriding the ones before it:
@@ -459,11 +491,14 @@ project has no gomdlint config, gomdlint translates a markdownlint config
 that it finds and applies it for the run. It offers to save the translation
 only when stdin and stderr are both terminals.
 
-Migration writes markdownlint's rule defaults and translated options into
-`rule_defaults`, with the settings of the source file under `rules`. It
-writes no other setting, so `ignore`, `flavor`, `backups` and the other
-settings of a user or system config still apply after migration, as they do
-while gomdlint translates the markdownlint config for each run. As in
+Migration writes whether markdownlint runs each rule into `rule_defaults`,
+with the settings of the source file under `rules`. Options are written
+under gomdlint's names, such as `max` for `line_length`, and options that
+the source leaves out keep gomdlint's defaults, which are markdownlint's.
+An option that the rule does not read is left out with a warning. It writes
+no other setting, so `ignore`, `flavor`, `backups` and the other settings of
+a user or system config still apply after migration, as they do while
+gomdlint translates the markdownlint config for each run. As in
 markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
@@ -506,11 +541,13 @@ SARIF output as `toolConfigurationNotifications`. They never change findings
 or the exit code, even with `--strict`.
 
 `markdownlint-configure-file` accepts a JSON object of markdownlint settings
-and applies it to the whole file. Invalid JSON and unknown rule keys fail
-that file. As in markdownlint, the keys apply in the order they are written,
-and the first `default` key, in any case, sets every rule's baseline. The
-configure-file comments of one file act as one object. A key that a later
-comment writes again keeps its first place and takes the later value.
+and applies it to the whole file. Invalid JSON, unknown rule keys and two
+spellings of one option fail that file, while an option that the rule does
+not read changes nothing, as in markdownlint. As in markdownlint, the keys
+apply in the order they are written, and the first `default` key, in any
+case, sets every rule's baseline. The configure-file comments of one file
+act as one object. A key that a later comment writes again keeps its first
+place and takes the later value.
 
 ## Markdown Support
 
