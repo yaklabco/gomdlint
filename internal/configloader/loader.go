@@ -310,7 +310,12 @@ func loadConfigFile(path string) (*config.Config, []string, error) {
 		cfg.Rules = make(map[string]config.RuleConfig)
 	}
 
-	// Rule keys may be IDs, names or aliases in any case.
+	// Rule options may use markdownlint's spellings, and rule keys may be
+	// IDs, names or aliases in any case. The options go first, so that an
+	// error names the rule key as the file writes it.
+	if err := normalizeRuleOptions(cfg, lint.DefaultRegistry); err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := normalizeRuleKeys(cfg, lint.DefaultRegistry); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -451,6 +456,40 @@ func isTerminal(stream any) bool {
 		return false
 	}
 	return term.IsTerminal(int(descriptor))
+}
+
+// normalizeRuleOptions rewrites the options of each rule in one
+// configuration layer to the canonical names that the rule's catalog entry
+// declares, such as max for markdownlint's line_length (see
+// lint.Registry.NormalizeOptions), so that layers merge option by option
+// whatever spelling each uses. A value of the wrong type is dropped, so the
+// rule uses its default, and an unknown option is kept, unread; the file's
+// warnings report both. Two spellings of one option in one rule's settings
+// are an error: either value could win. Options of a key that names no
+// rule stay as they are.
+func normalizeRuleOptions(cfg *config.Config, registry *lint.Registry) error {
+	for _, section := range []struct {
+		name  string
+		rules map[string]config.RuleConfig
+	}{{"rules", cfg.Rules}, {"rule_defaults", cfg.RuleDefaults}} {
+		// Sorted keys keep the error message stable.
+		for _, key := range slices.Sorted(maps.Keys(section.rules)) {
+			ruleCfg := section.rules[key]
+			rule, found := registry.Lookup(key)
+			if !found || len(ruleCfg.Options) == 0 {
+				continue
+			}
+			normalized, issues, _ := registry.NormalizeOptions(rule.ID(), ruleCfg.Options)
+			for _, issue := range issues {
+				if issue.Kind == lint.OptionIssueConflict {
+					return fmt.Errorf("%s: %s", section.name, issue.Text(rule.Name()))
+				}
+			}
+			ruleCfg.Options = normalized
+			section.rules[key] = ruleCfg
+		}
+	}
+	return nil
 }
 
 // normalizeRuleKeys converts the rule names, aliases and differently cased

@@ -1,0 +1,11 @@
+exit code 0
+-- stdout --
+doc.md (1 issue)
+  doc.md:3:41  warning  line-length  Line length 58 exceeds maximum 40
+    Suggestion: Shorten the line to at most 40 characters
+
+1 issue (1 warning), in 1 file, 1 fixable
+-- stderr --
+WARN $PROJECT/.gomdlint.yml:6: unknown option "stirct" for line-length (did you mean "strict"?); it is ignored
+WARN $PROJECT/.gomdlint.yml:7: line-length option "headings" must be true or false, not "no"; it is ignored
+WARN $PROJECT/.gomdlint.yml:10: unordered-list-style option "style" must be one of "consistent", "asterisk", "plus", "dash" or "sublist", not "dashes" (did you mean "dash"?)

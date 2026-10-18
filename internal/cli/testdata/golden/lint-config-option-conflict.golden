@@ -1,0 +1,4 @@
+exit code 65
+-- stdout --
+-- stderr --
+Error: load configuration: load project config: $PROJECT/.gomdlint.yml: rules: "line_length" and "max" both set line-length option "max"; keep one of them

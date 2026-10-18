@@ -98,14 +98,22 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 			}
 		case "rules", "rule_defaults":
 			for _, rule := range mappingEntries(entry.value, entry.through) {
-				if _, known := registry.Lookup(rule.name); !known {
+				known, isRule := registry.Lookup(rule.name)
+				if !isRule {
 					warn(rule, unknownRuleMessage(registry, rule.name))
 				}
 				prefix := name + "." + rule.name + "."
 				for _, nested := range mappingEntries(rule.value, rule.through) {
-					if !slices.Contains(ruleKeys, nested.name) {
+					switch {
+					case !slices.Contains(ruleKeys, nested.name):
 						warn(nested, fmt.Sprintf("unknown key %q; rule options belong under %q",
 							prefix+nested.name, prefix+"options"))
+					case nested.name == "options" && isRule:
+						for _, option := range mappingEntries(nested.value, nested.through) {
+							for _, message := range optionWarnings(registry, known, option) {
+								warn(option, message)
+							}
+						}
 					}
 				}
 			}
@@ -113,6 +121,24 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 	}
 
 	return warnings
+}
+
+// optionWarnings describes the problems of option, an entry under the
+// options of rule: an option that the rule does not read, with the closest
+// spellings, a value of the wrong type, which loading drops so that the
+// rule uses its default, and a value that the option does not allow. Two
+// spellings of one option fail loading instead (see normalizeRuleOptions).
+func optionWarnings(registry *lint.Registry, rule lint.Rule, option keyEntry) []string {
+	var value any
+	if err := option.value.Decode(&value); err != nil {
+		return nil // Loading has decoded the file, so this does not happen.
+	}
+	_, issues, _ := registry.NormalizeOptions(rule.ID(), map[string]any{option.name: value})
+	messages := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		messages = append(messages, issue.Text(rule.Name()))
+	}
+	return messages
 }
 
 // keyEntry is a key that decoding reads from a mapping, with its value and

@@ -529,7 +529,7 @@ func TestLoad_JSONProjectConfig(t *testing.T) {
 func TestLoad_JSONNumbers(t *testing.T) {
 	t.Parallel()
 
-	const options = `{"line_length": 100, "ratio": 0.5, "huge": 1e400}`
+	const options = `{"max": 100, "ratio": 0.5, "huge": 1e400}`
 	jsonResult, err := loadProjectFile(t, ".gomdlint.json", `{"rules": {"MD013": {"options": `+options+`}}}`)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -540,8 +540,8 @@ func TestLoad_JSONNumbers(t *testing.T) {
 	}
 
 	got := jsonResult.Config.Rules["MD013"].Options
-	if lineLength, ok := got["line_length"].(int); !ok || lineLength != 100 {
-		t.Errorf("line_length = %#v, want int 100", got["line_length"])
+	if lineLength, ok := got["max"].(int); !ok || lineLength != 100 {
+		t.Errorf("max = %#v, want int 100", got["max"])
 	}
 	if want := yamlResult.Config.Rules["MD013"].Options; fmt.Sprintf("%#v", got) != fmt.Sprintf("%#v", want) {
 		t.Errorf("options = %#v, want %#v as from YAML", got, want)
