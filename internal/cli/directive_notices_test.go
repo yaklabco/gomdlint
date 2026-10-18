@@ -25,8 +25,9 @@ const (
 	// silences the rule it covers.
 	formerTagComment = "<!-- markdownlint-disable lists -->"
 
-	// ruleComment names the rule that lists covers, as its notice advises.
-	ruleComment = "<!-- markdownlint-disable unordered-list-style -->"
+	// ruleComment names the rule that lists covers by markdownlint's name
+	// for it, as its notice advises.
+	ruleComment = "<!-- markdownlint-disable ul-style -->"
 )
 
 // noticeDocument is a document with a trailing space on line 5, which a
@@ -49,7 +50,7 @@ var (
 // to stderr.
 var wantNoticeWarnings = []string{
 	`WARN doc.md:3: markdownlint-disable: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
-	`WARN doc.md:7: markdownlint-disable: deprecated tag "lists" (write its rules instead: unordered-list-style); ` +
+	`WARN doc.md:7: markdownlint-disable: deprecated tag "lists" (write its rules instead: ul-style); ` +
 		`it will stop working in a later release`,
 }
 
@@ -152,8 +153,8 @@ func TestLint_JSONCarriesDirectiveNotices(t *testing.T) {
 		},
 		{
 			Line: 7, Kind: "deprecated-tag", Directive: "markdownlint-disable", Name: "lists",
-			Rules: []string{"unordered-list-style"},
-			Message: `markdownlint-disable: deprecated tag "lists" (write its rules instead: unordered-list-style); ` +
+			Rules: []string{"ul-style"},
+			Message: `markdownlint-disable: deprecated tag "lists" (write its rules instead: ul-style); ` +
 				`it will stop working in a later release`,
 		},
 	}, got.Files[0].Notices)

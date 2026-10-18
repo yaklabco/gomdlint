@@ -51,6 +51,13 @@ func TestRuleNameMessagesGolden(t *testing.T) {
 			args: []string{"lint", "--disable", "no-trailling-spaces", "doc.md"},
 		},
 		{
+			// Flags name rules by gomdlint's names, even for a typo of a
+			// markdownlint name. Only markdownlint comments offer
+			// markdownlint's names.
+			name: "lint-disable-alias-typo",
+			args: []string{"lint", "--disable", "ul-styel", "doc.md"},
+		},
+		{
 			// A typo of a tag, an ID as close to many rules as to any, and
 			// a name like no rule, in all three rule flags.
 			name: "lint-rule-flags-unknown",

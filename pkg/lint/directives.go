@@ -134,10 +134,11 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 			}
 			rules, meaning := configureFileRules(key, registry)
 			if meaning == unknownWord {
-				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.UnknownKeyText(key))
+				suggestions := registry.markdownlintSuggestions(registry.Closest(key))
+				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.unknownKeyText(key, suggestions))
 			}
 			if meaning == formerTag {
-				directive.notices = append(directive.notices, deprecatedTagNotice(directive, key, rules))
+				directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, key, rules))
 			}
 			for _, id := range sortedIDs(rules) {
 				converted := config.MarkdownlintRuleConfig(id, value)
@@ -238,14 +239,46 @@ func sortedIDs(rules []Rule) []string {
 	return slices.Compact(ids)
 }
 
+// markdownlintName returns the name that a markdownlint comment should use
+// for rule, which markdownlint reads too: the name markdownlint lists first
+// for the rule (RuleMeta.MarkdownlintName), or the rule's own name when that
+// is markdownlint's first name, when markdownlint lacks the rule, or when
+// the rule has no catalog entry.
+func (r *Registry) markdownlintName(rule Rule) string {
+	r.mu.RLock()
+	name := r.meta[rule.ID()].MarkdownlintName
+	r.mu.RUnlock()
+	return cmp.Or(name, rule.Name(), rule.ID())
+}
+
+// markdownlintSuggestions returns suggestions, from Closest, with each rule
+// named as a markdownlint comment should name it (see markdownlintName).
+// Tags keep their names, which are markdownlint's.
+func (r *Registry) markdownlintSuggestions(suggestions []Suggestion) []Suggestion {
+	if len(suggestions) == 0 {
+		return nil
+	}
+	named := make([]Suggestion, len(suggestions))
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for idx, suggestion := range suggestions {
+		if !suggestion.IsTag() {
+			suggestion.Name = cmp.Or(r.meta[suggestion.RuleID].MarkdownlintName, suggestion.Name)
+		}
+		named[idx] = suggestion
+	}
+	return named
+}
+
 // wordResolver resolves the words of the markdownlint comments of one file.
 // It remembers the suggestions it offers for each unknown word, which a file
 // may repeat in many comments.
 type wordResolver struct {
 	registry *Registry
 
-	// closest maps a lower-cased unknown word to Registry.Closest's
-	// suggestions for it. It is nil until a comment has an unknown word.
+	// closest maps a lower-cased unknown word to the suggestions for it:
+	// Registry.Closest's, named as markdownlint names the rules. It is nil
+	// until a comment has an unknown word.
 	closest map[string][]Suggestion
 }
 
@@ -280,12 +313,12 @@ func (w *wordResolver) ruleList(directive *inlineDirective) ([]string, []Notice)
 		}
 		noticed[key] = true
 		if meaning == formerTag {
-			notices = append(notices, deprecatedTagNotice(directive, word, rules))
+			notices = append(notices, deprecatedTagNotice(w.registry, directive, word, rules))
 			continue
 		}
 		suggestions, ok := w.closest[key]
 		if !ok {
-			suggestions = w.registry.Closest(key)
+			suggestions = w.registry.markdownlintSuggestions(w.registry.Closest(key))
 			if w.closest == nil {
 				w.closest = make(map[string][]Suggestion)
 			}
@@ -298,7 +331,8 @@ func (w *wordResolver) ruleList(directive *inlineDirective) ([]string, []Notice)
 
 // unknownRuleNotice is the notice for word, a word of directive that names
 // no rule or tag, which the comment ignores. It offers suggestions, the
-// rules and tags that word most likely means.
+// rules and tags that word most likely means, named as markdownlint names
+// them.
 func unknownRuleNotice(directive *inlineDirective, word string, suggestions []Suggestion) Notice {
 	var names []string // None without suggestions, rather than an empty list.
 	if len(suggestions) > 0 {
@@ -320,11 +354,12 @@ func unknownRuleNotice(directive *inlineDirective, word string, suggestions []Su
 
 // deprecatedTagNotice is the notice for word, a word of directive that is
 // one of gomdlint's former tags and names rules, in rule ID order. It names
-// the rules, which the comment can name instead.
-func deprecatedTagNotice(directive *inlineDirective, word string, rules []Rule) Notice {
+// the rules, which the comment can name instead, as markdownlint names them
+// (see Registry.markdownlintName), so that markdownlint reads them too.
+func deprecatedTagNotice(registry *Registry, directive *inlineDirective, word string, rules []Rule) Notice {
 	names := make([]string, len(rules))
 	for idx, rule := range rules {
-		names[idx] = cmp.Or(rule.Name(), rule.ID())
+		names[idx] = registry.markdownlintName(rule)
 	}
 	kind := directive.kind()
 	return Notice{

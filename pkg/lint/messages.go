@@ -64,9 +64,16 @@ func IsSingleWord(key string) bool {
 // words that each name a rule or tag gets a note instead: such a key names
 // nothing, because markdownlint reads it as one name.
 func (r *Registry) UnknownKeyText(key string) string {
+	return r.unknownKeyText(key, r.Closest(key))
+}
+
+// unknownKeyText is UnknownKeyText offering suggestions, the rules and tags
+// closest to key, unless key holds several words that each name a rule or a
+// tag.
+func (r *Registry) unknownKeyText(key string, suggestions []Suggestion) string {
 	words := strings.Fields(key)
 	if len(words) < 2 || !r.allKnown(words) {
-		return UnknownRuleText(key, r.Closest(key))
+		return UnknownRuleText(key, suggestions)
 	}
 
 	quoted := make([]string, len(words))

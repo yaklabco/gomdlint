@@ -50,6 +50,13 @@ type RuleMeta struct {
 	// markdownlint's order, such as ul-style for MD004.
 	Aliases []string
 
+	// MarkdownlintName is the name that markdownlint lists first for the
+	// rule, when that is not Name, such as ul-style for MD004. It is one of
+	// Aliases. Where gomdlint suggests a rule for a markdownlint comment, it
+	// writes this name, which markdownlint reads too. It is empty when Name
+	// is markdownlint's first name, and for rules that markdownlint lacks.
+	MarkdownlintName string
+
 	// Category is the construct the rule checks.
 	Category Category
 

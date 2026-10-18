@@ -32,9 +32,9 @@ var (
 		Line:      7,
 		Directive: "markdownlint-disable-next-line",
 		Name:      "lists",
-		Rules:     []string{"unordered-list-style"},
+		Rules:     []string{"ul-style"},
 		Message: `markdownlint-disable-next-line: deprecated tag "lists" ` +
-			`(write its rules instead: unordered-list-style); it will stop working in a later release`,
+			`(write its rules instead: ul-style); it will stop working in a later release`,
 	}
 )
 
@@ -77,8 +77,8 @@ func TestJSONReporter_ListsNoticesPerFile(t *testing.T) {
 			"kind": "deprecated-tag",
 			"directive": "markdownlint-disable-next-line",
 			"name": "lists",
-			"rules": ["unordered-list-style"],
-			"message": "markdownlint-disable-next-line: deprecated tag \"lists\" (write its rules instead: unordered-list-style); it will stop working in a later release"
+			"rules": ["ul-style"],
+			"message": "markdownlint-disable-next-line: deprecated tag \"lists\" (write its rules instead: ul-style); it will stop working in a later release"
 		}
 	]`, string(output.Files[0]["notices"]))
 	assert.NotContains(t, output.Files[1], "notices", "a file without notices has no notices key")

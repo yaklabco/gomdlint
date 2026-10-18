@@ -75,17 +75,20 @@ func TestEngineFormerDirectiveTagsWarnAndWork(t *testing.T) {
 		enable            []string
 		covers            []string
 	}{
+		// The rules are named as markdownlint names them, such as ul-style
+		// for unordered-list-style, so that the comment works in both tools.
+		// gomdlint's own rules have only their own names.
 		{
 			tag: "style", ruleID: "MD004", body: mixedBullets,
-			covers: []string{"heading-style", "unordered-list-style", "code-block-style", "code-fence-style", "link-destination-style"},
+			covers: []string{"heading-style", "ul-style", "code-block-style", "code-fence-style", "link-destination-style"},
 		},
-		{tag: "lists", ruleID: "MD004", body: mixedBullets, covers: []string{"unordered-list-style"}},
-		{tag: "layout", ruleID: "MD012", body: extraBlank, covers: []string{"no-multiple-blank-lines"}},
+		{tag: "lists", ruleID: "MD004", body: mixedBullets, covers: []string{"ul-style"}},
+		{tag: "layout", ruleID: "MD012", body: extraBlank, covers: []string{"no-multiple-blanks"}},
 		{tag: "metadata", ruleID: "MD041", body: "Text.\n", enable: []string{"MD041"}, covers: []string{"first-line-heading"}},
 		{tag: "gfm", ruleID: "MDL003", body: shortTable, covers: []string{"table-alignment"}},
 		{tag: "tables", ruleID: "MDL003", body: shortTable, covers: []string{"table-alignment"}},
 		{tag: "Style", ruleID: "MD004", body: mixedBullets,
-			covers: []string{"heading-style", "unordered-list-style", "code-block-style", "code-fence-style", "link-destination-style"}},
+			covers: []string{"heading-style", "ul-style", "code-block-style", "code-fence-style", "link-destination-style"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tag, func(t *testing.T) {
@@ -182,7 +185,8 @@ func TestEngineOnlyFormerTagsAreDeprecated(t *testing.T) {
 		assert.Empty(t, result.Diagnostics, "style still silences unordered-list-style")
 		require.Len(t, result.Notices, 1)
 		assert.Equal(t, lint.NoticeDeprecatedTag, result.Notices[0].Kind)
-		assert.Equal(t, []string{"unordered-list-style"}, result.Notices[0].Rules)
+		assert.Equal(t, []string{"unordered-list-style"}, result.Notices[0].Rules,
+			"without a catalog entry, a rule has only its own name")
 	})
 
 	t.Run("tag of a rule outside the catalog", func(t *testing.T) {
@@ -294,9 +298,9 @@ func TestEngineDirectiveNoticesForEveryKind(t *testing.T) {
 			Line:      3,
 			Directive: "markdownlint-configure-file",
 			Name:      "lists",
-			Rules:     []string{"unordered-list-style"},
+			Rules:     []string{"ul-style"},
 			Message: `markdownlint-configure-file: deprecated tag "lists" ` +
-				`(write its rules instead: unordered-list-style); it will stop working in a later release`,
+				`(write its rules instead: ul-style); it will stop working in a later release`,
 		}}, result.Notices)
 	})
 }
@@ -336,7 +340,9 @@ func TestEngineDirectiveNoticesFollowTheComments(t *testing.T) {
 
 // TestEngineDirectiveNoticeSuggestions covers the suggestions that notices
 // offer: the closest rules and tags, as unknown keys elsewhere get them, and
-// none when too many are as close.
+// none when too many are as close. A rule is offered by the name that
+// markdownlint lists first for it, which markdownlint reads in the same
+// comment, even when the word looks like gomdlint's own name for the rule.
 func TestEngineDirectiveNoticeSuggestions(t *testing.T) {
 	tests := []struct {
 		word        string
@@ -351,6 +357,18 @@ func TestEngineDirectiveNoticeSuggestions(t *testing.T) {
 			// A mistyped ID is as close to too many rules to name any.
 			word: "MD002", message: `markdownlint-disable: unknown rule "MD002"; it is ignored`,
 		},
+		{
+			word: "ul-styel", suggestions: []string{"ul-style"},
+			message: `markdownlint-disable: unknown rule "ul-styel" (did you mean "ul-style"?); it is ignored`,
+		},
+		{word: "unordered-list-styel", suggestions: []string{"ul-style"}},
+		{word: "no-multiple-blank", suggestions: []string{"no-multiple-blanks"}},
+		{word: "heading-blank-line", suggestions: []string{"blanks-around-headings"}},
+		{word: "single-h11", suggestions: []string{"single-title"}},
+		// first-line-heading is markdownlint's first name for MD041 too.
+		{word: "first-line-headin", suggestions: []string{"first-line-heading"}},
+		// markdownlint lacks gomdlint's own rules, so they keep their names.
+		{word: "table-alignmnt", suggestions: []string{"table-alignment"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.word, func(t *testing.T) {
@@ -358,9 +376,23 @@ func TestEngineDirectiveNoticeSuggestions(t *testing.T) {
 
 			require.Len(t, result.Notices, 1)
 			assert.Equal(t, tt.suggestions, result.Notices[0].Suggestions)
-			assert.Equal(t, tt.message, result.Notices[0].Message)
+			if tt.message != "" {
+				assert.Equal(t, tt.message, result.Notices[0].Message)
+			}
 		})
 	}
+}
+
+// TestEngineConfigureFileSuggestsMarkdownlintNames covers the error for an
+// unknown key of a configure-file comment, which offers the rule by
+// markdownlint's name, as notices in markdownlint comments do.
+func TestEngineConfigureFileSuggestsMarkdownlintNames(t *testing.T) {
+	input := "<!-- markdownlint-configure-file {\"ul-styel\": false} -->\n- one\n"
+
+	_, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+		context.Background(), "test.md", []byte(input), config.NewConfig())
+
+	require.ErrorContains(t, err, `markdownlint-configure-file at line 1: unknown rule "ul-styel" (did you mean "ul-style"?)`)
 }
 
 // TestEngineDirectiveNoticesInPartialRegistries lints with a registry that

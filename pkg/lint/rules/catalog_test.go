@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"cmp"
 	"maps"
 	"slices"
 	"strings"
@@ -113,12 +114,18 @@ func TestCatalogFollowsMarkdownlint(t *testing.T) {
 		assert.Equal(t, !fromMarkdownlint, lint.IsGomdlintOnlyRule(meta.ID), "%s: gomdlint-only rule", meta.ID)
 		if !fromMarkdownlint {
 			assert.Empty(t, meta.Aliases, "%s: markdownlint has no names for its own rules", meta.ID)
+			assert.Empty(t, meta.MarkdownlintName, "%s: markdownlint has no names for its own rules", meta.ID)
 			assert.NotEmpty(t, meta.Tags, "%s: tags", meta.ID)
 			continue
 		}
 		shared = append(shared, meta.ID)
 
 		assert.Equal(t, row.Tags, meta.Tags, "%s: tags", meta.ID)
+
+		// Markdownlint comments name the rule by markdownlint's first name,
+		// which MarkdownlintName records only where it is not Name.
+		assert.Equal(t, row.Aliases[0], cmp.Or(meta.MarkdownlintName, meta.Name), "%s: markdownlint's first name", meta.ID)
+		assert.NotEqual(t, meta.Name, meta.MarkdownlintName, "%s: MarkdownlintName repeats Name", meta.ID)
 
 		// The aliases are markdownlint's names for the rule other than its
 		// gomdlint name, in markdownlint's order.
