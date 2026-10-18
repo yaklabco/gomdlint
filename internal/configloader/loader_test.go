@@ -826,6 +826,65 @@ func TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases(t *testing.T) {
 	}
 }
 
+// TestLoad_ChecksTheKeysThatDecodingReads covers YAML's own rules for
+// merges and aliases. Only the keys that decoding reads are checked: an
+// alias key reads as the scalar it names, a written key replaces a merged
+// one, and an earlier merged mapping replaces a later one.
+func TestLoad_ChecksTheKeysThatDecodingReads(t *testing.T) {
+	t.Parallel()
+
+	const typo = `unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "alias key that names an unknown rule",
+			content: "ignore: [&MD013 no-trailling-spaces]\nrules:\n  *MD013 : false\n",
+			want:    []string{`.gomdlint.yml:3: ` + typo},
+		},
+		{
+			name:    "alias key that names a rule, from an anchor named like a word",
+			content: "ignore: [&rule MD013]\nrules:\n  *rule : false\n",
+			want:    []string{},
+		},
+		{
+			name:    "merged rules replaced by written rules",
+			content: "<<:\n  rules:\n    no-trailling-spaces: false\nrules:\n  MD009: false\n",
+			want:    []string{},
+		},
+		{
+			name:    "merged rule replaced by a written rule",
+			content: "rules:\n  <<:\n    MD013:\n      enabled: false\n      style: x\n  MD013:\n    enabled: true\n",
+			want:    []string{},
+		},
+		{
+			name:    "merged typo replaced by the same typo written",
+			content: "rules:\n  <<:\n    no-trailling-spaces: false\n  no-trailling-spaces: true\n",
+			want:    []string{`.gomdlint.yml:4: ` + typo},
+		},
+		{
+			name:    "typo in two merged mappings",
+			content: "rules:\n  <<:\n    - no-trailling-spaces: false\n    - no-trailling-spaces: true\n",
+			want:    []string{`.gomdlint.yml:3: ` + typo + ` (through the merge at line 2)`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := loadProject(t, tt.content)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			assert.Equal(t, tt.want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+		})
+	}
+}
+
 // TestUnknownKeyWarnings_EndsOnAMappingThatMergesItself covers a mapping
 // whose merge key names the mapping itself. Decoding rejects it, and the
 // key check, which reads the parsed document, must end on it too.

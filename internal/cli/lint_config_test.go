@@ -340,6 +340,35 @@ func TestLintWarnsAboutUnknownRulesThroughMerges(t *testing.T) {
 		`(did you mean "no-trailing-spaces"?); it is ignored (through the merge at line 2)`)
 }
 
+// TestLintChecksTheRuleKeysThatDecodingReads covers configs, given with
+// --config, whose rule keys YAML's merge and alias rules change.
+func TestLintChecksTheRuleKeysThatDecodingReads(t *testing.T) {
+	t.Run("alias key", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":     trailingDoc,
+			"config.yml": "ignore: [&MD013 no-trailling-spaces]\nrules:\n  *MD013 : false\n",
+		})
+
+		got := execute(t, "lint", "--config", "config.yml", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Contains(t, got.stderr,
+			`config.yml:3: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`)
+	})
+
+	t.Run("merged rules replaced by written rules", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":     trailingDoc,
+			"config.yml": "<<:\n  rules:\n    no-trailling-spaces: false\nrules:\n  MD009: false\n",
+		})
+
+		got := execute(t, "lint", "--config", "config.yml", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.NotContains(t, got.stderr, "unknown rule")
+	})
+}
+
 // TestLintWarnsAboutRuleOptionsOutsideOptions covers a rule option written
 // directly in the rule entry, where gomdlint does not read it.
 func TestLintWarnsAboutRuleOptionsOutsideOptions(t *testing.T) {
