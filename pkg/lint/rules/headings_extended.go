@@ -725,7 +725,7 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 // backslash that escapes it and the whitespace before them on the same line.
 // It returns nil unless the fix changes nothing but the heading's text, and
 // that only by the deleted characters: removing the punctuation must not
-// leave the heading showing nothing (see headingShowsContent), leave a
+// leave the heading showing nothing (see showsContent), leave a
 // setext line blank or turn it into a thematic break, underline or other
 // block, expose a closing hash sequence, leave a backslash showing, or
 // change an anchor that a fragment link uses.
@@ -749,7 +749,7 @@ func trailingPunctuationFix(
 	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
 		deleteStart--
 	}
-	if !headingShowsContent(file, heading, deleteStart) {
+	if !showsContent(file, heading, deleteStart) {
 		return nil
 	}
 	deleted := mdast.SourceRange{StartOffset: deleteStart, EndOffset: content.EndOffset}
@@ -758,42 +758,14 @@ func trailingPunctuationFix(
 	return checker.offer(builder, changeText(heading, textSub{rng: deleted}).withLocal(true))
 }
 
-// headingShowsContent reports whether a heading still shows something once
-// MD026 deletes everything in it from offset on, both as goldmark reads the
-// heading and as GFM does. The readings differ in one place only: goldmark
-// reads "[ ]", "[x]" or "[X]" at the start of a list item's first block as a
-// task checkbox even when that block is a heading, where GFM reads text or a
-// link (see checkboxShowsText). Everything else in the heading is read by
-// the same inline parser with the same definitions, so goldmark's reading
-// must show content after the checkbox, which shows nothing itself, and GFM
-// must show something where goldmark read the checkbox. A heading left
-// showing nothing renders differently and gets another anchor.
-func headingShowsContent(file *mdast.FileSnapshot, heading *mdast.Node, offset int) bool {
-	if first := heading.FirstChild; first != nil && first.Kind == mdast.NodeTaskCheckbox &&
-		!checkboxShowsText(file, first) {
-		return false
-	}
-	return showsContent(file, heading, offset)
-}
-
-// checkboxShowsText reports whether GFM shows something where goldmark read
-// a task checkbox at the start of a heading. GFM reads a checkbox only in a
-// paragraph, so it reads the brackets as text or as the text of a link:
-// "[x]" and "[X]" show their letter either way, and "[ ]" shows its brackets
-// unless "(" or "[" follows, where it can start a link whose text is only
-// whitespace and which shows nothing.
-func checkboxShowsText(file *mdast.FileSnapshot, checkbox *mdast.Node) bool {
-	if checkbox.Inline != nil && checkbox.Inline.Checked {
-		return true
-	}
-	end := checkbox.SourceRange().EndOffset
-	return end >= len(file.Content) || (file.Content[end] != '(' && file.Content[end] != '[')
-}
-
 // showsContent reports whether the inline content of node that starts before
 // offset shows something: a visible character once escapes and character
 // references are resolved, a code span, or an image. Raw HTML, a task
-// checkbox and a link without text show nothing that counts.
+// checkbox and a link without text show nothing that counts. MD026 asks it
+// about a heading, which never holds a checkbox: the parser reads one only
+// at the start of a paragraph, as GFM does, so "[ ]" in a heading is text or
+// the text of a link. A heading left showing nothing renders differently and
+// gets another anchor.
 func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
 	for child := node.FirstChild; child != nil; child = child.Next {
 		span := child.SourceRange()
