@@ -920,7 +920,9 @@ For each rule, the final configuration is computed:
 | `options` | Rule-specific | `rules.X.options.*` | none |
 
 Migrated configs also write a `rule_defaults` layer, which applies after
-`severity_default` and before `rules`.
+`severity_default` and before `rules`. A migrated config holds nothing but
+`rules` and `rule_defaults`, so the layers below it keep their other
+settings.
 
 **Rule Identification:** Config files accept a rule's ID (`MD001`), name
 (`heading-increment`), or markdownlint alias (`ul-style` for MD004)
@@ -929,13 +931,16 @@ interchangeably, in any case, through `Registry.Lookup`. The `--enable`,
 (`whitespace`), which stand for every rule they cover, and the shell
 completes all of these for them. A key or flag value that names no rule
 gets a warning or error that suggests the closest rules. Inline markdownlint
-comments and `markdownlint-configure-file` keys resolve their words as
-markdownlint reads them, upper-cased as JavaScript's `toUpperCase` does,
-with markdownlint's tags. One key per word (`markdownlintKey` in
-`pkg/lint/directives.go`) serves that lookup, the order of configure-file
-keys and the deduplication of notices. The lookup goes through an index of
-every registered identifier and tag, and every catalog word, by that key,
-so it compares letters beyond ASCII as markdownlint does. A word that names
+comments, `markdownlint-configure-file` keys and the keys of markdownlint
+configs resolve their words as markdownlint reads them, upper-cased as
+JavaScript's `toUpperCase` does, with markdownlint's tags. One key per word
+(`markdownlintKey` in `pkg/lint/directives.go`) serves those lookups, the
+default key and the deduplication of notices. The lookup goes through an
+index of every registered identifier and tag, and every catalog word, by
+that key, so it compares letters beyond ASCII as markdownlint does. The keys
+of a markdownlint configuration object apply in the order they are written,
+which `lint.MarkdownlintSettings` keeps, and the configure-file comments of
+a file merge into one such object first. A word that names
 no rule or tag, and a former gomdlint tag that still resolves through the
 rules' own `Tags()`, give the file a notice (see [Notices](#notices)).
 Notices, and the errors for unknown configure-file keys, name rules as

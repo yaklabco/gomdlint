@@ -294,6 +294,28 @@ formats change. The first entries under Changed may need action.
   keys, where one of them used to win at random. Unknown config keys, such
   as `flavour`, and flag-only keys such as `rule_format` warn with the file
   and line.
+- `gomdlint migrate`, and the offer to save a translated markdownlint
+  config, write only `rules` and `rule_defaults`. They used to write
+  `flavor`, `ignore: []`, `gitignore`, `default_ignores` and `backups` too,
+  which replaced the settings of a user or system config, so a user's
+  ignore pattern such as `drafts/**` stopped working after migration.
+- Migrated markdownlint configs, markdownlint configs applied for a run and
+  `markdownlint-configure-file` comments apply their keys in the order they
+  are written, as markdownlint does, so `{"MD009": true, "whitespace":
+  false}` turns MD009 off. Rule keys used to apply after the others. The
+  configure-file comments of one file act as one object, as in
+  markdownlint, and warnings about unknown keys follow the order of the
+  keys.
+- The `default` key of a markdownlint config matches in any case, and the
+  first one wins, as in markdownlint. `{"Default": false}` used to warn
+  about an unknown rule and leave every rule on. The default key and rule
+  keys read their values as JavaScript tests them, so `0`, `""` and
+  `{"enabled": null}` turn rules off, and an object as the default turns
+  every rule on without setting options.
+- Migrated and applied markdownlint configs compare keys by their
+  JavaScript upper case, as markdownlint does and as markdownlint comments
+  already did. A key with the long s, such as `no-trailing-ſpaces`, names
+  MD009, while `NO-TRAİLING-SPACES`, with a dotted capital I, names no rule.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up
   after wide characters and tabs.
