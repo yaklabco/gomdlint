@@ -324,6 +324,22 @@ func TestLintWarnsAboutUnknownConfigKeys(t *testing.T) {
 	assert.NotContains(t, got.stdout, "flavour")
 }
 
+// TestLintWarnsAboutUnknownRulesThroughMerges covers a typo that a YAML
+// merge key brings into rules, in a config given with --config. The typo
+// leaves its rule enabled, so it must warn.
+func TestLintWarnsAboutUnknownRulesThroughMerges(t *testing.T) {
+	inProject(t, map[string]string{
+		"doc.md":     trailingDoc,
+		"config.yml": "rules:\n  <<: &rules\n    no-trailling-spaces: false\n",
+	})
+
+	got := execute(t, "lint", "--config", "config.yml", "doc.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Contains(t, got.stderr, `config.yml:3: unknown rule "no-trailling-spaces" `+
+		`(did you mean "no-trailing-spaces"?); it is ignored (through the merge at line 2)`)
+}
+
 // TestLintWarnsAboutRuleOptionsOutsideOptions covers a rule option written
 // directly in the rule entry, where gomdlint does not read it.
 func TestLintWarnsAboutRuleOptionsOutsideOptions(t *testing.T) {

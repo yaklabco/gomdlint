@@ -56,7 +56,8 @@ func yamlKeys(value any) []string {
 // file that gomdlint does not read. YAML decoding drops them silently, so a
 // typo such as "flavour" would otherwise leave the default in force without
 // a trace. Keys under rules and rule_defaults that name no rule in registry
-// are reported too.
+// are reported too. Keys that a merge key or an alias brings in are checked
+// like the others, at the line where they are written.
 func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []string {
 	if len(doc.Content) == 0 {
 		return nil // An empty file has no keys.
@@ -67,11 +68,11 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 	ruleKeys := yamlKeys(config.RuleConfig{})
 
 	var warnings []string
-	warn := func(key *yaml.Node, message string) {
-		warnings = append(warnings, fmt.Sprintf("%s:%d: %s", path, key.Line, message))
+	warn := func(key, via *yaml.Node, message string) {
+		warnings = append(warnings, fmt.Sprintf("%s:%d: %s%s", path, key.Line, message, throughText(via)))
 	}
 
-	forEachKey(doc.Content[0], func(key, value *yaml.Node) {
+	forEachKey(doc.Content[0], nil, func(key, value, via *yaml.Node) {
 		name := key.Value
 		if flag, ok := commandLineOnlyKeys[name]; ok {
 			hint := "use the " + flag + " flag"
@@ -79,30 +80,30 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 				// The environment sets a lasting default, as a config file would.
 				hint += " or the " + envVar + " environment variable"
 			}
-			warn(key, fmt.Sprintf("%q cannot be set in a config file; %s", name, hint))
+			warn(key, via, fmt.Sprintf("%q cannot be set in a config file; %s", name, hint))
 			return
 		}
 		if !slices.Contains(topKeys, name) {
-			warn(key, unknownKeyMessage("", name, topKeys))
+			warn(key, via, unknownKeyMessage("", name, topKeys))
 			return
 		}
 
 		switch name {
 		case "backups":
-			forEachKey(value, func(nested, _ *yaml.Node) {
+			forEachKey(value, via, func(nested, _, nestedVia *yaml.Node) {
 				if !slices.Contains(backupKeys, nested.Value) {
-					warn(nested, unknownKeyMessage("backups.", nested.Value, backupKeys))
+					warn(nested, nestedVia, unknownKeyMessage("backups.", nested.Value, backupKeys))
 				}
 			})
 		case "rules", "rule_defaults":
-			forEachKey(value, func(rule, settings *yaml.Node) {
+			forEachKey(value, via, func(rule, settings, ruleVia *yaml.Node) {
 				if _, known := registry.Lookup(rule.Value); !known {
-					warn(rule, unknownRuleMessage(registry, rule.Value))
+					warn(rule, ruleVia, unknownRuleMessage(registry, rule.Value))
 				}
 				prefix := name + "." + rule.Value + "."
-				forEachKey(settings, func(nested, _ *yaml.Node) {
+				forEachKey(settings, ruleVia, func(nested, _, nestedVia *yaml.Node) {
 					if !slices.Contains(ruleKeys, nested.Value) {
-						warn(nested, fmt.Sprintf("unknown key %q; rule options belong under %q",
+						warn(nested, nestedVia, fmt.Sprintf("unknown key %q; rule options belong under %q",
 							prefix+nested.Value, prefix+"options"))
 					}
 				})
@@ -111,6 +112,20 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 	})
 
 	return warnings
+}
+
+// throughText says how a key that a merge key or an alias brought in
+// reached the mapping it configures, for the end of a warning. via is the
+// first merge key or alias on the way, or nil for a key written in place.
+func throughText(via *yaml.Node) string {
+	switch {
+	case via == nil:
+		return ""
+	case via.Kind == yaml.AliasNode:
+		return fmt.Sprintf(" (through the alias at line %d)", via.Line)
+	default:
+		return fmt.Sprintf(" (through the merge at line %d)", via.Line)
+	}
 }
 
 // unknownRuleMessage describes key, a key under rules or rule_defaults that
@@ -140,19 +155,59 @@ func unknownKeyMessage(prefix, name string, known []string) string {
 	return message + "; it is ignored"
 }
 
-// forEachKey calls visit for each key and value of a YAML mapping node.
-// Other node kinds have no keys. A merge key (<<) is skipped: it is not a
-// key of its own but brings in the keys of an anchored mapping, which are
-// checked where the anchor is defined.
-func forEachKey(node *yaml.Node, visit func(key, value *yaml.Node)) {
-	if node == nil || node.Kind != yaml.MappingNode {
+// forEachKey calls visit for each key of a YAML mapping node, with its
+// value, as decoding reads the mapping. An alias stands for the node it
+// names, and other nodes have no keys. A merge key (<<) is not visited
+// itself: the keys of the mappings it merges, written in place, through an
+// alias or as a sequence of them, are visited instead, at the nodes where
+// they are written. via is the merge key or alias that led to node, or nil.
+// visit receives the first merge key or alias on the way to each key, so a
+// warning can say how the key arrived. Each mapping is read once, so an
+// alias that names a mapping holding it cannot loop.
+func forEachKey(node, via *yaml.Node, visit func(key, value, via *yaml.Node)) {
+	walkMapping(node, via, visit, make(map[*yaml.Node]bool))
+}
+
+// walkMapping is forEachKey for the mapping that node is or names, which it
+// skips when seen holds it already.
+func walkMapping(node, via *yaml.Node, visit func(key, value, via *yaml.Node), seen map[*yaml.Node]bool) {
+	for node != nil && node.Kind == yaml.AliasNode {
+		if via == nil {
+			via = node
+		}
+		node = node.Alias
+	}
+	if node == nil || node.Kind != yaml.MappingNode || seen[node] {
 		return
 	}
+	seen[node] = true
+
 	for idx := 0; idx+1 < len(node.Content); idx += 2 {
-		if key := node.Content[idx]; key.ShortTag() != mergeTag {
-			visit(key, node.Content[idx+1])
+		key, value := node.Content[idx], node.Content[idx+1]
+		if !isMergeKey(key) {
+			visit(key, value, via)
+			continue
+		}
+
+		mergeVia := via
+		if mergeVia == nil {
+			mergeVia = key
+		}
+		merged := []*yaml.Node{value}
+		if value.Kind == yaml.SequenceNode {
+			merged = value.Content
+		}
+		for _, mapping := range merged {
+			walkMapping(mapping, mergeVia, visit, seen)
 		}
 	}
+}
+
+// isMergeKey reports whether key is a merge key, as YAML decoding tells
+// one: the plain scalar <<, or << tagged !!merge. A quoted "<<", like every
+// key of a JSON config, is an ordinary key.
+func isMergeKey(key *yaml.Node) bool {
+	return key.Kind == yaml.ScalarNode && key.Value == "<<" && key.ShortTag() == mergeTag
 }
 
 // closestKey returns the known key nearest to name by edit distance, if any
