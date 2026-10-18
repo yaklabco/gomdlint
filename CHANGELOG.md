@@ -45,8 +45,8 @@ formats change. The first entries under Changed may need action.
   file that could not be read used to print "No issues found" and exit 0,
   and every other failure exited 1.
 - Each file's findings are listed by line, then column, rule ID and message,
-  in every format, as markdownlint-cli2 lists them. They used to follow rule
-  ID order.
+  in every format. They used to follow rule ID order. markdownlint-cli2 also
+  lists findings by line, but orders the findings on one line by rule ID.
 - Table rows start with an `E`, `W` or `I` severity marker, and the legend
   lists only the markers that the rows show, so a table reads the same
   without colour.
@@ -204,9 +204,11 @@ formats change. The first entries under Changed may need action.
 - **MD033**: Reports every disallowed tag at its own position. It used to
   check only the first tag of each HTML block, so a `<script>` after an
   allowed `<details>` passed.
-- **MD034**: Reports exactly the GFM autolink literals that markdownlint
-  finds. Its fix no longer wraps trailing punctuation or inserts angle
-  brackets into link text, and it fixes a URL followed by an unbalanced `)`.
+- **MD034**: Reports the GFM autolink literals that markdownlint finds,
+  except in tables that goldmark reads and markdownlint does not, which the
+  README lists under Known Limitations. Its fix no longer wraps trailing
+  punctuation or inserts angle brackets into link text, and it fixes a URL
+  followed by an unbalanced `)`.
 - **MD038**: Splits code spans as micromark does, so its fix no longer breaks
   a code span that holds backticks, and it reports the spaces on each side
   where they are.

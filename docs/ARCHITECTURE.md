@@ -378,9 +378,11 @@ because the engine may apply any subset of them.
   byte for byte, resolved link destinations and titles, and inline text with
   the whitespace that HTML collapses. With the `commonmark` flavor it also
   parses as GFM. A document whose raw HTML is anything other than
-  whitespace, well-formed comments and `br`, `wbr`, `hr` and `img` tags
-  keeps none of these rules' fixes, because no signature models how a style
-  sheet or an element left open changes the page. `list_fix_safety.go` plans
+  whitespace, well-formed comments, and start tags of `br`, `wbr`, `hr` and
+  `img` with only the presentational attributes that `benignAttribute`
+  allows, each used once (`benignHTML`), keeps none of these rules' fixes,
+  because no signature models how a style sheet, an event handler or an
+  element left open changes the page. `list_fix_safety.go` plans
   list item moves together, so that moves which are only safe together form
   one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through
@@ -434,13 +436,16 @@ Every built-in rule has one catalog entry, a `lint.RuleMeta`, in the
 its canonical name, the markdownlint names that differ from it (`Aliases`),
 markdownlint's first name where that differs (`MarkdownlintName`), its
 category, markdownlint's tags for it, and whether it can fix. Categories
-order rule listings and documentation, and are not accepted where a rule
-can be named. gomdlint's own rules, MDL001 and MDL003, take tags from
+group the rules in documentation, such as the README's rule categories, and
+are not accepted where a rule can be named. Rule listings such as
+`gomdlint rules` are in rule ID order. A tag may cover several rules, as in
+markdownlint. gomdlint's own rules, MDL001 and MDL003, take tags from
 markdownlint's vocabulary. `RegisterAll` records each entry with
 `Registry.Describe`. Catalog tests check that every registered rule has
-exactly one entry, that names and fix flags match the rules, that no
-identifier or tag names two rules, and that tags and aliases equal
-markdownlint v0.41.0's table, which is stored as test data.
+exactly one entry, that names and fix flags match the rules, that each ID,
+name and alias names one rule and no tag spells one of them, and that tags
+and aliases equal markdownlint v0.41.0's table, which is stored as test
+data.
 
 The registry resolves names through the catalog:
 
@@ -760,7 +765,8 @@ sequenceDiagram
 path, then output in sorted order regardless of worker completion order. The
 runner also sorts each file's diagnostics by line, as markdownlint-cli2
 does, then by column, rule ID and message, so every reporter lists findings
-in the same order. The engine reports them rule by rule.
+in the same order. On one line, markdownlint-cli2 orders findings by rule ID
+instead. The engine reports them rule by rule.
 
 ## Error Handling
 

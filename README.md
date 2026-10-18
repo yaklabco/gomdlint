@@ -288,9 +288,10 @@ Total: 7 issues (7 warnings) in 2 files
 
 Control table order with `--summary-order rules` (default) or `--summary-order files`.
 
-Every format lists findings file by file, in path order. Within a file, as
-in markdownlint-cli2, findings follow line order, then column, rule ID and
-message.
+Every format lists findings file by file, in path order. Within a file,
+findings follow line order, as in markdownlint-cli2, then column, rule ID
+and message. On one line, markdownlint-cli2 orders findings by rule ID
+instead of column.
 
 SARIF output follows SARIF 2.1.0. Its file locations are relative to the
 root of the Git working tree, as GitHub code scanning expects, and its
@@ -518,8 +519,8 @@ exit code tells a CI job what happened:
 | 74 | A file or directory could not be read or written |
 
 When several apply, 74 comes first, then 70, then the codes for findings.
-gomdlint names each file it could not lint and each rule that failed on
-stderr.
+Info findings never change the exit code, even with `--strict`. gomdlint
+names each file it could not lint and each rule that failed on stderr.
 
 ```yaml
 # GitHub Actions example
@@ -560,9 +561,15 @@ differently from GitHub and from micromark, the parser behind markdownlint.
 Some of its fix checks are also stricter than they need to be.
 
 - Twelve list and whitespace rules withhold every fix in a document that
-  holds raw HTML other than comments and `br`, `wbr`, `hr` and `img` tags,
-  because such HTML can change how the whole page shows. One inline `<kbd>`
-  is enough. The rules are `unordered-list-style` (MD004), `list-indent`
+  holds any raw HTML other than well-formed comments and start tags of
+  `br`, `wbr`, `hr` and `img` with only presentational attributes, because
+  other HTML can change how the whole page shows. The attributes allowed
+  are `src`, `alt`, `title`, `width`, `height`, `align`, `border`,
+  `loading`, `decoding`, `srcset` and `sizes` on `img`, `clear` on `br`,
+  and `align`, `width`, `size` and `noshade` on `hr`, each used once. So
+  `<br>` keeps the fixes, while `<br onclick="noop()">`, an end tag such as
+  `</br>`, a comment with `--` inside it, or one inline `<kbd>` withholds
+  them. The rules are `unordered-list-style` (MD004), `list-indent`
   (MD005), `ul-indent` (MD007), `no-trailing-spaces` (MD009),
   `no-hard-tabs` (MD010), `no-multiple-blank-lines` (MD012), `line-length`
   (MD013), `no-multiple-space-blockquote` (MD027), `ol-prefix` (MD029),
@@ -620,10 +627,17 @@ automation.
 stave build      # Build bin/gomdlint
 stave test       # Run tests with the race detector
 stave lint       # Run golangci-lint and apply its fixes
-stave ci:gate    # Run every check that CI runs
+stave ci:gate    # Run the CI checks, apart from the Markdown lint
 stave check      # Format, lint and test
 stave install    # Install to GOPATH/bin
 stave -l         # List all available tasks
+```
+
+CI also lints the repository's Markdown, which `stave ci:gate` does not.
+To run that check locally:
+
+```bash
+go run ./cmd/gomdlint lint --strict README.md CHANGELOG.md CI_CD.md docs CLAUDE.md AGENTS.md
 ```
 
 [CI_CD.md](CI_CD.md) describes the CI workflows and the release process.
