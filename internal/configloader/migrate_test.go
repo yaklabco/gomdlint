@@ -18,31 +18,24 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/rules"
-	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
+// lintMigratedMarkdown lints input under the gomdlint config that migrate
+// writes from settings, a markdownlint config, and returns the findings.
+// The input must lint the same under every other shape of the settings
+// (see configShapes): the markdownlint config applied for a run, and the
+// migrated config in the flat shape, with gomdlint's names and with
+// markdownlint's.
 func lintMigratedMarkdown(t *testing.T, settings, input string) []lint.Diagnostic {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), ".markdownlint.json")
 	require.NoError(t, os.WriteFile(path, []byte(settings), 0o600))
-	converted, err := ConvertMarkdownlintConfig(path)
-	require.NoError(t, err)
-	migratedPath := filepath.Join(filepath.Dir(path), ".gomdlint.yml")
-	yamlConfig, err := converted.FileContent(migratedPath)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(migratedPath, yamlConfig, 0o600))
-	loaded, err := Load(context.Background(), LoadOptions{
-		WorkingDir: filepath.Dir(path), ExplicitPath: migratedPath, IgnoreEnv: true,
-		IgnoreUserConfig: true, IgnoreSystemConfig: true, IgnoreMarkdownlint: true, NonInteractive: true,
-	})
-	require.NoError(t, err)
-	registry := lint.NewRegistry()
-	rules.RegisterAll(registry)
-	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
-		context.Background(), "test.md", []byte(input), loaded.Config)
-	require.NoError(t, err)
-	require.Empty(t, result.RuleErrors)
-	return result.Diagnostics
+	shapes := configShapes(t, path)
+	diags := lintWithConfig(t, shapes["the migrated config"], input)
+	for name, cfg := range shapes {
+		assert.Equal(t, diags, lintWithConfig(t, cfg, input), "%s lints like the migrated config", name)
+	}
+	return diags
 }
 
 func TestMigratedWhitespacePolicy(t *testing.T) {
