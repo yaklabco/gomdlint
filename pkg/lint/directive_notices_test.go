@@ -281,7 +281,7 @@ func TestEngineDirectiveNoticesForEveryKind(t *testing.T) {
 				"the word must not change what the comment does to MD009")
 			if strings.Contains(tt.directive, "disable") {
 				plain := reportedLines(t, document("plain-comment", "MD009"), "MD009")
-				assert.NotEqual(t, plain, want, "the comment must silence MD009 somewhere")
+				assert.NotEqual(t, want, plain, "the comment must silence MD009 somewhere")
 			}
 		})
 	}
