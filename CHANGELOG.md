@@ -295,6 +295,35 @@ formats change. The first entries under Changed may need action.
   commit publishes nothing. The Homebrew formula declares the MIT license
   instead of Apache-2.0.
 
+## [0.2.2] - 2026-10-14
+
+### Added
+
+- markdownlint comments: `disable`, `enable`, `disable-line`,
+  `disable-next-line`, `disable-file`, `enable-file`, `capture` and
+  `restore`, with rule IDs, aliases and tags. Suppressed findings produce no
+  fixes, and comments inside code or front matter change nothing.
+- `markdownlint-configure-file` applies a JSON object of markdownlint
+  settings to one file. Invalid settings fail the file with an error at the
+  comment's line, before any fix.
+
+### Fixed
+
+- Link labels formatted as code keep their visible text, and empty links are
+  reported at their source positions.
+- Markdown checks skip leading front matter, while positions still count its
+  lines.
+- Independent emphasis spans no longer cause false positives, and list and
+  heading fixes stay safe.
+- Migration translates markdownlint's rule options and defaults without
+  enabling gomdlint-only rules or changing native defaults, including table
+  alignment, HTML allowlists, ordered list styles, whitespace and line
+  length. It does not evaluate JavaScript configs or resolve `extends`.
+- **MD032**: No longer reports a list followed by a blank line and a fenced
+  code block.
+- The diff output keeps each file's subdirectory path instead of only its
+  name.
+
 ## [0.2.1] - 2026-02-06
 
 No functional changes. Release process verification.
@@ -355,6 +384,7 @@ Initial release of gomdlint - a fast Markdown linter written in Go.
 - CommonMark and GFM flavor support
 
 [Unreleased]: https://github.com/yaklabco/gomdlint/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/yaklabco/gomdlint/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yaklabco/gomdlint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yaklabco/gomdlint/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yaklabco/gomdlint/compare/v0.1.0...v0.1.1
