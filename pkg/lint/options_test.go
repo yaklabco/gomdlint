@@ -456,18 +456,19 @@ func TestRegistryNormalizeOptions_IssuesShareNothing(t *testing.T) {
 	}})
 	options := map[string]any{"old_style": "zigzag", "names": "Go"}
 
+	const changed = "changed"
 	_, issues, declared := registry.NormalizeOptions("MD044", options)
 	require.True(t, declared)
 	require.Len(t, issues, 2)
 	for _, issue := range issues {
 		if len(issue.Option.Aliases) > 0 {
-			issue.Option.Aliases[0].Name = "changed"
+			issue.Option.Aliases[0].Name = changed
 		}
 		if len(issue.Option.Values) > 0 {
-			issue.Option.Values[0] = "changed"
+			issue.Option.Values[0] = changed
 		}
 		if names, ok := issue.Option.Default.([]string); ok {
-			names[0] = "changed"
+			names[0] = changed
 		}
 	}
 
