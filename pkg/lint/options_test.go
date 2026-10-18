@@ -166,10 +166,10 @@ func TestNormalizeOptions(t *testing.T) {
 		},
 		{
 			name:    "an unknown option is kept and gets the closest spelling",
-			options: map[string]any{"line_lenght": 100},
-			want:    map[string]any{"line_lenght": 100},
+			options: map[string]any{"lin_length": 100},
+			want:    map[string]any{"lin_length": 100},
 			issues: []lint.OptionIssue{{
-				Kind: lint.OptionIssueUnknown, Key: "line_lenght", Value: 100, Suggestions: []string{"line_length"},
+				Kind: lint.OptionIssueUnknown, Key: "lin_length", Value: 100, Suggestions: []string{"line_length"},
 			}},
 		},
 		{
@@ -251,7 +251,7 @@ func TestNormalizeOptions_Suggestions(t *testing.T) {
 		want []string
 	}{
 		{key: "stirct", want: []string{"strict"}},
-		{key: "heading_lenght", want: nil},
+		{key: "heading_length", want: nil},
 		{key: "length", want: []string{"code_block_line_length", "heading_line_length", "line_length"}},
 		{key: "_max", want: []string{"max"}},
 		{key: "frobnicate", want: nil},
@@ -279,8 +279,8 @@ func TestOptionIssueText(t *testing.T) {
 	}{
 		{
 			name:  "unknown with a suggestion",
-			issue: lint.OptionIssue{Kind: lint.OptionIssueUnknown, Key: "line_lenght", Suggestions: []string{"line_length"}},
-			want:  `unknown option "line_lenght" for line-length (did you mean "line_length"?); it is ignored`,
+			issue: lint.OptionIssue{Kind: lint.OptionIssueUnknown, Key: "lin_length", Suggestions: []string{"line_length"}},
+			want:  `unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored`,
 		},
 		{
 			name:  "unknown with several suggestions",
@@ -431,14 +431,14 @@ func TestRegistryMarkdownlintRuleConfig(t *testing.T) {
 	registry := optionsRegistry()
 
 	cfg, issues := registry.MarkdownlintRuleConfig("MD013", map[string]any{
-		"line_length": 100, "tables": false, "line_lenght": 1, "style": 3, "severity": "warning",
+		"line_length": 100, "tables": false, "lin_length": 1, "style": 3, "severity": "warning",
 	})
 	assert.Equal(t, map[string]any{"max": 100, "ignore_tables": true}, cfg.Options)
 	require.NotNil(t, cfg.Severity)
 	assert.Equal(t, "warning", *cfg.Severity)
 	require.Len(t, issues, 2)
 	assert.Equal(t, lint.OptionIssueUnknown, issues[0].Kind)
-	assert.Equal(t, "line_lenght", issues[0].Key)
+	assert.Equal(t, "lin_length", issues[0].Key)
 	assert.Equal(t, lint.OptionIssueWrongType, issues[1].Kind)
 	assert.Equal(t, "style", issues[1].Key)
 

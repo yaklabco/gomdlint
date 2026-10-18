@@ -68,7 +68,7 @@ func TestLoad_WarnsAboutOptions(t *testing.T) {
 	content := `rules:
   line-length:
     options:
-      line_lenght: 100
+      lin_length: 100
       max: 100px
       strict: true
   unordered-list-style:
@@ -89,7 +89,7 @@ rule_defaults:
 	require.NoError(t, err, "option problems do not fail loading")
 
 	assert.Equal(t, []string{
-		`.gomdlint.yml:4: unknown option "line_lenght" for line-length (did you mean "line_length"?); it is ignored`,
+		`.gomdlint.yml:4: unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored`,
 		`.gomdlint.yml:5: line-length option "max" must be an integer, not "100px"; it is ignored`,
 		`.gomdlint.yml:9: unordered-list-style option "style" must be one of "consistent", "asterisk", "plus", "dash" or ` +
 			`"sublist", not "dashes" (did you mean "dash"?)`,
@@ -98,7 +98,7 @@ rule_defaults:
 		`.gomdlint.yml:17: unknown rule "frobnicate"; it is ignored`,
 	}, relativeWarnings(result.Warnings, ".gomdlint.yml"))
 
-	assert.Equal(t, map[string]any{"line_lenght": 100, "strict": true}, result.Config.Rules["MD013"].Options,
+	assert.Equal(t, map[string]any{"lin_length": 100, "strict": true}, result.Config.Rules["MD013"].Options,
 		"the value of the wrong type is dropped")
 	assert.Equal(t, map[string]any{"style": "dashes"}, result.Config.Rules["MD004"].Options,
 		"a value outside the allowed ones is kept for the rule")
@@ -112,7 +112,7 @@ func TestLoad_WarnsAboutOptionsInJSON(t *testing.T) {
 	content := `{
   "rules": {
     "MD013": {
-      "options": {"tables": "no", "heading_lenght": 60}
+      "options": {"tables": "no", "heading_length": 60}
     }
   }
 }
@@ -121,7 +121,7 @@ func TestLoad_WarnsAboutOptionsInJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{
-		`.gomdlint.json:4: unknown option "heading_lenght" for line-length; it is ignored`,
+		`.gomdlint.json:4: unknown option "heading_length" for line-length; it is ignored`,
 		`.gomdlint.json:4: line-length option "tables" must be true or false, not "no"; it is ignored`,
 	}, relativeWarnings(result.Warnings, ".gomdlint.json"))
 }

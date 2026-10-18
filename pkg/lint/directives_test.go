@@ -529,12 +529,13 @@ func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
 // an unknown option is ignored, as markdownlint ignores it, and two
 // spellings of one option fail the file, as in a config file.
 func TestEngineConfigureFileOptionSpellings(t *testing.T) {
+	const lineLength = "MD013"
 	long := strings.Repeat("word ", 20) + "end\n"
 	lintWith := func(t *testing.T, settings string) (*lint.FileResult, error) {
 		t.Helper()
 		input := "# Title\n\n<!-- markdownlint-configure-file " + settings + " -->\n\n" + long
 		cfg := config.NewConfig()
-		cfg.EnableRules = []string{"MD013"}
+		cfg.EnableRules = []string{lineLength}
 		cfg.DisableRules = []string{"MD041", "MD033"}
 		return lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
 			context.Background(), "test.md", []byte(input), cfg)
@@ -543,7 +544,7 @@ func TestEngineConfigureFileOptionSpellings(t *testing.T) {
 	lineLengthFindings := func(result *lint.FileResult) int {
 		count := 0
 		for _, diag := range result.Diagnostics {
-			if diag.RuleID == "MD013" && diag.StartLine == 5 {
+			if diag.RuleID == lineLength && diag.StartLine == 5 {
 				count++
 			}
 		}
@@ -554,7 +555,7 @@ func TestEngineConfigureFileOptionSpellings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, lineLengthFindings(result), "markdownlint's line_length sets max")
 
-	result, err = lintWith(t, `{"line-length": {"code_blocks": false, "line_lenght": 120}}`)
+	result, err = lintWith(t, `{"line-length": {"code_blocks": false, "lin_length": 120}}`)
 	require.NoError(t, err)
 	assert.Equal(t, 1, lineLengthFindings(result), "an unknown option changes nothing")
 

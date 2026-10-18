@@ -170,7 +170,7 @@ type OptionIssue struct {
 // Text describes the issue for a warning or an error about the options of
 // the rule named ruleName, in the manner of UnknownRuleText:
 //
-//	unknown option "line_lenght" for line-length (did you mean "line_length"?); it is ignored
+//	unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored
 //	line-length option "max" must be an integer, not "100px"; it is ignored
 //	ul-style option "style" must be one of "consistent", "dash" or "plus", not "dashes" (did you mean "dash"?)
 //	"line_length" and "max" both set line-length option "max"; keep one of them
@@ -462,14 +462,21 @@ func listValues(value any) ([]any, bool) {
 // ignores case.
 func closestWords(key string, words []string) []string {
 	key = strings.ToLower(key)
-	best, bestRank := []string(nil), noMatch
-	for _, word := range words {
-		rank := matchRank(key, strings.ToLower(word), true)
-		switch {
-		case rank == noMatch:
-		case bestRank == noMatch || rank < bestRank:
-			best, bestRank = []string{word}, rank
-		case rank == bestRank:
+	ranks := make([]int, len(words))
+	bestRank := noMatch
+	for idx, word := range words {
+		ranks[idx] = matchRank(key, strings.ToLower(word), true)
+		if ranks[idx] != noMatch && (bestRank == noMatch || ranks[idx] < bestRank) {
+			bestRank = ranks[idx]
+		}
+	}
+	if bestRank == noMatch {
+		return nil
+	}
+
+	best := make([]string, 0, maxClosest+1)
+	for idx, word := range words {
+		if ranks[idx] == bestRank {
 			best = append(best, word)
 		}
 	}

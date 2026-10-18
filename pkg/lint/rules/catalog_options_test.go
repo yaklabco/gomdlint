@@ -139,14 +139,13 @@ func TestCatalogOptionsFollowMarkdownlint(t *testing.T) {
 			if enabled, isBool := defaultValue.(bool); isBool && inverted {
 				defaultValue = !enabled
 			}
-			switch {
-			case spec.Name == "front_matter_title":
+			if spec.Name == "front_matter_title" {
 				assert.Equal(t, `^\s*title\s*[:=]`, parameter.Default, "%s %s: the schema's pattern", meta.ID, name)
 				assert.Equal(t, config.MarkdownlintFrontMatterTitlePattern, defaultValue,
 					"%s %s: the pattern markdownlint's code applies", meta.ID, name)
-			default:
-				assert.Equal(t, parameter.Default, defaultValue, "%s %s: default", meta.ID, name)
+				continue
 			}
+			assert.Equal(t, parameter.Default, defaultValue, "%s %s: default", meta.ID, name)
 		}
 		assert.ElementsMatch(t, slices.Collect(maps.Keys(parameters)), slices.Collect(maps.Keys(seen)),
 			"%s: every markdownlint parameter is an option", meta.ID)

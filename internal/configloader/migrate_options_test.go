@@ -55,13 +55,13 @@ func TestConvertMarkdownlintConfig_OptionWarnings(t *testing.T) {
 	t.Parallel()
 
 	result := convertSettings(t, `{
-		"MD013": {"line_lenght": 100, "strict": "yes"},
+		"MD013": {"lin_length": 100, "strict": "yes"},
 		"MD004": {"style": "dashes"},
 		"MD005": {"indent": 2}
 	}`)
 
 	assert.Equal(t, []string{
-		`unknown option "line_lenght" for line-length (did you mean "line_length"?); it is ignored`,
+		`unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored`,
 		`line-length option "strict" must be true or false, not "yes"; it is ignored`,
 		`unordered-list-style option "style" must be one of "consistent", "asterisk", "plus", "dash" or "sublist", ` +
 			`not "dashes" (did you mean "dash"?)`,
