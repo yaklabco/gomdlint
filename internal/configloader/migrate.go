@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/yaklabco/gomdlint/internal/jsonc"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/rules"
@@ -157,11 +158,12 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 }
 
 // readMarkdownlintSettings reads content, the markdownlint config at path,
-// into its settings in the order of its keys: as JSON with comments for a
-// name that ends in .json or .jsonc, and as YAML otherwise.
+// into its settings in the order of its keys: as JSON with comments and
+// trailing commas (see jsonc.Strip) for a name that ends in .json or
+// .jsonc, and as YAML otherwise.
 func readMarkdownlintSettings(path string, content []byte) (*lint.MarkdownlintSettings, error) {
 	if IsJSONConfig(path) {
-		settings, err := lint.DecodeMarkdownlintJSON(stripJSONComments(content))
+		settings, err := lint.DecodeMarkdownlintJSON(jsonc.Strip(content))
 		if err != nil {
 			return nil, fmt.Errorf("parse JSON: %w", err)
 		}
@@ -276,73 +278,6 @@ func (r *MigrationResult) FileContent(path string) ([]byte, error) {
 	return content, nil
 }
 
-// stripJSONComments removes JavaScript-style comments from JSON content,
-// keeping their line endings, so that every line keeps its number. Valid
-// JSON, which holds no comments, comes back as it is.
-func stripJSONComments(content []byte) []byte {
-	var result []byte
-	inString := false
-	inSingleComment := false
-	inMultiComment := false
-
-	for idx := 0; idx < len(content); idx++ {
-		char := content[idx]
-
-		if inSingleComment {
-			if char == '\n' {
-				inSingleComment = false
-				result = append(result, char)
-			}
-			continue
-		}
-
-		if inMultiComment {
-			if char == '*' && idx+1 < len(content) && content[idx+1] == '/' {
-				inMultiComment = false
-				idx++ // skip the closing /
-			} else if char == '\n' {
-				result = append(result, char) // Lines keep their numbers, for warnings.
-			}
-			continue
-		}
-
-		if inString {
-			result = append(result, char)
-			if char == '\\' && idx+1 < len(content) {
-				idx++
-				result = append(result, content[idx])
-			} else if char == '"' {
-				inString = false
-			}
-			continue
-		}
-
-		if char == '"' {
-			inString = true
-			result = append(result, char)
-			continue
-		}
-
-		if char == '/' && idx+1 < len(content) {
-			next := content[idx+1]
-			if next == '/' {
-				inSingleComment = true
-				idx++
-				continue
-			}
-			if next == '*' {
-				inMultiComment = true
-				idx++
-				continue
-			}
-		}
-
-		result = append(result, char)
-	}
-
-	return result
-}
-
 // markdownlintConversion converts the rule keys of one markdownlint
 // configuration into cfg, recording warnings in result.
 type markdownlintConversion struct {
@@ -398,13 +333,14 @@ type sourceLocator struct {
 }
 
 // newSourceLocator reads content, the markdownlint config at path, into a
-// tree of nodes that record their lines: as JSON with comments for a name
-// that ends in .json or .jsonc, which jsonDocument reads, and as YAML
-// otherwise. Content that it cannot read has no lines to find.
+// tree of nodes that record their lines: as JSON with comments and trailing
+// commas for a name that ends in .json or .jsonc, which jsonDocument reads
+// once jsonc.Strip has blanked them, and as YAML otherwise. Content that it
+// cannot read has no lines to find.
 func newSourceLocator(path string, content []byte) *sourceLocator {
 	var doc *yaml.Node
 	if IsJSONConfig(path) {
-		parsed, err := jsonDocument(stripJSONComments(content))
+		parsed, err := jsonDocument(jsonc.Strip(content))
 		if err != nil {
 			return &sourceLocator{}
 		}

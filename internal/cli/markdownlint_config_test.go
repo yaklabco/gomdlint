@@ -112,6 +112,32 @@ func TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintConfig_TrailingCommas covers markdownlint configs with
+// comments and a comma after their last member, which markdownlint-cli2
+// 0.23.3 reads with jsonc-parser and its allowTrailingComma option, in
+// .markdownlint.json and .markdownlint.jsonc alike. gomdlint used to stop
+// with a config error. markdownlint-cli2 reports trailingSpaceDoc's
+// trailing space with neither config.
+func TestMarkdownlintConfig_TrailingCommas(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+	}{
+		{name: "JSON", file: ".markdownlint.json", settings: `{"MD009": false,}`},
+		{name: "JSONC", file: ".markdownlint.jsonc", settings: "{\n  // Trailing spaces are fine.\n  \"MD009\": false,\n}\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": nil}, got)
+				assert.NotContains(t, warnings, "WARN")
+			})
+		}
+	}
+}
+
 // TestMarkdownlintConfig_DefaultKeyInAnyCase covers the default key of a
 // markdownlint config, which markdownlint 0.41.1 reads in any case, taking
 // the first one written. gomdlint used to read only "default", so it warned
