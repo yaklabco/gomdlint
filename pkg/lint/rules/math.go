@@ -41,7 +41,7 @@ func findMath(ctx *lint.RuleContext) mathRegions {
 func (m *mathRegions) findBlocks(ctx *lint.RuleContext) {
 	file := ctx.File
 	htmlLines := htmlBlockLines(ctx)
-	var ends []int // Built at the first math block.
+	var holders []*mdast.Node // Built at the first math block.
 	for line := file.FrontMatterLines + 1; line <= len(file.Lines); line++ {
 		if ctx.IsLineInCodeBlock(line) || htmlLines[line] {
 			continue
@@ -50,25 +50,51 @@ func (m *mathRegions) findBlocks(ctx *lint.RuleContext) {
 		if !ok {
 			continue
 		}
-		if ends == nil {
-			ends = containerLastLines(ctx)
+		if holders == nil {
+			holders = innermostContainers(ctx)
 		}
-		last := len(file.Lines)
-		if ends[line] > 0 {
-			last = ends[line]
+		// goldmark takes a lazy line into the containers of the paragraph it
+		// continues. A fence opens no paragraph, so micromark reads it in the
+		// containers the line continues explicitly.
+		container := holders[line]
+		for container != nil && !lint.ContinuesContainers(file, container, line) {
+			container = enclosingContainer(container)
 		}
-		closing := last
-		for next := line + 1; next <= last; next++ {
-			if mathFenceCloses(withoutContainerPrefix(lint.LineText(file, next)), fence) {
-				closing = next
-				break
-			}
-		}
+		closing := mathBlockEnd(file, container, line, fence)
 		for covered := line; covered <= closing; covered++ {
 			m.lines[covered] = true
 		}
 		line = closing
 	}
+}
+
+// mathBlockEnd returns the last line of a math block whose fence, fence
+// dollar signs long, opens on line opening inside container, or outside
+// every container when container is nil: the line of its closing fence, or
+// the line before the first line that does not continue the container
+// explicitly, since micromark-extension-math allows no lazy line, or the
+// last line of the document.
+func mathBlockEnd(file *mdast.FileSnapshot, container *mdast.Node, opening, fence int) int {
+	for next := opening + 1; next <= len(file.Lines); next++ {
+		if container != nil && !lint.ContinuesContainers(file, container, next) {
+			return next - 1
+		}
+		if mathFenceCloses(withoutContainerPrefix(lint.LineText(file, next)), fence) {
+			return next
+		}
+	}
+	return len(file.Lines)
+}
+
+// enclosingContainer returns the blockquote or list item around node, or
+// nil when there is none.
+func enclosingContainer(node *mdast.Node) *mdast.Node {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeBlockquote || parent.Kind == mdast.NodeListItem {
+			return parent
+		}
+	}
+	return nil
 }
 
 // mathFenceOpening returns the length of the dollar sign run that opens a
@@ -100,29 +126,38 @@ func dollarRun(text []byte, offset int) int {
 	return count
 }
 
-// containerLastLines returns, for each line, the last line of the innermost
-// blockquote or list item that holds it, and 0 for a line that none holds.
-// A math block cannot outlast its container. The containers are written
-// from the longest to the shortest, so an inner one overwrites the outer
-// ones, in time that grows with the lines the containers hold.
-func containerLastLines(ctx *lint.RuleContext) []int {
-	type lineSpan struct{ first, last int }
-	var spans []lineSpan
+// innermostContainers returns, for each line, the innermost blockquote or
+// list item whose span holds it, or nil. The containers are written from
+// the longest to the shortest, and from the outermost to the innermost
+// among equally long ones, so an inner one overwrites the outer ones, in
+// time that grows with the lines the containers hold.
+func innermostContainers(ctx *lint.RuleContext) []*mdast.Node {
+	type heldLines struct {
+		node               *mdast.Node
+		first, last, depth int
+	}
+	var spans []heldLines
 	for _, containers := range [][]*mdast.Node{ctx.Blockquotes(), ctx.ListItems()} {
 		for _, container := range containers {
 			if pos := container.SourcePosition(); pos.IsValid() {
-				spans = append(spans, lineSpan{pos.StartLine, pos.EndLine})
+				depth := 0
+				for parent := container.Parent; parent != nil; parent = parent.Parent {
+					depth++
+				}
+				spans = append(spans, heldLines{container, pos.StartLine, pos.EndLine, depth})
 			}
 		}
 	}
-	slices.SortStableFunc(spans, func(a, b lineSpan) int { return cmp.Compare(b.last-b.first, a.last-a.first) })
-	ends := make([]int, len(ctx.File.Lines)+1)
+	slices.SortFunc(spans, func(a, b heldLines) int {
+		return cmp.Or(cmp.Compare(b.last-b.first, a.last-a.first), cmp.Compare(a.depth, b.depth))
+	})
+	holders := make([]*mdast.Node, len(ctx.File.Lines)+1)
 	for _, span := range spans {
-		for line := max(span.first, 1); line <= span.last && line < len(ends); line++ {
-			ends[line] = span.last
+		for line := max(span.first, 1); line <= span.last && line < len(holders); line++ {
+			holders[line] = span.node
 		}
 	}
-	return ends
+	return holders
 }
 
 // findInline records the inline math of every paragraph, heading and table

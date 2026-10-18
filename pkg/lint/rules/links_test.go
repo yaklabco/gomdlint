@@ -186,6 +186,47 @@ func TestReversedLinkRule_SkipsMath(t *testing.T) {
 	assert.Equal(t, []position{{3, 10}, {15, 12}, {17, 15}, {38, 12}}, got)
 }
 
+// TestReversedLinkRule_MathEndsAtALazyLine checks MD011 against markdownlint
+// 0.41.1, where a math block ends at the first line that does not continue
+// its blockquotes and list items explicitly: a lazy line ends it and is not
+// math, as micromark-extension-math allows no lazy continuation.
+func TestReversedLinkRule_MathEndsAtALazyLine(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  []position
+	}{
+		{name: "lazy line in a blockquote", input: "> $$\n(a)[b]\n", want: []position{{2, 1}}},
+		{name: "lazy line in a list item", input: "- $$\n(a)[b]\n", want: []position{{2, 1}}},
+		{name: "lazy line after math", input: "> $$\n> (a)[b]\n(c)[d]\n", want: []position{{3, 1}}},
+		{name: "blank quoted line", input: "> $$\n>\n> (a)[b]\n", want: []position{}},
+		{name: "blank line in a list item", input: "- $$\n\n  (a)[b]\n", want: []position{}},
+		{name: "list item ended by a blank line", input: "- $$\n\n(a)[b]\n", want: []position{{3, 1}}},
+		{name: "quoted line lazy for the list item", input: "> - $$\n>   (a)[b]\n> (c)[d]\n", want: []position{{3, 3}}},
+		{name: "lazy fence opens math of its own", input: "> $$\n> a\n$$\n(e)[f]\n", want: []position{}},
+		{name: "ordered item indentation", input: "1. $$\n   (a)[b]\n  (c)[d]\n", want: []position{{3, 3}}},
+		{name: "quote markers without spaces", input: ">  $$\n> (a)[b]\n>(c)[d]\n", want: []position{}},
+		// A fence on a lazy line opens math outside the containers it does
+		// not continue, where goldmark reads a lazy paragraph line.
+		{name: "lazy fence after a quoted paragraph", input: "> a\n$$\n(b)[c]\n", want: []position{}},
+		{name: "lazy fence after a list item", input: "- a\n$$\n(b)[c]\n", want: []position{}},
+		{name: "fence lazy for the list item", input: "> - a\n> $$\n> (b)[c]\n", want: []position{}},
+		{name: "fence in the list item", input: "> - a\n>   $$\n> (b)[c]\n", want: []position{{3, 3}}},
+		{name: "blockquote in a list item", input: "- > $$\n  > (a)[b]\n  (c)[d]\n", want: []position{{3, 3}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewReversedLinkRule(), tt.input, nil)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // TestLinkSpacesRule_ReportsEachSide reports leading and trailing spaces
 // separately at the spaces the fix deletes, like markdownlint.
 func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {

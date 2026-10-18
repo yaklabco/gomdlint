@@ -281,7 +281,8 @@ formats change. The first entries under Changed may need action.
   finding per line. With `ignore_code_languages` set, it skips fences that
   name no language.
 - **MD011**: Skips math, which markdownlint parses: blocks fenced by `$$`
-  and inline math such as `$(a)[b]$`.
+  and inline math such as `$(a)[b]$`. A math block ends before a line that
+  does not continue its blockquotes and list items, such as a lazy line.
 - **MD012**: Reports each blank line past the maximum, as markdownlint
   does, and no longer reports the blank lines right after front matter. One
   pass of fixes still removes a whole run.

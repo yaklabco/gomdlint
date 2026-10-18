@@ -184,12 +184,17 @@ func listItemIndent(item *mdast.Node) int {
 // a tab: goldmark measures that tab from where the item starts, not from
 // the start of the line.
 func scanPrefix(content []byte, lineStart int, node *mdast.Node, lineNum int) ([]prefixPart, int) {
+	return scanContainers(content, lineStart, containersOf(node), lineNum)
+}
+
+// scanContainers is scanPrefix for the given containers, outermost first.
+func scanContainers(content []byte, lineStart int, containers []*mdast.Node, lineNum int) ([]prefixPart, int) {
 	cursor := &lineCursor{content: content}
 	if lineNum == 1 && bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
 		cursor.pos = len(mdast.ByteOrderMark)
 	}
 	var parts []prefixPart
-	for _, container := range containersOf(node) {
+	for _, container := range containers {
 		switch container.Kind {
 		case mdast.NodeBlockquote:
 			saved := *cursor
@@ -254,6 +259,20 @@ func ContainerPrefix(file *mdast.FileSnapshot, node *mdast.Node, lineNum int) []
 	}
 	_, end := scanPrefix(content, lineStartOffset(file, lineNum), node, lineNum)
 	return content[:end]
+}
+
+// ContinuesContainers reports whether a 1-based line continues container, a
+// blockquote or list item, and every blockquote and list item around it
+// explicitly: the line holds each blockquote's '>' marker and each list
+// item's content indentation, or is blank inside a list item. A lazy
+// continuation line, which only a paragraph may have, does not.
+func ContinuesContainers(file *mdast.FileSnapshot, container *mdast.Node, lineNum int) bool {
+	if file == nil || container == nil || lineNum < 1 || lineNum > len(file.Lines) {
+		return false
+	}
+	containers := append(containersOf(container), container)
+	parts, _ := scanContainers(RawLineContent(file, lineNum), lineStartOffset(file, lineNum), containers, lineNum)
+	return len(parts) == len(containers)
 }
 
 // lineStartOffset returns the offset where a 1-based line starts, or 0 when

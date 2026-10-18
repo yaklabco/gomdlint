@@ -101,6 +101,48 @@ func TestContainerPrefix(t *testing.T) {
 	}
 }
 
+// TestContinuesContainers checks which lines continue a container and the
+// containers around it explicitly, as a construct that allows no lazy line,
+// such as a math block, needs.
+func TestContinuesContainers(t *testing.T) {
+	t.Parallel()
+
+	file := parseSource(t, "> a\nlazy\n> b\n>\n\n- c\n\n  d\ne\n> - f\n>   g\n> h\n")
+	quotes := mdast.FindByKind(file.Root, mdast.NodeBlockquote)
+	items := mdast.FindByKind(file.Root, mdast.NodeListItem)
+	require.Len(t, quotes, 2)
+	require.Len(t, items, 2)
+	quote, item, quotedItem := quotes[0], items[0], items[1]
+
+	tests := []struct {
+		name      string
+		container *mdast.Node
+		line      int
+		want      bool
+	}{
+		{"first line of a blockquote", quote, 1, true},
+		{"lazy line", quote, 2, false},
+		{"quoted line", quote, 3, true},
+		{"marker-only line", quote, 4, true},
+		{"blank line after a blockquote", quote, 5, false},
+		{"first line of a list item", item, 6, true},
+		{"blank line in a list item", item, 7, true},
+		{"indented line", item, 8, true},
+		{"unindented line", item, 9, false},
+		{"first line of a quoted list item", quotedItem, 10, true},
+		{"indented quoted line", quotedItem, 11, true},
+		{"quoted line lazy for the list item", quotedItem, 12, false},
+		{"out of range line", quote, 99, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, lint.ContinuesContainers(file, tt.container, tt.line))
+		})
+	}
+	assert.False(t, lint.ContinuesContainers(file, nil, 1))
+}
+
 func TestIsBlankLineInContainer(t *testing.T) {
 	t.Parallel()
 
