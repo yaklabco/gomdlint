@@ -507,7 +507,7 @@ type docLayout struct {
 // the regions their merges took, and the regions their list tightness
 // checks visited.
 type regionWork struct {
-	parsed, merged, tightness int
+	parsed, merged, tightVisits int
 }
 
 // layoutList is a top-level list of the original document.
@@ -993,77 +993,94 @@ type regionVerdict interface {
 // merged and grown until each holds, with their outcomes as evaluate finds
 // them for the edits that start in each. ok is false when a region cannot be
 // checked on its own or cannot grow to hold.
+//
+// Regions are evaluated in order. One that does not hold grows, takes in the
+// regions it then meets on either side (see absorbGrown) and is evaluated
+// again, so a growth costs the regions it takes in, not all the regions.
 func decomposeRegions[O regionVerdict](
 	layout *docLayout, placed []placedEdit, evaluate func(region, []placedEdit) O,
 ) ([]region, []O, bool) {
-	regions := make([]region, len(placed))
+	initial := make([]region, len(placed))
 	for idx, edit := range placed {
-		regions[idx] = layout.regionFor(edit)
+		initial[idx] = layout.regionFor(edit)
 	}
-	regions = layout.mergeRegions(regions)
-	outcomes := make([]O, 0, len(regions))
-	for idx := 0; idx < len(regions); {
-		from, to := layout.editSpan(regions[idx])
-		outcome := evaluate(regions[idx], regionEdits(from, to, placed))
+	// pending[next:] holds the regions still to evaluate, sorted by span;
+	// done holds those that hold, with their outcomes, all before them.
+	pending := layout.mergeRegions(initial)
+	next := 0
+	done := make([]region, 0, len(pending))
+	outcomes := make([]O, 0, len(pending))
+	for next < len(pending) {
+		reg := pending[next]
+		from, to := layout.editSpan(reg)
+		outcome := evaluate(reg, regionEdits(from, to, placed))
 		holds, undecided := outcome.verdict()
 		switch {
 		case undecided:
 			return nil, nil, false
-		case !holds:
-			grown := layout.grow(regions[idx])
-			if grown == regions[idx] {
-				return nil, nil, false
-			}
-			regions[idx] = grown
-			// Merging changes no region before the first that differs.
-			regions, idx = layout.remerge(regions, idx)
-			outcomes = outcomes[:idx]
+		case holds:
+			done = append(done, reg)
+			outcomes = append(outcomes, outcome)
+			next++
 			continue
 		}
-		outcomes = append(outcomes, outcome)
-		idx++
+		grown := layout.grow(reg)
+		if grown == reg {
+			return nil, nil, false
+		}
+		lo, hi, merged := layout.absorbGrown(done, pending, next, grown)
+		done, outcomes = done[:lo], outcomes[:lo]
+		// Every region done or taken in has used a slot of pending before
+		// hi, so the merged regions fit there, to be evaluated next.
+		next = hi - len(merged)
+		copy(pending[next:hi], merged)
 	}
-	return regions, outcomes, true
+	return done, outcomes, true
 }
 
-// remerge merges regions, sorted by span with no two meeting but the one at
-// idx, which grew, as mergeRegions would merge them all, and returns them
-// with the index of the first region that changed. A region can meet another
-// only where their spans overlap or touch, and the spans of regions that do
-// not meet do not overlap, so mergeRegions runs on the window of regions
-// whose spans reach the grown region's, widened while the merged regions
-// reach further; the regions outside it stay. So a check whose regions grow
-// one by one merges each with its neighbours, not with all the regions.
-func (l *docLayout) remerge(regions []region, idx int) ([]region, int) {
-	start, end := l.span(regions[idx])
-	lo, hi := idx, idx+1
+// absorbGrown merges grown, the region at pending[next] after it grew, with
+// the regions it meets, as mergeRegions merges them: the regions done[lo:]
+// that hold before it and pending[next+1:hi] after it, all sorted by span
+// with no two meeting. It returns lo, hi and the merged regions, sorted by
+// span. Regions meet exactly where their spans overlap: group regions that
+// share a group, list regions of one list where first <= other.last+2, and a
+// list region and a group region of its list's group, whose span holds the
+// list region's. So the regions taken in are those whose spans overlap the
+// grown region's, or the merged regions' as they reach further; regions
+// whose spans only touch stay. grown must be a region that grow returns: a
+// list region that fits, or a group region.
+func (l *docLayout) absorbGrown(done, pending []region, next int, grown region) (int, int, []region) {
+	start, end := l.span(grown)
+	lo := len(done)
 	for lo > 0 {
-		if _, prevEnd := l.span(regions[lo-1]); prevEnd < start {
+		if _, prevEnd := l.span(done[lo-1]); prevEnd <= start {
 			break
 		}
 		lo--
 	}
+	window := append(slices.Clone(done[lo:]), grown)
+	hi := next + 1
 	for {
-		for hi < len(regions) {
-			if nextStart, _ := l.span(regions[hi]); nextStart > end {
+		for hi < len(pending) {
+			if nextStart, _ := l.span(pending[hi]); nextStart >= end {
 				break
 			}
+			window = append(window, pending[hi])
 			hi++
 		}
-		merged := l.mergeRegions(slices.Clone(regions[lo:hi]))
+		merged := l.mergeRegions(window)
 		reach := end
 		for _, reg := range merged {
 			_, regEnd := l.span(reg)
 			reach = max(reach, regEnd)
 		}
-		if hi < len(regions) {
-			if nextStart, _ := l.span(regions[hi]); nextStart <= reach {
-				end = reach
-				continue
-			}
+		if hi == len(pending) {
+			return lo, hi, merged
 		}
-		first := min(idx, lo+firstDifference(regions[lo:hi], merged))
-		return slices.Concat(regions[:lo], merged, regions[hi:]), first
+		if nextStart, _ := l.span(pending[hi]); nextStart >= reach {
+			return lo, hi, merged
+		}
+		end, window = reach, merged
 	}
 }
 
@@ -1089,7 +1106,7 @@ func (l *docLayout) listsTightAfter(regions []region, loosens func(int) bool) ma
 	}
 	counts := make(map[int]count)
 	for idx, reg := range regions {
-		l.work.tightness++
+		l.work.tightVisits++
 		if !reg.isList() {
 			continue
 		}
@@ -1100,10 +1117,16 @@ func (l *docLayout) listsTightAfter(regions []region, loosens func(int) bool) ma
 	}
 	tight := make(map[int]bool, len(counts))
 	for list, c := range counts {
-		model := l.lists[list]
-		tight[list] = !c.loosened && model.loose[len(model.loose)-1]-c.inside == 0
+		tight[list] = l.lists[list].tightWith(c.inside, c.loosened)
 	}
 	return tight
+}
+
+// tightWith reports whether the list is tight when its list regions hold the
+// given number of its loose items, and one of them makes it loose or not.
+// Without list regions, that is the list's tightness in the original.
+func (l *layoutList) tightWith(inside int, loosened bool) bool {
+	return !loosened && l.loose[len(l.loose)-1]-inside == 0
 }
 
 // parseRegion parses a region with its edits, which are in source offsets

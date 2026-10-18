@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -418,7 +419,11 @@ func (m *regionModel) compare(regions []region, outcomes []*regionOutcome) (bool
 // unknown and the part up to its end does not already differ: the anchors
 // after a region whose anchor counts changed are not known.
 func decideReplacements(orig string, reps []replacement) (bool, bool) {
-	slices.SortFunc(reps, func(a, b replacement) int { return a.start - b.start })
+	// By start, then end, so that an empty replacement comes before one that
+	// starts where it does, and the order is total.
+	slices.SortFunc(reps, func(a, b replacement) int {
+		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
+	})
 	for idx, rep := range reps {
 		if rep.unknownAfter {
 			if replacedDiffers(orig, reps[:idx+1], false) {
@@ -542,8 +547,7 @@ func (m *regionModel) newRegionState(edits []fix.TextEdit) *regionState {
 // number of them make it loose. Without list regions, that is the list's
 // tightness in the original, as newLayoutList checks.
 func (m *regionModel) tightWith(list, inside, loosening int) bool {
-	model := m.lists[list]
-	return loosening == 0 && model.loose[len(model.loose)-1]-inside == 0
+	return m.lists[list].tightWith(inside, loosening > 0)
 }
 
 // clashes reports whether an edit, in source offsets, overlaps an edit of

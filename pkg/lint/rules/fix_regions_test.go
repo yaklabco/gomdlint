@@ -610,7 +610,7 @@ func breaksBeforeTextDocument(n int) (string, []fix.TextEdit) {
 	for idx := range n {
 		doc.WriteString("***")
 		edits = append(edits, fix.TextEdit{StartOffset: doc.Len(), EndOffset: doc.Len(), NewText: "\n"})
-		fmt.Fprintf(&doc, "\nText %d\n\n", idx)
+		fmt.Fprintf(&doc, "\nText %d   \n\n", idx)
 	}
 	return doc.String(), edits
 }
@@ -641,7 +641,7 @@ func regionWorkOf(t *testing.T, input string, edits []fix.TextEdit) regionWork {
 		for _, work := range works {
 			total.parsed += work.parsed
 			total.merged += work.merged
-			total.tightness += work.tightness
+			total.tightVisits += work.tightVisits
 		}
 	}
 	return total
@@ -663,8 +663,20 @@ func TestRegionWorkGrowsWithTheDocument(t *testing.T) {
 			return regionWorkOf(t, input, edits)
 		}
 		short, long := work(small), work(factor*small)
-		t.Logf("tightness visits %d for %d lists, %d for %d", short.tightness, small, long.tightness, factor*small)
-		assert.Less(t, ratio(short.tightness, long.tightness), 1.5*factor, "tightness work grows faster than the document")
+		t.Logf("tightness visits %d for %d lists, %d for %d", short.tightVisits, small, long.tightVisits, factor*small)
+		assert.Less(t, ratio(short.tightVisits, long.tightVisits), 1.5*factor, "tightness work grows faster than the document")
+	})
+	t.Run("growing regions next to one another", func(t *testing.T) {
+		work := func(breaks int) regionWork {
+			input, edits := breaksBeforeTextDocument(breaks)
+			edits = append(edits, trailingSpaceEdits(input)...)
+			prepared, err := fix.PrepareEdits(edits, len(input))
+			require.NoError(t, err)
+			return regionWorkOf(t, input, prepared)
+		}
+		short, long := work(small), work(factor*small)
+		t.Logf("regions merged %d for %d breaks, %d for %d", short.merged, small, long.merged, factor*small)
+		assert.Less(t, ratio(short.merged, long.merged), 1.5*factor, "merge work grows faster than the document")
 	})
 	t.Run("growing regions", func(t *testing.T) {
 		work := func(breaks int) regionWork {
@@ -677,47 +689,94 @@ func TestRegionWorkGrowsWithTheDocument(t *testing.T) {
 	})
 }
 
-// TestRemergeMatchesMergeRegions checks that merging only the window around
-// a grown region gives the regions, and the first region that changed, that
-// merging all the regions gives, on regions of random edits in random
-// documents with lists.
-func TestRemergeMatchesMergeRegions(t *testing.T) {
-	rng := rand.New(rand.NewPCG(20261018, 23))
-	gfm, _ := recordingInstances()
-	checked := 0
-	for range 2000 {
-		text := randomRegionDocument(rng) + randomRegionDocument(rng)
-		layout := newDocLayout(gfm, []byte(text))
-		if layout == nil || len(layout.source) == 0 {
-			continue
-		}
-		var placed []placedEdit
-		for range 1 + rng.IntN(12) {
-			at := rng.IntN(len(layout.source))
-			placed = append(placed, layout.placeEdit(fix.TextEdit{StartOffset: at, EndOffset: at}))
-		}
-		regions := make([]region, len(placed))
-		for idx, edit := range placed {
-			regions[idx] = layout.regionFor(edit)
-		}
-		regions = layout.mergeRegions(regions)
-		for idx := range regions {
+// stubOutcome is the outcome of a region in TestDecomposeRegionsMatchesFullMerges,
+// which holds or not as a function of the region alone.
+type stubOutcome struct {
+	reg   region
+	holds bool
+}
+
+func (o stubOutcome) verdict() (bool, bool) { return o.holds, false }
+
+// decomposeWithFullMerges is decomposeRegions as it was before regions grew
+// by windows: after each growth it merges all the regions again and goes on
+// from the first that changed.
+func decomposeWithFullMerges(layout *docLayout, placed []placedEdit, evaluate func(region, []placedEdit) stubOutcome) ([]region, []stubOutcome, bool) {
+	regions := make([]region, len(placed))
+	for idx, edit := range placed {
+		regions[idx] = layout.regionFor(edit)
+	}
+	regions = layout.mergeRegions(regions)
+	outcomes := make([]stubOutcome, 0, len(regions))
+	for idx := 0; idx < len(regions); {
+		from, to := layout.editSpan(regions[idx])
+		outcome := evaluate(regions[idx], regionEdits(from, to, placed))
+		if !outcome.holds {
 			grown := layout.grow(regions[idx])
 			if grown == regions[idx] {
-				continue
+				return nil, nil, false
 			}
 			before := slices.Clone(regions)
-			after := slices.Clone(regions)
-			after[idx] = grown
-			want := layout.mergeRegions(slices.Clone(after))
-			got, first := layout.remerge(after, idx)
-			require.Equal(t, want, got, "document %q, regions %v, grown %d", text, before, idx)
-			require.Equal(t, firstDifference(before, want), first, "document %q, regions %v, grown %d", text, before, idx)
-			checked++
+			regions[idx] = grown
+			regions = layout.mergeRegions(regions)
+			idx = firstDifference(before, regions)
+			outcomes = outcomes[:idx]
+			continue
+		}
+		outcomes = append(outcomes, outcome)
+		idx++
+	}
+	return regions, outcomes, true
+}
+
+// TestDecomposeRegionsMatchesFullMerges checks that growing regions by
+// windows gives the regions and outcomes that merging all the regions after
+// each growth gives, on random edits in random documents with lists, under
+// both flavors, with regions that hold as a function of the region alone, so
+// that regions grow again and again and lists become group regions.
+func TestDecomposeRegionsMatchesFullMerges(t *testing.T) {
+	rng := rand.New(rand.NewPCG(20261018, 23))
+	gfm, commonMark := recordingInstances()
+	checks, growths := 0, 0
+	for range 1500 {
+		text := randomRegionDocument(rng) + randomRegionDocument(rng) + randomRegionDocument(rng)
+		for _, markdown := range []goldmark.Markdown{gfm, commonMark} {
+			layout := newDocLayout(markdown, []byte(text))
+			if layout == nil || len(layout.source) == 0 {
+				continue
+			}
+			var edits []fix.TextEdit
+			for range 1 + rng.IntN(16) {
+				at := rng.IntN(len(layout.source) + 1)
+				edits = append(edits, fix.TextEdit{StartOffset: at, EndOffset: min(len(layout.source), at+rng.IntN(4))})
+			}
+			prepared, err := fix.PrepareEdits(edits, len(layout.source))
+			if err != nil {
+				continue
+			}
+			placed := make([]placedEdit, len(prepared))
+			for idx, edit := range prepared {
+				placed[idx] = layout.placeEdit(edit)
+			}
+			seed := rng.Uint64()
+			evaluate := func(reg region, _ []placedEdit) stubOutcome {
+				key := uint64(reg.list+2)*1000003 + uint64(reg.first)*1009 + uint64(reg.last)*7 + seed
+				holds := key%5 < 3
+				if !holds {
+					growths++
+				}
+				return stubOutcome{reg: reg, holds: holds}
+			}
+			wantRegions, wantOutcomes, wantOK := decomposeWithFullMerges(layout, placed, evaluate)
+			gotRegions, gotOutcomes, gotOK := decomposeRegions(layout, placed, evaluate)
+			require.Equal(t, wantOK, gotOK, "document %q, edits %v", text, prepared)
+			require.Equal(t, wantRegions, gotRegions, "document %q, edits %v", text, prepared)
+			require.Equal(t, wantOutcomes, gotOutcomes, "document %q, edits %v", text, prepared)
+			checks++
 		}
 	}
-	t.Logf("%d grown regions merged", checked)
-	assert.Positive(t, checked)
+	t.Logf("%d decompositions, %d regions that did not hold", checks, growths)
+	assert.Positive(t, growths)
 }
 
 // TestRegionChecksAfterClosedBlocks checks region checks where groups start
