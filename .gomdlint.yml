@@ -7,12 +7,6 @@ flavor: gfm
 # Default severity for all rules: error, warning, or info
 # severity_default: error
 
-# Enable auto-fix mode
-# fix: false
-
-# Number of parallel workers (0 = auto)
-# jobs: 0
-
 # File patterns to ignore (glob patterns)
 ignore:
   # Test data files - intentionally contain lint errors for testing
@@ -23,9 +17,6 @@ ignore:
   - "vendor/**"
   - "node_modules/**"
   - ".git/**"
-
-  # Beads issue tracker internal files
-  - ".beads/**"
 
 # Rule-specific configuration
 rules:
@@ -42,7 +33,25 @@ rules:
     enabled: true
     options:
       max: 80
+      # Prose wraps at 80 columns. Code blocks hold commands, program
+      # output and diagrams, and table rows cannot wrap, so both are exempt.
+      ignore_code_blocks: true
+      ignore_tables: true
+  MD024:
+    options:
+      # CHANGELOG.md repeats Added, Changed and Fixed under every release, as
+      # Keep a Changelog does, so only headings under one parent must differ.
+      siblings_only: true
+  MD058:
+    # blanks-around-tables is the one rule whose default severity is info,
+    # and --strict fails only on warnings and errors. A warning here makes
+    # the CI lint of these docs fail on every finding.
+    severity: warning
   MD060:
     enabled: true
     options:
       style: compact
+  # The docs link to other sites and to files in this repository on purpose.
+  # link-destination-style compares every link with the first one, so it
+  # would report each relative link that follows an absolute one.
+  MDL001: false

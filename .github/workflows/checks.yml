@@ -55,6 +55,9 @@ jobs:
       - name: Build
         run: go build -o /dev/null ./cmd/gomdlint
 
+      - name: Lint Markdown docs
+        run: go run ./cmd/gomdlint lint --strict README.md CHANGELOG.md CI_CD.md docs CLAUDE.md AGENTS.md
+
       - name: Run tests
         run: go test -race -coverprofile=coverage.out ./...
 

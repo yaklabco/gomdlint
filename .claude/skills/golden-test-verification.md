@@ -7,7 +7,7 @@ description: Use when verifying golden test output files after generation. Ensur
 
 ## Overview
 
-Verify that generated golden test files are correct. This is the critical quality gate — the golden files ARE the source of truth for fix behavior, so they must be manually verified before being committed.
+Verify that generated golden test files are correct. This is the critical quality gate. The golden files ARE the source of truth for fix behavior, so they must be manually verified before being committed.
 
 ## Pre-Verification: Bug Report Check
 
@@ -19,14 +19,14 @@ Before verifying any golden files for a rule:
 
 After a bug has been fixed (`status: fixed`):
 
-1. Regenerate all golden files: `go test -update ./pkg/lint/rules/... -run TestGoldenPerRule/<RULE_ID>`
+1. Regenerate all golden files: `go test ./pkg/lint/rules/ -run 'TestGoldenPerRule/<RULE_ID>' -update` (put `-update` after the package path, or `go test` tests the repository root instead)
 2. Verify the regenerated files using the standard checklist below
 3. Confirm round-trip passes
 4. Update the bug report status to `verified`
 
 ## Verification Checklist
 
-For each newly generated test case, verify all 4 files:
+For each newly generated test case, verify all 4 files. When the case has a `.config.yml` sidecar, read it first: the flavor and options it sets decide what the rule should report.
 
 ### 1. Verify `.golden.md` (Fix Output)
 
@@ -49,19 +49,19 @@ For each newly generated test case, verify all 4 files:
 
 ### 2. Verify `.diags.json` (Diagnostics)
 
-- [ ] Each diagnostic has the correct `rule` ID matching the directory name
+- [ ] Each diagnostic has the correct `rule` ID matching the directory name, and the rule's `name`
 - [ ] Each diagnostic has the correct `line` number (1-indexed)
 - [ ] Each diagnostic has the correct `column` number (1-indexed)
 - [ ] The `message` accurately describes the violation
 - [ ] The `severity` is correct (usually `"warning"`)
-- [ ] The `fixable` field matches the rule's `CanFix()` return value
+- [ ] The `fixable` field is true only when the rule can fix (`CanFix()`) and its fix check kept the fix. A fixable rule reports a finding with `fixable: false` when the fix could change the document's structure or rendering
 - [ ] For `clean` cases: array is `[]`
 - [ ] For `code_block_immunity` cases: array is `[]`
 - [ ] Diagnostic count matches the number of violations in the input
 
 ### 3. Verify `.diags.txt` (Human-Readable)
 
-- [ ] Each line follows format: `<filename>:<line>:<col> <severity> <message> (<rule-name>) [fixable]`
+- [ ] Each line follows format: `<filename>:<line>:<col> <severity> <message> (<RULE_ID>/<rule-name>) [fixable]`, with `[fixable]` only on findings that carry a fix
 - [ ] Content is consistent with `.diags.json`
 
 ### 4. Run Round-Trip Test
@@ -70,7 +70,7 @@ For each newly generated test case, verify all 4 files:
 go test ./pkg/lint/rules/... -run "TestGoldenRoundTrip/<RULE_ID>/<scenario>"
 ```
 
-- [ ] Test passes (zero fixable diagnostics remain after applying fixes)
+- [ ] Test passes: the fix passes converge and zero fixable diagnostics remain. The round trip fixes through `lint.Pipeline`, pass by pass as `--fix` does
 - [ ] No warnings about skipped or merged edits (unless testing overlapping edit scenarios)
 
 ## Batch Verification Commands
@@ -88,7 +88,7 @@ go test -v ./pkg/lint/rules/... -run "TestGoldenRoundTrip/<RULE_ID>"
 go test -v ./pkg/lint/rules/... -run "TestGolden"
 ```
 
-## Red Flags — Investigate Before Committing
+## Red Flags: Investigate Before Committing
 
 | Red Flag | Possible Cause |
 |----------|----------------|
@@ -100,11 +100,11 @@ go test -v ./pkg/lint/rules/... -run "TestGolden"
 | CRLF test produces mixed line endings | Fix replaces `\r\n` with `\n` in some places |
 | `.golden.md` has unexpected changes far from violation | Fix has incorrect byte range (too wide) |
 | Multiple violations but only some are fixed | Edit conflict resolution is dropping valid edits |
-| `diags.json` has `"name": ""` | Rule implementation may not set the name field — check if this is the existing convention |
-| `.diags.json` is `[]` for a `basic` scenario with clear violations | **Rule detection is broken** — file a bug report, do not baseline |
-| `.golden.md` identical to `.input.md` for fixable rule with violations | **Rule fix is broken** — file a bug report, do not baseline |
-| Round-trip adds NEW diagnostics on second pass | **Fix creates new violations** (potential infinite loop) — file a bug report |
-| All scenarios for a rule produce `[]` diagnostics | **Rule is completely non-functional** — file a bug report |
+| The harness fails with "is not a rule of this case" | A diagnostic lacks the rule's ID or name; the harness requires both |
+| `.diags.json` is `[]` for a `basic` scenario with clear violations | **Rule detection is broken**. File a bug report, do not baseline |
+| `.golden.md` identical to `.input.md` for fixable rule with violations | **Rule fix is broken**, unless its fix check withheld the fixes on purpose (`fixable: false`). Check the fix check, then file a bug report if the fixes should apply. Do not baseline |
+| Round-trip adds NEW diagnostics on second pass | **Fix creates new violations** (potential infinite loop). File a bug report |
+| All scenarios for a rule produce `[]` diagnostics | **Rule is completely non-functional**. File a bug report |
 
 ## When a Golden File Looks Wrong
 
@@ -120,11 +120,11 @@ Instead:
 
 When verifying a batch of new test cases:
 
-1. **`clean` cases first** — fastest to verify (golden = input, diags = [])
-2. **`code_block_immunity` cases** — same check (golden = input, diags = [])
-3. **`basic` cases** — core violation/fix behavior
-4. **Edge cases** — each one individually
-5. **Round-trip for all** — single batch run
+1. **`clean` cases first**, fastest to verify (golden = input, diags = [])
+2. **`code_block_immunity` cases**, same check (golden = input, diags = [])
+3. **`basic` cases**, core violation/fix behavior
+4. **Edge cases**, each one individually
+5. **Round-trip for all**, single batch run
 
 ## Final Gate
 

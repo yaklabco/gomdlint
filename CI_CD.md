@@ -34,10 +34,16 @@ The `test` job runs these steps in order:
 2. `go vet ./...` runs the standard vet analyzers.
 3. golangci-lint v2.11.4 runs with the settings in `.golangci.yml`.
 4. `go build` compiles `./cmd/gomdlint`.
-5. `go test -race` runs every test with the race detector and writes
+5. `go run ./cmd/gomdlint lint --strict` lints `README.md`, `CHANGELOG.md`,
+   `CI_CD.md`, `docs`, `CLAUDE.md` and `AGENTS.md` with the repository's
+   `.gomdlint.yml`. With `--strict`, a warning or an error fails the job,
+   while an info finding does not. blanks-around-tables (MD058) is the only
+   rule whose default severity is info, and `.gomdlint.yml` raises it to a
+   warning, so every finding in these files fails the job.
+6. `go test -race` runs every test with the race detector and writes
    `coverage.out`.
-6. `go mod tidy` runs, and the step fails if `go.mod` or `go.sum` changes.
-7. The cross-compile step builds `./cmd/gomdlint` with `CGO_ENABLED=0` for
+7. `go mod tidy` runs, and the step fails if `go.mod` or `go.sum` changes.
+8. The cross-compile step builds `./cmd/gomdlint` with `CGO_ENABLED=0` for
    the ten release platforms.
 
 The `govulncheck` job runs govulncheck v1.9.0 on `./...`. It fails when code
@@ -177,8 +183,13 @@ problem on `main` and tag the next patch version.
 ## Running the checks locally
 
 `stave ci:gate` runs the checks from the `test` and `govulncheck` jobs in
-sequence. It uses the golangci-lint binary on your `PATH`, which should be
-v2.11.4 or another release built with Go 1.26 or later.
+sequence, apart from the Markdown lint. It uses the golangci-lint binary on
+your `PATH`, which should be v2.11.4 or another release built with Go 1.26
+or later. To lint the Markdown as CI does, run:
+
+```bash
+go run ./cmd/gomdlint lint --strict README.md CHANGELOG.md CI_CD.md docs CLAUDE.md AGENTS.md
+```
 
 To test the release configuration without publishing anything, run:
 
