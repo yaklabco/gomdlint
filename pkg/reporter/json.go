@@ -36,6 +36,43 @@ type JSONFileResult struct {
 	// RuleErrors lists the rules that failed on the file, in rule ID order.
 	// The file was linted, but its findings or fixes may be incomplete.
 	RuleErrors []JSONRuleError `json:"ruleErrors,omitempty"`
+
+	// Notices lists the problems with the file's markdownlint comments that
+	// change neither its findings nor the exit code, in the order of the
+	// comments and their words. The key is absent for a file without
+	// notices.
+	Notices []JSONNotice `json:"notices,omitempty"`
+}
+
+// JSONNotice describes a word in a markdownlint comment that names no rule
+// or tag, which the comment ignores, as markdownlint does, or that is one of
+// gomdlint's deprecated tags, which still work but will stop working in a
+// later release.
+type JSONNotice struct {
+	// Line is the 1-based line on which the comment starts.
+	Line int `json:"line"`
+
+	// Kind is "unknown-rule" for a word that names no rule or tag, and
+	// "deprecated-tag" for a deprecated tag.
+	Kind string `json:"kind"`
+
+	// Directive is the kind of comment, such as "markdownlint-disable".
+	Directive string `json:"directive"`
+
+	// Name is the word as the comment writes it.
+	Name string `json:"name"`
+
+	// Suggestions are, for an unknown word, the rules and tags it most
+	// likely means, any one of which may be meant. The key is absent when
+	// none is close enough.
+	Suggestions []string `json:"suggestions,omitempty"`
+
+	// Rules are, for a deprecated tag, the names of the rules it covers,
+	// which the comment can name instead. The key is absent otherwise.
+	Rules []string `json:"rules,omitempty"`
+
+	// Message describes the problem, starting with the kind of comment.
+	Message string `json:"message"`
 }
 
 // JSONRuleError describes a rule that failed on a file: it returned an
@@ -162,6 +199,19 @@ func (r *JSONReporter) buildOutput(result *runner.Result) *JSONOutput {
 						Message:  ruleFailureCause(ruleErr).Error(),
 					})
 					output.Summary.RuleErrors++
+				}
+
+				// The same notices SARIF reports as configuration notifications.
+				for _, notice := range file.Notices {
+					fileResult.Notices = append(fileResult.Notices, JSONNotice{
+						Line:        notice.Line,
+						Kind:        string(notice.Kind),
+						Directive:   notice.Directive,
+						Name:        notice.Name,
+						Suggestions: notice.Suggestions,
+						Rules:       notice.Rules,
+						Message:     notice.Message,
+					})
 				}
 
 				for _, diag := range file.Result.Diagnostics {
