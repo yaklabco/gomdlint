@@ -246,9 +246,10 @@ func TestLoad_MarkdownlintPrompt(t *testing.T) {
 // TestLoad_SavedMigrationKeepsInheritedSettings covers a markdownlint config
 // whose translation is saved, as the prompt offers, under a user config
 // that sets what a markdownlint config cannot: ignore patterns, the flavor,
-// the gitignore and default_ignores settings and backups. The saved file
-// holds only rule settings, so the user's settings still apply, as they do
-// while the translation applies for a run.
+// the gitignore and default_ignores settings, backups and a rule's
+// auto_fix. The saved file holds only rule settings, and leaves auto_fix
+// unset, so the user's settings still apply, as they do while the
+// translation applies for a run.
 func TestLoad_SavedMigrationKeepsInheritedSettings(t *testing.T) {
 	root := t.TempDir()
 	userDir := filepath.Join(root, "xdg", "gomdlint")
@@ -258,7 +259,8 @@ func TestLoad_SavedMigrationKeepsInheritedSettings(t *testing.T) {
 			"flavor: commonmark\n"+
 			"gitignore: false\n"+
 			"default_ignores: false\n"+
-			"backups:\n  enabled: false\n  mode: none\n"), 0o644))
+			"backups:\n  enabled: false\n  mode: none\n"+
+			"rules:\n  MD013:\n    auto_fix: false\n"), 0o644))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
 
 	project := filepath.Join(root, "project")
@@ -286,6 +288,8 @@ func TestLoad_SavedMigrationKeepsInheritedSettings(t *testing.T) {
 	require.True(t, ok, "the migrated rule settings apply")
 	require.NotNil(t, rule.Enabled)
 	assert.False(t, *rule.Enabled)
+	require.NotNil(t, rule.AutoFix, "the user's auto_fix survives the migrated rule settings")
+	assert.False(t, *rule.AutoFix)
 }
 
 func TestInteractiveTerminalNeedsTerminals(t *testing.T) {
