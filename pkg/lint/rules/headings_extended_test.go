@@ -808,6 +808,63 @@ func TestNoDuplicateHeadingRule(t *testing.T) {
 	}
 }
 
+// TestNoDuplicateHeadingRule_MarkdownlintText checks MD024 against
+// markdownlint 0.41.1: headings are compared by their text as written,
+// without the HTML directly in it, with each line ending read as a space. A
+// setext heading keeps the whitespace at the end of its last line and the
+// prefix of each later line, while an ATX heading drops the whitespace
+// around its text. With siblings_only, a heading is compared with the
+// earlier headings of its level since the last heading of a lower level.
+func TestNoDuplicateHeadingRule_MarkdownlintText(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+	}{
+		{name: "emphasis and code are not plain text", input: "# Title\n\n## Foo\n\n## *Foo*\n\n## `Foo`\n\n## Foo\n", wantLines: []int{9}},
+		{name: "HTML directly in a heading is left out", input: "# Title\n\n## Foo <b>bar</b>\n\n## Foo bar\n\n## Foo <i>bar</i>\n", wantLines: []int{5, 7}},
+		{name: "HTML at both ends is left out", input: "# Title\n\n## <b>Foo</b>\n\n## Foo\n", wantLines: []int{5}},
+		{name: "space before HTML is kept", input: "# Title\n\n## Foo <br>\n\n## Foo\n\n## Foo \n", wantLines: []int{7}},
+		{name: "HTML inside emphasis is kept", input: "# Title\n\n## *Foo <b>x</b>*\n\n## *Foo x*\n\n## *Foo <b>x</b>*\n", wantLines: []int{7}},
+		{name: "closing sequences and spaces", input: "# Title\n\n## Foo ##\n\n## Foo\n\n## Foo   #\n", wantLines: []int{5, 7}},
+		{name: "escapes and references as written", input: "# Title\n\n## Foo\\!\n\n## Foo!\n\n## Foo&#33;\n\n## Foo!\n", wantLines: []int{9}},
+		{name: "links as written", input: "# Title\n\n## [Foo](a)\n\n## [Foo](b)\n\n## Foo\n", wantLines: []int{}},
+		{name: "empty headings", input: "# Title\n\n#\n\n##\n\n## Text\n", wantLines: []int{5}},
+		{name: "setext line ending reads as a space", input: "# Title\n\nFirst\nsecond\n------\n\n## First second\n", wantLines: []int{7}},
+		{name: "setext hard break keeps its spaces", input: "# Title\n\nFirst  \nsecond\n------\n\nFirst   second\n------\n", wantLines: []int{7}},
+		{name: "setext continuation indentation is kept", input: "# Title\n\nFirst\n  second\n------\n\nFirst   second\n------\n", wantLines: []int{7}},
+		{name: "setext first line indentation is dropped", input: "# Title\n\n  First\n------\n\nFirst\n------\n", wantLines: []int{6}},
+		{name: "setext trailing spaces are kept", input: "# Title\n\nFirst  \n------\n\nFirst\n------\n", wantLines: []int{}},
+		{name: "setext quote prefix is kept", input: "# Title\n\n> First\n> second\n> ------\n\nFirst > second\n------\n", wantLines: []int{7}},
+		{name: "setext list indentation is kept", input: "# Title\n\n- First\n  second\n  ------\n\nFirst   second\n------\n", wantLines: []int{7}},
+		{name: "carriage return line endings", input: "# Title\r\n\r\nFirst\r\nsecond\r\n------\r\n\r\n## First second\r\n", wantLines: []int{7}},
+		{
+			name: "siblings after a repeated parent", input: "# A\n\n## X\n\n# A\n\n## X\n",
+			options: map[string]any{"siblings_only": true}, wantLines: []int{5},
+		},
+		{
+			name: "siblings after going back up a level", input: "# A\n\n## X\n\n### Y\n\n## X\n\n### Y\n",
+			options: map[string]any{"siblings_only": true}, wantLines: []int{7},
+		},
+		{
+			name: "siblings across a skipped level", input: "# A\n\n### X\n\n## B\n\n### X\n",
+			options: map[string]any{"siblings_only": true}, wantLines: []int{},
+		},
+		{
+			name: "siblings that are empty", input: "# T\n\n#\n\n##\n\n#\n",
+			options: map[string]any{"siblings_only": true}, wantLines: []int{7},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoDuplicateHeadingRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+		})
+	}
+}
+
 func TestNoTrailingPunctuationRule(t *testing.T) {
 	tests := []struct {
 		name      string

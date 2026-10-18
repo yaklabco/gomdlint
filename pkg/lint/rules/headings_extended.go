@@ -527,15 +527,11 @@ func (r *NoDuplicateHeadingRule) checkAll(ctx *lint.RuleContext, headings []*mda
 			break
 		}
 
-		text := lint.HeadingText(heading)
-		if text == "" {
-			continue
-		}
-
+		text := markdownlintHeadingText(ctx.File, heading)
 		if first, ok := seen[text]; ok {
 			firstPos := first.SourcePosition()
 			diag := lint.NewDiagnostic(r.ID(), heading,
-				fmt.Sprintf("Duplicate heading text %q (first occurrence on line %d)", text, firstPos.StartLine)).
+				fmt.Sprintf("Duplicate heading text %q (first occurrence on line %d)", strings.TrimSpace(text), firstPos.StartLine)).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion("Use unique heading text").
 				Build()
@@ -548,71 +544,92 @@ func (r *NoDuplicateHeadingRule) checkAll(ctx *lint.RuleContext, headings []*mda
 	return diags
 }
 
+// checkSiblings compares each heading with the earlier headings of its level
+// since the last heading of a lower level, as markdownlint does: going down
+// a level starts an empty list for the deeper level, and going back up
+// forgets the lists below.
 func (r *NoDuplicateHeadingRule) checkSiblings(ctx *lint.RuleContext, headings []*mdast.Node) []lint.Diagnostic {
-	// For siblings_only mode, track headings by their parent context.
-	// Headings at the same level under the same parent are considered siblings.
-	// A parent is any heading with a lower level number.
-
-	type parentInfo struct {
-		level int
-		text  string
-	}
-
-	diags := make([]lint.Diagnostic, 0, len(headings))
-	parentStack := make([]parentInfo, 0, len(headings))
-
-	// Map from (level, parent_path) -> (text -> first_heading)
-	seen := make(map[string]map[string]*mdast.Node)
+	const maxLevel = 6
+	var diags []lint.Diagnostic
+	seen := make([]map[string]*mdast.Node, maxLevel+1)
+	seen[1] = make(map[string]*mdast.Node)
+	lastLevel := 1
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
 			break
 		}
 
-		level := lint.HeadingLevel(heading)
-		text := lint.HeadingText(heading)
-		if text == "" {
-			continue
+		level := min(max(lint.HeadingLevel(heading), 1), maxLevel)
+		for lastLevel < level {
+			lastLevel++
+			seen[lastLevel] = make(map[string]*mdast.Node)
+		}
+		for lastLevel > level {
+			seen[lastLevel] = nil
+			lastLevel--
 		}
 
-		// Pop parent stack until we find a parent with lower level.
-		for len(parentStack) > 0 && parentStack[len(parentStack)-1].level >= level {
-			parentStack = parentStack[:len(parentStack)-1]
-		}
-
-		// Build a unique key for the parent context.
-		// Include both level and text of each parent to distinguish different sections.
-		var parentKeyBuilder strings.Builder
-		for _, p := range parentStack {
-			fmt.Fprintf(&parentKeyBuilder, "%d:%s/", p.level, p.text)
-		}
-		parentKey := parentKeyBuilder.String()
-
-		// Create a key combining level and parent path.
-		contextKey := fmt.Sprintf("%d@%s", level, parentKey)
-
-		if seen[contextKey] == nil {
-			seen[contextKey] = make(map[string]*mdast.Node)
-		}
-
-		if first, ok := seen[contextKey][text]; ok {
+		text := markdownlintHeadingText(ctx.File, heading)
+		if first, ok := seen[level][text]; ok {
 			firstPos := first.SourcePosition()
 			diag := lint.NewDiagnostic(r.ID(), heading,
-				fmt.Sprintf("Duplicate sibling heading text %q (first occurrence on line %d)", text, firstPos.StartLine)).
+				fmt.Sprintf("Duplicate sibling heading text %q (first occurrence on line %d)", strings.TrimSpace(text), firstPos.StartLine)).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion("Use unique heading text among siblings").
 				Build()
 			diags = append(diags, diag)
 		} else {
-			seen[contextKey][text] = heading
+			seen[level][text] = heading
 		}
-
-		// Push this heading onto the parent stack for potential children.
-		parentStack = append(parentStack, parentInfo{level: level, text: text})
 	}
 
 	return diags
 }
+
+// markdownlintHeadingText returns a heading's text the way markdownlint's
+// getHeadingText reads it, for MD024 to compare: the text as written,
+// without the raw HTML directly in it, with each line ending read as a
+// space. An ATX heading leaves out the whitespace around its text. A setext
+// heading leaves out the indentation of its first line but keeps the prefix
+// of each later line, such as "> " or a list item's indentation, and the
+// whitespace at the end of its last line.
+func markdownlintHeadingText(file *mdast.FileSnapshot, heading *mdast.Node) string {
+	content := heading.ContentRange()
+	if file == nil || content.StartOffset < 0 || content.EndOffset < content.StartOffset ||
+		content.EndOffset > len(file.Content) {
+		return lint.HeadingText(heading)
+	}
+	start, end := content.StartOffset, content.EndOffset
+	if isSetextHeading(file, heading) {
+		for end < len(file.Content) && (file.Content[end] == ' ' || file.Content[end] == '\t') {
+			end++
+		}
+	} else {
+		for end > start && (file.Content[end-1] == ' ' || file.Content[end-1] == '\t') {
+			end--
+		}
+	}
+
+	var text strings.Builder
+	pos := start
+	for child := heading.FirstChild; child != nil; child = child.Next {
+		span := child.SourceRange()
+		if child.Kind != mdast.NodeHTMLInline || span.StartOffset < pos || span.EndOffset > end {
+			continue
+		}
+		text.Write(file.Content[pos:span.StartOffset])
+		pos = span.EndOffset
+	}
+	text.Write(file.Content[pos:end])
+	return markdownlintLineEndingsAsSpaces.Replace(text.String())
+}
+
+// markdownlintLineEndingsAsSpaces replaces each line ending with a space, as
+// markdownlint's newlineRe does.
+//
+//nolint:gochecknoglobals // A Replacer is safe for concurrent use and costly to build.
+var markdownlintLineEndingsAsSpaces = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
 
 // NoTrailingPunctuationRule checks for trailing punctuation in headings.
 type NoTrailingPunctuationRule struct {
