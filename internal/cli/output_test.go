@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // ruleLine returns the line of the rules listing that starts with identifier.
@@ -38,6 +39,9 @@ func TestRulesCommandPrintsPlainTable(t *testing.T) {
 		{format: "id", identifier: "MD009"},
 		{format: "combined", identifier: "MD009/no-trailing-spaces"},
 	}
+	md009, ok := lint.DefaultRegistry.Meta("MD009")
+	require.True(t, ok)
+	require.NotEmpty(t, md009.Description)
 
 	for _, tt := range tests {
 		t.Run(tt.format, func(t *testing.T) {
@@ -53,7 +57,7 @@ func TestRulesCommandPrintsPlainTable(t *testing.T) {
 			line := ruleLine(t, got.stdout, tt.identifier)
 			assert.Contains(t, line, "warning")
 			assert.Contains(t, line, "yes")
-			assert.Contains(t, line, "trailing spaces")
+			assert.True(t, strings.HasSuffix(line, "  "+md009.Description), "the catalog description: %q", line)
 		})
 	}
 }

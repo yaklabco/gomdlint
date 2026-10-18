@@ -18,7 +18,9 @@ type rulesFlags struct {
 	ruleFormat string
 }
 
-func newRulesCommand() *cobra.Command {
+// newRulesCommand creates the rules command, which lists the rules of
+// registry.
+func newRulesCommand(registry *lint.Registry) *cobra.Command {
 	flags := &rulesFlags{}
 
 	cmd := &cobra.Command{
@@ -32,7 +34,7 @@ default severity, and whether they support auto-fixing.`,
 				return usageError("invalid rule format %q; valid formats: name, id, combined", flags.ruleFormat)
 			}
 
-			if err := writeRules(cmd.OutOrStdout(), lint.DefaultRegistry.Rules(), ruleFormat); err != nil {
+			if err := writeRules(cmd.OutOrStdout(), registry, ruleFormat); err != nil {
 				return withExitCode(ExitIOError, err)
 			}
 			return nil
@@ -45,18 +47,21 @@ default severity, and whether they support auto-fixing.`,
 	return cmd
 }
 
-// writeRules writes the rules as a plain table, one rule per line.
-func writeRules(out io.Writer, rules []lint.Rule, ruleFormat config.RuleFormat) error {
+// writeRules writes the rules of registry as a plain table, one rule per
+// line, in rule ID order. Each rule is described by its catalog entry, or
+// by itself when the entry is missing or has no description.
+func writeRules(out io.Writer, registry *lint.Registry, ruleFormat config.RuleFormat) error {
 	table := tabwriter.NewWriter(out, 0, 0, rulesTablePadding, ' ', 0)
 	fmt.Fprintln(table, "RULE\tSEVERITY\tFIXABLE\tDESCRIPTION")
-	for _, rule := range rules {
+	for _, rule := range registry.Rules() {
 		fixable := "no"
 		if rule.CanFix() {
 			fixable = "yes"
 		}
+		meta, _ := registry.Meta(rule.ID()) // A rule without an entry gets the zero entry.
 		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
 			config.FormatRuleID(ruleFormat, rule.ID(), rule.Name()),
-			rule.DefaultSeverity(), fixable, rule.Description())
+			rule.DefaultSeverity(), fixable, lint.RuleDescription(rule, meta))
 	}
 	if err := table.Flush(); err != nil {
 		return fmt.Errorf("write rules: %w", err)

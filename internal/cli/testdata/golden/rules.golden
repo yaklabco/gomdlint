@@ -1,0 +1,56 @@
+RULE                              SEVERITY  FIXABLE  DESCRIPTION
+heading-increment                 warning   no       Each heading is at most one level deeper than the heading before it.
+heading-style                     warning   yes      Headings all use the first heading's style: # Title, # Title #, or underlined.
+unordered-list-style              warning   yes      Every bullet uses the same marker as the first bullet in the file.
+list-indent                       warning   yes      Items in a list start at the same column. Ordered numbers may right-align.
+ul-indent                         warning   yes      Bullets start at the margin, and each nested level adds 2 spaces.
+no-trailing-spaces                warning   yes      Lines do not end in spaces or tabs, except 2 spaces for a hard line break.
+no-hard-tabs                      warning   yes      Lines contain no tab characters, including inside code.
+no-reversed-links                 warning   yes      Links put the text in brackets and the URL in parentheses, as in [text](url).
+no-multiple-blank-lines           warning   yes      Outside code, no two blank lines follow each other.
+line-length                       warning   yes      Lines are at most 80 characters, unless only a final word or URL overflows.
+commands-show-output              warning   yes      Code blocks that show only commands leave out the $ prompt.
+no-missing-space-atx              warning   yes      A space follows the # marks that open a heading.
+no-multiple-space-atx             warning   yes      Only one space follows the # marks that open a heading.
+no-missing-space-closed-atx       warning   yes      A closed heading has a space inside each run of #, as in # Title #.
+no-multiple-space-closed-atx      warning   yes      A closed heading has only one space inside each run of #.
+heading-blank-lines               warning   yes      Headings have a blank line above and below.
+heading-start-left                warning   yes      Headings start at the beginning of the line, with no indentation.
+no-duplicate-heading              warning   no       No two headings have exactly the same text.
+single-h1                         warning   no       A document that starts with a title has no other top-level heading.
+no-trailing-punctuation           warning   yes      Headings do not end with a period, comma, semicolon, colon or exclamation mark.
+no-multiple-space-blockquote      warning   yes      At most one space follows the > of a blockquote.
+no-blanks-blockquote              warning   no       No blank line sits between two blockquotes.
+ol-prefix                         warning   yes      Ordered list items are all numbered 1, or count up by one from 0 or 1.
+list-marker-space                 warning   yes      One space separates each list marker from the item's text.
+blanks-around-fences              warning   yes      Fenced code blocks have a blank line above and below.
+blanks-around-lists               warning   yes      Lists have a blank line above and below.
+no-inline-html                    warning   no       Documents contain no raw HTML elements other than allowed ones.
+no-bare-urls                      warning   yes      URLs and email addresses sit inside angle brackets or a link.
+hr-style                          warning   yes      Every horizontal rule uses the same characters as the first one, such as ---.
+no-emphasis-as-heading            warning   yes      A line of only bold or italic text does not stand in for a heading.
+no-space-in-emphasis              warning   yes      Emphasis markers touch the text they wrap, as in **bold**.
+no-space-in-code                  warning   yes      Code spans have no space inside the backticks, or one space on each side.
+no-space-in-links                 warning   yes      Link text has no spaces just inside its brackets.
+fenced-code-language              warning   yes      Fenced code blocks name their language after the opening fence.
+first-line-heading                warning   no       The file starts with a top-level heading or a front matter title.
+no-empty-links                    warning   no       Every link has a destination that is not empty or just #.
+required-headings                 warning   no       Headings follow the configured outline in order. No outline is set by default.
+proper-names                      warning   yes      Proper names match the capitals in the configured list, empty by default.
+no-alt-text                       warning   no       Every image, in Markdown or HTML, has alt text.
+code-block-style                  warning   no       Code blocks all use the first block's style, fenced or indented.
+single-trailing-newline           warning   yes      The file ends with a newline character.
+code-fence-style                  warning   yes      Code fences all use the first fence's character, backtick or tilde.
+emphasis-style                    warning   yes      All italic text uses one marker, either *text* or _text_.
+strong-style                      warning   yes      All bold text uses one marker, either **text** or __text__.
+link-fragments                    warning   no       Links to a #fragment point at a heading or anchor in the same file.
+reference-links-images            warning   no       Reference links and images use labels that are defined.
+link-image-reference-definitions  warning   yes      Every reference definition is used, and each label is defined once.
+link-image-style                  warning   no       Links and images use only the allowed styles. By default, all are allowed.
+table-pipe-style                  warning   no       Table rows use leading and trailing pipes the same way throughout.
+table-column-count                warning   no       Every table row has as many cells as the header row.
+blanks-around-tables              info      yes      Tables have a blank line above and below.
+descriptive-link-text             warning   no       Link text describes its target instead of saying "click here" or "more".
+table-column-style                warning   no       Each table follows one style: aligned pipes, one space of padding, or none.
+link-destination-style            warning   no       Links in a file all use relative paths or all use absolute URLs.
+table-alignment                   warning   yes      Each cell of a table's delimiter row has at least 3 dashes.
