@@ -128,9 +128,10 @@ formats change. The first entries under Changed may need action.
 - Every rule option works under markdownlint's name as well as gomdlint's,
   such as `line_length` for `max` and the inverted `tables` for
   `ignore_tables`. Config files warn, with the file and line, about options
-  that a rule does not read, with the closest names, and about values of
-  the wrong type. Two names for one option are an error. Migrated configs
-  hold only the options that the source sets.
+  that a rule does not read, with the closest names, and about values or
+  list items of the wrong type, which leave the option at its default. Two
+  names for one option are an error. Migrated configs hold only the options
+  that the source sets.
 - Warnings for words in markdownlint comments that name no rule or tag, with
   suggestions that use markdownlint's rule names, and for gomdlint's former
   tags `style`, `lists`, `layout`, `metadata`, `gfm` and `tables`. The former
