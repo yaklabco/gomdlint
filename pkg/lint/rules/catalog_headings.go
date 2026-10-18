@@ -51,7 +51,8 @@ func headingsCatalog() []lint.RuleMeta {
 			Description: "Headings have a blank line above and below.",
 			Rationale: "Blank lines set headings apart in the source. " +
 				"Some parsers, such as kramdown, read a heading with no blank line before it as plain text.",
-			Fix: "The fix inserts the missing blank lines, keeping any blockquote markers.",
+			Fix: "The fix inserts the missing blank lines, keeping any blockquote markers. " +
+				"gomdlint reports a heading in a tight list without a fix, because a blank line would make the list loose.",
 		},
 		{
 			ID: "MD023", Name: "heading-start-left", Tags: []string{"headings", "spaces"}, Fixable: true,
@@ -78,6 +79,7 @@ func headingsCatalog() []lint.RuleMeta {
 			Description: "Headings do not end with a period, comma, semicolon, colon or exclamation mark.",
 			Rationale:   "Headings are not full sentences, so they need no closing punctuation.",
 			Fix: "The fix deletes the trailing punctuation. gomdlint reports a heading without a fix " +
+				"when the deletion would leave it showing nothing. It does the same " +
 				"when the document may link to heading anchors, because the fix may change the heading's anchor.",
 		},
 		{

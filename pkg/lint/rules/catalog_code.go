@@ -15,7 +15,8 @@ func codeCatalog() []lint.RuleMeta {
 			ID: "MD031", Name: "blanks-around-fences", Tags: []string{"code", "blank_lines"}, Fixable: true,
 			Description: "Fenced code blocks have a blank line above and below.",
 			Rationale:   "Some parsers, such as kramdown, do not recognize a fenced code block without the blank lines.",
-			Fix:         "The fix inserts the missing blank line, keeping any blockquote markers.",
+			Fix: "The fix inserts the missing blank line, keeping any blockquote markers. " +
+				"gomdlint reports a fence in a tight list without a fix, because a blank line would make the list loose.",
 		},
 		{
 			ID: "MD038", Name: "no-space-in-code", Tags: []string{"whitespace", "code"}, Fixable: true,
@@ -29,8 +30,8 @@ func codeCatalog() []lint.RuleMeta {
 			ID: "MD040", Name: "fenced-code-language", Tags: []string{"code", "language"}, Fixable: true,
 			Description: "Fenced code blocks name their language after the opening fence.",
 			Rationale:   "Renderers use the language to highlight the code.",
-			Fix: "The fix adds a language only when gomdlint can detect it with certainty, such as from a shebang line or valid JSON. " +
-				"gomdlint reports every other finding without a fix.",
+			Fix: "The fix adds a language only when gomdlint can detect it with certainty, such as from a shebang line or valid JSON, " +
+				"and when allowed_languages, if set, names it exactly. gomdlint reports every other finding without a fix.",
 		},
 		{
 			ID: "MD046", Name: "code-block-style", Tags: []string{"code"},
