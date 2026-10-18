@@ -213,7 +213,7 @@ func TestCatalogOptionsAreWellFormed(t *testing.T) {
 			assert.NotEmpty(t, spec.Description, label)
 			assert.True(t, strings.HasSuffix(spec.Description, "."), "%s: the description ends with a period", label)
 			assert.NotContains(t, spec.Description, "`", "%s: the description is plain text", label)
-			assert.NotContains(t, spec.Description, "—", "%s: no em dash", label)
+			assert.NotContains(t, spec.Description, "\u2014", "%s: no em dash", label)
 		}
 	}
 
