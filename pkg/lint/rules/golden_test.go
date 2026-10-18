@@ -22,8 +22,13 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
-// update is a flag to update golden files instead of comparing.
-// Usage: go test -update ./pkg/lint/rules/... -run TestGolden.
+// update is a flag to update golden files instead of comparing:
+//
+//	go test ./pkg/lint/rules/ -run 'TestGoldenPerRule/<ID>' -update
+//
+// The flag goes after the package path: go test stops reading package paths
+// at the first flag it does not know, so -update before the path tests the
+// repository root instead.
 var update = flag.Bool("update", false, "update golden files")
 
 // testdataDir returns the absolute path to the testdata directory.
