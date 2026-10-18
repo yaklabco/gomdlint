@@ -1,0 +1,10 @@
+lists.input.md:6:3 info Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:8:3 info Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:15:5 info Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:16:5 info Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:22:5 info Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:23:5 info Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:29:5 info Missing blank line before table (MD058/blanks-around-tables) [fixable]
+lists.input.md:30:5 info Missing blank line after table (MD058/blanks-around-tables) [fixable]
+lists.input.md:37:3 info Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:38:3 info Missing blank line after table (MD058/blanks-around-tables) [fixable]

@@ -405,7 +405,9 @@ func (r *TableBlankLinesRule) DefaultSeverity() config.Severity {
 // Apply checks the lines before and after each table. Like markdownlint, a
 // line holding only blockquote markers, whitespace, or HTML comments is
 // blank, and the fix inserts a blank line that keeps the enclosing
-// blockquotes whole. Text directly after a table is one of its rows.
+// blockquotes whole. Text directly after a table is one of its rows. The
+// fix is withheld where the blank line would separate two blocks of a list
+// (see blankLineSplitsList).
 func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -425,15 +427,50 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		blankLine := lint.BlankLineText(ctx.File, table)
 
 		if pos.StartLine > 1 && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, pos.StartLine-1)) {
-			builder := inserted.insert(ctx.File.Lines[pos.StartLine-1].StartOffset, blankLine)
+			var builder *fix.EditBuilder
+			if !blankLineSplitsList(table, pos.StartLine) {
+				builder = inserted.insert(ctx.File.Lines[pos.StartLine-1].StartOffset, blankLine)
+			}
 			diags = append(diags, r.blankLineDiagnostic(ctx, rows[0].start, "before", builder))
 		}
 		if pos.EndLine < len(ctx.File.Lines) && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, pos.EndLine+1)) {
-			builder := inserted.insert(ctx.File.Lines[pos.EndLine].StartOffset, blankLine)
+			var builder *fix.EditBuilder
+			if !blankLineSplitsList(table, pos.EndLine+1) {
+				builder = inserted.insert(ctx.File.Lines[pos.EndLine].StartOffset, blankLine)
+			}
 			diags = append(diags, r.blankLineDiagnostic(ctx, rows[len(rows)-1].start, "after", builder))
 		}
 	}
 	return verifyFixes(ctx, diags, fixAllowance{}), nil
+}
+
+// blankLineSplitsList reports whether a blank line inserted before line,
+// inside the containers of table, would separate two items of a list or two
+// blocks of an item: whether a list or list item between the table and its
+// innermost blockquote holds both line and the line before it. The inserted
+// line carries the markers of the table's blockquotes, so it stays inside
+// them, and only the lists within the innermost one take it for a blank
+// line.
+//
+// Such a line makes a tight list loose, which changes how every item of the
+// list renders. The re-parse that checks fixes cannot see that: goldmark
+// gives a table made from a paragraph no record of a blank line before it, so
+// a list whose item gains one before a table still parses as tight. The fix
+// is therefore withheld in loose lists as well, where it would be safe, and
+// for a list without a position.
+func blankLineSplitsList(table *mdast.Node, line int) bool {
+	for node := table.Parent; node != nil; node = node.Parent {
+		switch node.Kind {
+		case mdast.NodeBlockquote, mdast.NodeDocument:
+			return false
+		case mdast.NodeList, mdast.NodeListItem:
+			pos := node.SourcePosition()
+			if !pos.IsValid() || (pos.StartLine < line && line <= pos.EndLine) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *TableBlankLinesRule) blankLineDiagnostic(
