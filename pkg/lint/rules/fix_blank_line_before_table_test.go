@@ -79,6 +79,28 @@ func TestFix_BlankLineBeforeATableKeepsTheListTight(t *testing.T) {
 			ruleID:    "MD031",
 			wantFixed: "# Title\n\n- item\n\n  ```sh\n  code\n  ```\n\n  | a | b |\n  | --- | --- |\n\n- next\n",
 		},
+		{
+			// goldmark makes a table and a setext heading of the item's first
+			// paragraph, and the heading keeps the paragraph's blank-line flag.
+			name:   "heading after a table and a setext underline",
+			input:  "# Title\n\n- item\n  | a | b |\n  | --- | --- |\n  ===\n  # Later\n- next\n",
+			ruleID: "MD022",
+		},
+		{
+			name:   "heading after a table and a dash setext underline",
+			input:  "# Title\n\n- item\n  | a | b |\n  | --- | --- |\n  ---\n  # Later\n- next\n",
+			ruleID: "MD022",
+		},
+		{
+			name:   "fence after a table and a setext underline",
+			input:  "# Title\n\n- item\n  | a | b |\n  | --- | --- |\n  ===\n  ```sh\n  code\n  ```\n- next\n",
+			ruleID: "MD031",
+		},
+		{
+			name:   "fence and heading after a table and a setext underline",
+			input:  "# Title\n\n- item\n  | a | b |\n  | --- | --- |\n  ===\n  ```sh\n  code\n  ```\n  # Later\n- next\n",
+			ruleID: "MD031",
+		},
 	}
 
 	for _, tt := range tests {
