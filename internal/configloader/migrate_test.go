@@ -650,6 +650,10 @@ func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 			name: "YAML merges in sequence", file: ".markdownlint.yaml",
 			content: "a: &a\n  MD009: true\nb: &b\n  whitespace: false\n  MD009: false\n<<: [*a, *b]\n",
 		},
+		{
+			name: "YAML mapping merged twice", file: ".markdownlint.yaml",
+			content: "a: &a\n  MD009: true\nb: &b\n  <<: *a\n  whitespace: false\n<<: [*b, *a]\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

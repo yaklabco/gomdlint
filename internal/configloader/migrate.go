@@ -153,20 +153,23 @@ func markdownlintYAMLSettings(content []byte) (*lint.MarkdownlintSettings, error
 // replaces its value. Decoding gives a key written in the mapping the value
 // written with it, and a merged key the value of the first mapping that
 // brings it in, as js-yaml 4 does too.
+//
+// Each mapping is walked once. Its keys, and those of the mappings it
+// merges, have their places once it has been walked, so a later merge of it
+// adds nothing, and a mapping that merges itself ends the walk there.
 func yamlKeyOrder(node *yaml.Node) []string {
 	var keys []string
 	seen := make(map[string]bool)
-	visiting := make(map[*yaml.Node]bool) // Guards against a mapping that merges itself.
+	walked := make(map[*yaml.Node]bool)
 	var walk func(node *yaml.Node)
 	walk = func(node *yaml.Node) {
 		for node != nil && node.Kind == yaml.AliasNode {
 			node = node.Alias
 		}
-		if node == nil || node.Kind != yaml.MappingNode || visiting[node] {
+		if node == nil || node.Kind != yaml.MappingNode || walked[node] {
 			return
 		}
-		visiting[node] = true
-		defer delete(visiting, node)
+		walked[node] = true
 
 		for idx := 0; idx+1 < len(node.Content); idx += 2 {
 			key, value := node.Content[idx], node.Content[idx+1]
