@@ -308,8 +308,10 @@ formats change. The first entries under Changed may need action.
   a list item, one finding for each line, and no longer takes quote markers
   in an HTML block for blockquotes.
 - **MD033**, **MD045**: Read the lines of an HTML block as Markdown, as
-  markdownlint does, so a tag in a code span, in a fenced code block or
-  after a backslash is not HTML.
+  markdownlint does, so a tag in a code span, in a fenced code block, in
+  math or after a backslash is not HTML, and MD033 applies
+  `table_allowed_elements` in a table there. A tag or image in math outside
+  HTML blocks is not reported either.
 - **MD036**: Reads a strikethrough in bold or italic text as plain text, as
   markdownlint does, so `**~~Old~~ title**` is reported.
 - **MD045**: Reports a Markdown image only when nothing is written between

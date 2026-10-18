@@ -9,8 +9,10 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // Flavor identifies the Markdown flavor supported by the parser.
@@ -39,6 +41,47 @@ func New(flavor string) *Parser {
 		md:     newGoldmarkInstance(f, spans),
 		spans:  spans,
 	}
+}
+
+// NewHTMLBlockContent creates a parser for the lines of an HTML block, read
+// the way markdownlint 0.41 reads them for its HTML rules: as Markdown in
+// which no line starts an HTML block or indented code. Like markdownlint's
+// micromark parse, it reads GFM tables and autolink literals but no
+// strikethrough or task list items. Its parses report the gfm flavor.
+func NewHTMLBlockContent() *Parser {
+	spans := spanKey{key: spanContextKey}
+	return &Parser{
+		flavor: FlavorGFM,
+		md:     newHTMLBlockContentInstance(spans),
+		spans:  spans,
+	}
+}
+
+// newHTMLBlockContentInstance builds goldmark's default parser without its
+// HTML block and indented code parsers, with GFM tables and autolink
+// literals, recording source spans.
+func newHTMLBlockContentInstance(spans spanKey) goldmark.Markdown {
+	skip := map[parser.BlockParser]bool{
+		parser.NewHTMLBlockParser(): true,
+		parser.NewCodeBlockParser(): true,
+	}
+	var blocks []util.PrioritizedValue
+	for _, block := range parser.DefaultBlockParsers() {
+		if blockParser, ok := block.Value.(parser.BlockParser); ok && skip[blockParser] {
+			continue
+		}
+		blocks = append(blocks, block)
+	}
+	md := goldmark.New(
+		goldmark.WithParser(parser.NewParser(
+			parser.WithBlockParsers(blocks...),
+			parser.WithInlineParsers(parser.DefaultInlineParsers()...),
+			parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
+		)),
+		goldmark.WithExtensions(extension.Table, extension.Linkify),
+	)
+	md.Parser().AddOptions(sourceSpans{spanKey: spans})
+	return md
 }
 
 // Flavor returns the configured Markdown flavor.

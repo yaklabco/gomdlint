@@ -64,14 +64,22 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		eachHTMLBlockConstruct(&sources, block, func(_ []byte, construct mdscan.HTMLConstruct) {
+		eachHTMLBlockConstruct(&sources, block, func(_ []byte, construct mdscan.HTMLConstruct, inTable bool) {
+			if inTable {
+				report(construct, tableAllowed)
+				return
+			}
 			report(construct, allowed)
 		})
 	}
 
+	math := &lazyMath{ctx: ctx}
 	for _, inline := range ctx.HTMLInlines() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
+		}
+		if inMath(math, inline) {
+			continue
 		}
 		construct, ok := sources.construct(inline)
 		if !ok {
@@ -187,18 +195,20 @@ func (s *htmlSources) construct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
 }
 
 // eachHTMLBlockConstruct calls use with each raw HTML construct that
-// markdownlint finds in an HTML block (see htmlBlockInlineHTML), and with
-// the block's source, from which the construct reads. The source is valid
-// only during the call.
-func eachHTMLBlockConstruct(sources *htmlSources, block *mdast.Node, use func(source []byte, construct mdscan.HTMLConstruct)) {
-	ranges := htmlBlockInlineHTML(sources.file, block)
-	if len(ranges) == 0 {
+// markdownlint finds in an HTML block (see htmlBlockInlineHTML), with the
+// block's source, from which the construct reads, and with whether the
+// construct lies in a table. The source is valid only during the call.
+func eachHTMLBlockConstruct(
+	sources *htmlSources, block *mdast.Node, use func(source []byte, construct mdscan.HTMLConstruct, inTable bool),
+) {
+	tags := htmlBlockInlineHTML(sources.file, block)
+	if len(tags) == 0 {
 		return
 	}
 	sources.with(block, func(source []byte) {
-		for _, raw := range ranges {
-			if construct, ok := mdscan.MatchHTML(source[:raw.EndOffset], raw.StartOffset); ok {
-				use(source, construct)
+		for _, tag := range tags {
+			if construct, ok := mdscan.MatchHTML(source[:tag.span.EndOffset], tag.span.StartOffset); ok {
+				use(source, construct, tag.inTable)
 			}
 		}
 	})

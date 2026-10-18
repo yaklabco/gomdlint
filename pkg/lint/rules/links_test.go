@@ -503,6 +503,25 @@ func TestImageAltTextRule_EmptyLabel(t *testing.T) {
 	assert.Equal(t, []position{{3, 17}, {7, 1}, {12, 2}, {14, 3}}, got)
 }
 
+// TestImageAltTextRule_Math checks MD045 against markdownlint 0.41.1, which
+// parses math, so an image in math, Markdown or HTML, in an HTML block's
+// lines or elsewhere, is math.
+func TestImageAltTextRule_Math(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"<div>\n$<img>$\n</div>\n\n" + // 3-5
+		"<div>\n$$\n<img>\n$$\n</div>\n\n" + // 7-11
+		"$<img src=\"a.png\">$ and $![](a.png)$\n\n" + // 13
+		"![](b.png) outside.\n" // 15
+
+	type position struct{ line, column int }
+	diags := applyRuleWithOptions(t, NewImageAltTextRule(), markdown, nil)
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{15, 1}}, got)
+}
+
 // TestImageAltTextRule_HTMLImages checks HTML img elements like markdownlint:
 // an alt attribute (even an empty one) or aria-hidden="true" satisfies the rule.
 func TestImageAltTextRule_HTMLImages(t *testing.T) {
@@ -722,7 +741,8 @@ func TestImageAltTextRule_HTMLImagesKeepMaskedTags(t *testing.T) {
 	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
 	require.NoError(t, err)
 
-	images := NewImageAltTextRule().htmlImages(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+	images := NewImageAltTextRule().htmlImages(ctx, &lazyMath{ctx: ctx})
 
 	require.Len(t, images, 2)
 	assert.Equal(t, "<img src=\"a.png\"\n  alt=\"x\">", string(images[0].tag))

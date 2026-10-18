@@ -300,7 +300,11 @@ anchors built as GitHub builds them. `pkg/lint/mdscan` matches HTML
 constructs and GFM autolink literals. The HTML rules find the tags of an
 HTML block as markdownlint does, by parsing the block's lines again as
 Markdown without HTML blocks and indented code
-(`pkg/lint/rules/html_block_markdown.go`).
+(`pkg/lint/rules/html_block_markdown.go`, with the parser from
+`NewHTMLBlockContent`), leaving out tags in math and marking tags in
+tables. Rules that markdownlint runs on its micromark parse read math the
+way micromark-extension-math does (`pkg/lint/rules/math.go`), since
+goldmark reads none.
 
 ## Fix Engine
 

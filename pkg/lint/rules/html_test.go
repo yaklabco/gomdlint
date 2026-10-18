@@ -304,6 +304,70 @@ func TestInlineHTMLRule_TableAllowedElements(t *testing.T) {
 	}), []htmlDiagWant{{1, 5, "br"}})
 }
 
+// TestInlineHTMLRule_MathAndTablesInHTMLBlocks checks MD033 against
+// markdownlint 0.41.1, which parses math, so a tag in math is no HTML, in
+// an HTML block's lines as elsewhere, and which reads a table in an HTML
+// block's lines as a table, so table_allowed_elements applies to its cells.
+func TestInlineHTMLRule_MathAndTablesInHTMLBlocks(t *testing.T) {
+	tableOptions := map[string]any{"allowed_elements": []any{"div", "span", "img"}, "table_allowed_elements": []any{}}
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		want    []htmlDiagWant
+	}{
+		{name: "inline math in a block", input: "<div>\n$<img>$\n</div>\n", want: []htmlDiagWant{{1, 1, "div"}}},
+		{name: "math block in a block", input: "<div>\n$$\n<img>\n$$\n</div>\n", want: []htmlDiagWant{{1, 1, "div"}}},
+		{
+			name:  "math and a tag after it in a block",
+			input: "<div>\nText $<b>$ and <i>x</i>.\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 16, "i"}},
+		},
+		{name: "inline math outside blocks", input: "Text $<b>$ here.\n\n$<img src=\"a.png\">$\n"},
+		{
+			name:    "table in a block",
+			input:   "<div>\n| a | b |\n| - | - |\n| <span> | <img> |\n</div>\n",
+			options: tableOptions,
+			want:    []htmlDiagWant{{4, 3, "span"}, {4, 12, "img"}},
+		},
+		{
+			name:    "table in a quoted block",
+			input:   "> <div>\n> | a | b |\n> | - | - |\n> | <span> | c |\n> </div>\n",
+			options: tableOptions,
+			want:    []htmlDiagWant{{4, 5, "span"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, tt.input, tt.options), tt.want)
+		})
+	}
+}
+
+// TestPlainBlockHTMLMatchesTheParsedLines checks that the plain parse of an
+// HTML block's lines, which serves lines without math or a table, finds
+// the raw HTML that the parse with source spans finds.
+func TestPlainBlockHTMLMatchesTheParsedLines(t *testing.T) {
+	for _, source := range []string{
+		"<details>\n<summary>More</summary>\n<script>alert(1)</script>\n</details>",
+		"<div><span>x</span></div>",
+		"<div>\n<!-- <b>hidden</b> -->\n</div>",
+		"<div\n  class=\"note\">\ntext\n</div>",
+		"> <div>\n> <span>x</span>\n> </div>",
+		"> <div\n> title=\"<b>\">\n> x\n> </div>",
+		"<div>\n`<span>` inside and ``<em>``\n\\<em> escaped and <b>bold</b>\n</div>",
+		"<pre>\n```html\n<i>fenced</i>\n```\n</pre>",
+		"<div>\n[link](<b>) and <https://example.com/<i>\n</div>",
+		"- <details>\n  `<summary>` in an item and <summary>real</summary>\n  </details>",
+		"<table>\n    <tr><td>indented <b>cells</b></td></tr>\n</table>",
+	} {
+		t.Run(source, func(t *testing.T) {
+			const start = 7
+			assert.Equal(t, parsedBlockHTML("test.md", []byte(source), start), plainBlockHTML([]byte(source), start))
+		})
+	}
+}
+
 // TestHTMLSourcesMaskOneNodeAtATime checks that htmlSources masks the
 // quoted continuation lines of the node it is given and of no other node:
 // the shared copy is restored after each call, and a node that needs no

@@ -362,13 +362,14 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	images := ctx.Images()
 	diags := make([]lint.Diagnostic, 0, len(images))
+	math := &lazyMath{ctx: ctx}
 
 	for _, img := range images {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		if hasAltText(img) {
+		if hasAltText(img) || inMath(math, img) {
 			continue
 		}
 
@@ -382,7 +383,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	if ctx.File == nil {
 		return diags, nil
 	}
-	for _, image := range r.htmlImages(ctx) {
+	for _, image := range r.htmlImages(ctx, math) {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
@@ -429,13 +430,13 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 	})
 }
 
-// htmlImages returns the opening img tags in HTML blocks and inline HTML.
-// The sources come from htmlSources, so the file is not copied for each
-// element.
-func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
+// htmlImages returns the opening img tags in HTML blocks and inline HTML,
+// except those in math. The sources come from htmlSources, so the file is
+// not copied for each element.
+func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext, math *lazyMath) []htmlImage {
 	var images []htmlImage
 	sources := htmlSources{file: ctx.File}
-	keep := func(source []byte, construct mdscan.HTMLConstruct) {
+	keep := func(source []byte, construct mdscan.HTMLConstruct, _ bool) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
 			// The source is valid only while it is read, so the image keeps
 			// its own copy of the tag.
@@ -446,9 +447,12 @@ func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 		eachHTMLBlockConstruct(&sources, block, keep)
 	}
 	for _, inline := range ctx.HTMLInlines() {
+		if inMath(math, inline) {
+			continue
+		}
 		sources.with(inline, func(source []byte) {
 			if construct, ok := htmlNodeConstruct(source, inline); ok {
-				keep(source, construct)
+				keep(source, construct, false)
 			}
 		})
 	}

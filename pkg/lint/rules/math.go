@@ -279,6 +279,14 @@ func (l *lazyMath) holds(line, start, end int) bool {
 	return math.lines[line] || math.overlaps(start, end)
 }
 
+// inMath reports whether math holds a node, which markdownlint then reads
+// as math: the node starts on a line of a math block or lies partly in
+// inline math.
+func inMath(math *lazyMath, node *mdast.Node) bool {
+	span := node.SourceRange()
+	return math.holds(node.SourcePosition().StartLine, span.StartOffset, max(span.EndOffset, span.StartOffset+1))
+}
+
 // regions finds the math on first use.
 func (l *lazyMath) regions() *mathRegions {
 	if l.found == nil {
