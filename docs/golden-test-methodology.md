@@ -355,9 +355,10 @@ sidecars are rejected:
   without options.
 - A rule entry with an option that the rule does not read, such as a
   misspelled `nmes`, a value or a list item of the wrong type, two spellings
-  of one option, or one option set both under `options` and directly under
-  the rule ID. The harness checks options against the rule's catalog entry,
-  as a config file's warnings do.
+  of one option, one option set both under `options` and directly under the
+  rule ID, or one option set twice through a YAML alias of its key. The
+  harness checks options against the rule's catalog entry, as a config
+  file's warnings do.
 - A sidecar that configures a rule the scenario does not run. A per-rule
   scenario runs only its directory's rule, and a real-world scenario runs the
   default-enabled rules.
