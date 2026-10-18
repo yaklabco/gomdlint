@@ -441,6 +441,88 @@ func TestCodeBlockLanguageRule_InfoStringWords(t *testing.T) {
 	}
 }
 
+// TestCodeBlockLanguageRule_LineEndings verifies that MD040 ends a fence's
+// info string at the end of the line, as GFM and markdownlint do, where a
+// carriage return ends a line as well as a line feed. The expected findings
+// are markdownlint 0.41.1's.
+func TestCodeBlockLanguageRule_LineEndings(t *testing.T) {
+	allowBash := map[string]any{"allowed_languages": []any{"bash"}}
+	allowBashOnly := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
+	tests := []struct {
+		name         string
+		input        string
+		options      map[string]any
+		wantMessages []string
+		wantFixed    string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "bare carriage return after the language", input: "# Title\n\n```bash\recho hi\n```\n",
+			options: allowBash},
+		{name: "bare carriage return after the language with language only",
+			input: "# Title\n\n```bash\recho hi\n```\n", options: allowBashOnly},
+		{name: "mixed line endings after the language",
+			input: "# Title\r\n\r\n```bash\recho hi\n```\r\n", options: allowBashOnly},
+		{name: "mixed line endings without a language",
+			input:        "# Title\r\n\n```\r#!/bin/bash\necho hi\r\n```\n",
+			options:      allowBashOnly,
+			wantMessages: []string{"Fenced code block has no language specified"}},
+		{
+			// GFM's code starts with "echo hi", which goldmark reads into the
+			// fence line, so the shebang it sees first is not the code's start.
+			name:         "bare carriage return before a line that starts with a shebang",
+			input:        "# Title\n\n```\recho hi\n#!/bin/bash\necho x\n```\n",
+			wantMessages: []string{"Fenced code block has no language specified"},
+		},
+		{name: "carriage return line feeds after the language",
+			input: "# Title\r\n\r\n```bash\r\necho hi\r\n```\r\n", options: allowBashOnly},
+		{name: "carriage return line feeds without a language",
+			input:        "# Title\r\n\r\n```\r\n#!/bin/bash\r\necho hi\r\n```\r\n",
+			options:      allowBashOnly,
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "# Title\r\n\r\n```bash\r\n#!/bin/bash\r\necho hi\r\n```\r\n"},
+		{name: "carriage return line feeds after a title",
+			input:        "# Title\r\n\r\n```bash title=x\r\necho hi\r\n```\r\n",
+			options:      allowBashOnly,
+			wantMessages: []string{"Code fence info must contain only a language identifier"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			messages := make([]string, 0, len(diags))
+			for _, diag := range diags {
+				messages = append(messages, diag.Message)
+			}
+			assert.ElementsMatch(t, tt.wantMessages, messages)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_CarriageReturnLines verifies that MD040 offers no
+// fix in a document whose lines end in carriage returns alone. goldmark ends
+// lines only at line feeds, so it reads such a document as one line and finds
+// no fence there, where markdownlint 0.41.1 reports line 3 of each: a missing
+// language and an info string with a title. Whatever MD040 reports there, a
+// fix must not change the document.
+func TestCodeBlockLanguageRule_CarriageReturnLines(t *testing.T) {
+	options := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
+	for _, input := range []string{
+		"# Title\r\r```\r#!/bin/bash\recho hi\r```\r",
+		"# Title\r\r```bash title=x\recho hi\r```\r",
+		"# Title\r\r```bash\recho hi\r```\r",
+	} {
+		diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), input, options)
+		for _, diag := range diags {
+			assert.False(t, diag.HasFix(), "%q keeps a fix", input)
+		}
+		assert.Equal(t, input, applyAllEdits(t, input, diags))
+	}
+}
+
 // TestFenceLanguageAfterInsert verifies that the language a fence would name
 // after the MD040 fix inserts text after its fence characters is the first
 // word of the line that follows, split at spaces and tabs only.
@@ -454,6 +536,7 @@ func TestFenceLanguageAfterInsert(t *testing.T) {
 		{name: "spaces after the fence", content: "```  \ncode\n```\n", want: "bash"},
 		{name: "tab after the fence", content: "```\t\ncode\n```\n", want: "bash"},
 		{name: "carriage return line ending", content: "```\r\ncode\r\n```\r\n", want: "bash"},
+		{name: "bare carriage return after the fence", content: "```\rcode\n```\n", want: "bash"},
 		{name: "fence on the last line", content: "```", want: "bash"},
 		{name: "no-break space after the fence", content: "```\u00a0\ncode\n```\n", want: "bash\u00a0"},
 		{name: "word after the fence", content: "```sh x\ncode\n```\n", want: "bashsh"},
