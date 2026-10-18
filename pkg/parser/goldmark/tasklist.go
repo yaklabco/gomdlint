@@ -21,6 +21,13 @@ var gfmExtensions = []goldmark.Extender{
 	gfmTaskList{},
 }
 
+// Priorities of goldmark's task list extension: its checkbox parser runs
+// before the link parser, and its renderer after goldmark's own renderers.
+const (
+	taskCheckBoxParserPriority   = 0
+	taskCheckBoxRendererPriority = 500
+)
+
 // gfmTaskList is goldmark's task list extension, reading a checkbox only
 // where GFM does: at the start of the paragraph that is a list item's first
 // block, followed by a space, a tab or a line ending and then more of the
@@ -33,10 +40,10 @@ type gfmTaskList struct{}
 // with the priorities goldmark's task list extension gives them.
 func (gfmTaskList) Extend(md goldmark.Markdown) {
 	md.Parser().AddOptions(parser.WithInlineParsers(
-		util.Prioritized(paragraphCheckBoxParser{InlineParser: extension.NewTaskCheckBoxParser()}, 0),
+		util.Prioritized(paragraphCheckBoxParser{InlineParser: extension.NewTaskCheckBoxParser()}, taskCheckBoxParserPriority),
 	))
 	md.Renderer().AddOptions(renderer.WithNodeRenderers(
-		util.Prioritized(extension.NewTaskCheckBoxHTMLRenderer(), 500),
+		util.Prioritized(extension.NewTaskCheckBoxHTMLRenderer(), taskCheckBoxRendererPriority),
 	))
 }
 

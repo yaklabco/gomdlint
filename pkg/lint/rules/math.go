@@ -75,7 +75,7 @@ func (m *mathRegions) findBlocks(ctx *lint.RuleContext) {
 // math block on a line, after its container prefix: two or more dollar
 // signs, then text that holds no dollar sign.
 func mathFenceOpening(text []byte) (int, bool) {
-	run := runLength(text, 0, '$')
+	run := dollarRun(text, 0)
 	if run < 2 || bytes.IndexByte(text[run:], '$') >= 0 {
 		return 0, false
 	}
@@ -86,14 +86,15 @@ func mathFenceOpening(text []byte) (int, bool) {
 // a math block opened by fence dollar signs: at least as many dollar signs,
 // then only spaces and tabs.
 func mathFenceCloses(text []byte, fence int) bool {
-	run := runLength(text, 0, '$')
+	run := dollarRun(text, 0)
 	return run >= fence && len(bytes.Trim(text[run:], " \t")) == 0
 }
 
-// runLength returns how many times ch repeats in text from offset on.
-func runLength(text []byte, offset int, ch byte) int {
+// dollarRun returns how many dollar signs follow one another in text from
+// offset on.
+func dollarRun(text []byte, offset int) int {
 	count := 0
-	for offset+count < len(text) && text[offset+count] == ch {
+	for offset+count < len(text) && text[offset+count] == '$' {
 		count++
 	}
 	return count
@@ -128,7 +129,7 @@ func containerLastLines(ctx *lint.RuleContext) []int {
 // cell outside math blocks.
 func (m *mathRegions) findInline(ctx *lint.RuleContext) {
 	skips := mathSkipRanges(ctx)
-	var blocks []*mdast.Node
+	blocks := make([]*mdast.Node, 0, len(ctx.Paragraphs())+len(ctx.Headings()))
 	blocks = append(blocks, ctx.Paragraphs()...)
 	blocks = append(blocks, ctx.Headings()...)
 	for _, table := range ctx.Tables() {
@@ -192,7 +193,7 @@ func inlineMath(content []byte, span mdast.SourceRange, skips []mdast.SourceRang
 				continue
 			}
 		case '$':
-			run := runLength(content[:span.EndOffset], pos, '$')
+			run := dollarRun(content[:span.EndOffset], pos)
 			if end, ok := closingDollarRun(content[:span.EndOffset], pos+run, run); ok {
 				ranges = append(ranges, mdast.SourceRange{StartOffset: pos, EndOffset: end})
 				pos = end
@@ -214,7 +215,7 @@ func closingDollarRun(content []byte, offset, size int) (int, bool) {
 			pos++
 			continue
 		}
-		run := runLength(content, pos, '$')
+		run := dollarRun(content, pos)
 		if run == size {
 			return pos + run, true
 		}
