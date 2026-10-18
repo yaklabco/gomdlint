@@ -76,12 +76,15 @@ func markdownlintTruthy(value any) bool {
 // in markdownlint 0.41.1, a value that is falsy in JavaScript turns the
 // rule off, a string turns it on, with warnings when it is "warning", and
 // an object turns it on unless its enabled key is present and falsy. An
-// object also takes its severity key, and holds the rule's options under
-// its other keys. normalize, when not nil, gives the options that the rule
-// gets from those options, and from a value that holds none: they are
-// rewritten to the names the rule reads, over the options that every
-// markdownlint setting of the rule writes out, from the rule's declared
-// options. Without normalize, the settings hold the options as written.
+// object's severity key asks for warnings when it is "warning", and for
+// errors otherwise, whatever it holds: gomdlint's info, a misspelling such
+// as Warning, or a value that is not a string. The object holds the rule's
+// options under its other keys. normalize, when not nil, gives the options
+// that the rule gets from those options, and from a value that holds none:
+// they are rewritten to the names the rule reads, over the options that
+// every markdownlint setting of the rule writes out, from the rule's
+// declared options. Without normalize, the settings hold the options as
+// written.
 func MarkdownlintRuleConfig(ruleID string, value any, normalize OptionNormalizer) RuleConfig {
 	enabled := true
 	severity := string(SeverityError)
@@ -99,8 +102,9 @@ func MarkdownlintRuleConfig(ruleID string, value any, normalize OptionNormalizer
 			case "enabled":
 				*cfg.Enabled = markdownlintTruthy(option)
 			case "severity":
-				if explicitSeverity, ok := option.(string); ok {
-					cfg.Severity = &explicitSeverity
+				severity = string(SeverityError)
+				if text, ok := option.(string); ok && text == markdownlintWarning {
+					severity = markdownlintWarning
 				}
 			default:
 				options[key] = option

@@ -59,6 +59,15 @@ var markdownlintModes = []string{"applied for the run", "migrated"}
 func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings string) (map[string][]string, string) {
 	t.Helper()
 
+	report, warnings := markdownlintConfigReport(t, mode, name, settings)
+	return reportedFiles(t, report), warnings
+}
+
+// markdownlintConfigReport is lintWithMarkdownlintConfig, which returns the
+// JSON report itself.
+func markdownlintConfigReport(t *testing.T, mode, name, settings string) (string, string) {
+	t.Helper()
+
 	dir := inProject(t, map[string]string{"doc.md": trailingSpaceDoc, name: settings})
 	var warnings string
 	if mode == "migrated" {
@@ -73,7 +82,30 @@ func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings string) (map[
 	if mode != "migrated" {
 		warnings = got.stderr
 	}
-	return reportedFiles(t, got.stdout), warnings
+	return got.stdout, warnings
+}
+
+// reportedSeverities returns the severities of the findings that a JSON
+// report lists for doc.md, in order.
+func reportedSeverities(t *testing.T, report string) []string {
+	t.Helper()
+
+	var parsed struct {
+		Files []struct {
+			Diagnostics []struct {
+				Severity string `json:"severity"`
+			} `json:"diagnostics"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(report), &parsed), report)
+
+	var severities []string
+	for _, file := range parsed.Files {
+		for _, diag := range file.Diagnostics {
+			severities = append(severities, diag.Severity)
+		}
+	}
+	return severities
 }
 
 // TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem covers keys beyond
@@ -229,6 +261,59 @@ func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestMarkdownlintConfig_SeverityAsMarkdownlintReadsIt covers the severity
+// key of a rule's object in a markdownlint config, which markdownlint
+// 0.41.1 reads as "warning" when it is exactly that, and as "error"
+// otherwise, so gomdlint's info and a misspelling such as bogus or Warning
+// make errors. gomdlint used to keep info, which never fails a run, and to
+// reject bogus and Warning with a config error. markdownlint-cli2 reports
+// trailingSpaceDoc's trailing space with each config, as a warning with the
+// fourth only.
+func TestMarkdownlintConfig_SeverityAsMarkdownlintReadsIt(t *testing.T) {
+	tests := []struct {
+		name, file, settings, want string
+	}{
+		{name: "info", file: ".markdownlint.json", settings: `{"MD009": {"severity": "info"}}`, want: "error"},
+		{name: "bogus", file: ".markdownlint.json", settings: `{"MD009": {"severity": "bogus"}}`, want: "error"},
+		{name: "Warning", file: ".markdownlint.json", settings: `{"MD009": {"severity": "Warning"}}`, want: "error"},
+		{name: "warning", file: ".markdownlint.json", settings: `{"MD009": {"severity": "warning"}}`, want: "warning"},
+		{name: "YAML info", file: ".markdownlint.yaml", settings: "MD009:\n  severity: info\n", want: "error"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				report, _ := markdownlintConfigReport(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, []string{tt.want}, reportedSeverities(t, report))
+			})
+		}
+	}
+
+	t.Run("in markdownlint-configure-file", func(t *testing.T) {
+		doc := "<!-- markdownlint-configure-file {\"MD009\": {\"severity\": \"info\"}} -->\n\n" + trailingSpaceDoc
+		inProject(t, map[string]string{"doc.md": doc})
+
+		got := execute(t, "lint", "--format", "json", "doc.md")
+
+		assert.Equal(t, []string{"error"}, reportedSeverities(t, got.stdout))
+	})
+}
+
+// TestLint_OwnConfigKeepsItsSeverities covers gomdlint's own config files,
+// whose severities are gomdlint's: info stays info, and an unknown
+// severity is a config error.
+func TestLint_OwnConfigKeepsItsSeverities(t *testing.T) {
+	inProject(t, map[string]string{"doc.md": trailingSpaceDoc, ".gomdlint.yml": "rules:\n  MD009:\n    severity: info\n"})
+	got := execute(t, "lint", "--format", "json", "doc.md")
+	assert.Equal(t, []string{"info"}, reportedSeverities(t, got.stdout))
+
+	inProject(t, map[string]string{"doc.md": trailingSpaceDoc, ".gomdlint.yml": "rules:\n  MD009:\n    severity: bogus\n"})
+	got = execute(t, "lint", "--format", "json", "doc.md")
+	assert.Equal(t, cli.ExitConfigError, got.code)
+	assert.Contains(t, got.stderr, `invalid severity "bogus"`)
 }
 
 // TestMarkdownlintConfig_DefaultKeyInAnyCase covers the default key of a
