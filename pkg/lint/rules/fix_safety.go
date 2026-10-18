@@ -355,6 +355,13 @@ type fixVerifier struct {
 	allow    fixAllowance
 	original string
 	parsed   bool // whether the original content parsed
+	// originalFile is the parse of the original content, kept until
+	// regions builds model from it, and model the outline cut into regions
+	// (see outlineModel), built on first use; nil where region checks cannot
+	// be used.
+	originalFile *mdast.FileSnapshot
+	model        *outlineModel
+	modeled      bool
 }
 
 func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier {
@@ -371,6 +378,7 @@ func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier 
 	// so both outlines come from the same flavor.
 	if original, err := verifier.parser.Parse(ctx, ruleCtx.File.Path, ruleCtx.File.Content); err == nil {
 		verifier.original, verifier.parsed = documentOutline(original, allow), true
+		verifier.originalFile = original
 	}
 	return verifier
 }
@@ -398,20 +406,48 @@ func (v *fixVerifier) settle(kept []fix.TextEdit, diags []lint.Diagnostic, idxs 
 }
 
 // accepts reports whether the content with edits applied has the original
-// document's outline.
+// document's outline. Region checks decide when they can tell, parsing only
+// the regions the edits need (see outlineModel); otherwise the whole
+// document is parsed.
 func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
-	if !v.parsed {
+	// A cancelled run parses nothing, so the whole-document check fails.
+	if !v.parsed || v.ctx.Err() != nil {
 		return false
 	}
 	prepared, err := fix.PrepareEdits(edits, len(v.file.Content))
 	if err != nil {
 		return false
 	}
+	if model := v.regions(); model != nil {
+		if decided, unchanged := model.checkEdits(prepared); decided {
+			return unchanged
+		}
+	}
+	return v.acceptsWhole(prepared)
+}
+
+// acceptsWhole reports whether the content with edits, prepared, applied has
+// the original document's outline, parsing the whole document.
+func (v *fixVerifier) acceptsWhole(prepared []fix.TextEdit) bool {
 	fixed, err := v.parser.Parse(v.ctx, v.file.Path, fix.ApplyEdits(v.file.Content, prepared))
 	if err != nil {
 		return false
 	}
 	return documentOutline(fixed, v.allow) == v.original
+}
+
+// regions returns the outline model of the original, built on first use, or
+// nil where region checks cannot be used.
+func (v *fixVerifier) regions() *outlineModel {
+	if !v.modeled {
+		v.modeled = true
+		if v.originalFile != nil {
+			v.model = buildOutlineModel(v, v.originalFile)
+		}
+		// The model keeps what it compares; the parse can go.
+		v.originalFile = nil
+	}
+	return v.model
 }
 
 // documentOutline returns a canonical description of a parsed document: its

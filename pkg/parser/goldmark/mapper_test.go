@@ -3,8 +3,12 @@ package goldmark
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
@@ -487,5 +491,56 @@ func TestMapper_ParentChildRelationships(t *testing.T) {
 
 	if para.Prev != heading {
 		t.Error("paragraph.Prev should be heading")
+	}
+}
+
+// TestListItemLoose checks which items of a list make it loose as CommonMark
+// reads it, and that a list is tight exactly when none of them does.
+func TestListItemLoose(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		loose []bool
+	}{
+		{"tight", "- a\n- b\n- c\n", []bool{false, false, false}},
+		{"item after a blank line", "- a\n\n- b\n- c\n", []bool{false, true, false}},
+		{"first item after a blank line", "Intro\n\n- a\n- b\n", []bool{false, false}},
+		{"blank line between blocks", "- a\n\n  more\n- b\n", []bool{true, false}},
+		{"definition then text after a blank line", "Intro\n\n- [x]: /url\n  text\n- b\n", []bool{false, false}},
+		{"definition then text in a later item", "- a\n- [x]: /url\n  text\n- c\n", []bool{false, false, false}},
+		{"blank line between definition and text", "- [x]: /url\n\n  text\n- b\n", []bool{true, false}},
+		{"definition after a line its paragraph keeps", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, false}},
+		{"same, after a blank line in a later item", "- z\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, true, false}},
+		{"table and setext heading from the first paragraph", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n- d\n", []bool{false, false}},
+		{"definition, table and setext heading", "Intro\n\n- [x]: /u\n  a\n  b|c\n  -|-\n  ===\n- d\n", []bool{false, false}},
+		{"setext heading after a table and a blank line", "Intro\n\n- b|c\n  -|-\n\n  x\n  ===\n- d\n", []bool{true, false}},
+		{"ATX heading after a table and a blank line", "Intro\n\n- b|c\n  -|-\n\n  # x\n- d\n", []bool{true, false}},
+	}
+	markdowns := []struct {
+		name     string
+		markdown goldmark.Markdown
+	}{
+		{"commonmark", goldmark.New()},
+		{"gfm", goldmark.New(goldmark.WithExtensions(extension.GFM))},
+	}
+	for _, tt := range tests {
+		for _, md := range markdowns {
+			t.Run(tt.name+"/"+md.name, func(t *testing.T) {
+				source := []byte(tt.input)
+				doc := md.markdown.Parser().Parse(text.NewReader(source))
+				var list *ast.List
+				for node := doc.FirstChild(); node != nil && list == nil; node = node.NextSibling() {
+					if found, ok := node.(*ast.List); ok {
+						list = found
+					}
+				}
+				require.NotNil(t, list)
+				var loose []bool
+				for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+					loose = append(loose, ListItemLoose(item, source))
+				}
+				assert.Equal(t, tt.loose, loose)
+			})
+		}
 	}
 }

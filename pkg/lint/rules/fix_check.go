@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -96,13 +97,7 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 		slices.Sort(kept)
 	}
 	if len(kept) > 1 && !check.keepsTogether(diags, kept) {
-		var together []int
-		for _, idx := range kept {
-			if check.keepsTogether(diags, append(together, idx)) {
-				together = append(together, idx)
-			}
-		}
-		kept = together
+		kept, _ = check.keptInOrder(diags, kept)
 	}
 
 	keep := make(map[int]bool, len(kept))
@@ -151,11 +146,12 @@ func (c *fixCheck) sharedFixes(diags []lint.Diagnostic, candidates []int) map[in
 		}
 		return shared
 	}
+	ordered := blocksOrdered(blocks, len(c.file.Lines))
 	owners := make(map[int][]int)
 	for _, idx := range candidates {
 		slots := make(map[int]bool)
 		for _, edit := range diags[idx].FixEdits {
-			for _, slot := range editSlots(c.file, blocks, edit) {
+			for _, slot := range editSlots(c.file, blocks, ordered, edit) {
 				slots[slot] = true
 			}
 		}
@@ -190,12 +186,67 @@ func topLevelBlockLines(file *mdast.FileSnapshot) ([][2]int, bool) {
 	return blocks, true
 }
 
+// blocksOrdered reports whether the line spans of top-level blocks lie
+// within the file's lines, in order and apart: each starts no later than it
+// ends and ends before the next starts. Then the blocks and the gaps between
+// them that a range of lines touches can be found by binary search.
+func blocksOrdered(blocks [][2]int, lines int) bool {
+	previousEnd := 0
+	for _, block := range blocks {
+		if block[0] <= previousEnd || block[0] > block[1] || block[1] > lines {
+			return false
+		}
+		previousEnd = block[1]
+	}
+	return true
+}
+
+// orderedEditSlots returns the slots of editSlots for the lines first to
+// last, given ordered blocks in a file of the given number of lines. The
+// ends of the blocks and of the gaps grow with their index, and so do their
+// starts, so the blocks and gaps that the lines touch are consecutive.
+func orderedEditSlots(lines int, blocks [][2]int, first, last int) []int {
+	var slots []int
+	for idx := sort.Search(len(blocks), func(i int) bool { return blocks[i][1] >= first }); idx < len(blocks) &&
+		blocks[idx][0] <= last; idx++ {
+		slots = append(slots, 2*idx+1)
+	}
+	gapFirst := func(idx int) int {
+		if idx == 0 {
+			return 1
+		}
+		return blocks[idx-1][1] + 1
+	}
+	gapLast := func(idx int) int {
+		if idx == len(blocks) {
+			return lines
+		}
+		return blocks[idx][0] - 1
+	}
+	for idx := sort.Search(len(blocks)+1, func(i int) bool { return gapLast(i) >= first }); idx <= len(blocks) &&
+		gapFirst(idx) <= last; idx++ {
+		if gapFirst(idx) > gapLast(idx) {
+			continue
+		}
+		slots = append(slots, 2*idx)
+		if idx > 0 {
+			slots = append(slots, 2*idx-1)
+		}
+		if idx < len(blocks) {
+			slots = append(slots, 2*idx+1)
+		}
+	}
+	return slots
+}
+
 // editSlots returns the places an edit touches: slot 2i+1 for the top-level
 // block i, and slot 2i for the lines between blocks i-1 and i, together with
 // the slots of those two blocks, since an edit there can join or split them.
 // An insertion at the start of a line touches the line before it too. An edit
 // whose lines cannot be found touches slot -1, which every such edit shares.
-func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []int {
+// With ordered blocks (see blocksOrdered), the blocks and gaps are found by
+// binary search, which finds the slots that scanning them all finds.
+func editSlots(file *mdast.FileSnapshot, blocks [][2]int, ordered bool, edit fix.TextEdit) []int {
 	first, _ := file.LineAt(edit.StartOffset)
 	last, _ := file.LineAt(max(edit.StartOffset, edit.EndOffset-1))
 	if first < 1 || last < 1 {
@@ -204,6 +255,16 @@ func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []i
 	if edit.StartOffset == edit.EndOffset && first > 1 && file.Lines[first-1].StartOffset == edit.StartOffset {
 		first--
 	}
+	if ordered {
+		return orderedEditSlots(len(file.Lines), blocks, first, last)
+	}
+	return scannedEditSlots(len(file.Lines), blocks, first, last)
+}
+
+// scannedEditSlots returns the slots of editSlots for the lines first to
+// last by scanning every block and gap of a file of the given number of
+// lines.
+func scannedEditSlots(lines int, blocks [][2]int, first, last int) []int {
 	var slots []int
 	for idx, block := range blocks {
 		if block[1] >= first && block[0] <= last {
@@ -211,7 +272,7 @@ func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []i
 		}
 	}
 	for idx := 0; idx <= len(blocks); idx++ {
-		gapFirst, gapLast := 1, len(file.Lines)
+		gapFirst, gapLast := 1, lines
 		if idx > 0 {
 			gapFirst = blocks[idx-1][1] + 1
 		}
@@ -230,6 +291,96 @@ func editSlots(file *mdast.FileSnapshot, blocks [][2]int, edit fix.TextEdit) []i
 		}
 	}
 	return slots
+}
+
+// keptInOrder returns the fixes of kept, in order, that keep the document
+// unchanged together with the fixes kept before them: each is kept only when
+// the fixes kept before it and it still leave the document unchanged.
+//
+// Checking each step as a whole costs all the regions of the fixes kept so
+// far, which makes the loop grow with the square of their number. So the
+// fixes kept so far are held in a regionState for each parser, and a step
+// that the states decide costs only the regions the new fix meets (see
+// regionState). A step they cannot decide checks the fixes as a whole, and
+// the states are then built again for the fixes kept, or dropped when no
+// state holds them. It also returns the number of steps the states decided.
+func (c *fixCheck) keptInOrder(diags []lint.Diagnostic, kept []int) ([]int, int) {
+	if !c.htmlBenign() {
+		return nil, 0
+	}
+	var together []int
+	statesDecided := 0
+	states := c.regionStates(nil)
+	for _, idx := range kept {
+		decided, keep, commits := c.tryAdd(states, diags[idx].FixEdits)
+		if decided {
+			statesDecided++
+		} else {
+			keep = c.keepsTogether(diags, append(slices.Clone(together), idx))
+		}
+		if !keep {
+			continue
+		}
+		together = append(together, idx)
+		if decided {
+			for _, commit := range commits {
+				commit()
+			}
+			continue
+		}
+		var edits []fix.TextEdit
+		for _, other := range together {
+			edits = append(edits, diags[other].FixEdits...)
+		}
+		accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(c.content))
+		states = nil
+		if err == nil {
+			states = c.regionStates(accepted)
+		}
+	}
+	return together, statesDecided
+}
+
+// regionStates returns the region state of the edits, prepared, for each
+// parser, or nil when some parser has none.
+func (c *fixCheck) regionStates(prepared []fix.TextEdit) []*regionState {
+	c.ensureModels()
+	states := make([]*regionState, len(c.models))
+	for idx, model := range c.models {
+		if model == nil {
+			return nil
+		}
+		if states[idx] = model.newRegionState(prepared); states[idx] == nil {
+			return nil
+		}
+	}
+	return states
+}
+
+// tryAdd reports whether adding the edits of a fix to the edits of states
+// leaves the signatures unchanged for every parser. decided is false when
+// the states cannot tell; when the fix keeps the signatures, commits add it
+// to the states.
+func (c *fixCheck) tryAdd(states []*regionState, edits []fix.TextEdit) (bool, bool, []func()) {
+	if states == nil {
+		return false, false, nil
+	}
+	prepared, err := fix.PrepareEdits(edits, len(c.content))
+	if err != nil {
+		return false, false, nil
+	}
+	commits := make([]func(), 0, len(states))
+	for idx, model := range c.models {
+		decided, unchanged, commit := model.tryAdd(states[idx], prepared)
+		switch {
+		case !decided:
+			return false, false, nil
+		case !unchanged:
+			return true, false, nil
+		}
+		commits = append(commits, commit)
+	}
+	return true, true, commits
 }
 
 // keptInBatches returns the fixes of a batch of diagnostics that keep the
@@ -253,18 +404,28 @@ func (c *fixCheck) keptInBatches(diags []lint.Diagnostic, batch []int) []int {
 // configured flavor and, when that is CommonMark, in GFM too, because most
 // Markdown is also read on GitHub.
 //
-// The check reads the complete document, so it sees the effects a fix has
-// far from the text it changes: a link reference definition that links
+// The check compares the complete document, so it sees the effects a fix
+// has far from the text it changes: a link reference definition that links
 // elsewhere use, the anchor of a heading that a fragment link points to,
-// front matter that starts or ends.
+// front matter that starts or ends. It parses only the regions of the
+// document that the fix can change, and compares their signatures within the
+// document's (see regionModel), which decides as comparing the whole
+// document's signatures would; where that cannot be shown, it parses the
+// whole document.
 type fixCheck struct {
 	file      *mdast.FileSnapshot
 	content   []byte
+	flavor    config.Flavor
 	markdowns []goldmark.Markdown
 	// baseline holds the render signatures of the original content, and
 	// benign whether all its raw HTML is benign. Both are set on first use.
 	baseline []string
 	benign   bool
+	// models holds the region model of the original for each parser, nil
+	// where region checks cannot be used; modeled reports whether they are
+	// built.
+	models  []*regionModel
+	modeled bool
 }
 
 func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
@@ -272,7 +433,7 @@ func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
 	if flavor != config.FlavorGFM {
 		markdowns = append(markdowns, goldmark.New())
 	}
-	return &fixCheck{file: file, content: file.Content, markdowns: markdowns}
+	return &fixCheck{file: file, content: file.Content, flavor: flavor, markdowns: markdowns}
 }
 
 // keeps reports whether applying edits leaves the render signatures of the
@@ -286,7 +447,51 @@ func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
 	if err != nil {
 		return false
 	}
+	return c.unchangedBy(prepared)
+}
+
+// unchangedBy reports whether applying edits, prepared, leaves the render
+// signatures of the document unchanged: by region checks when they can
+// tell, and otherwise by parsing the whole document.
+func (c *fixCheck) unchangedBy(prepared []fix.TextEdit) bool {
+	if decided, unchanged := c.regionsUnchanged(prepared); decided {
+		return unchanged
+	}
 	return c.unchanged(fix.ApplyEdits(c.content, prepared))
+}
+
+// regionsUnchanged reports whether applying edits, prepared, leaves the
+// render signature unchanged for every parser, as region checks find.
+// decided is false when region checks cannot tell for some parser.
+func (c *fixCheck) regionsUnchanged(prepared []fix.TextEdit) (bool, bool) {
+	c.ensureModels()
+	for _, model := range c.models {
+		if model == nil {
+			return false, false
+		}
+	}
+	for _, model := range c.models {
+		decided, unchanged := model.checkEdits(prepared)
+		if !decided {
+			return false, false
+		}
+		if !unchanged {
+			return true, false
+		}
+	}
+	return true, true
+}
+
+// ensureModels builds the region model of the original for each parser.
+func (c *fixCheck) ensureModels() {
+	if c.modeled {
+		return
+	}
+	c.modeled = true
+	c.ensureBaseline()
+	for idx, markdown := range regionMarkdowns(c.flavor) {
+		c.models = append(c.models, buildRegionModel(markdown, c.content, c.baseline[idx]))
+	}
 }
 
 // htmlBenign reports whether all raw HTML of the original content is
@@ -308,7 +513,7 @@ func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
 	if err != nil || !c.htmlBenign() {
 		return false
 	}
-	return c.unchanged(fix.ApplyEdits(c.content, accepted))
+	return c.unchangedBy(accepted)
 }
 
 // ensureBaseline parses the original content once, for its render
@@ -423,6 +628,15 @@ type signatureWriter struct {
 	out     *strings.Builder
 	text    []byte
 	anchors map[string]int
+	// log, when set, records the slug and anchor of each heading and every
+	// change to the anchor counts (see anchorHistory).
+	log *anchorHistory
+	// With useAssigned, headings take their anchors from assigned in order,
+	// as a region check works them out; missing records a heading for which
+	// none was left.
+	useAssigned bool
+	assigned    []string
+	missing     bool
 }
 
 // blocks writes the children of a container.
@@ -635,11 +849,7 @@ func (s *signatureWriter) block(node gmast.Node) {
 		fmt.Fprintf(s.out, "H%d#%s(", node.Level, s.anchor(headingText(node, s.source)))
 		s.inlineContent(node)
 	case *gmast.List:
-		kind := "UL"
-		if node.IsOrdered() {
-			kind = fmt.Sprintf("OL%d", node.Start)
-		}
-		fmt.Fprintf(s.out, "%s%t(", kind, gmparser.ListTight(node, s.source))
+		s.out.WriteString(listToken(node.IsOrdered(), node.Start, gmparser.ListTight(node, s.source)))
 		s.blocks(node)
 	case *gmast.FencedCodeBlock:
 		info := ""
@@ -669,6 +879,15 @@ func (s *signatureWriter) block(node gmast.Node) {
 // slug of the text, with "-1", "-2" and so on added to repeated slugs, the
 // way github-slugger counts them.
 func (s *signatureWriter) anchor(text string) string {
+	if s.useAssigned {
+		if len(s.assigned) == 0 {
+			s.missing = true
+			return ""
+		}
+		unique := s.assigned[0]
+		s.assigned = s.assigned[1:]
+		return unique
+	}
 	slug := githubSlug(text)
 	unique := slug
 	for {
@@ -676,9 +895,17 @@ func (s *signatureWriter) anchor(text string) string {
 			break
 		}
 		s.anchors[slug]++
+		if s.log != nil {
+			s.log.write(slug, s.anchors[slug])
+		}
 		unique = slug + "-" + strconv.Itoa(s.anchors[slug])
 	}
 	s.anchors[unique] = 0
+	if s.log != nil {
+		s.log.write(unique, 0)
+		s.log.slugs = append(s.log.slugs, slug)
+		s.log.anchors = append(s.log.anchors, unique)
+	}
 	return unique
 }
 

@@ -315,55 +315,133 @@ func (m *mapper) mapList(list *ast.List) *mdast.Node {
 // definitions, and keeps the flag that its first line got when the item
 // followed a blank line, so goldmark reads the list as loose. Definitions
 // render nothing, so they and the rest of their paragraph count as one block.
+//
+// A list is tight exactly when none of its items makes it loose, as
+// ListItemLoose reports for each.
 func ListTight(list *ast.List, source []byte) bool {
 	if list.IsTight {
 		return true
 	}
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-		if item != list.FirstChild() && item.HasBlankPreviousLines() {
+		if ListItemLoose(item, source) {
 			return false
-		}
-		first := firstBlockEnd(item.FirstChild(), source)
-		if first == nil {
-			continue
-		}
-		for block := first.NextSibling(); block != nil; block = block.NextSibling() {
-			if block.HasBlankPreviousLines() {
-				return false
-			}
 		}
 	}
 	return true
 }
 
-// firstBlockEnd returns the last node of an item's first block, which starts
-// at node. That is node itself unless it is a link reference definition.
-// Then the block is the paragraph the definition started: it runs over the
-// definitions on the lines that follow and ends with the node that starts
-// on the line after the last of them, which holds the rest of the paragraph
-// (text or a setext heading) or a block that ended it. Definitions after a
-// blank line started another paragraph and are a block of their own.
-func firstBlockEnd(node ast.Node, source []byte) ast.Node {
-	if _, ok := node.(*ast.LinkReferenceDefinition); !ok {
-		return node
+// ListItemLoose reports whether an item of a list that goldmark parsed from
+// source makes the list loose as CommonMark reads it (see ListTight): it
+// follows a blank line and is not the list's first item, or a block of it
+// after its first block follows a blank line. It reads the blank-line flags
+// of the item and of the blocks after its first block, never those of the
+// nodes of its first block, which can carry the flag of the item's first
+// line.
+func ListItemLoose(item ast.Node, source []byte) bool {
+	if item.PreviousSibling() != nil && item.HasBlankPreviousLines() {
+		return true
 	}
-	for next := node.NextSibling(); next != nil && startsOnNextLine(node, next, source); next = node.NextSibling() {
-		node = next
-		if _, ok := next.(*ast.LinkReferenceDefinition); !ok {
+	end := firstBlockEnd(item.FirstChild(), source)
+	if end == nil {
+		return false
+	}
+	for block := end.NextSibling(); block != nil; block = block.NextSibling() {
+		if block.HasBlankPreviousLines() {
+			return true
+		}
+	}
+	return false
+}
+
+// firstBlockEnd returns the last node of an item's first block, which starts
+// at node. That is node itself unless node is a link reference definition or
+// a table: goldmark can split the paragraph an item starts with into several
+// nodes. Each link reference definition the paragraph starts with gets a node
+// placed before it; GFM makes a table of its lines from a header row on,
+// placed after it; and a setext underline makes a heading of what text is
+// left, placed after that table, and the paragraph is removed. The
+// paragraph, the heading and the first definition keep the paragraph's
+// blank-line flag, the flag of the item's first line.
+//
+// So the block runs over the definitions that follow node without a blank
+// line (a definition that starts another paragraph follows one, since a
+// paragraph ends only at a blank line or at a block that interrupts it,
+// which would come between them), then takes the node after them when it
+// starts before the last of them ends or on the line after it: the rest of
+// the paragraph, whose lines can come between the definitions when goldmark
+// takes a definition from a line after one the paragraph keeps, the table
+// made from it, or a block that ended the paragraph, which follows no blank
+// line either. A table in the block takes the heading after it when the
+// heading starts where the table does or before: the heading made from the
+// same paragraph, whose text precedes the table's rows. Other headings start
+// after the rows.
+func firstBlockEnd(node ast.Node, source []byte) ast.Node {
+	if _, ok := node.(*ast.LinkReferenceDefinition); ok {
+		for next := node.NextSibling(); next != nil; next = node.NextSibling() {
+			if _, ok := next.(*ast.LinkReferenceDefinition); ok {
+				if next.HasBlankPreviousLines() {
+					break
+				}
+				node = next
+				continue
+			}
+			if startsInside(node, next) || startsOnNextLine(node, next, source) {
+				node = next
+			}
 			break
 		}
+	}
+	table, ok := node.(*east.Table)
+	if !ok {
+		return node
+	}
+	heading, ok := table.NextSibling().(*ast.Heading)
+	if !ok {
+		return node
+	}
+	if start, found := blockStart(heading); found && start <= table.Pos() {
+		return heading
 	}
 	return node
 }
 
-// startsOnNextLine reports whether the first line of next is the line after
-// the last line of prev. Blocks without lines never are.
-func startsOnNextLine(prev, next ast.Node, source []byte) bool {
-	prevLines, nextLines := prev.Lines(), next.Lines()
-	if prevLines.Len() == 0 || nextLines.Len() == 0 {
+// blockStart returns where a block starts: its first line of content (for a
+// fenced code block, the line after the fence), or for a block without lines
+// the position goldmark gives it. A table's position is that of the
+// paragraph it was made from, when it was made: the first line the
+// paragraph kept after its definitions, which is where the setext heading
+// made from the same paragraph starts.
+func blockStart(node ast.Node) (int, bool) {
+	if lines := node.Lines(); lines.Len() > 0 {
+		return lines.At(0).Start, true
+	}
+	if pos := node.Pos(); pos >= 0 {
+		return pos, true
+	}
+	return 0, false
+}
+
+// startsInside reports whether next starts before prev ends, as the rest of
+// a paragraph does when its lines come between the definitions taken from
+// it. It never does when prev has no lines or next cannot be placed.
+func startsInside(prev, next ast.Node) bool {
+	prevLines := prev.Lines()
+	start, found := blockStart(next)
+	if prevLines.Len() == 0 || !found {
 		return false
 	}
-	end, start := prevLines.At(prevLines.Len()-1).Stop, nextLines.At(0).Start
+	return start < prevLines.At(prevLines.Len()-1).Stop
+}
+
+// startsOnNextLine reports whether next starts on the line after the last
+// line of prev. Blocks that cannot be placed never do.
+func startsOnNextLine(prev, next ast.Node, source []byte) bool {
+	prevLines := prev.Lines()
+	start, found := blockStart(next)
+	if prevLines.Len() == 0 || !found {
+		return false
+	}
+	end := prevLines.At(prevLines.Len() - 1).Stop
 	if end > start || start > len(source) {
 		return false
 	}
