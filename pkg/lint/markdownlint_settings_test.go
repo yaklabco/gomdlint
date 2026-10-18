@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,6 +53,32 @@ func TestDecodeMarkdownlintJSONValues(t *testing.T) {
 		require.Error(t, want, data)
 		require.EqualError(t, err, want.Error(), data)
 	}
+}
+
+// TestDecodeMarkdownlintJSONNumbers covers numbers beyond the range of a
+// float64, which JSON.parse and markdownlint-cli2's JSONC parser read as
+// Infinity, or as 0 when too small, so that markdownlint-cli2 loads a
+// config that holds one, in a rule's value or deep in its options.
+// encoding/json rejects them.
+func TestDecodeMarkdownlintJSONNumbers(t *testing.T) {
+	t.Parallel()
+
+	settings, err := lint.DecodeMarkdownlintJSON([]byte(
+		`{"MD013": 1e400, "MD009": {"br_spaces": -1e400, "list": [1e-400, 2.5]}, "MD010": 12345678901234567890}`))
+	require.NoError(t, err)
+
+	values := settings.Settings()
+	require.Len(t, values, 3)
+	infinity, ok := values[0].Value.(float64)
+	require.True(t, ok)
+	assert.True(t, math.IsInf(infinity, 1))
+	options, ok := values[1].Value.(map[string]any)
+	require.True(t, ok)
+	negative, ok := options["br_spaces"].(float64)
+	require.True(t, ok)
+	assert.True(t, math.IsInf(negative, -1))
+	assert.Equal(t, []any{float64(0), 2.5}, options["list"])
+	assert.InDelta(t, 12345678901234567890.0, values[2].Value, 0)
 }
 
 // TestMarkdownlintSettingsSet covers setting keys as JavaScript sets the

@@ -265,6 +265,25 @@ func TestConvertMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 	}
 }
 
+// TestConvertMarkdownlintConfig_NumbersBeyondFloat64 covers a number too
+// large for a float64, which markdownlint-cli2's JSONC parser reads as
+// Infinity, so the config loads. gomdlint used to fail it. Infinity turns a
+// rule on, as any number but zero does, and is no integer for an option,
+// which is ignored with a warning.
+func TestConvertMarkdownlintConfig_NumbersBeyondFloat64(t *testing.T) {
+	t.Parallel()
+
+	result := convertFile(t, ".markdownlint.json", `{"MD009": 1e400, "MD013": {"line_length": 1e400}}`)
+
+	for _, id := range []string{"MD009", "MD013"} {
+		rule := result.Config.Rules[id]
+		require.NotNil(t, rule.Enabled, id)
+		assert.True(t, *rule.Enabled, id)
+	}
+	assert.EqualValues(t, 80, result.Config.Rules["MD013"].Options["max"], "markdownlint's default line length")
+	assert.Equal(t, []string{`line-length option "line_length" must be an integer, not +Inf; it is ignored`}, result.Warnings)
+}
+
 // TestLoad_YAMLProjectConfigWithByteOrderMark covers gomdlint's own YAML
 // config files, which load with a leading byte order mark, as JSON ones
 // do (see TestLoad_JSONProjectConfig).
