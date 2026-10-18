@@ -53,6 +53,70 @@ func TestEngineMarkdownlintDirectives(t *testing.T) {
 	}
 }
 
+// TestEngineDirectiveGrammarFollowsMarkdownlint lints comments that
+// markdownlint 0.41.1 reads as directives, or as plain text, and checks the
+// lines on which no-trailing-spaces reports. The expected lines come from
+// markdownlint 0.41.1 itself, run on the same documents with only MD009
+// enabled. As in its inlineCommentStartRe, the comment's kind must be
+// followed by whitespace or "-->", whitespace is JavaScript's, and case
+// folds ASCII letters only. A comment inside the parameter of another
+// counts too, because markdownlint resumes its search right after the kind.
+func TestEngineDirectiveGrammarFollowsMarkdownlint(t *testing.T) {
+	tests := []struct {
+		name, input string
+		want        []int
+		plain       bool // The comment is plain text, so it gets no notices.
+	}{
+		{name: "disable-next-lines", input: "# T\n\n<!-- markdownlint-disable-next-lines MD009 -->\nbad \n\nstill bad \n", want: []int{4, 6}, plain: true},
+		{
+			name:  "capture-x",
+			input: "# T\n\n<!-- markdownlint-disable MD009 -->\n<!-- markdownlint-capture-x -->\n<!-- markdownlint-enable MD009 -->\n<!-- markdownlint-restore -->\n\nbad \n",
+			want:  []int{8},
+		},
+		{name: "disablex", input: "# T\n\n<!-- markdownlint-disablex MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "disable-file2", input: "# T\n\n<!-- markdownlint-disable-file2 MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "configure-file-brace", input: "# T\n\n<!-- markdownlint-configure-file{\"MD009\": false} -->\nbad \n", want: []int{4}, plain: true},
+		{name: "dashes-then-space", input: "# T\n\n<!-- markdownlint-disable--  -->\nbad \n", want: []int{4}, plain: true},
+		{name: "kelvin-sign", input: "# T\n\n<!-- marKdownlint-disable MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "long-s", input: "# T\n\n<!-- markdownlint-diſable MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "disable-closed", input: "# T\n\n<!-- markdownlint-disable-->\nbad \n"},
+		{name: "disable-file-closed", input: "# T\n\nbad \n\n<!-- markdownlint-disable-file-->\n"},
+		{name: "disable-next-line-closed", input: "# T\n\n<!-- markdownlint-disable-next-line-->\nbad \nbad \n", want: []int{5}},
+		{name: "disable-line-closed", input: "# T\n\nbad <!-- markdownlint-disable-line--> \nbad \n", want: []int{4}},
+		{name: "enable-closed", input: "# T\n\n<!-- markdownlint-disable MD009 -->\nbad \n<!-- markdownlint-enable-->\nbad \n", want: []int{6}},
+		{name: "enable-file-closed", input: "# T\n\n<!-- markdownlint-disable-file MD009 -->\n<!-- markdownlint-enable-file-->\nbad \n", want: []int{5}},
+		{
+			name:  "capture-restore-closed",
+			input: "# T\n\n<!-- markdownlint-capture-->\n<!-- markdownlint-disable MD009 -->\nbad \n<!-- markdownlint-restore-->\nbad \n",
+			want:  []int{7},
+		},
+		{name: "configure-file-closed", input: "# T\n\n<!-- markdownlint-configure-file {\"MD009\": false}-->\nbad \n"},
+		{name: "upper-case", input: "# T\n\n<!-- MARKDOWNLINT-DISABLE MD009 -->\nbad \n"},
+		{name: "tab", input: "# T\n\n<!-- markdownlint-disable\tMD009 -->\nbad \n"},
+		{name: "no-break-spaces", input: "# T\n\n<!-- markdownlint-disable MD009 -->\nbad \n"},
+		{name: "nested", input: "# T\n\n<!-- markdownlint-disable <!-- markdownlint-enable MD009 -->\nbad \n", want: []int{4}},
+	}
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	describeCatalog(registry)
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(tt.input), config.NewConfig())
+			require.NoError(t, err)
+
+			var lines []int
+			for _, diag := range result.Diagnostics {
+				lines = append(lines, diag.StartLine)
+			}
+			assert.Equal(t, tt.want, lines)
+			if tt.plain {
+				assert.Empty(t, result.Notices, "a comment that is no directive gets no notices")
+			}
+		})
+	}
+}
+
 func TestEngineDirectiveCanEnableConfiguredDisabledRule(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())

@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -49,12 +50,91 @@ func takesRules(action string) bool {
 	}
 }
 
-var directivePattern = regexp.MustCompile(`(?is)<!--\s*markdownlint-` +
-	`(configure-file|disable-next-line|disable-line|disable-file|enable-file|disable|enable|capture|restore)\b(.*?)-->`)
+// jsWhitespace matches one character that JavaScript's \s matches, as in
+// markdownlint's regular expressions: tab, line feed, vertical tab, form
+// feed, carriage return, the line and paragraph separators, the byte order
+// mark and every space separator, such as the no-break space.
+const jsWhitespace = `[\t\n\v\f\r\x{2028}\x{2029}\x{feff}\p{Zs}]`
+
+// directiveStart matches the start of a markdownlint comment as markdownlint
+// 0.41.1's inlineCommentStartRe (helpers/helpers.cjs) does: "<!--", any
+// whitespace, "markdownlint-", the comment's kind, and whitespace or "-->"
+// right after the kind. A comment whose kind is followed by anything else,
+// such as <!-- markdownlint-disablex --> or
+// <!-- markdownlint-disable-next-lines -->, is plain text.
+var directiveStart = regexp.MustCompile(directiveStartPattern())
+
+// directiveStartPattern returns the pattern of directiveStart. Like a
+// JavaScript regular expression with the i flag, it ignores the case of
+// ASCII letters only.
+func directiveStartPattern() string {
+	kinds := []string{
+		"configure-file", "disable-next-line", "disable-line", "disable-file", "enable-file",
+		"disable", "enable", "capture", "restore",
+	}
+	for idx, kind := range kinds {
+		kinds[idx] = caseless(kind)
+	}
+	return `<!--` + jsWhitespace + `*` + caseless("markdownlint-") +
+		`(` + strings.Join(kinds, "|") + `)(?:` + jsWhitespace + `|-->)`
+}
+
+// caseless returns a pattern that matches word, made of lower-case ASCII
+// letters and hyphens, with each letter in either case. Go's (?i) would
+// also match ſ for s and the Kelvin sign for k, which JavaScript's i flag
+// does not.
+func caseless(word string) string {
+	var pattern strings.Builder
+	for _, char := range word {
+		if 'a' <= char && char <= 'z' {
+			pattern.WriteString("[" + string(char) + string(char-'a'+'A') + "]")
+		} else {
+			pattern.WriteString(regexp.QuoteMeta(string(char)))
+		}
+	}
+	return pattern.String()
+}
+
+// directiveMatch is a markdownlint comment found in a piece of text.
+type directiveMatch struct {
+	start     int    // The offset of "<!--".
+	kind      string // The comment's kind as written, such as disable.
+	parameter string // The text from the end of the kind to the next "-->".
+}
+
+// findDirectives returns the markdownlint comments in text, in order, read
+// as markdownlint 0.41.1 reads them (handleInlineConfig in
+// lib/markdownlint.mjs): a comment starts where directiveStart matches, and
+// its parameter runs from the end of its kind to the next "-->". The search
+// for the next comment resumes right after the whitespace or "-->" that
+// ends the kind, so a comment within the parameter of another counts too,
+// and it stops at a comment without a closing "-->".
+func findDirectives(text []byte) []directiveMatch {
+	var found []directiveMatch
+	for pos := 0; pos < len(text); {
+		loc := directiveStart.FindSubmatchIndex(text[pos:])
+		if loc == nil {
+			break
+		}
+		kindStart, kindEnd := pos+loc[2], pos+loc[3]
+		closing := bytes.Index(text[kindEnd:], []byte("-->"))
+		if closing < 0 {
+			break
+		}
+		found = append(found, directiveMatch{
+			start:     pos + loc[0],
+			kind:      string(text[kindStart:kindEnd]),
+			parameter: string(text[kindEnd : kindEnd+closing]),
+		})
+		pos += loc[1]
+	}
+	return found
+}
 
 // collectDirectives returns the markdownlint comments of file in source
 // order. Each comment that takes rules carries the IDs of the rules it
-// names and the notices about its words.
+// names and the notices about its words. Only HTML nodes hold comments, so
+// comments in code and front matter do not count.
 func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDirective {
 	nodes := mdast.FindByKind(file.Root, mdast.NodeHTMLBlock)
 	nodes = append(nodes, mdast.FindByKind(file.Root, mdast.NodeHTMLInline)...)
@@ -62,14 +142,13 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 	resolver := &wordResolver{registry: registry}
 	for _, node := range nodes {
 		rng := node.SourceRange()
-		content := node.Text()
-		for _, match := range directivePattern.FindAllSubmatchIndex(content, -1) {
-			offset := rng.StartOffset + match[0]
+		for _, found := range findDirectives(node.Text()) {
+			offset := rng.StartOffset + found.start
 			line, _ := file.LineAt(offset)
 			directive := inlineDirective{
 				line: line, offset: offset,
-				action:    strings.ToLower(string(content[match[2]:match[3]])),
-				parameter: string(content[match[4]:match[5]]),
+				action:    strings.ToLower(found.kind),
+				parameter: found.parameter,
 			}
 			if takesRules(directive.action) {
 				directive.rules, directive.notices = resolver.ruleList(&directive)

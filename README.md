@@ -213,7 +213,9 @@ MD025 checks document titles, while native MD025 checks all H1 headings.
 Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
 `disable-next-line`, `disable-file`, `enable-file`, `capture`, and `restore`, with
 rule IDs, aliases, or tags. Suppressed findings produce no fixes. Comments inside
-code or frontmatter do not change lint settings.
+code or frontmatter do not change lint settings. As in markdownlint, whitespace
+or `-->` must follow the comment's kind, so a comment such as
+`<!-- markdownlint-disable-next-lines MD009 -->` is plain text and does nothing.
 
 A word in such a comment that names no rule or tag does nothing, as in
 markdownlint. gomdlint warns about it, and names the rules and tags that the
