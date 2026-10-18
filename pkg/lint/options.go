@@ -4,10 +4,13 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // OptionType is the type of a rule option's value, written as
@@ -241,6 +244,41 @@ func describeOptionValue(value any) string {
 // changes. The problems are in order of key.
 func NormalizeOptions(specs []OptionSpec, options map[string]any) (map[string]any, []OptionIssue) {
 	return newOptionTable(specs).normalize(options)
+}
+
+// MarkdownlintRuleConfig converts value, the setting of the registered rule
+// with the given ID in a markdownlint configuration, to gomdlint's settings
+// for the rule (see config.MarkdownlintRuleConfig). Its options are
+// rewritten through the rule's declared options, as NormalizeOptions does:
+// markdownlint's spellings become canonical names, and options that the
+// rule does not read are left out, as markdownlint ignores them. The
+// issues report each option left out or kept in doubt, and two spellings
+// of one option. A rule whose entry does not declare its options keeps
+// them as written.
+func (r *Registry) MarkdownlintRuleConfig(id string, value any) (config.RuleConfig, []OptionIssue) {
+	var issues []OptionIssue
+	cfg := config.MarkdownlintRuleConfig(id, value, func(ruleID string, options map[string]any) map[string]any {
+		normalized, found, declared := r.NormalizeOptions(ruleID, options)
+		if !declared {
+			return options
+		}
+		issues = found
+		var known map[string]any
+		for _, issue := range found {
+			if issue.Kind != OptionIssueUnknown {
+				continue
+			}
+			if known == nil {
+				known = maps.Clone(normalized)
+			}
+			delete(known, issue.Key)
+		}
+		if known != nil {
+			return known
+		}
+		return normalized
+	})
+	return cfg, issues
 }
 
 // optionTable indexes the options that one rule declares by spelling.

@@ -421,6 +421,48 @@ func TestRegistryNormalizeOptions_UndeclaredEntry(t *testing.T) {
 	assert.Empty(t, issues)
 }
 
+// TestRegistryMarkdownlintRuleConfig covers the translation of a rule's
+// setting in a markdownlint configuration through its declared options:
+// markdownlint's spellings become canonical, and options that the rule
+// cannot use are left out, as markdownlint ignores them.
+func TestRegistryMarkdownlintRuleConfig(t *testing.T) {
+	t.Parallel()
+
+	registry := optionsRegistry()
+
+	cfg, issues := registry.MarkdownlintRuleConfig("MD013", map[string]any{
+		"line_length": 100, "tables": false, "line_lenght": 1, "style": 3, "severity": "warning",
+	})
+	assert.Equal(t, map[string]any{"max": 100, "ignore_tables": true}, cfg.Options)
+	require.NotNil(t, cfg.Severity)
+	assert.Equal(t, "warning", *cfg.Severity)
+	require.Len(t, issues, 2)
+	assert.Equal(t, lint.OptionIssueUnknown, issues[0].Kind)
+	assert.Equal(t, "line_lenght", issues[0].Key)
+	assert.Equal(t, lint.OptionIssueWrongType, issues[1].Kind)
+	assert.Equal(t, "style", issues[1].Key)
+
+	cfg, issues = registry.MarkdownlintRuleConfig("MD013", map[string]any{"line_length": 100, "max": 90})
+	assert.Equal(t, map[string]any{"max": 90}, cfg.Options, "the canonical spelling wins")
+	require.Len(t, issues, 1)
+	assert.Equal(t, lint.OptionIssueConflict, issues[0].Kind)
+
+	cfg, issues = registry.MarkdownlintRuleConfig("MD005", map[string]any{"indent": 2})
+	assert.Nil(t, cfg.Options, "a rule without options keeps none")
+	require.Len(t, issues, 1)
+	assert.True(t, issues[0].NoOptions)
+
+	cfg, issues = registry.MarkdownlintRuleConfig("MD999", map[string]any{"any": 1})
+	assert.Equal(t, map[string]any{"any": 1}, cfg.Options, "a rule without declared options keeps what is written")
+	assert.Empty(t, issues)
+
+	cfg, issues = registry.MarkdownlintRuleConfig("MD013", false)
+	require.NotNil(t, cfg.Enabled)
+	assert.False(t, *cfg.Enabled)
+	assert.Nil(t, cfg.Options)
+	assert.Empty(t, issues)
+}
+
 // TestResolveRulesNormalizesOptions covers the options that rules see: the
 // canonical spellings, whatever spelling the configuration used, with
 // rules overriding rule_defaults option by option.

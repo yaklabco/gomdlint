@@ -524,6 +524,45 @@ func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
 		`markdownlint-configure-file at line 1: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?)`)
 }
 
+// TestEngineConfigureFileOptionSpellings covers rule options in
+// markdownlint-configure-file: markdownlint's spellings configure the rule,
+// an unknown option is ignored, as markdownlint ignores it, and two
+// spellings of one option fail the file, as in a config file.
+func TestEngineConfigureFileOptionSpellings(t *testing.T) {
+	long := strings.Repeat("word ", 20) + "end\n"
+	lintWith := func(t *testing.T, settings string) (*lint.FileResult, error) {
+		t.Helper()
+		input := "# Title\n\n<!-- markdownlint-configure-file " + settings + " -->\n\n" + long
+		cfg := config.NewConfig()
+		cfg.EnableRules = []string{"MD013"}
+		cfg.DisableRules = []string{"MD041", "MD033"}
+		return lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+			context.Background(), "test.md", []byte(input), cfg)
+	}
+	// lineLengthFindings counts the findings of MD013 on the long line.
+	lineLengthFindings := func(result *lint.FileResult) int {
+		count := 0
+		for _, diag := range result.Diagnostics {
+			if diag.RuleID == "MD013" && diag.StartLine == 5 {
+				count++
+			}
+		}
+		return count
+	}
+
+	result, err := lintWith(t, `{"MD013": {"line_length": 120}}`)
+	require.NoError(t, err)
+	assert.Zero(t, lineLengthFindings(result), "markdownlint's line_length sets max")
+
+	result, err = lintWith(t, `{"line-length": {"code_blocks": false, "line_lenght": 120}}`)
+	require.NoError(t, err)
+	assert.Equal(t, 1, lineLengthFindings(result), "an unknown option changes nothing")
+
+	_, err = lintWith(t, `{"MD013": {"line_length": 120, "max": 100}}`)
+	require.EqualError(t, err, `file configuration: markdownlint-configure-file at line 3: `+
+		`"line_length" and "max" both set line-length option "max"; keep one of them`)
+}
+
 // TestEngineConfigureFileAppliesKeysInWrittenOrder covers the order in which
 // configure-file comments apply their keys: the order they are written, as
 // in markdownlint 0.41.1, whose getEffectiveConfig applies the keys of its
