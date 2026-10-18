@@ -81,6 +81,11 @@ var regionSnippets = []string{
 	"- [d8]: /eight\n\n  text after a blank line\n- second\n- third\n",
 	"Intro paragraph\n- [d9]: /nine\n  text\n- b\n- c\n- d\n",
 	"> - [d10]: /ten\n>   quoted text\n> - b\n> - c\n",
+	// goldmark can take a definition from a line after one that stays in
+	// the paragraph: a title with a nested parenthesis, or a quoted title
+	// that a definition follows on its closing line.
+	"- a\n- [g1]: /g1\n  (x (y\n  [g2]: /g2\n- c   \n- d\n\n- e\n- f\n",
+	"- a\n- [g3]: /g3\n  \"multi\n  line\" [g4]: /g4\n  text\n- c   \n- d\n- e\n",
 }
 
 // regionEditTexts are the texts random edits insert.
@@ -406,6 +411,10 @@ func TestRegionChecksOnListsThatStartWithDefinitions(t *testing.T) {
 		"definition first": strings.Replace(inside, "- item 0 with trailing spaces   \n",
 			"- [ref0]: /url0\n  text of item 0\n", 1),
 		"loose": strings.ReplaceAll(inside, "   \n- ", "   \n\n- "),
+		// A definition after a line its paragraph keeps, in the item before
+		// the edited ones.
+		"kept line":       "# Title\n\n- a\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n\n- d\n- e\n- f\n",
+		"kept line tight": "# Title\n\n- a\n- [a]: /a\n  (x (y\n  [b]: /b\n- c   \n- d\n- e\n- f\n",
 	}
 	edits := []struct {
 		name     string
@@ -419,6 +428,8 @@ func TestRegionChecksOnListsThatStartWithDefinitions(t *testing.T) {
 		{name: "blank line removed", old: "spaces   \n\n- [ref7]", new: "spaces   \n- [ref7]"},
 		{name: "item split after a definition", old: "text of item 10", new: "text\n- of item 10"},
 		{name: "definition item nested", old: "\n- [ref7]", new: "\n  - [ref7]"},
+		{name: "blank line removed after an item", old: "- c\n\n- d", new: "- c\n- d"},
+		{name: "trailing spaces after a kept line", old: "- c   ", new: "- c"},
 	}
 	cases, decided := 0, 0
 	for docName, doc := range docs {
@@ -435,13 +446,13 @@ func TestRegionChecksOnListsThatStartWithDefinitions(t *testing.T) {
 				}
 				cases++
 				t.Run(docName+"/"+string(flavor)+"/"+tt.name, func(t *testing.T) {
-					edits := []fix.TextEdit{replaceOnce(t, doc, tt.old, tt.new)}
-					want := check.unchanged(fix.ApplyEdits(snapshot.Content, edits))
-					ok, got := check.regionsUnchanged(edits)
-					outlineWant := verifier.acceptsWhole(edits)
+					change := []fix.TextEdit{replaceOnce(t, doc, tt.old, tt.new)}
+					want := check.unchanged(fix.ApplyEdits(snapshot.Content, change))
+					ok, got := check.regionsUnchanged(change)
+					outlineWant := verifier.acceptsWhole(change)
 					outlineOK, outlineGot := false, false
 					if model != nil {
-						outlineOK, outlineGot = model.checkEdits(edits)
+						outlineOK, outlineGot = model.checkEdits(change)
 					}
 					if ok && outlineOK {
 						decided++

@@ -37,16 +37,16 @@ import (
 // block, container offset or blank-line statistic carries over. The context
 // flags of the list parsers are reset when a list or item opens, before they
 // are read; the setext and fence flags live only while their block is open;
-// the first block opened there is marked as following a blank line whatever
-// came before; and link reference definitions become nodes, made from the
-// lines of their paragraph when it closes, and otherwise only matter to
-// inline parsing, which starts once all blocks are closed. So the document
-// falls into
-// groups, each starting at a line where the parser opened a block with no
-// block open, and the blocks of a group parse the same on their own as in
-// the document, given the document's definitions. A group runs from its
-// first line to the first line of the next, blank lines included.
-// docLayout records the groups of the original by wrapping the reader.
+// the blocks opened there are marked as following a blank line whatever came
+// before (the outer loop passes true to openBlocks); and link reference
+// definitions become nodes, made from the lines of their paragraph when it
+// closes, and otherwise only matter to inline parsing, which starts once all
+// blocks are closed. So the document falls into groups, each starting at a
+// line where the parser opened a block with no block open, and the blocks of
+// a group parse the same on their own as in the document, given the
+// document's definitions. A group runs from its first line to the first line
+// of the next, blank lines included. docLayout records the groups of the
+// original by wrapping the reader.
 //
 // Group regions. A group region is a run of whole groups that holds every
 // line an edit changes; an edit that changes the line ending of a line
@@ -72,18 +72,20 @@ import (
 // document. A list is tight, as CommonMark reads it (gmparser.ListTight),
 // when no item makes it loose by following a blank line, unless it is the
 // first item, or by having a block after its first block that follows one
-// (gmparser.ListItemLoose). Only the flags of the item before and of its
-// first block depend on the line before the region, and the rule reads
-// neither: the item before is the region's first item, and no item's first
-// block is read. So the region's list decides for its items as the
-// document does, but for whether the item before follows a blank line,
+// (gmparser.ListItemLoose). The only blank-line flags that depend on the
+// line before the region are those of the blocks opened on the marker line
+// of the item before (the item, its first block, and containers opened on
+// that line with their first items and blocks) and of the nodes goldmark
+// makes from a paragraph opened there (its definitions, the rest of it, or
+// a setext heading made from it). ListItemLoose reads none of them: an
+// item's own flag only when it is not its list's first item, and blocks
+// only after an item's first block, which takes in a paragraph's
+// definitions and its rest. So the region's list decides for its items as
+// the document does, but for whether the item before follows a blank line,
 // which comes from the original, as do the items outside the regions, and
 // the tightness of the edited list follows. goldmark's own IsTight is not
 // used: it reads the rest of a paragraph that starts with link reference
 // definitions as a block of its own, with the flag of the item's first line.
-// docLayout checks that the items give gmparser.ListTight's answer for every
-// list of the original and uses no list regions for a list where they do
-// not.
 //
 // Signatures. The signature of the document is its front matter and the
 // signatures of its top-level blocks in order, and that of a list is a token
@@ -501,15 +503,10 @@ func newLayoutList(list *gmast.List, rec *parseRecord, source []byte, index, gro
 		}
 		model.lines = append(model.lines, line)
 		model.blank = append(model.blank, item.HasBlankPreviousLines())
-		if gmparser.ListItemLoose(item, item == list.FirstChild(), source) {
+		if gmparser.ListItemLoose(item, source) {
 			loose++
 		}
 		model.loose = append(model.loose, loose)
-	}
-	// List regions rely on the items deciding the list's tightness one by
-	// one, so a list whose items do not give its tightness gets none.
-	if (loose == 0) != gmparser.ListTight(list, source) {
-		model.regions = false
 	}
 	return model
 }

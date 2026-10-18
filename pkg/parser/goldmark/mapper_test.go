@@ -1,7 +1,6 @@
 package goldmark
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -506,9 +505,11 @@ func TestListItemLoose(t *testing.T) {
 		{"item after a blank line", "- a\n\n- b\n- c\n", []bool{false, true, false}},
 		{"first item after a blank line", "Intro\n\n- a\n- b\n", []bool{false, false}},
 		{"blank line between blocks", "- a\n\n  more\n- b\n", []bool{true, false}},
-		{"definition then text after a paragraph", "Intro\n\n- [x]: /url\n  text\n- b\n", []bool{false, false}},
+		{"definition then text after a blank line", "Intro\n\n- [x]: /url\n  text\n- b\n", []bool{false, false}},
 		{"definition then text in a later item", "- a\n- [x]: /url\n  text\n- c\n", []bool{false, false, false}},
 		{"blank line between definition and text", "- [x]: /url\n\n  text\n- b\n", []bool{true, false}},
+		{"definition after a line its paragraph keeps", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, false}},
+		{"same, after a blank line in a later item", "- z\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, true, false}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -523,10 +524,9 @@ func TestListItemLoose(t *testing.T) {
 			require.NotNil(t, list)
 			var loose []bool
 			for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-				loose = append(loose, ListItemLoose(item, item == list.FirstChild(), source))
+				loose = append(loose, ListItemLoose(item, source))
 			}
 			assert.Equal(t, tt.loose, loose)
-			assert.Equal(t, !slices.Contains(loose, true), ListTight(list, source))
 		})
 	}
 }

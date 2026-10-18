@@ -323,7 +323,7 @@ func ListTight(list *ast.List, source []byte) bool {
 		return true
 	}
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-		if ListItemLoose(item, item == list.FirstChild(), source) {
+		if ListItemLoose(item, source) {
 			return false
 		}
 	}
@@ -334,10 +334,11 @@ func ListTight(list *ast.List, source []byte) bool {
 // source makes the list loose as CommonMark reads it (see ListTight): it
 // follows a blank line and is not the list's first item, or a block of it
 // after its first block follows a blank line. It reads the blank-line flags
-// of the item and of the blocks after its first block, not those of its
-// first block, which follow from the line before the item.
-func ListItemLoose(item ast.Node, first bool, source []byte) bool {
-	if !first && item.HasBlankPreviousLines() {
+// of the item and of the blocks after its first block, never those of the
+// nodes of its first block, which can carry the flag of the item's first
+// line.
+func ListItemLoose(item ast.Node, source []byte) bool {
+	if item.PreviousSibling() != nil && item.HasBlankPreviousLines() {
 		return true
 	}
 	end := firstBlockEnd(item.FirstChild(), source)
@@ -354,22 +355,47 @@ func ListItemLoose(item ast.Node, first bool, source []byte) bool {
 
 // firstBlockEnd returns the last node of an item's first block, which starts
 // at node. That is node itself unless it is a link reference definition.
-// Then the block is the paragraph the definition started: it runs over the
-// definitions on the lines that follow and ends with the node that starts
-// on the line after the last of them, which holds the rest of the paragraph
-// (text or a setext heading) or a block that ended it. Definitions after a
-// blank line started another paragraph and are a block of their own.
+// Then the block is the paragraph the definition started, which goldmark
+// splits into a node for each definition, placed before the rest of the
+// paragraph (text or a setext heading) when any is left. Only the first of
+// those definitions takes the paragraph's blank-line flag; a definition
+// that starts another paragraph follows a blank line, since a paragraph
+// ends only at a blank line or at a block that interrupts it, which would
+// come between them. So the block runs over the definitions that follow
+// without a blank line, and ends with the node after them when that node
+// starts before the last of them ends or on the line after it: the rest of
+// the paragraph, which keeps the paragraph's flag and whose lines can come
+// between the definitions when goldmark takes a definition from a line
+// after one that the paragraph keeps, or a block that ended the paragraph.
 func firstBlockEnd(node ast.Node, source []byte) ast.Node {
 	if _, ok := node.(*ast.LinkReferenceDefinition); !ok {
 		return node
 	}
-	for next := node.NextSibling(); next != nil && startsOnNextLine(node, next, source); next = node.NextSibling() {
-		node = next
-		if _, ok := next.(*ast.LinkReferenceDefinition); !ok {
-			break
+	for next := node.NextSibling(); next != nil; next = node.NextSibling() {
+		if _, ok := next.(*ast.LinkReferenceDefinition); ok {
+			if next.HasBlankPreviousLines() {
+				break
+			}
+			node = next
+			continue
 		}
+		if startsInside(node, next) || startsOnNextLine(node, next, source) {
+			node = next
+		}
+		break
 	}
 	return node
+}
+
+// startsInside reports whether next starts before prev ends, as the rest of
+// a paragraph does when its lines come between the definitions taken from
+// it. Blocks without lines never do.
+func startsInside(prev, next ast.Node) bool {
+	prevLines, nextLines := prev.Lines(), next.Lines()
+	if prevLines.Len() == 0 || nextLines.Len() == 0 {
+		return false
+	}
+	return nextLines.At(0).Start < prevLines.At(prevLines.Len()-1).Stop
 }
 
 // startsOnNextLine reports whether the first line of next is the line after

@@ -621,6 +621,11 @@ func TestListTightnessFollowsCommonMark(t *testing.T) {
 		{"blank line between definition and text", "- [x]: /url\n\n  text\n- b\n", []bool{false}},
 		{"blank line between text and definition", "- a\n\n  [x]: /url\n- b\n", []bool{false}},
 		{"blank line after the text that follows a definition", "- [x]: /url\n  text\n\n  more\n- b\n", []bool{false}},
+		{"definition after a line its paragraph keeps", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{true}},
+		{"definition after a quoted line its paragraph keeps", "Intro\n\n- [a]: /a\n  \"multi\n  line\" [b]: /b\n  text\n- c\n", []bool{true}},
+		{"setext heading after a line its paragraph keeps", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n  ===\n- c\n", []bool{true}},
+		{"definition after a kept line, then a blank line", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n\n  more\n- c\n", []bool{false}},
+		{"blank line in a quote between definition and text", "> - [x]: /url\n>\n>   text\n> - b\n", []bool{false}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
