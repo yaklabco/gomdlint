@@ -348,7 +348,7 @@ The harness fails a scenario rather than ignore part of its sidecar. These
 sidecars are rejected:
 
 - A sidecar with any other key, such as a misspelled `flavour`, or with a rule
-  setting such as `severity`, `enabled` or `auto_fix`.
+  setting such as `severity`, `enabled` or `auto_fix`, even one set to null.
 - A sidecar with an invalid flavor or an unknown rule, or one that uses a rule
   name such as `proper-names` instead of the rule ID.
 - An empty sidecar, a sidecar with more than one YAML document, or a rule entry

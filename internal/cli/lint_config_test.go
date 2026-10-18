@@ -388,6 +388,21 @@ func TestLintReadsRuleOptionsOutsideOptions(t *testing.T) {
 			assert.Contains(t, got.stdout, "line-length")
 		})
 	}
+
+	// Linting copies the configuration for a file with a
+	// markdownlint-configure-file comment, and the copy keeps the option.
+	t.Run("file with a configure-file comment", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":        "# Title\n\n<!-- markdownlint-configure-file {\"MD009\": false} -->\n\nA line of more than twenty characters.\n",
+			".gomdlint.yml": "rules:\n  line-length:\n    line_length: 20\n",
+		})
+
+		got := execute(t, "lint", "--color", "never", "--no-context", "doc.md")
+
+		assert.Empty(t, got.stderr)
+		assert.Contains(t, got.stdout, "doc.md:5:21")
+		assert.Contains(t, got.stdout, "line-length")
+	})
 }
 
 func TestLintAppliesSeverityDefault(t *testing.T) {

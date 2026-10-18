@@ -196,7 +196,8 @@ func TestRuleConfig_RejectsAnOptionWrittenTwice(t *testing.T) {
 				`line 3: "line_length" and "options.line_length" both set option "line_length"; keep one of them`)
 			var conflict *config.FlatOptionConflictError
 			require.ErrorAs(t, err, &conflict)
-			assert.Equal(t, config.FlatOptionConflictError{Name: "line_length", Line: 3}, *conflict)
+			assert.Equal(t, config.FlatOptionConflictError{Section: "rules", Rule: "MD013", Name: "line_length", Line: 3},
+				*conflict)
 		})
 	}
 
@@ -317,39 +318,121 @@ rules:
 		cfg.Rules["MD009"].Options)
 }
 
-// TestRuleConfig_FlatOptionsStayUnreadUntilResolved covers decoding, which
-// keeps the options written directly under the rule key unread, so that
-// only the options a rule declares need decoding. A flat key whose value
-// cannot be decoded, here one that holds the rule's own settings, decodes,
-// and ResolveFlatOptions drops it without reading it, while it reads the
-// options that it is told the rule reads. FromYAML, which does not know
-// the rules, reads every flat key as an option.
-func TestRuleConfig_FlatOptionsStayUnreadUntilResolved(t *testing.T) {
+// TestReadFlatOptions_ReadsOnlyAcceptedKeys covers decoding, which reads
+// the settings and the options under options and leaves the keys written
+// directly under the rule key alone, and ReadFlatOptions, which reads the
+// keys that it is told the rule reads from the document, under rules and
+// rule_defaults. A key that it is not told to read keeps its value
+// unread, so a value that cannot be decoded, here one that holds the
+// rule's own settings, does no harm.
+func TestReadFlatOptions_ReadsOnlyAcceptedKeys(t *testing.T) {
 	t.Parallel()
 
-	var cfg config.Config
+	var doc yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte(`rules:
   MD013: &length
     enabled: false
     options: {max: 100}
     metadata: *length
     line_length: 90
-`), &cfg))
+rule_defaults:
+  MD009:
+    br_spaces: 3
+    note: 1
+`), &doc))
+	var cfg config.Config
+	require.NoError(t, doc.Decode(&cfg))
 
 	rule := cfg.Rules["MD013"]
 	require.NotNil(t, rule.Enabled)
 	assert.False(t, *rule.Enabled)
-	assert.Equal(t, map[string]any{"max": 100}, rule.Options, "flat options wait to be read")
+	assert.Equal(t, map[string]any{"max": 100}, rule.Options, "decoding leaves the flat keys alone")
+	assert.Nil(t, cfg.RuleDefaults["MD009"].Options)
 
-	dropped, err := rule.ResolveFlatOptions(func(name string) bool { return name == "line_length" })
-	require.NoError(t, err)
-	assert.Equal(t, []string{"metadata"}, dropped)
-	assert.Equal(t, map[string]any{"max": 100, "line_length": 90}, rule.Options)
+	var asked []string
+	require.NoError(t, config.ReadFlatOptions(&doc, &cfg, func(rule, option string) bool {
+		asked = append(asked, rule+"."+option)
+		return option == "line_length" || option == "br_spaces"
+	}))
 
-	dropped, err = rule.ResolveFlatOptions(func(string) bool { return true })
+	assert.ElementsMatch(t, []string{"MD013.line_length", "MD013.metadata", "MD009.br_spaces", "MD009.note"}, asked)
+	assert.Equal(t, map[string]any{"max": 100, "line_length": 90}, cfg.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"br_spaces": 3}, cfg.RuleDefaults["MD009"].Options)
+}
+
+// TestRuleConfig_CloneKeepsEverythingDecoded covers Clone of a decoded
+// configuration, under rules and rule_defaults, whether decoding read the
+// flat options, as FromYAML does, or left them to ReadFlatOptions, as
+// decoding with yaml.Unmarshal does: the copy holds exactly what the
+// configuration holds, so nothing is waiting to be read that a copy could
+// lose.
+func TestRuleConfig_CloneKeepsEverythingDecoded(t *testing.T) {
+	t.Parallel()
+
+	content := []byte(`rules:
+  MD013:
+    severity: error
+    line_length: 100
+    options:
+      tables: false
+rule_defaults:
+  MD009:
+    br_spaces: 3
+`)
+	read, err := config.FromYAML(content)
 	require.NoError(t, err)
-	assert.Empty(t, dropped, "no flat option is left to read")
-	assert.Equal(t, map[string]any{"max": 100, "line_length": 90}, rule.Options)
+	assert.Equal(t, map[string]any{"line_length": 100, "tables": false}, read.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"br_spaces": 3}, read.RuleDefaults["MD009"].Options)
+
+	var decoded config.Config
+	require.NoError(t, yaml.Unmarshal(content, &decoded))
+
+	for name, cfg := range map[string]*config.Config{"FromYAML": read, "yaml.Unmarshal": &decoded} {
+		clone := cfg.Clone()
+		assert.Equal(t, settled(cfg.Rules), settled(clone.Rules), "%s: rules", name)
+		assert.Equal(t, settled(cfg.RuleDefaults), settled(clone.RuleDefaults), "%s: rule_defaults", name)
+	}
+}
+
+// settled returns a copy of rules in which empty options are nil: both set
+// nothing, and Clone writes nil options as an empty mapping.
+func settled(rules map[string]config.RuleConfig) map[string]config.RuleConfig {
+	copied := make(map[string]config.RuleConfig, len(rules))
+	for key, rule := range rules {
+		if len(rule.Options) == 0 {
+			rule.Options = nil
+		}
+		copied[key] = rule
+	}
+	return copied
+}
+
+// TestRuleConfig_FlatOptionsFollowYAMLKeySelection covers keys whose
+// selection yaml.v3 decides in its own way: a numeric key that a written
+// key and a merged key both spell, where yaml.v3 compares the merged key
+// with the written one by type, and a null key, which decoding into a map
+// of strings skips. An option written directly under the rule key is
+// selected exactly as under options.
+func TestRuleConfig_FlatOptionsFollowYAMLKeySelection(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.FromYAML([]byte(`rules:
+  MD013:
+    <<: {'10': 80}
+    10: 100
+    ~: 5
+  MD009:
+    options:
+      <<: {'10': 80}
+      10: 100
+      ~: 5
+`))
+	require.NoError(t, err)
+
+	var selected map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte("<<: {'10': 80}\n10: 100\n~: 5\n"), &selected))
+	assert.Equal(t, selected, cfg.Rules["MD009"].Options, "under options, yaml.v3 selects the keys")
+	assert.Equal(t, selected, cfg.Rules["MD013"].Options, "directly under the rule key, the same keys")
 }
 
 // TestRuleConfig_FlatOptionsThroughMergesAndAliases covers flat options

@@ -103,6 +103,11 @@ func TestLoad_FlatOptionsMergeByOption(t *testing.T) {
 			user:    "rules:\n  MD013:\n    line_length: 90\n    strict: true\n",
 			project: "rules:\n  line-length:\n    options:\n      max: 100\n",
 		},
+		{
+			name:    "flat over flat",
+			user:    "rules:\n  MD013:\n    line_length: 90\n    strict: true\n",
+			project: "rules:\n  line-length:\n    line_length: 100\n",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -115,8 +120,54 @@ func TestLoad_FlatOptionsMergeByOption(t *testing.T) {
 
 			merged := mergeFiles(t, user, project)
 			assert.Equal(t, map[string]any{"max": 100, "strict": true}, merged.Rules["MD013"].Options)
+
+			// rule_defaults merges the same way.
+			userDefaults := filepath.Join(dir, "user-defaults.yml")
+			projectDefaults := filepath.Join(dir, "project-defaults.yml")
+			require.NoError(t, os.WriteFile(userDefaults, []byte(strings.Replace(tt.user, "rules:", "rule_defaults:", 1)), 0o600))
+			require.NoError(t, os.WriteFile(projectDefaults,
+				[]byte(strings.Replace(tt.project, "rules:", "rule_defaults:", 1)), 0o600))
+
+			merged = mergeFiles(t, userDefaults, projectDefaults)
+			assert.Equal(t, map[string]any{"max": 100, "strict": true}, merged.RuleDefaults["MD013"].Options)
 		})
 	}
+}
+
+// TestMergeAll_KeepsFlatOptions checks that merging configurations that
+// FromYAML read, under rules and rule_defaults, keeps the options that each
+// writes directly under a rule key, option by option.
+func TestMergeAll_KeepsFlatOptions(t *testing.T) {
+	t.Parallel()
+
+	base, err := config.FromYAML([]byte(
+		"rules:\n  MD013:\n    line_length: 90\n    strict: true\nrule_defaults:\n  MD009:\n    br_spaces: 3\n    strict: true\n"))
+	require.NoError(t, err)
+	override, err := config.FromYAML([]byte(
+		"rules:\n  MD013:\n    line_length: 100\nrule_defaults:\n  MD009:\n    br_spaces: 4\n"))
+	require.NoError(t, err)
+
+	merged := MergeAll(base, override)
+	assert.Equal(t, map[string]any{"line_length": 100, "strict": true}, merged.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"br_spaces": 4, "strict": true}, merged.RuleDefaults["MD009"].Options)
+}
+
+// TestLoad_CloneKeepsFlatOptions checks that a copy of a loaded
+// configuration, such as the one that linting makes for a file with a
+// markdownlint-configure-file comment, keeps the options that the file
+// writes directly under rule keys, under rules and rule_defaults.
+func TestLoad_CloneKeepsFlatOptions(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "rules:\n  line-length:\n    line_length: 100\n"+
+		"rule_defaults:\n  no-trailing-spaces:\n    br_spaces: 3\n")
+	require.NoError(t, err)
+
+	clone := result.Config.Clone()
+	assert.Equal(t, map[string]any{"max": 100}, clone.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"br_spaces": 3}, clone.RuleDefaults["MD009"].Options)
+	assert.Equal(t, result.Config.Rules, clone.Rules)
+	assert.Equal(t, result.Config.RuleDefaults, clone.RuleDefaults)
 }
 
 // TestLoad_RejectsAnOptionSetFlatAndUnderOptions checks an option set both
@@ -263,6 +314,20 @@ func TestLoad_NativeSettingsBesideAKeyThatHoldsThem(t *testing.T) {
 		result.Config.Rules["MD013"])
 	assert.Equal(t, []string{`.gomdlint.yml:6: unknown option "metadata" for line-length; it is ignored`},
 		relativeWarnings(result.Warnings, ".gomdlint.yml"))
+}
+
+// TestLoad_RejectsADeclaredFlatOptionThatCannotDecode checks a key
+// written directly under the rule key that spells an option of the rule,
+// whose value holds the rule's own settings. The option is read, so its
+// value must decode, and loading fails with an error that names the rule,
+// the line and the option.
+func TestLoad_RejectsADeclaredFlatOptionThatCannotDecode(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadProject(t, "rules:\n  MD013: &length\n    line_length: *length\n")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		`.gomdlint.yml: rules.MD013: line 3: option "line_length": yaml: anchor 'length' value contains itself`)
 }
 
 // TestLoad_UnknownOptionWrittenTwiceOnlyWarns checks an unknown option

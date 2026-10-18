@@ -41,11 +41,15 @@ type goldenSidecar struct {
 	// by rules through the configuration. Empty keeps the product default.
 	Flavor config.Flavor `yaml:"flavor"`
 
-	// Rules holds rule options keyed by rule ID. They decode as a config
+	// Rules holds rule options keyed by rule ID. They read as a config
 	// file's do, so they may sit under options, directly under the rule ID
-	// as markdownlint writes them, or both. loadGoldenConfig rejects the
-	// other rule settings.
+	// as markdownlint writes them, or both (see decodeGoldenSidecar).
+	// loadGoldenConfig rejects the other rule settings.
 	Rules map[string]config.RuleConfig `yaml:"rules"`
+
+	// settings holds, for each rule key, the first rule setting other than
+	// options that the sidecar writes for it (see writtenRuleSettings).
+	settings map[string]string
 }
 
 // loadGoldenConfig builds the configuration for one fixture from its sidecar.
@@ -86,41 +90,62 @@ func loadGoldenConfig(path string) (*config.Config, error) {
 			}
 			return nil, fmt.Errorf("sidecar %s: rules.%s: unknown rule", path, key)
 		}
-		ruleCfg := sidecar.Rules[key]
-		// Every key directly under the rule ID is read as an option, so that
-		// checkSidecarOptions rejects those the rule does not read.
-		if _, err := ruleCfg.ResolveFlatOptions(func(string) bool { return true }); err != nil {
-			return nil, fmt.Errorf("sidecar %s: rules.%s: %w", path, key, err)
-		}
-		if setting := firstRuleSetting(ruleCfg); setting != "" {
+		if setting := sidecar.settings[key]; setting != "" {
 			return nil, fmt.Errorf("sidecar %s: rules.%s.%s: a sidecar sets rule options only", path, key, setting)
 		}
-		if len(ruleCfg.Options) == 0 {
+		options := sidecar.Rules[key].Options
+		if len(options) == 0 {
 			return nil, fmt.Errorf("sidecar %s: rules.%s sets no options", path, key)
 		}
-		if err := checkSidecarOptions(rule, ruleCfg.Options); err != nil {
+		if err := checkSidecarOptions(rule, options); err != nil {
 			return nil, fmt.Errorf("sidecar %s: rules.%s: %w", path, key, err)
 		}
-		cfg.Rules[key] = config.RuleConfig{Options: ruleCfg.Options}
+		cfg.Rules[key] = config.RuleConfig{Options: options}
 	}
 
 	return cfg, nil
 }
 
-// firstRuleSetting returns the key of the first rule setting other than the
-// options that ruleCfg sets, or "" when it sets none. The harness runs a
-// case's rules itself, with fixes on and their own severities, so it cannot
-// honour one.
-func firstRuleSetting(ruleCfg config.RuleConfig) string {
-	switch {
-	case ruleCfg.Enabled != nil:
-		return "enabled"
-	case ruleCfg.Severity != nil:
-		return "severity"
-	case ruleCfg.AutoFix != nil:
-		return "auto_fix"
+// writtenRuleSettings returns, for each rule key of doc, the parsed
+// sidecar, the first rule setting other than options that it writes for
+// the rule, whatever its value: the harness runs a case's rules itself,
+// with fixes on and their own severities, so it cannot honour one, and a
+// setting that is null is written all the same. Keys count as decoding
+// takes them, after merge keys. A bare true or false is markdownlint's
+// shorthand for enabled.
+func writtenRuleSettings(doc *yaml.Node) (map[string]string, error) {
+	var shape struct {
+		Rules map[string]yaml.Node `yaml:"rules"`
 	}
-	return ""
+	if err := doc.Decode(&shape); err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+
+	settings := make(map[string]string)
+	for key, node := range shape.Rules {
+		target := &node
+		for target.Kind == yaml.AliasNode {
+			target = target.Alias
+		}
+		switch target.Kind {
+		case yaml.ScalarNode:
+			if target.ShortTag() == "!!bool" {
+				settings[key] = "enabled"
+			}
+		case yaml.MappingNode:
+			var written map[string]yaml.Node
+			if err := target.Decode(&written); err != nil {
+				return nil, fmt.Errorf("parse: %w", err)
+			}
+			for _, setting := range []string{"enabled", "severity", "auto_fix"} {
+				if _, ok := written[setting]; ok {
+					settings[key] = setting
+					break
+				}
+			}
+		}
+	}
+	return settings, nil
 }
 
 // checkSidecarOptions checks options, the options of rule in a sidecar,
@@ -144,10 +169,11 @@ func checkSidecarOptions(rule lint.Rule, options map[string]any) error {
 }
 
 // decodeGoldenSidecar decodes exactly one YAML document, rejecting unknown keys
-// outside the rules. The settings of each rule decode as a config file's do,
-// where every key that is no rule setting is an option, so loadGoldenConfig
-// checks them. Option values decode into the same Go types as in the
-// product's YAML loader.
+// outside the rules. The settings of each rule read as a config file's do,
+// and every key under a rule ID that is no rule setting is read as an
+// option (see config.ReadFlatOptions), so that loadGoldenConfig rejects
+// those the rule does not read. Option values decode into the same Go types
+// as in the product's YAML loader.
 func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
 	var sidecar goldenSidecar
 
@@ -172,6 +198,18 @@ func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
 
 	if sidecar.Flavor == "" && len(sidecar.Rules) == 0 {
 		return goldenSidecar{}, errEmptySidecar
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
+	}
+	rules := config.Config{Rules: sidecar.Rules}
+	if err := config.ReadFlatOptions(&doc, &rules, func(string, string) bool { return true }); err != nil {
+		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
+	}
+	if sidecar.settings, err = writtenRuleSettings(&doc); err != nil {
+		return goldenSidecar{}, err
 	}
 
 	return sidecar, nil

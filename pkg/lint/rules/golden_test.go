@@ -444,6 +444,10 @@ rules:
 		{name: "rule turned on", content: "rules:\n  MD044:\n    enabled: true\n    names: [GitHub]\n", wantErr: "rules.MD044.enabled"},
 		{name: "rule shorthand", content: "rules:\n  MD044: true\n", wantErr: "rules.MD044.enabled"},
 		{name: "rule auto-fix", content: "rules:\n  MD044:\n    auto_fix: false\n    names: [GitHub]\n", wantErr: "rules.MD044.auto_fix"},
+		{name: "null severity", content: "rules:\n  MD013:\n    max: 100\n    severity: null\n", wantErr: "rules.MD013.severity"},
+		{name: "null enabled", content: "rules:\n  MD013:\n    max: 100\n    enabled:\n", wantErr: "rules.MD013.enabled"},
+		{name: "null auto-fix", content: "rules:\n  MD013:\n    max: 100\n    auto_fix: ~\n", wantErr: "rules.MD013.auto_fix"},
+		{name: "merged severity", content: "rules:\n  MD013:\n    <<: {severity: null}\n    max: 100\n", wantErr: "rules.MD013.severity"},
 		{
 			name:    "unknown option",
 			content: "rules:\n  MD044:\n    options:\n      nmes: [GitHub]\n",
