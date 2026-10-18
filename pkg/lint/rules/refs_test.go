@@ -844,6 +844,73 @@ func TestDescriptiveLinkTextRule_MarkdownlintPositions(t *testing.T) {
 	}, positions(map[string]any{"prohibited_texts": []any{"https example com", "here"}}))
 }
 
+// TestReferenceLinkImagesRule_Footnotes checks MD052 against markdownlint
+// 0.41.1, which reads GFM footnotes: "[^label]" calls a footnote when a line
+// starts with "[^label]:", in any container and before or after the call,
+// so it is not an undefined reference. goldmark reads no footnotes, and
+// takes such a line for a paragraph unless it is also a link reference
+// definition.
+func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name     string
+		input    string
+		want     []position // With shortcut_syntax.
+		wantFull []position // Without it.
+	}{
+		{name: "definition before the call", input: "# T\n\n[^first]: Defined before.\n\nUse [^first] here.\n"},
+		{name: "definition after the call", input: "# T\n\nUse [^first] here.\n\n[^first]: Defined after.\n"},
+		{name: "labels in another case", input: "# T\n\nUse [^Second].\n\n[^second]: Two words.\n"},
+		{name: "definition in a list item", input: "# T\n\nUse [^third].\n\n- item\n\n  [^third]: In a list.\n"},
+		{name: "definition in a blockquote", input: "# T\n\nUse [^q].\n\n> [^q]: In a quote.\n"},
+		{name: "definition that interrupts a paragraph", input: "# T\n\nUse [^n].\nSome text\n[^n]: Interrupts the paragraph.\n"},
+		{name: "escaped bracket in the label", input: "# T\n\nUse [^e\\]x].\n\n[^e\\]x]: Escaped bracket.\n"},
+		{name: "indented definition", input: "# T\n\nUse [^i].\n\n   [^i]: Indented three.\n"},
+		{
+			name:  "undefined footnotes",
+			input: "# T\n\nMore [^missing] and [^] and [^ x] text.\n",
+			want:  []position{{3, 6}, {3, 21}, {3, 29}},
+		},
+		{
+			name:  "label with a space is no footnote",
+			input: "# T\n\nUse [^a b].\n\n[^a b]: Not a footnote.\n",
+			want:  []position{{3, 5}, {5, 1}},
+		},
+		{name: "definition in code", input: "# T\n\nUse [^c].\n\n```\n[^c]: in code\n```\n", want: []position{{3, 5}}},
+		{name: "definition in HTML", input: "# T\n\nUse [^h].\n\n<div>\n[^h]: in html\n</div>\n", want: []position{{3, 5}}},
+		{
+			// The second bracket pair calls the footnote, so the first is
+			// a shortcut reference of its own.
+			name:  "footnote call after link text",
+			input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n",
+			want:  []position{{3, 5}},
+		},
+	}
+
+	positions := func(input string, options map[string]any) []position {
+		diags := applyRuleWithOptions(t, NewReferenceLinkImagesRule(), input, options)
+		got := make([]position, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, position{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			wantFull := tt.wantFull
+			if wantFull == nil {
+				wantFull = []position{}
+			}
+			assert.Equal(t, want, positions(tt.input, map[string]any{"shortcut_syntax": true}), "with shortcut_syntax")
+			assert.Equal(t, wantFull, positions(tt.input, nil), "without shortcut_syntax")
+		})
+	}
+}
+
 func TestRuleMetadata(t *testing.T) {
 	tests := []struct {
 		rule         lint.Rule

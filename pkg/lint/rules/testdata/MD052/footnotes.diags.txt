@@ -1,0 +1,1 @@
+footnotes.input.md:6:35 warning Reference link uses undefined label [^missing] (MD052/reference-links-images)

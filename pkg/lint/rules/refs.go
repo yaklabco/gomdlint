@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -121,6 +122,11 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 // shortcut_syntax is set, whose label matches no definition. The parser turns
 // every reference with a defined label into a link or image, so only the
 // reference syntax it left as text can be undefined.
+//
+// Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
+// "[^label]" calls a footnote when the document defines it with a line that
+// starts "[^label]:", so it is no undefined reference. In "[text][^label]"
+// the second pair calls the footnote, so the first is a shortcut reference.
 func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -136,6 +142,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		ignoredSet[refs.NormalizeLabel(label)] = true
 	}
 
+	var footnotes map[string]bool
 	var diags []lint.Diagnostic
 
 	for _, usage := range refCtx.Usages {
@@ -147,34 +154,143 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			continue
 		}
 
+		label, normalized, style := usage.Label, usage.NormalizedLabel, usage.Style
+		// A defined label can still stay text, for example when the link
+		// text contains another link, so only labels with no definition
+		// are reported.
+		defined := usage.ResolvedDefinition != nil
+		if strings.HasPrefix(label, "^") {
+			if footnotes == nil {
+				footnotes = gfmFootnoteLabels(ctx)
+			}
+			if footnotes[normalized] {
+				if style != refs.StyleFull || !validShortcutLabel(usage.Text) {
+					continue
+				}
+				label, normalized, style = usage.Text, refs.NormalizeLabel(usage.Text), refs.StyleShortcut
+				defined = refCtx.Definitions[normalized] != nil
+			}
+		}
+
 		// Skip shortcut unless configured to check
-		if usage.Style == refs.StyleShortcut && !includeShortcut {
+		if style == refs.StyleShortcut && !includeShortcut {
 			continue
 		}
 
 		// Skip ignored labels
-		if ignoredSet[usage.NormalizedLabel] {
+		if ignoredSet[normalized] || defined {
 			continue
 		}
 
-		// A defined label can still stay text, for example when the link text
-		// contains another link, so only report labels with no definition.
-		if usage.ResolvedDefinition == nil {
-			kind := "link"
-			if usage.IsImage {
-				kind = "image"
-			}
-
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, usage.Position,
-				fmt.Sprintf("Reference %s uses undefined label [%s]", kind, displayLabel(usage.Label))).
-				WithSeverity(config.SeverityWarning).
-				WithSuggestion("Define the reference or use inline syntax").
-				Build()
-			diags = append(diags, diag)
+		kind := "link"
+		if usage.IsImage {
+			kind = "image"
 		}
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, usage.Position,
+			fmt.Sprintf("Reference %s uses undefined label [%s]", kind, displayLabel(label))).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Define the reference or use inline syntax").
+			Build()
+		diags = append(diags, diag)
 	}
 
 	return diags, nil
+}
+
+// validShortcutLabel reports whether link text can be the label of a
+// shortcut reference: it holds a character other than whitespace and no
+// unescaped bracket.
+func validShortcutLabel(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	for idx := 0; idx < len(text); idx++ {
+		switch text[idx] {
+		case '\\':
+			idx++
+		case '[', ']':
+			return false
+		}
+	}
+	return true
+}
+
+// gfmFootnoteLabels returns the normalized labels, each with its "^", of
+// the footnote definitions GFM reads in the file: lines outside code and
+// HTML blocks that start with "[^label]:" after their container prefix.
+func gfmFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
+	labels := make(map[string]bool)
+	htmlLines := htmlBlockLines(ctx)
+	for line := ctx.File.FrontMatterLines + 1; line <= len(ctx.File.Lines); line++ {
+		if ctx.IsLineInCodeBlock(line) || htmlLines[line] {
+			continue
+		}
+		if label, ok := footnoteDefinitionLabel(withoutContainerPrefix(lint.LineText(ctx.File, line))); ok {
+			labels[refs.NormalizeLabel("^"+label)] = true
+		}
+	}
+	return labels
+}
+
+// withoutContainerPrefix returns text after the blockquote markers, list
+// item markers and indentation that start it.
+func withoutContainerPrefix(text []byte) []byte {
+	for len(text) > 0 {
+		switch ch := text[0]; {
+		case ch == ' ' || ch == '\t' || ch == '>':
+			text = text[1:]
+		case (ch == '-' || ch == '+' || ch == '*') && len(text) > 1 && (text[1] == ' ' || text[1] == '\t'):
+			text = text[2:]
+		case ch >= '0' && ch <= '9':
+			digits := 1
+			for digits < len(text) && digits < 9 && text[digits] >= '0' && text[digits] <= '9' {
+				digits++
+			}
+			if digits+1 >= len(text) || (text[digits] != '.' && text[digits] != ')') ||
+				(text[digits+1] != ' ' && text[digits+1] != '\t') {
+				return text
+			}
+			text = text[digits+2:]
+		default:
+			return text
+		}
+	}
+	return text
+}
+
+// maxFootnoteLabel is the most characters GFM allows in a footnote label.
+const maxFootnoteLabel = 999
+
+// footnoteDefinitionLabel returns the label of a GFM footnote definition
+// that starts text, "[^label]:", as written. As in micromark, the label is
+// not empty, holds no space, tab, line ending or "[", and a backslash
+// escapes a bracket or backslash after it.
+func footnoteDefinitionLabel(text []byte) (string, bool) {
+	if !bytes.HasPrefix(text, []byte("[^")) {
+		return "", false
+	}
+	size := 0
+	for idx := len("[^"); idx < len(text); {
+		char, width := utf8.DecodeRune(text[idx:])
+		switch {
+		case size > maxFootnoteLabel:
+			return "", false
+		case char == ']':
+			if size == 0 || idx+1 >= len(text) || text[idx+1] != ':' {
+				return "", false
+			}
+			return string(text[len("[^"):idx]), true
+		case char == '[' || char == ' ' || char == '\t' || char == '\r' || char == '\n':
+			return "", false
+		case char == '\\' && idx+1 < len(text) && (text[idx+1] == '[' || text[idx+1] == '\\' || text[idx+1] == ']'):
+			idx += 2
+			size += 2
+			continue
+		}
+		idx += width
+		size++
+	}
+	return "", false
 }
 
 // displayLabel returns a label for a message, with each run of whitespace,
