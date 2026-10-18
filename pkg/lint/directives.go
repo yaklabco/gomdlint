@@ -787,7 +787,7 @@ func directiveStates(file *mdast.FileSnapshot, directives []inlineDirective, reg
 	state := make(map[string]bool)
 	states := make(map[string][]bool)
 	for _, rule := range registry.Rules() {
-		state[rule.ID()] = resolveRule(rule, cfg).Enabled
+		state[rule.ID()] = resolveRule(rule, cfg, nil).Enabled
 		states[rule.ID()] = make([]bool, len(file.Lines)+1)
 	}
 	set := func(directive inlineDirective) {

@@ -74,6 +74,14 @@ type RuleMeta struct {
 	// Options describes the options the rule reads. An empty list declares
 	// nothing: it does not mean that the rule has no options.
 	Options []OptionSpec
+
+	// OptionsDeclared reports that Options lists every option the rule
+	// reads, so that an empty list means it reads none. The registry then
+	// rewrites the rule's options to their canonical names before the rule
+	// runs (see NormalizeOptions), and configuration checks report any
+	// other option as unknown. Every built-in rule's entry declares its
+	// options.
+	OptionsDeclared bool
 }
 
 // clone returns a copy of meta that shares no slices with it.
@@ -83,6 +91,8 @@ func (meta RuleMeta) clone() RuleMeta {
 	meta.Options = slices.Clone(meta.Options)
 	for idx := range meta.Options {
 		meta.Options[idx].Aliases = slices.Clone(meta.Options[idx].Aliases)
+		meta.Options[idx].Values = slices.Clone(meta.Options[idx].Values)
+		meta.Options[idx].Default = cloneOptionValue(meta.Options[idx].Default)
 	}
 	return meta
 }
@@ -96,14 +106,30 @@ type OptionSpec struct {
 	// spelling where gomdlint names an option differently.
 	Aliases []OptionAlias
 
-	// Type names the type of the option's value, such as boolean, integer,
-	// string or list.
-	Type string
+	// Type is the type of the option's value.
+	Type OptionType
 
-	// Default is the value the rule uses when the option is not set.
+	// Default is the value the rule uses when the option is not set. It is
+	// nil for an option that turns on a check of its own when it is set,
+	// such as MD047's max_trailing_blank_lines, which limits nothing
+	// unless set.
 	Default any
 
-	// Description says what the option controls.
+	// DefaultFrom names another option of the rule, whose value this one
+	// takes when it is not set, as heading_max takes max's. Default is
+	// then the value that both take when neither is set.
+	DefaultFrom string
+
+	// Values lists the strings that the option allows, for an option that
+	// allows only these. It is empty for an option that takes any value of
+	// its type.
+	Values []string
+
+	// GomdlintOnly reports that markdownlint has no such option. Every
+	// option of a rule that markdownlint lacks is one.
+	GomdlintOnly bool
+
+	// Description says what the option controls, in plain text.
 	Description string
 }
 
@@ -123,4 +149,16 @@ type OptionAlias struct {
 // shares with markdownlint their markdownlint IDs, such as MD009.
 func IsGomdlintOnlyRule(id string) bool {
 	return strings.HasPrefix(id, "MDL")
+}
+
+// cloneOptionValue returns a copy of value, an option's value, that shares
+// no list with it.
+func cloneOptionValue(value any) any {
+	switch typed := value.(type) {
+	case []string:
+		return slices.Clone(typed)
+	case []any:
+		return slices.Clone(typed)
+	}
+	return value
 }

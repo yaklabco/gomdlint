@@ -36,8 +36,9 @@ type ResolvedRule struct {
 func ResolveRules(registry *Registry, cfg *config.Config) []ResolvedRule {
 	var resolved []ResolvedRule
 
+	declared := registry.lookups().options
 	for _, rule := range registry.Rules() {
-		rr := resolveRule(rule, cfg)
+		rr := resolveRule(rule, cfg, declared[rule.ID()])
 		if rr.Enabled {
 			resolved = append(resolved, rr)
 		}
@@ -62,7 +63,13 @@ func ruleListed(list []string, rule Rule) bool {
 // Settings apply in increasing precedence: the rule's built-in defaults,
 // severity_default, rule_defaults, rules, then the command-line lists
 // (EnableRules, DisableRules and FixRules), which name rules by ID or name.
-func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
+//
+// declared holds the options that the rule's catalog entry declares, or is
+// nil. With them, the options of rule_defaults and of rules are each
+// rewritten to canonical names (see NormalizeOptions) before rules
+// override rule_defaults option by option, so that the rule reads every
+// option under its canonical name. The configuration is never changed.
+func resolveRule(rule Rule, cfg *config.Config, declared *optionTable) ResolvedRule {
 	rr := ResolvedRule{
 		Rule:     rule,
 		Enabled:  rule.DefaultEnabled(),
@@ -83,6 +90,7 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 	}
 
 	if baseline, ok := cfg.RuleDefaults[rule.ID()]; ok {
+		baseline.Options = canonicalOptions(declared, baseline.Options)
 		rr.Config = &baseline
 		if baseline.Enabled != nil {
 			rr.Enabled = *baseline.Enabled
@@ -97,6 +105,7 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 
 	// Apply rule-specific config.
 	if ruleCfg, ok := cfg.Rules[rule.ID()]; ok {
+		ruleCfg.Options = canonicalOptions(declared, ruleCfg.Options)
 		if rr.Config != nil && rr.Config.Options != nil {
 			options := maps.Clone(rr.Config.Options)
 			maps.Copy(options, ruleCfg.Options)
@@ -133,4 +142,17 @@ func resolveRule(rule Rule, cfg *config.Config) ResolvedRule {
 	rr.AutoFix = rr.Fixable && cfg.Fix
 
 	return rr
+}
+
+// canonicalOptions returns values, the options of one configuration
+// section for a rule, rewritten to the canonical names of declared, the
+// rule's declared options, or values itself when declared is nil. Of two
+// spellings of one option, the canonical one wins: configuration files
+// reject both, but a configuration built in code may hold them.
+func canonicalOptions(declared *optionTable, values map[string]any) map[string]any {
+	if declared == nil {
+		return values
+	}
+	normalized, _ := declared.normalize(values)
+	return normalized
 }

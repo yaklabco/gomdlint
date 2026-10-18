@@ -83,6 +83,10 @@ type ruleIndex struct {
 
 	// rules lists the rules with their identifiers, for Suggest.
 	rules []indexedRule
+
+	// options maps the ID of each registered rule whose catalog entry
+	// declares its options (RuleMeta.OptionsDeclared) to those options.
+	options map[string]*optionTable
 }
 
 // directiveWord says what a word of a markdownlint comment, or a key of a
@@ -229,6 +233,22 @@ func (r *Registry) Resolve(key string) (string, Rule, bool) {
 // tags that rules report themselves through Rule.Tags do not count.
 func (r *Registry) RulesByTag(tag string) []Rule {
 	return slices.Clone(r.lookups().tags[foldKey(tag)])
+}
+
+// NormalizeOptions rewrites options, the options of the registered rule
+// with the given ID, to the canonical names of the options that its
+// catalog entry declares, and reports the problems it finds, as the
+// function NormalizeOptions does. It reports false, and returns options as
+// they are without problems, when no registered rule has the ID, given
+// exactly as registered, or when the rule's entry does not declare its
+// options (RuleMeta.OptionsDeclared).
+func (r *Registry) NormalizeOptions(id string, options map[string]any) (map[string]any, []OptionIssue, bool) {
+	table := r.lookups().options[id]
+	if table == nil {
+		return options, nil, false
+	}
+	normalized, issues := table.normalize(options)
+	return normalized, issues, true
 }
 
 // Suggestion is a rule or a tag that Suggest offers in place of a key.
@@ -431,6 +451,7 @@ func (r *Registry) buildIndex() *ruleIndex {
 		tagSpellings:      make(map[string]string),
 		words:             make(map[string]*directiveWord),
 		markdownlintNames: make(map[string]string),
+		options:           make(map[string]*optionTable),
 	}}
 
 	// The catalog's words come from every entry, registered or not, so that
@@ -456,6 +477,9 @@ func (r *Registry) buildIndex() *ruleIndex {
 		}
 		build.rules = append(build.rules, indexed)
 		build.addTags(rule, meta)
+		if meta.OptionsDeclared {
+			build.options[id] = newOptionTable(meta.Options)
+		}
 	}
 
 	build.tagNames = slices.Sorted(maps.Keys(build.tags))
