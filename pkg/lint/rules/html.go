@@ -64,11 +64,8 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		span := block.SourceRange()
-		sources.with(block, func(source []byte) {
-			for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
-				report(construct, allowed)
-			}
+		eachHTMLBlockConstruct(&sources, block, func(_ []byte, construct mdscan.HTMLConstruct) {
+			report(construct, allowed)
 		})
 	}
 
@@ -187,6 +184,24 @@ func (s *htmlSources) construct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
 		construct, ok = htmlNodeConstruct(source, node)
 	})
 	return construct, ok
+}
+
+// eachHTMLBlockConstruct calls use with each raw HTML construct that
+// markdownlint finds in an HTML block (see htmlBlockInlineHTML), and with
+// the block's source, from which the construct reads. The source is valid
+// only during the call.
+func eachHTMLBlockConstruct(sources *htmlSources, block *mdast.Node, use func(source []byte, construct mdscan.HTMLConstruct)) {
+	ranges := htmlBlockInlineHTML(sources.file, block)
+	if len(ranges) == 0 {
+		return
+	}
+	sources.with(block, func(source []byte) {
+		for _, raw := range ranges {
+			if construct, ok := mdscan.MatchHTML(source[:raw.EndOffset], raw.StartOffset); ok {
+				use(source, construct)
+			}
+		}
+	})
 }
 
 // with calls use with the source of node. The source is valid only during

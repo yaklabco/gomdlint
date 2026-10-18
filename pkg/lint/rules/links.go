@@ -428,12 +428,7 @@ func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 		}
 	}
 	for _, block := range ctx.HTMLBlocks() {
-		span := block.SourceRange()
-		sources.with(block, func(source []byte) {
-			for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
-				keep(source, construct)
-			}
-		})
+		eachHTMLBlockConstruct(&sources, block, keep)
 	}
 	for _, inline := range ctx.HTMLInlines() {
 		sources.with(inline, func(source []byte) {

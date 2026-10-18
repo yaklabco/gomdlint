@@ -215,6 +215,55 @@ func TestInlineHTMLRule_EachElement(t *testing.T) {
 			input: "<div>a < b and c<d</div>\n",
 			want:  []htmlDiagWant{{1, 1, "div"}},
 		},
+		// markdownlint 0.41.1 reads an HTML block's lines as Markdown in
+		// which no line starts an HTML block or indented code, so a tag is
+		// code in a code span or a fenced code block, and text after a
+		// backslash or as a link destination.
+		{
+			name:  "tag in a code span in a block",
+			input: "<div>\n`<span>` inside\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}},
+		},
+		{
+			name:  "tags in code spans with longer backtick strings",
+			input: "<div>\n``<span>`` and `` ` <em> ` ``\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}},
+		},
+		{
+			name:  "tag after an unmatched backtick",
+			input: "<div>\n`<span>\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 2, "span"}},
+		},
+		{
+			name:  "escaped tag in a block",
+			input: "<div>\n\\<em> escaped and <b>bold</b>\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 19, "b"}},
+		},
+		{
+			name:  "tag in a fenced code block in a block",
+			input: "<pre>\n```html\n<i>fenced</i>\n```\n</pre>\n",
+			want:  []htmlDiagWant{{1, 1, "pre"}},
+		},
+		{
+			name:  "tag as a link destination in a block",
+			input: "<div>\n[link](<b>) and <https://example.com/<i>\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 38, "i"}},
+		},
+		{
+			name:  "code span in a quoted block",
+			input: "> <div>\n> `<span>` in a quote and <span\n> class=\"x\">split</span>\n> </div>\n",
+			want:  []htmlDiagWant{{1, 3, "div"}, {2, 27, "span"}},
+		},
+		{
+			name:  "code span in a block in a list item",
+			input: "- <details>\n  `<summary>` in an item and <summary>real</summary>\n  </details>\n",
+			want:  []htmlDiagWant{{1, 3, "details"}, {2, 30, "summary"}},
+		},
+		{
+			name:  "indented tags in a block",
+			input: "<table>\n    <tr><td>indented <b>cells</b></td></tr>\n</table>\n",
+			want:  []htmlDiagWant{{1, 1, "table"}, {2, 5, "tr"}, {2, 9, "td"}, {2, 22, "b"}},
+		},
 	}
 
 	for _, tt := range tests {

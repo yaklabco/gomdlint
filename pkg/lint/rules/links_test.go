@@ -427,6 +427,13 @@ func TestImageAltTextRule_HTMLImages(t *testing.T) {
 		{name: "uppercase element name", input: "Text <IMG SRC=\"a.png\"> here.\n", want: []position{{1, 6}}},
 		{name: "img inside HTML block", input: "<p>\n  <img src=\"a.png\">\n</p>\n", want: []position{{2, 3}}},
 		{name: "img inside HTML comment", input: "<!-- <img src=\"a.png\"> -->\n"},
+		{
+			// markdownlint reads an HTML block's lines as Markdown, so an
+			// img in a code span there is code.
+			name:  "img in a code span in an HTML block",
+			input: "<div>\n`<img src=\"a.png\">` code\n<img src=\"b.png\">\n</div>\n",
+			want:  []position{{3, 1}},
+		},
 		{name: "other elements ignored", input: "<div class=\"x\">text</div>\n"},
 		{name: "quoted HTML block img spanning lines", input: "> <img src=\"a.png\"\n> alt=\"x\">\n"},
 		{name: "quoted inline img spanning lines", input: "> Text <img src=\"a.png\"\n> alt=\"x\"> more.\n"},
