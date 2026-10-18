@@ -1,0 +1,10 @@
+exit code 0
+-- stdout --
+notices.md (1 issue)
+  notices.md:5:15  warning  no-trailing-spaces  Trailing whitespace
+    Suggestion: Remove trailing whitespace
+
+1 issue (1 warning), in 1 file, 1 fixable
+-- stderr --
+WARN notices.md:3: markdownlint-disable: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
+WARN notices.md:7: markdownlint-disable: deprecated tag "lists" (write its rules instead: ul-style); it will stop working in a later release

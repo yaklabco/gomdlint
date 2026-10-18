@@ -209,6 +209,7 @@ func (r *Runner) processFile(
 		if pr.FileResult != nil {
 			outcome.RuleErrors = pr.RuleErrorList()
 			outcome.SkippedEdits = pr.SkippedEdits
+			outcome.Notices = pr.Notices
 		}
 	}()
 

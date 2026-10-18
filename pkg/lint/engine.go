@@ -108,6 +108,13 @@ type FileResult struct {
 	// the rule returned, a recovered panic (ErrRulePanic) or invalid fix edits
 	// (ErrInvalidFix). Every value is a *RuleError.
 	RuleErrors map[string]error
+
+	// Notices lists the problems with the file's markdownlint comments that
+	// change neither its findings nor the exit code: words that name no rule
+	// or tag, and gomdlint's former tags. They follow the comments in source
+	// order, each comment's words in order, and the keys of a configure-file
+	// comment in the order it applies them.
+	Notices []Notice
 }
 
 // HasIssues returns true if any diagnostics were found.
@@ -217,15 +224,17 @@ func (e *Engine) lintFile(
 	}
 
 	// Resolve which rules to run.
-	cfg, err = configureFile(collectDirectives(snapshot, e.Registry), e.Registry, cfg)
+	directives := collectDirectives(snapshot, e.Registry)
+	cfg, err = configureFile(directives, e.Registry, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("file configuration: %w", err)
 	}
-	states := directiveStates(snapshot, e.Registry, cfg)
+	states := directiveStates(snapshot, directives, e.Registry, cfg)
 
 	result := &FileResult{
 		Snapshot:   snapshot,
 		RuleErrors: make(map[string]error),
+		Notices:    directiveNotices(directives),
 	}
 
 	validator := fix.NewValidator(content)

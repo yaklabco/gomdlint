@@ -79,11 +79,18 @@ type SARIFRun struct {
 type SARIFInvocation struct {
 	ExecutionSuccessful        bool                `json:"executionSuccessful"`
 	ToolExecutionNotifications []SARIFNotification `json:"toolExecutionNotifications,omitempty"`
+
+	// ToolConfigurationNotifications reports problems with the
+	// configuration that a file's markdownlint comments hold, such as a
+	// comment that names no rule, as warnings at the comment's line. They
+	// do not make the run unsuccessful.
+	ToolConfigurationNotifications []SARIFNotification `json:"toolConfigurationNotifications,omitempty"`
 }
 
 // SARIFNotification reports a problem the tool met while running, such as a
-// file it could not read or a rule that failed, as opposed to a finding in a
-// file.
+// file it could not read or a rule that failed, or a problem with its
+// configuration, such as a markdownlint comment that names no rule, as
+// opposed to a finding in a file.
 type SARIFNotification struct {
 	Level     string          `json:"level"`
 	Message   SARIFMessage    `json:"message"`
@@ -294,6 +301,7 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 				builder.addResult(file, &file.Result.Diagnostics[idx])
 			}
 			builder.addRuleFailures(file.Path, file.Result.RuleErrors)
+			builder.addNotices(file.Path, file.Notices)
 		}
 		for _, err := range result.Errors {
 			if err != nil {
@@ -407,6 +415,23 @@ func (b *sarifRunBuilder) failure(message, path string) SARIFNotification {
 // notify appends a notification to the run's invocation.
 func (b *sarifRunBuilder) notify(notification SARIFNotification) {
 	b.invocation.ToolExecutionNotifications = append(b.invocation.ToolExecutionNotifications, notification)
+}
+
+// addNotices records the notices of the file at path, problems with the
+// configuration that its markdownlint comments hold, as warning
+// configuration notifications located at each comment's line.
+func (b *sarifRunBuilder) addNotices(path string, notices []lint.Notice) {
+	for _, notice := range notices {
+		location := SARIFPhysicalLocation{ArtifactLocation: b.locator.locate(path)}
+		if notice.Line > 0 {
+			location.Region = &SARIFRegion{StartLine: notice.Line}
+		}
+		b.invocation.ToolConfigurationNotifications = append(b.invocation.ToolConfigurationNotifications, SARIFNotification{
+			Level:     "warning",
+			Message:   SARIFMessage{Text: notice.Message},
+			Locations: []SARIFLocation{{PhysicalLocation: location}},
+		})
+	}
 }
 
 // addResult appends the result for diag, which refers to its rule's

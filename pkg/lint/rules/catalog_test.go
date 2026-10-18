@@ -1,10 +1,12 @@
 package rules
 
 import (
+	"cmp"
 	"maps"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,6 +85,22 @@ func TestCatalogIdentifiersNameOneRule(t *testing.T) {
 	}
 }
 
+// TestCatalogWordsAreASCII checks that every identifier and tag is ASCII.
+// Configuration files resolve them through Registry.Lookup, which folds
+// case Go's way, and markdownlint comments by markdownlint's key, which
+// folds it as JavaScript's toUpperCase does. The two agree on ASCII words,
+// so keeping the built-in words ASCII keeps them in agreement.
+func TestCatalogWordsAreASCII(t *testing.T) {
+	for _, meta := range Catalog() {
+		words := append(append([]string{meta.ID, meta.Name, meta.MarkdownlintName}, meta.Aliases...), meta.Tags...)
+		for _, word := range words {
+			for _, char := range word {
+				assert.Less(t, char, rune(utf8.RuneSelf), "%s: %q", meta.ID, word)
+			}
+		}
+	}
+}
+
 func TestCatalogCategories(t *testing.T) {
 	rulesPerCategory := make(map[lint.Category]int)
 	for _, meta := range Catalog() {
@@ -113,12 +131,19 @@ func TestCatalogFollowsMarkdownlint(t *testing.T) {
 		assert.Equal(t, !fromMarkdownlint, lint.IsGomdlintOnlyRule(meta.ID), "%s: gomdlint-only rule", meta.ID)
 		if !fromMarkdownlint {
 			assert.Empty(t, meta.Aliases, "%s: markdownlint has no names for its own rules", meta.ID)
+			assert.Empty(t, meta.MarkdownlintName, "%s: markdownlint has no names for its own rules", meta.ID)
 			assert.NotEmpty(t, meta.Tags, "%s: tags", meta.ID)
 			continue
 		}
 		shared = append(shared, meta.ID)
 
 		assert.Equal(t, row.Tags, meta.Tags, "%s: tags", meta.ID)
+
+		// Markdownlint comments name the rule by markdownlint's first name,
+		// which MarkdownlintName records only where it is not Name.
+		require.NotEmpty(t, row.Aliases, "%s: markdownlint's names", meta.ID)
+		assert.Equal(t, row.Aliases[0], cmp.Or(meta.MarkdownlintName, meta.Name), "%s: markdownlint's first name", meta.ID)
+		assert.NotEqual(t, meta.Name, meta.MarkdownlintName, "%s: MarkdownlintName repeats Name", meta.ID)
 
 		// The aliases are markdownlint's names for the rule other than its
 		// gomdlint name, in markdownlint's order.

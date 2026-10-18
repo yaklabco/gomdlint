@@ -213,10 +213,30 @@ MD025 checks document titles, while native MD025 checks all H1 headings.
 Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
 `disable-next-line`, `disable-file`, `enable-file`, `capture`, and `restore`, with
 rule IDs, aliases, or tags. Suppressed findings produce no fixes. Comments inside
-code or frontmatter do not change lint settings.
+code or frontmatter do not change lint settings. As in markdownlint, whitespace
+or `-->` must follow the comment's kind, so a comment such as
+`<!-- markdownlint-disable-next-lines MD009 -->` is plain text and does nothing.
+Unlike markdownlint, gomdlint also reads a comment split over several lines,
+and it reads every comment after one that lacks its closing `-->`, where
+markdownlint can skip some.
+
+A word in such a comment that names no rule or tag does nothing, as in
+markdownlint. gomdlint warns about it, and names the rules and tags that the
+word most likely means when some are close. gomdlint's former tags `style`,
+`lists`, `layout`, `metadata`, `gfm` and `tables` still work, but markdownlint
+does not know them. Each use gets a warning that names the rules the tag
+covers, and the tags will stop working in a later release. These warnings name
+rules as markdownlint does, such as `ul-style` for `unordered-list-style`, so
+that the comment works in markdownlint too. The warnings go to stderr in every
+output format. JSON output also lists them under each file's `notices`, and
+SARIF output as `toolConfigurationNotifications`. They never change findings
+or the exit code, even with `--strict`.
 
 `markdownlint-configure-file` accepts a JSON object of markdownlint settings and
 applies it to the whole file. Invalid JSON and unknown rule keys fail that file.
+markdownlint applies the object's keys in the order they are written, while
+gomdlint applies the keys that name rules after the others, so a rule's own
+setting wins over its tag's wherever it is written.
 Migration does not evaluate JavaScript configuration or resolve `extends`.
 
 Override configuration via command line (`--enable`, `--disable`) or environment variables (`GOMDLINT_*`).

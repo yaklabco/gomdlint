@@ -3,6 +3,7 @@ package lint_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,6 +50,149 @@ func TestEngineMarkdownlintDirectives(t *testing.T) {
 			}
 			require.Equal(t, tt.wantLines, lines)
 			require.Len(t, result.Edits, len(tt.wantLines), "suppressed diagnostics must not produce fixes")
+		})
+	}
+}
+
+// TestEngineDirectiveGrammarFollowsMarkdownlint lints comments that
+// markdownlint 0.41.1 reads as directives, or as plain text, and checks the
+// lines on which no-trailing-spaces reports. The expected lines come from
+// markdownlint 0.41.1 itself, run on the same documents with only MD009
+// enabled. As in its inlineCommentStartRe, the comment's kind must be
+// followed by whitespace or "-->", whitespace is JavaScript's, and case
+// folds ASCII letters only. A comment inside the parameter of another
+// counts too, because markdownlint resumes its search right after the kind.
+func TestEngineDirectiveGrammarFollowsMarkdownlint(t *testing.T) {
+	tests := []struct {
+		name, input string
+		want        []int
+		plain       bool // The comment is plain text, so it gets no notices.
+	}{
+		{name: "disable-next-lines", input: "# T\n\n<!-- markdownlint-disable-next-lines MD009 -->\nbad \n\nstill bad \n", want: []int{4, 6}, plain: true},
+		{
+			name:  "capture-x",
+			input: "# T\n\n<!-- markdownlint-disable MD009 -->\n<!-- markdownlint-capture-x -->\n<!-- markdownlint-enable MD009 -->\n<!-- markdownlint-restore -->\n\nbad \n",
+			want:  []int{8},
+		},
+		{name: "disablex", input: "# T\n\n<!-- markdownlint-disablex MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "disable-file2", input: "# T\n\n<!-- markdownlint-disable-file2 MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "configure-file-brace", input: "# T\n\n<!-- markdownlint-configure-file{\"MD009\": false} -->\nbad \n", want: []int{4}, plain: true},
+		{name: "dashes-then-space", input: "# T\n\n<!-- markdownlint-disable--  -->\nbad \n", want: []int{4}, plain: true},
+		{name: "kelvin-sign", input: "# T\n\n<!-- mar\u212adownlint-disable MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "long-s", input: "# T\n\n<!-- markdownlint-di\u017fable MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "disable-closed", input: "# T\n\n<!-- markdownlint-disable-->\nbad \n"},
+		{name: "disable-file-closed", input: "# T\n\nbad \n\n<!-- markdownlint-disable-file-->\n"},
+		{name: "disable-next-line-closed", input: "# T\n\n<!-- markdownlint-disable-next-line-->\nbad \nbad \n", want: []int{5}},
+		{name: "disable-line-closed", input: "# T\n\nbad <!-- markdownlint-disable-line--> \nbad \n", want: []int{4}},
+		{name: "enable-closed", input: "# T\n\n<!-- markdownlint-disable MD009 -->\nbad \n<!-- markdownlint-enable-->\nbad \n", want: []int{6}},
+		{name: "enable-file-closed", input: "# T\n\n<!-- markdownlint-disable-file MD009 -->\n<!-- markdownlint-enable-file-->\nbad \n", want: []int{5}},
+		{
+			name:  "capture-restore-closed",
+			input: "# T\n\n<!-- markdownlint-capture-->\n<!-- markdownlint-disable MD009 -->\nbad \n<!-- markdownlint-restore-->\nbad \n",
+			want:  []int{7},
+		},
+		{name: "configure-file-closed", input: "# T\n\n<!-- markdownlint-configure-file {\"MD009\": false}-->\nbad \n"},
+		{name: "upper-case", input: "# T\n\n<!-- MARKDOWNLINT-DISABLE MD009 -->\nbad \n"},
+		{name: "tab", input: "# T\n\n<!-- markdownlint-disable\tMD009 -->\nbad \n"},
+		{name: "no-break-spaces", input: "# T\n\n<!--\u00a0markdownlint-disable\u00a0MD009 -->\nbad \n"},
+		{name: "nested", input: "# T\n\n<!-- markdownlint-disable <!-- markdownlint-enable MD009 -->\nbad \n", want: []int{4}},
+		// The parameter splits into words at JavaScript's whitespace too,
+		// which holds the byte order mark but not the next-line character.
+		{name: "feff-separator", input: "# T\n\n<!-- markdownlint-disable\ufeffMD009 -->\nbad \n"},
+		{name: "feff-between-words", input: "# T\n\n<!-- markdownlint-disable MD010\ufeffMD009 -->\nbad \n"},
+		{name: "next-line-is-no-space", input: "# T\n\n<!-- markdownlint-disable MD010\u0085MD009 -->\nbad \n", want: []int{4}},
+		{name: "next-line-after-word", input: "# T\n\n<!-- markdownlint-disable MD009\u0085 -->\nbad \n", want: []int{4}},
+		// Go and JavaScript disagree on these two characters around the kind.
+		{name: "next-line-after-kind", input: "# T\n\n<!-- markdownlint-disable\u0085MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "vertical-tab-before-name", input: "# T\n\n<!--\u000bmarkdownlint-disable MD009 -->\nbad \n"},
+		// The disable comment reads the capture comment's words too.
+		{name: "nested-capture-word", input: "# T\n\n<!-- markdownlint-disable <!-- markdownlint-capture MD009 -->\nbad \n"},
+	}
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	describeCatalog(registry)
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(tt.input), config.NewConfig())
+			require.NoError(t, err)
+
+			var lines []int
+			for _, diag := range result.Diagnostics {
+				lines = append(lines, diag.StartLine)
+			}
+			assert.Equal(t, tt.want, lines)
+			if tt.plain {
+				assert.Empty(t, result.Notices, "a comment that is no directive gets no notices")
+			}
+		})
+	}
+}
+
+// TestEngineDirectiveWordsFoldCaseAsMarkdownlint covers words that
+// markdownlint upper-cases with JavaScript's toUpperCase before it looks
+// them up, which turns the long s, the dotless i and ligatures such as st
+// into ASCII letters but leaves the dotted capital I and the Kelvin sign as
+// they are. The expected findings come from markdownlint 0.41.1, run on the
+// same documents with MD009, MD012 and MD032 on.
+func TestEngineDirectiveWordsFoldCaseAsMarkdownlint(t *testing.T) {
+	tests := []struct {
+		name, input string
+		want        []string // line:rule
+	}{
+		{name: "long s", input: "# T\n\n<!-- markdownlint-disable no-trailing-\u017fpaces -->\nbad \n"},
+		{name: "dotless i", input: "# T\n\n<!-- markdownlint-disable no-tra\u0131ling-spaces -->\nbad \n"},
+		{name: "long s in a tag", input: "# T\n\n<!-- markdownlint-disable white\u017fpace -->\nbad \n"},
+		{name: "ligature st", input: "# T\n\n<!-- markdownlint-disable blanks-around-li\ufb06s -->\nText\n- item\n"},
+		{name: "dotted capital i", input: "# T\n\n<!-- markdownlint-disable NO-TRA\u0130LING-SPACES -->\nbad \n", want: []string{"4:MD009"}},
+		{name: "kelvin sign", input: "# T\n\n<!-- markdownlint-disable no-multiple-blan\u212as -->\nText.\n\n\nMore.\n", want: []string{"6:MD012"}},
+		{
+			name:  "configure-file key",
+			input: "# T\n\n<!-- markdownlint-configure-file {\"no-trailing-\u017fpaces\": false} -->\nbad \n",
+		},
+	}
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	registry.Register(rules.NewMultipleBlankLinesRule())
+	registry.Register(rules.NewBlanksAroundListsRule())
+	describeCatalog(registry)
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(tt.input), config.NewConfig())
+			require.NoError(t, err)
+
+			var got []string
+			for _, diag := range result.Diagnostics {
+				got = append(got, fmt.Sprintf("%d:%s", diag.StartLine, diag.RuleID))
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestEngineConfigureFileRuleKeysInAnySpelling covers the order in which a
+// configure-file comment applies its keys: tags first, then rules, so that
+// a rule's own setting wins over its tag's. A rule key counts as one in
+// every spelling that markdownlint reads as the rule, as it does when the
+// key resolves. Each document writes the rule key last, so markdownlint,
+// which applies keys in the order they are written, applies it last too:
+// markdownlint 0.41.1 reports MD009 on line 5 for each of them.
+func TestEngineConfigureFileRuleKeysInAnySpelling(t *testing.T) {
+	for _, key := range []string{"no-trailing-spaces", "NO-TRAILING-SPACES", "no-trailing-\u017fpaces", "no-tra\u0131ling-spaces"} {
+		t.Run(key, func(t *testing.T) {
+			input := "# T\n\n<!-- markdownlint-configure-file " +
+				"{\"default\": false, \"whitespace\": false, \"" + key + "\": true} -->\n\nbad \n"
+
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+				context.Background(), "test.md", []byte(input), config.NewConfig())
+			require.NoError(t, err)
+
+			var got []string
+			for _, diag := range result.Diagnostics {
+				got = append(got, fmt.Sprintf("%d:%s", diag.StartLine, diag.RuleID))
+			}
+			assert.Equal(t, []string{"5:MD009"}, got)
 		})
 	}
 }

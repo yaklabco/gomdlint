@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"math"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -281,18 +280,15 @@ func combineEdits(content []byte, edits []fix.TextEdit) (fix.TextEdit, bool) {
 	}, true
 }
 
-// lineDirectivePattern matches the start of an inline directive that turns
-// rules on or off for part of a file.
-var lineDirectivePattern = regexp.MustCompile(`(?i)<!--\s*markdownlint-(?:disable|enable|capture|restore)`)
-
 // hasLineDirectives reports whether a file holds an inline directive that
 // can turn rules on or off for some lines only, so that some diagnostics of
 // a rule may be suppressed while others are kept. It looks where the engine
-// looks for directives, in HTML blocks and inline HTML.
+// looks for directives, in HTML blocks and inline HTML, and reads them as the
+// engine does (see lint.HasInlineDirective).
 func hasLineDirectives(file *mdast.FileSnapshot) bool {
 	return mdast.FindFirst(file.Root, func(node *mdast.Node) bool {
 		return (node.Kind == mdast.NodeHTMLBlock || node.Kind == mdast.NodeHTMLInline) &&
-			lineDirectivePattern.Match(node.Text())
+			lint.HasInlineDirective(node.Text())
 	}) != nil
 }
 

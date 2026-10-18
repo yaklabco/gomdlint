@@ -42,6 +42,13 @@ type FileOutcome struct {
 	// applied because their fix conflicted with another fix. It is empty
 	// unless the fix loop stopped early (Exhausted or Oscillated).
 	SkippedEdits []lint.SkippedEdit
+
+	// Notices lists the problems with the file's markdownlint comments that
+	// change neither its findings nor the exit code, such as a word that
+	// names no rule (see lint.Notice), in the order of the comments. Like
+	// the diagnostics, they describe the content that Result reports on,
+	// and they are empty when Result is nil. They do not fail the file.
+	Notices []lint.Notice
 }
 
 // Failed reports whether the file could not be linted completely, which

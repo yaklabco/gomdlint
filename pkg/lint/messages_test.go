@@ -27,6 +27,17 @@ func TestRuleErrorLeadsWithRuleName(t *testing.T) {
 		(&lint.RuleError{RuleID: "MD009", Err: cause}).Error(), "a rule without a name")
 }
 
+// TestUnknownKeyTextKeepsTheWordsOfAConfigFile covers the remedy for a key
+// of several words in a configuration file, whose keys gomdlint reads by
+// its own names: it keeps the words as written.
+func TestUnknownKeyTextKeepsTheWordsOfAConfigFile(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t,
+		`unknown rule "unordered-list-style MD009" (a key names one rule or tag; write "unordered-list-style" and "MD009" as separate keys)`,
+		lint.DefaultRegistry.UnknownKeyText("unordered-list-style MD009"))
+}
+
 func TestUnknownRuleText(t *testing.T) {
 	t.Parallel()
 

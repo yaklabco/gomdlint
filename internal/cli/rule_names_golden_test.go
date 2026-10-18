@@ -51,6 +51,13 @@ func TestRuleNameMessagesGolden(t *testing.T) {
 			args: []string{"lint", "--disable", "no-trailling-spaces", "doc.md"},
 		},
 		{
+			// Flags name rules by gomdlint's names, even for a typo of a
+			// markdownlint name. Only markdownlint comments offer
+			// markdownlint's names.
+			name: "lint-disable-alias-typo",
+			args: []string{"lint", "--disable", "ul-styel", "doc.md"},
+		},
+		{
 			// A typo of a tag, an ID as close to many rules as to any, and
 			// a name like no rule, in all three rule flags.
 			name: "lint-rule-flags-unknown",
@@ -92,6 +99,13 @@ func TestRuleNameMessagesGolden(t *testing.T) {
 				"configured.md": "<!-- markdownlint-configure-file {\"MD009 MD010\": false} -->\n\n" + ruleNameDoc,
 			},
 			args: []string{"lint", "--color", "never", "--no-context", "configured.md"},
+		},
+		{
+			// A typo in a markdownlint comment silences nothing, and a
+			// former gomdlint tag still works. Both get a warning.
+			name:  "lint-directive-notices",
+			files: map[string]string{"notices.md": noticeDoc},
+			args:  []string{"lint", "--color", "never", "--no-context", "notices.md"},
 		},
 	}
 

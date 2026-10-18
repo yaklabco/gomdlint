@@ -38,13 +38,24 @@ func UnknownRuleText(key string, suggestions []Suggestion) string {
 	return text + " (did you mean " + joinChoices(choices, "or") + "?)"
 }
 
+// deprecatedTagText describes tag, a deprecated tag that covers the rules
+// named in names, for a warning: `deprecated tag "style" (write its rules
+// instead: heading-style, unordered-list-style); it will stop working in a
+// later release`.
+func deprecatedTagText(tag string, names []string) string {
+	return fmt.Sprintf("deprecated tag %q (write its rules instead: %s); it will stop working in a later release",
+		tag, strings.Join(names, ", "))
+}
+
 // IsSingleWord reports whether key is one word: not empty, and free of
-// whitespace. Only such a key can name a rule or a tag in a markdownlint
-// configuration object, such as a .markdownlint.json file or a
-// markdownlint-configure-file comment: markdownlint looks those keys up
-// whole, ignoring only case, and no rule identifier or tag holds
-// whitespace. Lookup and RulesByTag ignore surrounding whitespace, so check
-// a key with IsSingleWord before resolving it as markdownlint would.
+// whitespace. Only such a key can name a built-in rule or tag in a
+// markdownlint configuration file, such as .markdownlint.json:
+// markdownlint looks those keys up whole, ignoring only case, and no
+// built-in identifier or tag holds whitespace. Lookup and RulesByTag ignore
+// surrounding whitespace, so check a key with IsSingleWord before resolving
+// it through them as markdownlint would. markdownlint-configure-file
+// comments resolve their keys through the registry's index of
+// markdownlint keys instead (see lookupWord).
 func IsSingleWord(key string) bool {
 	return key != "" && !strings.ContainsFunc(key, unicode.IsSpace)
 }
@@ -59,9 +70,15 @@ func (r *Registry) UnknownKeyText(key string) string {
 	if len(words) < 2 || !r.allKnown(words) {
 		return UnknownRuleText(key, r.Closest(key))
 	}
+	return severalWordsKeyText(key, words)
+}
 
-	quoted := make([]string, len(words))
-	for idx, word := range words {
+// severalWordsKeyText describes key, a key of several words that each name a
+// rule or tag, which names nothing, because markdownlint reads a key as one
+// name. It says to write the words of writeAs as separate keys.
+func severalWordsKeyText(key string, writeAs []string) string {
+	quoted := make([]string, len(writeAs))
+	for idx, word := range writeAs {
 		quoted[idx] = strconv.Quote(word)
 	}
 	return fmt.Sprintf("unknown rule %q (a key names one rule or tag; write %s as separate keys)",

@@ -38,13 +38,16 @@ type Registry struct {
 	byName map[string]Rule
 	meta   map[string]RuleMeta // rule ID -> catalog entry
 
-	// index serves Lookup, RulesByTag and Suggest. Every change sets it to
-	// nil, and the next lookup builds a new one. A built index never
-	// changes, so a reader may use it after releasing the lock.
+	// index serves every lookup of identifiers, tags and names. Every
+	// change sets it to nil, and the next lookup builds a new one. A built
+	// index never changes, so a reader may use it after releasing the lock.
 	index *ruleIndex
 }
 
-// ruleIndex maps lower-cased identifiers and tags to the registered rules.
+// ruleIndex maps the identifiers and tags of the registered rules, and the
+// words of the catalog, to the rules: lower-cased for Lookup, RulesByTag
+// and Suggest, and by markdownlint's key for the words of markdownlint
+// comments and the keys of configure-file objects.
 type ruleIndex struct {
 	// keys maps the IDs, names and aliases of the rules to the rules. An ID
 	// takes precedence over a name, and a name over an alias.
@@ -53,19 +56,55 @@ type ruleIndex struct {
 	// tags maps the tags of the rules' catalog entries to the rules.
 	tags map[string][]Rule
 
-	// ownTags maps the tags that the rules report themselves, through
-	// Rule.Tags, to the rules.
-	ownTags map[string][]Rule
+	// tagSpellings maps each key of tags to the tag as a catalog entry
+	// writes it: in lower case when an entry writes it so, else as the
+	// first entry that lists it, in rule ID order, does.
+	tagSpellings map[string]string
 
 	// catalog holds the IDs, names, aliases and tags of every catalog
 	// entry, whether or not its rule is registered.
 	catalog map[string]bool
+
+	// words maps the key (see markdownlintKey) of every ID, name, alias and
+	// tag of the registered rules and of the catalog to what a word with
+	// that key names in a markdownlint comment or a configure-file key.
+	// Unlike the lower-cased maps, it compares identifiers beyond ASCII as
+	// markdownlint does, by their upper case. Like them, it ignores
+	// whitespace around an identifier, which no built-in identifier has and
+	// no comment word can hold.
+	words map[string]*directiveWord
+
+	// markdownlintNames maps the key (see markdownlintKey) of a catalog
+	// entry's own name to markdownlint's name for its rule
+	// (RuleMeta.MarkdownlintName), for every entry that has one, whether or
+	// not its rule is registered.
+	markdownlintNames map[string]string
 
 	// tagNames lists the keys of tags in order.
 	tagNames []string
 
 	// rules lists the rules with their identifiers, for Suggest.
 	rules []indexedRule
+}
+
+// directiveWord says what a word of a markdownlint comment, or a key of a
+// configure-file object, names: an entry of ruleIndex.words.
+type directiveWord struct {
+	// rule is the registered rule whose ID, name or catalog alias the word
+	// is. An ID takes precedence over a name, and a name over an alias.
+	rule Rule
+
+	// tagged lists the registered rules whose catalog entries list the word
+	// as a tag, in rule ID order.
+	tagged []Rule
+
+	// owned lists the registered rules that report the word as a tag
+	// themselves, through Rule.Tags, in rule ID order.
+	owned []Rule
+
+	// catalog reports whether the word is the ID, name, an alias or a tag
+	// of any catalog entry, whether or not its rule is registered.
+	catalog bool
 }
 
 // indexedRule is a registered rule with its lower-cased identifiers.
@@ -194,12 +233,6 @@ func (r *Registry) RulesByTag(tag string) []Rule {
 	return slices.Clone(r.lookups().tags[foldKey(tag)])
 }
 
-// rulesByOwnTag returns the registered rules that list tag among the tags
-// they report themselves through Rule.Tags, in rule ID order.
-func (r *Registry) rulesByOwnTag(tag string) []Rule {
-	return slices.Clone(r.lookups().ownTags[foldKey(tag)])
-}
-
 // inCatalog reports whether word is the ID, name, an alias or a tag of any
 // catalog entry the registry holds, whether or not that entry's rule is
 // registered. Matching ignores case and surrounding whitespace.
@@ -209,7 +242,9 @@ func (r *Registry) inCatalog(word string) bool {
 
 // Suggestion is a rule or a tag that Suggest offers in place of a key.
 type Suggestion struct {
-	// Name is the canonical name of the rule, or the tag.
+	// Name is the name to show for the rule, or the tag. Suggest and
+	// Closest give a rule's canonical name; suggestions for markdownlint
+	// comments give markdownlint's name for it instead.
 	Name string
 
 	// RuleID is the ID of the suggested rule. It is empty for a tag.
@@ -397,72 +432,138 @@ func (r *Registry) lookups() *ruleIndex {
 // buildIndex indexes the registered rules. The caller holds the write lock.
 func (r *Registry) buildIndex() *ruleIndex {
 	ids := slices.Sorted(maps.Keys(r.byID))
-	index := &ruleIndex{
+	build := indexBuilder{&ruleIndex{
 		keys:    make(map[string]Rule, 2*len(ids)), // An ID and a name per rule, before aliases.
 		tags:    make(map[string][]Rule),
-		ownTags: make(map[string][]Rule),
 		catalog: make(map[string]bool),
 		rules:   make([]indexedRule, 0, len(ids)),
-	}
+
+		tagSpellings:      make(map[string]string),
+		words:             make(map[string]*directiveWord),
+		markdownlintNames: make(map[string]string),
+	}}
 
 	// The catalog's words come from every entry, registered or not, so that
 	// a word means the same in a registry that holds only some of the rules.
-	for _, meta := range r.meta {
-		for _, words := range [][]string{{meta.ID, meta.Name}, meta.Aliases, meta.Tags} {
-			for _, word := range words {
-				if key := foldKey(word); key != "" {
-					index.catalog[key] = true
-				}
-			}
-		}
+	for _, id := range slices.Sorted(maps.Keys(r.meta)) {
+		build.addCatalogEntry(r.meta[id])
 	}
 
 	// The first claim on a key wins, so claim IDs, then names, then aliases.
-	claim := func(identifier string, rule Rule) {
-		if key := foldKey(identifier); key != "" {
-			if _, taken := index.keys[key]; !taken {
-				index.keys[key] = rule
-			}
-		}
-	}
 	for _, id := range ids {
-		claim(id, r.byID[id])
+		build.claim(id, r.byID[id])
 	}
 	for _, name := range slices.Sorted(maps.Keys(r.byName)) {
-		claim(name, r.byName[name])
+		build.claim(name, r.byName[name])
 	}
-
 	for _, id := range ids {
 		rule := r.byID[id]
 		meta := r.meta[id]
-		entry := indexedRule{rule: rule, id: foldKey(id), names: []string{foldKey(rule.Name())}}
+		indexed := indexedRule{rule: rule, id: foldKey(id), names: []string{foldKey(rule.Name())}}
 		for _, alias := range meta.Aliases {
-			claim(alias, rule)
-			entry.names = append(entry.names, foldKey(alias))
+			build.claim(alias, rule)
+			indexed.names = append(indexed.names, foldKey(alias))
 		}
-		index.rules = append(index.rules, entry)
-		addTagged(index.tags, meta.Tags, rule)
-		addTagged(index.ownTags, rule.Tags(), rule)
+		build.rules = append(build.rules, indexed)
+		build.addTags(rule, meta)
 	}
 
-	index.tagNames = slices.Sorted(maps.Keys(index.tags))
-	return index
+	build.tagNames = slices.Sorted(maps.Keys(build.tags))
+	return build.ruleIndex
+}
+
+// indexBuilder fills a ruleIndex, which never changes once buildIndex
+// returns it.
+type indexBuilder struct {
+	*ruleIndex
+}
+
+// entry returns the entry of words for word, adding an empty one when there
+// is none, or nil for a word whose key is empty.
+func (b indexBuilder) entry(word string) *directiveWord {
+	key := markdownlintKey(strings.TrimSpace(word))
+	if key == "" {
+		return nil
+	}
+	found := b.words[key]
+	if found == nil {
+		found = &directiveWord{}
+		b.words[key] = found
+	}
+	return found
+}
+
+// addCatalogEntry indexes the words of meta, a catalog entry, whose rule may
+// not be registered. Entries arrive in ID order, and the first claim on a
+// name wins.
+func (b indexBuilder) addCatalogEntry(meta RuleMeta) {
+	for _, group := range [][]string{{meta.ID, meta.Name}, meta.Aliases, meta.Tags} {
+		for _, word := range group {
+			if key := foldKey(word); key != "" {
+				b.catalog[key] = true
+			}
+			if found := b.entry(word); found != nil {
+				found.catalog = true
+			}
+		}
+	}
+	key := markdownlintKey(strings.TrimSpace(meta.Name))
+	if _, taken := b.markdownlintNames[key]; key != "" && !taken && meta.MarkdownlintName != "" {
+		b.markdownlintNames[key] = meta.MarkdownlintName
+	}
+}
+
+// claim makes identifier, an ID, name or alias of rule, name rule, unless
+// another rule has claimed it already.
+func (b indexBuilder) claim(identifier string, rule Rule) {
+	if key := foldKey(identifier); key != "" {
+		if _, taken := b.keys[key]; !taken {
+			b.keys[key] = rule
+		}
+	}
+	if found := b.entry(identifier); found != nil && found.rule == nil {
+		found.rule = rule
+	}
+}
+
+// addTags indexes the tags of rule, a registered rule: those of its catalog
+// entry meta and those it reports itself. Rules arrive in ID order.
+func (b indexBuilder) addTags(rule Rule, meta RuleMeta) {
+	addTagged(b.tags, meta.Tags, rule)
+	for _, tag := range meta.Tags {
+		if key := foldKey(tag); key != "" {
+			if spelling, ok := b.tagSpellings[key]; !ok || (spelling != key && tag == key) {
+				b.tagSpellings[key] = tag
+			}
+		}
+		if found := b.entry(tag); found != nil {
+			found.tagged = appendOnce(found.tagged, rule)
+		}
+	}
+	for _, tag := range rule.Tags() {
+		if found := b.entry(tag); found != nil {
+			found.owned = appendOnce(found.owned, rule)
+		}
+	}
 }
 
 // addTagged adds rule to the list of each of its tags in byTag, once.
-// Rules arrive in ID order, so each list stays in ID order.
 func addTagged(byTag map[string][]Rule, tags []string, rule Rule) {
 	for _, tag := range tags {
-		key := foldKey(tag)
-		if key == "" {
-			continue
+		if key := foldKey(tag); key != "" {
+			byTag[key] = appendOnce(byTag[key], rule)
 		}
-		tagged := byTag[key]
-		if last := len(tagged) - 1; last >= 0 && tagged[last].ID() == rule.ID() {
-			continue // The rule lists the tag twice.
-		}
-		byTag[key] = append(tagged, rule)
 	}
+}
+
+// appendOnce appends rule to rules unless it is the last of them already,
+// as when a rule lists a tag twice. Rules arrive in ID order, so each list
+// stays in ID order.
+func appendOnce(rules []Rule, rule Rule) []Rule {
+	if last := len(rules) - 1; last >= 0 && rules[last].ID() == rule.ID() {
+		return rules
+	}
+	return append(rules, rule)
 }
 
 // foldKey normalizes a rule identifier or tag for matching: lower case,

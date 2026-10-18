@@ -85,6 +85,27 @@ func TestListFixesKeepSuppressedItems(t *testing.T) {
 			input: "- Alpha\n  * Beta <!-- markdownlint-disable-line MD004 -->\n  * Gamma\n",
 			want:  "- Alpha\n  * Beta <!-- markdownlint-disable-line MD004 -->\n  * Gamma\n",
 		},
+		{
+			// Replacing both bullets would rewrite the suppressed line of Gamma.
+			name:  "suppressed later bullet in a list",
+			rule:  NewUnorderedListStyleRule(),
+			input: "- Alpha\n  * Beta\n  * Gamma <!-- markdownlint-disable-line MD004 -->\n",
+			want:  "- Alpha\n  * Beta\n  * Gamma <!-- markdownlint-disable-line MD004 -->\n",
+		},
+		{
+			// A no-break space after "<!--" is whitespace to markdownlint, so the
+			// comment still suppresses Gamma.
+			name:  "suppressed later bullet after a no-break space",
+			rule:  NewUnorderedListStyleRule(),
+			input: "- Alpha\n  * Beta\n  * Gamma <!--\u00a0markdownlint-disable-line MD004 -->\n",
+			want:  "- Alpha\n  * Beta\n  * Gamma <!--\u00a0markdownlint-disable-line MD004 -->\n",
+		},
+		{
+			name:  "suppressed later bullet after a vertical tab",
+			rule:  NewUnorderedListStyleRule(),
+			input: "- Alpha\n  * Beta\n  * Gamma <!--\u000bmarkdownlint-disable-line MD004 -->\n",
+			want:  "- Alpha\n  * Beta\n  * Gamma <!--\u000bmarkdownlint-disable-line MD004 -->\n",
+		},
 	}
 
 	for _, tt := range tests {

@@ -1,0 +1,6 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: --disable: unknown rule "ul-styel" (did you mean "unordered-list-style"?)
+Run 'gomdlint rules' to list rules.
+Run 'gomdlint lint --help' for usage.
