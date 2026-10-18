@@ -183,6 +183,36 @@ func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
 	}
 }
 
+// TestLinkSpacesRule_LinksInTaskListItems checks that MD039 sees the links
+// GFM reads at the start of a list item where goldmark alone would read a
+// task checkbox: in a heading, or right before "(". markdownlint 0.41.1
+// reports each side of the whitespace at the same column.
+func TestLinkSpacesRule_LinksInTaskListItems(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantColumns []int
+	}{
+		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{7, 7}},
+		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{9, 9}},
+		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{4, 4}},
+		{name: "checkbox before parenthesized text", input: "- [ ] (https://example.org)\n", wantColumns: []int{}},
+		{name: "checkbox before a link", input: "- [ ] [ text ](/url)\n", wantColumns: []int{8, 13}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewLinkSpacesRule(), tt.input, nil)
+			columns := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				require.Equal(t, 1, diag.StartLine)
+				columns = append(columns, diag.StartColumn)
+			}
+			require.Equal(t, tt.wantColumns, columns)
+		})
+	}
+}
+
 // TestLinkSpacesRule_Fix trims the whitespace inside link text like markdownlint:
 // only spaces and tabs on the same line as the bracket are removed.
 func TestLinkSpacesRule_Fix(t *testing.T) {

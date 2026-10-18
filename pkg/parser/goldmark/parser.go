@@ -9,7 +9,6 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
@@ -229,11 +228,7 @@ func newGoldmarkInstance(flavor string, spans spanKey) goldmark.Markdown {
 	// Configure extensions based on flavor.
 	switch flavor {
 	case FlavorGFM:
-		opts = append(opts,
-			goldmark.WithExtensions(
-				extension.GFM,
-			),
-		)
+		opts = append(opts, goldmark.WithExtensions(gfmExtensions...))
 	case FlavorCommonMark:
 		// No extensions for pure CommonMark.
 	}

@@ -1118,15 +1118,15 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 		{name: "period after default ignorable characters alone", input: "## \u200b\u2060\u034f\ufe0f.\n"},
 		{name: "period after an emoji with a variation selector", input: "## \u2764\ufe0f.\n", wantFixed: "## \u2764\ufe0f\n"},
 		{name: "period after a letter with a combining mark", input: "## e\u0301.\n", wantFixed: "## e\u0301\n"},
-		// goldmark reads "[ ]", "[x]" or "[X]" at the start of a list item's
-		// first block as a task checkbox even in a heading. GFM reads it as
-		// text or as a link, so "[ ](/url)" is a link that shows nothing.
+		// GFM reads "[ ]", "[x]" or "[X]" at the start of a heading in a list
+		// item as text or as a link, never as a task checkbox, so "[ ](/url)"
+		// is a link that shows nothing and "[ ]" alone shows its brackets.
 		{name: "period after a link with a space as its text in a list item", input: "- ## [ ](/url).\n"},
 		{name: "period after a link with a tab as its text in a list item", input: "- ## [\t](/url).\n"},
 		{name: "period after a link with a space as its text in a quoted list item", input: "> - ## [ ](/url).\n"},
 		{name: "period after a reference link with a space as its text in a list item",
 			input: "- ## [ ][ref].\n\n[ref]: /url\n"},
-		{name: "period after empty brackets alone in a list item", input: "- ## [ ].\n"},
+		{name: "period after empty brackets alone in a list item", input: "- ## [ ].\n", wantFixed: "- ## [ ]\n"},
 		{name: "period after a link with a tab as its text", input: "## [\t](/url).\n"},
 		{name: "period after a link with two spaces as its text in a list item", input: "- ## [  ](/url).\n"},
 		{name: "period after empty brackets and text in a list item", input: "- ## [ ] Done.\n",
