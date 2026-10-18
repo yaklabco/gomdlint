@@ -7,5 +7,5 @@ doc.md (1 issue)
 1 issue (1 error), in 1 file, 1 fixable
 -- stderr --
 INFO using $PROJECT/.markdownlint.json, translated to gomdlint settings for this run; to save them, run: gomdlint migrate $PROJECT/.markdownlint.json --output $PROJECT/.gomdlint.yml
-WARN $PROJECT/.markdownlint.json: unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored
 WARN $PROJECT/.markdownlint.json: unknown option "stirct" for line-length (did you mean "strict"?); it is ignored
+WARN $PROJECT/.markdownlint.json: unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored
