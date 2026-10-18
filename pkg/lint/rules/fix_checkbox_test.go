@@ -111,6 +111,11 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 		{name: "blank first line", input: "-\n  [x] done\n", micromark: 1, cmark: 0},
 		{name: "blank first line, trailing tab", input: "-\t\n  [x] done\n", micromark: 0, cmark: 0},
 		{name: "definitions then checkbox", input: "- [cc]: /url\n  [dd]: /other\n  [x] done\n", micromark: 1, cmark: 0},
+		{name: "footnote list, trailing spaces", input: "[^a]: - [x] task  \n\nUse [^a].\n", micromark: 1, cmark: 0},
+		{name: "footnote list, tab after brackets", input: "[^a]: - [ ]\ttask\n\nUse [^a].\n", micromark: 1, cmark: 0},
+		{name: "quoted footnote list", input: "> [^a]: - [x] task \n\nUse [^a].\n", micromark: 1, cmark: 0},
+		{name: "footnote list in an item", input: "- a\n  [^b]: - [x] c \n\nUse [^b].\n", micromark: 1, cmark: 0},
+		{name: "footnote list, space after an empty marker", input: "[^a]: - \n    [x] task\n\nUse [^a].\n", micromark: 0, cmark: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

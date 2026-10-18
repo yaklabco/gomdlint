@@ -55,6 +55,15 @@ func TestCheckboxCandidateRegions(t *testing.T) {
 		{name: "carriage returns", input: "- [x] a\r\n- b\r\n", regions: []string{"- [x] a\r\n- b\r\n"}},
 		{name: "byte order mark", input: "\ufeff- [x] a\n", regions: []string{"\ufeff- [x] a\n"}},
 		{name: "marker without a space", input: "-[x] a\n"},
+		// micromark reads a checkbox in a list that starts a footnote
+		// definition's content on its first line.
+		{name: "list in a footnote", input: "[^a]: - [x] task\n", regions: []string{"[^a]: - [x] task\n"}},
+		{name: "quoted footnote", input: "> [^a]: 1. [ ] task\n", regions: []string{"> [^a]: 1. [ ] task\n"}},
+		{
+			name: "footnote in a list item", input: "- a\n  [^b]: - [x] c\n",
+			regions: []string{"  [^b]: - [x] c\n"},
+		},
+		{name: "footnote without a list", input: "[^a]: [x] text\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +97,10 @@ func TestCheckboxGuardWithholds(t *testing.T) {
 		// checkbox in "-\n  [x] task"; cmark-gfm reads a checkbox in
 		// "- [x] \n" and text in "- [x]\n".
 		{name: "space after an empty marker", input: "- \n  [x] task\n", old: "- \n", new: "-\n", want: true},
+		{
+			name: "space after an empty marker in a footnote", input: "[^a]: - \n    [x] task\n",
+			old: "- \n", new: "-\n", want: true,
+		},
 		{name: "space after the brackets", input: "- [x] \n", old: "] \n", new: "]\n", want: true},
 		{name: "marker spacing", input: "-  [x] task\n", old: "-  [", new: "- [", want: true},
 		{name: "marker style", input: "* [x] task\n", old: "* [", new: "- [", want: true},

@@ -22,14 +22,16 @@ import (
 // (checkboxGuard). The finding is reported without a fix.
 //
 // A checkbox candidate is a lexical superset of the checkboxes both read.
-// A line is a marker line when, after any blockquote markers, spaces and
-// tabs, it holds one or more list item markers, a bullet or one to nine
-// digits with "." or ")", each followed by a space, a tab or the end of
-// the line. The marker line's chunk is the rest of the line after the
-// markers and the lines after it, up to a blank line (one of nothing but
-// ">", spaces and tabs) or the next marker line. A candidate is a chunk
-// line whose text, after blockquote markers, spaces and tabs, starts with
-// "[" and then either a line ending, or one character and "]".
+// A line is a marker line when, after a prefix of container markers,
+// spaces and tabs, it holds one or more list item markers, a bullet or one
+// to nine digits with "." or ")", each followed by a space, a tab or the
+// end of the line. Container markers are blockquote markers and footnote
+// definition labels ("[^label]:"), whose content can start on the same
+// line. The marker line's chunk is the rest of the line after the markers
+// and the lines after it, up to a blank line (nothing but container
+// markers, spaces and tabs) or the next marker line. A candidate is a
+// chunk line whose text, after its prefix, starts with "[" and then either
+// a line ending, or one character and "]".
 //
 // It is a superset because both renderers read a checkbox only at the
 // start of the paragraph that is a list item's first content, and only
@@ -39,8 +41,10 @@ import (
 // micromark, on the line after the link reference definitions that start
 // the item's content. None of these is ever parted from the marker line by
 // a blank line or another item's marker, and the item's later lines carry
-// only blockquote markers and indentation before their text. cmark-gfm
-// reads a checkbox only on the marker line, after the marker and spaces.
+// only container markers and indentation before their text. The only
+// containers that can open before an item's marker on its line are
+// blockquotes, list items and footnote definitions. cmark-gfm reads a
+// checkbox only on the marker line, after the marker and spaces.
 //
 // A candidate's region runs from the start of its marker line, whose
 // blockquote markers and indentation decide how wide a tab between the
@@ -329,6 +333,13 @@ func readLineShape(line []byte, first bool) lineShape {
 		case char == ' ' || char == '\t' || char == '>':
 			pos++
 			continue
+		case char == '[' && pos+1 < len(line) && line[pos+1] == '^':
+			// A footnote definition is a container too, and its content
+			// can start on its first line, as in "[^a]: - [x] task".
+			if end := bytes.Index(line[pos:], []byte("]:")); end > 0 {
+				pos += end + len("]:")
+				continue
+			}
 		case (char == '-' || char == '+' || char == '*') && spaceAfter(pos+1):
 			shape.marker = true
 			pos++
