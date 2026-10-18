@@ -489,7 +489,8 @@ The CLI writes them to stderr, JSON output lists them under each file's
   marker and `+` for a fixable finding, cut by display width and narrowed to
   fit the terminal.
 - `summary` (`SummaryRenderer`): counts per rule and per file, through
-  `analysis.Analyze`.
+  `analysis.Analyze`, highest count first, with ties in rule ID and path
+  order.
 - `json` (`JSONReporter`): files, diagnostics with their fixes as byte
   offsets, rule errors, notices and a summary.
 - `sarif` (`SARIFReporter`): SARIF 2.1.0 with artifact URIs relative to
@@ -764,9 +765,11 @@ sequenceDiagram
 **Deterministic Output:** Results are collected into a map keyed by file
 path, then output in sorted order regardless of worker completion order. The
 runner also sorts each file's diagnostics by line, as markdownlint-cli2
-does, then by column, rule ID and message, so every reporter lists findings
-in the same order. On one line, markdownlint-cli2 orders findings by rule ID
-instead. The engine reports them rule by rule.
+does, then by column, rule ID and message, so the text, table, JSON and
+SARIF reporters list findings in the same order. On one line,
+markdownlint-cli2 orders findings by rule ID instead. The engine reports
+them rule by rule. The summary format lists counts rather than findings,
+and sorts its rules and files by count.
 
 ## Error Handling
 

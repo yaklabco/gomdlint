@@ -288,10 +288,12 @@ Total: 7 issues (7 warnings) in 2 files
 
 Control table order with `--summary-order rules` (default) or `--summary-order files`.
 
-Every format lists findings file by file, in path order. Within a file,
-findings follow line order, as in markdownlint-cli2, then column, rule ID
-and message. On one line, markdownlint-cli2 orders findings by rule ID
-instead of column.
+Text, table, JSON and SARIF output list findings file by file, in path
+order. Within a file, findings follow line order, as in markdownlint-cli2,
+then column, rule ID and message. On one line, markdownlint-cli2 orders
+findings by rule ID instead of column. The summary format counts findings
+instead of listing them, and orders its rules and files by those counts,
+highest first, with ties in rule ID and path order.
 
 SARIF output follows SARIF 2.1.0. Its file locations are relative to the
 root of the Git working tree, as GitHub code scanning expects, and its

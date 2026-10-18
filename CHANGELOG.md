@@ -44,9 +44,10 @@ formats change. The first entries under Changed may need action.
   or directory could not be read or written. Warnings alone still exit 0. A
   file that could not be read used to print "No issues found" and exit 0,
   and every other failure exited 1.
-- Each file's findings are listed by line, then column, rule ID and message,
-  in every format. They used to follow rule ID order. markdownlint-cli2 also
-  lists findings by line, but orders the findings on one line by rule ID.
+- Text, table, JSON and SARIF output list each file's findings by line, then
+  column, rule ID and message. They used to follow rule ID order.
+  markdownlint-cli2 also lists findings by line, but orders the findings on
+  one line by rule ID.
 - Table rows start with an `E`, `W` or `I` severity marker, and the legend
   lists only the markers that the rows show, so a table reads the same
   without colour.
