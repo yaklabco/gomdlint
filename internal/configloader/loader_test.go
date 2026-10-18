@@ -801,6 +801,17 @@ func TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases(t *testing.T) {
 				`.gomdlint.yml:2: unknown key "backups.enable" (did you mean "backups.enabled"?); it is ignored (through the merge at line 2)`,
 			},
 		},
+		{
+			// The alias names the mapping that holds it. Decoding reads the
+			// rules mapping as the settings of MD013, whose key MD013 is no
+			// option of the rule, so its value, which contains itself, is
+			// never read, and the key check must end too.
+			name:    "alias to the mapping that holds it",
+			content: "rules: &rules\n  MD013: *rules\n",
+			want: []string{
+				`.gomdlint.yml:2: unknown option "MD013" for line-length; it is ignored (through the alias at line 2)`,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -814,35 +825,6 @@ func TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases(t *testing.T) {
 
 			assert.Equal(t, tt.want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
 		})
-	}
-}
-
-// TestLoad_RuleSettingsThatHoldThemselves covers a rule whose settings are
-// an alias of the mapping that holds them. Every key under a rule that is
-// not a setting is an option, so the rule's own key is read as an option
-// whose value contains itself, and loading fails with YAML's error for such
-// a value instead of looping.
-func TestLoad_RuleSettingsThatHoldThemselves(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), ".gomdlint.yml")
-	if err := os.WriteFile(path, []byte("rules: &rules\n  MD013: *rules\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := loadConfigFile(path)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "parse YAML") ||
-			!strings.Contains(err.Error(), "anchor 'rules' value contains itself") {
-			t.Errorf("loadConfigFile() error = %v, want the decoder's error about a value that contains itself", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("loading does not end on rule settings that hold themselves")
 	}
 }
 

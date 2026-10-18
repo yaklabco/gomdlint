@@ -160,8 +160,10 @@ func TestRuleConfig_RuleSettingKeys(t *testing.T) {
 	var tags []string
 	typ := reflect.TypeFor[config.RuleConfig]()
 	for idx := range typ.NumField() {
-		name, _, _ := strings.Cut(typ.Field(idx).Tag.Get("yaml"), ",")
-		tags = append(tags, name)
+		if field := typ.Field(idx); field.IsExported() {
+			name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+			tags = append(tags, name)
+		}
 	}
 	assert.ElementsMatch(t, tags, config.RuleSettingKeys())
 	assert.Equal(t, []string{"enabled", "severity", "auto_fix", "options"}, config.RuleSettingKeys())
@@ -173,9 +175,9 @@ func TestRuleConfig_RuleSettingKeys(t *testing.T) {
 
 // TestRuleConfig_RejectsAnOptionWrittenTwice covers an option written both
 // directly under the rule key and under options. Either value could win,
-// so decoding fails and names the line of the flat key. Two different
-// spellings of one option, such as line_length and max, decode side by
-// side: only the rule's declared options tell that they are one, and the
+// so reading the flat option fails and names the line of the flat key. Two
+// different spellings of one option, such as line_length and max, read side
+// by side: only the rule's declared options tell that they are one, and the
 // loader reports them.
 func TestRuleConfig_RejectsAnOptionWrittenTwice(t *testing.T) {
 	t.Parallel()
@@ -190,9 +192,11 @@ func TestRuleConfig_RejectsAnOptionWrittenTwice(t *testing.T) {
 			_, err := config.FromYAML([]byte(content))
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "line 3")
 			assert.Contains(t, err.Error(),
-				`"line_length" and "options.line_length" both set option "line_length"; keep one of them`)
+				`line 3: "line_length" and "options.line_length" both set option "line_length"; keep one of them`)
+			var conflict *config.FlatOptionConflictError
+			require.ErrorAs(t, err, &conflict)
+			assert.Equal(t, config.FlatOptionConflictError{Name: "line_length", Line: 3}, *conflict)
 		})
 	}
 
@@ -203,7 +207,7 @@ func TestRuleConfig_RejectsAnOptionWrittenTwice(t *testing.T) {
 
 // TestRuleConfig_OptionWrittenTwiceThroughAMerge covers a flat option that
 // a merge key brings in, also set under options. The error names the line
-// where the rule's settings start, since the flat key is not written there.
+// where the flat key is written, in the merged mapping.
 func TestRuleConfig_OptionWrittenTwiceThroughAMerge(t *testing.T) {
 	t.Parallel()
 
@@ -211,33 +215,141 @@ func TestRuleConfig_OptionWrittenTwiceThroughAMerge(t *testing.T) {
 		"base: &base\n  max: 100\nrules:\n  MD013:\n    <<: *base\n    options:\n      max: 90\n"))
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `line 5: "max" and "options.max" both set option "max"; keep one of them`)
+	assert.Contains(t, err.Error(), `line 2: "max" and "options.max" both set option "max"; keep one of them`)
 }
 
-// TestRuleConfig_ReportsTheErrorsOfEveryRule covers errors in the settings
-// of two rules, and an error that only reading the flat options finds, a
-// key written twice inside an option's value: decoding reports them all,
-// each with its line.
+// TestRuleConfig_RejectsAKeyWrittenTwiceThroughAnAlias covers two keys in
+// one mapping that read as one name, where one of them is an alias of the
+// other. YAML rejects a key written twice, but compares an alias key by its
+// anchor, so decoding would keep the later value silently. Decoding fails
+// instead, at the line of the later key, naming both keys as written, both
+// for keys directly under the rule key and for keys under options.
+func TestRuleConfig_RejectsAKeyWrittenTwiceThroughAnAlias(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name, content, want string
+	}{
+		{
+			name:    "flat",
+			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
+			want:    `line 4: "line_length" and "*opt" both set option "line_length"; keep one of them`,
+		},
+		{
+			name:    "alias first",
+			content: "ignore: [&opt line_length]\nrules:\n  MD013:\n    *opt : 20\n    line_length: 100\n",
+			want:    `line 5: "*opt" and "line_length" both set option "line_length"; keep one of them`,
+		},
+		{
+			name:    "under options",
+			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
+			want:    `line 5: "options.max" and "options.*opt" both set option "max"; keep one of them`,
+		},
+		{
+			name:    "in a merged mapping",
+			content: "base: &base\n  &opt max: 100\n  *opt : 20\nrules:\n  MD013:\n    <<: *base\n",
+			want:    `line 3: "max" and "*opt" both set option "max"; keep one of them`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var cfg config.Config
+			err := yaml.Unmarshal([]byte(tt.content), &cfg)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+// TestRuleConfig_ReportsTheErrorsOfEveryRule covers keys written twice in
+// the settings of two rules: decoding reports both, each with its line.
 func TestRuleConfig_ReportsTheErrorsOfEveryRule(t *testing.T) {
 	t.Parallel()
 
 	_, err := config.FromYAML([]byte(`rules:
   MD013:
-    max: 1
-    options:
-      max: 2
+    &a line_length: 1
+    *a : 2
   MD009:
-    br_spaces: 1
     options:
-      br_spaces: 2
-  MD033:
-    extra: {a: 1, a: 2}
+      &b br_spaces: 1
+      *b : 2
 `))
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `line 3: "max" and "options.max" both set option "max"`)
-	assert.Contains(t, err.Error(), `line 7: "br_spaces" and "options.br_spaces" both set option "br_spaces"`)
-	assert.Contains(t, err.Error(), `line 11: mapping key "a" already defined at line 11`)
+	assert.Contains(t, err.Error(), `line 4: "line_length" and "*a" both set option "line_length"`)
+	assert.Contains(t, err.Error(), `line 8: "options.br_spaces" and "options.*b" both set option "br_spaces"`)
+}
+
+// TestRuleConfig_MergedKeysYieldToWrittenKeys covers YAML's precedence for
+// merge keys, which a key brought in twice follows without an error: a key
+// written in the mapping, even as an alias, replaces a merged one, and an
+// earlier merged mapping replaces a later one.
+func TestRuleConfig_MergedKeysYieldToWrittenKeys(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.FromYAML([]byte(`ignore: [&length line_length]
+base: &base
+  line_length: 100
+  tables: false
+other: &other
+  line_length: 60
+  headings: false
+rules:
+  MD013:
+    <<: *base
+    line_length: 80
+  MD010:
+    <<: *base
+    *length : 70
+  MD009:
+    <<: [*base, *other]
+    options:
+      max: 1
+`))
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]any{"line_length": 80, "tables": false}, cfg.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"line_length": 70, "tables": false}, cfg.Rules["MD010"].Options)
+	assert.Equal(t, map[string]any{"line_length": 100, "tables": false, "headings": false, "max": 1},
+		cfg.Rules["MD009"].Options)
+}
+
+// TestRuleConfig_FlatOptionsStayUnreadUntilResolved covers decoding, which
+// keeps the options written directly under the rule key unread, so that
+// only the options a rule declares need decoding. A flat key whose value
+// cannot be decoded, here one that holds the rule's own settings, decodes,
+// and ResolveFlatOptions drops it without reading it, while it reads the
+// options that it is told the rule reads. FromYAML, which does not know
+// the rules, reads every flat key as an option.
+func TestRuleConfig_FlatOptionsStayUnreadUntilResolved(t *testing.T) {
+	t.Parallel()
+
+	var cfg config.Config
+	require.NoError(t, yaml.Unmarshal([]byte(`rules:
+  MD013: &length
+    enabled: false
+    options: {max: 100}
+    metadata: *length
+    line_length: 90
+`), &cfg))
+
+	rule := cfg.Rules["MD013"]
+	require.NotNil(t, rule.Enabled)
+	assert.False(t, *rule.Enabled)
+	assert.Equal(t, map[string]any{"max": 100}, rule.Options, "flat options wait to be read")
+
+	dropped, err := rule.ResolveFlatOptions(func(name string) bool { return name == "line_length" })
+	require.NoError(t, err)
+	assert.Equal(t, []string{"metadata"}, dropped)
+	assert.Equal(t, map[string]any{"max": 100, "line_length": 90}, rule.Options)
+
+	dropped, err = rule.ResolveFlatOptions(func(string) bool { return true })
+	require.NoError(t, err)
+	assert.Empty(t, dropped, "no flat option is left to read")
+	assert.Equal(t, map[string]any{"max": 100, "line_length": 90}, rule.Options)
 }
 
 // TestRuleConfig_FlatOptionsThroughMergesAndAliases covers flat options

@@ -18,13 +18,22 @@ const (
 //
 // A configuration file may write the options under the options key, the
 // shape that gomdlint writes, or directly under the rule key, the flat
-// shape that markdownlint uses, or both (see UnmarshalYAML). Either way
-// they end up in Options.
+// shape that markdownlint uses, or both. Only the options that a rule
+// declares tell which keys directly under the rule key are options, so
+// decoding (see UnmarshalYAML) keeps those keys unread, and
+// ResolveFlatOptions reads the options among them into Options. FromYAML
+// reads them all.
 type RuleConfig struct {
 	Enabled  *bool          `mapstructure:"enabled" yaml:"enabled"`
 	Severity *string        `mapstructure:"severity" yaml:"severity"`
 	AutoFix  *bool          `mapstructure:"auto_fix" yaml:"auto_fix"`
 	Options  map[string]any `mapstructure:"options" yaml:"options"`
+
+	// flat holds the keys that a configuration file writes directly under
+	// the rule key, other than the settings, unread, in the order in which
+	// decoding takes them, until ResolveFlatOptions reads them. ToYAML
+	// writes only what has been read.
+	flat []mappingEntry
 }
 
 // ruleSettingKeys are the keys that RuleConfig's fields read; see

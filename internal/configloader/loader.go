@@ -6,6 +6,7 @@ package configloader
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -462,15 +463,18 @@ func isTerminal(stream any) bool {
 	return term.IsTerminal(int(descriptor))
 }
 
-// normalizeRuleOptions rewrites the options of each rule in one
-// configuration layer to the canonical names that the rule's catalog entry
-// declares, such as max for markdownlint's line_length (see
-// lint.Registry.NormalizeOptions), so that layers merge option by option
-// whatever spelling each uses. A value of the wrong type is dropped, as if
-// the layer did not set it, and an unknown option is kept, unread; the
-// file's warnings report both. Two spellings of one option in one rule's
-// settings are an error: either value could win. Options of a key that
-// names no rule stay as they are.
+// normalizeRuleOptions reads the options that each rule in one
+// configuration layer writes directly under its key (see readFlatOptions),
+// and rewrites the options of each rule to the canonical names that the
+// rule's catalog entry declares, such as max for markdownlint's line_length
+// (see lint.Registry.NormalizeOptions), so that layers merge option by
+// option whatever shape and spelling each uses. A value of the wrong type
+// is dropped, as if the layer did not set it, and an unknown option under
+// options is kept, unread; the file's warnings report both. Two spellings
+// of one option in one rule's settings are an error, whether they are
+// written under options, directly under the rule key or one in each place,
+// and so is one spelling written in both places: either value could win.
+// Options of a key that names no rule stay as they are.
 func normalizeRuleOptions(cfg *config.Config, registry *lint.Registry) error {
 	for _, section := range []struct {
 		name  string
@@ -480,18 +484,54 @@ func normalizeRuleOptions(cfg *config.Config, registry *lint.Registry) error {
 		for _, key := range slices.Sorted(maps.Keys(section.rules)) {
 			ruleCfg := section.rules[key]
 			rule, found := registry.Lookup(key)
-			if !found || len(ruleCfg.Options) == 0 {
-				continue
+			if err := readFlatOptions(&ruleCfg, registry, rule, found); err != nil {
+				return fmt.Errorf("%s: %w", section.name, err)
 			}
-			normalized, issues, _ := registry.NormalizeOptions(rule.ID(), ruleCfg.Options)
-			for _, issue := range issues {
-				if issue.Kind == lint.OptionIssueConflict {
-					return fmt.Errorf("%s: %s", section.name, issue.Text(rule.Name()))
+			if found && len(ruleCfg.Options) > 0 {
+				normalized, issues, _ := registry.NormalizeOptions(rule.ID(), ruleCfg.Options)
+				for _, issue := range issues {
+					if issue.Kind == lint.OptionIssueConflict {
+						return fmt.Errorf("%s: %s", section.name, issue.Text(rule.Name()))
+					}
 				}
+				ruleCfg.Options = normalized
 			}
-			ruleCfg.Options = normalized
 			section.rules[key] = ruleCfg
 		}
+	}
+	return nil
+}
+
+// readFlatOptions reads the options of rule that ruleCfg, the rule's
+// settings, writes directly under the rule key (see
+// config.RuleConfig.ResolveFlatOptions): the keys that spell one of the
+// options the rule declares, or every key for a rule that declares none.
+// Any other key is never read, so a value that cannot be decoded does no
+// harm, and the file's warnings report the key. found reports whether the
+// settings' key names a rule at all; a key that names none reads nothing.
+// An option that the settings write both in place and under options is an
+// error that names the rule and the line of the key in place.
+func readFlatOptions(ruleCfg *config.RuleConfig, registry *lint.Registry, rule lint.Rule, found bool) error {
+	if !found {
+		// Reading nothing decodes nothing, so it cannot fail.
+		_, err := ruleCfg.ResolveFlatOptions(func(string) bool { return false })
+		return err //nolint:wrapcheck // Always nil.
+	}
+
+	_, err := ruleCfg.ResolveFlatOptions(func(name string) bool {
+		return !unknownOption(registry, rule, name)
+	})
+	var conflict *config.FlatOptionConflictError
+	switch {
+	case errors.As(err, &conflict):
+		option, ok := declaredOption(registry, rule, conflict.Name)
+		if !ok {
+			option = conflict.Name
+		}
+		return fmt.Errorf("line %d: %q and %q both set %s option %q; keep one of them",
+			conflict.Line, conflict.Name, "options."+conflict.Name, rule.Name(), option)
+	case err != nil:
+		return fmt.Errorf("%s: %w", rule.Name(), err)
 	}
 	return nil
 }

@@ -122,7 +122,8 @@ func TestLoad_FlatOptionsMergeByOption(t *testing.T) {
 // TestLoad_RejectsAnOptionSetFlatAndUnderOptions checks an option set both
 // directly under the rule key and under options. Two spellings of it are
 // the error that two spellings under options are, and the same spelling
-// twice fails decoding at the line of the flat key: either value could win.
+// twice is that error with the line of the flat key: either value could
+// win.
 func TestLoad_RejectsAnOptionSetFlatAndUnderOptions(t *testing.T) {
 	t.Parallel()
 
@@ -148,7 +149,13 @@ func TestLoad_RejectsAnOptionSetFlatAndUnderOptions(t *testing.T) {
 		{
 			name:    "same spelling",
 			content: "rules:\n  MD013:\n    max: 100\n    options:\n      max: 90\n",
-			want:    `line 3: "max" and "options.max" both set option "max"; keep one of them`,
+			want:    `.gomdlint.yml: rules: line 3: "max" and "options.max" both set line-length option "max"; keep one of them`,
+		},
+		{
+			name:    "same markdownlint spelling",
+			content: "rule_defaults:\n  line-length:\n    line_length: 100\n    options:\n      line_length: 90\n",
+			want: `.gomdlint.yml: rule_defaults: line 3: "line_length" and "options.line_length" both set ` +
+				`line-length option "max"; keep one of them`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,9 +210,10 @@ rule_defaults:
 	rule := result.Config.Rules["MD013"]
 	require.NotNil(t, rule.Severity)
 	assert.Equal(t, "error", *rule.Severity)
-	assert.Equal(t, map[string]any{"lin_length": 100}, rule.Options, "the value of the wrong type is dropped")
+	assert.Empty(t, rule.Options, "the unknown option is never read and the value of the wrong type is dropped")
 	assert.Equal(t, map[string]any{"style": "dashes"}, result.Config.Rules["MD004"].Options,
 		"a value outside the allowed ones is kept for the rule")
+	assert.Empty(t, result.Config.Rules["MD009"].Options, "keys that misspell settings are no options")
 }
 
 // TestLoad_WarnsAboutFlatOptionsInJSON checks the same warnings for a JSON
@@ -229,7 +237,101 @@ func TestLoad_WarnsAboutFlatOptionsInJSON(t *testing.T) {
 		`.gomdlint.json:3: unknown option "heading_length" for line-length; it is ignored`,
 		`.gomdlint.json:5: unknown key "rules.MD009.enable" (did you mean "rules.MD009.enabled"?); it is ignored`,
 	}, relativeWarnings(result.Warnings, ".gomdlint.json"))
-	assert.Equal(t, map[string]any{"max": 100, "heading_length": 60}, result.Config.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"max": 100}, result.Config.Rules["MD013"].Options)
+}
+
+// TestLoad_NativeSettingsBesideAKeyThatHoldsThem checks a config that main
+// loads: native settings, and an unknown key whose value is an alias of the
+// rule's own settings. Only the rule's declared options are read from the
+// keys directly under the rule key, so the unknown key's value, which
+// contains itself, is never decoded. The file loads with the same settings
+// as on main, and the unknown key gets a warning.
+func TestLoad_NativeSettingsBesideAKeyThatHoldsThem(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, `rules:
+  MD013: &length
+    enabled: false
+    severity: error
+    options: {max: 100}
+    metadata: *length
+`)
+	require.NoError(t, err)
+
+	severity := "error"
+	assert.Equal(t, config.RuleConfig{Enabled: config.Bool(false), Severity: &severity, Options: map[string]any{"max": 100}},
+		result.Config.Rules["MD013"])
+	assert.Equal(t, []string{`.gomdlint.yml:6: unknown option "metadata" for line-length; it is ignored`},
+		relativeWarnings(result.Warnings, ".gomdlint.yml"))
+}
+
+// TestLoad_UnknownOptionWrittenTwiceOnlyWarns checks an unknown option
+// written both directly under the rule key and under options. Neither is
+// read, so they do not conflict, and each gets a warning.
+func TestLoad_UnknownOptionWrittenTwiceOnlyWarns(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "rules:\n  MD013:\n    foo: 1\n    options:\n      foo: 2\n")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		`.gomdlint.yml:3: unknown option "foo" for line-length; it is ignored`,
+		`.gomdlint.yml:5: unknown option "foo" for line-length; it is ignored`,
+	}, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+}
+
+// TestLoad_RejectsAKeyWrittenTwiceThroughAnAlias checks two keys in one
+// mapping that read as one name through an alias, directly under the rule
+// key and under options. Decoding would keep the later value silently, so
+// loading fails at the line of the later key.
+func TestLoad_RejectsAKeyWrittenTwiceThroughAnAlias(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name, content, want string
+	}{
+		{
+			name:    "flat",
+			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
+			want:    `line 4: "line_length" and "*opt" both set option "line_length"; keep one of them`,
+		},
+		{
+			name:    "under options",
+			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
+			want:    `line 5: "options.max" and "options.*opt" both set option "max"; keep one of them`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := loadProject(t, tt.content)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), ".gomdlint.yml: parse YAML: ")
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+// TestLoad_MergedFlatOptionsYieldToWrittenOnes checks YAML's precedence for
+// merge keys under a rule: an option written in the rule's settings
+// replaces the one that a merge key brings in, without an error.
+func TestLoad_MergedFlatOptionsYieldToWrittenOnes(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, `rule_defaults:
+  MD013: &base
+    line_length: 100
+    tables: false
+rules:
+  line-length:
+    <<: *base
+    line_length: 80
+`)
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Warnings)
+	assert.Equal(t, map[string]any{"max": 80, "ignore_tables": true}, result.Config.Rules["MD013"].Options)
+	assert.Equal(t, map[string]any{"max": 100, "ignore_tables": true}, result.Config.RuleDefaults["MD013"].Options)
 }
 
 // settingNamedOptionsRule is a rule whose options are spelled like rule

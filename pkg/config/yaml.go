@@ -120,14 +120,18 @@ func withHeader(header string, yamlBytes []byte) []byte {
 // such as "yes" are not booleans here, as in markdownlint.
 //
 // In a mapping, the keys of RuleSettingKeys are the rule's settings, and
-// every other key is an option written directly under the rule key, the
-// flat shape that markdownlint uses. The flat options join the options
-// mapping, so a mapping may write options either way, or both. A key that
-// is a setting is always the setting, so an option spelled like one can be
-// set only under options. An option written both flat and under options is
-// an error, since either value could win. Two spellings of one option,
-// such as markdownlint's and gomdlint's, decode side by side; the rule's
-// declared options tell that they are one.
+// every other key may be an option written directly under the rule key,
+// the flat shape that markdownlint uses. Only the options that the rule
+// declares tell which of those keys are options, so decoding keeps them
+// unread, values and all, for ResolveFlatOptions: the value of a key that
+// is no option is never decoded, as before the flat shape was read. A key
+// that is a setting is always the setting, so an option spelled like one
+// can be set only under options.
+//
+// Two keys in one mapping that read as one name, such as a key and an
+// alias of it, are an error, directly under the rule key and under
+// options: YAML rejects a key written twice, but compares an alias key by
+// its anchor, so decoding would keep the later value silently.
 //
 // YAML is a superset of JSON, so JSON config files get the shorthand and
 // the flat shape too.
@@ -149,8 +153,23 @@ func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 			return err //nolint:wrapcheck // yaml.v3 reports a *yaml.TypeError with the document's other errors only when it is returned unwrapped.
 		}
 		cfg := RuleConfig(decoded)
-		if err := cfg.addFlatOptions(value); err != nil {
+
+		entries, err := takenEntries(value, "")
+		if err != nil {
 			return err
+		}
+		for _, entry := range entries {
+			switch {
+			case entry.name == "options":
+				// Decoding has read the options; this checks their keys.
+				if !plainMapping(entry.value) {
+					if _, err := takenEntries(entry.value, "options."); err != nil {
+						return err
+					}
+				}
+			case !isRuleSettingKey(entry.name):
+				cfg.flat = append(cfg.flat, entry)
+			}
 		}
 		*rc = cfg
 		return nil
@@ -160,64 +179,208 @@ func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 }
 
-// addFlatOptions adds the options that mapping, the settings of the rule,
-// writes directly under the rule key to rc's options: every key that
-// decoding reads from mapping, after YAML's merge keys and aliases, that is
-// not a rule setting. An option that rc's options set already is an error
-// at the line of the flat key.
-func (rc *RuleConfig) addFlatOptions(mapping *yaml.Node) error {
-	if !mayHoldFlatOptions(mapping) {
-		return nil
-	}
-	var entries map[string]any
-	if err := mapping.Decode(&entries); err != nil {
-		return err //nolint:wrapcheck // yaml.v3 reports a *yaml.TypeError with the document's other errors only when it is returned unwrapped.
-	}
+// FlatOptionConflictError is the error of an option written both directly
+// under the rule key and under options, under the same name: either value
+// could win.
+type FlatOptionConflictError struct {
+	// Name is the name that both write.
+	Name string
 
-	// Sorted keys keep the error message stable.
-	for _, key := range slices.Sorted(maps.Keys(entries)) {
-		if isRuleSettingKey(key) {
+	// Line is the line of the key written directly under the rule key.
+	Line int
+}
+
+// Error describes the conflict in the manner of the error for two
+// spellings of one option.
+func (e *FlatOptionConflictError) Error() string {
+	return fmt.Sprintf("line %d: %q and %q both set option %q; keep one of them",
+		e.Line, e.Name, "options."+e.Name, e.Name)
+}
+
+// ResolveFlatOptions reads the keys that a configuration file writes
+// directly under the rule key, other than the settings, into Options:
+// those that reads accepts by name as options of the rule. It drops the
+// others without decoding their values, so that a value that cannot be
+// decoded, such as one that contains itself, does no harm, and returns
+// their names, in order. An option that reads accepts and that Options
+// already sets under the same name is a *FlatOptionConflictError. Either
+// way, no key is left to read.
+func (rc *RuleConfig) ResolveFlatOptions(reads func(name string) bool) ([]string, error) {
+	flat := rc.flat
+	rc.flat = nil
+
+	var dropped []string
+	var options map[string]any
+	for _, option := range flat {
+		if !reads(option.name) {
+			dropped = append(dropped, option.name)
 			continue
 		}
-		if _, nested := rc.Options[key]; nested {
-			return &yaml.TypeError{Errors: []string{fmt.Sprintf(
-				"line %d: %q and %q both set option %q; keep one of them",
-				keyLine(mapping, key), key, "options."+key, key)}}
+		if _, nested := rc.Options[option.name]; nested {
+			return dropped, &FlatOptionConflictError{Name: option.name, Line: option.key.Line}
 		}
-		if rc.Options == nil {
-			rc.Options = make(map[string]any, len(entries))
+		var value any
+		if err := option.value.Decode(&value); err != nil {
+			return dropped, fmt.Errorf("line %d: option %q: %w", option.key.Line, option.name, err)
 		}
-		rc.Options[key] = entries[key]
+		if options == nil {
+			// Copies of the settings share their options, so the flat
+			// options join a copy.
+			options = make(map[string]any, len(rc.Options)+len(flat))
+			maps.Copy(options, rc.Options)
+		}
+		options[option.name] = value
 	}
-	return nil
+	if options != nil {
+		rc.Options = options
+	}
+	return dropped, nil
 }
 
-// mayHoldFlatOptions reports whether mapping, the settings of a rule, may
-// hold a key that is not a rule setting: whether it writes one, or a key
-// whose name only decoding tells, such as an alias, or a merge key, which
-// may bring one in. The settings that gomdlint writes, which Clone reads
-// back, hold none, so they decode once.
-func mayHoldFlatOptions(mapping *yaml.Node) bool {
-	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
-		key := mapping.Content[idx]
-		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" || !isRuleSettingKey(key.Value) {
-			return true
-		}
-	}
-	return false
+// mappingEntry is an entry that decoding takes from a mapping: its key's
+// name as decoding reads it, and its key and value nodes.
+type mappingEntry struct {
+	name       string
+	key, value *yaml.Node
 }
 
-// keyLine returns the line of the entry of mapping whose key reads as name,
-// or the line of mapping itself when the entry is not written there, as
-// when a merge key brings it in.
-func keyLine(mapping *yaml.Node, name string) int {
-	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
-		var key string
-		if mapping.Content[idx].Decode(&key) == nil && key == name {
-			return mapping.Content[idx].Line
+// takenEntries returns the entries that decoding takes from node, a mapping
+// or an alias of one, without decoding their values, in the order of
+// yaml.v3's precedence: those written in the mapping, then, in turn, those
+// of each mapping that its merge key brings in, each before those that its
+// own merge key brings in. An entry whose name a previous entry has taken
+// is left out, as decoding leaves it out, so a key written in the mapping
+// replaces a merged one, and an earlier merged mapping replaces a later
+// one. Two keys written in one mapping that read as one name are an error
+// that names both, after prefix, such as "options.", at the line of the
+// second. A node that is no mapping has no entries.
+func takenEntries(node *yaml.Node, prefix string) ([]mappingEntry, error) {
+	if plainMapping(node) {
+		// Every key is written in the mapping as a string that YAML has
+		// checked for repeats, as every mapping that gomdlint writes is.
+		node = aliasTarget(node)
+		entries := make([]mappingEntry, 0, len(node.Content)/2)
+		for idx := 0; idx+1 < len(node.Content); idx += 2 {
+			key := node.Content[idx]
+			entries = append(entries, mappingEntry{name: key.Value, key: key, value: node.Content[idx+1]})
+		}
+		return entries, nil
+	}
+
+	var entries []mappingEntry
+	taken := make(map[string]bool)
+	walked := make(map[*yaml.Node]bool)
+
+	var walk func(node *yaml.Node) error
+	walk = func(node *yaml.Node) error {
+		node = aliasTarget(node)
+		// A mapping is walked once, so one that merges itself, which
+		// decoding rejects, cannot loop.
+		if node == nil || node.Kind != yaml.MappingNode || walked[node] {
+			return nil
+		}
+		walked[node] = true
+
+		written := make(map[string]*yaml.Node, len(node.Content)/2)
+		var merge *yaml.Node
+		for idx := 0; idx+1 < len(node.Content); idx += 2 {
+			key, value := node.Content[idx], node.Content[idx+1]
+			if isMergeKey(key) {
+				merge = value
+				continue
+			}
+			name, ok := keyName(key)
+			if !ok {
+				continue // Decoding skips a key that is no string, or fails on it.
+			}
+			if first, twice := written[name]; twice {
+				return &yaml.TypeError{Errors: []string{fmt.Sprintf(
+					"line %d: %q and %q both set option %q; keep one of them",
+					key.Line, prefix+writtenKey(first), prefix+writtenKey(key), name)}}
+			}
+			written[name] = key
+			if !taken[name] {
+				taken[name] = true
+				entries = append(entries, mappingEntry{name: name, key: key, value: value})
+			}
+		}
+		if merge == nil {
+			return nil
+		}
+		sources := []*yaml.Node{merge}
+		if merge.Kind == yaml.SequenceNode {
+			sources = merge.Content
+		}
+		for _, source := range sources {
+			if err := walk(source); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := walk(node); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// aliasTarget returns the node that node, possibly an alias, stands for.
+func aliasTarget(node *yaml.Node) *yaml.Node {
+	for node != nil && node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	return node
+}
+
+// plainMapping reports whether node, or the node it is an alias of, is a
+// mapping whose keys are all strings written in it, with no merge key.
+// YAML rejects a mapping that writes one key twice, comparing keys by
+// their text, which for a string is the name that decoding reads, so no
+// two keys of such a mapping read as one name, and nothing else brings
+// keys in.
+func plainMapping(node *yaml.Node) bool {
+	node = aliasTarget(node)
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for idx := 0; idx < len(node.Content); idx += 2 {
+		if key := node.Content[idx]; key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" {
+			return false
 		}
 	}
-	return mapping.Line
+	return true
+}
+
+// isMergeKey reports whether key is a merge key, as decoding tells one:
+// the plain scalar <<, or << tagged !!merge. A quoted "<<", like every key
+// of a JSON config, is an ordinary key.
+func isMergeKey(key *yaml.Node) bool {
+	return key.Kind == yaml.ScalarNode && key.Value == "<<" && key.ShortTag() == "!!merge"
+}
+
+// keyName returns the name that decoding reads from key: the text of a
+// string, and otherwise what the key decodes to as a string, such as the
+// scalar that an alias names. It reports false for a key that does not
+// decode to a string.
+func keyName(key *yaml.Node) (string, bool) {
+	if key.Kind == yaml.ScalarNode && key.ShortTag() == "!!str" {
+		return key.Value, true
+	}
+	var name string
+	if err := key.Decode(&name); err != nil {
+		return "", false
+	}
+	return name, true
+}
+
+// writtenKey returns key as a file writes it: an alias as *anchor, and any
+// other key as its text.
+func writtenKey(key *yaml.Node) string {
+	if key.Kind == yaml.AliasNode {
+		return "*" + key.Value
+	}
+	return key.Value
 }
 
 // describeNode names the value of a YAML node for an error message.
@@ -228,10 +391,16 @@ func describeNode(node *yaml.Node) string {
 	return node.ShortTag()
 }
 
-// FromYAML parses a configuration from YAML bytes.
+// FromYAML parses a configuration from YAML bytes. It does not know which
+// options the rules declare, so it reads every key written directly under a
+// rule key, other than the settings, as an option (see ResolveFlatOptions).
+// A configuration loader that knows the rules reads only their options.
 func FromYAML(data []byte) (*Config, error) {
 	cfg := &Config{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+	if err := cfg.readAllFlatOptions(); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 
@@ -241,6 +410,33 @@ func FromYAML(data []byte) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// readAllFlatOptions reads every key written directly under a rule key,
+// other than the settings, into the rule's options, in rules and
+// rule_defaults, rule by rule in order of key, so the first error is the
+// same every time.
+func (c *Config) readAllFlatOptions() error {
+	for _, section := range []struct {
+		name  string
+		rules map[string]RuleConfig
+	}{{"rules", c.Rules}, {"rule_defaults", c.RuleDefaults}} {
+		var keys []string
+		for key, rule := range section.rules {
+			if len(rule.flat) > 0 {
+				keys = append(keys, key)
+			}
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			rule := section.rules[key]
+			if _, err := rule.ResolveFlatOptions(func(string) bool { return true }); err != nil {
+				return fmt.Errorf("%s.%s: %w", section.name, key, err)
+			}
+			section.rules[key] = rule
+		}
+	}
+	return nil
 }
 
 // Clone creates a deep copy of the configuration.
@@ -383,6 +579,10 @@ func (rc RuleConfig) clone() RuleConfig {
 		clone.Options = make(map[string]any, len(rc.Options))
 		maps.Copy(clone.Options, rc.Options) // Note: nested maps/slices in Options are not deep copied
 	}
+
+	// Keys not read yet stay unread in the copy. Reading them replaces the
+	// slice and never changes the nodes, so the copy can share the nodes.
+	clone.flat = slices.Clone(rc.flat)
 
 	return clone
 }

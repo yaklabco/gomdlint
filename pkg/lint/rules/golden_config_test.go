@@ -87,6 +87,11 @@ func loadGoldenConfig(path string) (*config.Config, error) {
 			return nil, fmt.Errorf("sidecar %s: rules.%s: unknown rule", path, key)
 		}
 		ruleCfg := sidecar.Rules[key]
+		// Every key directly under the rule ID is read as an option, so that
+		// checkSidecarOptions rejects those the rule does not read.
+		if _, err := ruleCfg.ResolveFlatOptions(func(string) bool { return true }); err != nil {
+			return nil, fmt.Errorf("sidecar %s: rules.%s: %w", path, key, err)
+		}
 		if setting := firstRuleSetting(ruleCfg); setting != "" {
 			return nil, fmt.Errorf("sidecar %s: rules.%s.%s: a sidecar sets rule options only", path, key, setting)
 		}

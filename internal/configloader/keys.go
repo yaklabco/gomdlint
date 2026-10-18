@@ -150,15 +150,42 @@ func ruleEntryWarnings(registry *lint.Registry, rule lint.Rule, prefix string, e
 	return warnings
 }
 
+// unknownOptionIssue returns the issue that name spells no option of rule,
+// with the closest spellings, when the rule declares its options and none
+// of them is spelled so. Only the name counts: the value asked about is
+// null, so no value is ever decoded to tell.
+func unknownOptionIssue(registry *lint.Registry, rule lint.Rule, name string) (lint.OptionIssue, bool) {
+	_, issues, _ := registry.NormalizeOptions(rule.ID(), map[string]any{name: nil})
+	for _, issue := range issues {
+		if issue.Kind == lint.OptionIssueUnknown {
+			return issue, true
+		}
+	}
+	return lint.OptionIssue{}, false
+}
+
+// unknownOption reports whether rule declares its options and none of them
+// is spelled name. A rule that declares none may read any name.
+func unknownOption(registry *lint.Registry, rule lint.Rule, name string) bool {
+	_, unknown := unknownOptionIssue(registry, rule, name)
+	return unknown
+}
+
 // declaredOption returns the canonical name of the option of rule that
-// spelling spells, when the rule declares its options and one of them is
-// spelled so, by its name or an alias. It asks NormalizeOptions with a null
-// value, which suits every option type, so the only issue it can report is
-// that spelling spells no option.
+// spelling spells, by its name or an alias, when the rule declares its
+// options and one of them is spelled so.
 func declaredOption(registry *lint.Registry, rule lint.Rule, spelling string) (string, bool) {
 	normalized, issues, declared := registry.NormalizeOptions(rule.ID(), map[string]any{spelling: nil})
-	if !declared || len(issues) > 0 {
+	switch {
+	case !declared:
 		return "", false
+	case len(issues) > 0:
+		// One key brings at most one issue. A known spelling's issue
+		// names its option.
+		if issues[0].Kind == lint.OptionIssueUnknown {
+			return "", false
+		}
+		return issues[0].Option.Name, true
 	}
 	for name := range normalized {
 		return name, true
@@ -172,8 +199,8 @@ func declaredOption(registry *lint.Registry, rule lint.Rule, spelling string) (s
 // rule and is close to none, but close to a setting. A rule that does not
 // declare its options has none to tell a typo by.
 func misspelledSetting(registry *lint.Registry, rule lint.Rule, name string) bool {
-	_, issues, declared := registry.NormalizeOptions(rule.ID(), map[string]any{name: nil})
-	if !declared || len(issues) != 1 || issues[0].Kind != lint.OptionIssueUnknown || len(issues[0].Suggestions) > 0 {
+	issue, unknown := unknownOptionIssue(registry, rule, name)
+	if !unknown || len(issue.Suggestions) > 0 {
 		return false
 	}
 	_, near := closestKey(name, config.RuleSettingKeys())
@@ -195,9 +222,15 @@ type optionWarning struct {
 // not allow. A warning about an item of a list names the item's line. Two
 // spellings of one option fail loading instead (see normalizeRuleOptions).
 func optionWarnings(registry *lint.Registry, rule lint.Rule, option keyEntry) []optionWarning {
+	// The name alone tells an unknown option. Loading never decodes the
+	// value of an unknown key written directly under the rule key, which
+	// may not decode, so its value is not read here either.
+	if issue, unknown := unknownOptionIssue(registry, rule, option.name); unknown {
+		return []optionWarning{{at: option, message: issue.Text(rule.Name())}}
+	}
 	var value any
 	if err := option.value.Decode(&value); err != nil {
-		return nil // Loading has decoded the file, so this does not happen.
+		return nil // Loading has decoded the value, so this does not happen.
 	}
 	_, issues, _ := registry.NormalizeOptions(rule.ID(), map[string]any{option.name: value})
 	warnings := make([]optionWarning, 0, len(issues))

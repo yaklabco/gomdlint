@@ -474,6 +474,16 @@ rules:
 			content: "rules:\n  MD013:\n    max: 100\n    options:\n      max: 90\n",
 			wantErr: `"max" and "options.max" both set option "max"`,
 		},
+		{
+			name:    "option set twice through an alias",
+			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
+			wantErr: `line 4: "line_length" and "*opt" both set option "line_length"`,
+		},
+		{
+			name:    "option set twice through an alias under options",
+			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
+			wantErr: `line 5: "options.max" and "options.*opt" both set option "max"`,
+		},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
