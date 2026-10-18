@@ -490,9 +490,10 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 			wantFix:   "Line one\n\nLine two\n",
 		},
 		{
+			// markdownlint reports each blank line past the maximum.
 			name:      "three consecutive blank lines",
 			input:     "Line one\n\n\n\nLine two\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Line one\n\nLine two\n",
 		},
 		{
@@ -525,7 +526,7 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 		{
 			name:      "negative max consecutive counts as 1",
 			input:     "A\n\nB\n\n\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "A\n\nB\n",
 			config:    map[string]any{"max_consecutive": -2},
 		},
@@ -571,7 +572,7 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 		{
 			name:      "several blank lines before end of file",
 			input:     "Line one\n\n\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Line one\n",
 		},
 		{
@@ -647,6 +648,93 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 func markdownlintRuleConfig(ruleID string, value any) config.RuleConfig {
 	converted, _ := lint.DefaultRegistry.MarkdownlintRuleConfig(ruleID, value)
 	return converted
+}
+
+// TestMultipleBlankLinesRule_EachLine checks MD012 against markdownlint
+// 0.41.1: each blank line past the maximum is a finding, with the number of
+// blank lines in a row up to it, and the fixes of a run together remove all
+// of its extra lines in one pass. Blank lines right after front matter are
+// part of the front matter, as markdownlint's front matter pattern reads
+// them.
+func TestMultipleBlankLinesRule_EachLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFound []int
+		wantFix   string // Empty means unchanged.
+	}{
+		{
+			name: "runs of three and two", input: "# T\n\nA\n\n\n\nB\n\n\nC\n",
+			wantLines: []int{5, 6, 9}, wantFound: []int{2, 3, 2}, wantFix: "# T\n\nA\n\nB\n\nC\n",
+		},
+		{
+			name: "run at the end of the file", input: "# T\n\ntext\n\n\n",
+			wantLines: []int{5, 6}, wantFound: []int{2, 3}, wantFix: "# T\n\ntext\n",
+		},
+		{name: "blank lines after front matter", input: "---\ntitle: x\n---\n\n\n\n# H\n\ntext\n", wantLines: []int{}, wantFound: []int{}},
+		{name: "blank lines after TOML front matter", input: "+++\ntitle = 1\n+++\n\n\n# H\n", wantLines: []int{}, wantFound: []int{}},
+		{
+			name: "text right after front matter", input: "---\ntitle: x\n---\nA\n\n\n# H\n",
+			wantLines: []int{6}, wantFound: []int{2}, wantFix: "---\ntitle: x\n---\nA\n\n# H\n",
+		},
+		{
+			name: "blank lines in code", input: "# T\n\n```\na\n\n\n\nb\n```\n\n\nend\n",
+			wantLines: []int{11}, wantFound: []int{2}, wantFix: "# T\n\n```\na\n\n\n\nb\n```\n\nend\n",
+		},
+		{
+			name: "whitespace-only lines", input: "# T\n\nA\n  \n\t\n\nB\n",
+			wantLines: []int{5, 6}, wantFound: []int{2, 3}, wantFix: "# T\n\nA\n  \nB\n",
+		},
+		{
+			name: "carriage return line endings", input: "# T\r\n\r\nA\r\n\r\n\r\n\r\nB\r\n",
+			wantLines: []int{5, 6}, wantFound: []int{2, 3}, wantFix: "# T\r\n\r\nA\r\n\r\nB\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewMultipleBlankLinesRule(), tt.input, nil)
+			found := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				var count, maximum int
+				_, err := fmt.Sscanf(diag.Message, "Multiple consecutive blank lines (found %d, max %d)", &count, &maximum)
+				require.NoError(t, err, diag.Message)
+				found = append(found, count)
+			}
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			assert.Equal(t, tt.wantFound, found)
+			want := tt.wantFix
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestMultipleBlankLinesRule_OnePassRemovesARun checks that the engine
+// applies the fixes of all of a run's extra lines in one pass, so --fix
+// removes the run at once.
+func TestMultipleBlankLinesRule_OnePassRemovesARun(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(NewMultipleBlankLinesRule())
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	cfg := config.NewConfig()
+	cfg.Fix = true
+
+	input := []byte("# T\n\nA\n\n\n\n\nB\n\n\nC\n\n\n")
+	result, err := engine.LintFile(context.Background(), "test.md", input, cfg)
+	require.NoError(t, err)
+	// Lines 5, 6, 7, 10, 13 and 14, as markdownlint reports them: the last
+	// run ends with the empty line after the final newline.
+	require.Len(t, result.Diagnostics, 6)
+	fixed := fix.ApplyEdits(input, result.Edits)
+	assert.Equal(t, "# T\n\nA\n\nB\n\nC\n", string(fixed))
+
+	again, err := engine.LintFile(context.Background(), "test.md", fixed, cfg)
+	require.NoError(t, err)
+	assert.Empty(t, again.Diagnostics)
 }
 
 // TestMultipleBlankLinesRule_ConvergesWithFinalNewline checks that the fixes
