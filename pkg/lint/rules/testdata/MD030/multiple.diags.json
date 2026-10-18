@@ -3,7 +3,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 3,
-    "column": 2,
+    "column": 1,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -12,7 +12,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 4,
-    "column": 2,
+    "column": 1,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -21,7 +21,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 5,
-    "column": 2,
+    "column": 1,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -30,7 +30,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 9,
-    "column": 3,
+    "column": 1,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -39,7 +39,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 10,
-    "column": 3,
+    "column": 1,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -48,7 +48,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 11,
-    "column": 3,
+    "column": 1,
     "message": "List marker space 2 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -57,7 +57,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 15,
-    "column": 2,
+    "column": 1,
     "message": "List marker space 3 does not match expected 1",
     "severity": "warning",
     "fixable": true
@@ -66,7 +66,7 @@
     "rule": "MD030",
     "name": "list-marker-space",
     "line": 16,
-    "column": 2,
+    "column": 1,
     "message": "List marker space 3 does not match expected 1",
     "severity": "warning",
     "fixable": true

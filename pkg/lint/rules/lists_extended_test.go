@@ -329,6 +329,36 @@ func TestULIndentRule_Metadata(t *testing.T) {
 	assert.True(t, rule.CanFix())
 }
 
+// TestListMarkerSpaceRule_MarkdownlintParity checks MD030 against
+// markdownlint 0.41.1: a finding points at the list marker, and an option
+// set to 0 means its default of 1, as markdownlint reads "0 || 1".
+func TestListMarkerSpaceRule_MarkdownlintParity(t *testing.T) {
+	input := "-  item\n-   item2\n\n1.  one\n2.  two\n\n> -  quoted\n\n- a\n  -  nested\n\n-      code\n"
+	fixed := "- item\n- item2\n\n1. one\n2. two\n\n> - quoted\n\n- a\n  - nested\n\n-      code\n"
+	zeros := map[string]any{"ul_single": 0, "ol_single": 0, "ul_multi": 0, "ol_multi": 0}
+
+	type finding struct {
+		line, column int
+		message      string
+	}
+	for _, options := range []map[string]any{nil, zeros} {
+		diags := applyRuleWithOptions(t, NewListMarkerSpaceRule(), input, options)
+		got := make([]finding, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, finding{diag.StartLine, diag.StartColumn, diag.Message})
+		}
+		assert.Equal(t, []finding{
+			{1, 1, "List marker space 2 does not match expected 1"},
+			{2, 1, "List marker space 3 does not match expected 1"},
+			{4, 1, "List marker space 2 does not match expected 1"},
+			{5, 1, "List marker space 2 does not match expected 1"},
+			{7, 3, "List marker space 2 does not match expected 1"},
+			{10, 3, "List marker space 2 does not match expected 1"},
+		}, got, "options %v", options)
+		assert.Equal(t, fixed, applyAllEdits(t, input, diags), "options %v", options)
+	}
+}
+
 func TestListMarkerSpaceRule_Metadata(t *testing.T) {
 	rule := NewListMarkerSpaceRule()
 
