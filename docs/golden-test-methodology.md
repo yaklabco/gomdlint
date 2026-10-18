@@ -703,8 +703,8 @@ golden files cannot show:
 
 ## Current Coverage
 
-582 golden tests from 291 inputs: 286 per-rule scenarios across all 55 rules and
-5 real-world documents, each with a round trip, and 14 sidecar configs. Every
+588 golden tests from 294 inputs: 289 per-rule scenarios across all 55 rules and
+5 real-world documents, each with a round trip, and 15 sidecar configs. Every
 rule has at least `basic` and `clean` cases. Fixable rules have edge-case
 coverage for frontmatter, code block immunity, unicode, and batch fix scenarios.
 Non-fixable rules have frontmatter and (where applicable) code block immunity cases.

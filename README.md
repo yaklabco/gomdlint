@@ -134,7 +134,9 @@ consistent code block and fence style, and ensure blank lines around fences,
 no spaces inside code spans, and no `$` prompts before commands without
 output. A missing language is added only when the whole block shows which
 one it is: a shebang line, JSON, an XML document, an HTML page with a
-doctype, a PHP opening tag, a complete unified diff, or a Dockerfile.
+doctype, a PHP opening tag, a complete unified diff, or a Dockerfile. When
+`allowed_languages` is set, the language must also be one it names, with
+the same case.
 
 **Links** - Detect reversed link syntax, bare URLs, spaces inside link text,
 empty links, missing image alt text, broken link fragments, undefined and
@@ -566,6 +568,10 @@ Some of its fix checks are also stricter than they need to be.
   (MD013), `no-multiple-space-blockquote` (MD027), `ol-prefix` (MD029),
   `list-marker-space` (MD030), `blanks-around-lists` (MD032) and
   `single-trailing-newline` (MD047). Their findings are still reported.
+- `blanks-around-tables` (MD058) reports a table in a list without a fix
+  whenever the blank line it needs would fall between two items or between
+  two blocks of an item. That keeps a tight list tight, but it also
+  withholds the fix in loose lists, where the blank line would be safe.
 - goldmark reads `> -  first item` followed by `> <tab>- second item`, where
   `<tab>` is a tab character, as one list item that continues with the text
   `- second item`. CommonMark reads two items, so the list rules see one

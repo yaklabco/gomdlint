@@ -278,8 +278,13 @@ and `commonmark` adds none.
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark
 reads as tight, so `ListTight` and `ListItemLoose` report tightness as
-CommonMark does. `Parser.ParseWithReferences` parses part of a document
-with the document's definitions, for the region checks below.
+CommonMark does. goldmark builds a GFM table from a paragraph without the
+paragraph's blank-line flag, so the parser gives the table that flag when
+the table takes the paragraph's first line, unless link reference
+definitions came off the paragraph's start. A list item that gains a blank
+line before a table then reads as loose, as in CommonMark.
+`Parser.ParseWithReferences` parses part of a document with the document's
+definitions, for the region checks below.
 
 Helpers in `pkg/lint/source.go` give rule fixes the container prefix of a
 line measured in CommonMark columns (`ContainerPrefix`), blank-line checks
