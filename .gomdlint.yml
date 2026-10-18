@@ -42,6 +42,11 @@ rules:
       # CHANGELOG.md repeats Added, Changed and Fixed under every release, as
       # Keep a Changelog does, so only headings under one parent must differ.
       siblings_only: true
+  MD058:
+    # blanks-around-tables is the one rule whose default severity is info,
+    # and --strict fails only on warnings and errors. A warning here makes
+    # the CI lint of these docs fail on every finding.
+    severity: warning
   MD060:
     enabled: true
     options:
