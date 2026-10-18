@@ -845,10 +845,12 @@ func TestNoDuplicateHeadingRule_MarkdownlintText(t *testing.T) {
 			wantLines: []int{5, 13, 17},
 		},
 		{
-			// markdownlint parses math, which holds no HTML.
-			name:      "a tag in inline math is math",
+			// goldmark parses no math, so a tag in inline math is HTML
+			// directly in the heading, as on main. markdownlint reads it as
+			// math and reports neither.
+			name:      "a tag in inline math is HTML",
 			input:     "# Title\n\n## $<b>$ a\n\n## $$ a\n\n## x $y<i>z$ w\n\n## x $yz$ w\n",
-			wantLines: []int{},
+			wantLines: []int{5, 9},
 		},
 		{name: "closing sequences and spaces", input: "# Title\n\n## Foo ##\n\n## Foo\n\n## Foo   #\n", wantLines: []int{5, 7}},
 		{name: "escapes and references as written", input: "# Title\n\n## Foo\\!\n\n## Foo!\n\n## Foo&#33;\n\n## Foo!\n", wantLines: []int{9}},

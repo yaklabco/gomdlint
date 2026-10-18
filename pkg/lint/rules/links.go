@@ -55,16 +55,14 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	}
 
 	var diags []lint.Diagnostic
-	math := findMath(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip lines in code blocks and, as markdownlint does, in math
-		// blocks.
-		if ctx.IsLineInCodeBlock(lineNum) || math.lines[lineNum] {
+		// Skip lines in code blocks.
+		if ctx.IsLineInCodeBlock(lineNum) {
 			continue
 		}
 
@@ -81,7 +79,7 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 				continue
 			}
 			startOffset, endOffset := lineStart+start, lineStart+end
-			if overlapsCodeSpan(ctx, startOffset, endOffset) || math.overlaps(startOffset, endOffset) {
+			if overlapsCodeSpan(ctx, startOffset, endOffset) {
 				continue
 			}
 
@@ -362,14 +360,13 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	images := ctx.Images()
 	diags := make([]lint.Diagnostic, 0, len(images))
-	math := &lazyMath{ctx: ctx}
 
 	for _, img := range images {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		if hasAltText(img) || inMath(math, img) {
+		if hasAltText(img) {
 			continue
 		}
 
@@ -383,7 +380,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	if ctx.File == nil {
 		return diags, nil
 	}
-	for _, image := range r.htmlImages(ctx, math) {
+	for _, image := range r.htmlImages(ctx) {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
@@ -430,12 +427,12 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 	})
 }
 
-// htmlImages returns the opening img tags in HTML blocks and inline HTML,
-// except those in math. The sources come from htmlSources, so the file is
-// not copied for each element.
-func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext, math *lazyMath) []htmlImage {
+// htmlImages returns the opening img tags in HTML blocks and inline HTML.
+// The sources come from htmlSources, so the file is not copied for each
+// element.
+func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 	var images []htmlImage
-	sources := htmlSources{file: ctx.File, math: math}
+	sources := htmlSources{file: ctx.File}
 	keep := func(source []byte, construct mdscan.HTMLConstruct, _ bool) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
 			// The source is valid only while it is read, so the image keeps
@@ -447,9 +444,6 @@ func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext, math *lazyMath) []h
 		eachHTMLBlockConstruct(&sources, block, keep)
 	}
 	for _, inline := range ctx.HTMLInlines() {
-		if inMath(math, inline) {
-			continue
-		}
 		sources.with(inline, func(source []byte) {
 			if construct, ok := htmlNodeConstruct(source, inline); ok {
 				keep(source, construct, false)

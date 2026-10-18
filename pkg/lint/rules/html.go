@@ -50,8 +50,7 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	// The table lines and the masked copy of the file are worked out once
 	// for the file, not again for each element.
 	tables := newTableLineRanges(ctx.Tables())
-	math := &lazyMath{ctx: ctx}
-	sources := htmlSources{file: ctx.File, math: math}
+	sources := htmlSources{file: ctx.File}
 
 	var diags []lint.Diagnostic
 	report := func(construct mdscan.HTMLConstruct, allowedSet map[string]bool) {
@@ -77,9 +76,6 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	for _, inline := range ctx.HTMLInlines() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
-		}
-		if inMath(math, inline) {
-			continue
 		}
 		construct, ok := sources.construct(inline)
 		if !ok {
@@ -179,9 +175,6 @@ func fillWithSpaces(text []byte) {
 type htmlSources struct {
 	file    *mdast.FileSnapshot
 	scratch []byte
-	// math is the file's math, which eachHTMLBlockConstruct reads to leave
-	// math alone in a block that starts in it.
-	math *lazyMath
 }
 
 // construct returns the single raw HTML construct of an inline HTML node,
@@ -204,8 +197,7 @@ func (s *htmlSources) construct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
 func eachHTMLBlockConstruct(
 	sources *htmlSources, block *mdast.Node, use func(source []byte, construct mdscan.HTMLConstruct, inTable bool),
 ) {
-	readMath := sources.math == nil || !sources.math.inBlock(block.SourcePosition().StartLine)
-	tags := htmlBlockInlineHTML(sources.file, block, readMath)
+	tags := htmlBlockInlineHTML(sources.file, block)
 	if len(tags) == 0 {
 		return
 	}

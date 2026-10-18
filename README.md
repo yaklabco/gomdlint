@@ -720,22 +720,25 @@ Some of its fix checks are also stricter than they need to be.
   takes time that grows with the square of the run's length. Many fixes
   inside one large block other than a list, such as a long table or
   blockquote, cost a parse of that block each.
-- gomdlint reads a math block only when its `$$` fence starts the line,
-  with no indentation and no blockquote or list marker before it.
-  markdownlint also reads math inside blockquotes, list items, footnotes
-  and tables, which `no-reversed-links` (MD011), `no-inline-html` (MD033),
-  `no-alt-text` (MD045) and `reference-links-images` (MD052) skip, while
-  gomdlint reports there. gomdlint also stops reading math blocks for the
-  rest of a document at a fence where micromark may read the lines before
-  it differently from goldmark: after an indented `$$` fence, which
-  markdownlint may read as math, after an HTML block that goldmark does not
-  read, or inside a `:::` directive.
-- With `shortcut_syntax`, `reference-links-images` (MD052) counts no
-  footnote definition where micromark may read math, an HTML block or no
-  list item over it. Examples are a definition in an ordered list whose
-  first marker is not `1.` or `1)`, or one after a math fence in its
-  container. There MD052 reports the footnote call, as main does, even
-  where markdownlint reads the definition.
+- goldmark parses no math, so no rule skips it. `no-reversed-links`
+  (MD011), `no-inline-html` (MD033), `no-alt-text` (MD045) and
+  `reference-links-images` (MD052) report in a `$$` math block and in
+  inline math such as `$(a)[b]$`, which markdownlint skips, and
+  `no-duplicate-heading` (MD024) and `descriptive-link-text` (MD059) read
+  a tag or code span in inline math as HTML or code.
+- `reference-links-images` (MD052) reads GFM footnotes as markdownlint does
+  only where micromark is certain to read the definition: a `[^1]:` line
+  at column 0, at the top level outside code blocks, HTML blocks and front
+  matter, at the start of the document, after a blank line or right after
+  another such definition. No line before it may start with `$$` or `:::`,
+  and each code fence or HTML block before it that may hold blank lines,
+  such as a comment, must start at column 0 after a blank line, where
+  goldmark reads it at the top level. A call of any other definition, such
+  as one in a list item, a blockquote or a footnote, is read as goldmark
+  reads it, as a reference, and reported when no link reference definition
+  matches, even where markdownlint reads the footnote definition. No
+  definition counts in a document whose front matter markdownlint may read
+  differently, or whose lines end with a carriage return alone.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

@@ -876,9 +876,11 @@ func TestDescriptiveLinkTextRule_MarkdownlintPositions(t *testing.T) {
 }
 
 // TestDescriptiveLinkTextRule_StrikethroughAndMath checks MD059 against
-// markdownlint 0.41.1, which parses no strikethrough and parses math. Code
-// or HTML in a strikethrough is directly in the link text for it, so the
-// link is skipped, and code or HTML in math is math, so it is not.
+// markdownlint 0.41.1, which parses no strikethrough, so code or HTML in a
+// strikethrough is directly in the link text for it, and the link is
+// skipped. Code or HTML in inline math is code or HTML too, as on main:
+// goldmark parses no math, where markdownlint reads it as math and reports
+// the links on lines 15 and 17.
 func TestDescriptiveLinkTextRule_StrikethroughAndMath(t *testing.T) {
 	markdown := "# Title\n\n" +
 		"[~~`here`~~](x)\n\n" + // 3: the code is direct
@@ -887,8 +889,8 @@ func TestDescriptiveLinkTextRule_StrikethroughAndMath(t *testing.T) {
 		"[~~here <b>x</b>~~](x)\n\n" + // 9
 		"[*~~`here`~~*](x)\n\n" + // 11: emphasis holds the code
 		"[~~`a`~~ here](x)\n\n" + // 13
-		"[$<here>$](x)\n\n" + // 15: the tag is math
-		"[$`here`$](x)\n\n" + // 17: the code is math
+		"[$<here>$](x)\n\n" + // 15: the tag is HTML
+		"[$`here`$](x)\n\n" + // 17: the code is code
 		"[here $<b>$](x)\n" // 19
 
 	diags := applyRuleWithOptions(t, NewDescriptiveLinkTextRule(), markdown, nil)
@@ -897,228 +899,30 @@ func TestDescriptiveLinkTextRule_StrikethroughAndMath(t *testing.T) {
 	for _, diag := range diags {
 		got = append(got, position{diag.StartLine, diag.StartColumn})
 	}
-	assert.Equal(t, []position{{5, 2}, {7, 2}, {11, 2}, {15, 2}, {17, 2}}, got)
+	assert.Equal(t, []position{{5, 2}, {7, 2}, {11, 2}}, got)
 }
 
-// TestReferenceLinkImagesRule_Footnotes checks MD052 against markdownlint
-// 0.41.1, which reads GFM footnotes: "[^label]" calls a footnote when a line
-// starts with "[^label]:", in any container and before or after the call,
-// so it is not an undefined reference. goldmark reads no footnotes, and
-// takes such a line for a paragraph unless it is also a link reference
-// definition.
-func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
-	type position struct{ line, column int }
-	tests := []struct {
-		name     string
-		input    string
-		want     []position // With shortcut_syntax.
-		wantFull []position // Without it.
-	}{
-		{name: "definition before the call", input: "# T\n\n[^first]: Defined before.\n\nUse [^first] here.\n"},
-		{name: "definition after the call", input: "# T\n\nUse [^first] here.\n\n[^first]: Defined after.\n"},
-		{name: "labels in another case", input: "# T\n\nUse [^Second].\n\n[^second]: Two words.\n"},
-		{name: "definition in a list item", input: "# T\n\nUse [^third].\n\n- item\n\n  [^third]: In a list.\n"},
-		{name: "definition in a blockquote", input: "# T\n\nUse [^q].\n\n> [^q]: In a quote.\n"},
-		{name: "definition that interrupts a paragraph", input: "# T\n\nUse [^n].\nSome text\n[^n]: Interrupts the paragraph.\n"},
-		{name: "escaped bracket in the label", input: "# T\n\nUse [^e\\]x].\n\n[^e\\]x]: Escaped bracket.\n"},
-		{name: "indented definition", input: "# T\n\nUse [^i].\n\n   [^i]: Indented three.\n"},
-		{
-			name:  "undefined footnotes",
-			input: "# T\n\nMore [^missing] and [^] and [^ x] text.\n",
-			want:  []position{{3, 6}, {3, 21}, {3, 29}},
-		},
-		{
-			name:  "label with a space is no footnote",
-			input: "# T\n\nUse [^a b].\n\n[^a b]: Not a footnote.\n",
-			want:  []position{{3, 5}, {5, 1}},
-		},
-		{name: "definition in code", input: "# T\n\nUse [^c].\n\n```\n[^c]: in code\n```\n", want: []position{{3, 5}}},
-		{name: "definition in HTML", input: "# T\n\nUse [^h].\n\n<div>\n[^h]: in html\n</div>\n", want: []position{{3, 5}}},
-		{
-			// The second bracket pair calls the footnote, so the first is
-			// a shortcut reference of its own.
-			name:  "footnote call after link text",
-			input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n",
-			want:  []position{{3, 5}},
-		},
-		// A definition starts after the prefixes of the containers its line
-		// continues and at most three columns of space, as a container does.
-		{
-			name:  "paragraph line indented four columns",
-			input: "# T\n\nUse [^n].\n\ntext\n    [^n]: note text\n",
-			want:  []position{{3, 5}, {6, 5}},
-		},
-		{name: "definition in indented code", input: "# T\n\nUse [^n].\n\n    [^n]: indented code\n", want: []position{{3, 5}}},
-		{name: "definition in math", input: "# T\n\nUse [^n].\n\n$$\n[^n]: in math\n$$\n", want: []position{{3, 5}}},
-		{
-			name:  "definition in indented code in a list item",
-			input: "# T\n\nUse [^n].\n\n- item\n\n      [^n]: indented in item\n",
-			want:  []position{{3, 5}},
-		},
-		{name: "definition that interrupts a list item's paragraph", input: "# T\n\nUse [^n].\n\n- item\n   [^n]: in item\n"},
-		{name: "definition on a lazy line", input: "# T\n\nUse [^n].\n\n> quote\n[^n]: lazy\n"},
-		{name: "definition in a quoted list item", input: "# T\n\nUse [^n].\n\n> - a\n>     [^n]: x\n"},
-		{
-			name:  "quoted list item line indented four columns",
-			input: "# T\n\nUse [^n].\n\n> - a\n>       [^n]: x\n",
-			want:  []position{{3, 5}, {6, 9}},
-		},
-		{name: "tab past a list item's indentation", input: "# T\n\nUse [^n].\n\n- a\n\n\t[^n]: tab\n"},
-		// A footnote definition is no link reference definition, so a
-		// label that names both calls the footnote.
-		{
-			name:  "full reference to a footnote that is also a link definition",
-			input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n",
-			want:  []position{{3, 5}},
-		},
-		{name: "footnote call that is also a link definition", input: "# T\n\nUse [^n] here.\n\n[^n]: /url\n"},
-		{
-			name:  "defined link text before a footnote that is also a link definition",
-			input: "# T\n\nUse [text][^n].\n\n[text]: /a\n[^n]: /url\n",
-		},
-		// A footnote definition is a container whose content lines are
-		// indented four columns, so a definition can start four to seven
-		// columns in, and code in its content holds none.
-		{name: "definition in a footnote's content", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^n]: inner\n"},
-		{name: "definition after text in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: text\n    [^n]: inner\n"},
-		{name: "definition after a blank line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n\n    [^n]: inner\n"},
-		{name: "definition two footnotes deep", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^p]:\n        [^n]: inner\n"},
-		{name: "seven columns into a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n       [^n]: seven\n"},
-		{name: "lazy line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\nlazy\n    [^n]: inner\n"},
-		{name: "footnote in a list item", input: "# T\n\nUse [^n].\n\n- [^o]:\n      [^n]: inner\n"},
-		{
-			name:  "indented code in a footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]:\n\n        [^n]: code\n",
-			want:  []position{{3, 5}},
-		},
-		{
-			name:  "fenced code in a footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: note\n    ```\n    [^n]: code\n    ```\n",
-			want:  []position{{3, 5}},
-		},
-		{
-			// A known gap, on the side of reporting nothing: markdownlint
-			// reports 3:5, as the definition line is code in the footnote's
-			// content, but goldmark reads the fence line as the destination
-			// of "[^o]:" and "[^n]: code" as a link reference definition, so
-			// the reference resolves.
-			name:  "fenced code after an empty footnote line",
-			input: "# T\n\nUse [^n].\n\n[^o]:\n    ```\n    [^n]: code\n    ```\n",
-		},
-		{
-			name:  "line after a closed footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n\ntext\n    [^n]: not\n",
-			want:  []position{{3, 5}, {8, 5}},
-		},
-		{
-			// markdownlint reads math, which holds no references.
-			name:     "references in math",
-			input:    "# T\n\nInline $[a][b]$ and $[^n]$ math.\n\n$$\n[c][d] and [e]\n$$\n\n[f][g] outside.\n",
-			want:     []position{{9, 1}},
-			wantFull: []position{{9, 1}},
-		},
-		{
-			// An indented line after text continues the paragraph and
-			// opens no math.
-			name:     "indented line after text",
-			input:    "Intro\n    $$\n\n[a][b]\n",
-			want:     []position{{4, 1}},
-			wantFull: []position{{4, 1}},
-		},
-		// Where micromark may read math, an HTML block or no list item over a
-		// definition, or may have closed the footnote that holds it, the
-		// definition does not count, and MD052 reports what main reports.
-		// markdownlint reports 3:5 alone, as it reads the second call as math
-		// or as no call, but in the item marked 01, which micromark reads as
-		// text, it reports both.
-		{
-			name:  "definition in math in a footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n    $$\n    [^n]: x\n    $$\n",
-			want:  []position{{3, 5}, {7, 5}},
-		},
-		{
-			name:  "definition in math in an item after a heading",
-			input: "# T\n\nUse [^n].\n\n## H\n3. $$\n   [^n]: y\n   $$\n\nEnd.\n",
-			want:  []position{{3, 5}, {7, 4}},
-		},
-		{
-			name:  "indented line in an item marked 01",
-			input: "# T\n\nUse [^n].\n\nIntro\n01. $$\n    [^n]: y\n    $$\n\nEnd.\n",
-			want:  []position{{3, 5}, {7, 5}},
-		},
-		{
-			name:  "definition in an item marked 01",
-			input: "# T\n\nUse [^n].\n\nIntro\n01. a\n    [^n]: y\n\nEnd.\n",
-			want:  []position{{3, 5}, {7, 5}},
-		},
-		{
-			name:  "definition after indented math",
-			input: "# T\n\nUse [^n].\n\nIntro\n  $$\n[^n]: y\n  $$\n",
-			want:  []position{{3, 5}, {7, 1}},
-		},
-		{
-			name:  "definition after indented math that starts a block",
-			input: "# T\n\nUse [^n].\n\n  $$\n[^n]: y\n  $$\n",
-			want:  []position{{3, 5}, {6, 1}},
-		},
-		{
-			name:  "definition after math that ends a footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n$$\nx\n$$\n    [^n]: y\n",
-			want:  []position{{3, 5}, {9, 5}},
-		},
-		{
-			name:  "definition after a heading that ends a footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n# H\n    [^n]: y\n",
-			want:  []position{{3, 5}},
-		},
-		{
-			name:  "definition after an HTML block in a footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n\n    <div>\n    [^n]: y\n",
-			want:  []position{{3, 5}},
-		},
-		{
-			// micromark reads a line four columns in as one that continues
-			// both footnotes, so the fence goes on and holds the definition.
-			name:  "definition after a fence in a nested footnote",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n    [^p]: b\n        ```\n    [^n]: y\n",
-			want:  []position{{3, 5}, {8, 5}},
-		},
-		{
-			name:  "definition after HTML on a footnote's first line",
-			input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n    [^n]: y\n",
-			want:  []position{{3, 5}, {6, 5}},
-		},
-		{
-			name:  "definition after HTML on the first line of a footnote with an escaped label",
-			input: "# T\n\nUse [^n].\n\n[^o\\]x]: <div> x\n    [^n]: y\n",
-			want:  []position{{3, 5}, {6, 5}},
-		},
-		{
-			name:  "definition in a list from 01 after indented code and a blank line",
-			input: "# T\n\nUse [^n].\n\n    code\n\n01. a\n    [^n]: y\n",
-			want:  []position{{3, 5}, {8, 5}},
-		},
-		// Definitions that micromark reads still count.
-		{name: "definition in an item marked 1", input: "# T\n\nUse [^n].\n\n1. [^n]: y\n"},
-		{name: "definition in the second item of a list from 1", input: "# T\n\nUse [^n].\n\n1. a\n2. b\n   [^n]: y\n"},
-		{name: "definition after a formula on one line", input: "# T\n\nUse [^n].\n\n- Equation:\n  $$E = mc^2$$\n  [^n]: y\n"},
-		{name: "definition in a sibling of a footnote with HTML", input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n[^p]: b\n    [^n]: y\n"},
-		{
-			// micromark ends the footnote, and the fence in it, at a line at
-			// column 0, where main reports 3:5 and 7:1.
-			name:  "definition after a fence that a footnote's end closes",
-			input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n[^n]: y\n",
-		},
-		{name: "definition in a blockquote", input: "# T\n\nUse [^n].\n\n> [^n]: y\n"},
-		{name: "definition in a bullet item", input: "# T\n\nUse [^n].\n\n- [^n]: y\n"},
-		{name: "definition after closed math", input: "# T\n\nUse [^n].\n\n$$\nx\n$$\n\n[^n]: y\n"},
-	}
+// footnoteCase is an MD052 footnote case: its input, and the positions of
+// its findings with shortcut_syntax (want) and without it (wantFull).
+type footnoteCase struct {
+	name     string
+	input    string
+	want     []footnotePosition
+	wantFull []footnotePosition
+}
 
-	positions := func(input string, options map[string]any) []position {
+// footnotePosition is the line and column of an MD052 finding.
+type footnotePosition struct{ line, column int }
+
+// checkFootnoteCases runs MD052 on each case, with shortcut_syntax and
+// without it.
+func checkFootnoteCases(t *testing.T, tests []footnoteCase) {
+	t.Helper()
+	positions := func(input string, options map[string]any) []footnotePosition {
 		diags := applyRuleWithOptions(t, NewReferenceLinkImagesRule(), input, options)
-		got := make([]position, 0, len(diags))
+		got := make([]footnotePosition, 0, len(diags))
 		for _, diag := range diags {
-			got = append(got, position{diag.StartLine, diag.StartColumn})
+			got = append(got, footnotePosition{diag.StartLine, diag.StartColumn})
 		}
 		return got
 	}
@@ -1126,15 +930,455 @@ func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			want := tt.want
 			if want == nil {
-				want = []position{}
+				want = []footnotePosition{}
 			}
 			wantFull := tt.wantFull
 			if wantFull == nil {
-				wantFull = []position{}
+				wantFull = []footnotePosition{}
 			}
 			assert.Equal(t, want, positions(tt.input, map[string]any{"shortcut_syntax": true}), "with shortcut_syntax")
 			assert.Equal(t, wantFull, positions(tt.input, nil), "without shortcut_syntax")
 		})
+	}
+}
+
+// TestReferenceLinkImagesRule_CertainFootnotes checks MD052 on GFM
+// footnotes whose definition micromark is certain to read (see
+// certainFootnoteLabels), where it reports what markdownlint 0.41.1
+// reports: "[^label]" calls the footnote, and in "[text][^label]" the
+// second pair calls it, so the first is a shortcut reference. Two
+// definitions in a row count, as micromark reads each, and so does a
+// definition right after front matter, at the start of micromark's
+// document.
+func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{name: "definition before the call", input: "# T\n\n[^first]: Defined before.\n\nUse [^first] here.\n"},
+		{name: "definition after the call", input: "# T\n\nUse [^first] here.\n\n[^first]: Defined after.\n"},
+		{name: "labels in another case", input: "# T\n\nUse [^Second].\n\n[^second]: Two words.\n"},
+		{name: "escaped bracket in the label", input: "# T\n\nUse [^e\\]x].\n\n[^e\\]x]: Escaped bracket.\n"},
+		{name: "definition on the first line", input: "[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
+		{name: "definition after a byte order mark", input: "\ufeff[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
+		{name: "definition right after front matter", input: "---\ntitle: x\n---\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
+		{name: "definitions in a row", input: "# T\n\nUse [^a], [^b] and [x][^c].\n\n[^a]: One note.\n[^b]: Two notes.\n[^c]: Three notes.\n"},
+		{name: "definition after one that opens math", input: "# T\n\nUse [^a] and [x][^b].\n\n[^a]: $$\n[^b]: Two notes.\n"},
+		{name: "definition after one that opens a fence", input: "# T\n\nUse [^a] and [x][^b].\n\n[^a]: ```\n[^b]: Two notes.\n"},
+		{name: "definition before math", input: "# T\n\nUse [^n] and [x][^n].\n\n[^n]: Note text.\n\n$$\nx\n$$\n"},
+		{name: "definition after a list", input: "# T\n\nUse [^n] and [x][^n].\n\n- item\n\n[^n]: Note text.\n"},
+		{name: "definition after a closed fence in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n\n[^n]: y\n"},
+		{name: "definition after a fenced code block", input: "# T\n\nUse [^n] and [x][^n].\n\n```\n[^n]: in code\n\n```\n\n[^n]: Note text.\n"},
+		{name: "definition after a comment over several lines", input: "# T\n\nUse [^n] and [x][^n].\n\n<!--\n\n[^n]: in a comment\n-->\n\n[^n]: Note text.\n"},
+		{name: "definition after a one-line comment", input: "# T\n\nUse [^n] and [x][^n].\n\n<!-- note -->\n\n[^n]: Note text.\n"},
+		{name: "definition after a div", input: "# T\n\nUse [^n] and [x][^n].\n\n<div>\n<b>x</b>\n</div>\n\n[^n]: Note text.\n"},
+		{name: "definition after one-line CDATA", input: "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[x]]]]>\n\n[^n]: Note text.\n"},
+		{name: "undefined footnotes", input: "# T\n\nMore [^missing] and [^] and [^ x] text.\n", want: []footnotePosition{{3, 6}, {3, 21}, {3, 29}}},
+		{name: "label with a space is no footnote", input: "# T\n\nUse [^a b].\n\n[^a b]: Not a footnote.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
+		{name: "footnote call after link text", input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n", want: []footnotePosition{{3, 5}}},
+		{name: "full reference to a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n", want: []footnotePosition{{3, 5}}},
+		{name: "footnote call that is also a link definition", input: "# T\n\nUse [^n] here.\n\n[^n]: /url\n"},
+	})
+}
+
+// TestReferenceLinkImagesRule_FootnotesAroundBlocks checks MD052 on GFM
+// footnote definitions in or after blocks that micromark may read
+// otherwise than goldmark: code, HTML, math, directives, and code fences
+// or HTML blocks that hold blank lines, unless both parsers read them
+// alike. The definitions do not count, and MD052 reports what main
+// reports.
+func TestReferenceLinkImagesRule_FootnotesAroundBlocks(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{
+			name:     "fence in a nested footnote",
+			input:    "Use [x][^n].\n\n[^a]: one\n    [^b]: two\n    ```\n    [^n]: three four\n    ```\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "fence in a nested footnote after a blank line",
+			input:    "Use [x][^n].\n\n[^a]: one\n\n    [^b]: two\n    ```\n    [^n]: three four\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{name: "definition in code", input: "# T\n\nUse [^c].\n\n```\n[^c]: in code\n```\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition in HTML", input: "# T\n\nUse [^h].\n\n<div>\n[^h]: in html\n</div>\n", want: []footnotePosition{{3, 5}}},
+		{
+			name:     "definition in an HTML block after a blank line",
+			input:    "# T\n\nUse [^h] and [x][^h].\n\n<!--\n\n[^h]: in a comment\n-->\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a fence after a blank line",
+			input:    "# T\n\nUse [^c] and [x][^c].\n\n```\n\n[^c]: in code\n```\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{name: "definition in indented code", input: "# T\n\nUse [^n].\n\n    [^n]: indented code\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition in math", input: "# T\n\nUse [^n].\n\n$$\n[^n]: in math\n$$\n", want: []footnotePosition{{3, 5}, {6, 1}}},
+		{name: "definition after closed math", input: "# T\n\nUse [^n].\n\n$$\nx\n$$\n\n[^n]: y\n"},
+		{
+			name:     "definition after closed math with a full reference",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n$$\nx\n$$\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after math in code",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n```\n$$\n```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a quoted fence",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n> $$\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a directive",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n:::note\n\n[^n]: Note text.\n:::\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a closed directive",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n:::note\nx\n:::\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "indented definition after a directive",
+			input:    "Use [x][^n].\n\n:::note\n[^a]: one\n:::\n    [^n]: three four\n",
+			want:     []footnotePosition{{1, 5}, {4, 1}, {6, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "definition that ends a list item before a fence",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n- item\n[^x]: y\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {6, 1}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition that ends a list item before a comment",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n- item\n[^x]: y\n  <!--\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {6, 1}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "lazy table row before a fence",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n- | a |\n  | - |\n| b |\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {10, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after CDATA that micromark does not close",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[\nx]]]>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {8, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after one-line CDATA that micromark does not close",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[x]]]>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence that a tag line holds for micromark",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<del\t>\n```\nx\n\n```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {11, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence that an end tag with a space holds for goldmark",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n</ div>\n```\nx\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after an empty item that micromark refuses",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n    code\n\n-\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {10, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after an empty item after a definition",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n[ref]: /url\n-\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence in a script block that micromark ends early",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<script/>\n\n```\n\n</script>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {11, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence right after text",
+			input:    "# T\n\nUse [^n] and [x][^n].\ntext\n```\nx\n```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a declaration that goldmark does not read",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<!doctype\n\n[^n]: Note text.\n>\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a declaration after text",
+			input:    "# T\n\nUse [^n] and [x][^n].\ntext\n<!x\n\n[^n]: Note text.\n>\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a declaration that goldmark reads",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<!DOCTYPE\n\n[^n]: Note text.\n>\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{name: "definition in indented code in a list item", input: "# T\n\nUse [^n].\n\n- item\n\n      [^n]: indented in item\n", want: []footnotePosition{{3, 5}}},
+		{name: "indented code in a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n\n        [^n]: code\n", want: []footnotePosition{{3, 5}}},
+		{name: "fenced code in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: note\n    ```\n    [^n]: code\n    ```\n", want: []footnotePosition{{3, 5}}},
+		{name: "fenced code after an empty footnote line", input: "# T\n\nUse [^n].\n\n[^o]:\n    ```\n    [^n]: code\n    ```\n"},
+		{name: "definition in math in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n    $$\n    [^n]: x\n    $$\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{
+			name:  "definition in math in an item after a heading",
+			input: "# T\n\nUse [^n].\n\n## H\n3. $$\n   [^n]: y\n   $$\n\nEnd.\n",
+			want:  []footnotePosition{{3, 5}, {7, 4}},
+		},
+		{name: "definition after indented math", input: "# T\n\nUse [^n].\n\nIntro\n  $$\n[^n]: y\n  $$\n", want: []footnotePosition{{3, 5}, {7, 1}}},
+		{name: "definition after indented math that starts a block", input: "# T\n\nUse [^n].\n\n  $$\n[^n]: y\n  $$\n", want: []footnotePosition{{3, 5}, {6, 1}}},
+		{name: "definition after math that ends a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n$$\nx\n$$\n    [^n]: y\n", want: []footnotePosition{{3, 5}, {9, 5}}},
+		{name: "definition after an HTML block in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n\n    <div>\n    [^n]: y\n", want: []footnotePosition{{3, 5}}},
+		{
+			name:  "definition after a fence in a nested footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n    [^p]: b\n        ```\n    [^n]: y\n",
+			want:  []footnotePosition{{3, 5}, {8, 5}},
+		},
+		{name: "definition after HTML on a footnote's first line", input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n    [^n]: y\n", want: []footnotePosition{{3, 5}, {6, 5}}},
+		{
+			name:  "definition in a list from 01 after indented code and a blank line",
+			input: "# T\n\nUse [^n].\n\n    code\n\n01. a\n    [^n]: y\n",
+			want:  []footnotePosition{{3, 5}, {8, 5}},
+		},
+		{
+			name:  "definition in a sibling of a footnote with HTML",
+			input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n[^p]: b\n    [^n]: y\n",
+			want:  []footnotePosition{{3, 5}, {7, 5}},
+		},
+		{name: "definition after a fence that a footnote's end closes", input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n[^n]: y\n", want: []footnotePosition{{3, 5}, {7, 1}}},
+		{
+			name:     "references in math",
+			input:    "# T\n\nInline $[a][b]$ and $[^n]$ math.\n\n$$\n[c][d] and [e]\n$$\n\n[f][g] outside.\n",
+			want:     []footnotePosition{{3, 9}, {3, 22}, {6, 1}, {6, 12}, {9, 1}},
+			wantFull: []footnotePosition{{3, 9}, {6, 1}, {9, 1}},
+		},
+	})
+}
+
+// TestReferenceLinkImagesRule_UncertainFootnotes checks MD052 on GFM
+// footnote definitions that micromark is not certain to read where they
+// stand: in a container or a footnote, indented, or after a line that is
+// not blank. They do not count, so their calls are read as goldmark reads
+// them, and MD052 reports what main reports. markdownlint counts most of
+// them. A certain definition in the same document, such as "[^o]:" at
+// column 0, still counts.
+func TestReferenceLinkImagesRule_UncertainFootnotes(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{name: "definition in a list item", input: "# T\n\nUse [^third].\n\n- item\n\n  [^third]: In a list.\n", want: []footnotePosition{{3, 5}, {7, 3}}},
+		{name: "definition in a blockquote", input: "# T\n\nUse [^q].\n\n> [^q]: In a quote.\n", want: []footnotePosition{{3, 5}, {5, 3}}},
+		{name: "definition that interrupts a paragraph", input: "# T\n\nUse [^n].\nSome text\n[^n]: Interrupts the paragraph.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
+		{
+			name:     "definition after a heading",
+			input:    "# T\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{2, 1}, {4, 5}, {4, 14}},
+			wantFull: []footnotePosition{{4, 14}},
+		},
+		{name: "indented definition", input: "# T\n\nUse [^i].\n\n   [^i]: Indented three.\n", want: []footnotePosition{{3, 5}, {5, 4}}},
+		{name: "paragraph line indented four columns", input: "# T\n\nUse [^n].\n\ntext\n    [^n]: note text\n", want: []footnotePosition{{3, 5}, {6, 5}}},
+		{name: "definition that interrupts a list item's paragraph", input: "# T\n\nUse [^n].\n\n- item\n   [^n]: in item\n", want: []footnotePosition{{3, 5}, {6, 4}}},
+		{name: "definition on a lazy line", input: "# T\n\nUse [^n].\n\n> quote\n[^n]: lazy\n", want: []footnotePosition{{3, 5}, {6, 1}}},
+		{
+			name:     "definition after a quote marker line",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n> quote\n>\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{name: "definition in a quoted list item", input: "# T\n\nUse [^n].\n\n> - a\n>     [^n]: x\n", want: []footnotePosition{{3, 5}, {6, 7}}},
+		{name: "quoted list item line indented four columns", input: "# T\n\nUse [^n].\n\n> - a\n>       [^n]: x\n", want: []footnotePosition{{3, 5}, {6, 9}}},
+		{name: "tab past a list item's indentation", input: "# T\n\nUse [^n].\n\n- a\n\n\t[^n]: tab\n"},
+		{name: "defined link text before a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[text]: /a\n[^n]: /url\n"},
+		{
+			name:     "definition after a definition's continuation line",
+			input:    "# T\n\nUse [^a], [^b] and [x][^b].\n\n[^a]: One note.\n    more\n[^b]: Two notes.\n",
+			want:     []footnotePosition{{3, 11}, {3, 20}, {7, 1}},
+			wantFull: []footnotePosition{{3, 20}},
+		},
+		{name: "definition in a footnote's content", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^n]: inner\n", want: []footnotePosition{{3, 5}, {6, 5}}},
+		{name: "definition after text in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: text\n    [^n]: inner\n"},
+		{name: "definition after a blank line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n\n    [^n]: inner\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition two footnotes deep", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^p]:\n        [^n]: inner\n"},
+		{name: "seven columns into a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n       [^n]: seven\n", want: []footnotePosition{{3, 5}, {6, 8}}},
+		{name: "lazy line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\nlazy\n    [^n]: inner\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{name: "footnote in a list item", input: "# T\n\nUse [^n].\n\n- [^o]:\n      [^n]: inner\n", want: []footnotePosition{{3, 5}, {5, 3}, {6, 7}}},
+		{name: "line after a closed footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n\ntext\n    [^n]: not\n", want: []footnotePosition{{3, 5}, {8, 5}}},
+		{name: "indented line in an item marked 01", input: "# T\n\nUse [^n].\n\nIntro\n01. $$\n    [^n]: y\n    $$\n\nEnd.\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{name: "definition in an item marked 01", input: "# T\n\nUse [^n].\n\nIntro\n01. a\n    [^n]: y\n\nEnd.\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{name: "definition after a heading that ends a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n# H\n    [^n]: y\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition in an item marked 1", input: "# T\n\nUse [^n].\n\n1. [^n]: y\n"},
+		{name: "definition in the second item of a list from 1", input: "# T\n\nUse [^n].\n\n1. a\n2. b\n   [^n]: y\n", want: []footnotePosition{{3, 5}, {7, 4}}},
+		{name: "definition after a formula on one line", input: "# T\n\nUse [^n].\n\n- Equation:\n  $$E = mc^2$$\n  [^n]: y\n", want: []footnotePosition{{3, 5}, {7, 3}}},
+		{name: "definition in a bullet item", input: "# T\n\nUse [^n].\n\n- [^n]: y\n"},
+		{name: "indented line after text", input: "Intro\n    $$\n\n[a][b]\n", want: []footnotePosition{{4, 1}}, wantFull: []footnotePosition{{4, 1}}},
+	})
+}
+
+// TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions checks
+// MD052 where markdownlint may take other lines than the parser for front
+// matter, or a carriage return alone ends a line. No definition counts
+// there, and MD052 reports what main reports.
+func TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{
+			name:     "front matter closed with dots",
+			input:    "---\ntitle: x\n...\n\n[^n]: Note text.\n---\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{5, 1}, {8, 5}, {8, 14}},
+			wantFull: []footnotePosition{{8, 14}},
+		},
+		{
+			name:     "front matter opened with a no-break space",
+			input:    "---\u00a0\ntitle: x\n---\n\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{5, 1}, {7, 5}, {7, 14}},
+			wantFull: []footnotePosition{{7, 14}},
+		},
+		{
+			name:     "line separator in front matter",
+			input:    "---\ntitle: x\u2028---\n---\n\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{5, 1}, {7, 5}, {7, 14}},
+			wantFull: []footnotePosition{{7, 14}},
+		},
+		{
+			name:     "carriage return alone",
+			input:    "# T\r\rUse [^n] and [x][^n].\r\r[^n]: Note text.\r",
+			want:     []footnotePosition{{1, 10}, {1, 19}, {1, 29}},
+			wantFull: []footnotePosition{{1, 19}},
+		},
+	})
+}
+
+// TestMarkdownlintFrontMatterLines checks the front matter that
+// markdownlint 0.41.1's frontMatterRe takes, up to its closing line, which
+// MD052 compares with the parser's before it counts a footnote definition.
+func TestMarkdownlintFrontMatterLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   int
+		wantOK bool
+	}{
+		{name: "no front matter", input: "# T\n", want: 0, wantOK: true},
+		{name: "YAML", input: "---\na: 1\n---\nText\n", want: 3, wantOK: true},
+		{name: "spaces and a tab after the markers", input: "--- \t\na: 1\n---  \n", want: 3, wantOK: true},
+		{name: "YAML closed with dots only", input: "---\na: 1\n...\n", want: 0, wantOK: true},
+		{name: "YAML closed with dots and then dashes", input: "---\na: 1\n...\n---\n", want: 4, wantOK: true},
+		{name: "TOML closed with dots", input: "+++\na = 1\n...\n", want: 3, wantOK: true},
+		{name: "JSON", input: "{\n\"a\": 1\n}\n", want: 3, wantOK: true},
+		{name: "no-break space after the opening", input: "---\u00a0\na: 1\n---\n", want: 3, wantOK: true},
+		{name: "text after the opening", input: "--- x\na: 1\n---\n", want: 0, wantOK: true},
+		{name: "four dashes", input: "----\na\n---\n", want: 0, wantOK: true},
+		{name: "unclosed", input: "---\na: 1\n", want: 0, wantOK: true},
+		{name: "closing with a no-break space", input: "---\na: 1\n---\u00a0\n", want: 3, wantOK: true},
+		{name: "closing without a final newline", input: "---\na: 1\n---", want: 3, wantOK: true},
+		{name: "byte order mark", input: "\ufeff---\na: 1\n---\n", want: 3, wantOK: true},
+		{name: "line separator", input: "---\na\u2028---\n---\n", want: 0, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := markdownlintFrontMatterLines(parseForCheck(t, tt.input))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestHasLoneCarriageReturn checks for the line ending that micromark reads
+// and the parser does not: a carriage return that no line feed follows.
+func TestHasLoneCarriageReturn(t *testing.T) {
+	assert.False(t, hasLoneCarriageReturn([]byte("a\r\nb\r\n")))
+	assert.False(t, hasLoneCarriageReturn([]byte("a\nb")))
+	assert.True(t, hasLoneCarriageReturn([]byte("a\rb\n")))
+	assert.True(t, hasLoneCarriageReturn([]byte("a\r\nb\r")))
+	assert.True(t, hasLoneCarriageReturn([]byte("a\r\r\n")))
+}
+
+// TestFootnoteDefinitionLabel checks the labels that micromark reads in a
+// footnote definition, whose length it counts in UTF-16 code units, up to
+// 999.
+func TestFootnoteDefinitionLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		want   string
+		wantOK bool
+	}{
+		{name: "label", text: "[^note]: text", want: "note", wantOK: true},
+		{name: "escaped bracket", text: "[^a\\]b]: text", want: "a\\]b", wantOK: true},
+		{name: "empty label", text: "[^]: text"},
+		{name: "space in the label", text: "[^a b]: text"},
+		{name: "no colon", text: "[^note] text"},
+		{name: "999 code units", text: "[^" + strings.Repeat("\U0001F600", 499) + "a]: x", want: strings.Repeat("\U0001F600", 499) + "a", wantOK: true},
+		{name: "1000 code units", text: "[^" + strings.Repeat("\U0001F600", 500) + "]: x"},
+		{name: "999 code units with an escape", text: "[^" + strings.Repeat("a", 997) + "\\]]: x", want: strings.Repeat("a", 997) + "\\]", wantOK: true},
+		{name: "1000 code units with an escape", text: "[^" + strings.Repeat("a", 998) + "\\]]: x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := footnoteDefinitionLabel([]byte(tt.text))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestOpensRawHTMLBlock checks which lines open an HTML block of kinds 1 to
+// 5 that does not end on the line, as micromark reads them.
+func TestOpensRawHTMLBlock(t *testing.T) {
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{line: "<!--", want: true},
+		{line: "<!-- note -->", want: false},
+		{line: "<!-->", want: false},
+		{line: "<?php", want: true},
+		{line: "<?>", want: false},
+		{line: "<![CDATA[ x", want: true},
+		{line: "<![CDATA[ x ]]>", want: false},
+		{line: "<![CDATA[x]]]>", want: true},
+		{line: "<![CDATA[x]]]]>", want: false},
+		{line: "<![CDATA[]]>", want: false},
+		{line: "<![CDATA[>", want: true},
+		{line: "<![CDATA[x]>", want: true},
+		{line: "<!doctype", want: true},
+		{line: "<!DOCTYPE html>", want: false},
+		{line: "<script>", want: true},
+		{line: "<SCRIPT src=a.js>", want: true},
+		{line: "<textarea", want: true},
+		{line: "<pre\tclass=x>", want: true},
+		{line: "<script>a</b></script>", want: false},
+		{line: "<script></</script>", want: false},
+		{line: "<script>x</script", want: true},
+		{line: "<pre>x</PRE>", want: false},
+		{line: "<pre>x</pre >", want: true},
+		{line: "<pre>x</prescription>", want: true},
+		{line: "<style>x</script>", want: false},
+		{line: "<prescription>", want: false},
+		{line: "<script/>", want: false},
+		{line: "<scripts>", want: false},
+		{line: "<div>", want: false},
+		{line: "text <!--", want: false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, opensRawHTMLBlock([]byte(tt.line)), "%q", tt.line)
 	}
 }
 

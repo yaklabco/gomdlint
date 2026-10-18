@@ -7,5 +7,23 @@
     "message": "Reference link uses undefined label [^missing]",
     "severity": "warning",
     "fixable": false
+  },
+  {
+    "rule": "MD052",
+    "name": "reference-links-images",
+    "line": 7,
+    "column": 23,
+    "message": "Reference link uses undefined label [^listed]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD052",
+    "name": "reference-links-images",
+    "line": 15,
+    "column": 3,
+    "message": "Reference link uses undefined label [^listed]",
+    "severity": "warning",
+    "fixable": false
   }
 ]

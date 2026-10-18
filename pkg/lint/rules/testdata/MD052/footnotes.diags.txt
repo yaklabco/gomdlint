@@ -1,1 +1,3 @@
 footnotes.input.md:6:35 warning Reference link uses undefined label [^missing] (MD052/reference-links-images)
+footnotes.input.md:7:23 warning Reference link uses undefined label [^listed] (MD052/reference-links-images)
+footnotes.input.md:15:3 warning Reference link uses undefined label [^listed] (MD052/reference-links-images)

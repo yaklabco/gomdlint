@@ -4,11 +4,12 @@ package rules
 
 import (
 	"bytes"
-	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -125,9 +126,12 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 // reference syntax it left as text can be undefined.
 //
 // Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
-// "[^label]" calls a footnote when the document defines it with a line that
+// "[^label]" calls a footnote that the document defines with a line that
 // starts "[^label]:", so it is no undefined reference. In "[text][^label]"
 // the second pair calls the footnote, so the first is a shortcut reference.
+// Only the definitions that micromark is certain to read count (see
+// certainFootnoteLabels). A call of any other label is read as goldmark
+// reads it.
 func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -145,7 +149,6 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	var footnotes map[string]bool
 	var diags []lint.Diagnostic
-	math := &lazyMath{ctx: ctx}
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
@@ -162,7 +165,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		footnote := false
 		if strings.HasPrefix(label, "^") {
 			if footnotes == nil {
-				footnotes = gfmFootnoteLabels(ctx)
+				footnotes = certainFootnoteLabels(ctx)
 			}
 			footnote = footnotes[normalized]
 		}
@@ -180,9 +183,6 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			}
 			label, normalized, style = usage.Text, refs.NormalizeLabel(usage.Text), refs.StyleShortcut
 			defined = refCtx.Definitions[normalized] != nil
-		}
-		if usageInMath(ctx.File, math, usage) {
-			continue
 		}
 
 		// Skip shortcut unless configured to check
@@ -210,14 +210,6 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	return diags, nil
 }
 
-// usageInMath reports whether a reference starts in math, which
-// markdownlint parses and goldmark does not: on a line of a math block or
-// in inline math.
-func usageInMath(file *mdast.FileSnapshot, math *lazyMath, usage *refs.ReferenceUsage) bool {
-	start, ok := file.Offset(usage.Position.StartLine, usage.Position.StartColumn)
-	return ok && math.holds(usage.Position.StartLine, start, start+1)
-}
-
 // validShortcutLabel reports whether link text can be the label of a
 // shortcut reference: it holds a character other than whitespace and no
 // unescaped bracket.
@@ -236,361 +228,327 @@ func validShortcutLabel(text string) bool {
 	return true
 }
 
-// gfmFootnoteLabels returns the normalized labels, each with its "^", of
-// the footnote definitions GFM reads in the file (see footnoteScan).
-func gfmFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
+// certainFootnoteLabels returns the normalized labels, each with its "^",
+// of the GFM footnote definitions that micromark is certain to read, which
+// goldmark does not parse. A definition counts on a line that starts with
+// "[^label]:" at column 0 at the start of the document, right after a blank
+// line or right after another definition that counts, since micromark reads
+// two definitions in a row as two. goldmark must read the line at the top
+// level of the document: outside its front matter, code blocks and HTML
+// blocks, and in no blockquote or list item.
+//
+// So that micromark reads the lines before the definition as goldmark does,
+// no line before it may start, after its indentation and container markers,
+// with "$$" or ":::", where micromark may open math or a directive, and
+// every line before it that may open a block holding blank lines must open
+// one that both parsers read alike (see sharedBlocks.vet).
+//
+// No definition counts where markdownlint may not take the parser's front
+// matter (see markdownlintFrontMatterLines), or where a carriage return
+// that no line feed follows ends a line, as it does for micromark and not
+// for the parser. A definition that does not count leaves its calls read
+// as goldmark reads them, as before MD052 read footnotes.
+func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
+	file := ctx.File
 	labels := make(map[string]bool)
-	first := 0
-	for line := ctx.File.FrontMatterLines + 1; line <= len(ctx.File.Lines); line++ {
-		if _, ok := footnoteDefinitionLabel(withoutContainerPrefix(lint.LineText(ctx.File, line))); ok {
-			first = line
-			break
-		}
-	}
-	if first == 0 {
+	if hasLoneCarriageReturn(file.Content) {
 		return labels
 	}
-	scan := newFootnoteScan(ctx)
-	for line := first; line <= len(ctx.File.Lines); line++ {
-		scan.visit(line, labels)
+	if frontMatter, ok := markdownlintFrontMatterLines(file); !ok || frontMatter != file.FrontMatterLines {
+		return labels
+	}
+	blocks := sharedBlocks{ctx: ctx}
+	var topLevel []bool
+	afterBlank, afterDefinition := true, false
+	// readThrough is the last line of a block that both parsers read alike,
+	// whose lines need no reading.
+	readThrough := 0
+	for line := 1; line <= len(file.Lines); line++ {
+		text := lint.RawLineContent(file, line)
+		if line == 1 {
+			text = bytes.TrimPrefix(text, []byte(mdast.ByteOrderMark))
+		}
+		rest := withoutContainerPrefix(text)
+		if bytes.HasPrefix(rest, []byte("$$")) || bytes.HasPrefix(rest, []byte(":::")) {
+			break
+		}
+		if line <= file.FrontMatterLines {
+			continue
+		}
+		if line > readThrough {
+			end, ok := blocks.vet(line, len(rest) == len(text) && afterBlank, rest)
+			if !ok {
+				break
+			}
+			readThrough = end
+		}
+		label, counts := footnoteDefinitionLabel(text)
+		counts = counts && (afterBlank || afterDefinition)
+		if counts {
+			if topLevel == nil {
+				topLevel = topLevelLines(ctx)
+			}
+			counts = topLevel[line]
+		}
+		if counts {
+			labels[refs.NormalizeLabel("^"+label)] = true
+		}
+		afterBlank, afterDefinition = len(bytes.Trim(text, " \t")) == 0, counts
 	}
 	return labels
 }
 
-// innermostContainers returns, for each line, the innermost blockquote or
-// list item whose span holds it, or nil. The containers are written from
-// the longest to the shortest, and from the outermost to the innermost
-// among equally long ones, so an inner one overwrites the outer ones, in
-// time that grows with the lines the containers hold.
-func innermostContainers(ctx *lint.RuleContext) []*mdast.Node {
-	type heldLines struct {
-		node               *mdast.Node
-		first, last, depth int
+// sharedBlocks finds the blocks that micromark reads as goldmark does among
+// those that may hold blank lines: fenced code blocks and HTML blocks of
+// CommonMark's kinds 1 to 5. The top-level blocks of goldmark's tree are
+// read once, when a line first needs them.
+type sharedBlocks struct {
+	ctx         *lint.RuleContext
+	fences, raw map[int]int
+}
+
+// vet reads a line, rest after its indentation and container markers,
+// that may open a block holding blank lines. It returns the block's last
+// line when both parsers read the block alike, 0 when the line opens no
+// such block, and false when micromark may read such a block where
+// goldmark does not. Both read alike a block that goldmark reads at the
+// top level from a line that starts at column 0 and is fresh: the first
+// line of the document or a line after a blank one, where no paragraph,
+// container or HTML block of kind 6 or 7 goes on in either parser. Its
+// end is then the same line in both, except for a CDATA section: goldmark
+// ends one at the first line that holds "]]>", and micromark only at a
+// ">" right after a run of "]" of even length (closesCDATA). vet does not
+// compare the two, so a CDATA section that goes on past its first line
+// counts as one that micromark may read otherwise.
+func (b *sharedBlocks) vet(line int, fresh bool, rest []byte) (int, bool) {
+	var starts map[int]int
+	switch {
+	case bytes.HasPrefix(rest, []byte("```")) || bytes.HasPrefix(rest, []byte("~~~")):
+		if b.fences == nil {
+			b.fences = b.topLevelBlocks(b.ctx.CodeBlocks(), lint.IsFencedCodeBlock)
+		}
+		starts = b.fences
+	case opensRawHTMLBlock(rest):
+		if bytes.HasPrefix(rest, []byte(cdataOpening)) {
+			return 0, false
+		}
+		if b.raw == nil {
+			b.raw = b.topLevelBlocks(b.ctx.HTMLBlocks(), func(*mdast.Node) bool { return true })
+		}
+		starts = b.raw
+	default:
+		return 0, true
 	}
-	var spans []heldLines
+	end, ok := starts[line]
+	return end, fresh && ok && end > line
+}
+
+// topLevelBlocks maps the first line of each of nodes that is a child of
+// the document and that keep accepts to its last line.
+func (b *sharedBlocks) topLevelBlocks(nodes []*mdast.Node, keep func(*mdast.Node) bool) map[int]int {
+	file := b.ctx.File
+	blocks := make(map[int]int)
+	for _, node := range nodes {
+		span := node.SourceRange()
+		if node.Parent != b.ctx.Root || !keep(node) || span.StartOffset < 0 || span.EndOffset <= span.StartOffset {
+			continue
+		}
+		first, _ := file.LineAt(span.StartOffset)
+		last, _ := file.LineAt(span.EndOffset - 1)
+		if first > 0 {
+			blocks[first] = last
+		}
+	}
+	return blocks
+}
+
+// cdataOpening starts a CDATA section, an HTML block of kind 5.
+const cdataOpening = "<![CDATA["
+
+// opensRawHTMLBlock reports whether text starts an HTML block of
+// CommonMark's kinds 1 to 5, as micromark reads them, that does not end on
+// the line: one that starts with a script, pre, style or textarea tag, a
+// comment, a processing instruction, a declaration or a CDATA section.
+// Such a block ends only at its end marker, so it may hold blank lines.
+func opensRawHTMLBlock(text []byte) bool {
+	switch {
+	case bytes.HasPrefix(text, []byte("<!--")):
+		return !bytes.Contains(text[len("<!"):], []byte("-->"))
+	case bytes.HasPrefix(text, []byte("<?")):
+		return !bytes.Contains(text[len("<"):], []byte("?>"))
+	case bytes.HasPrefix(text, []byte(cdataOpening)):
+		return !closesCDATA(text[len(cdataOpening):])
+	case len(text) > len("<!") && text[0] == '<' && text[1] == '!' && isASCIILetter(text[2]):
+		return bytes.IndexByte(text[len("<!a"):], '>') < 0
+	}
+	if len(text) == 0 || text[0] != '<' {
+		return false
+	}
+	name := rawHTMLTagName(text[len("<"):])
+	if name == 0 {
+		return false
+	}
+	if after := len("<") + name; len(text) > after && text[after] != ' ' && text[after] != '\t' && text[after] != '>' {
+		return false
+	}
+	return !holdsRawHTMLEndTag(text[len("<")+name:])
+}
+
+// rawHTMLTagName returns the length of script, pre, style or textarea, the
+// names that start an HTML block of kind 1, when text starts with one of
+// them in any case, and 0 otherwise. The caller checks the byte after it.
+func rawHTMLTagName(text []byte) int {
+	for _, name := range [...]string{"script", "pre", "style", "textarea"} {
+		if len(text) >= len(name) && bytes.EqualFold(text[:len(name)], []byte(name)) {
+			return len(name)
+		}
+	}
+	return 0
+}
+
+// holdsRawHTMLEndTag reports whether text holds an end tag of script, pre,
+// style or textarea, in any case, which ends an HTML block of kind 1. As in
+// micromark, the name must be followed directly by ">", so "</pre >" does
+// not count.
+func holdsRawHTMLEndTag(text []byte) bool {
+	rest := text
+	for {
+		idx := bytes.Index(rest, []byte("</"))
+		if idx < 0 {
+			return false
+		}
+		rest = rest[idx+len("</"):]
+		if name := rawHTMLTagName(rest); name > 0 && len(rest) > name && rest[name] == '>' {
+			return true
+		}
+	}
+}
+
+// closesCDATA reports whether text, the rest of a line after "<![CDATA[",
+// ends the section for micromark, which reads its end only at a ">" right
+// after a run of "]" of even length, at least two.
+func closesCDATA(text []byte) bool {
+	run := 0
+	for _, char := range text {
+		switch {
+		case char == ']':
+			run++
+		case char == '>' && run >= len("]]") && run%2 == 0:
+			return true
+		default:
+			run = 0
+		}
+	}
+	return false
+}
+
+// topLevelLines marks, for each line from 1, whether goldmark reads it at
+// the top level of the document, outside its code blocks, HTML blocks,
+// blockquotes and list items.
+func topLevelLines(ctx *lint.RuleContext) []bool {
+	lines := len(ctx.File.Lines)
+	// opened counts, for each line, the blockquotes and list items that
+	// start on it less those that end on the line before it.
+	opened := make([]int, lines+2)
 	for _, containers := range [][]*mdast.Node{ctx.Blockquotes(), ctx.ListItems()} {
 		for _, container := range containers {
-			if pos := container.SourcePosition(); pos.IsValid() {
-				depth := 0
-				for parent := container.Parent; parent != nil; parent = parent.Parent {
-					depth++
-				}
-				spans = append(spans, heldLines{container, pos.StartLine, pos.EndLine, depth})
+			pos := container.SourcePosition()
+			first, last := max(pos.StartLine, 1), min(pos.EndLine, lines)
+			if pos.IsValid() && first <= last {
+				opened[first]++
+				opened[last+1]--
 			}
 		}
 	}
-	slices.SortFunc(spans, func(a, b heldLines) int {
-		return cmp.Or(cmp.Compare(b.last-b.first, a.last-a.first), cmp.Compare(a.depth, b.depth))
-	})
-	holders := make([]*mdast.Node, len(ctx.File.Lines)+1)
-	for _, span := range spans {
-		for line := max(span.first, 1); line <= span.last && line < len(holders); line++ {
-			holders[line] = span.node
-		}
+	html := htmlBlockLines(ctx)
+	topLevel := make([]bool, lines+1)
+	open := 0
+	for line := 1; line <= lines; line++ {
+		open += opened[line]
+		topLevel[line] = open == 0 && !html[line] && !ctx.IsLineInCodeBlock(line)
 	}
-	return holders
+	return topLevel
 }
 
-// enclosingContainer returns the blockquote or list item around node, or
-// nil when there is none.
-func enclosingContainer(node *mdast.Node) *mdast.Node {
-	for parent := node.Parent; parent != nil; parent = parent.Parent {
-		if parent.Kind == mdast.NodeBlockquote || parent.Kind == mdast.NodeListItem {
-			return parent
-		}
-	}
-	return nil
-}
-
-// maxContainerIndent is the most columns of space before the marker that
-// starts a container, such as a blockquote or a footnote definition.
-const maxContainerIndent = 3
-
-// footnoteScan reads footnote definitions line by line, as
-// micromark-extension-gfm-footnote reads them and goldmark does not. A
-// footnote definition is a container: it starts after the prefixes of the
-// containers its line continues explicitly (a lazy line is outside those it
-// does not continue) and at most three columns of space, with
-// "[^label]:", and its content lines are indented four columns, or are a
-// lazy line of a paragraph in it. So a definition can start four to seven
-// columns in, inside an open footnote, and a line after a blank line that
-// is not indented as far closes the footnotes it does not reach. Indented
-// code and fenced code in a footnote's content hold no definition, nor do
-// goldmark's code and HTML blocks outside footnotes, or math blocks that a
-// fence outside containers opens, at column 0 or indented
-// (possibleMathLines).
-//
-// Where micromark may not read a definition, the scan counts none
-// (countable): MD052 then resolves the footnote call as goldmark does, as
-// main does, so counting fewer definitions only reports more calls, never
-// fewer. That is where an earlier line of a footnote's content, or of a
-// goldmark container around the definition, may open math or an HTML block
-// over it, or where an ordered list item around it may not be a list item
-// to micromark. A footnote closes after a blank line, at math that a fence
-// outside containers opens, and at a less indented line that starts a block
-// no lazy line continues.
-type footnoteScan struct {
-	ctx          *lint.RuleContext
-	holders      []*mdast.Node
-	htmlLines    map[int]bool
-	math         mathRegions
-	indentedCode map[int]bool
-	// depth counts the footnote definitions that may be open, afterBlank
-	// whether a blank line came after the last line read, and fence the
-	// fenced code open in a footnote's content.
-	depth      int
-	afterBlank bool
-	fence      footnoteFence
-	// doubtIn tells, for each open footnote by depth from 1, whether a line
-	// of its content may open math or an HTML block over what follows.
-	// doubtIn[0] stands for no footnote, and len(doubtIn) is depth+1.
-	doubtIn []bool
-	// blockStarts holds the lines where goldmark starts a block other than
-	// a paragraph, which no lazy line continues.
-	blockStarts map[int]bool
-	// containerMath holds, for each goldmark container, its first line that
-	// opens math after the container's prefix (findContainerMath).
-	containerMath map[*mdast.Node]int
-}
-
-// footnoteFence is a fenced code block in the content of the depth
-// footnote definitions that hold it.
-type footnoteFence struct {
-	open  bool
-	char  byte
-	size  int
-	depth int
-}
-
-// newFootnoteScan builds a scan of the file of ctx.
-func newFootnoteScan(ctx *lint.RuleContext) *footnoteScan {
-	scan := &footnoteScan{
-		ctx:           ctx,
-		holders:       innermostContainers(ctx),
-		htmlLines:     htmlBlockLines(ctx),
-		math:          mathRegions{lines: possibleMathLines(ctx)},
-		indentedCode:  make(map[int]bool),
-		doubtIn:       []bool{false},
-		blockStarts:   make(map[int]bool),
-		containerMath: make(map[*mdast.Node]int),
-	}
-	for _, blocks := range [][]*mdast.Node{
-		ctx.Headings(), ctx.ThematicBreaks(), ctx.CodeBlocks(), ctx.HTMLBlocks(), ctx.ListItems(), ctx.Blockquotes(), ctx.Tables(),
-	} {
-		for _, block := range blocks {
-			if pos := block.SourcePosition(); pos.IsValid() {
-				scan.blockStarts[pos.StartLine] = true
-			}
-		}
-	}
-	scan.findContainerMath()
-	for _, block := range ctx.CodeBlocks() {
-		if !lint.IsFencedCodeBlock(block) {
-			for line := range lint.CodeContentLines([]*mdast.Node{block}) {
-				scan.indentedCode[line] = true
-			}
-		}
-	}
-	return scan
-}
-
-// visit reads one line, adding the label of a definition on it to labels.
-func (s *footnoteScan) visit(line int, labels map[string]bool) {
-	file := s.ctx.File
-	if len(bytes.TrimSpace(withoutContainerPrefix(lint.LineText(file, line)))) == 0 {
-		s.afterBlank = true
-		return
-	}
-	if s.math.lines[line] {
-		// Math that a fence outside containers opens holds no definition
-		// and ends every footnote, since math allows no lazy line.
-		s.closeFootnotes(0)
-		s.afterBlank = false
-		return
-	}
-	container := s.holders[line]
-	for container != nil && !lint.ContinuesContainers(file, container, line) {
-		container = enclosingContainer(container)
-	}
-	indent, start, ok := lint.IndentAfterContainers(file, container, line)
-	if !ok {
-		return
-	}
-	rest := lint.RawLineContent(file, line)[start:]
-	if indent < tabStop*s.depth && (s.afterBlank || s.blockStarts[line] || breaksParagraph(rest, true)) {
-		s.closeFootnotes(indent / tabStop)
-	}
-	s.afterBlank = false
-	if s.fence.open && s.fence.depth <= s.depth {
-		if indent-tabStop*s.fence.depth <= maxFenceIndent && s.fence.closedBy(rest) {
-			s.fence.open = false
-		}
-		return
-	}
-	s.fence.open = false
-	if s.depth > 0 && indent >= tabStop*s.depth && indent-tabStop*s.depth <= maxFenceIndent {
-		if char, size, opens := footnoteFenceOpening(rest); opens {
-			s.fence = footnoteFence{open: true, char: char, size: size, depth: s.depth}
-			return
-		}
-	}
-	s.noteDoubt(indent, rest)
-	if s.excluded(line) {
-		return
-	}
-	label, ok := footnoteDefinitionLabel(rest)
-	if !ok || indent > maxContainerIndent+tabStop*s.depth || !s.countable(line, indent, container) {
-		return
-	}
-	labels[refs.NormalizeLabel("^"+label)] = true
-	s.closeFootnotes(indent / tabStop)
-	s.depth++
-	s.doubtIn = append(s.doubtIn, opensDoubt(bytes.TrimLeft(rest[len("[^")+len(label)+len("]:"):], " \t")))
-}
-
-// closeFootnotes closes the open footnotes past depth.
-//
-// micromark reads a line indented exactly four columns for each open
-// footnote as one that continues all of them, so a fence or doubt in a
-// footnote that the scan closes may go on in the one it leaves open: that
-// one takes over the doubt.
-func (s *footnoteScan) closeFootnotes(depth int) {
-	held := s.fence.open && s.fence.depth > depth
-	for _, doubt := range s.doubtIn[depth+1:] {
-		held = held || doubt
-	}
-	s.depth = depth
-	s.doubtIn = s.doubtIn[:depth+1]
-	if held && depth > 0 {
-		s.doubtIn[depth] = true
-	}
-}
-
-// noteDoubt marks the open footnotes whose content holds a line, indent
-// columns in and rest after its indentation, that may open math or an HTML
-// block over the lines after it.
-func (s *footnoteScan) noteDoubt(indent int, rest []byte) {
-	if s.depth == 0 || !opensDoubt(rest) {
-		return
-	}
-	for level := 1; level <= min(s.depth, indent/tabStop); level++ {
-		s.doubtIn[level] = true
-	}
-}
-
-// opensDoubt reports whether text, a line after its indentation, may open
-// math or an HTML block in micromark.
-func opensDoubt(text []byte) bool {
-	if _, fence := mathFenceOpening(text); fence {
-		return true
-	}
-	kind, _ := htmlBlockStart(text)
-	return kind != htmlNone
-}
-
-// countable reports whether a footnote definition on line, indent columns
-// past the prefixes of container and the containers around it, may count.
-// It does not when a footnote whose content holds it has a line before it
-// that may open math or an HTML block (noteDoubt); when a goldmark
-// container around it has a line before it that opens math after the
-// container's prefix (findContainerMath); or when a list item around it is
-// in an ordered list that micromark may not read (orderedListNotFromOne).
-func (s *footnoteScan) countable(line, indent int, container *mdast.Node) bool {
-	for level := 1; level <= min(s.depth, indent/tabStop); level++ {
-		if s.doubtIn[level] {
+// hasLoneCarriageReturn reports whether content holds a carriage return
+// that no line feed follows.
+func hasLoneCarriageReturn(content []byte) bool {
+	for {
+		idx := bytes.IndexByte(content, '\r')
+		if idx < 0 {
 			return false
 		}
-	}
-	for node := container; node != nil; node = enclosingContainer(node) {
-		if node.Kind == mdast.NodeListItem && orderedListNotFromOne(s.ctx.File.Content, node) {
-			return false
+		if idx+1 == len(content) || content[idx+1] != '\n' {
+			return true
 		}
-		if first := s.containerMath[node]; first > 0 && first < line {
+		content = content[idx+2:]
+	}
+}
+
+// markdownlintFrontMatterLines returns the number of lines up to the
+// closing line of the front matter that markdownlint's frontMatterRe finds
+// at the start of the file, and whether it can tell. The pattern opens
+// front matter with a first line of "---", "+++" or "{" and white space,
+// after one byte order mark if there is one, and closes it with the first
+// later line of "---", of "+++" or "...", or of "}", and white space. It
+// reads U+2028 and U+2029 as line endings, which the parser does not, so a
+// line that holds either up to the closing line leaves it unsure.
+func markdownlintFrontMatterLines(file *mdast.FileSnapshot) (int, bool) {
+	if len(file.Lines) == 0 {
+		return 0, true
+	}
+	first := bytes.TrimPrefix(lint.RawLineContent(file, 1), []byte(mdast.ByteOrderMark))
+	var opening string
+	var closings []string
+	switch {
+	case bytes.HasPrefix(first, []byte(yamlFrontMatterFence)):
+		opening, closings = yamlFrontMatterFence, []string{yamlFrontMatterFence}
+	case bytes.HasPrefix(first, []byte(tomlFrontMatterFence)):
+		opening, closings = tomlFrontMatterFence, []string{tomlFrontMatterFence, "..."}
+	case bytes.HasPrefix(first, []byte("{")):
+		opening, closings = "{", []string{"}"}
+	default:
+		return 0, true
+	}
+	if hasLineSeparator(first) {
+		return 0, false
+	}
+	if !onlyJSWhiteSpace(first[len(opening):]) {
+		return 0, true
+	}
+	for line := 2; line <= len(file.Lines); line++ {
+		text := lint.RawLineContent(file, line)
+		if hasLineSeparator(text) {
+			return 0, false
+		}
+		for _, closing := range closings {
+			if bytes.HasPrefix(text, []byte(closing)) && onlyJSWhiteSpace(text[len(closing):]) {
+				return line, true
+			}
+		}
+	}
+	return 0, true
+}
+
+// hasLineSeparator reports whether text holds U+2028 or U+2029, which a
+// JavaScript regular expression reads as a line ending.
+func hasLineSeparator(text []byte) bool {
+	return bytes.Contains(text, []byte("\u2028")) || bytes.Contains(text, []byte("\u2029"))
+}
+
+// onlyJSWhiteSpace reports whether text holds nothing but the white space,
+// other than line endings, that a JavaScript regular expression's \s
+// matches: tab, vertical tab, form feed, U+FEFF and the space separators.
+func onlyJSWhiteSpace(text []byte) bool {
+	for _, char := range string(text) {
+		switch {
+		case char == '\t', char == '\v', char == '\f', char == '\ufeff':
+		case unicode.Is(unicode.Zs, char):
+		default:
 			return false
 		}
 	}
 	return true
-}
-
-// findContainerMath records, for each goldmark container, its first line
-// whose text after the container's prefix and at most three spaces opens
-// math, in one pass over the lines that hold "$$". A line belongs to the
-// innermost container it continues explicitly.
-func (s *footnoteScan) findContainerMath() {
-	file := s.ctx.File
-	for line := file.FrontMatterLines + 1; line <= len(file.Lines); line++ {
-		raw := lint.RawLineContent(file, line)
-		if !bytes.Contains(raw, []byte("$$")) {
-			continue
-		}
-		container := s.holders[line]
-		for container != nil && !lint.ContinuesContainers(file, container, line) {
-			container = enclosingContainer(container)
-		}
-		if container == nil || s.containerMath[container] > 0 {
-			continue
-		}
-		indent, start, ok := lint.IndentAfterContainers(file, container, line)
-		if _, fence := mathFenceOpening(raw[start:]); ok && fence && indent <= maxFenceIndent {
-			s.containerMath[container] = line
-		}
-	}
-}
-
-// orderedListNotFromOne reports whether list item, read from content,
-// belongs to an ordered list whose first marker is not "1." or "1)", the
-// single digit 1. micromark may not start such a list after paragraph text
-// or indented code, and starts every list whose first marker is. An item's
-// span starts at its marker.
-func orderedListNotFromOne(content []byte, item *mdast.Node) bool {
-	list := item.Parent
-	if list == nil || list.Block == nil || list.Block.List == nil || !list.Block.List.Ordered || list.FirstChild == nil {
-		return false
-	}
-	at := list.FirstChild.SourceRange().StartOffset
-	return at < 0 || at+1 >= len(content) || content[at] != '1' || (content[at+1] != '.' && content[at+1] != ')')
-}
-
-// excluded reports whether a line is in goldmark's code or HTML blocks, or
-// in a math block, where no definition starts. In a footnote's content goldmark
-// reads an indented line after a blank line as indented code, which the
-// indentation rule judges instead.
-func (s *footnoteScan) excluded(line int) bool {
-	if s.htmlLines[line] || s.math.lines[line] {
-		return true
-	}
-	return s.ctx.IsLineInCodeBlock(line) && (s.depth == 0 || !s.indentedCode[line])
-}
-
-// minFenceSize is the fewest backticks or tildes that open a code fence.
-const minFenceSize = 3
-
-// footnoteFenceOpening reports whether text opens a code fence, and returns
-// its character and length: three or more backticks, with no backtick in
-// the info string after them, or three or more tildes.
-func footnoteFenceOpening(text []byte) (byte, int, bool) {
-	if len(text) == 0 || (text[0] != '`' && text[0] != '~') {
-		return 0, 0, false
-	}
-	char := text[0]
-	size := 0
-	for size < len(text) && text[size] == char {
-		size++
-	}
-	if size < minFenceSize || (char == '`' && bytes.IndexByte(text[size:], '`') >= 0) {
-		return 0, 0, false
-	}
-	return char, size, true
-}
-
-// closedBy reports whether text closes the fence: at least as many of its
-// characters, then only spaces and tabs.
-func (fence footnoteFence) closedBy(text []byte) bool {
-	size := 0
-	for size < len(text) && text[size] == fence.char {
-		size++
-	}
-	return size >= fence.size && len(bytes.Trim(text[size:], " \t\r\n")) == 0
 }
 
 // withoutContainerPrefix returns text after the blockquote markers, list
@@ -619,13 +577,15 @@ func withoutContainerPrefix(text []byte) []byte {
 	return text
 }
 
-// maxFootnoteLabel is the most characters GFM allows in a footnote label.
+// maxFootnoteLabel is the most UTF-16 code units that micromark allows in
+// a footnote label.
 const maxFootnoteLabel = 999
 
 // footnoteDefinitionLabel returns the label of a GFM footnote definition
 // that starts text, "[^label]:", as written. As in micromark, the label is
-// not empty, holds no space, tab, line ending or "[", and a backslash
-// escapes a bracket or backslash after it.
+// not empty, holds no space, tab, line ending or "[", a backslash escapes
+// a bracket or backslash after it, and it is at most maxFootnoteLabel
+// UTF-16 code units long, escapes included.
 func footnoteDefinitionLabel(text []byte) (string, bool) {
 	if !bytes.HasPrefix(text, []byte("[^")) {
 		return "", false
@@ -649,7 +609,7 @@ func footnoteDefinitionLabel(text []byte) (string, bool) {
 			continue
 		}
 		idx += width
-		size++
+		size += utf16.RuneLen(char)
 	}
 	return "", false
 }
@@ -1010,7 +970,6 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	var diags []lint.Diagnostic
-	math := &lazyMath{ctx: ctx}
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
@@ -1024,7 +983,7 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			continue
 		}
 		label, hasLabel := linkLabel(ctx.File, usage.Node)
-		if compatible && holdsMarkdownlintChild(usage.Node, math, mdast.NodeCodeSpan, mdast.NodeHTMLInline) {
+		if compatible && holdsMarkdownlintChild(usage.Node, mdast.NodeCodeSpan, mdast.NodeHTMLInline) {
 			continue
 		}
 
@@ -1107,15 +1066,10 @@ func markdownlintChildren(node *mdast.Node) []*mdast.Node {
 }
 
 // holdsMarkdownlintChild reports whether markdownlint's micromark tree gives
-// node a child of one of kinds (see markdownlintChildren). A child in
-// inline math does not count: markdownlint parses math and reads it as
-// math, not as the code or HTML goldmark finds there.
-func holdsMarkdownlintChild(node *mdast.Node, math *lazyMath, kinds ...mdast.NodeKind) bool {
+// node a child of one of kinds (see markdownlintChildren).
+func holdsMarkdownlintChild(node *mdast.Node, kinds ...mdast.NodeKind) bool {
 	for _, child := range markdownlintChildren(node) {
-		if !slices.Contains(kinds, child.Kind) {
-			continue
-		}
-		if span := child.SourceRange(); !math.overlaps(span.StartOffset, span.EndOffset) {
+		if slices.Contains(kinds, child.Kind) {
 			return true
 		}
 	}

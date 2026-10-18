@@ -19,16 +19,15 @@ import (
 // htmlBlockParser parses the lines of an HTML block the way markdownlint
 // 0.41 reads them for its HTML rules (MD033 and MD045): as Markdown in
 // which no line starts an HTML block or indented code. The block's tags
-// are then inline HTML, while a tag in a code span, a fenced code block or
-// math is code or math, and one after a backslash or as a link destination
-// is text.
+// are then inline HTML, while a tag in a code span or a fenced code block
+// is code, and one after a backslash or as a link destination is text.
 //
 //nolint:gochecknoglobals // A parser is safe for concurrent parses and costly to build.
 var htmlBlockParser = gmparser.NewHTMLBlockContent()
 
 // htmlBlockMarkdown is goldmark configured as htmlBlockParser is, without
-// its source spans, for the lines of a block that hold no math and no
-// table: there a plain parse finds the same raw HTML at less cost.
+// its source spans, for the lines of a block that hold no table: there a
+// plain parse finds the same raw HTML at less cost.
 //
 //nolint:gochecknoglobals // A goldmark parser is safe for concurrent parses and costly to build.
 var htmlBlockMarkdown = newHTMLBlockMarkdown()
@@ -67,11 +66,7 @@ type blockHTML struct {
 // HTML block: the block's whole lines are parsed as Markdown (see
 // parsedBlockHTML). A line's container prefix is part of what is parsed,
 // as in markdownlint, so a block in a blockquote is read as a blockquote.
-// readMath tells whether the parse leaves out raw HTML in math. It does not
-// for a block that goldmark starts in math, which micromark does not read
-// as one block, so that the rules report there as they did before they
-// skipped math.
-func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node, readMath bool) []blockHTML {
+func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node) []blockHTML {
 	span := block.SourceRange()
 	if file == nil || span.StartOffset < 0 || span.EndOffset <= span.StartOffset || span.EndOffset > len(file.Content) {
 		return nil
@@ -83,30 +78,26 @@ func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node, readMath b
 	}
 	start := file.Lines[firstLine-1].StartOffset
 	source := file.Content[start:file.Lines[lastLine-1].NewlineStart]
-	if !bytes.ContainsAny(source, "$|") {
+	if bytes.IndexByte(source, '|') < 0 {
 		return plainBlockHTML(source, start)
 	}
-	return parsedBlockHTML(file.Path, source, start, readMath)
+	return parsedBlockHTML(file.Path, source, start)
 }
 
 // parsedBlockHTML returns the raw HTML in the lines of a block, source,
 // that start at offset start in the file: the lines are parsed with
-// htmlBlockParser, and each inline HTML node there that is not in math,
-// when readMath is set, is raw HTML, in a table or not.
-func parsedBlockHTML(path string, source []byte, start int, readMath bool) []blockHTML {
+// htmlBlockParser, and each inline HTML node there is raw HTML, in a table
+// or not.
+func parsedBlockHTML(path string, source []byte, start int) []blockHTML {
 	parsed, err := htmlBlockParser.Parse(context.Background(), path, source)
 	if err != nil {
 		return nil
 	}
 	lines := lint.NewRuleContext(context.Background(), parsed, nil, nil)
-	var math mathRegions
-	if readMath {
-		math = findMathInHTMLBlock(lines)
-	}
 	var tags []blockHTML
 	for _, node := range lines.HTMLInlines() {
 		raw := node.SourceRange()
-		if raw.IsEmpty() || math.lines[node.SourcePosition().StartLine] || math.overlaps(raw.StartOffset, raw.EndOffset) {
+		if raw.IsEmpty() {
 			continue
 		}
 		tags = append(tags, blockHTML{
@@ -118,9 +109,9 @@ func parsedBlockHTML(path string, source []byte, start int, readMath bool) []blo
 }
 
 // plainBlockHTML returns the raw HTML in the lines of a block, source,
-// that start at offset start in the file and hold no dollar sign and no
-// pipe, so neither math nor a table: each raw HTML node of the plain parse
-// runs from the start of its first segment to the end of its last.
+// that start at offset start in the file and hold no pipe, so no table:
+// each raw HTML node of the plain parse runs from the start of its first
+// segment to the end of its last.
 func plainBlockHTML(source []byte, start int) []blockHTML {
 	var tags []blockHTML
 	document := htmlBlockMarkdown.Parser().Parse(gmtext.NewReader(source))

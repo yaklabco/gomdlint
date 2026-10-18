@@ -184,24 +184,12 @@ func listItemIndent(item *mdast.Node) int {
 // a tab: goldmark measures that tab from where the item starts, not from
 // the start of the line.
 func scanPrefix(content []byte, lineStart int, node *mdast.Node, lineNum int) ([]prefixPart, int) {
-	return scanContainers(content, lineStart, containersOf(node), lineNum)
-}
-
-// scanContainers is scanPrefix for the given containers, outermost first.
-func scanContainers(content []byte, lineStart int, containers []*mdast.Node, lineNum int) ([]prefixPart, int) {
-	parts, cursor := scanContainersCursor(content, lineStart, containers, lineNum)
-	return parts, cursor.pos
-}
-
-// scanContainersCursor is scanContainers, returning the cursor where the
-// prefix ends.
-func scanContainersCursor(content []byte, lineStart int, containers []*mdast.Node, lineNum int) ([]prefixPart, *lineCursor) {
 	cursor := &lineCursor{content: content}
 	if lineNum == 1 && bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
 		cursor.pos = len(mdast.ByteOrderMark)
 	}
 	var parts []prefixPart
-	for _, container := range containers {
+	for _, container := range containersOf(node) {
 		switch container.Kind {
 		case mdast.NodeBlockquote:
 			saved := *cursor
@@ -212,7 +200,7 @@ func scanContainersCursor(content []byte, lineStart int, containers []*mdast.Nod
 			}
 			if cursor.peek() != '>' {
 				*cursor = saved
-				return parts, cursor
+				return parts, cursor.pos
 			}
 			cursor.advance()
 			part := prefixPart{kind: mdast.NodeBlockquote, indent: indent}
@@ -227,7 +215,7 @@ func scanContainersCursor(content []byte, lineStart int, containers []*mdast.Nod
 				// The item's first line: the marker and the spaces after it,
 				// or the whole line when the content starts on a later one.
 				if !cursor.advanceTo(container.ContentRange().StartOffset - lineStart) {
-					return parts, cursor
+					return parts, cursor.pos
 				}
 				parts = append(parts, prefixPart{kind: mdast.NodeListItem, width: width})
 				continue
@@ -241,12 +229,12 @@ func scanContainersCursor(content []byte, lineStart int, containers []*mdast.Nod
 			if consumed < width && !cursor.restIsBlank() {
 				// Not indented enough to continue the item.
 				*cursor = saved
-				return parts, cursor
+				return parts, cursor.pos
 			}
 			parts = append(parts, prefixPart{kind: mdast.NodeListItem, width: width})
 		}
 	}
-	return parts, cursor
+	return parts, cursor.pos
 }
 
 // ContainerPrefix returns the bytes at the start of a 1-based line that
@@ -266,46 +254,6 @@ func ContainerPrefix(file *mdast.FileSnapshot, node *mdast.Node, lineNum int) []
 	}
 	_, end := scanPrefix(content, lineStartOffset(file, lineNum), node, lineNum)
 	return content[:end]
-}
-
-// ContinuesContainers reports whether a 1-based line continues container, a
-// blockquote or list item, and every blockquote and list item around it
-// explicitly: the line holds each blockquote's '>' marker and each list
-// item's content indentation, or is blank inside a list item. A lazy
-// continuation line, which only a paragraph may have, does not.
-func ContinuesContainers(file *mdast.FileSnapshot, container *mdast.Node, lineNum int) bool {
-	if file == nil || container == nil || lineNum < 1 || lineNum > len(file.Lines) {
-		return false
-	}
-	containers := append(containersOf(container), container)
-	parts, _ := scanContainers(RawLineContent(file, lineNum), lineStartOffset(file, lineNum), containers, lineNum)
-	return len(parts) == len(containers)
-}
-
-// IndentAfterContainers returns the columns of space at the start of a
-// 1-based line after the prefixes of container, a blockquote or list item,
-// and the containers around it, or after nothing when container is nil, and
-// the offset in the line of the first byte after that space. ok is false
-// when the line does not continue the containers explicitly (see
-// ContinuesContainers). A tab counts to the next tab stop, less the columns
-// of it that the containers claim.
-func IndentAfterContainers(file *mdast.FileSnapshot, container *mdast.Node, lineNum int) (int, int, bool) {
-	if file == nil || lineNum < 1 || lineNum > len(file.Lines) {
-		return 0, 0, false
-	}
-	var containers []*mdast.Node
-	if container != nil {
-		containers = append(containersOf(container), container)
-	}
-	parts, cursor := scanContainersCursor(RawLineContent(file, lineNum), lineStartOffset(file, lineNum), containers, lineNum)
-	if len(parts) != len(containers) {
-		return 0, 0, false
-	}
-	start := cursor.col
-	for isBlank(cursor.peek()) {
-		cursor.advance()
-	}
-	return cursor.col - start, cursor.pos, true
 }
 
 // lineStartOffset returns the offset where a 1-based line starts, or 0 when

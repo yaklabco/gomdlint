@@ -301,16 +301,17 @@ constructs and GFM autolink literals. The HTML rules find the tags of an
 HTML block as markdownlint does, by parsing the block's lines again as
 Markdown without HTML blocks and indented code
 (`pkg/lint/rules/html_block_markdown.go`, with the parser from
-`NewHTMLBlockContent`), leaving out tags in math and marking tags in
-tables. Rules that markdownlint runs on its micromark parse read inline
-math, and math blocks whose `$$` fence starts its line, the way
-micromark-extension-math does (`pkg/lint/rules/math.go`), since goldmark
-reads none. micromark reads such a fence as top-level math while it reads
-the blocks before it as goldmark does, so these blocks need no reading of
-containers. From the first fence where the two parsers may disagree, such
-as after an HTML block that only micromark reads or inside a `:::`
-directive, no more math blocks are read. Math inside containers is not
-read.
+`NewHTMLBlockContent`), and marking tags in tables. goldmark parses no
+math, so no rule skips it. MD052 reads GFM footnotes, which goldmark does
+not parse either, from the lines of the file, and counts only the
+definitions that micromark is certain to read
+(`certainFootnoteLabels` in `pkg/lint/rules/refs.go`): a `[^label]:` line
+at column 0 that goldmark reads at the top level, after a blank line or
+another such definition. Every line before it that may open a block
+holding blank lines must open one that micromark reads as goldmark does,
+so none may open math or a directive, and a code fence or an HTML block of
+kinds 1 to 5 must start at column 0 after a blank line, at the top level
+of goldmark's tree (`sharedBlocks`).
 
 ## Fix Engine
 

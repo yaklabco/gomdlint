@@ -524,14 +524,13 @@ func (r *NoDuplicateHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 func (r *NoDuplicateHeadingRule) checkAll(ctx *lint.RuleContext, headings []*mdast.Node) []lint.Diagnostic {
 	seen := make(map[string]*mdast.Node)
 	var diags []lint.Diagnostic
-	math := &lazyMath{ctx: ctx}
 
 	for _, heading := range headings {
 		if ctx.Cancelled() {
 			break
 		}
 
-		text := markdownlintHeadingText(ctx.File, heading, math)
+		text := markdownlintHeadingText(ctx.File, heading)
 		if first, ok := seen[text]; ok {
 			firstPos := first.SourcePosition()
 			diag := lint.NewDiagnostic(r.ID(), heading,
@@ -557,7 +556,6 @@ func (r *NoDuplicateHeadingRule) checkSiblings(ctx *lint.RuleContext, headings [
 	var diags []lint.Diagnostic
 	seen := make([]map[string]*mdast.Node, maxLevel+1)
 	seen[1] = make(map[string]*mdast.Node)
-	math := &lazyMath{ctx: ctx}
 	lastLevel := 1
 
 	for _, heading := range headings {
@@ -575,7 +573,7 @@ func (r *NoDuplicateHeadingRule) checkSiblings(ctx *lint.RuleContext, headings [
 			lastLevel--
 		}
 
-		text := markdownlintHeadingText(ctx.File, heading, math)
+		text := markdownlintHeadingText(ctx.File, heading)
 		if first, ok := seen[level][text]; ok {
 			firstPos := first.SourcePosition()
 			diag := lint.NewDiagnostic(r.ID(), heading,
@@ -596,12 +594,12 @@ func (r *NoDuplicateHeadingRule) checkSiblings(ctx *lint.RuleContext, headings [
 // getHeadingText reads it, for MD024 to compare: the text as written,
 // without the raw HTML directly in it, with each line ending read as a
 // space. HTML in a strikethrough is directly in the heading for
-// markdownlint, which parses no strikethrough, and a tag in inline math is
-// math (see markdownlintChildren). An ATX heading leaves out the whitespace
-// around its text. A setext heading leaves out the indentation of its first
-// line but keeps the prefix of each later line, such as "> " or a list
-// item's indentation, and the whitespace at the end of its last line.
-func markdownlintHeadingText(file *mdast.FileSnapshot, heading *mdast.Node, math *lazyMath) string {
+// markdownlint, which parses no strikethrough (see markdownlintChildren).
+// An ATX heading leaves out the whitespace around its text. A setext
+// heading leaves out the indentation of its first line but keeps the prefix
+// of each later line, such as "> " or a list item's indentation, and the
+// whitespace at the end of its last line.
+func markdownlintHeadingText(file *mdast.FileSnapshot, heading *mdast.Node) string {
 	content := heading.ContentRange()
 	if file == nil || content.StartOffset < 0 || content.EndOffset < content.StartOffset ||
 		content.EndOffset > len(file.Content) {
@@ -622,8 +620,7 @@ func markdownlintHeadingText(file *mdast.FileSnapshot, heading *mdast.Node, math
 	pos := start
 	for _, child := range markdownlintChildren(heading) {
 		span := child.SourceRange()
-		if child.Kind != mdast.NodeHTMLInline || span.StartOffset < pos || span.EndOffset > end ||
-			math.overlaps(span.StartOffset, span.EndOffset) {
+		if child.Kind != mdast.NodeHTMLInline || span.StartOffset < pos || span.EndOffset > end {
 			continue
 		}
 		text.Write(file.Content[pos:span.StartOffset])

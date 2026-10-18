@@ -280,17 +280,6 @@ formats change. The first entries under Changed may need action.
 - **MD010**: Reports each run of tabs, as markdownlint does, instead of one
   finding per line. With `ignore_code_languages` set, it skips fences that
   name no language.
-- **MD011**: Skips math, which markdownlint parses: inline math such as
-  `$(a)[b]$`, and math blocks whose `$$` fence starts its line, with no
-  indentation and no blockquote or list marker before it. Such a block
-  runs to its closing fence, a line of at least as many dollar signs after
-  at most three spaces, or to the end of the document, so `> $$` inside it
-  is math. Math inside blockquotes, list items, footnotes and tables, and
-  behind an indented fence, is read as text, so its findings are reported.
-  So is every math block from a fence where micromark may read the lines
-  before it differently from goldmark, such as one after an indented fence
-  or inside a `:::` directive. Inline math never pairs dollar signs across
-  a math fence.
 - **MD012**: Reports each blank line past the maximum, as markdownlint
   does, and no longer reports the blank lines right after front matter. One
   pass of fixes still removes a whole run.
@@ -309,39 +298,37 @@ formats change. The first entries under Changed may need action.
 - **MD024**: Compares headings as written, without their raw HTML, so
   `## Foo` and `## *Foo*` differ, and reports a repeated empty heading. HTML
   in a strikethrough is left out too, since markdownlint parses no
-  strikethrough, and a tag in inline math stays. With `siblings_only`, it
-  compares a heading with the earlier headings of its level since the last
-  heading of a lower level.
+  strikethrough. With `siblings_only`, it compares a heading with the
+  earlier headings of its level since the last heading of a lower level.
 - **MD028**: Reports blank lines between blockquotes that are indented or in
   a list item, one finding for each line, and no longer takes quote markers
   in an HTML block for blockquotes.
 - **MD033**, **MD045**: Read the lines of an HTML block as Markdown, as
-  markdownlint does, so a tag in a code span, in a fenced code block, in
-  math or after a backslash is not HTML, and MD033 applies
-  `table_allowed_elements` in a table there. A tag or image in math outside
-  HTML blocks is not reported either.
+  markdownlint does, so a tag in a code span, in a fenced code block or
+  after a backslash is not HTML, and MD033 applies `table_allowed_elements`
+  in a table there.
 - **MD036**: Reads a strikethrough in bold or italic text as plain text, as
   markdownlint does, so `**~~Old~~ title**` is reported.
 - **MD045**: Reports a Markdown image only when nothing is written between
   its brackets, so `![ ](a.png)` passes, as in markdownlint.
 - **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
   `#TOP` unless `ignore_case` is set.
-- **MD052**: With `shortcut_syntax`, no longer reports GFM footnote calls
-  such as `[^1]` whose footnote the document defines. A footnote definition
-  counts only where a container could start, after at most three spaces
-  past the prefixes of its line's containers, or four more for each
-  footnote definition whose content holds it, and not in code, HTML or
-  math. Where micromark may read math, an HTML block or no list item over a
-  definition, as in an ordered list whose first marker is not `1.` or after
-  a math fence in its container, the definition does not count, and the
-  call is reported. In `[text][^1]`, `[text]` is a shortcut reference even when
-  `[^1]: /url` also reads as a link reference definition. References in
-  math are skipped.
+- **MD052**: Reads GFM footnotes as markdownlint does where micromark is
+  certain to read the definition. A call such as `[^1]` is then no
+  reference, so `shortcut_syntax` no longer reports it, and in
+  `[text][^1]` the `[text]` is a shortcut reference, reported only with
+  `shortcut_syntax`, even when `[^1]: /url` also reads as a link reference
+  definition. A definition counts only on a `[^1]:` line at column 0, at
+  the top level outside code blocks, HTML blocks and front matter, at the
+  start of the document, after a blank line or right after another such
+  definition. No line before it may start with `$$` or `:::`, and each
+  code fence or HTML block before it that may hold blank lines must start
+  at column 0 after a blank line, where goldmark reads it at the top level.
+  Calls of other definitions are read as before.
 - **MD059**: Compares link text as written and skips only links whose text
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
-  strikethrough counts as direct, and code or HTML in inline math does not.
-  Findings point at the link text, one column after the bracket, and
-  autolinks are never checked.
+  strikethrough counts as direct. Findings point at the link text, one
+  column after the bracket, and autolinks are never checked.
 - `[ ]`, `[x]` and `[X]` make a task checkbox where micromark reads one:
   at the start of a list item's first paragraph, after any link reference
   definitions that start it, and before whitespace or a line ending with
