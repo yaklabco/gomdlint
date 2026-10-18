@@ -110,39 +110,40 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			continue
 		}
 
-		// Build the fix from the tabs outside code text.
+		// Like markdownlint, report each run of tabs at its first tab. Each
+		// run's fix replaces its tabs outside code text, so the fixes of a
+		// line's runs together replace what one fix for the line would.
 		codeLine := codeBlockByLine[lineNum] != nil
 		structureEnd := tabStructureEnd(ctx.File, lineNum, lineContent, codeBlockByLine[lineNum])
-		builder := fix.NewEditBuilder()
-		for _, tabPos := range tabPositions {
-			offset := textStart + tabPos
-			structural := tabPos < structureEnd
-			if (codeLine && !structural) || inRanges(offset, codeSpans) {
-				continue
+		for _, run := range tabRuns(tabPositions) {
+			builder := fix.NewEditBuilder()
+			for _, tabPos := range run {
+				offset := textStart + tabPos
+				structural := tabPos < structureEnd
+				if (codeLine && !structural) || inRanges(offset, codeSpans) {
+					continue
+				}
+				spaces := spacesPerTab
+				if structural {
+					spaces = tabWidth - visualColumn(lineContent[:tabPos])%tabWidth
+				}
+				builder.ReplaceRange(offset, offset+1, strings.Repeat(" ", spaces))
 			}
-			spaces := spacesPerTab
-			if structural {
-				spaces = tabWidth - visualColumn(lineContent[:tabPos])%tabWidth
+
+			pos := mdast.SourcePosition{
+				StartLine:   lineNum,
+				StartColumn: textOffset + run[0] + 1,
+				EndLine:     lineNum,
+				EndColumn:   textOffset + run[len(run)-1] + 2,
 			}
-			builder.ReplaceRange(offset, offset+1, strings.Repeat(" ", spaces))
+			diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Hard tab character found").
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion("Replace tabs with spaces")
+			if len(builder.Edits) > 0 {
+				diagBuilder = diagBuilder.WithFix(builder)
+			}
+			diags = append(diags, diagBuilder.Build())
 		}
-
-		// Create a single diagnostic for the line at the first tab position.
-		firstTabPos := tabPositions[0]
-		pos := mdast.SourcePosition{
-			StartLine:   lineNum,
-			StartColumn: textOffset + firstTabPos + 1,
-			EndLine:     lineNum,
-			EndColumn:   textOffset + firstTabPos + 2,
-		}
-
-		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Hard tab character found").
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Replace tabs with spaces")
-		if len(builder.Edits) > 0 {
-			diagBuilder = diagBuilder.WithFix(builder)
-		}
-		diags = append(diags, diagBuilder.Build())
 	}
 
 	return keepSafeFixes(ctx, diags), nil
@@ -261,6 +262,19 @@ func inRanges(offset int, ranges []mdast.SourceRange) bool {
 		}
 	}
 	return false
+}
+
+// tabRuns splits ascending tab positions into runs of adjacent tabs.
+func tabRuns(positions []int) [][]int {
+	var runs [][]int
+	start := 0
+	for idx := 1; idx <= len(positions); idx++ {
+		if idx == len(positions) || positions[idx] != positions[idx-1]+1 {
+			runs = append(runs, positions[start:idx])
+			start = idx
+		}
+	}
+	return runs
 }
 
 // findTabPositions returns the positions (0-indexed) of the tab characters in

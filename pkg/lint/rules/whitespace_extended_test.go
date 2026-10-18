@@ -147,9 +147,10 @@ func TestHardTabsRule(t *testing.T) {
 			wantFix:   "```makefile\nall:\n\tgo build ./...\n\tgo test ./...\n```\n",
 		},
 		{
+			// Each run of tabs is a finding, as in markdownlint.
 			name:      "tab in prose is fixed but not the one in a code span",
 			input:     "Text\twith `code\there` tab\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Text with `code\there` tab\n",
 		},
 		{
@@ -240,6 +241,31 @@ func TestHardTabsRule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHardTabsRule_EachRun checks that MD010 reports each run of tabs at its
+// first tab, as markdownlint 0.41.1 does, and that the fixes of a line's runs
+// together replace its tabs as one fix for the line did.
+func TestHardTabsRule_EachRun(t *testing.T) {
+	input := "# T\n\nAnother\ttab\texample\n\na\t\tb\tc\n\n- item\n\n\t\tnested\tcode\n\nText `a\tb` and\tc\n"
+	type position struct{ line, column int }
+	positions := func(diags []lint.Diagnostic) []position {
+		got := make([]position, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, position{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+
+	diags := applyRuleWithOptions(t, NewHardTabsRule(), input, nil)
+	assert.Equal(t, []position{{3, 8}, {3, 12}, {5, 2}, {5, 5}, {9, 1}, {9, 9}, {11, 8}, {11, 15}}, positions(diags))
+	// The second tab of line 9 is partly the code's own text, and tabs in
+	// code spans are code, so neither is replaced.
+	assert.Equal(t, "# T\n\nAnother tab example\n\na  b c\n\n- item\n\n    \tnested\tcode\n\nText `a\tb` and c\n",
+		applyAllEdits(t, input, diags))
+
+	excluded := applyRuleWithOptions(t, NewHardTabsRule(), input, map[string]any{"code_blocks": false})
+	assert.Equal(t, []position{{3, 8}, {3, 12}, {5, 2}, {5, 5}, {11, 15}}, positions(excluded))
 }
 
 func TestHardTabsRule_IgnoreCodeLanguages(t *testing.T) {

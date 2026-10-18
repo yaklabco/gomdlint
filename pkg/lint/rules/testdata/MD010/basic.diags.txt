@@ -1,3 +1,4 @@
 basic.input.md:3:16 warning Hard tab character found (MD010/no-hard-tabs) [fixable]
 basic.input.md:4:1 warning Hard tab character found (MD010/no-hard-tabs) [fixable]
 basic.input.md:6:8 warning Hard tab character found (MD010/no-hard-tabs) [fixable]
+basic.input.md:6:12 warning Hard tab character found (MD010/no-hard-tabs) [fixable]

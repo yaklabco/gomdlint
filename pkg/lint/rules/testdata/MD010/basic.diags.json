@@ -25,5 +25,14 @@
     "message": "Hard tab character found",
     "severity": "warning",
     "fixable": true
+  },
+  {
+    "rule": "MD010",
+    "name": "no-hard-tabs",
+    "line": 6,
+    "column": 12,
+    "message": "Hard tab character found",
+    "severity": "warning",
+    "fixable": true
   }
 ]
