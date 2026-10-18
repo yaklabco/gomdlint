@@ -90,7 +90,7 @@ type presetContext struct {
 // one first.
 //
 //nolint:ireturn // goldmark's parser.Context interface fixes this signature.
-func (c presetContext) Reference(label string) (parser.Reference, bool) {
+func (c *presetContext) Reference(label string) (parser.Reference, bool) {
 	if ref, found := c.refs[label]; found {
 		return ref, true
 	}
@@ -135,7 +135,7 @@ func (p *Parser) parse(
 	pc := parser.NewContext()
 	pc.Set(p.spans.key, recorder)
 	if refs != nil {
-		pc = presetContext{Context: pc, refs: refs}
+		pc = &presetContext{Context: pc, refs: refs}
 	}
 	gmDoc := p.md.Parser().Parse(reader, parser.WithContext(pc))
 
