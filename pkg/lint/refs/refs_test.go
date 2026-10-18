@@ -98,7 +98,9 @@ func TestContext_ValidateFragment(t *testing.T) {
 		{"empty fragment", "", true},
 		{"just hash", "#", true},
 		{"special top", "#top", true},
-		{"special TOP", "#TOP", true},
+		// markdownlint matches "#top" in lowercase only, unless case is
+		// ignored.
+		{"special TOP", "#TOP", false},
 		{"github line ref", "#L20", true},
 		{"valid anchor", "#heading-one", true},
 		{"valid html anchor", "#custom-id", true},
@@ -112,6 +114,12 @@ func TestContext_ValidateFragment(t *testing.T) {
 				t.Errorf("ValidateFragment(%q) = %v, want %v", tt.fragment, got, tt.expected)
 			}
 		})
+	}
+
+	for fragment, want := range map[string]bool{"#TOP": true, "#Top": true, "#HEADING-ONE": true, "#nonexistent": false} {
+		if got := ctx.ValidateFragmentIgnoreCase(fragment); got != want {
+			t.Errorf("ValidateFragmentIgnoreCase(%q) = %v, want %v", fragment, got, want)
+		}
 	}
 }
 

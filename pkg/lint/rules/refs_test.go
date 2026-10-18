@@ -701,6 +701,37 @@ func TestLinkFragmentsRule_GitHubSlugs(t *testing.T) {
 	}
 }
 
+// TestLinkFragmentsRule_CustomAnchorsAndTop checks MD051 against
+// markdownlint 0.41.1: "{#name}" in a heading's text adds the anchor name
+// when the name is lowercase words joined by single hyphens or underscores,
+// and "#top" matches only in lowercase unless case is ignored.
+func TestLinkFragmentsRule_CustomAnchorsAndTop(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"## Custom {#custom}\n\n" + // 3
+		"## Upper {#Upper}\n\n" + // 5
+		"## Two {#one} {#two}\n\n" + // 7
+		"## Doubled {#a--b}\n\n" + // 9
+		"Setext {#setext-anchor}\n-----------------------\n\n" + // 11
+		"## Code `{#in-code}`\n\n" + // 14
+		"## Under {#under_score}\n\n" + // 16
+		"[a](#custom) [b](#custom-custom) [c](#Upper) [d](#upper) [e](#one) [f](#two)\n" + // 18
+		"[g](#a--b) [h](#setext-anchor) [i](#in-code) [j](#under_score) [k](#TOP)\n" + // 19
+		"[l](#top) [m](#Top) [n](#L12) [o](#Custom)\n" // 20
+
+	type position struct{ line, column int }
+	positions := func(options map[string]any) []position {
+		diags := applyRuleWithOptions(t, NewLinkFragmentsRule(), markdown, options)
+		got := make([]position, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, position{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+
+	assert.Equal(t, []position{{18, 34}, {18, 46}, {19, 1}, {19, 64}, {20, 11}, {20, 31}}, positions(nil))
+	assert.Equal(t, []position{{18, 34}, {18, 46}, {19, 1}}, positions(map[string]any{"ignore_case": true}))
+}
+
 func TestDescriptiveLinkTextRule(t *testing.T) {
 	rule := NewDescriptiveLinkTextRule()
 
