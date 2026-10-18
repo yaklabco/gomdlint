@@ -85,7 +85,8 @@ type ruleIndex struct {
 	rules []indexedRule
 
 	// options maps the ID of each registered rule whose catalog entry
-	// declares its options (RuleMeta.OptionsDeclared) to those options.
+	// declares its options (RuleMeta.OptionsDeclared), or that declares
+	// them itself (OptionDeclarer), to those options.
 	options map[string]*optionTable
 }
 
@@ -238,10 +239,12 @@ func (r *Registry) RulesByTag(tag string) []Rule {
 // NormalizeOptions rewrites options, the options of the registered rule
 // with the given ID, to the canonical names of the options that its
 // catalog entry declares, and reports the problems it finds, as the
-// function NormalizeOptions does. It reports false, and returns options as
-// they are without problems, when no registered rule has the ID, given
-// exactly as registered, or when the rule's entry does not declare its
-// options (RuleMeta.OptionsDeclared).
+// function NormalizeOptions does. A rule without a catalog entry that
+// declares its options can declare them itself (OptionDeclarer), as every
+// built-in rule does. It reports false, and returns options as they are
+// without problems, when no registered rule has the ID, given exactly as
+// registered, or when neither the rule's entry nor the rule declares its
+// options.
 func (r *Registry) NormalizeOptions(id string, options map[string]any) (map[string]any, []OptionIssue, bool) {
 	table := r.lookups().options[id]
 	if table == nil {
@@ -477,8 +480,11 @@ func (r *Registry) buildIndex() *ruleIndex {
 		}
 		build.rules = append(build.rules, indexed)
 		build.addTags(rule, meta)
-		if meta.OptionsDeclared {
+		switch declarer, declares := rule.(OptionDeclarer); {
+		case meta.OptionsDeclared:
 			build.options[id] = newOptionTable(meta.Options)
+		case declares:
+			build.options[id] = newOptionTable(declarer.DeclaredOptions())
 		}
 	}
 

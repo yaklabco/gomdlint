@@ -113,6 +113,19 @@ func (t OptionType) typeText() string {
 	return string(t)
 }
 
+// OptionDeclarer is a rule that declares the options it reads itself, as
+// every built-in rule does. A registry uses the declaration when the rule
+// has no catalog entry that declares its options (RuleMeta.OptionsDeclared),
+// so that a rule registered on its own, without its entry, still reads its
+// options under every spelling that the declaration accepts.
+type OptionDeclarer interface {
+	Rule
+
+	// DeclaredOptions returns every option that the rule reads, in a list
+	// that the caller may keep.
+	DeclaredOptions() []OptionSpec
+}
+
 // OptionIssueKind classifies an OptionIssue.
 type OptionIssueKind int
 
