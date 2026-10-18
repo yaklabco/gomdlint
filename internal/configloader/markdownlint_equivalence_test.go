@@ -17,13 +17,21 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
+// legacyWarning and legacyLineLength are markdownlintWarning and
+// markdownlintLineLength of pkg/config on main at 580bd58 (#42).
+const (
+	legacyWarning    = string(config.SeverityWarning)
+	legacyLineLength = 80
+)
+
 // legacyMarkdownlintRuleConfig is config.MarkdownlintRuleConfig as it was
 // before the rule catalog declared options, on main at 580bd58 (#42): it
 // reads a value with JavaScript's truthiness, sets some of markdownlint's
 // defaults explicitly, renames a few options by hand, and passes every
-// other option through. It is kept here, unchanged apart from its name, as
-// the reference that TestMarkdownlintTranslationKeepsEffectiveOptions
-// compares the catalog-driven translation with.
+// other option through. It is kept here, unchanged apart from the names it
+// uses, as the reference that TestMarkdownlintTranslationKeepsEffectiveOptions
+// and TestMarkdownlintTranslationWritesWhat42Wrote compare the
+// catalog-driven translation with.
 func legacyMarkdownlintRuleConfig(ruleID string, value any) config.RuleConfig {
 	enabled := true
 	severity := string(config.SeverityError)
@@ -37,7 +45,7 @@ func legacyMarkdownlintRuleConfig(ruleID string, value any) config.RuleConfig {
 		cfg.Options = map[string]any{"ignore_code_blocks": true, "br_spaces": 2}
 	case "MD013":
 		cfg.Options = map[string]any{
-			"max": 80, "ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true,
+			"max": legacyLineLength, "ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true,
 		}
 	case "MD025":
 		cfg.Options = map[string]any{"title_only": true}
@@ -55,7 +63,7 @@ func legacyMarkdownlintRuleConfig(ruleID string, value any) config.RuleConfig {
 	switch typed := value.(type) {
 	case string:
 		*cfg.Enabled = typed != ""
-		if typed == "warning" {
+		if typed == legacyWarning {
 			severity = typed
 		}
 	case map[string]any:
@@ -137,8 +145,8 @@ func legacyTruthy(value any) bool {
 // on main at 580bd58, unchanged apart from the names it calls.
 func legacyMarkdownlintDefaultRuleConfig(ruleID string, value any) config.RuleConfig {
 	switch text, isText := value.(string); {
-	case isText && text == "warning":
-		return legacyMarkdownlintRuleConfig(ruleID, "warning")
+	case isText && text == legacyWarning:
+		return legacyMarkdownlintRuleConfig(ruleID, legacyWarning)
 	case legacyTruthy(value):
 		return legacyMarkdownlintRuleConfig(ruleID, true)
 	default:
@@ -445,22 +453,20 @@ func TestMarkdownlintTranslationWritesWhat42Wrote(t *testing.T) {
 
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
-	values := []any{true, false, nil, "warning", "", float64(0), map[string]any{}, map[string]any{"enabled": false}}
-	encode := func(cfg config.RuleConfig) string {
-		if cfg.Options == nil {
-			cfg.Options = map[string]any{}
+	values := []any{true, false, nil, legacyWarning, "", float64(0), map[string]any{}, map[string]any{"enabled": false}}
+	settled := func(cfg config.RuleConfig) config.RuleConfig {
+		if len(cfg.Options) == 0 {
+			cfg.Options = nil
 		}
-		encoded, err := json.Marshal(cfg)
-		require.NoError(t, err)
-		return string(encoded)
+		return cfg
 	}
 	for _, id := range registry.IDs() {
 		for _, value := range values {
 			converted, issues := registry.MarkdownlintRuleConfig(id, value)
 			assert.Empty(t, issues, "%s %#v", id, value)
-			assert.Equal(t, encode(legacyMarkdownlintRuleConfig(id, value)), encode(converted), "%s %#v", id, value)
-			assert.Equal(t, encode(legacyMarkdownlintDefaultRuleConfig(id, value)),
-				encode(registry.MarkdownlintDefaultRuleConfig(id, value)), "%s default %#v", id, value)
+			assert.Equal(t, settled(legacyMarkdownlintRuleConfig(id, value)), settled(converted), "%s %#v", id, value)
+			assert.Equal(t, settled(legacyMarkdownlintDefaultRuleConfig(id, value)),
+				settled(registry.MarkdownlintDefaultRuleConfig(id, value)), "%s default %#v", id, value)
 		}
 	}
 }

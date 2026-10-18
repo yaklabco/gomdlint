@@ -489,8 +489,8 @@ func TestRegistryNormalizeOptions_IssuesShareNothing(t *testing.T) {
 		assert.Equal(t, issues[idx].Key, issue.Key)
 	}
 	// The issues come in the order of their keys: lines, names, old_style.
-	assert.Equal(t, meta.Options, []lint.OptionSpec{again[2].Option, again[1].Option, again[0].Option},
-		"a later issue sees the declarations as they were")
+	seen := []lint.OptionSpec{again[2].Option, again[1].Option, again[0].Option}
+	assert.Equal(t, meta.Options, seen, "a later issue sees the declarations as they were")
 }
 
 func TestRegistryNormalizeOptions_UndeclaredEntry(t *testing.T) {
@@ -583,8 +583,12 @@ func TestRegistryMarkdownlintRuleConfigWritesPinnedOptions(t *testing.T) {
 	assert.Empty(t, issues)
 
 	cfg, _ = registry.MarkdownlintRuleConfig("MD033", true)
-	cfg.Options["allowed_elements"].([]string)[0] = "hr"
-	cfg.Options["levels"].([]int)[0] = 9
+	elements, isList := cfg.Options["allowed_elements"].([]string)
+	require.True(t, isList)
+	elements[0] = "hr"
+	levels, isList := cfg.Options["levels"].([]int)
+	require.True(t, isList)
+	levels[0] = 9
 	assert.Equal(t, pinned, registry.MarkdownlintDefaultRuleConfig("MD033", true).Options, "each setting has its own copy")
 	meta, ok := registry.Meta("MD033")
 	require.True(t, ok)

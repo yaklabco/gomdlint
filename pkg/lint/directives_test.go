@@ -531,9 +531,12 @@ func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
 // defaults for some options of some rules, max among them, so the comment
 // gives MD013 a max of 80, not the baseline's 20.
 func TestEngineConfigureFileSettingReplacesRuleDefaults(t *testing.T) {
-	const paragraph = "This paragraph is longer than twenty characters, yes.\n"
+	const (
+		lineLength = "MD013"
+		paragraph  = "This paragraph is longer than twenty characters, yes.\n"
+	)
 	cfg := config.NewConfig()
-	cfg.RuleDefaults = map[string]config.RuleConfig{"MD013": {Options: map[string]any{"max": 20}}}
+	cfg.RuleDefaults = map[string]config.RuleConfig{lineLength: {Options: map[string]any{"max": 20}}}
 	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry)
 	lineLengthLines := func(t *testing.T, input string) []int {
 		t.Helper()
@@ -541,7 +544,7 @@ func TestEngineConfigureFileSettingReplacesRuleDefaults(t *testing.T) {
 		require.NoError(t, err)
 		var lines []int
 		for _, diag := range result.Diagnostics {
-			if diag.RuleID == "MD013" {
+			if diag.RuleID == lineLength {
 				lines = append(lines, diag.StartLine)
 			}
 		}

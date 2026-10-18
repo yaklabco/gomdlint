@@ -17,6 +17,10 @@ import (
 // layeredParagraph is 54 characters long: over a limit of 20, under 80.
 const layeredParagraph = "This paragraph is longer than twenty characters, yes.\n"
 
+// lineLengthID is the ID of line-length, the rule that the layered tests
+// configure.
+const lineLengthID = "MD013"
+
 // TestLoad_MarkdownlintSettingReplacesLowerLayerOptions covers a project's
 // markdownlint config, translated for the run, over a user config that sets
 // options of a rule that the markdownlint config names. As #42 did, the
@@ -68,7 +72,7 @@ func TestLoad_MarkdownlintSettingReplacesLowerLayerOptions(t *testing.T) {
 			rules.RegisterAll(registry)
 			var got map[string]any
 			for _, resolved := range lint.ResolveRules(registry, result.Config) {
-				if resolved.Rule.ID() == "MD013" {
+				if resolved.Rule.ID() == lineLengthID {
 					got = resolved.Config.Options
 				}
 			}
@@ -91,7 +95,7 @@ func lintWith(t *testing.T, registry *lint.Registry, cfg *config.Config, content
 	require.NoError(t, err)
 	var lines []int
 	for _, diag := range result.Diagnostics {
-		if diag.RuleID == "MD013" {
+		if diag.RuleID == lineLengthID {
 			lines = append(lines, diag.StartLine)
 		}
 	}
