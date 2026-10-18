@@ -574,8 +574,9 @@ func TestEngineConfigureFileSettingReplacesRuleDefaults(t *testing.T) {
 
 // TestEngineConfigureFileOptionSpellings covers rule options in
 // markdownlint-configure-file: markdownlint's spellings configure the rule,
-// an unknown option is ignored, as markdownlint ignores it, and two
-// spellings of one option fail the file, as in a config file.
+// an unknown option is ignored, as markdownlint ignores it, and of two
+// spellings of one option markdownlint's applies, as markdownlint knows no
+// other, where a config file rejects the two. They used to fail the file.
 func TestEngineConfigureFileOptionSpellings(t *testing.T) {
 	const lineLength = "MD013"
 	long := strings.Repeat("word ", 20) + "end\n"
@@ -607,9 +608,12 @@ func TestEngineConfigureFileOptionSpellings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, lineLengthFindings(result), "an unknown option changes nothing")
 
-	_, err = lintWith(t, `{"MD013": {"line_length": 120, "max": 100}}`)
-	require.EqualError(t, err, `file configuration: markdownlint-configure-file at line 3: `+
-		`"line_length" and "max" both set line-length option "max"; keep one of them`)
+	result, err = lintWith(t, `{"MD013": {"line_length": 120, "max": 100}}`)
+	require.NoError(t, err)
+	assert.Zero(t, lineLengthFindings(result), "markdownlint's line_length applies, not max")
+	require.Len(t, result.Notices, 1)
+	assert.Equal(t, lint.NoticeOptionConflict, result.Notices[0].Kind)
+	assert.Equal(t, 3, result.Notices[0].Line)
 }
 
 // TestEngineConfigureFileAppliesKeysInWrittenOrder covers the order in which

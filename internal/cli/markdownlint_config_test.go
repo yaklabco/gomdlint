@@ -462,6 +462,23 @@ func TestLint_ConfigureFileReadsAsMarkdownlintCLI2Does(t *testing.T) {
 	}
 }
 
+// TestLint_ConfigureFileReadsMarkdownlintsSpelling covers a configure-file
+// setting that writes an option in markdownlint's spelling and gomdlint's.
+// markdownlint reads its own, line_length, so markdownlint-cli2 reports the
+// comment's own line as longer than 10 characters, and the trailing space.
+// gomdlint used to fail the file. It now reads line_length too, with a
+// notice that max is ignored.
+func TestLint_ConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
+	doc := "<!-- markdownlint-configure-file {\"MD013\": {\"line_length\": 10, \"max\": 100}} -->\n\n" + trailingSpaceDoc
+	inProject(t, map[string]string{"doc.md": doc})
+
+	got := execute(t, "lint", "--format", "json", "doc.md")
+
+	assert.Equal(t, map[string][]string{"doc.md": {"MD009", "MD013"}}, reportedFiles(t, got.stdout))
+	assert.Equal(t, `WARN doc.md:1: markdownlint-configure-file: "line_length" and "max" both set line-length option "max"; `+
+		`markdownlint reads "line_length", so "max" is ignored`+"\n", got.stderr)
+}
+
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config
 // sets and a markdownlint config cannot: its ignore patterns, flavor,
 // gitignore and default_ignores settings and backups. While gomdlint

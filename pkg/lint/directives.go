@@ -245,9 +245,8 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // configureFile records the notices on their comments, once for a key that
 // a comment repeats in any spelling that markdownlint reads as the same
 // word.
-func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
+func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) *config.Config {
 	var settings MarkdownlintSettings
-	lines := make(map[string]int) // key -> the line of the comment that last set it
 	configured := false
 	resolver := &wordResolver{registry: registry} // It remembers the suggestions for unknown keys.
 	for idx := range directives {
@@ -274,14 +273,13 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 					directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, setting.Key, rules))
 				}
 				directive.notices = append(directive.notices,
-					unknownOptionNotices(registry, directive, setting.Key, rules, setting.Value)...)
+					optionNotices(registry, directive, setting.Key, rules, setting.Value)...)
 			}
 			settings.Set(setting.Key, setting.Value)
-			lines[setting.Key] = directive.line
 		}
 	}
 	if !configured {
-		return cfg, nil
+		return cfg
 	}
 
 	result := cfg.Clone()
@@ -309,27 +307,28 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 		rules, _ := lookupWord(setting.Key, registry)
 		for _, id := range sortedIDs(rules) {
-			converted, err := configureFileRule(registry, lines[setting.Key], id, setting.Value)
-			if err != nil {
-				return nil, err
-			}
+			converted := configureFileRule(registry, id, setting.Value)
 			converted.AutoFix = result.Rules[id].AutoFix
 			result.Rules[id] = converted
 		}
 	}
-	return result, nil
+	return result
 }
 
-// unknownOptionNotices returns the notices for the options in value, the
-// setting of key in directive, a markdownlint-configure-file comment, that
-// the rules that key names do not read (see Registry.MarkdownlintRuleConfig).
-// markdownlint ignores such an option, as gomdlint does, so the notices
-// change nothing. For a key that names one rule there is one for each
-// option that the rule does not read, which offers the closest option
-// names, and for a key that names several, a tag, one for each option that
-// none of its rules reads, as configuration files warn about them. Each
-// names the rules as markdownlint names them, in ID order.
-func unknownOptionNotices(registry *Registry, directive *inlineDirective, key string, rules []Rule, value any) []Notice {
+// optionNotices returns the notices for the options in value, the setting
+// of key in directive, a markdownlint-configure-file comment, that the rules
+// that key names do not read (see Registry.MarkdownlintRuleConfig), or that
+// the setting writes in two spellings. markdownlint ignores an option that
+// it does not know, as gomdlint does, so the notices change nothing.
+//
+// For a key that names one rule there is one for each option that the rule
+// does not read, which offers the closest option names, and for a key that
+// names several, a tag, one for each option that none of its rules reads,
+// as configuration files warn about them. An option written in both
+// spellings gets one for each rule that reads it, which says that
+// gomdlint's spelling is ignored (see configureFileRule). Each names the
+// rules as markdownlint names them, in ID order.
+func optionNotices(registry *Registry, directive *inlineDirective, key string, rules []Rule, value any) []Notice {
 	if options, ok := value.(map[string]any); !ok || len(options) == 0 {
 		return nil
 	}
@@ -337,40 +336,59 @@ func unknownOptionNotices(registry *Registry, directive *inlineDirective, key st
 	slices.SortFunc(sorted, func(a, b Rule) int { return cmp.Compare(a.ID(), b.ID()) })
 	sorted = slices.CompactFunc(sorted, func(a, b Rule) bool { return a.ID() == b.ID() })
 
+	kind := directive.kind()
+	notice := func(noticeKind NoticeKind, option string, suggestions, rules []string, text string) Notice {
+		return Notice{
+			Kind: noticeKind, Line: directive.line, Directive: kind,
+			Name: option, Suggestions: suggestions, Rules: rules, Message: kind + ": " + text,
+		}
+	}
+
 	names := make([]string, len(sorted))
 	unread := make(map[string]int) // option -> the rules that do not read it
 	var issues []OptionIssue       // The unknown options of the one rule.
+	var conflicts []Notice
 	for idx, rule := range sorted {
 		names[idx] = registry.markdownlintName(rule)
 		_, found := registry.MarkdownlintRuleConfig(rule.ID(), value)
 		for _, issue := range found {
-			if issue.Kind == OptionIssueUnknown {
+			switch issue.Kind {
+			case OptionIssueUnknown:
 				unread[issue.Key]++
 				issues = append(issues, issue)
+			case OptionIssueConflict:
+				conflicts = append(conflicts, notice(NoticeOptionConflict, issue.Option.Name, nil,
+					[]string{names[idx]}, conflictText(issue, names[idx])))
 			}
 		}
 	}
 
-	kind := directive.kind()
-	notice := func(option string, suggestions []string, text string) Notice {
-		return Notice{
-			Kind: NoticeUnknownOption, Line: directive.line, Directive: kind,
-			Name: option, Suggestions: suggestions, Rules: names, Message: kind + ": " + text,
-		}
-	}
 	var notices []Notice
 	if len(sorted) == 1 {
 		for _, issue := range issues {
-			notices = append(notices, notice(issue.Key, issue.Suggestions, issue.Text(names[0])))
+			notices = append(notices, notice(NoticeUnknownOption, issue.Key, issue.Suggestions, names, issue.Text(names[0])))
 		}
-		return notices
+		return append(notices, conflicts...)
 	}
 	for _, option := range slices.Sorted(maps.Keys(unread)) {
 		if unread[option] == len(sorted) {
-			notices = append(notices, notice(option, nil, UnknownTagOptionText(option, key)))
+			notices = append(notices, notice(NoticeUnknownOption, option, nil, names, UnknownTagOptionText(option, key)))
 		}
 	}
-	return notices
+	return append(notices, conflicts...)
+}
+
+// conflictText describes issue, two spellings of one option of the rule
+// named ruleName in a markdownlint-configure-file setting
+// (OptionIssueConflict), of which markdownlint reads its own spelling and
+// gomdlint's canonical one is ignored (see configureFileRule).
+func conflictText(issue OptionIssue, ruleName string) string {
+	markdownlintSpelling := issue.Key
+	if markdownlintSpelling == issue.Option.Name {
+		markdownlintSpelling = issue.Other
+	}
+	return fmt.Sprintf("%q and %q both set %s option %q; markdownlint reads %q, so %q is ignored",
+		issue.Key, issue.Other, ruleName, issue.Option.Name, markdownlintSpelling, issue.Option.Name)
 }
 
 // readConfigureFile reads the parameter of directive, a
@@ -407,24 +425,35 @@ func readConfigureFile(directive *inlineDirective) (*MarkdownlintSource, bool) {
 }
 
 // configureFileRule converts value, the setting of the rule with the given
-// ID in a markdownlint-configure-file comment on the given line, as a
-// markdownlint configuration file's is converted. Options that the rule
-// does not read, or whose values have the wrong type, change nothing, as
-// in markdownlint, but two spellings of one option are an error, as in a
-// config file.
-func configureFileRule(registry *Registry, line int, id string, value any) (config.RuleConfig, error) {
+// ID in a markdownlint-configure-file comment, as a markdownlint
+// configuration file's is converted. Options that the rule does not read,
+// or whose values have the wrong type, change nothing, as in markdownlint.
+// Two spellings of one option, which a config file rejects, read as
+// markdownlint reads them: markdownlint knows an option by its own
+// spelling only, an alias of the option's canonical name, such as
+// line_length for max, so that spelling applies and the canonical one is
+// left out.
+func configureFileRule(registry *Registry, id string, value any) config.RuleConfig {
 	converted, issues := registry.MarkdownlintRuleConfig(id, value)
+	var canonical []string // The canonical spellings that conflict with markdownlint's.
 	for _, issue := range issues {
-		if issue.Kind != OptionIssueConflict {
-			continue
+		if issue.Kind == OptionIssueConflict {
+			canonical = append(canonical, issue.Option.Name)
 		}
-		name := id
-		if rule, ok := registry.GetByID(id); ok {
-			name = rule.Name()
-		}
-		return config.RuleConfig{}, fmt.Errorf("markdownlint-configure-file at line %d: %s", line, issue.Text(name))
 	}
-	return converted, nil
+	if len(canonical) == 0 {
+		return converted
+	}
+	options, ok := value.(map[string]any)
+	if !ok {
+		return converted // Only an object holds options, which can conflict.
+	}
+	options = maps.Clone(options)
+	for _, name := range canonical {
+		delete(options, name)
+	}
+	converted, _ = registry.MarkdownlintRuleConfig(id, options)
+	return converted
 }
 
 // markdownlintKey returns the key by which markdownlint knows word, a word

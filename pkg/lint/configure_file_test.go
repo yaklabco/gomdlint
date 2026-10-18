@@ -215,6 +215,54 @@ func TestEngineConfigureFileUnknownOptionsChangeNothing(t *testing.T) {
 	assert.Empty(t, lintDefault(t, quiet).Notices)
 }
 
+// TestEngineConfigureFileReadsMarkdownlintsSpelling covers a setting that
+// writes an option in markdownlint's spelling and in gomdlint's, which a
+// config file rejects. markdownlint knows its own spelling only, so it
+// reads that and ignores the other, and gomdlint does the same, with a
+// notice. gomdlint used to fail the file. markdownlint reports the long
+// lines with a line length of 20, and the table row only in the first
+// document, where gomdlint's ignore_tables is ignored in favour of
+// markdownlint's inverted tables.
+func TestEngineConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
+	document := func(parameter string) string {
+		return "<!-- markdownlint-configure-file " + parameter + " -->\n\n# Title\n\n" +
+			"| a | b |\n| - | - |\n| one table row that is long enough | x |\n\n" +
+			"This paragraph line is long enough to pass twenty.\n"
+	}
+	tests := []struct {
+		parameter, ignored, message string
+		lines                       []int
+	}{
+		{
+			parameter: `{"MD013": {"line_length": 20, "max": 100}}`, ignored: "max", lines: []int{1, 7, 9},
+			message: `"line_length" and "max" both set line-length option "max"; ` +
+				`markdownlint reads "line_length", so "max" is ignored`,
+		},
+		{
+			parameter: `{"MD013": {"line_length": 20, "tables": false, "ignore_tables": false}}`,
+			ignored:   "ignore_tables", lines: []int{1, 9},
+			message: `"ignore_tables" and "tables" both set line-length option "ignore_tables"; ` +
+				`markdownlint reads "tables", so "ignore_tables" is ignored`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.parameter, func(t *testing.T) {
+			result := lintDefault(t, document(tt.parameter))
+
+			assert.Equal(t, tt.lines, reportedLines(t, document(tt.parameter), "MD013"))
+			assert.Equal(t, []lint.Notice{{
+				Kind:      lint.NoticeOptionConflict,
+				Line:      1,
+				Directive: "markdownlint-configure-file",
+				Name:      tt.ignored,
+				Rules:     []string{"line-length"},
+				Message:   "markdownlint-configure-file: " + tt.message,
+			}}, result.Notices)
+		})
+	}
+}
+
 // TestEngineConfigureFileAppliesTheCommentsItReads covers a file with two
 // configure-file comments, of which markdownlint ignores the first, which
 // it cannot read, and applies the second, which turns MD009 off.

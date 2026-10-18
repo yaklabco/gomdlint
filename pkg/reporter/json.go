@@ -50,15 +50,18 @@ type JSONFileResult struct {
 // the comment ignores, as markdownlint does; a word that is one of
 // gomdlint's deprecated tags, which still work but will stop working in a
 // later release; an option in a configure-file setting that its rules do
-// not read; or a configure-file comment that markdownlint ignores because
-// it holds no object of settings.
+// not read, or that the setting also writes in markdownlint's spelling; or
+// a configure-file comment that markdownlint ignores because it holds no
+// object of settings.
 type JSONNotice struct {
 	// Line is the 1-based line on which the comment starts.
 	Line int `json:"line"`
 
 	// Kind is "unknown-rule" for a word or key that names no rule or tag,
 	// "deprecated-tag" for a deprecated tag, "unknown-option" for an option
-	// that the rules of a configure-file setting do not read, and
+	// that the rules of a configure-file setting do not read,
+	// "option-conflict" for an option that a configure-file setting writes
+	// in gomdlint's spelling beside markdownlint's, which applies, and
 	// "invalid-configuration" for a configure-file comment that holds no
 	// object of settings.
 	Kind string `json:"kind"`
@@ -78,9 +81,10 @@ type JSONNotice struct {
 	Suggestions []string `json:"suggestions,omitempty"`
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead, and, for an unknown option, the
-	// rules whose setting holds it, none of which reads it, named as
-	// markdownlint names them. The key is absent otherwise.
+	// which the comment can name instead, for an unknown option, the rules
+	// whose setting holds it, none of which reads it, and, for an option
+	// conflict, the rule whose option it is, named as markdownlint names
+	// them. The key is absent otherwise.
 	Rules []string `json:"rules,omitempty"`
 
 	// Message describes the problem, starting with the kind of comment.
