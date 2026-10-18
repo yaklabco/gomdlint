@@ -789,16 +789,38 @@ func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
 }
 
 // showsText reports whether source text renders a visible character: one
-// that is graphic and not a space, so neither whitespace nor a zero-width
-// character such as U+200B counts.
+// that is graphic, not a space and not default ignorable, so neither
+// whitespace nor a character that renders nothing, such as U+200B or the
+// variation selector U+FE0F, counts.
 func showsText(source []byte) bool {
 	var rendered bytes.Buffer
 	writer := bufio.NewWriter(&rendered)
 	gmhtml.DefaultWriter.Write(writer, source)
 	_ = writer.Flush() // A bytes.Buffer never fails to write.
 	return bytes.ContainsFunc(rendered.Bytes(), func(r rune) bool {
-		return unicode.IsGraphic(r) && !unicode.IsSpace(r)
+		return unicode.IsGraphic(r) && !unicode.IsSpace(r) && !defaultIgnorable(r)
 	})
+}
+
+// defaultIgnorable reports whether char has Unicode's Default_Ignorable_Code_Point
+// property, which marks characters that render nothing unless a renderer
+// supports them. Go's unicode package lacks the derived property, so this
+// derives it as DerivedCoreProperties.txt does: Other_Default_Ignorable_Code_Point,
+// format characters and variation selectors, without white space, the
+// interlinear annotation characters U+FFF9 to U+FFFB, the Egyptian
+// hieroglyph format characters U+13430 to U+1343F, and the prepended
+// concatenation marks.
+func defaultIgnorable(char rune) bool {
+	switch {
+	case unicode.Is(unicode.White_Space, char),
+		char >= 0xFFF9 && char <= 0xFFFB,
+		char >= 0x13430 && char <= 0x1343F,
+		unicode.Is(unicode.Prepended_Concatenation_Mark, char):
+		return false
+	}
+	return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, char) ||
+		unicode.Is(unicode.Cf, char) ||
+		unicode.Is(unicode.Variation_Selector, char)
 }
 
 // escapedAt reports whether the byte at offset follows an odd number of

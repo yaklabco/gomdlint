@@ -104,6 +104,12 @@ func TestFix_RuleFixesKeepTheDocument(t *testing.T) {
 			wantLines: []int{3},
 		},
 		{
+			name:      "heading of a variation selector and a period",
+			input:     "# Title\n\n## \ufe0f.\n",
+			ruleID:    "MD026",
+			wantLines: []int{3},
+		},
+		{
 			name:      "heading that ends with a period",
 			input:     "# Title\n\n## Usage.\n",
 			ruleID:    "MD026",

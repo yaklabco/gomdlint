@@ -1109,6 +1109,15 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 		{name: "period after a link without text", input: "## [](https://example.com).\n"},
 		{name: "period after a zero-width non-joiner reference", input: "## &zwnj;.\n"},
 		{name: "period after a zero-width space", input: "## \u200b.\n"},
+		{name: "period after a word joiner", input: "## \u2060.\n"},
+		{name: "period after a combining grapheme joiner", input: "## \u034f.\n"},
+		{name: "period after a variation selector", input: "## \ufe0f.\n"},
+		{name: "period after a variation selector reference", input: "## &#xFE0F;.\n"},
+		{name: "period after a supplementary variation selector", input: "## \U000e0100.\n"},
+		{name: "period after a Hangul filler", input: "## \u3164.\n"},
+		{name: "period after default ignorable characters alone", input: "## \u200b\u2060\u034f\ufe0f.\n"},
+		{name: "period after an emoji with a variation selector", input: "## \u2764\ufe0f.\n", wantFixed: "## \u2764\ufe0f\n"},
+		{name: "period after a letter with a combining mark", input: "## e\u0301.\n", wantFixed: "## e\u0301\n"},
 		{name: "period alone in a heading in a blockquote", input: "> ## .\n"},
 		{name: "period alone in a heading in a list item", input: "- ## .\n"},
 		{name: "ellipsis alone in a setext heading", input: "...\n---\n"},
@@ -1134,6 +1143,29 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 			assert.Equal(t, tt.wantFixed != "", diags[0].HasFix())
 			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
 		})
+	}
+}
+
+// TestDefaultIgnorable checks defaultIgnorable against Unicode's
+// Default_Ignorable_Code_Point property on characters of each part of its
+// derivation. When it was written, defaultIgnorable agreed with ICU 78
+// (Unicode 17.0) on every code point.
+func TestDefaultIgnorable(t *testing.T) {
+	ignorable := []rune{
+		0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180E, 0x180F,
+		0x200B, 0x200F, 0x202A, 0x202E, 0x2060, 0x206F, 0x3164, 0xFE00, 0xFE0F, 0xFEFF,
+		0xFFA0, 0xFFF0, 0xFFF8, 0x1BCA0, 0x1D173, 0x1D17A, 0xE0000, 0xE0001, 0xE0100, 0xE0FFF,
+	}
+	for _, r := range ignorable {
+		assert.True(t, defaultIgnorable(r), "U+%04X is default ignorable", r)
+	}
+	// Letters, punctuation, white space, combining marks, symbols, the
+	// interlinear annotation and Egyptian format characters, and the
+	// prepended concatenation marks U+0600 and U+110BD are not.
+	visible := []rune{'a', '.', ' ', '\t', 0x00A0, 0x0301, 0x0600, 0x2003, 0x2764, 0x2800,
+		0xFFF9, 0xFFFB, 0x13430, 0x1343F, 0x110BD}
+	for _, r := range visible {
+		assert.False(t, defaultIgnorable(r), "U+%04X is not default ignorable", r)
 	}
 }
 
