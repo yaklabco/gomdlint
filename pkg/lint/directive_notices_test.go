@@ -580,16 +580,20 @@ func TestEngineDirectiveNoticesDedupeAsMarkdownlintReads(t *testing.T) {
 // configure-file comment whose keys repeat a former tag in spellings that
 // markdownlint reads as one word: the comment gets one notice for them, as
 // a comment of another kind does for its words. The keys apply in the order
-// of their spelling, and the notice names the first.
+// they are written, and the notice names the first.
 func TestEngineConfigureFileNoticesDedupeAsMarkdownlintReads(t *testing.T) {
-	result := lintDefault(t, "# Title\n\n<!-- markdownlint-configure-file "+
-		"{\"lists\": false, \"LISTS\": false, \"li\u017fts\": false} -->\n")
+	for _, keys := range [][]string{{"lists", "LISTS", "li\u017fts"}, {"LISTS", "li\u017fts", "lists"}} {
+		t.Run(keys[0], func(t *testing.T) {
+			result := lintDefault(t, "# Title\n\n<!-- markdownlint-configure-file "+
+				`{"`+keys[0]+`": false, "`+keys[1]+`": false, "`+keys[2]+`": false} -->`+"\n")
 
-	var got []string
-	for _, notice := range result.Notices {
-		got = append(got, notice.Name)
+			var got []string
+			for _, notice := range result.Notices {
+				got = append(got, notice.Name)
+			}
+			assert.Equal(t, []string{keys[0]}, got)
+		})
 	}
-	assert.Equal(t, []string{"LISTS"}, got)
 }
 
 // TestEngineDirectiveNoticeSuggestionsReadWordsAsMarkdownlintDoes covers the

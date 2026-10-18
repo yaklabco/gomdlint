@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -171,13 +172,11 @@ func TestEngineDirectiveWordsFoldCaseAsMarkdownlint(t *testing.T) {
 	}
 }
 
-// TestEngineConfigureFileRuleKeysInAnySpelling covers the order in which a
-// configure-file comment applies its keys: tags first, then rules, so that
-// a rule's own setting wins over its tag's. A rule key counts as one in
-// every spelling that markdownlint reads as the rule, as it does when the
-// key resolves. Each document writes the rule key last, so markdownlint,
-// which applies keys in the order they are written, applies it last too:
-// markdownlint 0.41.1 reports MD009 on line 5 for each of them.
+// TestEngineConfigureFileRuleKeysInAnySpelling covers a configure-file
+// comment that writes a rule key last, after its tag, in every spelling
+// that markdownlint reads as the rule. The keys apply in the order they are
+// written, so the rule's own setting wins: markdownlint 0.41.1 reports MD009
+// on line 5 for each of them.
 func TestEngineConfigureFileRuleKeysInAnySpelling(t *testing.T) {
 	for _, key := range []string{"no-trailing-spaces", "NO-TRAILING-SPACES", "no-trailing-\u017fpaces", "no-tra\u0131ling-spaces"} {
 		t.Run(key, func(t *testing.T) {
@@ -502,14 +501,67 @@ func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
 		`markdownlint-configure-file at line 1: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?)`)
 }
 
-func TestEngineConfigureFileRuleOverridesTag(t *testing.T) {
+// TestEngineConfigureFileAppliesKeysInWrittenOrder covers the order in which
+// configure-file comments apply their keys: the order they are written, as
+// in markdownlint 0.41.1, whose getEffectiveConfig applies the keys of its
+// configuration object in order, a later key replacing what an earlier one
+// set for the same rule. markdownlint spreads each comment's object over
+// its configuration, so the comments of a file act as one object: a key
+// written again, in the same comment or a later one, keeps its first place
+// and takes its last value, as a JavaScript object's keys do. The first key
+// named default, in any case, sets every rule's baseline before the other
+// keys apply, wherever it is written. Each case gives what markdownlint
+// 0.41.1 reports with the configuration {}: whether no-trailing-spaces
+// (MD009) reports the trailing space. gomdlint used to apply rule keys after
+// the others, so a rule's own setting won over its tag's, and the last
+// default key in byte order won.
+func TestEngineConfigureFileAppliesKeysInWrittenOrder(t *testing.T) {
+	tests := []struct {
+		name     string
+		comments []string
+		reported bool
+	}{
+		{name: "tag after rule", comments: []string{`{"MD009": true, "whitespace": false}`}},
+		{name: "rule after tag", comments: []string{`{"whitespace": false, "MD009": true}`}, reported: true},
+		{name: "ID after name", comments: []string{`{"no-trailing-spaces": true, "MD009": false}`}},
+		{name: "name after ID", comments: []string{`{"MD009": false, "no-trailing-spaces": true}`}, reported: true},
+		{
+			name:     "key written twice",
+			comments: []string{`{"whitespace": false, "MD009": true, "whitespace": false}`}, reported: true,
+		},
+		{
+			name:     "key written again in a later comment",
+			comments: []string{`{"whitespace": false, "MD009": true}`, `{"whitespace": false}`}, reported: true,
+		},
+		{
+			name:     "rule written again in a later comment",
+			comments: []string{`{"MD009": true, "whitespace": false}`, `{"MD009": true}`},
+		},
+		{name: "rule in a later comment", comments: []string{`{"whitespace": false}`, `{"MD009": true}`}, reported: true},
+		{name: "first default key", comments: []string{`{"default": false, "Default": true}`}},
+		{name: "first default key in another case", comments: []string{`{"Default": false, "default": true}`}},
+		{name: "default keys in two comments", comments: []string{`{"default": false}`, `{"Default": true}`}},
+		{name: "rule before default", comments: []string{`{"MD009": true, "default": false}`}, reported: true},
+		{name: "rule in an earlier comment than default", comments: []string{`{"MD009": false}`, `{"default": true}`}},
+	}
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())
-	input := "bad \n<!-- markdownlint-configure-file {\"MD009\": true, \"whitespace\": false} -->\n"
-	for range 20 {
-		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
-		require.NoError(t, err)
-		require.Len(t, result.Diagnostics, 1)
+	describeCatalog(registry)
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var input strings.Builder
+			for _, comment := range tt.comments {
+				input.WriteString("<!-- markdownlint-configure-file " + comment + " -->\n\n")
+			}
+			input.WriteString("# Title\n\ntext \n")
+
+			for range 20 { // Map order must not decide.
+				result, err := engine.LintFile(context.Background(), "test.md", []byte(input.String()), config.NewConfig())
+				require.NoError(t, err)
+				assert.Equal(t, tt.reported, len(result.Diagnostics) == 1, input.String())
+			}
+		})
 	}
 }
 

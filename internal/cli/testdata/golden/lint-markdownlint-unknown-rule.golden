@@ -11,6 +11,6 @@ doc.md (3 issues)
 3 issues (3 errors), in 1 file, 3 fixable
 -- stderr --
 INFO using $PROJECT/.markdownlint.json, translated to gomdlint settings for this run; to save them, run: gomdlint migrate $PROJECT/.markdownlint.json --output $PROJECT/.gomdlint.yml
-WARN $PROJECT/.markdownlint.json: unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored
 WARN $PROJECT/.markdownlint.json: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
 WARN $PROJECT/.markdownlint.json: unknown rule "tables" (did you mean the tag "table"?); it is ignored
+WARN $PROJECT/.markdownlint.json: unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored

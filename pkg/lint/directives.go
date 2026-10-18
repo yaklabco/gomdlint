@@ -2,7 +2,7 @@ package lint
 
 import (
 	"cmp"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -217,75 +217,91 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 
 // configureFile applies the markdownlint-configure-file comments among
 // directives to cfg and returns the result, which is cfg itself when there
-// are none. A key that names no rule or tag is an error. A key that is a
-// deprecated tag gets a notice, which configureFile records on its comment,
-// once for a tag that the comment's keys repeat in any spelling that
-// markdownlint reads as the same word.
+// are none. As in markdownlint 0.41.1, the comments act as one
+// configuration object (see MarkdownlintSettings), which each comment's
+// keys join in the order they are written: a key that the object holds
+// already keeps its place and takes the new value. The object then applies
+// to cfg. Its default key, the first key named default in any case, gives
+// every rule a baseline under RuleDefaults. Its other keys apply in order,
+// each replacing the settings under Rules of the rules it names, so a later
+// key wins over an earlier one for the rules both name.
+//
+// markdownlint spreads the comments over its own configuration object, in
+// which a key that its configuration holds already keeps the
+// configuration's place. That holds for the default key of the object
+// {"default": true}, which markdownlint assumes without a configuration
+// file, so there a comment's Default key, written in another case, loses to
+// it. gomdlint applies the comments over its settings, which are no such
+// object, so their keys apply in the order the comments write them.
+//
+// A key that names no rule or tag is an error. A key that is a deprecated
+// tag gets a notice, which configureFile records on its comment, once for a
+// tag that the comment's keys repeat in any spelling that markdownlint reads
+// as the same word.
 func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
-	var result *config.Config
+	var settings MarkdownlintSettings
+	configured := false
 	for idx := range directives {
 		directive := &directives[idx]
 		if directive.action != configureFileAction {
 			continue
 		}
-		if result == nil {
-			result = cfg.Clone()
-			if result == nil {
-				result = config.NewConfig()
-			}
-		}
-		var raw map[string]any
-		if err := json.Unmarshal([]byte(directive.parameter), &raw); err != nil {
-			return nil, fmt.Errorf("markdownlint-configure-file at line %d: %w", directive.line, err)
-		}
-		if raw == nil {
+		configured = true
+		parsed, err := decodeSettings([]byte(directive.parameter), false)
+		if errors.Is(err, ErrNotJSONObject) {
 			return nil, fmt.Errorf("markdownlint-configure-file at line %d must contain a JSON object", directive.line)
 		}
-		// markdownlint applies the keys in the order they are written, which
-		// a Go map loses. gomdlint applies them in a fixed order instead: the
-		// keys that name no rule (the default key and tags) first, then the
-		// rule keys, each group in byte order, so that a rule's own setting
-		// wins over its tag's wherever it is written.
-		var tagKeys, ruleKeys []string
-		for _, key := range slices.Sorted(maps.Keys(raw)) {
-			if ruleKey(key, registry) {
-				ruleKeys = append(ruleKeys, key)
-			} else {
-				tagKeys = append(tagKeys, key)
-			}
+		if err != nil {
+			return nil, fmt.Errorf("markdownlint-configure-file at line %d: %w", directive.line, err)
 		}
 		var noticed wordSet // The deprecated tags with a notice.
-		for _, key := range slices.Concat(tagKeys, ruleKeys) {
-			value := raw[key]
-			if markdownlintKey(key) == "default" {
-				if result.RuleDefaults == nil {
-					result.RuleDefaults = make(map[string]config.RuleConfig)
+		for _, setting := range parsed.settings {
+			if !IsMarkdownlintDefaultKey(setting.Key) {
+				rules, meaning := lookupWord(setting.Key, registry)
+				if meaning == unknownWord {
+					return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s",
+						directive.line, registry.configureFileKeyText(setting.Key))
 				}
-				for _, id := range registry.IDs() {
-					baseline := value
-					if IsGomdlintOnlyRule(id) {
-						baseline = false
-					}
-					result.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, baseline)
+				if meaning == formerTag && noticed.add(setting.Key) {
+					directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, setting.Key, rules))
 				}
-				continue
 			}
-			rules, meaning := lookupWord(key, registry)
-			if meaning == unknownWord {
-				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.configureFileKeyText(key))
-			}
-			if meaning == formerTag && noticed.add(key) {
-				directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, key, rules))
-			}
-			for _, id := range sortedIDs(rules) {
-				converted := config.MarkdownlintRuleConfig(id, value)
-				converted.AutoFix = result.Rules[id].AutoFix
-				result.Rules[id] = converted
-			}
+			settings.Set(setting.Key, setting.Value)
 		}
 	}
-	if result == nil {
+	if !configured {
 		return cfg, nil
+	}
+
+	result := cfg.Clone()
+	if result == nil {
+		result = config.NewConfig()
+	}
+	if value, ok := settings.Default(); ok {
+		if result.RuleDefaults == nil {
+			result.RuleDefaults = make(map[string]config.RuleConfig)
+		}
+		for _, id := range registry.IDs() {
+			baseline := value
+			if IsGomdlintOnlyRule(id) {
+				baseline = false
+			}
+			result.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, baseline)
+		}
+	}
+	if result.Rules == nil {
+		result.Rules = make(map[string]config.RuleConfig)
+	}
+	for _, setting := range settings.settings {
+		if IsMarkdownlintDefaultKey(setting.Key) {
+			continue
+		}
+		rules, _ := lookupWord(setting.Key, registry)
+		for _, id := range sortedIDs(rules) {
+			converted := config.MarkdownlintRuleConfig(id, setting.Value)
+			converted.AutoFix = result.Rules[id].AutoFix
+			result.Rules[id] = converted
+		}
 	}
 	return result, nil
 }
@@ -314,9 +330,9 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 // Everything that compares the words of comments or the keys of
 // configure-file objects goes through this key: their resolution
 // (lookupWord, against the registry's index of every identifier and tag by
-// this key), the order of configure-file keys (ruleKey), the default key,
-// the deduplication of notices (wordSet), the suggestions for unknown
-// words (Registry.markdownlintSuggestions) and the words of remedies
+// this key), the default key (IsMarkdownlintDefaultKey), the deduplication
+// of notices (wordSet), the suggestions for unknown words
+// (Registry.markdownlintSuggestions) and the words of remedies
 // (Registry.markdownlintTerm). Registry.Closest, which ranks the
 // suggestions, lower-cases the key once more with foldKey. That decides no
 // word's meaning; it only lets a word with a Kelvin sign be offered its
@@ -380,14 +396,6 @@ func isASCII(text string) bool {
 // holds the same whitespace between its words.
 func lookupWord(word string, registry *Registry) ([]Rule, wordMeaning) {
 	return directiveRules(markdownlintKey(word), registry)
-}
-
-// ruleKey reports whether key, a key of a markdownlint-configure-file
-// object, identifies a registered rule by its ID, name or an alias, as
-// lookupWord reads it, rather than a tag or nothing.
-func ruleKey(key string, registry *Registry) bool {
-	word := registry.lookups().words[markdownlintKey(key)]
-	return word != nil && word.rule != nil
 }
 
 // asciiUpperCase returns, in lower case, the ASCII letters that JavaScript's

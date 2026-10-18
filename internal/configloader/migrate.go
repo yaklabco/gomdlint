@@ -1,8 +1,8 @@
 package configloader
 
 import (
-	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,8 +30,12 @@ type MigrationResult struct {
 	SourcePath string
 }
 
-// ConvertMarkdownlintConfig converts a markdownlint config file to gomdlint format.
-// Returns the converted config, any warnings, and an error if conversion failed.
+// ConvertMarkdownlintConfig converts a markdownlint config file to gomdlint
+// format. As in markdownlint 0.41.1, the default key gives every rule its
+// baseline, and the other keys apply in the order they are written, each
+// replacing what an earlier key set for the rules it names (see
+// lint.MarkdownlintSettings). It returns the converted config with any
+// warnings, or an error if the file cannot be read or parsed.
 func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	result := &MigrationResult{
 		SourcePath: path,
@@ -47,22 +51,17 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	// Parse as generic map first
-	var raw map[string]any
-	if IsJSONConfig(path) {
-		if err := parseJSONC(content, &raw); err != nil {
-			return nil, fmt.Errorf("parse JSON: %w", err)
-		}
-	} else {
-		if err := yaml.Unmarshal(content, &raw); err != nil {
-			return nil, fmt.Errorf("parse YAML: %w", err)
-		}
+	settings, err := readMarkdownlintSettings(path, content)
+	if err != nil {
+		return nil, err
 	}
 
 	cfg := &config.Config{Rules: make(map[string]config.RuleConfig)}
 	var defaultValue any = true
-	if value, ok := raw["default"]; ok {
-		defaultValue = value
+	for _, setting := range settings.Settings() {
+		if setting.Key == "default" {
+			defaultValue = setting.Value
+		}
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
@@ -75,28 +74,118 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 		cfg.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, value)
 	}
 
-	// Handle special keys
-	processSpecialKeys(raw, result)
-
-	// Apply tags before explicit rules, deterministically.
-	keys := make([]string, 0, len(raw))
-	for key := range raw {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		if isMarkdownlintTag(registry, key) {
-			processRuleKey(registry, cfg, key, raw[key], result)
+	for _, setting := range settings.Settings() {
+		switch setting.Key {
+		case "default", "$schema":
+			continue
+		case "extends":
+			if extends, ok := setting.Value.(string); ok {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("'extends: %q' is not yet supported; you may need to merge configs manually", extends))
+				continue
+			}
 		}
-	}
-	for _, key := range keys {
-		if !isMarkdownlintTag(registry, key) {
-			processRuleKey(registry, cfg, key, raw[key], result)
-		}
+		processRuleKey(registry, cfg, setting.Key, setting.Value, result)
 	}
 
 	result.Config = cfg
 	return result, nil
+}
+
+// readMarkdownlintSettings reads content, the markdownlint config at path,
+// into its settings in the order of its keys: as JSON with comments for a
+// name that ends in .json or .jsonc, and as YAML otherwise.
+func readMarkdownlintSettings(path string, content []byte) (*lint.MarkdownlintSettings, error) {
+	if IsJSONConfig(path) {
+		settings, err := lint.DecodeMarkdownlintJSON(stripJSONComments(content))
+		if err != nil {
+			return nil, fmt.Errorf("parse JSON: %w", err)
+		}
+		return settings, nil
+	}
+	settings, err := markdownlintYAMLSettings(content)
+	if err != nil {
+		return nil, fmt.Errorf("parse YAML: %w", err)
+	}
+	return settings, nil
+}
+
+// markdownlintYAMLSettings reads content, a markdownlint config in YAML,
+// into its settings: the keys of its mapping in the order of yamlKeyOrder,
+// with the values that decoding gives them. Empty content and null hold no
+// settings.
+func markdownlintYAMLSettings(content []byte) (*lint.MarkdownlintSettings, error) {
+	var values map[string]any
+	if err := yaml.Unmarshal(content, &values); err != nil {
+		return nil, err //nolint:wrapcheck // The caller names the format.
+	}
+	settings := &lint.MarkdownlintSettings{}
+	if len(values) == 0 {
+		return settings, nil
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return nil, err //nolint:wrapcheck // Decoding the same content succeeded.
+	}
+	for _, key := range yamlKeyOrder(doc.Content[0]) {
+		if value, ok := values[key]; ok {
+			settings.Set(key, value)
+			delete(values, key)
+		}
+	}
+	// The order holds every key that decoding reads. Should one be missing,
+	// it still applies, after the others.
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		settings.Set(key, values[key])
+	}
+	return settings, nil
+}
+
+// yamlKeyOrder returns the keys of node, a YAML mapping or an alias of one,
+// in the order in which js-yaml 4 adds them to an object: each key written
+// in the mapping in its place, and the keys of the mappings that a merge key
+// (<<) brings in, in their own order, in the place of the merge key. A key
+// comes once, in its first place, which keeps it when a later entry
+// replaces its value. Decoding gives a key written in the mapping the value
+// written with it, and a merged key the value of the first mapping that
+// brings it in, as js-yaml 4 does too.
+func yamlKeyOrder(node *yaml.Node) []string {
+	var keys []string
+	seen := make(map[string]bool)
+	visiting := make(map[*yaml.Node]bool) // Guards against a mapping that merges itself.
+	var walk func(node *yaml.Node)
+	walk = func(node *yaml.Node) {
+		for node != nil && node.Kind == yaml.AliasNode {
+			node = node.Alias
+		}
+		if node == nil || node.Kind != yaml.MappingNode || visiting[node] {
+			return
+		}
+		visiting[node] = true
+		defer delete(visiting, node)
+
+		for idx := 0; idx+1 < len(node.Content); idx += 2 {
+			key, value := node.Content[idx], node.Content[idx+1]
+			if isMergeKey(key) {
+				sources := []*yaml.Node{value}
+				if value.Kind == yaml.SequenceNode {
+					sources = value.Content
+				}
+				for _, source := range sources {
+					walk(source)
+				}
+				continue
+			}
+			var name string
+			if key.Decode(&name) == nil && !seen[name] {
+				seen[name] = true
+				keys = append(keys, name)
+			}
+		}
+	}
+	walk(node)
+	return keys
 }
 
 // FileContent returns the content of a gomdlint config file at path that
@@ -120,24 +209,8 @@ func (r *MigrationResult) FileContent(path string) ([]byte, error) {
 	return content, nil
 }
 
-// parseJSONC parses JSON with comments (JSONC format).
-// It strips comments before parsing.
-func parseJSONC(content []byte, target any) error {
-	// Simple approach: try parsing as JSON first
-	// JSON with comments will fail, but many .jsonc files are valid JSON
-	if err := json.Unmarshal(content, target); err == nil {
-		return nil
-	}
-
-	// Strip comments and try again
-	stripped := stripJSONComments(content)
-	if err := json.Unmarshal(stripped, target); err != nil {
-		return fmt.Errorf("unmarshal stripped JSON: %w", err)
-	}
-	return nil
-}
-
 // stripJSONComments removes JavaScript-style comments from JSON content.
+// Valid JSON, which holds no comments, comes back as it is.
 func stripJSONComments(content []byte) []byte {
 	var result []byte
 	inString := false
@@ -200,22 +273,6 @@ func stripJSONComments(content []byte) []byte {
 	return result
 }
 
-// processSpecialKeys handles markdownlint special configuration keys.
-func processSpecialKeys(raw map[string]any, result *MigrationResult) {
-	// Handle "default" key
-	delete(raw, "default")
-
-	// Handle "extends" key
-	if extends, ok := raw["extends"].(string); ok {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("'extends: %q' is not yet supported; you may need to merge configs manually", extends))
-		delete(raw, "extends")
-	}
-
-	// Remove $schema
-	delete(raw, "$schema")
-}
-
 // processRuleKey processes a single key from the markdownlint config: a rule
 // ID, name or alias, or a markdownlint tag, in any case. Like markdownlint,
 // it reads the key whole, so a key that is empty or holds whitespace names
@@ -235,11 +292,6 @@ func processRuleKey(registry *lint.Registry, cfg *config.Config, key string, val
 
 	// markdownlint ignores keys it does not know.
 	result.Warnings = append(result.Warnings, registry.UnknownKeyText(key)+"; it is ignored")
-}
-
-// isMarkdownlintTag reports whether key is a markdownlint tag.
-func isMarkdownlintTag(registry *lint.Registry, key string) bool {
-	return len(markdownlintTagRuleIDs(registry, key)) > 0
 }
 
 // markdownlintTagRuleIDs returns the IDs of the markdownlint rules that the

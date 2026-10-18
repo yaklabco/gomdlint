@@ -45,6 +45,105 @@ func reportedFiles(t *testing.T, report string) map[string][]string {
 	return files
 }
 
+// markdownlintModes are the two ways a markdownlint config takes effect:
+// translated for each run, or migrated to a gomdlint config first.
+var markdownlintModes = []string{"applied for the run", "migrated"}
+
+// lintWithMarkdownlintConfig lints doc.md, which holds doc, under the
+// markdownlint config name, which holds settings, as mode says: translated
+// for the run, or migrated with gomdlint migrate, after which the
+// markdownlint config goes, as migrate advises. It returns the rules that
+// each file reports and the warnings: the run's for a translated config,
+// and migrate's for a migrated one.
+func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings, doc string) (map[string][]string, string) {
+	t.Helper()
+
+	dir := inProject(t, map[string]string{"doc.md": doc, name: settings})
+	var warnings string
+	if mode == "migrated" {
+		migrated := execute(t, "migrate", name, "--output", ".gomdlint.yml")
+		require.Equal(t, cli.ExitSuccess, migrated.code, migrated.stderr)
+		warnings = migrated.stdout
+		require.NoError(t, os.Remove(filepath.Join(dir, name)))
+	}
+
+	got := execute(t, "lint", "--format", "json", "doc.md")
+	require.NotEqual(t, cli.ExitConfigError, got.code, got.stderr)
+	if mode != "migrated" {
+		warnings = got.stderr
+	}
+	return reportedFiles(t, got.stdout), warnings
+}
+
+// TestMarkdownlintConfig_AppliesKeysInWrittenOrder covers the order in which
+// a markdownlint config's keys apply, in JSON and in YAML: the order they
+// are written, as in markdownlint 0.41.1, so a later key overrides an
+// earlier one for the rules both name. markdownlint reports
+// trailingSpaceDoc's trailing space with the second config of each pair
+// only, where the rule's key follows the whitespace tag's.
+func TestMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+		want                 []string
+	}{
+		{name: "JSON tag last", file: ".markdownlint.json", settings: `{"MD009": true, "whitespace": false}`},
+		{
+			name: "JSON rule last", file: ".markdownlint.json",
+			settings: `{"whitespace": false, "MD009": true}`, want: []string{"MD009"},
+		},
+		{name: "YAML tag last", file: ".markdownlint.yaml", settings: "MD009: true\nwhitespace: false\n"},
+		{
+			name: "YAML rule last", file: ".markdownlint.yaml",
+			settings: "whitespace: false\nMD009: true\n", want: []string{"MD009"},
+		},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, _ := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings, trailingSpaceDoc)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+			})
+		}
+	}
+}
+
+// TestLint_ConfigureFileAppliesKeysInWrittenOrder covers the same order in
+// markdownlint-configure-file comments, which act as one object, as in
+// markdownlint 0.41.1: a key written again in a later comment keeps its
+// first place. markdownlint reports the trailing space in the second and
+// third documents only.
+func TestLint_ConfigureFileAppliesKeysInWrittenOrder(t *testing.T) {
+	tests := []struct {
+		name     string
+		comments []string
+		want     []string
+	}{
+		{name: "tag last", comments: []string{`{"MD009": true, "whitespace": false}`}},
+		{name: "rule last", comments: []string{`{"whitespace": false, "MD009": true}`}, want: []string{"MD009"}},
+		{
+			name:     "tag written again in a later comment",
+			comments: []string{`{"whitespace": false, "MD009": true}`, `{"whitespace": false}`}, want: []string{"MD009"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var doc string
+			for _, comment := range tt.comments {
+				doc += "<!-- markdownlint-configure-file " + comment + " -->\n\n"
+			}
+			inProject(t, map[string]string{"doc.md": doc + trailingSpaceDoc})
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, map[string][]string{"doc.md": tt.want}, reportedFiles(t, got.stdout))
+		})
+	}
+}
+
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config
 // sets and a markdownlint config cannot: its ignore patterns, flavor,
 // gitignore and default_ignores settings and backups. While gomdlint

@@ -582,6 +582,131 @@ func convertSettings(t *testing.T, settings string) *MigrationResult {
 	return result
 }
 
+// convertFile converts the markdownlint config written to a file named
+// name.
+func convertFile(t *testing.T, name, content string) *MigrationResult {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	result, err := ConvertMarkdownlintConfig(path)
+	require.NoError(t, err)
+	return result
+}
+
+// TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder covers the order
+// in which the keys of a markdownlint config apply: the order they are
+// written, as in markdownlint 0.41.1, whose getEffectiveConfig applies the
+// keys of its configuration object in the order JavaScript keeps them. A
+// later key replaces what an earlier one set for the same rule, so whether
+// no-trailing-spaces (MD009) ends up on depends on whether its own key or
+// the whitespace tag comes last. A key written twice in JSON keeps its
+// first place and takes its last value, as JSON.parse and the JSONC parser
+// of markdownlint-cli2 read it. For each JSON config, markdownlint 0.41.1
+// leaves MD009 on exactly when md009 is set, and markdownlint-cli2 0.23.3
+// does the same for the JSONC and YAML files. markdownlint-cli2 reads YAML
+// with js-yaml 5, which reads a merge key (<<) as an ordinary key that
+// names nothing, while gomdlint applies merge keys, as YAML 1.1 and js-yaml
+// 4 do, with the merged keys in the place of the merge key and a key
+// written in the mapping keeping the first place of the merged key it
+// replaces, as js-yaml 4 orders them.
+func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, file, content string
+		md009               bool
+	}{
+		{name: "tag after rule", file: ".markdownlint.json", content: `{"MD009": true, "whitespace": false}`},
+		{name: "rule after tag", file: ".markdownlint.json", content: `{"whitespace": false, "MD009": true}`, md009: true},
+		{name: "ID after name", file: ".markdownlint.json", content: `{"no-trailing-spaces": true, "MD009": false}`},
+		{
+			name: "name after ID", file: ".markdownlint.json",
+			content: `{"MD009": false, "no-trailing-spaces": true}`, md009: true,
+		},
+		{
+			name: "key written twice", file: ".markdownlint.json",
+			content: `{"whitespace": false, "MD009": true, "whitespace": false}`, md009: true,
+		},
+		{
+			name: "JSONC", file: ".markdownlint.jsonc",
+			content: "{\n  // The tag comes last.\n  \"MD009\": true, /* then */ \"whitespace\": false\n}\n",
+		},
+		{name: "YAML tag after rule", file: ".markdownlint.yaml", content: "MD009: true\nwhitespace: false\n"},
+		{name: "YAML rule after tag", file: ".markdownlint.yml", content: "whitespace: false\nMD009: true\n", md009: true},
+		{
+			name: "YAML merge after rule", file: ".markdownlint.yaml",
+			content: "x: &ws\n  whitespace: false\nMD009: true\n<<: *ws\n",
+		},
+		{
+			name: "YAML merge before rule", file: ".markdownlint.yaml",
+			content: "x: &ws\n  whitespace: false\n<<: *ws\nMD009: true\n", md009: true,
+		},
+		{
+			name: "YAML key replacing a merged key", file: ".markdownlint.yaml",
+			content: "x: &m\n  MD009: false\n  whitespace: false\n<<: *m\nMD009: true\n",
+		},
+		{
+			name: "YAML merges in sequence", file: ".markdownlint.yaml",
+			content: "a: &a\n  MD009: true\nb: &b\n  whitespace: false\n  MD009: false\n<<: [*a, *b]\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			requireRuleEnabled(t, result, "MD009", tt.md009)
+		})
+	}
+}
+
+// TestConvertMarkdownlintConfig_EmptyConfigs covers configs that hold no
+// settings, which keep markdownlint's defaults, as markdownlint-cli2 reads
+// them, and configs that hold a value other than an object, which fail.
+func TestConvertMarkdownlintConfig_EmptyConfigs(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ file, content string }{
+		{".markdownlint.json", "null\n"},
+		{".markdownlint.jsonc", "// Nothing yet.\n{}\n"},
+		{".markdownlint.yaml", ""},
+		{".markdownlint.yaml", "# Nothing yet.\n"},
+		{".markdownlint.yml", "~\n"},
+	} {
+		result := convertFile(t, tt.file, tt.content)
+		assert.Empty(t, result.Warnings, tt.content)
+		assert.Empty(t, result.Config.Rules, tt.content)
+		require.Contains(t, result.Config.RuleDefaults, "MD009", tt.content)
+		assert.True(t, *result.Config.RuleDefaults["MD009"].Enabled, tt.content)
+	}
+
+	for _, tt := range []struct{ file, content string }{
+		{".markdownlint.json", `["MD009"]`},
+		{".markdownlint.json", ""},
+		{".markdownlint.yaml", "- MD009\n"},
+		{".markdownlint.yaml", "MD009\n"},
+	} {
+		path := filepath.Join(t.TempDir(), tt.file)
+		require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o600))
+		_, err := ConvertMarkdownlintConfig(path)
+		assert.Error(t, err, tt.content)
+	}
+}
+
+// TestMigratedLaterKeyReplacesOptions covers two keys that name one rule,
+// line-length (MD013): as in markdownlint 0.41.1, the later key replaces the
+// earlier one's options, so only its own options and markdownlint's
+// defaults apply. markdownlint 0.41.1 reports the 90-character line with
+// the first config and not with the second.
+func TestMigratedLaterKeyReplacesOptions(t *testing.T) {
+	input := "# Title\n\n" + strings.Repeat("word ", 17) + "words\n"
+	require.Len(t, lintMigratedMarkdown(t,
+		`{"default": false, "MD013": {"line_length": 100}, "line-length": {"tables": false}}`, input), 1)
+	require.Empty(t, lintMigratedMarkdown(t,
+		`{"default": false, "line-length": {"tables": false}, "MD013": {"line_length": 100}}`, input))
+}
+
 // requireRuleEnabled checks that converted settings set the rule's enabled state.
 func requireRuleEnabled(t *testing.T, result *MigrationResult, ruleID string, want bool) {
 	t.Helper()
@@ -652,11 +777,12 @@ func TestConvertMarkdownlintConfig_KeysNameOneRuleOrTag(t *testing.T) {
 	for _, ruleID := range []string{"MD009", "MD010", "MD013"} {
 		assert.NotContains(t, result.Config.Rules, ruleID)
 	}
+	// The warnings follow the keys, in the order they are written.
 	assert.Equal(t, []string{
-		`unknown rule ""; it is ignored`,
-		`unknown rule " MD013" (did you mean "line-length"?); it is ignored`,
 		`unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored`,
+		`unknown rule " MD013" (did you mean "line-length"?); it is ignored`,
 		`unknown rule "whitespace " (did you mean the tag "whitespace"?); it is ignored`,
+		`unknown rule ""; it is ignored`,
 	}, result.Warnings)
 }
 
