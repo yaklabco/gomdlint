@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -211,6 +213,47 @@ func TestFirstLineHeadingRule_HTMLHeading(t *testing.T) {
 	}
 }
 
+// TestFirstLineHeadingRule_Definitions checks that a link reference
+// definition counts as the first content of a document, as in markdownlint
+// 0.41.1, even though it renders nothing.
+func TestFirstLineHeadingRule_Definitions(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+	}{
+		{name: "definition before a heading", input: "[a]: /url\n# H\n", wantLines: []int{1}},
+		{name: "definition before text", input: "[a]: /url\n\ntext\n", wantLines: []int{1}},
+		{name: "definition alone", input: "[a]: /url\n", wantLines: []int{1}},
+		{name: "definition after a comment", input: "<!-- c -->\n[a]: /url\n# H\n", wantLines: []int{2}},
+		{name: "definition and a blank line before a heading", input: "[a]: /url\n\n# H\n", wantLines: []int{1}},
+		{name: "two definitions", input: "[a]: /url\n[b]: /other\n# H\n\ntext\n", wantLines: []int{1}},
+		{name: "definition over two lines", input: "[a]:\n/url\n# H\n", wantLines: []int{1}},
+		{name: "definition after a byte order mark", input: "\ufeff[a]: /url\n# H\n", wantLines: []int{1}},
+		{name: "definition before a second-level heading", input: "[a]: /url\n## H\n", wantLines: []int{1}},
+		{name: "definition after front matter", input: "---\nfoo: x\n---\n[a]: /url\n# H\n", wantLines: []int{4}},
+		{name: "front matter title", input: "---\ntitle: x\n---\n[a]: /url\n# H\n", wantLines: []int{}},
+		{name: "definition in a list item", input: "- [a]: /url\n# H\n", wantLines: []int{1}},
+		{name: "definition after the heading", input: "# H\n\n[a]: /url\n", wantLines: []int{}},
+		{
+			name: "preamble allowed", input: "[a]: /url\n# H\n",
+			options: map[string]any{"allow_preamble": true}, wantLines: []int{},
+		},
+		{
+			name: "preamble allowed before a second-level heading", input: "[a]: /url\n## H\n",
+			options: map[string]any{"allow_preamble": true}, wantLines: []int{2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewFirstLineHeadingRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+		})
+	}
+}
+
 // TestFirstLineHeadingRule_DefaultEnabled checks that MD041 runs by default,
 // as in markdownlint.
 func TestFirstLineHeadingRule_DefaultEnabled(t *testing.T) {
@@ -322,6 +365,57 @@ func TestHeadingBlankLinesRule(t *testing.T) {
 					t.Logf("  - %s at line %d", d.Message, d.StartLine)
 				}
 			}
+		})
+	}
+}
+
+// TestHeadingBlankLinesRule_Definitions checks that a heading right after a
+// link reference definition needs a blank line above, as in markdownlint
+// 0.41.1: the definition renders nothing, but its line is not blank.
+func TestHeadingBlankLinesRule_Definitions(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Expected output after fixes; empty means unchanged.
+	}{
+		{
+			name: "definition before a heading", input: "[a]: /url\n# H\n",
+			wantLines: []int{2}, wantFixed: "[a]: /url\n\n# H\n",
+		},
+		{
+			name: "definition after a comment", input: "<!-- c -->\n[a]: /url\n# H\n",
+			wantLines: []int{3}, wantFixed: "<!-- c -->\n[a]: /url\n\n# H\n",
+		},
+		{
+			name: "two definitions", input: "[a]: /url\n[b]: /other\n# H\n\ntext\n",
+			wantLines: []int{3}, wantFixed: "[a]: /url\n[b]: /other\n\n# H\n\ntext\n",
+		},
+		{
+			name: "definition over two lines", input: "[a]:\n/url\n# H\n",
+			wantLines: []int{3}, wantFixed: "[a]:\n/url\n\n# H\n",
+		},
+		{
+			name: "definition after front matter", input: "---\ntitle: x\n---\n[a]: /url\n# H\n",
+			wantLines: []int{5}, wantFixed: "---\ntitle: x\n---\n[a]: /url\n\n# H\n",
+		},
+		{
+			name: "definition after a byte order mark", input: "\ufeff[a]: /url\n# H\n",
+			wantLines: []int{2}, wantFixed: "\ufeff[a]: /url\n\n# H\n",
+		},
+		{name: "definition and a blank line", input: "[a]: /url\n\n# H\n", wantLines: []int{}},
+		{name: "comment before a heading", input: "<!-- c -->\n# H\n", wantLines: []int{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingBlankLinesRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
 		})
 	}
 }

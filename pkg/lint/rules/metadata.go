@@ -58,6 +58,14 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	if ctx.OptionBool("allow_preamble", false) {
 		firstBlock = lint.FirstHeading(ctx.Root)
 	}
+	// A link reference definition renders nothing, but markdownlint counts
+	// it as content, so one before the first block starts the document.
+	if !ctx.OptionBool("allow_preamble", false) {
+		if line := firstDefinitionLine(ctx); line > 0 &&
+			(firstBlock == nil || line < firstBlock.SourcePosition().StartLine) {
+			return []lint.Diagnostic{r.notHeadingDiagnostic(ctx, line, requiredLevel)}, nil
+		}
+	}
 	if firstBlock == nil {
 		return nil, nil
 	}
@@ -79,25 +87,7 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 
 	// If first block is not a heading.
 	if firstBlock.Kind != mdast.NodeHeading {
-		pos := mdast.SourcePosition{
-			StartLine:   firstContentLine,
-			StartColumn: 1,
-			EndLine:     firstContentLine,
-			EndColumn:   1,
-		}
-
-		var msg string
-		if requiredLevel == 1 {
-			msg = "First line should be a top-level heading"
-		} else {
-			msg = fmt.Sprintf("First line should be an H%d heading", requiredLevel)
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion(fmt.Sprintf("Add an H%d heading at the beginning", requiredLevel)).
-			Build()
-		return []lint.Diagnostic{diag}, nil
+		return []lint.Diagnostic{r.notHeadingDiagnostic(ctx, firstContentLine, requiredLevel)}, nil
 	}
 
 	// Check heading level.
@@ -113,6 +103,33 @@ func (r *FirstLineHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	}
 
 	return nil, nil
+}
+
+// notHeadingDiagnostic reports that the content starting on line is not the
+// heading that should start the document.
+func (r *FirstLineHeadingRule) notHeadingDiagnostic(ctx *lint.RuleContext, line, requiredLevel int) lint.Diagnostic {
+	pos := mdast.SourcePosition{StartLine: line, StartColumn: 1, EndLine: line, EndColumn: 1}
+	msg := "First line should be a top-level heading"
+	if requiredLevel != 1 {
+		msg = fmt.Sprintf("First line should be an H%d heading", requiredLevel)
+	}
+	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion(fmt.Sprintf("Add an H%d heading at the beginning", requiredLevel)).
+		Build()
+}
+
+// firstDefinitionLine returns the line on which the document's first link
+// reference definition starts, or 0 when it has none. goldmark leaves
+// definitions out of the tree.
+func firstDefinitionLine(ctx *lint.RuleContext) int {
+	first := 0
+	for _, def := range ctx.RefContext().AllDefinitions {
+		if line := def.Lines[0]; line > 0 && (first == 0 || line < first) {
+			first = line
+		}
+	}
+	return first
 }
 
 // htmlHeadingLevel returns the level of an HTML block whose first tag is an
@@ -242,6 +259,10 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	includeMetadata := ctx.OptionBool("include_front_matter", false)
 	lastLine := lastSourceLine(ctx.File)
 	headings := ctx.Headings()
+	firstDefinition := 0
+	if len(headings) > 0 {
+		firstDefinition = firstDefinitionLine(ctx)
+	}
 	var diags []lint.Diagnostic
 	checker := newFixChecker(ctx)
 
@@ -268,7 +289,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		linesBelow := headingBlankLineOption(ctx, "lines_below", lint.HeadingLevel(heading))
 
 		// Check blank lines above (unless it's the first line or follows front matter).
-		if pos.StartLine > 1 && linesAbove > 0 && (!headingIsFirstContent(ctx, heading) || includeMetadata) {
+		if pos.StartLine > 1 && linesAbove > 0 && (!headingIsFirstContent(ctx, heading, firstDefinition) || includeMetadata) {
 			blanksBefore := 0
 			for line := pos.StartLine - 1; line >= 1; line-- {
 				if includeMetadata && line <= ctx.File.FrontMatterLines {
@@ -329,7 +350,16 @@ func headingBlankLineOption(ctx *lint.RuleContext, key string, level int) int {
 	}
 }
 
-func headingIsFirstContent(ctx *lint.RuleContext, heading *mdast.Node) bool {
+// headingIsFirstContent reports whether only blank lines, HTML comments and
+// front matter come before a heading, so that markdownlint finds blank lines
+// above it up to the start of the document. A link reference definition,
+// which goldmark leaves out of the tree, comes before the heading when it
+// starts on an earlier line; firstDefinition is the line of the document's
+// first definition, or 0.
+func headingIsFirstContent(ctx *lint.RuleContext, heading *mdast.Node, firstDefinition int) bool {
+	if firstDefinition > 0 && firstDefinition < heading.SourcePosition().StartLine {
+		return false
+	}
 	for node := ctx.Root.FirstChild; node != nil; node = node.Next {
 		if node == heading {
 			return true
