@@ -296,6 +296,98 @@ Text after.`,
 	}
 }
 
+// TestTableBlankLinesRule_FixKeepsListsTight verifies that MD058 reports a
+// table in a list without a fix when the blank line it needs would separate
+// two items of a list or two blocks of an item, which makes a tight list
+// loose, and keeps the fix where the blank line falls outside every list or
+// inside a blockquote within the item.
+func TestTableBlankLinesRule_FixKeepsListsTight(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+		wantFixed string // Output after the fixes; empty means unchanged.
+	}{
+		{
+			name:      "table after the text of an item",
+			input:     "- item\n  | a | b |\n  | --- | --- |\n  | 1 | 2 |\n- next\n",
+			wantLines: []int{2, 4},
+		},
+		{
+			name:      "table after the text of an ordered item",
+			input:     "1. item\n   | a | b |\n   | --- | --- |\n2. next\n",
+			wantLines: []int{2, 3},
+		},
+		{
+			name:      "table that starts a later item",
+			input:     "- first\n- | a | b |\n  | --- | --- |\n- next\n",
+			wantLines: []int{2, 3},
+		},
+		{
+			name:      "table in a nested list",
+			input:     "- outer\n  - item\n    | a | b |\n    | --- | --- |\n  - next\n",
+			wantLines: []int{3, 4},
+		},
+		{
+			name:      "list in a blockquote",
+			input:     "> - item\n>   | a | b |\n>   | --- | --- |\n> - next\n",
+			wantLines: []int{2, 3},
+		},
+		{
+			name:      "table after a heading in an item",
+			input:     "- # Title\n  | a | b |\n  | --- | --- |\n- next\n",
+			wantLines: []int{2, 3},
+		},
+		{
+			name:      "table after a fenced code block in an item",
+			input:     "- item\n  ```sh\n  code\n  ```\n  | a | b |\n  | --- | --- |\n- next\n",
+			wantLines: []int{5, 6},
+		},
+		{
+			// A loose list stays loose, but the fix is withheld in every list:
+			// the check that guards fixes cannot tell a loose list from a tight
+			// one that the blank line before a table would loosen.
+			name:      "table after text in a loose list",
+			input:     "- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n",
+			wantLines: []int{4},
+		},
+		{
+			// The inserted lines hold the blockquote marker, so they stay in
+			// the blockquote and the item keeps its blocks.
+			name:      "table in a blockquote in an item",
+			input:     "- item\n  > | a | b |\n  > | --- | --- |\n- next\n",
+			wantLines: []int{2, 3},
+			wantFixed: "- item\n  >\n  > | a | b |\n  > | --- | --- |\n  >\n- next\n",
+		},
+		{
+			// The blank line after the table falls after the list.
+			name:      "table that ends the last item before a heading",
+			input:     "- first\n- item\n  | a | b |\n  | --- | --- |\n# Heading\n",
+			wantLines: []int{3, 4},
+			wantFixed: "- first\n- item\n  | a | b |\n  | --- | --- |\n\n# Heading\n",
+		},
+		{
+			// The blank line before the table falls before the list.
+			name:      "table that starts the first item after a paragraph",
+			input:     "Text\n- | a | b |\n  | --- | --- |\n",
+			wantLines: []int{2},
+			wantFixed: "Text\n\n- | a | b |\n  | --- | --- |\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewTableBlankLinesRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestTableRowCells(t *testing.T) {
 	tests := []struct {
 		input             string

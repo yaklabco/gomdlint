@@ -1087,6 +1087,111 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 	}
 }
 
+// TestNoTrailingPunctuationRule_KeepsHeadingContent verifies that MD026
+// reports a heading of nothing but punctuation, as markdownlint does, but
+// withholds the fix whenever deleting the punctuation would leave the heading
+// showing nothing: no text other than whitespace, no code span and no image.
+func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantFixed string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "period alone", input: "## .\n"},
+		{name: "ellipsis alone", input: "## ...\n"},
+		{name: "exclamation marks alone", input: "## !!\n"},
+		{name: "full-width period alone", input: "# \u3002\n"},
+		{name: "escaped period alone", input: "## \\.\n"},
+		{name: "period alone in a closed heading", input: "## . ##\n"},
+		{name: "period alone after extra spaces", input: "##   .\n"},
+		{name: "period after a no-break space", input: "## \u00a0.\n"},
+		{name: "period after a no-break space reference", input: "## &nbsp;.\n"},
+		{name: "period after a link without text", input: "## [](https://example.com).\n"},
+		{name: "period after a zero-width non-joiner reference", input: "## &zwnj;.\n"},
+		{name: "period after a zero-width space", input: "## \u200b.\n"},
+		{name: "period after a word joiner", input: "## \u2060.\n"},
+		{name: "period after a combining grapheme joiner", input: "## \u034f.\n"},
+		{name: "period after a variation selector", input: "## \ufe0f.\n"},
+		{name: "period after a variation selector reference", input: "## &#xFE0F;.\n"},
+		{name: "period after a supplementary variation selector", input: "## \U000e0100.\n"},
+		{name: "period after a Hangul filler", input: "## \u3164.\n"},
+		{name: "period after default ignorable characters alone", input: "## \u200b\u2060\u034f\ufe0f.\n"},
+		{name: "period after an emoji with a variation selector", input: "## \u2764\ufe0f.\n", wantFixed: "## \u2764\ufe0f\n"},
+		{name: "period after a letter with a combining mark", input: "## e\u0301.\n", wantFixed: "## e\u0301\n"},
+		// goldmark reads "[ ]", "[x]" or "[X]" at the start of a list item's
+		// first block as a task checkbox even in a heading. GFM reads it as
+		// text or as a link, so "[ ](/url)" is a link that shows nothing.
+		{name: "period after a link with a space as its text in a list item", input: "- ## [ ](/url).\n"},
+		{name: "period after a link with a tab as its text in a list item", input: "- ## [\t](/url).\n"},
+		{name: "period after a link with a space as its text in a quoted list item", input: "> - ## [ ](/url).\n"},
+		{name: "period after a reference link with a space as its text in a list item",
+			input: "- ## [ ][ref].\n\n[ref]: /url\n"},
+		{name: "period after empty brackets alone in a list item", input: "- ## [ ].\n"},
+		{name: "period after a link with a tab as its text", input: "## [\t](/url).\n"},
+		{name: "period after a link with two spaces as its text in a list item", input: "- ## [  ](/url).\n"},
+		{name: "period after empty brackets and text in a list item", input: "- ## [ ] Done.\n",
+			wantFixed: "- ## [ ] Done\n"},
+		{name: "period after checked brackets and text in a list item", input: "- ## [x] Done.\n",
+			wantFixed: "- ## [x] Done\n"},
+		{name: "period after a link with a letter as its text in a list item", input: "- ## [X](/url).\n",
+			wantFixed: "- ## [X](/url)\n"},
+		{name: "period after a link with an image as its text", input: "## [![logo](logo.png)](/url).\n",
+			wantFixed: "## [![logo](logo.png)](/url)\n"},
+		{name: "period after a link with an image as its text in a list item",
+			input: "- ## [![logo](logo.png)](/url).\n", wantFixed: "- ## [![logo](logo.png)](/url)\n"},
+		{name: "period in a heading of a task item", input: "- [ ] task\n  ## Notes.\n",
+			wantFixed: "- [ ] task\n  ## Notes\n"},
+		{name: "period alone in a heading in a blockquote", input: "> ## .\n"},
+		{name: "period alone in a heading in a list item", input: "- ## .\n"},
+		{name: "ellipsis alone in a setext heading", input: "...\n---\n"},
+		{name: "period after a code span", input: "## `x`.\n", wantFixed: "## `x`\n"},
+		{name: "period after an image", input: "## ![logo](logo.png).\n", wantFixed: "## ![logo](logo.png)\n"},
+		{name: "period after an image without alt text", input: "## ![](logo.png).\n", wantFixed: "## ![](logo.png)\n"},
+		{name: "period after emphasis", input: "## *x*.\n", wantFixed: "## *x*\n"},
+		{name: "period after link text", input: "## [docs](https://example.com) .\n", wantFixed: "## [docs](https://example.com)\n"},
+		{name: "period after a character reference", input: "## &copy;.\n", wantFixed: "## &copy;\n"},
+		// The run is both periods, so the fix deletes the backslash too.
+		{name: "escaped period and period alone", input: "## \\..\n"},
+		{name: "escaped period and period after text", input: "## a\\..\n", wantFixed: "## a\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), tt.input, nil)
+			require.Len(t, diags, 1)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, tt.wantFixed != "", diags[0].HasFix())
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestDefaultIgnorable checks defaultIgnorable against Unicode's
+// Default_Ignorable_Code_Point property on characters of each part of its
+// derivation. When it was written, defaultIgnorable agreed with ICU 78
+// (Unicode 17.0) on every code point.
+func TestDefaultIgnorable(t *testing.T) {
+	ignorable := []rune{
+		0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180E, 0x180F,
+		0x200B, 0x200F, 0x202A, 0x202E, 0x2060, 0x206F, 0x3164, 0xFE00, 0xFE0F, 0xFEFF,
+		0xFFA0, 0xFFF0, 0xFFF8, 0x1BCA0, 0x1D173, 0x1D17A, 0xE0000, 0xE0001, 0xE0100, 0xE0FFF,
+	}
+	for _, r := range ignorable {
+		assert.True(t, defaultIgnorable(r), "U+%04X is default ignorable", r)
+	}
+	// Letters, punctuation, white space, combining marks, symbols, the
+	// interlinear annotation and Egyptian format characters, and the
+	// prepended concatenation marks U+0600 and U+110BD are not.
+	visible := []rune{'a', '.', ' ', '\t', 0x00A0, 0x0301, 0x0600, 0x2003, 0x2764, 0x2800,
+		0xFFF9, 0xFFFB, 0x13430, 0x1343F, 0x110BD}
+	for _, r := range visible {
+		assert.False(t, defaultIgnorable(r), "U+%04X is not default ignorable", r)
+	}
+}
+
 func TestHeadingStartLeftRule_Metadata(t *testing.T) {
 	rule := NewHeadingStartLeftRule()
 

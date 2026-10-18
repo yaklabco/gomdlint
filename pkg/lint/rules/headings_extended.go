@@ -1,11 +1,15 @@
 package rules
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -721,8 +725,9 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 // backslash that escapes it and the whitespace before them on the same line.
 // It returns nil unless the fix changes nothing but the heading's text, and
 // that only by the deleted characters: removing the punctuation must not
-// leave a setext line blank or turn it into a thematic break, underline or
-// other block, expose a closing hash sequence, leave a backslash showing, or
+// leave the heading showing nothing (see headingShowsContent), leave a
+// setext line blank or turn it into a thematic break, underline or other
+// block, expose a closing hash sequence, leave a backslash showing, or
 // change an anchor that a fragment link uses.
 func trailingPunctuationFix(
 	ctx *lint.RuleContext,
@@ -744,10 +749,107 @@ func trailingPunctuationFix(
 	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
 		deleteStart--
 	}
+	if !headingShowsContent(file, heading, deleteStart) {
+		return nil
+	}
 	deleted := mdast.SourceRange{StartOffset: deleteStart, EndOffset: content.EndOffset}
 	builder := fix.NewEditBuilder()
 	builder.Delete(deleted.StartOffset, deleted.EndOffset)
 	return checker.offer(builder, changeText(heading, textSub{rng: deleted}).withLocal(true))
+}
+
+// headingShowsContent reports whether a heading still shows something once
+// MD026 deletes everything in it from offset on, both as goldmark reads the
+// heading and as GFM does. The readings differ in one place only: goldmark
+// reads "[ ]", "[x]" or "[X]" at the start of a list item's first block as a
+// task checkbox even when that block is a heading, where GFM reads text or a
+// link (see checkboxShowsText). Everything else in the heading is read by
+// the same inline parser with the same definitions, so goldmark's reading
+// must show content after the checkbox, which shows nothing itself, and GFM
+// must show something where goldmark read the checkbox. A heading left
+// showing nothing renders differently and gets another anchor.
+func headingShowsContent(file *mdast.FileSnapshot, heading *mdast.Node, offset int) bool {
+	if first := heading.FirstChild; first != nil && first.Kind == mdast.NodeTaskCheckbox &&
+		!checkboxShowsText(file, first) {
+		return false
+	}
+	return showsContent(file, heading, offset)
+}
+
+// checkboxShowsText reports whether GFM shows something where goldmark read
+// a task checkbox at the start of a heading. GFM reads a checkbox only in a
+// paragraph, so it reads the brackets as text or as the text of a link:
+// "[x]" and "[X]" show their letter either way, and "[ ]" shows its brackets
+// unless "(" or "[" follows, where it can start a link whose text is only
+// whitespace and which shows nothing.
+func checkboxShowsText(file *mdast.FileSnapshot, checkbox *mdast.Node) bool {
+	if checkbox.Inline != nil && checkbox.Inline.Checked {
+		return true
+	}
+	end := checkbox.SourceRange().EndOffset
+	return end >= len(file.Content) || (file.Content[end] != '(' && file.Content[end] != '[')
+}
+
+// showsContent reports whether the inline content of node that starts before
+// offset shows something: a visible character once escapes and character
+// references are resolved, a code span, or an image. Raw HTML, a task
+// checkbox and a link without text show nothing that counts.
+func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
+	for child := node.FirstChild; child != nil; child = child.Next {
+		span := child.SourceRange()
+		if span.StartOffset >= offset || span.EndOffset > len(file.Content) {
+			break
+		}
+		switch child.Kind {
+		case mdast.NodeCodeSpan, mdast.NodeImage:
+			return true
+		case mdast.NodeText:
+			if showsText(file.Content[span.StartOffset:min(span.EndOffset, offset)]) {
+				return true
+			}
+		case mdast.NodeHTMLInline, mdast.NodeTaskCheckbox:
+		default:
+			if showsContent(file, child, offset) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// showsText reports whether source text renders a visible character: one
+// that is graphic, not a space and not default ignorable, so neither
+// whitespace nor a character that renders nothing, such as U+200B or the
+// variation selector U+FE0F, counts.
+func showsText(source []byte) bool {
+	var rendered bytes.Buffer
+	writer := bufio.NewWriter(&rendered)
+	gmhtml.DefaultWriter.Write(writer, source)
+	_ = writer.Flush() // A bytes.Buffer never fails to write.
+	return bytes.ContainsFunc(rendered.Bytes(), func(r rune) bool {
+		return unicode.IsGraphic(r) && !unicode.IsSpace(r) && !defaultIgnorable(r)
+	})
+}
+
+// defaultIgnorable reports whether char has Unicode's Default_Ignorable_Code_Point
+// property, which marks characters that render nothing unless a renderer
+// supports them. Go's unicode package lacks the derived property, so this
+// derives it as DerivedCoreProperties.txt does: Other_Default_Ignorable_Code_Point,
+// format characters and variation selectors, without white space, the
+// interlinear annotation characters U+FFF9 to U+FFFB, the Egyptian
+// hieroglyph format characters U+13430 to U+1343F, and the prepended
+// concatenation marks.
+func defaultIgnorable(char rune) bool {
+	switch {
+	case unicode.Is(unicode.White_Space, char),
+		char >= 0xFFF9 && char <= 0xFFFB,
+		char >= 0x13430 && char <= 0x1343F,
+		unicode.Is(unicode.Prepended_Concatenation_Mark, char):
+		return false
+	}
+	return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, char) ||
+		unicode.Is(unicode.Cf, char) ||
+		unicode.Is(unicode.Variation_Selector, char)
 }
 
 // escapedAt reports whether the byte at offset follows an odd number of

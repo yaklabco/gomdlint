@@ -325,7 +325,9 @@ func (p *spanLinkParser) CloseBlock(parent ast.Node, block text.Reader, pc parse
 }
 
 // spanParagraphTransformer records the source lines of tables built from
-// paragraphs, since goldmark's table rows carry no line segments.
+// paragraphs, since goldmark's table rows carry no line segments, and gives
+// such a table the blank-line flag of the paragraph it replaces, which
+// goldmark leaves out.
 type spanParagraphTransformer struct {
 	parser.ParagraphTransformer
 	spanKey
@@ -347,6 +349,7 @@ func (t *spanParagraphTransformer) Transform(node *ast.Paragraph, reader text.Re
 		lines[idx] = before.At(idx)
 	}
 	parent, prev := node.Parent(), node.PreviousSibling()
+	blank := node.HasBlankPreviousLines()
 
 	t.ParagraphTransformer.Transform(node, reader, pc)
 
@@ -365,8 +368,36 @@ func (t *spanParagraphTransformer) Transform(node *ast.Paragraph, reader text.Re
 	if !ok || remaining >= len(lines) {
 		return
 	}
+	// GFM builds the table without the paragraph's blank-line flag, so a
+	// list whose item gains a blank line before a table would still read as
+	// tight. A table that takes the paragraph's first line follows what the
+	// paragraph followed, unless link reference definitions came off the
+	// paragraph's start: the first of them took the flag, and the table
+	// follows the last of them directly. goldmark moves the paragraph's
+	// position to the first line it keeps, so the paragraph's first line is
+	// the one it opened on, as recorded then.
+	if opened, found := rec.blocks[node]; found && remaining == 0 && len(lines) > 0 &&
+		sameLine(reader.Source(), opened.start, lines[0].Start) {
+		table.SetBlankPreviousLines(blank)
+	}
 	if _, seen := rec.tables[table]; seen {
 		return
 	}
 	rec.tables[table] = tableRows{lines: lines[remaining:]}
+}
+
+// sameLine reports whether two offsets of source lie on one line.
+func sameLine(source []byte, first, second int) bool {
+	if first < 0 || second < 0 || first > len(source) || second > len(source) {
+		return false
+	}
+	if first > second {
+		first, second = second, first
+	}
+	for _, ch := range source[first:second] {
+		if ch == '\n' || ch == '\r' {
+			return false
+		}
+	}
+	return true
 }

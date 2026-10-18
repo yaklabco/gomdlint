@@ -31,23 +31,17 @@ func NewCodeBlockLanguageRule() *CodeBlockLanguageRule {
 	}
 }
 
-// Apply checks that fenced code blocks have an info string.
+// Apply checks that fenced code blocks have an info string. Like
+// markdownlint, it reads the info string as GFM does (see fenceInfo),
+// compares the language, its first word (see infoWords), with each name in
+// allowed_languages exactly, so case matters, and checks that list and
+// language_only independently.
 func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
 	}
 
-	allowedLanguages := ctx.Option("allowed_languages", nil)
-	var allowedSet map[string]bool
-	if langs, ok := allowedLanguages.([]any); ok && len(langs) > 0 {
-		allowedSet = make(map[string]bool)
-		for _, l := range langs {
-			if s, ok := l.(string); ok {
-				allowedSet[strings.ToLower(s)] = true
-			}
-		}
-	}
-
+	allowed := allowedLanguages(ctx)
 	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
 
@@ -61,20 +55,13 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			continue
 		}
 
-		info := lint.CodeBlockInfo(cb)
-		if ctx.OptionBool("language_only", false) && len(strings.Fields(info)) > 1 {
+		words := infoWords(fenceInfo(ctx.File, cb))
+		if ctx.OptionBool("language_only", false) && len(words) > 1 {
 			diags = append(diags, lint.NewDiagnostic(r.ID(), cb, "Code fence info must contain only a language identifier").
 				WithSeverity(config.SeverityWarning).Build())
-			continue
-		}
-		// Extract just the language part (first word).
-		lang := strings.Fields(info)
-		langName := ""
-		if len(lang) > 0 {
-			langName = strings.ToLower(lang[0])
 		}
 
-		if langName == "" {
+		if len(words) == 0 {
 			diagBuilder := lint.NewDiagnostic(r.ID(), cb,
 				"Fenced code block has no language specified").
 				WithSeverity(config.SeverityWarning).
@@ -82,7 +69,7 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 
 			// Add autofix if file is available.
 			if ctx.File != nil {
-				if fixer := r.buildLanguageFix(ctx.File, cb); fixer != nil {
+				if fixer := r.buildLanguageFix(ctx.File, cb, allowed); fixer != nil {
 					diagBuilder = diagBuilder.WithFix(fixer)
 				}
 			}
@@ -92,9 +79,9 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 
 		// Check against allowed languages if configured.
-		if allowedSet != nil && !allowedSet[langName] {
+		if language := words[0]; allowed != nil && !allowed[language] {
 			diag := lint.NewDiagnostic(r.ID(), cb,
-				fmt.Sprintf("Language '%s' is not in the allowed list", langName)).
+				fmt.Sprintf("Language '%s' is not in the allowed list", language)).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion("Use one of the allowed language identifiers").
 				Build()
@@ -105,11 +92,107 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	return verifyFixes(ctx, diags, fixAllowance{codeInfo: true}), nil
 }
 
-// buildLanguageFix detects the language and creates a fix to insert it.
+// infoWords splits a fence's info string into words at spaces and tabs, as
+// GFM and markdownlint do. The first word is the language. Other space
+// characters, such as U+00A0, belong to the words they stand in.
+func infoWords(info string) []string {
+	return strings.FieldsFunc(info, func(r rune) bool { return r == ' ' || r == '\t' })
+}
+
+// fenceInfo returns the info string of a fenced code block as GFM reads it:
+// the text after the opening fence characters to the end of the line, where
+// a carriage return ends a line as well as a line feed, without the spaces
+// and tabs around it. goldmark ends lines only at line feeds, so its info
+// string can take in the text after a bare carriage return, and it drops a
+// carriage return that comes before the info string.
+func fenceInfo(file *mdast.FileSnapshot, cb *mdast.Node) string {
+	if after, ok := afterOpeningFence(file, cb); ok {
+		if rest, ok := restOfLine(file, after); ok {
+			return infoLine(rest)
+		}
+	}
+	return infoLine(lint.CodeBlockInfo(cb))
+}
+
+// infoLine returns text up to its first carriage return or line feed,
+// without the spaces and tabs around it.
+func infoLine(text string) string {
+	if end := strings.IndexAny(text, "\r\n"); end >= 0 {
+		text = text[:end]
+	}
+	return strings.Trim(text, " \t")
+}
+
+// afterOpeningFence returns the offset just past the fence characters of a
+// fenced code block's opening fence, when the source holds them where the
+// block starts.
+func afterOpeningFence(file *mdast.FileSnapshot, cb *mdast.Node) (int, bool) {
+	if file == nil {
+		return 0, false
+	}
+	start, length, char := cb.SourceRange().StartOffset, lint.CodeFenceLength(cb), lint.CodeFenceChar(cb)
+	if length == 0 || start < 0 || start+length > len(file.Content) {
+		return 0, false
+	}
+	for _, ch := range file.Content[start : start+length] {
+		if ch != char {
+			return 0, false
+		}
+	}
+	return start + length, true
+}
+
+// restOfLine returns the source from offset to the end of its line, without
+// the line ending. Lines end only at line feeds here, as in goldmark, so the
+// text can hold a bare carriage return.
+func restOfLine(file *mdast.FileSnapshot, offset int) (string, bool) {
+	line, _ := file.LineAt(offset)
+	if line < 1 || line > len(file.Lines) || offset > file.Lines[line-1].NewlineStart {
+		return "", false
+	}
+	return string(file.Content[offset:file.Lines[line-1].NewlineStart]), true
+}
+
+// allowedLanguages returns the names that allowed_languages permits, or nil
+// when it sets no list and every language is allowed. As in markdownlint, an
+// empty list allows every language, and a list that holds no string allows
+// none.
+func allowedLanguages(ctx *lint.RuleContext) map[string]bool {
+	names, ok := ctx.Option("allowed_languages", nil).([]any)
+	if !ok || len(names) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		if language, ok := name.(string); ok {
+			allowed[language] = true
+		}
+	}
+	return allowed
+}
+
+// buildLanguageFix detects the language and creates a fix to insert it. It
+// returns nil when no language is detected, when allowed, which is nil when
+// every language is allowed, leaves out the language detected, or when the
+// fixed fence would name another language than the one inserted: the rule
+// would report such a language on the next run, and the fix check reads no
+// info string. It also returns nil when the fence line holds a bare carriage
+// return: GFM ends the line there and reads what follows as code, which
+// goldmark reads into the fence, so detection would not see the block's code.
 func (r *CodeBlockLanguageRule) buildLanguageFix(
 	file *mdast.FileSnapshot,
 	cb *mdast.Node,
+	allowed map[string]bool,
 ) *fix.EditBuilder {
+	// The language goes right after the opening fence characters.
+	insertAt, ok := afterOpeningFence(file, cb)
+	if !ok {
+		return nil
+	}
+	if rest, ok := restOfLine(file, insertAt); !ok || strings.ContainsRune(rest, '\r') {
+		return nil
+	}
+
 	// Get code block content for detection.
 	content := r.getCodeBlockContent(file, cb)
 	if len(content) == 0 {
@@ -121,18 +204,30 @@ func (r *CodeBlockLanguageRule) buildLanguageFix(
 	if detectedLang == "text" {
 		return nil // Don't insert "text" as language.
 	}
-
-	// The full span of a fenced code block starts at its opening fence.
-	fence := cb.SourceRange()
-	fenceLength := lint.CodeFenceLength(cb)
-	if fenceLength == 0 || fence.StartOffset+fenceLength > len(file.Content) {
+	if allowed != nil && !allowed[detectedLang] {
 		return nil
 	}
-
-	// Insert language right after fence.
+	if fenceLanguageAfterInsert(file, insertAt, detectedLang) != detectedLang {
+		return nil
+	}
 	builder := fix.NewEditBuilder()
-	builder.Insert(fence.StartOffset+fenceLength, detectedLang)
+	builder.Insert(insertAt, detectedLang)
 	return builder
+}
+
+// fenceLanguageAfterInsert returns the language that the line holding offset,
+// an opening fence that ends at offset, would name with text inserted at
+// offset: the first word of the info string that would follow the fence.
+func fenceLanguageAfterInsert(file *mdast.FileSnapshot, offset int, text string) string {
+	rest, ok := restOfLine(file, offset)
+	if !ok {
+		return ""
+	}
+	words := infoWords(infoLine(text + rest))
+	if len(words) == 0 {
+		return ""
+	}
+	return words[0]
 }
 
 // getCodeBlockContent extracts the content lines of a code block (excluding fences).

@@ -1,0 +1,92 @@
+[
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 6,
+    "column": 3,
+    "message": "Missing blank line before table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 8,
+    "column": 3,
+    "message": "Missing blank line after table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 15,
+    "column": 5,
+    "message": "Missing blank line before table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 16,
+    "column": 5,
+    "message": "Missing blank line after table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 22,
+    "column": 5,
+    "message": "Missing blank line before table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 23,
+    "column": 5,
+    "message": "Missing blank line after table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 29,
+    "column": 5,
+    "message": "Missing blank line before table",
+    "severity": "info",
+    "fixable": true
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 30,
+    "column": 5,
+    "message": "Missing blank line after table",
+    "severity": "info",
+    "fixable": true
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 37,
+    "column": 3,
+    "message": "Missing blank line before table",
+    "severity": "info",
+    "fixable": false
+  },
+  {
+    "rule": "MD058",
+    "name": "blanks-around-tables",
+    "line": 38,
+    "column": 3,
+    "message": "Missing blank line after table",
+    "severity": "info",
+    "fixable": true
+  }
+]

@@ -1,0 +1,6 @@
+rules:
+  MD040:
+    options:
+      allowed_languages:
+        - go
+        - ruby

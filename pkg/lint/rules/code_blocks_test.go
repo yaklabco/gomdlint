@@ -232,9 +232,28 @@ func TestCodeBlockLanguageRule_AllowedLanguages(t *testing.T) {
 			wantN:   1,
 		},
 		{
-			name:    "case insensitive",
+			// markdownlint compares the language with each allowed name exactly.
+			name:    "capitalized language with a lowercase name",
 			input:   "```Go\ncode\n```",
 			allowed: []any{"go"},
+			wantN:   1,
+		},
+		{
+			name:    "lowercase language with a capitalized name",
+			input:   "```go\ncode\n```",
+			allowed: []any{"Go"},
+			wantN:   1,
+		},
+		{
+			name:    "language written as allowed",
+			input:   "```Go\ncode\n```",
+			allowed: []any{"Go"},
+			wantN:   0,
+		},
+		{
+			name:    "empty list allows every language",
+			input:   "```rust\ncode\n```",
+			allowed: []any{},
 			wantN:   0,
 		},
 	}
@@ -264,6 +283,269 @@ func TestCodeBlockLanguageRule_AllowedLanguages(t *testing.T) {
 			if len(diags) != tt.wantN {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
 			}
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_FixKeepsToAllowedLanguages verifies that MD040
+// inserts a detected language only when allowed_languages, matched exactly
+// as markdownlint matches it, permits that language, so that the fix never
+// writes a language the rule would report on the next run.
+func TestCodeBlockLanguageRule_FixKeepsToAllowedLanguages(t *testing.T) {
+	const bashBlock = "```\n#!/bin/bash\necho hi\n```\n"
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantFixed string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "detected language not allowed", input: bashBlock,
+			options: map[string]any{"allowed_languages": []any{"go", "ruby"}}},
+		{name: "detected language allowed", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{"go", "bash"}},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+		{name: "detected language allowed only in another case", input: bashBlock,
+			options: map[string]any{"allowed_languages": []any{"Bash"}}},
+		{name: "detected JSON allowed", input: "```\n{\"a\": 1}\n```\n",
+			options:   map[string]any{"allowed_languages": []any{"json"}},
+			wantFixed: "```json\n{\"a\": 1}\n```\n"},
+		{name: "empty list allows the detected language", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{}},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+		{name: "no list allows the detected language", input: bashBlock,
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+		{name: "list without names allows no language", input: bashBlock,
+			options: map[string]any{"allowed_languages": []any{1}}},
+		{name: "detected language allowed with language only", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{"bash"}, "language_only": true},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			require.Len(t, diags, 1)
+			assert.Equal(t, "Fenced code block has no language specified", diags[0].Message)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			fixed := applyAllEdits(t, tt.input, diags)
+			assert.Equal(t, want, fixed)
+			// A fixed block passes; an unfixed one is reported again without a fix.
+			again := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), fixed, tt.options)
+			if fixed != tt.input {
+				assert.Empty(t, again)
+			}
+			for _, diag := range again {
+				assert.False(t, diag.HasFix())
+			}
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_AllowedLanguageMessages verifies that MD040 names
+// a language that allowed_languages leaves out as it is written, and that,
+// like markdownlint, it checks the allowed languages of a fence whose info
+// string language_only also reports.
+func TestCodeBlockLanguageRule_AllowedLanguageMessages(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		options      map[string]any
+		wantMessages []string
+	}{
+		{name: "language in another case", input: "```Go\ncode\n```\n",
+			options:      map[string]any{"allowed_languages": []any{"go"}},
+			wantMessages: []string{"Language 'Go' is not in the allowed list"}},
+		{name: "info string with more than a language", input: "```bash title=x\ncode\n```\n",
+			options: map[string]any{"allowed_languages": []any{"go"}, "language_only": true},
+			wantMessages: []string{
+				"Code fence info must contain only a language identifier",
+				"Language 'bash' is not in the allowed list",
+			}},
+		{name: "allowed language with more than a language", input: "```go title=x\ncode\n```\n",
+			options:      map[string]any{"allowed_languages": []any{"go"}, "language_only": true},
+			wantMessages: []string{"Code fence info must contain only a language identifier"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			messages := make([]string, 0, len(diags))
+			for _, diag := range diags {
+				messages = append(messages, diag.Message)
+				assert.False(t, diag.HasFix())
+			}
+			assert.ElementsMatch(t, tt.wantMessages, messages)
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_InfoStringWords verifies that MD040 splits an
+// info string into its language and the rest at spaces and tabs only, as GFM
+// and markdownlint do, so that another space character such as U+00A0 is
+// part of the language, and that its fix leaves a fence whose language is
+// exactly the detected one.
+func TestCodeBlockLanguageRule_InfoStringWords(t *testing.T) {
+	const shebang = "#!/bin/bash\necho hi\n```\n"
+	allowBash := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
+	tests := []struct {
+		name         string
+		input        string
+		options      map[string]any
+		wantMessages []string
+		wantFixed    string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "no-break space alone", input: "```\u00a0\n" + shebang, options: allowBash,
+			wantMessages: []string{"Language '\u00a0' is not in the allowed list"}},
+		{name: "no-break space alone without options", input: "```\u00a0\n" + shebang},
+		{name: "em space alone", input: "```\u2003\n" + shebang, options: allowBash,
+			wantMessages: []string{"Language '\u2003' is not in the allowed list"}},
+		{name: "form feed alone", input: "```\f\n" + shebang, options: allowBash,
+			wantMessages: []string{"Language '\f' is not in the allowed list"}},
+		{name: "vertical tab alone without options", input: "```\v\n" + shebang},
+		{name: "title after a tab", input: "```bash\ttitle=x\ncode\n```\n", options: allowBash,
+			wantMessages: []string{"Code fence info must contain only a language identifier"}},
+		{name: "title after a no-break space", input: "```bash\u00a0title=x\ncode\n```\n", options: allowBash,
+			wantMessages: []string{"Language 'bash\u00a0title=x' is not in the allowed list"}},
+		{name: "tab before the language", input: "```\tbash\ncode\n```\n", options: allowBash},
+		{name: "tab after the fence", input: "```\t\n" + shebang, options: allowBash,
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "```bash\t\n" + shebang},
+		{name: "spaces after the fence", input: "```  \n" + shebang, options: allowBash,
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "```bash  \n" + shebang},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			messages := make([]string, 0, len(diags))
+			for _, diag := range diags {
+				messages = append(messages, diag.Message)
+			}
+			assert.ElementsMatch(t, tt.wantMessages, messages)
+
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			fixed := applyAllEdits(t, tt.input, diags)
+			assert.Equal(t, want, fixed)
+			if fixed != tt.input {
+				// The inserted language is the fence's whole language, and allowed.
+				assert.Empty(t, applyRuleWithOptions(t, NewCodeBlockLanguageRule(), fixed, tt.options))
+			}
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_LineEndings verifies that MD040 ends a fence's
+// info string at the end of the line, as GFM and markdownlint do, where a
+// carriage return ends a line as well as a line feed. The expected findings
+// are markdownlint 0.41.1's.
+func TestCodeBlockLanguageRule_LineEndings(t *testing.T) {
+	allowBash := map[string]any{"allowed_languages": []any{"bash"}}
+	allowBashOnly := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
+	tests := []struct {
+		name         string
+		input        string
+		options      map[string]any
+		wantMessages []string
+		wantFixed    string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "bare carriage return after the language", input: "# Title\n\n```bash\recho hi\n```\n",
+			options: allowBash},
+		{name: "bare carriage return after the language with language only",
+			input: "# Title\n\n```bash\recho hi\n```\n", options: allowBashOnly},
+		{name: "mixed line endings after the language",
+			input: "# Title\r\n\r\n```bash\recho hi\n```\r\n", options: allowBashOnly},
+		{name: "mixed line endings without a language",
+			input:        "# Title\r\n\n```\r#!/bin/bash\necho hi\r\n```\n",
+			options:      allowBashOnly,
+			wantMessages: []string{"Fenced code block has no language specified"}},
+		{
+			// GFM's code starts with "echo hi", which goldmark reads into the
+			// fence line, so the shebang it sees first is not the code's start.
+			name:         "bare carriage return before a line that starts with a shebang",
+			input:        "# Title\n\n```\recho hi\n#!/bin/bash\necho x\n```\n",
+			wantMessages: []string{"Fenced code block has no language specified"},
+		},
+		{name: "carriage return line feeds after the language",
+			input: "# Title\r\n\r\n```bash\r\necho hi\r\n```\r\n", options: allowBashOnly},
+		{name: "carriage return line feeds without a language",
+			input:        "# Title\r\n\r\n```\r\n#!/bin/bash\r\necho hi\r\n```\r\n",
+			options:      allowBashOnly,
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "# Title\r\n\r\n```bash\r\n#!/bin/bash\r\necho hi\r\n```\r\n"},
+		{name: "carriage return line feeds after a title",
+			input:        "# Title\r\n\r\n```bash title=x\r\necho hi\r\n```\r\n",
+			options:      allowBashOnly,
+			wantMessages: []string{"Code fence info must contain only a language identifier"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			messages := make([]string, 0, len(diags))
+			for _, diag := range diags {
+				messages = append(messages, diag.Message)
+			}
+			assert.ElementsMatch(t, tt.wantMessages, messages)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_CarriageReturnLines verifies that MD040 offers no
+// fix in a document whose lines end in carriage returns alone. goldmark ends
+// lines only at line feeds, so it reads such a document as one line and finds
+// no fence there, where markdownlint 0.41.1 reports line 3 of each: a missing
+// language and an info string with a title. Whatever MD040 reports there, a
+// fix must not change the document.
+func TestCodeBlockLanguageRule_CarriageReturnLines(t *testing.T) {
+	options := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
+	for _, input := range []string{
+		"# Title\r\r```\r#!/bin/bash\recho hi\r```\r",
+		"# Title\r\r```bash title=x\recho hi\r```\r",
+		"# Title\r\r```bash\recho hi\r```\r",
+	} {
+		diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), input, options)
+		for _, diag := range diags {
+			assert.False(t, diag.HasFix(), "%q keeps a fix", input)
+		}
+		assert.Equal(t, input, applyAllEdits(t, input, diags))
+	}
+}
+
+// TestFenceLanguageAfterInsert verifies that the language a fence would name
+// after the MD040 fix inserts text after its fence characters is the first
+// word of the line that follows, split at spaces and tabs only.
+func TestFenceLanguageAfterInsert(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "nothing after the fence", content: "```\ncode\n```\n", want: "bash"},
+		{name: "spaces after the fence", content: "```  \ncode\n```\n", want: "bash"},
+		{name: "tab after the fence", content: "```\t\ncode\n```\n", want: "bash"},
+		{name: "carriage return line ending", content: "```\r\ncode\r\n```\r\n", want: "bash"},
+		{name: "bare carriage return after the fence", content: "```\rcode\n```\n", want: "bash"},
+		{name: "fence on the last line", content: "```", want: "bash"},
+		{name: "no-break space after the fence", content: "```\u00a0\ncode\n```\n", want: "bash\u00a0"},
+		{name: "word after the fence", content: "```sh x\ncode\n```\n", want: "bashsh"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(tt.content))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, fenceLanguageAfterInsert(file, len("```"), "bash"))
 		})
 	}
 }
