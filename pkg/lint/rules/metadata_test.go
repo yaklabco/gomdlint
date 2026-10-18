@@ -420,6 +420,48 @@ func TestHeadingBlankLinesRule_Definitions(t *testing.T) {
 	}
 }
 
+// TestHeadingBlankLinesRule_MarkdownlintBlankLines checks that MD022 counts
+// a line as blank the way markdownlint 0.41.1 does: once HTML comments and
+// every ">" are removed, nothing but whitespace is left. MD031 and MD058
+// already count blank lines this way.
+func TestHeadingBlankLinesRule_MarkdownlintBlankLines(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantLines []int
+	}{
+		{name: "comment lines around headings", input: "# One\n<!-- comment -->\n## Two\n<!-- c -->\n\ntext\n", wantLines: []int{}},
+		{name: "quote marker line before a heading", input: "> quote\n>\n# Heading\n\ntext\n", wantLines: []int{}},
+		{name: "quote marker line after a heading", input: "# Heading\n>\ntext\n", wantLines: []int{}},
+		{name: "nested quote markers after a heading", input: "# Heading\n> >\n\ntext\n", wantLines: []int{}},
+		{name: "quoted text after a heading", input: "# Heading\n>> text\n", wantLines: []int{1}},
+		{name: "two comments on one line", input: "# Heading\n<!-- a --> <!-- b -->\ntext\n", wantLines: []int{}},
+		{name: "comment and text on one line", input: "# Heading\n<!-- a --> x\n\ntext\n", wantLines: []int{1}},
+		{name: "start of a comment after a heading", input: "# Heading\n<!--\nmulti\n-->\ntext\n", wantLines: []int{}},
+		{name: "end of a comment before a heading", input: "text\n\n<!--\nx\n-->\n# Heading\n\ntext\n", wantLines: []int{}},
+		{name: "comment in a blockquote", input: "> # Heading\n> <!-- c -->\n> text\n", wantLines: []int{}},
+		{name: "unmatched comment end before a heading", input: "text\n-->\n# Heading\n\ntext\n", wantLines: []int{}},
+		{name: "unterminated comment after a heading", input: "# Heading\n<!-- unterminated\ntext\n", wantLines: []int{}},
+		{name: "empty comment after a heading", input: "# Heading\n<!---->\ntext\n", wantLines: []int{}},
+		{
+			name: "comment and blank line count as two", input: "text\n<!-- c -->\n\n# Heading\n\ntext\n",
+			options: map[string]any{"lines_above": 2}, wantLines: []int{},
+		},
+		{
+			name: "comment text is not blank", input: "text\n\n<!--\nx\n-->\n# Heading\n\ntext\n",
+			options: map[string]any{"lines_above": 2}, wantLines: []int{6},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewHeadingBlankLinesRule(), tt.input, tt.options)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+		})
+	}
+}
+
 // TestHeadingBlankLinesRule_Containers verifies that MD022 counts blank lines
 // within blockquotes and list items, and that its fix keeps the container.
 func TestHeadingBlankLinesRule_Containers(t *testing.T) {

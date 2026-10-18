@@ -242,10 +242,12 @@ func NewHeadingBlankLinesRule() *HeadingBlankLinesRule {
 // matches markdownlint: adjacent headings need blank lines between them.
 // Setting it to false allows headings to touch other headings.
 //
-// Blank lines are counted inside the heading's containers, so a line holding
-// only ">" is blank within a blockquote, and the fix inserts the container
-// prefix (">" in a blockquote) so it never splits the container. A heading
-// followed only by blank lines up to the end of the file needs none below.
+// A line counts as blank as markdownlint reads it: nothing but whitespace is
+// left once HTML comments and every ">" are removed, so a comment line or a
+// line holding only ">" separates a heading from its neighbours. The fix
+// inserts the container prefix (">" in a blockquote) so it never splits the
+// container. A heading followed only by blank lines up to the end of the
+// file needs none below.
 //
 // Each diagnostic's fix inserts the blank lines its own heading needs. Where
 // two adjacent headings share a gap, both insert at the same offset and the
@@ -295,7 +297,7 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 				if includeMetadata && line <= ctx.File.FrontMatterLines {
 					break
 				}
-				if !lint.IsBlankLineInContainer(ctx.File, heading, line) {
+				if !headingBlankLine(ctx.File, heading, line) {
 					break
 				}
 				blanksBefore++
@@ -311,7 +313,10 @@ func (r *HeadingBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 
 		// Check blank lines below (unless only blank lines follow).
 		if pos.EndLine < lastLine && linesBelow > 0 {
-			blanksAfter := lint.CountBlankLinesAfterInContainer(ctx.File, heading, pos.EndLine)
+			blanksAfter := 0
+			for line := pos.EndLine + 1; line <= lastLine && headingBlankLine(ctx.File, heading, line); line++ {
+				blanksAfter++
+			}
 			if blanksAfter < linesBelow && pos.EndLine+blanksAfter < lastLine {
 				// Check if next non-blank line is also a heading.
 				if compatible || !r.isNextLineHeading(ctx, heading, pos.EndLine, startLines) {
@@ -381,7 +386,7 @@ func (r *HeadingBlankLinesRule) isPreviousLineHeading(
 	endLines map[int]bool,
 ) bool {
 	for ln := lineNum - 1; ln >= 1; ln-- {
-		if !lint.IsBlankLineInContainer(ctx.File, heading, ln) {
+		if !headingBlankLine(ctx.File, heading, ln) {
 			return endLines[ln]
 		}
 	}
@@ -398,11 +403,19 @@ func (r *HeadingBlankLinesRule) isNextLineHeading(
 	startLines map[int]bool,
 ) bool {
 	for ln := lineNum + 1; ln <= len(ctx.File.Lines); ln++ {
-		if !lint.IsBlankLineInContainer(ctx.File, heading, ln) {
+		if !headingBlankLine(ctx.File, heading, ln) {
 			return startLines[ln]
 		}
 	}
 	return false
+}
+
+// headingBlankLine reports whether a line counts as blank next to a heading:
+// blank within the heading's containers, or blank the way markdownlint reads
+// it once HTML comments and every ">" are removed, so that a comment line or
+// a line of quote markers separates the heading from its neighbours.
+func headingBlankLine(file *mdast.FileSnapshot, heading *mdast.Node, line int) bool {
+	return lint.IsBlankLineInContainer(file, heading, line) || isMarkdownlintBlankLine(lint.LineText(file, line))
 }
 
 func (r *HeadingBlankLinesRule) createBlankBeforeDiagnostic(
