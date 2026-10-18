@@ -385,8 +385,7 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) error {
 	}
 	for _, option := range slices.Sorted(maps.Keys(unread)) {
 		if unread[option] == len(ruleIDs) {
-			c.warn(c.locate.optionLine(key, option, 0),
-				fmt.Sprintf("unknown option %q for the rules of the tag %q; it is ignored", option, key))
+			c.warn(c.locate.optionLine(key, option, 0), lint.UnknownTagOptionText(option, key))
 		}
 	}
 	return nil

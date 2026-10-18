@@ -17,6 +17,13 @@ const (
 	// a later release.
 	NoticeDeprecatedTag NoticeKind = "deprecated-tag"
 
+	// NoticeUnknownOption marks an option in the setting of a
+	// markdownlint-configure-file key that the rule the key names does not
+	// read, or, for a tag, that none of its rules reads. The comment does
+	// nothing with the option, as in markdownlint, and applies the rest of
+	// the setting.
+	NoticeUnknownOption NoticeKind = "unknown-option"
+
 	// NoticeInvalidConfiguration marks a markdownlint-configure-file
 	// comment whose parameter holds no object of settings: text that is
 	// neither JSON, with comments and trailing commas, nor YAML, or a value
@@ -41,8 +48,9 @@ type Notice struct {
 	// markdownlint-disable.
 	Directive string
 
-	// Name is the word, or the configure-file key, as the comment writes
-	// it. It is empty for a configure-file comment that holds no settings
+	// Name is the word, the configure-file key or, for an unknown option,
+	// the option, as the comment writes it. It is empty for a
+	// configure-file comment that holds no settings
 	// (NoticeInvalidConfiguration).
 	Name string
 
@@ -50,12 +58,15 @@ type Notice struct {
 	// likely means, any one of which may be meant (see Registry.Closest).
 	// There are none when nothing is close enough, or when too many are.
 	// Rules are named as markdownlint names them (RuleMeta.MarkdownlintName),
-	// so that a comment written from them works in markdownlint too.
+	// so that a comment written from them works in markdownlint too. For an
+	// unknown option of one rule, they are the option names it most likely
+	// means.
 	Suggestions []string
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead, in rule ID order, named as
-	// markdownlint names them.
+	// which the comment can name instead, and, for an unknown option, the
+	// rules whose setting holds it, none of which reads it, in rule ID
+	// order, named as markdownlint names them.
 	Rules []string
 
 	// Message describes the problem in a sentence that starts with

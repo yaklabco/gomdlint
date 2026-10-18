@@ -273,6 +273,8 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 				case meaning == formerTag && noticed.add(setting.Key):
 					directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, setting.Key, rules))
 				}
+				directive.notices = append(directive.notices,
+					unknownOptionNotices(registry, directive, setting.Key, rules, setting.Value)...)
 			}
 			settings.Set(setting.Key, setting.Value)
 			lines[setting.Key] = directive.line
@@ -316,6 +318,59 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 	}
 	return result, nil
+}
+
+// unknownOptionNotices returns the notices for the options in value, the
+// setting of key in directive, a markdownlint-configure-file comment, that
+// the rules that key names do not read (see Registry.MarkdownlintRuleConfig).
+// markdownlint ignores such an option, as gomdlint does, so the notices
+// change nothing. For a key that names one rule there is one for each
+// option that the rule does not read, which offers the closest option
+// names, and for a key that names several, a tag, one for each option that
+// none of its rules reads, as configuration files warn about them. Each
+// names the rules as markdownlint names them, in ID order.
+func unknownOptionNotices(registry *Registry, directive *inlineDirective, key string, rules []Rule, value any) []Notice {
+	if options, ok := value.(map[string]any); !ok || len(options) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(rules)
+	slices.SortFunc(sorted, func(a, b Rule) int { return cmp.Compare(a.ID(), b.ID()) })
+	sorted = slices.CompactFunc(sorted, func(a, b Rule) bool { return a.ID() == b.ID() })
+
+	names := make([]string, len(sorted))
+	unread := make(map[string]int) // option -> the rules that do not read it
+	var issues []OptionIssue       // The unknown options of the one rule.
+	for idx, rule := range sorted {
+		names[idx] = registry.markdownlintName(rule)
+		_, found := registry.MarkdownlintRuleConfig(rule.ID(), value)
+		for _, issue := range found {
+			if issue.Kind == OptionIssueUnknown {
+				unread[issue.Key]++
+				issues = append(issues, issue)
+			}
+		}
+	}
+
+	kind := directive.kind()
+	notice := func(option string, suggestions []string, text string) Notice {
+		return Notice{
+			Kind: NoticeUnknownOption, Line: directive.line, Directive: kind,
+			Name: option, Suggestions: suggestions, Rules: names, Message: kind + ": " + text,
+		}
+	}
+	var notices []Notice
+	if len(sorted) == 1 {
+		for _, issue := range issues {
+			notices = append(notices, notice(issue.Key, issue.Suggestions, issue.Text(names[0])))
+		}
+		return notices
+	}
+	for _, option := range slices.Sorted(maps.Keys(unread)) {
+		if unread[option] == len(sorted) {
+			notices = append(notices, notice(option, nil, UnknownTagOptionText(option, key)))
+		}
+	}
+	return notices
 }
 
 // readConfigureFile reads the parameter of directive, a

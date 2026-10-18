@@ -258,6 +258,16 @@ func (issue OptionIssue) Text(ruleName string) string {
 	return fmt.Sprintf("%s option %q: unknown problem", ruleName, issue.Key)
 }
 
+// UnknownTagOptionText describes option, an option in the setting of tag,
+// a key of a markdownlint configuration that names several rules, that
+// none of those rules reads, for a warning, in the manner of
+// OptionIssue.Text for an option that one rule does not read:
+//
+//	unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored
+func UnknownTagOptionText(option, tag string) string {
+	return fmt.Sprintf("unknown option %q for the rules of the tag %q; it is ignored", option, tag)
+}
+
 // quotedChoices quotes each word and joins them as a list in prose.
 func quotedChoices(words []string, conjunction string) string {
 	quoted := make([]string, len(words))

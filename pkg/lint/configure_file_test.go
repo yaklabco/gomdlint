@@ -139,6 +139,82 @@ func TestEngineConfigureFileIgnoresUnknownKeys(t *testing.T) {
 	}, result.Notices[1])
 }
 
+// TestEngineConfigureFileNoticesUnknownOptions covers options that the rule
+// a configure-file key names does not read, which markdownlint ignores, as
+// gomdlint does. Each gets a notice that names the rule as markdownlint
+// names it and offers the closest option names. MD009 still reports.
+func TestEngineConfigureFileNoticesUnknownOptions(t *testing.T) {
+	tests := []struct {
+		name, parameter string
+		want            lint.Notice
+	}{
+		{
+			name: "typo", parameter: `{"MD009": {"br_spcaes": 0}}`,
+			want: lint.Notice{
+				Name: "br_spcaes", Suggestions: []string{"br_spaces"}, Rules: []string{"no-trailing-spaces"},
+				Message: `unknown option "br_spcaes" for no-trailing-spaces (did you mean "br_spaces"?); it is ignored`,
+			},
+		},
+		{
+			name: "markdownlint's name of the rule", parameter: `{"MD009": true, "unordered-list-style": {"styel": "dash"}}`,
+			want: lint.Notice{
+				Name: "styel", Suggestions: []string{"style"}, Rules: []string{"ul-style"},
+				Message: `unknown option "styel" for ul-style (did you mean "style"?); it is ignored`,
+			},
+		},
+		{
+			name: "a rule without options", parameter: `{"MD028": {"strict": true}}`,
+			want: lint.Notice{
+				Name: "strict", Rules: []string{"no-blanks-blockquote"},
+				Message: `unknown option "strict" for no-blanks-blockquote (it has no options); it is ignored`,
+			},
+		},
+		{
+			name: "no rule of a tag reads it", parameter: `{"whitespace": {"br_spaces": 3, "br_spcaes": 0}}`,
+			want: lint.Notice{
+				Name: "br_spcaes",
+				Rules: []string{
+					"no-trailing-spaces", "no-hard-tabs", "no-multiple-blanks", "no-multiple-space-blockquote",
+					"no-blanks-blockquote", "list-marker-space", "no-space-in-emphasis", "no-space-in-code",
+					"no-space-in-links",
+				},
+				Message: `unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lintDefault(t, configuredDoc(tt.parameter))
+
+			want := tt.want
+			want.Kind = lint.NoticeUnknownOption
+			want.Line = 1
+			want.Directive = "markdownlint-configure-file"
+			want.Message = "markdownlint-configure-file: " + want.Message
+			assert.Equal(t, []lint.Notice{want}, result.Notices)
+		})
+	}
+}
+
+// TestEngineConfigureFileUnknownOptionsChangeNothing covers a setting with
+// a known option and an unknown one: markdownlint applies the known one and
+// ignores the other, so the findings are those of the setting without it.
+// markdownlint reports the line of 60 characters with a line length of 40.
+func TestEngineConfigureFileUnknownOptionsChangeNothing(t *testing.T) {
+	document := func(parameter string) string {
+		return "<!-- markdownlint-configure-file " + parameter + " -->\n\n# Title\n\n" +
+			"This line has many words and it keeps going well past forty.\n"
+	}
+	noticed := document(`{"MD013": {"line_length": 40, "lin_length": 100}}`)
+	quiet := document(`{"MD013": {"line_length": 40}}`)
+
+	assert.Contains(t, reportedLines(t, noticed, "MD013"), 5)
+	assert.Equal(t, diagnosticSummary(lintDefault(t, quiet).Diagnostics), diagnosticSummary(lintDefault(t, noticed).Diagnostics))
+	require.Len(t, lintDefault(t, noticed).Notices, 1)
+	assert.Empty(t, lintDefault(t, quiet).Notices)
+}
+
 // TestEngineConfigureFileAppliesTheCommentsItReads covers a file with two
 // configure-file comments, of which markdownlint ignores the first, which
 // it cannot read, and applies the second, which turns MD009 off.

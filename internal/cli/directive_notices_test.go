@@ -274,3 +274,56 @@ func TestLint_MachineFormatsCarryConfigureFileNotices(t *testing.T) {
 		`5: markdownlint-configure-file: unknown rule "MD999"; it is ignored`,
 	}, got)
 }
+
+// TestLint_ConfigureFileUnknownOptionNotice covers an option that the rule
+// a configure-file key names does not read. markdownlint ignores it and
+// applies the rest of the setting, as gomdlint does, and markdownlint-cli2
+// reports the trailing space. gomdlint used to ignore the option without a
+// word. Now it gets a notice with the closest option name, in stderr, JSON
+// and SARIF output, while the findings and the exit code, under --strict
+// too, are those of the same document without the option.
+func TestLint_ConfigureFileUnknownOptionNotice(t *testing.T) {
+	const (
+		noticed = "# Notices\n\n<!-- markdownlint-configure-file {\"MD009\": {\"br_spaces\": 2, \"br_spcaes\": 0}} -->\n\n" +
+			"Trailing space \n"
+		message = `markdownlint-configure-file: unknown option "br_spcaes" for no-trailing-spaces ` +
+			`(did you mean "br_spaces"?); it is ignored`
+	)
+	// The same document without the option, which spaces replace.
+	quiet := strings.Replace(noticed, `, "br_spcaes": 0`, strings.Repeat(" ", len(`, "br_spcaes": 0`)), 1)
+
+	for _, flags := range [][]string{{"--format", "text"}, {"--strict"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			args := append([]string{"lint", "--color", "never"}, append(flags, "doc.md")...)
+
+			inProject(t, map[string]string{"doc.md": quiet})
+			want := execute(t, args...)
+			require.Empty(t, want.stderr)
+
+			inProject(t, map[string]string{"doc.md": noticed})
+			got := execute(t, args...)
+
+			assert.Equal(t, want.code, got.code, "notices never change the exit code")
+			assert.Equal(t, want.stdout, got.stdout, "notices never change the findings")
+			assert.Equal(t, "WARN doc.md:3: "+message+"\n", got.stderr)
+		})
+	}
+
+	inProject(t, map[string]string{"doc.md": noticed})
+	run := execute(t, "lint", "--format", "json", "doc.md")
+	var report struct {
+		Files []struct {
+			Notices []jsonNotice `json:"notices"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(run.stdout), &report), run.stdout)
+	require.Len(t, report.Files, 1)
+	assert.Equal(t, []jsonNotice{{
+		Line: 3, Kind: "unknown-option", Directive: "markdownlint-configure-file", Name: "br_spcaes",
+		Suggestions: []string{"br_spaces"}, Rules: []string{"no-trailing-spaces"}, Message: message,
+	}}, report.Files[0].Notices)
+
+	run = execute(t, "lint", "--format", "sarif", "doc.md")
+	assert.Contains(t, run.stdout, `"toolConfigurationNotifications"`)
+	assert.Contains(t, run.stdout, strings.ReplaceAll(message, `"`, `\"`))
+}
