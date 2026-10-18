@@ -368,17 +368,17 @@ func applyMarkdownlint(path string, opts LoadOptions, result *LoadResult) (*conf
 				path, shellQuote(path, windows), shellQuote(target, windows)))
 	}
 
-	// Only rule settings come from markdownlint; other settings keep the
+	// The translation holds rule settings only, so other settings keep the
 	// values of the layers below.
-	return &config.Config{Rules: converted.Config.Rules, RuleDefaults: converted.Config.RuleDefaults}, nil
+	return converted.Config, nil
 }
 
 // saveMigratedConfig writes a translated markdownlint config to target,
 // refusing to replace an existing file.
 func saveMigratedConfig(converted *MigrationResult, target string) error {
-	content, err := converted.Config.ToYAMLWithHeader(GenerateMigrationHeader(converted.SourcePath))
+	content, err := converted.FileContent(target)
 	if err != nil {
-		return fmt.Errorf("serialize %s: %w", target, err)
+		return err
 	}
 	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, configFilePermissions)
 	if err != nil {

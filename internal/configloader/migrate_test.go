@@ -2,13 +2,18 @@ package configloader
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/rules"
@@ -21,10 +26,9 @@ func lintMigratedMarkdown(t *testing.T, settings, input string) []lint.Diagnosti
 	require.NoError(t, os.WriteFile(path, []byte(settings), 0o600))
 	converted, err := ConvertMarkdownlintConfig(path)
 	require.NoError(t, err)
-	converted.Config.Flavor = config.FlavorGFM
-	yamlConfig, err := converted.Config.ToYAML()
-	require.NoError(t, err)
 	migratedPath := filepath.Join(filepath.Dir(path), ".gomdlint.yml")
+	yamlConfig, err := converted.FileContent(migratedPath)
+	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(migratedPath, yamlConfig, 0o600))
 	loaded, err := Load(context.Background(), LoadOptions{
 		WorkingDir: filepath.Dir(path), ExplicitPath: migratedPath, IgnoreEnv: true,
@@ -349,6 +353,52 @@ func TestMigrationPreservesEnabledRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMigrationFileHoldsOnlyRuleSettings covers the content of a migrated
+// config file, in YAML and in JSON. A markdownlint config sets rules and
+// nothing else, so the file holds rules and rule_defaults only. Any other
+// key, even one at its default value such as ignore: [], would replace the
+// setting of a user or system config. The file loads back to the settings
+// of the migration.
+func TestMigrationFileHoldsOnlyRuleSettings(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			converted := convertSettings(t, `{"MD013": false, "whitespace": {"enabled": false}}`)
+			path := filepath.Join(t.TempDir(), name)
+			content, err := converted.FileContent(path)
+			require.NoError(t, err)
+
+			var keys map[string]any
+			if HoldsJSON(path) {
+				require.NoError(t, json.Unmarshal(content, &keys), string(content))
+			} else {
+				require.NoError(t, yaml.Unmarshal(content, &keys), string(content))
+				assert.True(t, strings.HasPrefix(string(content), GenerateMigrationHeader(converted.SourcePath)))
+			}
+			assert.ElementsMatch(t, []string{"rules", "rule_defaults"}, slices.Collect(maps.Keys(keys)))
+
+			require.NoError(t, os.WriteFile(path, content, 0o600))
+			loaded, warnings, err := loadConfigFile(path)
+			require.NoError(t, err)
+			assert.Empty(t, warnings)
+			assert.Equal(t, enabledStates(converted.Config.Rules), enabledStates(loaded.Rules))
+			assert.Equal(t, enabledStates(converted.Config.RuleDefaults), enabledStates(loaded.RuleDefaults))
+		})
+	}
+}
+
+// enabledStates maps each rule of settings to whether it is enabled.
+func enabledStates(settings map[string]config.RuleConfig) map[string]bool {
+	states := make(map[string]bool, len(settings))
+	for id, rule := range settings {
+		states[id] = rule.Enabled != nil && *rule.Enabled
+	}
+	return states
 }
 
 func TestConvertMarkdownlintConfig_JSON(t *testing.T) {

@@ -17,7 +17,10 @@ import (
 
 // MigrationResult contains the result of converting a markdownlint config.
 type MigrationResult struct {
-	// Config is the converted gomdlint configuration.
+	// Config is the converted gomdlint configuration. It holds rule
+	// settings only, under Rules and RuleDefaults, because that is all a
+	// markdownlint config sets. Every other setting is unset, so that the
+	// layers below it, such as a user config, keep theirs.
 	Config *config.Config
 
 	// Warnings contains non-fatal issues encountered during conversion.
@@ -56,7 +59,7 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 		}
 	}
 
-	cfg := config.NewConfig()
+	cfg := &config.Config{Rules: make(map[string]config.RuleConfig)}
 	var defaultValue any = true
 	if value, ok := raw["default"]; ok {
 		defaultValue = value
@@ -94,6 +97,27 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 
 	result.Config = cfg
 	return result, nil
+}
+
+// FileContent returns the content of a gomdlint config file at path that
+// holds the converted settings: JSON for a name that ends in .json, which
+// lint reads as JSON, and otherwise YAML under a header that names the
+// source file. The file holds the rule settings alone, under rules and
+// rule_defaults, so a user or system config still sets everything else,
+// such as ignore patterns and the flavor.
+func (r *MigrationResult) FileContent(path string) ([]byte, error) {
+	if HoldsJSON(path) {
+		content, err := r.Config.RuleSettingsToJSON()
+		if err != nil {
+			return nil, fmt.Errorf("serialize %s: %w", path, err)
+		}
+		return content, nil
+	}
+	content, err := r.Config.RuleSettingsToYAML(GenerateMigrationHeader(r.SourcePath))
+	if err != nil {
+		return nil, fmt.Errorf("serialize %s: %w", path, err)
+	}
+	return content, nil
 }
 
 // parseJSONC parses JSON with comments (JSONC format).
