@@ -8,7 +8,7 @@ no-trailing-spaces                warning   yes      Outside code blocks, no lin
 no-hard-tabs                      warning   yes      Lines contain no tab characters, including inside code.
 no-reversed-links                 warning   yes      Inline links put the text in brackets and the URL in parentheses: [text](url).
 no-multiple-blank-lines           warning   yes      Outside code, no two blank lines follow each other.
-line-length                       warning   yes      Lines fit in 80 characters, except lone links, definitions and long last words.
+line-length                       warning   yes      Lines fit in 80 characters, with exemptions such as lone links and definitions.
 commands-show-output              warning   yes      Code blocks that show only commands leave out the $ prompt.
 no-missing-space-atx              warning   yes      A space follows the # marks that open a heading.
 no-multiple-space-atx             warning   yes      Only one space follows the # marks that open a heading.
@@ -34,18 +34,18 @@ no-space-in-code                  warning   yes      Code span text has no space
 no-space-in-links                 warning   yes      Link text has no spaces just inside its brackets.
 fenced-code-language              warning   yes      Fenced code blocks name their language after the opening fence.
 first-line-heading                warning   no       The file starts with a top-level heading or a front matter title.
-no-empty-links                    warning   no       Every link has a destination that is not empty or just #.
+no-empty-links                    warning   no       Inline links have a destination, and no link points at just #.
 required-headings                 warning   no       Headings follow the configured outline in order. No outline is set by default.
 proper-names                      warning   yes      Proper names match the capitals in the configured list, empty by default.
 no-alt-text                       warning   no       Markdown images have alt text, and HTML images have alt or aria-hidden="true".
 code-block-style                  warning   no       Code blocks all use the first block's style, fenced or indented.
-single-trailing-newline           warning   yes      The file ends with a newline character.
+single-trailing-newline           warning   yes      The file ends with a newline, or a last line of only spaces, > or comments.
 code-fence-style                  warning   yes      Code fences all use the first fence's character, backtick or tilde.
-emphasis-style                    warning   yes      All italic text uses one marker, either *text* or _text_.
-strong-style                      warning   yes      All bold text uses one marker, either **text** or __text__.
+emphasis-style                    warning   yes      All italic text uses one marker, *text* or _text_, except * inside a word.
+strong-style                      warning   yes      All bold text uses one marker, **text** or __text__, except ** inside a word.
 link-fragments                    warning   no       Links to a #fragment point at a heading or anchor in the same file.
-reference-links-images            warning   no       Reference links and images use labels that are defined.
-link-image-reference-definitions  warning   yes      Every reference definition is used, and each label is defined once.
+reference-links-images            warning   no       Labels in [text][label] and [label][] references are defined, except x.
+link-image-reference-definitions  warning   yes      Every reference definition is used and defined once, except [//] comments.
 link-image-style                  warning   no       Links and images use only the allowed styles. By default, all are allowed.
 table-pipe-style                  warning   no       Table rows use leading and trailing pipes the same way throughout.
 table-column-count                warning   no       Every table row has as many cells as the header row.

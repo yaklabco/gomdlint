@@ -14,16 +14,18 @@ func emphasisCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD049", Name: "emphasis-style", Tags: []string{"emphasis"}, Fixable: true,
-			Description: "All italic text uses one marker, either *text* or _text_.",
-			Rationale:   "One italic marker throughout makes the source easier to read.",
+			Description: "All italic text uses one marker, *text* or _text_, except * inside a word.",
+			Rationale: "One italic marker throughout makes the source easier to read. " +
+				"Underscores do not mark emphasis inside a word, so * stays allowed there.",
 			Fix: "The fix swaps the markers. gomdlint reports italic text without a fix " +
 				"when the new marker could pair with characters around it, as in *snake_case*. " +
 				"It does the same inside square brackets that are, or could become, the label of a reference link.",
 		},
 		{
 			ID: "MD050", Name: "strong-style", Tags: []string{"emphasis"}, Fixable: true,
-			Description: "All bold text uses one marker, either **text** or __text__.",
-			Rationale:   "One bold marker throughout makes the source easier to read.",
+			Description: "All bold text uses one marker, **text** or __text__, except ** inside a word.",
+			Rationale: "One bold marker throughout makes the source easier to read. " +
+				"Underscores do not mark emphasis inside a word, so ** stays allowed there.",
 			Fix: "The fix swaps the markers. gomdlint reports bold text without a fix " +
 				"when the new marker could pair with characters around it, as in **snake_case**. " +
 				"It does the same inside square brackets that are, or could become, the label of a reference link.",

@@ -335,8 +335,11 @@ type catalogFinding struct {
 }
 
 // TestCatalogTextsHoldForTheRules lints, with the built-in rules and their
-// default options, inputs that pin claims the catalog texts make, so that a
-// text fails here when its rule stops behaving as it says.
+// default options, inputs that pin claims the catalog texts make. Each case
+// names a phrase that the rule's description, rationale or fix text must
+// contain, and the findings that the claim behind the phrase predicts. A
+// text fails here when its rule stops behaving as it says, and when it
+// drops the phrase that states the behaviour, such as an exemption.
 func TestCatalogTextsHoldForTheRules(t *testing.T) {
 	// long has spaces past column 80, and short leaves room for a long last
 	// word that ends past it.
@@ -346,80 +349,174 @@ func TestCatalogTextsHoldForTheRules(t *testing.T) {
 	)
 	tests := []struct {
 		id, name, input string
-		want            []catalogFinding
+		// phrase is text that the rule's catalog texts state the pinned
+		// behaviour with.
+		phrase string
+		want   []catalogFinding
 		// fixText is the text that the rule's fix inserts, when the case
 		// pins it.
 		fixText string
 	}{
 		// MD007 checks bullets outside ordered lists.
-		{id: "MD007", name: "bullet under an ordered item", input: "# Title\n\n1. Parent\n   - Child\n"},
-		{id: "MD007", name: "bullet under a bullet", input: "# Title\n\n- Parent\n   - Child\n", want: []catalogFinding{{4, true}}},
+		{id: "MD007", name: "bullet under an ordered item", phrase: "Outside ordered lists", input: "# Title\n\n1. Parent\n   - Child\n"},
+		{
+			id: "MD007", name: "bullet under a bullet", phrase: "indent 2 spaces per level", want: []catalogFinding{{4, true}},
+			input: "# Title\n\n- Parent\n   - Child\n",
+		},
 
 		// MD009 leaves code blocks alone.
-		{id: "MD009", name: "trailing spaces in a code block", input: "# Title\n\n```text\ncode  \nmore   \n```\n"},
-		{id: "MD009", name: "trailing space in text", input: "# Title\n\nText \n", want: []catalogFinding{{3, true}}},
+		{id: "MD009", name: "trailing spaces in a code block", phrase: "Outside code blocks", input: "# Title\n\n```text\ncode  \nmore   \n```\n"},
+		{id: "MD009", name: "trailing space in text", phrase: "deletes the trailing whitespace", input: "# Title\n\nText \n", want: []catalogFinding{{3, true}}},
 
 		// keepSafeFixes keeps no fix in a document with raw HTML other than
 		// comments and plain br, wbr, hr or img tags.
 		{
-			id: "MD009", name: "HTML block elsewhere", want: []catalogFinding{{3, false}},
+			id: "MD009", name: "HTML block elsewhere", phrase: noFixWithRawHTML, want: []catalogFinding{{3, false}},
 			input: "# Title\n\nText \n\n<details>\n<summary>More</summary>\n</details>\n",
 		},
-		{id: "MD012", name: "inline HTML elsewhere", input: "# Title\n\n\n\nPress <kbd>Ctrl</kbd>.\n", want: []catalogFinding{{3, false}}},
-		{id: "MD012", name: "no HTML", input: "# Title\n\n\n\nPress Ctrl.\n", want: []catalogFinding{{3, true}}},
-		{id: "MD047", name: "HTML block", input: "# Title\n\n<details>\n<summary>More</summary>\n</details>", want: []catalogFinding{{5, false}}},
-		{id: "MD047", name: "comment and br", input: "# Title\n\nA<br>b <!-- note -->", want: []catalogFinding{{3, true}}},
+		{
+			id: "MD012", name: "inline HTML elsewhere", phrase: noFixWithRawHTML, want: []catalogFinding{{3, false}},
+			input: "# Title\n\n\n\nPress <kbd>Ctrl</kbd>.\n",
+		},
+		{id: "MD012", name: "no HTML", phrase: "deletes the extra blank lines", input: "# Title\n\n\n\nPress Ctrl.\n", want: []catalogFinding{{3, true}}},
+		{
+			id: "MD047", name: "HTML block", phrase: noFixWithRawHTML, want: []catalogFinding{{5, false}},
+			input: "# Title\n\n<details>\n<summary>More</summary>\n</details>",
+		},
+		{id: "MD047", name: "comment and br", phrase: "other than comments and plain br", input: "# Title\n\nA<br>b <!-- note -->\nEnd", want: []catalogFinding{{4, true}}},
+
+		// MD047 asks for a last line that counts as blank, not for a final
+		// newline byte.
+		{id: "MD047", name: "last line of text", phrase: "ends with a newline", input: "# Title\n\nText.", want: []catalogFinding{{3, true}}},
+		{id: "MD047", name: "last line of spaces", phrase: "a last line of only spaces", input: "# Title\n\nText.\n "},
+		{id: "MD047", name: "last line holding a comment", phrase: "or comments", input: "# Title\n\nText.\n<!-- end -->"},
+		{id: "MD047", name: "last line holding a quote marker", phrase: "only spaces, > or comments", input: "# Title\n\n> Quote.\n>"},
 
 		// MD011 checks inline links.
 		{
-			id: "MD011", name: "reference link and autolink",
+			id: "MD011", name: "reference link and autolink", phrase: "Inline links",
 			input: "# Title\n\nSee [text][ref] and <https://example.com>.\n\n[ref]: https://example.com\n",
 		},
-		{id: "MD011", name: "reversed inline link", input: "# Title\n\nSee (text)[https://example.com].\n", want: []catalogFinding{{3, true}}},
+		{
+			id: "MD011", name: "reversed inline link", phrase: "swaps the two parts", want: []catalogFinding{{3, true}},
+			input: "# Title\n\nSee (text)[https://example.com].\n",
+		},
+
+		// MD042 asks inline links for a destination, and every link for more
+		// than #.
+		{id: "MD042", name: "empty inline destination", phrase: "Inline links have a destination", input: "# Title\n\nSee [text]().\n", want: []catalogFinding{{3, false}}},
+		{
+			id: "MD042", name: "reference to an empty definition", phrase: "Inline links have a destination",
+			input: "# Title\n\nSee [text][ref].\n\n[ref]: <>\n",
+		},
+		{
+			id: "MD042", name: "reference to a bare fragment", phrase: "no link points at just #", want: []catalogFinding{{3, false}},
+			input: "# Title\n\nSee [text][ref].\n\n[ref]: #\n",
+		},
 
 		// MD045 asks Markdown images for alt text, and HTML images for alt,
 		// even empty, or aria-hidden="true".
 		{
-			id: "MD045", name: "images", want: []catalogFinding{{7, false}, {9, false}},
+			id: "MD045", name: "images", phrase: "aria-hidden=\"true\"", want: []catalogFinding{{7, false}, {9, false}},
 			input: "# Title\n\n<img src=\"a.png\" alt=\"\">\n\n<img src=\"b.png\" aria-hidden=\"true\">\n\n" +
 				"<img src=\"c.png\">\n\n![](d.png) and ![ok](e.png)\n",
 		},
 
-		// MD013 exempts lone links, definitions and a long last word.
-		{id: "MD013", name: "lone link", input: "# Title\n\n[" + long + "](https://example.com/page)\n"},
-		{id: "MD013", name: "definition with a title", input: "# Title\n\nSee [x].\n\n[x]: https://example.com/page \"" + long + "\"\n"},
-		{id: "MD013", name: "long last word", input: "# Title\n\n" + short + " https://example.com/a-path-that-runs-past-the-limit\n"},
-		{id: "MD013", name: "paragraph line", input: "# Title\n\n" + long + "\n", want: []catalogFinding{{3, true}}},
-		{id: "MD013", name: "heading", input: "# Title\n\n## " + long + "\n", want: []catalogFinding{{3, false}}},
+		// MD052 checks full and collapsed references, not shortcuts, and
+		// ignores the label x.
+		{
+			id: "MD052", name: "shortcut references", phrase: "Shortcut references such as [label] are not checked",
+			input: "# Title\n\nSee [missing] and ![missing].\n",
+		},
+		{id: "MD052", name: "label x", phrase: "except x", input: "# Title\n\nSee [text][x].\n"},
+		{
+			id: "MD052", name: "full and collapsed references", phrase: "[text][label] and [label][]",
+			input: "# Title\n\nSee [text][nope] and [nope][].\n", want: []catalogFinding{{3, false}, {3, false}},
+		},
+
+		// MD053 ignores definitions labeled //.
+		{id: "MD053", name: "comment definition", phrase: "except [//] comments", input: "# Title\n\nText.\n\n[//]: # (note)\n"},
+
+		// MD013 exempts lone links and images, definitions and a long last
+		// word, and its fix leaves headings alone.
+		{id: "MD013", name: "lone link", phrase: "only a link or an image", input: "# Title\n\n[" + long + "](https://example.com/page)\n"},
+		{id: "MD013", name: "lone image", phrase: "only a link or an image", input: "# Title\n\n![" + long + "](image.png)\n"},
+		{
+			id: "MD013", name: "definition with a title", phrase: "reference definitions",
+			input: "# Title\n\nSee [x].\n\n[x]: https://example.com/page \"" + long + "\"\n",
+		},
+		{
+			id: "MD013", name: "long last word", phrase: "only overflow is the last word",
+			input: "# Title\n\n" + short + " https://example.com/a-path-that-runs-past-the-limit\n",
+		},
+		{id: "MD013", name: "paragraph line", phrase: "wraps long paragraph lines", input: "# Title\n\n" + long + "\n", want: []catalogFinding{{3, true}}},
+		{id: "MD013", name: "heading", phrase: "when it is a heading", input: "# Title\n\n## " + long + "\n", want: []catalogFinding{{3, false}}},
 
 		// MD038 allows one space on each side and a space beside a backtick.
-		{id: "MD038", name: "allowed padding", input: "# Title\n\nUse `` `foo`` and `   ` and ` code ` here.\n"},
-		{id: "MD038", name: "one-sided space", input: "# Title\n\nUse ` code` here.\n", want: []catalogFinding{{3, true}}},
+		{id: "MD038", name: "allowed padding", phrase: "except one each side or by a backtick", input: "# Title\n\nUse `` `foo`` and `   ` and ` code ` here.\n"},
+		{id: "MD038", name: "one-sided space", phrase: "deletes the extra spaces", input: "# Title\n\nUse ` code` here.\n", want: []catalogFinding{{3, true}}},
 
 		// MDL001 ignores fragment links.
-		{id: "MDL001", name: "fragment link", input: "# Title\n\nSee [a](docs/a.md) and [top](#title).\n"},
-		{id: "MDL001", name: "mixed kinds", input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n", want: []catalogFinding{{3, false}}},
+		{id: "MDL001", name: "fragment link", phrase: "other than #fragment links", input: "# Title\n\nSee [a](docs/a.md) and [top](#title).\n"},
+		{
+			id: "MDL001", name: "mixed kinds", phrase: "all relative or all absolute", want: []catalogFinding{{3, false}},
+			input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n",
+		},
 
-		// Findings that fix texts name as reported without a fix.
-		{id: "MD027", name: "quoted item with a second paragraph", input: "# Title\n\n>   - item\n>\n>     second paragraph\n", want: []catalogFinding{{3, false}}},
-		{id: "MD049", name: "italic in a reference label", input: "# Title\n\n_first_ [*second*]\n\n[*second*]: /target\n", want: []catalogFinding{{3, false}}},
-		{id: "MD050", name: "bold in a reference label", input: "# Title\n\n__first__ [**second**]\n\n[**second**]: /target\n", want: []catalogFinding{{3, false}}},
-		{id: "MD053", name: "text after the definition", input: "# Title\n\n[unused]: /target\nParagraph.\n", want: []catalogFinding{{3, false}}},
-		{id: "MD053", name: "blank line after the definition", input: "# Title\n\n[unused]: /target\n\nParagraph.\n", want: []catalogFinding{{3, true}}},
+		// MD049 and MD050 allow asterisks inside a word, which underscores
+		// cannot replace, and hold back fixes in reference labels.
+		{id: "MD049", name: "asterisks inside a word", phrase: "except * inside a word", input: "# Title\n\n_one_ a*two*b\n"},
+		{id: "MD050", name: "asterisks inside a word", phrase: "except ** inside a word", input: "# Title\n\n__one__ a**two**b\n"},
+		{
+			id: "MD049", name: "italic in a reference label", phrase: "the label of a reference link", want: []catalogFinding{{3, false}},
+			input: "# Title\n\n_first_ [*second*]\n\n[*second*]: /target\n",
+		},
+		{
+			id: "MD050", name: "bold in a reference label", phrase: "the label of a reference link", want: []catalogFinding{{3, false}},
+			input: "# Title\n\n__first__ [**second**]\n\n[**second**]: /target\n",
+		},
+
+		// Other findings that fix texts name as reported without a fix.
+		{
+			id: "MD027", name: "quoted item with a second paragraph", phrase: "a list item that holds a second paragraph",
+			input: "# Title\n\n>   - item\n>\n>     second paragraph\n", want: []catalogFinding{{3, false}},
+		},
+		{
+			id: "MD053", name: "text after the definition", phrase: "other text follows it on the next line",
+			input: "# Title\n\n[unused]: /target\nParagraph.\n", want: []catalogFinding{{3, false}},
+		},
+		{
+			id: "MD053", name: "blank line after the definition", phrase: "deletes the unused or duplicate definition",
+			input: "# Title\n\n[unused]: /target\n\nParagraph.\n", want: []catalogFinding{{3, true}},
+		},
 
 		// MD036 makes a bold line a heading one level deeper than the one
 		// above it, at most level 6, or level 2 with none above, and never
 		// fixes an italic line.
-		{id: "MD036", name: "no heading above", input: "**Bold line**\n\nText.\n", want: []catalogFinding{{1, true}}, fixText: "## Bold line"},
 		{
-			id: "MD036", name: "level 6 above", want: []catalogFinding{{5, true}}, fixText: "###### Bold line",
+			id: "MD036", name: "no heading above", phrase: "With no heading above, it uses level 2",
+			input: "**Bold line**\n\nText.\n", want: []catalogFinding{{1, true}}, fixText: "## Bold line",
+		},
+		{
+			id: "MD036", name: "level 6 above", phrase: "at most level 6", want: []catalogFinding{{5, true}}, fixText: "###### Bold line",
 			input: "# One\n\n###### Six\n\n**Bold line**\n\nText.\n",
 		},
-		{id: "MD036", name: "italic line", input: "# Title\n\n*Italic line*\n\nText.\n", want: []catalogFinding{{3, false}}},
+		{
+			id: "MD036", name: "italic line", phrase: "reports italic lines without a fix",
+			input: "# Title\n\n*Italic line*\n\nText.\n", want: []catalogFinding{{3, false}},
+		},
+	}
+
+	texts := make(map[string]string) // rule ID -> description, rationale and fix text
+	for _, meta := range Catalog() {
+		texts[meta.ID] = meta.Description + " " + meta.Rationale + " " + meta.Fix
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.id+" "+tt.name, func(t *testing.T) {
+			require.NotEmpty(t, tt.phrase, "each case names the phrase it pins")
+			assert.Contains(t, texts[tt.id], tt.phrase, "the texts of %s state the behaviour this case pins", tt.id)
+
 			diags := lintWithDefaultRules(t, tt.input, config.NewConfig())
 
 			var got []catalogFinding

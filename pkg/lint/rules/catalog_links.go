@@ -28,7 +28,7 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD042", Name: "no-empty-links", Tags: []string{"links"},
-			Description: "Every link has a destination that is not empty or just #.",
+			Description: "Inline links have a destination, and no link points at just #.",
 			Rationale:   "An empty link looks clickable but leads nowhere.",
 			Fix:         "There is no automatic fix. Only the author knows where the link should go.",
 		},
@@ -48,15 +48,18 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD052", Name: "reference-links-images", Tags: []string{"images", "links"},
-			Description: "Reference links and images use labels that are defined.",
-			Rationale:   "A reference with an undefined label renders as plain text in brackets.",
-			Fix:         "There is no automatic fix. Only the author knows the missing destination.",
+			Description: "Labels in [text][label] and [label][] references are defined, except x.",
+			Rationale: "A reference with an undefined label renders as plain text in brackets. " +
+				"Shortcut references such as [label] are not checked, because plain text in brackets looks the same. " +
+				"The label x is ignored because task lists use [x].",
+			Fix: "There is no automatic fix. Only the author knows the missing destination.",
 		},
 		{
 			ID: "MD053", Name: "link-image-reference-definitions", Tags: []string{"images", "links"}, Fixable: true,
-			Description: "Every reference definition is used, and each label is defined once.",
+			Description: "Every reference definition is used and defined once, except [//] comments.",
 			Rationale: "Definitions render nothing, so an unused one is dead text. " +
-				"Only the first of duplicate definitions takes effect, so the others change nothing.",
+				"Only the first of duplicate definitions takes effect, so the others change nothing. " +
+				"A definition labeled //, as in [//]: # (note), is a common way to write a comment, so it is ignored.",
 			Fix: "The fix deletes the unused or duplicate definition. " +
 				"gomdlint reports a definition without a fix when other text follows it on the next line.",
 		},

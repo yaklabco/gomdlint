@@ -30,10 +30,11 @@ func layoutCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD013", Name: "line-length", Tags: []string{"line_length"}, Fixable: true,
-			Description: "Lines fit in 80 characters, except lone links, definitions and long last words.",
+			Description: "Lines fit in 80 characters, with exemptions such as lone links and definitions.",
 			Rationale: "Long lines are hard to work with in some editors. Diffs of short lines are also easier to read. " +
-				"Reference definitions, lines that hold only a link, and a long last word such as a URL are exempt, " +
-				"because they often cannot be split without breaking a URL.",
+				"The exemptions are reference definitions, lines that hold only a link or an image, " +
+				"and lines whose only overflow is the last word, such as a URL. " +
+				"They often cannot be split without breaking a URL.",
 			Fix: "The fix wraps long paragraph lines at spaces. gomdlint reports a line without a fix " +
 				"when it is a heading, a table row or code, or when no break point is safe. " + noFixWithRawHTML,
 		},
@@ -46,9 +47,10 @@ func layoutCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD047", Name: "single-trailing-newline", Tags: []string{"blank_lines"}, Fixable: true,
-			Description: "The file ends with a newline character.",
-			Rationale:   "Some programs mishandle a last line that has no newline.",
-			Fix:         "The fix adds a newline at the end of the file. " + noFixWithRawHTML,
+			Description: "The file ends with a newline, or a last line of only spaces, > or comments.",
+			Rationale: "Some programs mishandle a last line that has no newline. " +
+				"A last line with only spaces, > or a comment counts as blank, as in markdownlint.",
+			Fix: "The fix adds a newline at the end of the file. " + noFixWithRawHTML,
 		},
 	}
 }
