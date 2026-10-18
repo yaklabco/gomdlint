@@ -37,7 +37,7 @@ func headingsCatalog() []lint.RuleMeta {
 			Description: "A closed heading has a space inside each run of #, as in # Title #.",
 			Rationale:   "Without the spaces, the closing # marks show as heading text, or the line is not a heading at all.",
 			Fix: "The fix inserts the missing spaces. gomdlint reports the line without a fix " +
-				"when the document may link to heading anchors, because the fix adds or changes an anchor.",
+				"when the document may link to heading anchors, because the fix may add or change an anchor.",
 		},
 		{
 			ID: "MD021", Name: "no-multiple-space-closed-atx", Tags: []string{"headings", "atx_closed", "spaces"}, Fixable: true,
@@ -78,14 +78,15 @@ func headingsCatalog() []lint.RuleMeta {
 			Description: "Headings do not end with a period, comma, semicolon, colon or exclamation mark.",
 			Rationale:   "Headings are not full sentences, so they need no closing punctuation.",
 			Fix: "The fix deletes the trailing punctuation. gomdlint reports a heading without a fix " +
-				"when the document may link to heading anchors, because the fix changes the heading's anchor.",
+				"when the document may link to heading anchors, because the fix may change the heading's anchor.",
 		},
 		{
 			ID: "MD036", Name: "no-emphasis-as-heading", Tags: []string{"headings", "emphasis"}, Fixable: true,
 			Description: "A line of only bold or italic text does not stand in for a heading.",
 			Rationale: "Tools read a document's structure from its headings, " +
 				"so they miss a section that starts with emphasized text instead.",
-			Fix: "The fix turns a bold line into a heading one level deeper than the heading above it. " +
+			Fix: "The fix turns a bold line into a heading one level deeper than the heading above it, " +
+				"at most level 6. With no heading above, it uses level 2. " +
 				"gomdlint reports italic lines without a fix. It holds back the fix for bold lines too " +
 				"when the document may link to heading anchors.",
 		},

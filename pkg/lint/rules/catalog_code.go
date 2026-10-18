@@ -19,9 +19,11 @@ func codeCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD038", Name: "no-space-in-code", Tags: []string{"whitespace", "code"}, Fixable: true,
-			Description: "Code spans have no space inside the backticks, or one space on each side.",
-			Rationale:   "Extra spaces are usually accidental, and they can change how the code renders.",
-			Fix:         "The fix deletes the extra spaces.",
+			Description: "Code span text has no spaces around it, except one each side or by a backtick.",
+			Rationale: "Extra spaces are usually accidental, and they can change how the code renders. " +
+				"One space on each side is padding that renderers remove, " +
+				"and a space beside a backtick in the code keeps it apart from the delimiter.",
+			Fix: "The fix deletes the extra spaces.",
 		},
 		{
 			ID: "MD040", Name: "fenced-code-language", Tags: []string{"code", "language"}, Fixable: true,

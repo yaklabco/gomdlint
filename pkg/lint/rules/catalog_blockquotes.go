@@ -10,7 +10,8 @@ func blockquotesCatalog() []lint.RuleMeta {
 			Description: "At most one space follows the > of a blockquote.",
 			Rationale: "Extra spaces after > make the quote harder to read. " +
 				"At the start of a block, five spaces after > make an indented code block.",
-			Fix: "The fix deletes the extra spaces. gomdlint reports fence lines and HTML lines inside the quote without a fix.",
+			Fix: "The fix deletes the extra spaces. gomdlint reports fence lines and HTML lines inside the quote without a fix. " +
+				"The same goes for a list item that holds a second paragraph, code or a quote. " + noFixWithRawHTML,
 		},
 		{
 			ID: "MD028", Name: "no-blanks-blockquote", Tags: []string{"blockquote", "whitespace"},

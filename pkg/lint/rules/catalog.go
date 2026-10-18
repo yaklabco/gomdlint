@@ -7,6 +7,13 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
+// noFixWithRawHTML ends the fix text of every rule whose fixes keepSafeFixes
+// checks. That check keeps no fix in a document with raw HTML that it cannot
+// model, which is any raw HTML other than whitespace, well-formed comments
+// and the start tags of br, wbr, hr and img with a few plain attributes.
+const noFixWithRawHTML = "In a document with raw HTML other than comments and plain br, wbr, hr or img tags, " +
+	"gomdlint reports every finding without a fix."
+
 // catalogSection is the part of the catalog that one catalog_<category>.go
 // file lists.
 type catalogSection struct {

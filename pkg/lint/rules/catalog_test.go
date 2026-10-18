@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
@@ -250,34 +251,48 @@ func assertPlainProse(t *testing.T, field, text string) {
 // with no automatic fix. A fixing rule describes its fix instead, and names
 // the findings a user can expect it to report without a fix, leaving out
 // rare edge cases. Every fix also passes shared checks that parse the fixed
-// document. The texts name those checks only where they hold back most of a
-// rule's fixes, as the heading-anchor check does for MD018, MD020, MD026 and
-// MD036.
+// document. The texts name those checks where they hold back whole classes
+// of fixes: the heading-anchor check for MD018, MD020, MD026 and MD036, and
+// the raw HTML check of keepSafeFixes for every rule that uses it.
 func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
+	// rawHTMLChecked lists the rules whose fixes keepSafeFixes checks, so
+	// that raw HTML it cannot model anywhere in a document holds back all of
+	// their fixes.
+	rawHTMLChecked := map[string]bool{
+		"MD004": true, "MD005": true, "MD007": true, "MD009": true, "MD010": true, "MD012": true,
+		"MD013": true, "MD027": true, "MD029": true, "MD030": true, "MD032": true, "MD047": true,
+	}
+
 	// partialFixes lists the fixing rules that report findings a user can
-	// expect to meet without a fix.
+	// expect to meet without a fix. The rules in rawHTMLChecked are among
+	// them, and the comments give each rule's other reasons.
 	partialFixes := map[string]bool{
 		"MD003": true, // Underlined headings are never converted.
 		"MD004": true, // A marker change that would merge two lists.
 		"MD005": true, // Bullet items, and items with more than one paragraph.
 		"MD007": true, // Items with more than one paragraph.
+		"MD009": true, // Raw HTML only.
 		"MD010": true, // Tabs inside code are reported and never replaced.
+		"MD012": true, // Raw HTML only.
 		"MD013": true, // Only some long lines can be wrapped safely.
 		"MD018": true, // A new heading may break links to heading anchors.
 		"MD020": true, // A changed heading may break links to heading anchors.
 		"MD026": true, // A changed heading may break links to heading anchors.
-		"MD027": true, // Fence and HTML lines inside a quote.
+		"MD027": true, // Fence and HTML lines, and items with more than one paragraph.
 		"MD029": true, // A list that starts at a wrong number is not renumbered.
 		"MD030": true, // Items with more than one paragraph.
+		"MD032": true, // Raw HTML only.
 		"MD034": true, // Only some bare URLs can be wrapped safely.
 		"MD035": true, // A dash rule under a paragraph would make a heading.
 		"MD036": true, // Only some emphasized lines can become headings.
 		"MD037": true, // Markers that may be meant literally.
 		"MD040": true, // Only a language the code proves is inserted.
 		"MD044": true, // Names inside raw HTML.
+		"MD047": true, // Raw HTML only.
 		"MD048": true, // A new fence that would end the block early.
-		"MD049": true, // A new marker that could pair with nearby characters.
-		"MD050": true, // A new marker that could pair with nearby characters.
+		"MD049": true, // A new marker that could pair with nearby characters, or a reference label.
+		"MD050": true, // A new marker that could pair with nearby characters, or a reference label.
+		"MD053": true, // Text on the line after the definition.
 	}
 
 	fixing := make(map[string]bool)
@@ -287,8 +302,14 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 	for id := range partialFixes {
 		assert.True(t, fixing[id], "partialFixes lists %s, which is not a fixing rule in the catalog", id)
 	}
+	for id := range rawHTMLChecked {
+		assert.True(t, partialFixes[id], "rawHTMLChecked lists %s, which partialFixes leaves out", id)
+	}
 
 	for _, meta := range Catalog() {
+		assert.Equal(t, rawHTMLChecked[meta.ID], strings.HasSuffix(meta.Fix, " "+noFixWithRawHTML),
+			"%s: the fix text ends with the raw HTML sentence exactly when keepSafeFixes checks the rule's fixes: %q", meta.ID, meta.Fix)
+
 		if !meta.Fixable {
 			assert.True(t, strings.HasPrefix(meta.Fix, noAutomaticFix),
 				"%s: a rule without a fix says that it only reports: %q", meta.ID, meta.Fix)
@@ -303,5 +324,119 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 			assert.NotContains(t, meta.Fix, reportsWithoutFix,
 				"%s: a rule missing from partialFixes fixes every finding it can: %q", meta.ID, meta.Fix)
 		}
+	}
+}
+
+// catalogFinding is a finding of one rule, by line and by whether it
+// carries a fix.
+type catalogFinding struct {
+	line  int
+	fixed bool
+}
+
+// TestCatalogTextsHoldForTheRules lints, with the built-in rules and their
+// default options, inputs that pin claims the catalog texts make, so that a
+// text fails here when its rule stops behaving as it says.
+func TestCatalogTextsHoldForTheRules(t *testing.T) {
+	// long has spaces past column 80, and short leaves room for a long last
+	// word that ends past it.
+	const (
+		long  = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp qqq rrr sss ttt uuu vvv"
+		short = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp"
+	)
+	tests := []struct {
+		id, name, input string
+		want            []catalogFinding
+		// fixText is the text that the rule's fix inserts, when the case
+		// pins it.
+		fixText string
+	}{
+		// MD007 checks bullets outside ordered lists.
+		{id: "MD007", name: "bullet under an ordered item", input: "# Title\n\n1. Parent\n   - Child\n"},
+		{id: "MD007", name: "bullet under a bullet", input: "# Title\n\n- Parent\n   - Child\n", want: []catalogFinding{{4, true}}},
+
+		// MD009 leaves code blocks alone.
+		{id: "MD009", name: "trailing spaces in a code block", input: "# Title\n\n```text\ncode  \nmore   \n```\n"},
+		{id: "MD009", name: "trailing space in text", input: "# Title\n\nText \n", want: []catalogFinding{{3, true}}},
+
+		// keepSafeFixes keeps no fix in a document with raw HTML other than
+		// comments and plain br, wbr, hr or img tags.
+		{
+			id: "MD009", name: "HTML block elsewhere", want: []catalogFinding{{3, false}},
+			input: "# Title\n\nText \n\n<details>\n<summary>More</summary>\n</details>\n",
+		},
+		{id: "MD012", name: "inline HTML elsewhere", input: "# Title\n\n\n\nPress <kbd>Ctrl</kbd>.\n", want: []catalogFinding{{3, false}}},
+		{id: "MD012", name: "no HTML", input: "# Title\n\n\n\nPress Ctrl.\n", want: []catalogFinding{{3, true}}},
+		{id: "MD047", name: "HTML block", input: "# Title\n\n<details>\n<summary>More</summary>\n</details>", want: []catalogFinding{{5, false}}},
+		{id: "MD047", name: "comment and br", input: "# Title\n\nA<br>b <!-- note -->", want: []catalogFinding{{3, true}}},
+
+		// MD011 checks inline links.
+		{
+			id: "MD011", name: "reference link and autolink",
+			input: "# Title\n\nSee [text][ref] and <https://example.com>.\n\n[ref]: https://example.com\n",
+		},
+		{id: "MD011", name: "reversed inline link", input: "# Title\n\nSee (text)[https://example.com].\n", want: []catalogFinding{{3, true}}},
+
+		// MD045 asks Markdown images for alt text, and HTML images for alt,
+		// even empty, or aria-hidden="true".
+		{
+			id: "MD045", name: "images", want: []catalogFinding{{7, false}, {9, false}},
+			input: "# Title\n\n<img src=\"a.png\" alt=\"\">\n\n<img src=\"b.png\" aria-hidden=\"true\">\n\n" +
+				"<img src=\"c.png\">\n\n![](d.png) and ![ok](e.png)\n",
+		},
+
+		// MD013 exempts lone links, definitions and a long last word.
+		{id: "MD013", name: "lone link", input: "# Title\n\n[" + long + "](https://example.com/page)\n"},
+		{id: "MD013", name: "definition with a title", input: "# Title\n\nSee [x].\n\n[x]: https://example.com/page \"" + long + "\"\n"},
+		{id: "MD013", name: "long last word", input: "# Title\n\n" + short + " https://example.com/a-path-that-runs-past-the-limit\n"},
+		{id: "MD013", name: "paragraph line", input: "# Title\n\n" + long + "\n", want: []catalogFinding{{3, true}}},
+		{id: "MD013", name: "heading", input: "# Title\n\n## " + long + "\n", want: []catalogFinding{{3, false}}},
+
+		// MD038 allows one space on each side and a space beside a backtick.
+		{id: "MD038", name: "allowed padding", input: "# Title\n\nUse `` `foo`` and `   ` and ` code ` here.\n"},
+		{id: "MD038", name: "one-sided space", input: "# Title\n\nUse ` code` here.\n", want: []catalogFinding{{3, true}}},
+
+		// MDL001 ignores fragment links.
+		{id: "MDL001", name: "fragment link", input: "# Title\n\nSee [a](docs/a.md) and [top](#title).\n"},
+		{id: "MDL001", name: "mixed kinds", input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n", want: []catalogFinding{{3, false}}},
+
+		// Findings that fix texts name as reported without a fix.
+		{id: "MD027", name: "quoted item with a second paragraph", input: "# Title\n\n>   - item\n>\n>     second paragraph\n", want: []catalogFinding{{3, false}}},
+		{id: "MD049", name: "italic in a reference label", input: "# Title\n\n_first_ [*second*]\n\n[*second*]: /target\n", want: []catalogFinding{{3, false}}},
+		{id: "MD050", name: "bold in a reference label", input: "# Title\n\n__first__ [**second**]\n\n[**second**]: /target\n", want: []catalogFinding{{3, false}}},
+		{id: "MD053", name: "text after the definition", input: "# Title\n\n[unused]: /target\nParagraph.\n", want: []catalogFinding{{3, false}}},
+		{id: "MD053", name: "blank line after the definition", input: "# Title\n\n[unused]: /target\n\nParagraph.\n", want: []catalogFinding{{3, true}}},
+
+		// MD036 makes a bold line a heading one level deeper than the one
+		// above it, at most level 6, or level 2 with none above, and never
+		// fixes an italic line.
+		{id: "MD036", name: "no heading above", input: "**Bold line**\n\nText.\n", want: []catalogFinding{{1, true}}, fixText: "## Bold line"},
+		{
+			id: "MD036", name: "level 6 above", want: []catalogFinding{{5, true}}, fixText: "###### Bold line",
+			input: "# One\n\n###### Six\n\n**Bold line**\n\nText.\n",
+		},
+		{id: "MD036", name: "italic line", input: "# Title\n\n*Italic line*\n\nText.\n", want: []catalogFinding{{3, false}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id+" "+tt.name, func(t *testing.T) {
+			diags := lintWithDefaultRules(t, tt.input, config.NewConfig())
+
+			var got []catalogFinding
+			var inserted []string
+			for _, diag := range diags {
+				if diag.RuleID != tt.id {
+					continue
+				}
+				got = append(got, catalogFinding{line: diag.StartLine, fixed: len(diag.FixEdits) > 0})
+				for _, edit := range diag.FixEdits {
+					inserted = append(inserted, edit.NewText)
+				}
+			}
+			assert.Equal(t, tt.want, got, "findings of %s", tt.id)
+			if tt.fixText != "" {
+				assert.Contains(t, inserted, tt.fixText, "text that the fix of %s inserts", tt.id)
+			}
+		})
 	}
 }

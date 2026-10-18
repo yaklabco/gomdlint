@@ -17,14 +17,16 @@ func emphasisCatalog() []lint.RuleMeta {
 			Description: "All italic text uses one marker, either *text* or _text_.",
 			Rationale:   "One italic marker throughout makes the source easier to read.",
 			Fix: "The fix swaps the markers. gomdlint reports italic text without a fix " +
-				"when the new marker could pair with characters around it, as in *snake_case*.",
+				"when the new marker could pair with characters around it, as in *snake_case*. " +
+				"It does the same inside square brackets that are, or could become, the label of a reference link.",
 		},
 		{
 			ID: "MD050", Name: "strong-style", Tags: []string{"emphasis"}, Fixable: true,
 			Description: "All bold text uses one marker, either **text** or __text__.",
 			Rationale:   "One bold marker throughout makes the source easier to read.",
 			Fix: "The fix swaps the markers. gomdlint reports bold text without a fix " +
-				"when the new marker could pair with characters around it, as in **snake_case**.",
+				"when the new marker could pair with characters around it, as in **snake_case**. " +
+				"It does the same inside square brackets that are, or could become, the label of a reference link.",
 		},
 	}
 }

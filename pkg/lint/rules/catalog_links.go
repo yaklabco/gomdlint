@@ -8,7 +8,7 @@ func linksCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD011", Name: "no-reversed-links", Tags: []string{"links"}, Fixable: true,
-			Description: "Links put the text in brackets and the URL in parentheses, as in [text](url).",
+			Description: "Inline links put the text in brackets and the URL in parentheses: [text](url).",
 			Rationale:   "The reversed form (text)[url] is not a link, so its brackets and parentheses show as text.",
 			Fix:         "The fix swaps the two parts into the [text](url) form.",
 		},
@@ -34,9 +34,10 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD045", Name: "no-alt-text", Tags: []string{"accessibility", "images"},
-			Description: "Every image, in Markdown or HTML, has alt text.",
-			Rationale:   "Alt text describes an image for people who cannot see it, such as screen reader users.",
-			Fix:         "There is no automatic fix. Only the author can describe the image.",
+			Description: "Markdown images have alt text, and HTML images have alt or aria-hidden=\"true\".",
+			Rationale: "Alt text describes an image for people who cannot see it, such as screen reader users. " +
+				"In HTML, an empty alt or aria-hidden=\"true\" marks an image that screen readers skip.",
+			Fix: "There is no automatic fix. Only the author can describe the image.",
 		},
 		{
 			ID: "MD051", Name: "link-fragments", Tags: []string{"links"},
@@ -56,7 +57,8 @@ func linksCatalog() []lint.RuleMeta {
 			Description: "Every reference definition is used, and each label is defined once.",
 			Rationale: "Definitions render nothing, so an unused one is dead text. " +
 				"Only the first of duplicate definitions takes effect, so the others change nothing.",
-			Fix: "The fix deletes the unused or duplicate definition.",
+			Fix: "The fix deletes the unused or duplicate definition. " +
+				"gomdlint reports a definition without a fix when other text follows it on the next line.",
 		},
 		{
 			ID: "MD054", Name: "link-image-style", Tags: []string{"images", "links"},
@@ -73,7 +75,7 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MDL001", Name: "link-destination-style", Tags: []string{"links", "url"},
-			Description: "Links in a file all use relative paths or all use absolute URLs.",
+			Description: "Links in a file, other than #fragment links, are all relative or all absolute.",
 			Rationale: "Relative and absolute links behave differently when a file moves or a repository is forked. " +
 				"One kind keeps that behavior the same for every link.",
 			Fix: "There is no automatic fix.",
