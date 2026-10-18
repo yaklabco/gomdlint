@@ -237,3 +237,32 @@ func TestNoBareURLsRuleOnLargeDocument(t *testing.T) {
 
 	assert.Empty(t, applyWithinLimit(t, NewNoBareURLsRule(), file, cfg), "the document has no bare URLs")
 }
+
+// TestReversedLinkRuleOnLargeDocument verifies that MD011 runs in time that
+// grows about linearly with the document. A math block cannot outlast its
+// container, so MD011 looks up the innermost blockquote or list item of each
+// math block's first line. Searching every container for each math block
+// would take minutes on a document with tens of thousands of list items
+// that each hold one, far past the generous limit.
+func TestReversedLinkRuleOnLargeDocument(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large document")
+	}
+	// The race detector slows the rule down several times, so it gets a
+	// smaller document; a quadratic lookup still runs far past the limit.
+	items := 20000
+	if raceEnabled {
+		items = 10000
+	}
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range items {
+		fmt.Fprintf(&doc, "- item %d\n\n  $$\n  (a)[b]\n  $$\n\n", idx)
+	}
+	doc.WriteString("Text with a (reversed)[link].\n")
+	file, cfg := parseLargeDocument(t, doc.String())
+
+	diags := applyWithinLimit(t, NewReversedLinkRule(), file, cfg)
+
+	require.Len(t, diags, 1, "only the link outside the math blocks")
+}
