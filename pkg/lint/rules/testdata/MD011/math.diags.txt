@@ -1,2 +1,2 @@
-math.input.md:9:40 warning Reversed link syntax detected (MD011/no-reversed-links) [fixable]
+math.input.md:9:40 warning Reversed link syntax detected (MD011/no-reversed-links)
 math.input.md:11:45 warning Reversed link syntax detected (MD011/no-reversed-links) [fixable]

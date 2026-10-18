@@ -338,17 +338,27 @@ The engine then withholds every fix that changes or makes a possible task
 list checkbox (`pkg/lint/checkbox_guard.go`), whatever rule offers it, and
 reports its finding without a fix. micromark and GitHub's cmark-gfm read
 checkboxes in different places, so the guard reads no renderer's rules.
-It takes a lexical superset of both: in a list item's first lines up to a
-blank line or the next item, a line whose text starts with `[`, one
-character or a line ending, and `]`. A fix may not change the text from the
-start of the item's marker line through the line after the one holding the
-`]`, join that marker line to the line before, or leave the lines around it
-with a candidate they did not have. Plain task items, `[ ]`, `[x]` or `[X]`
-followed by spacing and text on the marker line of an item goldmark reads
-as a list item, above any footnote definition, still take fixes that change
-only the marker for one of its kind, the spacing after it, the indentation
-and trailing whitespace (`pkg/lint/checkbox_plain.go`, which states why
-both renderers read the same checkbox after them).
+A candidate is any line that holds `[`, one character and `]`, or ends with
+`[`, wherever on the line; no reading of list markers, containers or
+footnotes decides it. Its region covers its run, the lines around it up to
+a blank line, and the line on either side of the run. A fix may not change
+a region, insert text inside one or next to one at either end of the
+content, join a region's first line to the line before, or leave the lines
+around its edits with more candidates than they had.
+
+Plain task items, `[ ]`, `[x]` or `[X]` followed by spacing and text on the
+marker line of an item goldmark reads as a list item, above any footnote
+definition, still take fixes that change only the marker for one of its
+kind, the spacing after it, the indentation and trailing whitespace. No
+line may come in or go directly before or after one, except that blank
+lines before it may go while one stays, and one blank line may come in
+before an item whose list can follow paragraph text in both renderers, a
+bullet list or an ordered list whose first marker is `1.` or `1)`, on whose
+line no blockquote starts, as MD032 adds it. Before an item whose list
+cannot, after a line that is not blank, the lines up to the nearest blank
+line take only changes to their trailing whitespace
+(`pkg/lint/checkbox_plain.go`, which states why both renderers read the
+same checkbox after these changes).
 
 Fixes of different rules can each be safe and still corrupt a file
 together. One rule removing `$` prompts in a code block while another

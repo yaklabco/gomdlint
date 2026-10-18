@@ -21,8 +21,11 @@ func guardFor(t *testing.T, input string) *checkboxGuard {
 	return newCheckboxGuard(file.Content, file.Root)
 }
 
-// TestCheckboxCandidateRegions checks which text the guard takes for a
-// possible task list checkbox, written as the text of each region.
+// TestCheckboxCandidateRegions checks which text the guard keeps fixes away
+// from, written as the text of each merged region. A line that holds "[",
+// one character and "]", or ends with "[", anywhere, is a candidate; one
+// that is not plain guards its paragraph run and the lines on either side
+// of it, and a plain one its line and the next.
 func TestCheckboxCandidateRegions(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -34,49 +37,52 @@ func TestCheckboxCandidateRegions(t *testing.T) {
 		{name: "any one character", input: "+ [\t] tab\n* [y] why\n", regions: []string{"+ [\t] tab\n* [y] why\n"}},
 		{name: "one multibyte character", input: "- [é] e\n", regions: []string{"- [é] e\n"}},
 		{name: "two characters", input: "- [xx] no\n"},
-		{name: "not first", input: "- a [x] b\n"},
-		{name: "no list item", input: "[x] text\n\n> [ ] quote\n"},
+		{name: "not first", input: "- a [x] b\n", regions: []string{"- a [x] b\n"}},
+		{name: "no list item", input: "[x] text\n\n> [ ] quote\n", regions: []string{"[x] text\n\n> [ ] quote\n"}},
 		{
-			// Nothing but spaces after the brackets: micromark reads a
-			// checkbox only if the paragraph goes on, so the next line counts.
 			name: "spaces after the brackets", input: "- [x] \n  more\n\nafter\n",
-			regions: []string{"- [x] \n  more\n"},
+			regions: []string{"- [x] \n  more\n\n"},
 		},
 		{name: "last line", input: "- [x]", regions: []string{"- [x]"}},
 		{
 			name: "blank first line", input: "text\n- \n  [x] task\nnext\n",
-			regions: []string{"- \n  [x] task\nnext\n"},
+			regions: []string{"text\n- \n  [x] task\nnext\n"},
 		},
 		{
 			name: "after a definition", input: "- [cc]: /url\n  [x] done\n",
 			regions: []string{"- [cc]: /url\n  [x] done\n"},
 		},
-		{name: "after a blank line", input: "- a\n\n  [x] b\n"},
-		{name: "blank quoted line ends the chunk", input: "> - a\n>\n>   [x] b\n"},
+		{name: "after a blank line", input: "- a\n\n  [x] b\n", regions: []string{"\n  [x] b\n"}},
+		{name: "quote marker lines are not blank", input: "> - a\n>\n>   [x] b\n", regions: []string{"> - a\n>\n>   [x] b\n"}},
 		{
-			name: "line ending between the brackets", input: "- [\n  ] task\n\nend\n",
+			name: "line ending after the bracket", input: "- [\n  ] task\n\nend\n",
 			regions: []string{"- [\n  ] task\n\n"},
 		},
 		{name: "quoted and nested", input: "> - - [x] a\n", regions: []string{"> - - [x] a\n"}},
 		{name: "tab after the marker", input: "-\t[x] a\n", regions: []string{"-\t[x] a\n"}},
-		{
-			name: "next item ends the chunk", input: "- a\n- [x] b\n",
-			regions: []string{"- [x] b\n"},
-		},
-		{name: "ten digits are no marker", input: "1234567890. [x] a\n"},
+		{name: "plain item after an item", input: "- a\n- [x] b\n", regions: []string{"- [x] b\n"}},
+		{name: "ten digit marker", input: "1234567890. [x] a\n", regions: []string{"1234567890. [x] a\n"}},
 		{name: "carriage returns", input: "- [x] a\r\n- b\r\n", regions: []string{"- [x] a\r\n- b\r\n"}},
 		{name: "carriage returns alone", input: "-\r  [x] a\r\rb\r", regions: []string{"-\r  [x] a\r\r"}},
 		{name: "byte order mark", input: "\ufeff- [x] a\n", regions: []string{"\ufeff- [x] a\n"}},
-		{name: "marker without a space", input: "-[x] a\n"},
-		// micromark reads a checkbox in a list that starts a footnote
-		// definition's content on its first line.
+		{name: "marker without a space", input: "-[x] a\n", regions: []string{"-[x] a\n"}},
 		{name: "list in a footnote", input: "[^a]: - [x] task\n", regions: []string{"[^a]: - [x] task\n"}},
 		{name: "quoted footnote", input: "> [^a]: 1. [ ] task\n", regions: []string{"> [^a]: 1. [ ] task\n"}},
+		{name: "footnote in a list item", input: "- a\n  [^b]: - [x] c\n", regions: []string{"- a\n  [^b]: - [x] c\n"}},
+		{name: "footnote without a list", input: "[^a]: [x] text\n", regions: []string{"[^a]: [x] text\n"}},
+		{name: "reference in a paragraph", input: "a\n\nsee [1] and\nmore\n\nb\n", regions: []string{"\nsee [1] and\nmore\n\n"}},
 		{
-			name: "footnote in a list item", input: "- a\n  [^b]: - [x] c\n",
-			regions: []string{"  [^b]: - [x] c\n"},
+			name: "plain items with one that is not", input: "- [ ] a\n- [\t] b\n- [x] c\n\nd\n",
+			regions: []string{"- [ ] a\n- [\t] b\n- [x] c\n\n"},
 		},
-		{name: "footnote without a list", input: "[^a]: [x] text\n"},
+		{
+			name: "frozen lines above an item that cannot follow text", input: "a\n\n#Title\nmore\n> 3. [x] task\n",
+			regions: []string{"\n#Title\nmore\n> 3. [x] task\n"},
+		},
+		{
+			name: "frozen lines above every item of a list from 3", input: "# T\n3. [ ] a\n4. [ ] b\n5. [ ] c\n",
+			regions: []string{"# T\n3. [ ] a\n4. [ ] b\n5. [ ] c\n"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -162,10 +168,11 @@ func TestCheckboxGuardWithholds(t *testing.T) {
 	}
 }
 
-// TestCheckboxGuardInsertions checks insertions at the edges of a region:
-// a whole line inserted before the marker line keeps the item as it is,
-// while text that joins the marker line does not, and an insertion after
-// the region's last line ending touches nothing.
+// TestCheckboxGuardInsertions checks insertions at the edges of a region: a
+// blank line may come in before a plain bullet item's marker line, while
+// text that joins the marker line may not; an insertion after the region's
+// last line ending touches nothing; and no line comes in next to a region
+// at either end of the content.
 func TestCheckboxGuardInsertions(t *testing.T) {
 	input := "a\n- [x] b\nc\nd\n"
 	regionStart := strings.Index(input, "- [x]")
@@ -189,6 +196,18 @@ func TestCheckboxGuardInsertions(t *testing.T) {
 		"text joined to the marker line of a region at the end of the content")
 	assert.False(t, unterminated.withholds([]fix.TextEdit{{StartOffset: 2, EndOffset: 2, NewText: "\n"}}),
 		"a blank line before the marker line of a region at the end of the content")
+
+	// No line comes in before a region that starts the content or after one
+	// that ends it.
+	edges := "- [\t] a\n"
+	for _, offset := range []int{0, len(edges)} {
+		assert.True(t, guardFor(t, edges).withholds([]fix.TextEdit{{StartOffset: offset, EndOffset: offset, NewText: "x\n"}}),
+			"a line inserted at offset %d next to a region", offset)
+	}
+	assert.True(t, guardFor(t, "- [ ] a\n").withholds([]fix.TextEdit{{StartOffset: 0, EndOffset: 0, NewText: "x\n"}}),
+		"a line inserted before a plain candidate that starts the content")
+	assert.False(t, guardFor(t, "").withholds([]fix.TextEdit{{StartOffset: 0, EndOffset: 0, NewText: "x\n"}}),
+		"a line inserted into empty content")
 }
 
 // TestCheckboxGuardPlainCarveOut checks the fixes the guard lets through on
@@ -261,5 +280,187 @@ func TestCheckboxGuardPlainCarveOut(t *testing.T) {
 			edit := fix.TextEdit{StartOffset: start, EndOffset: start + len(tt.old), NewText: tt.new}
 			assert.Equal(t, tt.want, guardFor(t, tt.input).withholds([]fix.TextEdit{edit}))
 		})
+	}
+}
+
+// TestCheckboxGuardAnyBracketPair checks the round 3 review's cases: every
+// line with a bracket pair holding one character guards its paragraph,
+// whatever comes before it, so no fix there changes a checkbox that a
+// renderer reads after a prefix outside the grammar, such as cmark-gfm
+// 0.29 after "1!" or a ten-digit number, or in a footnote whose label holds
+// an escaped bracket.
+func TestCheckboxGuardAnyBracketPair(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		old   string // Text the fix replaces, found in input.
+		new   string
+		want  bool // Whether the guard withholds the fix.
+	}{
+		{name: "escaped footnote label", input: "[^a\\]:b]: - [\t] task\n\nUse [^a\\]:b].\n", old: "[\t]", new: "[ ]", want: true},
+		{name: "marker with an exclamation mark", input: "-\n  1! [x] \n", old: "] \n", new: "]\n", want: true},
+		{name: "ten digit marker", input: "-\n  1234567890. [x] \n", old: "] \n", new: "]\n", want: true},
+		{name: "ten digit marker first", input: "1234567890. [x] a  \n", old: "a  ", new: "a", want: true},
+		{name: "marker without a space", input: "-[x] a  \n", old: "a  ", new: "a", want: true},
+		{name: "line above in the paragraph", input: "intro  \nsee [1] here\n", old: "intro  ", new: "intro", want: true},
+		{name: "blank line before the paragraph", input: "a\n\nsee [1] here\n", old: "a\n\n", new: "a\n", want: true},
+		{name: "separate paragraph", input: "a  \n\n\nsee [1] here\n", old: "a  ", new: "a", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := strings.Index(tt.input, tt.old)
+			if start < 0 {
+				t.Fatalf("%q not in %q", tt.old, tt.input)
+			}
+			edit := fix.TextEdit{StartOffset: start, EndOffset: start + len(tt.old), NewText: tt.new}
+			assert.Equal(t, tt.want, guardFor(t, tt.input).withholds([]fix.TextEdit{edit}))
+		})
+	}
+}
+
+// TestCheckboxGuardPlainBoundary checks what fixes may change directly
+// before a plain candidate. One blank line may come in before an item that
+// can interrupt a paragraph in both renderers, a bullet item or an item of
+// an ordered list whose first marker is "1." or "1)", on whose line no
+// blockquote starts, as MD032 inserts it; such an item starts after
+// paragraph text as after a blank line. Blank lines directly before a
+// candidate may go while one stays. Every other line inserted or removed
+// directly before or after a candidate is withheld; micromark reads
+// "Intro\n> 3. [x] task" as text and "Intro\n>\n> 3. [x] task" as a
+// checkbox. Before an item that cannot interrupt a paragraph, the lines up
+// to the blank line above it may change only in their trailing whitespace:
+// micromark reads "#Title\n> 3. [x] task" as text and
+// "# Title\n> 3. [x] task" as a checkbox.
+func TestCheckboxGuardPlainBoundary(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		offset string // Text before the edit, found in input, or the end.
+		delete int    // Bytes the edit removes there.
+		insert string
+		want   bool // Whether the guard withholds the fix.
+	}{
+		// Allowed.
+		{name: "blank line before a bullet item", input: "Intro\n- [ ] a\n", offset: "Intro\n", insert: "\n", want: false},
+		{name: "blank line at the end of the line before", input: "Intro\n- [ ] a\n", offset: "Intro", insert: "\n", want: false},
+		{name: "blank line before an item numbered 1", input: "Intro\n1. [ ] a\n", offset: "Intro\n", insert: "\n", want: false},
+		{name: "blank line before an item numbered 1 with a parenthesis", input: "Intro\n1) [ ] a\n", offset: "Intro\n", insert: "\n", want: false},
+		{name: "quoted blank line in an open blockquote", input: "> Intro\n> - [ ] a\n", offset: "> Intro\n", insert: ">\n", want: false},
+		{name: "blank line after a heading", input: "# Title\n- [ ] a\n", offset: "# Title\n", insert: "\n", want: false},
+		{name: "one of two blank lines removed", input: "Intro\n\n\n- [ ] a\n", offset: "Intro\n", delete: 1, want: false},
+		{name: "line inserted above the line before", input: "Intro\nmore\n- [ ] a\n", offset: "Intro\n", insert: "x\n", want: false},
+		{name: "heading fixed directly before a bullet item", input: "#Title\n- [ ] a\n", offset: "#", insert: " ", want: false},
+		{name: "blank line after a blank line before a bullet item", input: "Intro\n\n- [ ] a\n", offset: "Intro\n\n", insert: "\n", want: false},
+		{name: "trailing spaces above an item that cannot interrupt", input: "Intro  \n> 3. [x] task\n", offset: "Intro", delete: 2, want: false},
+		{name: "blank line removed before an ordered item from 3", input: "# T\n\n\n3. [ ] a\n", offset: "# T\n", delete: 1, want: false},
+		{name: "text above the blank line before an item that cannot interrupt", input: "#Title\n\n3. [ ] a\n", offset: "#", insert: " ", want: false},
+		{name: "line above the blank line above an item that cannot follow text", input: "a\n\n#Title\n> 3. [x] task\n", offset: "a\n", insert: "x\n", want: false},
+		{name: "items of a list from 3", input: "# T\n\n3. [ ] a  \n4. [x] b\n", offset: "a", delete: 2, want: false},
+		{name: "trailing spaces on the third item of a list from 3 after a heading", input: "# T\n3. [ ] a\n4. [ ] b\n5. [ ] c  \n", offset: "5. [ ] c", delete: 2, want: false},
+		{name: "item after a lazy line in its blockquote", input: "> Intro\ncontinued\n> - [ ] a\n", offset: "continued\n", insert: ">\n", want: false},
+		{name: "blank line before a bullet item with CRLF", input: "Intro\r\n- [ ] a\r\n", offset: "Intro\r\n", insert: "\r\n", want: false},
+		{name: "trailing spaces on a plain item after a byte order mark", input: "\ufeff- [ ] a  \n", offset: "\ufeff- [ ] a", delete: 2, want: false},
+		{name: "blank line before an item after a byte order mark", input: "\ufeffIntro\n- [ ] a\n", offset: "\ufeffIntro\n", insert: "\n", want: false},
+		{name: "blank line removed after a first line with only a byte order mark", input: "\ufeff\n\n3. [ ] a\n", offset: "\ufeff\n", delete: 1, want: false},
+		// Withheld.
+		{name: "zero-padded first item", input: "Intro\n01. [ ] a\n", offset: "Intro\n", insert: "\n", want: true},
+		{name: "blank line before a list whose first marker is zero-padded", input: "Intro\n01. a\n2. [x] b\n", offset: "Intro\n", insert: "\n", want: true},
+		{name: "heading fixed directly before an item that cannot interrupt", input: "#Title\n> 3. [x] task\n", offset: "#", insert: " ", want: true},
+		{name: "heading fixed two lines above an item that cannot interrupt", input: "#Title\nmore\n> 3. [x] task\n", offset: "#", insert: " ", want: true},
+		{name: "punctuation removed directly before an ordered item from 3", input: "# Title:\n3. [ ] a\n", offset: "# Title", delete: 1, want: true},
+		{name: "blank line after a blank line before an ordered item from 3", input: "# T\n\n3. [ ] a\n", offset: "# T\n\n", insert: "\n", want: true},
+		{name: "line at the top of the lines above an item that cannot follow text", input: "a\n\n#Title\n> 3. [x] task\n", offset: "a\n\n", insert: "x\n", want: true},
+		{name: "blank line above the lines above an item that cannot follow text", input: "a\n\n#Title\n> 3. [x] task\n", offset: "a\n", delete: 1, want: true},
+		{name: "line ending removed above the blank line before an item from 3", input: "Intro\n\n3. [ ] a\n", offset: "Intro", delete: 1, want: true},
+		{name: "line ending removed above a line of spaces before an item from 3", input: "Intro\n  \n3. [ ] a\n", offset: "Intro", delete: 1, want: true},
+		{name: "text joined to the blank line before an item from 3", input: "Intro\n\n3. [ ] a\n", offset: "Intro\n", insert: "x", want: true},
+		{name: "line ending removed above the blank line before a quoted item from 3", input: "Intro\n\n> 3. [x] task\n", offset: "Intro", delete: 1, want: true},
+		{name: "text joined to the blank line before a quoted item from 3", input: "Intro\n\n> 3. [x] task\n", offset: "Intro\n", insert: "x", want: true},
+		{name: "indented quote marker before an item that cannot follow text", input: "Intro\n    >\n> 3. [x] task\n", offset: "Intro\n", delete: 4, want: true},
+		{name: "heading above a list from 3 with three items", input: "# T:\n3. [ ] a\n4. [ ] b\n5. [ ] c\n", offset: "# T", delete: 1, want: true},
+		{name: "item opening a nested blockquote", input: "> Intro\n> > - [ ] a\n", offset: "> Intro\n", insert: ">\n", want: true},
+		{name: "heading fixed before an item that cannot follow text, with CRLF", input: "#Title\r\n> 3. [x] task\r\n", offset: "#", insert: " ", want: true},
+		{name: "lone carriage returns, where goldmark reads no list", input: "Intro\r- [ ] a\r", offset: "Intro\r", insert: "\r", want: true},
+		{name: "indentation of the line above an item that cannot follow text", input: "#Title\n> 3. [x] task\n", offset: "", insert: " ", want: true},
+		{name: "ordered list from 3 in a blockquote", input: "Intro\n> 3. [x] task\n", offset: "Intro\n", insert: ">\n", want: true},
+		{name: "blockquote starting on the item's line", input: "Intro\n> - [x] task\n", offset: "Intro\n", insert: ">\n", want: true},
+		{name: "item numbered 3 after text", input: "Intro\n3. [x] task\n", offset: "Intro\n", insert: "\n", want: true},
+		{name: "line of text before an item", input: "Intro\n- [ ] a\n", offset: "Intro\n", insert: "Text\n", want: true},
+		{name: "two blank lines before an item", input: "Intro\n- [ ] a\n", offset: "Intro\n", insert: "\n\n", want: true},
+		{name: "blank line removed before an item", input: "Intro\n\n- [ ] a\n", offset: "Intro\n", delete: 1, want: true},
+		{name: "line before an item removed after a blank line", input: "x\n\n[foo]: /url\n- [ ] a\n", offset: "x\n\n", delete: 12, want: true},
+		{name: "line before an item made blank", input: "Intro\nmore\n- [ ] a\n", offset: "Intro\n", delete: 4, want: true},
+		{name: "blank line between items", input: "- [ ] a\n- [ ] b\n", offset: "- [ ] a\n", insert: "\n", want: true},
+		{name: "line after the last item", input: "- [ ] a\n", offset: "- [ ] a\n", insert: "x\n", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := strings.Index(tt.input, tt.offset)
+			if start < 0 {
+				t.Fatalf("%q not in %q", tt.offset, tt.input)
+			}
+			at := start + len(tt.offset)
+			edit := fix.TextEdit{StartOffset: at, EndOffset: at + tt.delete, NewText: tt.insert}
+			assert.Equal(t, tt.want, guardFor(t, tt.input).withholds([]fix.TextEdit{edit}))
+		})
+	}
+}
+
+// TestCheckboxGuardPlainBoundaryFixes checks fixes of several edits before a
+// plain candidate: the guard reads what all of them leave directly before
+// it, not what each leaves alone.
+func TestCheckboxGuardPlainBoundaryFixes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		edits []fix.TextEdit
+		want  bool // Whether the guard withholds the fix.
+	}{
+		{
+			name: "both blank lines removed by two edits", input: "Intro\n\n\n3. [ ] a\n",
+			edits: []fix.TextEdit{{StartOffset: 6, EndOffset: 7}, {StartOffset: 7, EndOffset: 8}}, want: true,
+		},
+		{
+			name: "text joined to one blank line while the other goes", input: "# T\n\n\n3. [ ] a\n",
+			edits: []fix.TextEdit{{StartOffset: 4, EndOffset: 4, NewText: "x"}, {StartOffset: 5, EndOffset: 6}}, want: true,
+		},
+		{
+			// The first edit leaves an empty piece at the start of the
+			// second blank line, inside the window once it widens.
+			name: "a blank line made text and the two after it removed", input: "Intro\n\n\n\n3. [ ] a\n",
+			edits: []fix.TextEdit{{StartOffset: 6, EndOffset: 7, NewText: "x\n"}, {StartOffset: 7, EndOffset: 9}}, want: true,
+		},
+		{
+			name: "two of three blank lines removed", input: "Intro\n\n\n\n3. [ ] a\n",
+			edits: []fix.TextEdit{{StartOffset: 6, EndOffset: 7}, {StartOffset: 7, EndOffset: 8}}, want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, guardFor(t, tt.input).withholds(tt.edits))
+		})
+	}
+}
+
+// TestHoldsCandidate checks the byte pattern of a candidate line: "[", one
+// character and "]", or "[" at the end of the line.
+func TestHoldsCandidate(t *testing.T) {
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{line: "[[]", want: true},
+		{line: "[ab] [x]", want: true},
+		{line: "[\xff]", want: true},
+		{line: "a [", want: true},
+		{line: "[é]", want: true},
+		{line: "[é", want: false},
+		{line: "[]", want: false},
+		{line: "[x", want: false},
+		{line: "[ab]", want: false},
+		{line: "", want: false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, holdsCandidate([]byte(tt.line)), "%q", tt.line)
 	}
 }

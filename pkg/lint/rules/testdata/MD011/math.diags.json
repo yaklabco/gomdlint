@@ -6,7 +6,7 @@
     "column": 40,
     "message": "Reversed link syntax detected",
     "severity": "warning",
-    "fixable": true
+    "fixable": false
   },
   {
     "rule": "MD011",

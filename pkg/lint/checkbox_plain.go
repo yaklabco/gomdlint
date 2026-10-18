@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -53,6 +54,29 @@ import (
 // changes, which no setext underline or table delimiter row depends on, or
 // it stays a plain candidate line, which holds "[" and text and so is
 // neither.
+//
+// What comes before a plain candidate (keepsBefore). No fix may insert or
+// remove a line directly before or after it, nor turn the line before it
+// from blank to not blank or back, with two exceptions. Blank lines directly
+// before it may go while one stays, since one blank line between blocks
+// reads as many do. And one blank line may come in directly before a
+// candidate whose list may start after paragraph text in both renderers: a
+// bullet list, or an ordered list whose first marker is "1." or "1)", when
+// no blockquote starts on the candidate's line (no footnote definition comes
+// before a plain candidate). CommonMark lets exactly those lists interrupt a
+// paragraph, and both renderers agree within limits that the condition
+// keeps: micromark wants the single digit 1 where goldmark and cmark-gfm
+// take any start number 1, such as "01.", and micromark reads a list in a
+// blockquote that starts on the item's line as interrupting the paragraph
+// above the quote, so the exception leaves such items out. The item then
+// starts the same list after paragraph text as after a blank line, and its
+// checkbox reads the same, so the blank line MD032 inserts before a task
+// list keeps its fix. Before a candidate whose list may not start after
+// paragraph text, after a line that is not blank, whether micromark reads
+// the list depends on what the lines above leave open, so those lines, up to
+// the nearest blank line, and that blank line, are frozen (freezeAbove):
+// they may change only in their trailing whitespace, unless they are plain
+// candidates or the lines after them, and no line may come in among them.
 
 // lineKind tells how the guard treats a line of a candidate's region.
 type lineKind uint8
@@ -64,6 +88,8 @@ const (
 	linePlain
 	// linePlainNext is the line after a plain candidate's marker line.
 	linePlainNext
+	// lineFrozen is above a frozen candidate (see freezeAbove).
+	lineFrozen
 	// lineGuarded is in the region of a candidate that is not plain.
 	lineGuarded
 )
@@ -128,6 +154,9 @@ func readPlainLine(line []byte, first bool) (plainLine, bool) {
 	return parts, true
 }
 
+// maxOrderedMarkerDigits is the most digits an ordered list marker has.
+const maxOrderedMarkerDigits = 9
+
 // listMarkerEnd returns the end of a list item marker at line[pos], a
 // bullet or one to nine digits with "." or ")", and whether it is ordered.
 func listMarkerEnd(line []byte, pos int) (int, bool, bool) {
@@ -189,13 +218,21 @@ func withoutSpace(text []byte) []byte {
 	}, text)
 }
 
-// plainItemStarts returns the offsets where goldmark reads a list item
-// whose first content is a paragraph that starts on the item's first
-// line, at the item's content.
-func plainItemStarts(root *mdast.Node) map[int]bool {
-	starts := make(map[int]bool)
+// plainItem is a list item goldmark reads whose first content is a
+// paragraph that starts on the item's first line, at the item's content.
+// interrupts tells whether it may directly follow paragraph text in both
+// renderers: its list is a bullet list, or an ordered list whose first
+// marker is "1." or "1)", and no blockquote starts on its line.
+type plainItem struct {
+	interrupts bool
+}
+
+// plainItems returns the items goldmark reads as plain in source, by the
+// offset where their content starts.
+func plainItems(source []byte, root *mdast.Node) map[int]plainItem {
+	items := make(map[int]plainItem)
 	if root == nil {
-		return starts
+		return items
 	}
 	for _, item := range mdast.FindByKind(root, mdast.NodeListItem) {
 		first := item.FirstChild
@@ -203,12 +240,47 @@ func plainItemStarts(root *mdast.Node) map[int]bool {
 			continue
 		}
 		content := item.ContentRange()
-		if first.SourceRange().StartOffset == content.StartOffset &&
-			first.SourcePosition().StartLine == item.SourcePosition().StartLine {
-			starts[content.StartOffset] = true
+		if first.SourceRange().StartOffset != content.StartOffset ||
+			first.SourcePosition().StartLine != item.SourcePosition().StartLine {
+			continue
+		}
+		interrupts := !opensBlockquote(source, item)
+		if list := item.Parent; interrupts && list != nil && list.Block != nil && list.Block.List != nil &&
+			list.Block.List.Ordered {
+			interrupts = firstMarkerIsOne(source, list)
+		}
+		items[content.StartOffset] = plainItem{interrupts: interrupts}
+	}
+	return items
+}
+
+// opensBlockquote reports whether a blockquote that holds item starts on
+// the item's line: no line ending comes between the two starts.
+func opensBlockquote(source []byte, item *mdast.Node) bool {
+	at := item.SourceRange().StartOffset
+	for parent := item.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind != mdast.NodeBlockquote {
+			continue
+		}
+		start := parent.SourceRange().StartOffset
+		if start <= at && at <= len(source) && !bytes.ContainsAny(source[start:at], "\r\n") {
+			return true
 		}
 	}
-	return starts
+	return false
+}
+
+// firstMarkerIsOne reports whether the first item marker of an ordered list
+// in source is "1." or "1)". goldmark and cmark-gfm let an ordered list
+// start after paragraph text when it starts at 1, but micromark wants the
+// single digit 1, so "01." does not.
+func firstMarkerIsOne(source []byte, list *mdast.Node) bool {
+	first := list.FirstChild
+	if first == nil || list.Block == nil || list.Block.List == nil || list.Block.List.StartNumber != 1 {
+		return false
+	}
+	at := first.SourceRange().StartOffset
+	return at+1 < len(source) && source[at] == '1' && (source[at+1] == '.' || source[at+1] == ')')
 }
 
 // splitAtLineEndings splits edit into one edit for each line it changes,
@@ -261,8 +333,8 @@ func lineEnding(line []byte) []byte {
 }
 
 // carvedOut returns the line that holds edit when the edit stays inside
-// the text of a plain candidate's marker line or the line after it, before
-// the line ending, and adds no line ending.
+// the text of a plain candidate's marker line, the line after it or a
+// frozen line, before the line ending, and adds no line ending.
 func (g *checkboxGuard) carvedOut(edit fix.TextEdit) (int, bool) {
 	if strings.ContainsAny(edit.NewText, "\r\n") {
 		return 0, false
@@ -272,7 +344,7 @@ func (g *checkboxGuard) carvedOut(edit fix.TextEdit) (int, bool) {
 		return 0, false
 	}
 	switch g.kinds[line] {
-	case linePlain, linePlainNext:
+	case linePlain, linePlainNext, lineFrozen:
 		return line, true
 	default:
 		return 0, false
@@ -298,59 +370,253 @@ func (g *checkboxGuard) allowsOnLine(line int, edits []fix.TextEdit) bool {
 	return bytes.Equal(bytes.TrimRight(after, " \t"), bytes.TrimRight(before, " \t"))
 }
 
-// classifyLines marks the lines of each candidate's region: a plain
-// candidate's marker line and the line after it, and every line of the
-// region of a candidate that is not plain, which wins.
-func (g *checkboxGuard) classifyLines(candidates []checkboxCandidate, shapes []lineShape, root *mdast.Node) {
+// classifyLines finds the plain candidates among the candidate lines and
+// marks each one's line and the line after it. A candidate that is not
+// plain guards its region later, which takes those lines back.
+func (g *checkboxGuard) classifyLines(candidates []bool, root *mdast.Node) {
 	g.kinds = make([]lineKind, len(g.lines))
 	g.plain = make(map[int]plainLine)
+	g.interrupting = make(map[int]bool)
 	footnote := len(g.lines)
-	for idx, shape := range shapes {
-		if shape.footnote {
+	for idx := range g.lines {
+		if opensFootnote(g.line(idx), idx == 0) {
 			footnote = idx
 			break
 		}
 	}
-	starts := plainItemStarts(root)
-	var guarded []checkboxCandidate
-	for _, candidate := range candidates {
-		parts, ok := g.plainCandidate(candidate, footnote, starts)
-		if !ok {
-			guarded = append(guarded, candidate)
+	items := plainItems(g.content, root)
+	for idx, candidate := range candidates {
+		if !candidate || idx >= footnote {
 			continue
 		}
-		g.plain[candidate.line] = parts
-		g.kinds[candidate.line] = linePlain
-		if next := candidate.line + 1; next < len(g.lines) && g.kinds[next] == lineFree {
+		parts, ok := readPlainLine(g.line(idx), idx == 0)
+		if !ok || !plainSpacing(parts.spacing) {
+			continue
+		}
+		item, ok := items[g.lines[idx]+parts.boxAt]
+		if !ok {
+			continue
+		}
+		g.plain[idx] = parts
+		g.plainLines = append(g.plainLines, idx)
+		g.kinds[idx] = linePlain
+		g.interrupting[idx] = item.interrupts
+	}
+	for _, line := range g.plainLines {
+		if next := line + 1; next < len(g.lines) && g.kinds[next] == lineFree {
 			g.kinds[next] = linePlainNext
-		}
-	}
-	for _, candidate := range guarded {
-		for line := candidate.marker; line <= candidate.last; line++ {
-			g.kinds[line] = lineGuarded
-		}
-	}
-	for line, kind := range g.kinds {
-		if kind != linePlain {
-			delete(g.plain, line)
 		}
 	}
 }
 
-// plainCandidate reports whether a candidate is plain, and returns the
-// parts of its line. footnote is the first line that starts a footnote
-// definition, and starts holds where goldmark reads plain list items.
-func (g *checkboxGuard) plainCandidate(candidate checkboxCandidate, footnote int, starts map[int]bool) (plainLine, bool) {
-	if candidate.marker != candidate.line || candidate.line >= footnote {
-		return plainLine{}, false
+// keepsPlainBoundaries reports whether edits, sorted, keep what comes
+// directly before each plain candidate as it allows. A change inside the
+// text of a plain candidate's line, the line after it or a frozen line is
+// allowsOnLine's to judge; keepsBefore judges the rest, for each candidate
+// that one of them comes directly before.
+func (g *checkboxGuard) keepsPlainBoundaries(edits []fix.TextEdit) bool {
+	if len(g.plainLines) == 0 {
+		return true
 	}
-	line := g.line(candidate.line)
-	parts, ok := readPlainLine(line, candidate.line == 0)
-	if !ok || !plainSpacing(parts.spacing) {
-		return plainLine{}, false
+	// An edit that keeps its line endings counts line by line, so that the
+	// part of it on the line before a candidate is judged as a change to
+	// that line. One that adds or removes line endings across a candidate's
+	// start changes the candidate's region, which withholds it.
+	var pieces []fix.TextEdit
+	for _, edit := range edits {
+		split, ok := splitAtLineEndings(g.content, edit)
+		if !ok {
+			split = []fix.TextEdit{edit}
+		}
+		for _, piece := range split {
+			if _, carved := g.carvedOut(piece); !carved {
+				pieces = append(pieces, piece)
+			}
+		}
 	}
-	if !starts[g.lines[candidate.line]+parts.boxAt] {
-		return plainLine{}, false
+	checked := make(map[int]bool)
+	for _, piece := range pieces {
+		line := g.lineAfterChange(piece)
+		if _, plain := g.plain[line]; !plain || checked[line] {
+			continue
+		}
+		checked[line] = true
+		if !g.keepsBefore(line, pieces) {
+			return false
+		}
 	}
-	return parts, true
+	return true
+}
+
+// lineAfterChange returns the line that piece comes directly before once
+// applied: the line after the last line whose text or line ending it
+// changes, or the line at whose start it inserts whole lines.
+func (g *checkboxGuard) lineAfterChange(piece fix.TextEdit) int {
+	if piece.StartOffset == piece.EndOffset {
+		at := g.lineOf(piece.StartOffset)
+		if g.lines[at] == piece.StartOffset && g.lineStartAfter(piece) {
+			return at
+		}
+		return at + 1
+	}
+	last := g.lineOf(piece.EndOffset - 1)
+	if next := last + 1; next < len(g.lines) && g.lines[next] == piece.EndOffset && !g.lineStartAfter(piece) {
+		// The piece takes the line ending before line next, which joins
+		// that line to the one above.
+		return next + 1
+	}
+	return last + 1
+}
+
+// keepsBefore reports whether pieces, sorted, keep what comes directly
+// before plain candidate line. It compares the lines from the line before
+// the candidate up, as far up as the pieces change them, before and after
+// the pieces. Those may insert or remove no line there, nor turn the line
+// before the candidate from blank to not blank or back, with two
+// exceptions: blank lines directly before the candidate may go while one
+// stays, and one blank line may come in before a candidate whose item may
+// follow paragraph text in both renderers (g.interrupting). Before a frozen
+// candidate, whose lines above take only the changes allowsOnLine allows,
+// nothing else may change.
+//
+// The guard judges each fix alone. Two fixes that each removed one of two
+// blank lines before a candidate would remove both, but MD012, the rule
+// that removes blank lines, leaves one of them.
+func (g *checkboxGuard) keepsBefore(line int, pieces []fix.TextEdit) bool {
+	if g.frozen(line) {
+		return false
+	}
+	start := g.lines[line]
+	from := start
+	if line > 0 {
+		from = g.lines[line-1]
+	}
+	// Take in each line above whose text or line ending a piece changes.
+	// The pieces do not overlap, so once the nearest piece above the window
+	// leaves the line above alone, every piece does. Pieces that the window
+	// took in as it grew are skipped.
+	for idx := sort.Search(len(pieces), func(idx int) bool { return pieces[idx].StartOffset >= from }) - 1; idx >= 0 && from > 0; idx-- {
+		if pieces[idx].StartOffset >= from {
+			continue
+		}
+		if !g.changesLine(pieces[idx], g.lineOf(from-1)) {
+			break
+		}
+		from = g.lines[g.lineOf(pieces[idx].StartOffset)]
+	}
+	before, after := g.windowTexts(from, start, pieces)
+	if len(after) > 0 && !isLineEnd(after[len(after)-1]) {
+		return false
+	}
+	blankBefore := line == 0 || g.holdsNoText(line-1)
+	blankAfter := true
+	switch body := trimLineEnding(after); {
+	case len(after) > 0:
+		lastStart := bytes.LastIndexAny(body, "\r\n") + 1
+		blankAfter = noText(body[lastStart:], from == 0 && lastStart == 0)
+	case from > 0:
+		// Every line of the window went, and no piece changes the line
+		// above it, which now comes directly before the candidate.
+		blankAfter = g.holdsNoText(g.lineOf(from - 1))
+	}
+	inserted := countLineEndings(after) - countLineEndings(before)
+	switch {
+	case blankBefore && blankAfter:
+		return inserted <= 0 || (inserted == 1 && g.interrupting[line])
+	case !blankBefore && !blankAfter:
+		return inserted == 0
+	case !blankBefore && blankAfter:
+		return inserted == 1 && g.interrupting[line]
+	default:
+		return false
+	}
+}
+
+// changesLine reports whether piece changes the text or the line ending of
+// line idx: it overlaps them, puts text before the line's text, or takes
+// the line ending before the line, which joins it to the one above.
+func (g *checkboxGuard) changesLine(piece fix.TextEdit, idx int) bool {
+	start, end := g.lines[idx], g.lineEnd(idx)
+	if piece.StartOffset < end && piece.EndOffset > start {
+		return true
+	}
+	return piece.EndOffset == start && !g.lineStartAfter(piece)
+}
+
+// frozen reports whether plain candidate line has frozen lines above it:
+// its item may not follow paragraph text in both renderers, and the line
+// before it holds text.
+func (g *checkboxGuard) frozen(line int) bool {
+	return line > 0 && !g.interrupting[line] && !g.holdsNoText(line-1)
+}
+
+// freezeAbove marks frozen the lines above each frozen candidate, from the
+// nearest line above it that holds no text, or the first line, through the
+// line before it, and returns their regions. micromark reads such a
+// candidate's checkbox or not by what those lines open and close
+// ("#Title\n> 3. [x] task" holds none, "# Title\n> 3. [x] task" one), so
+// they may change only in their trailing whitespace, unless they are plain
+// candidates or the lines after them, and no line may come in among them.
+func (g *checkboxGuard) freezeAbove() []checkboxRegion {
+	var regions []checkboxRegion
+	top, next, marked := 0, 0, -1
+	for _, line := range g.plainLines {
+		if !g.frozen(line) {
+			continue
+		}
+		// top becomes the first of the lines above that hold text.
+		for ; next < line; next++ {
+			if g.holdsNoText(next) {
+				top = next + 1
+			}
+		}
+		first := max(top-1, 0)
+		for idx := max(first, marked+1); idx < line; idx++ {
+			if g.kinds[idx] == lineFree {
+				g.kinds[idx] = lineFrozen
+			}
+		}
+		marked = line - 1
+		regions = append(regions, checkboxRegion{start: g.lines[first], end: g.lines[line]})
+	}
+	return regions
+}
+
+// holdsNoText reports whether line idx holds no text (see noText).
+func (g *checkboxGuard) holdsNoText(idx int) bool {
+	return noText(g.line(idx), idx == 0)
+}
+
+// noText reports whether a line, without its line ending, holds no text:
+// nothing but blockquote markers, each after at most three spaces, and
+// spaces and tabs. first tells whether the line starts the content, where
+// a byte order mark is no text either.
+func noText(line []byte, first bool) bool {
+	if first {
+		line = bytes.TrimPrefix(line, []byte(mdast.ByteOrderMark))
+	}
+	pos := 0
+	for {
+		spaces := 0
+		for pos+spaces < len(line) && spaces < 3 && line[pos+spaces] == ' ' {
+			spaces++
+		}
+		if pos+spaces >= len(line) || line[pos+spaces] != '>' {
+			break
+		}
+		pos += spaces + 1
+	}
+	return len(bytes.Trim(line[pos:], " \t")) == 0
+}
+
+// countLineEndings returns the number of line endings in text: line feeds,
+// and carriage returns that no line feed follows.
+func countLineEndings(text []byte) int {
+	count := 0
+	for idx, char := range text {
+		if char == '\n' || (char == '\r' && (idx+1 == len(text) || text[idx+1] != '\n')) {
+			count++
+		}
+	}
+	return count
 }

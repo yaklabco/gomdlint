@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"cmp"
 	"slices"
 	"sort"
 	"unicode/utf8"
@@ -13,49 +14,35 @@ import (
 // Task list checkboxes and fixes.
 //
 // A task list checkbox changes how a list item renders, and the renderers
-// disagree on where one is. micromark, which markdownlint uses, reads one
-// after a blank first line and after the link reference definitions that
-// start an item, and GitHub's cmark-gfm only right after the item's
-// marker; they also disagree on what may come between the brackets and
-// after them. Rather than emulate either, the engine withholds every fix
-// that changes text a checkbox could be read from or that makes such text
+// disagree on where one is: micromark, which markdownlint uses, and
+// GitHub's cmark-gfm differ on the line it may start on, on what may come
+// before, between and after the brackets, and each has quirks of its own.
+// Rather than emulate any of them, the engine withholds every fix that
+// changes text a checkbox could be read from or that makes such text
 // (checkboxGuard). The finding is reported without a fix.
 //
-// A checkbox candidate is a lexical superset of the checkboxes both read.
-// A line is a marker line when, after a prefix of container markers,
-// spaces and tabs, it holds one or more list item markers, a bullet or one
-// to nine digits with "." or ")", each followed by a space, a tab or the
-// end of the line. Container markers are blockquote markers and footnote
-// definition labels ("[^label]:"), whose content can start on the same
-// line. The marker line's chunk is the rest of the line after the markers
-// and the lines after it, up to a blank line (nothing but container
-// markers, spaces and tabs) or the next marker line. A candidate is a
-// chunk line whose text, after its prefix, starts with "[" and then either
-// a line ending, or one character and "]".
+// A candidate line is any line holding "[" and then one character and "]",
+// or "[" at its end, wherever on the line; no reading of list markers,
+// containers or footnotes decides it. Every checkbox either renderer reads
+// is such a line, whatever prefix or container the renderer accepts before
+// it. A candidate's region runs over its run, the lines around it up to a
+// blank line (one of nothing but spaces and tabs), which holds the list item
+// marker, the link reference definitions and the paragraph lines its
+// reading can depend on, and over the line before the run and the line after
+// it, so that no fix inserts or removes a line next to the run either. A fix
+// is withheld when it changes a byte of a region, inserts text inside one,
+// inserts text before a region that starts the content or after one that
+// ends it, or leaves a region's first byte off the start of a line, and when
+// it leaves a window of lines around its edits with more candidate lines than
+// it had.
 //
-// It is a superset because both renderers read a checkbox only at the
-// start of the paragraph that is a list item's first content, and only
-// with one character, or in micromark a line ending, between the
-// brackets. That paragraph starts on the rest of the item's marker line,
-// on a line after it when the marker line holds nothing else, or, in
-// micromark, on the line after the link reference definitions that start
-// the item's content. None of these is ever parted from the marker line by
-// a blank line or another item's marker, and the item's later lines carry
-// only container markers and indentation before their text. The only
-// containers that can open before an item's marker on its line are
-// blockquotes, list items and footnote definitions. cmark-gfm reads a
-// checkbox only on the marker line, after the marker and spaces.
-//
-// A candidate's region runs from the start of its marker line, whose
-// blockquote markers and indentation decide how wide a tab between the
-// brackets is, through the end of the line holding the "]", line ending
-// included, and the line after it: micromark reads a checkbox before only
-// spaces and tabs only when more of the paragraph follows, and none in a
-// paragraph that the next line makes a setext heading or a table. When a
-// line ending follows the "[", the "]" can start the next line, so the
-// region takes the two lines after the "[".
+// Plain task items such as "- [ ] todo" take some fixes instead (see
+// checkbox_plain.go).
 
-// checkboxRegion is the source range of one or more checkbox candidates.
+// checkboxRegion is a source range around a candidate. Fixes may change
+// its lines only as their kinds allow: not at all where it guards a
+// candidate that is not plain, and as checkbox_plain.go tells on the
+// lines of a plain candidate and the lines around it.
 type checkboxRegion struct {
 	start, end int
 }
@@ -67,23 +54,19 @@ type checkboxGuard struct {
 	// lines holds the start of each line; a line runs to the next start.
 	lines []int
 	// regions holds the merged regions of the document's candidates,
-	// sorted and apart.
+	// sorted and apart: the region of each candidate that is not plain, a
+	// plain candidate's marker line and the line after it, and the frozen
+	// lines above a plain candidate (see checkbox_plain.go).
 	regions []checkboxRegion
-	// chunkMarker holds, for each line, the marker line whose chunk holds
-	// it, or -1. runEnd holds, for each line, the last line of the run of
-	// lines from it that are neither blank nor marker lines, or the line
-	// before it when it is one.
-	chunkMarker, runEnd []int
-	// kinds tells how each line of a region is guarded, and plain holds the
-	// parts of each plain candidate's marker line (see checkbox_plain.go).
-	kinds []lineKind
-	plain map[int]plainLine
-}
-
-// checkboxCandidate is a candidate: its marker line, the line holding its
-// "[", and the last line of its region.
-type checkboxCandidate struct {
-	marker, line, last int
+	// kinds tells how each line of a region is guarded, plain holds the
+	// parts of each plain candidate's marker line, and plainLines lists the
+	// plain candidates' lines in order (see checkbox_plain.go).
+	kinds      []lineKind
+	plain      map[int]plainLine
+	plainLines []int
+	// interrupting tells, for each plain candidate's line, whether its item
+	// may directly follow paragraph text in both renderers.
+	interrupting map[int]bool
 }
 
 // newCheckboxGuard builds the guard for content, which goldmark parsed into
@@ -91,51 +74,104 @@ type checkboxCandidate struct {
 func newCheckboxGuard(content []byte, root *mdast.Node) *checkboxGuard {
 	guard := &checkboxGuard{content: content, lines: lineStarts(content)}
 	count := len(guard.lines)
-	shapes := make([]lineShape, count)
+	candidates := make([]bool, count)
+	blank := make([]bool, count)
 	for idx := range count {
-		shapes[idx] = readLineShape(guard.line(idx), idx == 0)
-	}
-	guard.chunkMarker = make([]int, count)
-	marker := -1
-	for idx, shape := range shapes {
-		switch {
-		case shape.marker:
-			marker = idx
-		case shape.blank:
-			marker = -1
+		line := guard.line(idx)
+		candidates[idx] = holdsCandidate(line)
+		if idx == 0 {
+			line = bytes.TrimPrefix(line, []byte(mdast.ByteOrderMark))
 		}
-		guard.chunkMarker[idx] = marker
+		blank[idx] = len(bytes.Trim(line, " \t")) == 0
 	}
-	guard.runEnd = make([]int, count)
-	for idx := count - 1; idx >= 0; idx-- {
-		switch {
-		case shapes[idx].blank || shapes[idx].marker:
-			guard.runEnd[idx] = idx - 1
-		case idx+1 < count:
-			guard.runEnd[idx] = max(guard.runEnd[idx+1], idx)
-		default:
-			guard.runEnd[idx] = idx
+	guard.classifyLines(candidates, root)
+
+	// The region of a candidate that is not plain covers its run and the
+	// lines on either side of it.
+	var regions []checkboxRegion
+	for idx := 0; idx < count; idx++ {
+		if !candidates[idx] || guard.kinds[idx] == linePlain {
+			continue
 		}
+		first, last := idx, idx
+		for first > 0 && !blank[first-1] {
+			first--
+		}
+		for last+1 < count && !blank[last+1] {
+			last++
+		}
+		first, last = max(first-1, 0), min(last+1, count-1)
+		regions = append(regions, checkboxRegion{start: guard.lines[first], end: guard.lineEnd(last)})
+		idx = last
 	}
-	candidates := candidatesOf(content, guard.lines, shapes)
-	regions := make([]checkboxRegion, 0, len(candidates))
-	for _, candidate := range candidates {
-		regions = append(regions, checkboxRegion{start: guard.lines[candidate.marker], end: guard.lineEnd(candidate.last)})
+	guard.guardRegions(regions)
+	for _, line := range guard.plainLines {
+		regions = append(regions, checkboxRegion{start: guard.lines[line], end: guard.lineEnd(min(line+1, count-1))})
 	}
+	regions = append(regions, guard.freezeAbove()...)
 	guard.regions = mergeRegions(regions)
-	guard.classifyLines(candidates, shapes, root)
 	return guard
+}
+
+// holdsCandidate reports whether a line, without its line ending, holds "["
+// and then one character and "]", or ends with "[".
+func holdsCandidate(line []byte) bool {
+	for pos := bytes.IndexByte(line, '['); pos >= 0; {
+		if pos+1 == len(line) {
+			return true
+		}
+		_, size := utf8.DecodeRune(line[pos+1:])
+		if closing := pos + 1 + size; closing < len(line) && line[closing] == ']' {
+			return true
+		}
+		next := bytes.IndexByte(line[pos+1:], '[')
+		if next < 0 {
+			return false
+		}
+		pos += 1 + next
+	}
+	return false
+}
+
+// guardRegions marks every line of the given regions guarded, which takes
+// them from the plain candidates.
+func (g *checkboxGuard) guardRegions(regions []checkboxRegion) {
+	for _, region := range regions {
+		for line := g.lineOf(region.start); line < len(g.lines) && g.lines[line] < region.end; line++ {
+			g.kinds[line] = lineGuarded
+		}
+	}
+	plainLines := g.plainLines[:0]
+	for _, line := range g.plainLines {
+		if g.kinds[line] == linePlain {
+			plainLines = append(plainLines, line)
+			continue
+		}
+		delete(g.plain, line)
+		delete(g.interrupting, line)
+	}
+	g.plainLines = plainLines
+	for line, kind := range g.kinds {
+		if kind == linePlainNext && (line == 0 || g.kinds[line-1] != linePlain) {
+			g.kinds[line] = lineFree
+		}
+	}
 }
 
 // withholds reports whether a fix, edits in content offsets, changes or
 // makes a checkbox candidate: an edit changes the text of a candidate's
 // region or joins its first line to the line before, unless the change is
-// one that a plain candidate allows (see checkbox_plain.go), or a window of
-// lines around the edits holds a candidate after them that it did not hold
-// before.
+// one that a plain candidate allows (see checkbox_plain.go); the edits
+// change what comes directly before a plain candidate in a way it does not
+// allow; or a window of lines around the edits holds more candidate lines
+// after them than before.
 func (g *checkboxGuard) withholds(edits []fix.TextEdit) bool {
 	edits = slices.Clone(edits)
-	slices.SortFunc(edits, func(a, b fix.TextEdit) int { return a.StartOffset - b.StartOffset })
+	// An insertion sorts before an edit that starts where it does, so that
+	// the edits apply in order.
+	slices.SortStableFunc(edits, func(a, b fix.TextEdit) int {
+		return cmp.Or(a.StartOffset-b.StartOffset, a.EndOffset-b.EndOffset)
+	})
 	carved := make(map[int][]fix.TextEdit)
 	for _, edit := range edits {
 		if !g.touches(edit) {
@@ -161,16 +197,15 @@ func (g *checkboxGuard) withholds(edits []fix.TextEdit) bool {
 			return true
 		}
 	}
-	for _, window := range g.windows(edits) {
-		if g.makesCandidate(window, edits) {
-			return true
-		}
+	if !g.keepsPlainBoundaries(edits) {
+		return true
 	}
-	return false
+	return g.makesCandidate(edits)
 }
 
 // touches reports whether edit changes a candidate region: it replaces a
-// byte of one, inserts text inside one, or leaves the region's first byte
+// byte of one, inserts text inside one, inserts text before one that starts
+// the content or after one that ends it, or leaves the region's first byte
 // off the start of a line.
 func (g *checkboxGuard) touches(edit fix.TextEdit) bool {
 	start, end := edit.StartOffset, edit.EndOffset
@@ -182,23 +217,15 @@ func (g *checkboxGuard) touches(edit fix.TextEdit) bool {
 			return true
 		case start == end && region.start < start && start < region.end:
 			return true
-		case g.appendsToUnterminatedEnd(edit, region):
+		case start == end && ((start == 0 && region.start == 0) || (start == len(g.content) && region.end == len(g.content))):
+			// No line comes in next to a region at either end of the
+			// content, where no line before or after the region guards it.
 			return true
 		case end == region.start && !g.lineStartAfter(edit):
 			return true
 		}
 	}
 	return false
-}
-
-// appendsToUnterminatedEnd reports whether edit inserts text at the end of
-// content that ends inside region, with no line ending: the text goes on
-// the region's last line.
-func (g *checkboxGuard) appendsToUnterminatedEnd(edit fix.TextEdit, region checkboxRegion) bool {
-	if edit.StartOffset != edit.EndOffset || edit.StartOffset != len(g.content) {
-		return false
-	}
-	return region.end == len(g.content) && (len(g.content) == 0 || !isLineEnd(g.content[len(g.content)-1]))
 }
 
 // lineStartAfter reports whether the text after edit starts a line once the
@@ -211,56 +238,29 @@ func (g *checkboxGuard) lineStartAfter(edit fix.TextEdit) bool {
 	return edit.StartOffset == 0 || isLineEnd(g.content[edit.StartOffset-1])
 }
 
-// lineWindow is a range of lines, first to last: from an edit's first
-// line, with a head through the line after its last line, and on through
-// the lines after that which a chunk there would take in, and one more.
-type lineWindow struct {
-	first, head, last int
-}
-
-// windows returns the line windows of edits, merged and sorted.
-func (g *checkboxGuard) windows(edits []fix.TextEdit) []lineWindow {
-	windows := make([]lineWindow, 0, len(edits))
+// makesCandidate reports whether edits, sorted, leave the lines they touch,
+// with the line after each, holding more candidate lines than before. An
+// edit that changes no region keeps every candidate line it had, so more
+// candidate lines means a new one.
+func (g *checkboxGuard) makesCandidate(edits []fix.TextEdit) bool {
+	type lineRange struct{ first, last int }
+	var ranges []lineRange
 	for _, edit := range edits {
 		first := g.lineOf(edit.StartOffset)
-		head := min(g.lineOf(max(edit.StartOffset, edit.EndOffset-1))+1, len(g.lines)-1)
-		through := max(head, g.runEnd[head])
-		windows = append(windows, lineWindow{first: first, head: head, last: min(through+1, len(g.lines)-1)})
-	}
-	slices.SortFunc(windows, func(a, b lineWindow) int { return a.first - b.first })
-	merged := windows[:0]
-	for _, window := range windows {
-		if count := len(merged); count > 0 && window.first <= merged[count-1].last+1 {
-			merged[count-1].head = max(merged[count-1].head, window.head)
-			merged[count-1].last = max(merged[count-1].last, window.last)
+		last := min(g.lineOf(max(edit.StartOffset, edit.EndOffset-1))+1, len(g.lines)-1)
+		if count := len(ranges); count > 0 && first <= ranges[count-1].last+1 {
+			ranges[count-1].last = max(ranges[count-1].last, last)
 			continue
 		}
-		merged = append(merged, window)
+		ranges = append(ranges, lineRange{first: first, last: last})
 	}
-	return merged
-}
-
-// makesCandidate reports whether the edits that lie in window leave it
-// with more candidates than it had. An edit that changes no region keeps
-// every candidate it had, so more candidates means a new one. The lines
-// before the window are the same before and after, and so is whether its
-// first line continues a chunk, so they hold the same candidates. The
-// lines after the head are the same too, and hold the same candidates
-// unless the edits change whether the line after the head continues a
-// chunk; only then is the rest of the window read.
-func (g *checkboxGuard) makesCandidate(window lineWindow, edits []fix.TextEdit) bool {
-	inChunk := window.first > 0 && g.chunkMarker[window.first-1] >= 0
-	from, first := g.lines[window.first], window.first == 0
-	headBefore, headAfter := g.windowTexts(from, g.lineEnd(window.head), edits)
-	countBefore, chunkBefore := scanCandidates(headBefore, inChunk, first)
-	countAfter, chunkAfter := scanCandidates(headAfter, inChunk, first)
-	if countAfter != countBefore || chunkAfter == chunkBefore {
-		return countAfter > countBefore
+	for _, lines := range ranges {
+		before, after := g.windowTexts(g.lines[lines.first], g.lineEnd(lines.last), edits)
+		if countCandidateLines(after) > countCandidateLines(before) {
+			return true
+		}
 	}
-	before, after := g.windowTexts(from, g.lineEnd(window.last), edits)
-	countBefore, _ = scanCandidates(before, inChunk, first)
-	countAfter, _ = scanCandidates(after, inChunk, first)
-	return countAfter > countBefore
+	return false
 }
 
 // windowTexts returns content[from:to] before and after the edits that lie
@@ -268,9 +268,12 @@ func (g *checkboxGuard) makesCandidate(window lineWindow, edits []fix.TextEdit) 
 func (g *checkboxGuard) windowTexts(from, to int, edits []fix.TextEdit) ([]byte, []byte) {
 	var after []byte
 	pos := from
-	for _, edit := range edits {
-		if edit.StartOffset < from || edit.EndOffset > to {
-			continue
+	first := sort.Search(len(edits), func(idx int) bool { return edits[idx].StartOffset >= from })
+	for _, edit := range edits[first:] {
+		// The edits do not overlap, so none after one that ends past to
+		// lies in the window either.
+		if edit.EndOffset > to {
+			break
 		}
 		after = append(after, g.content[pos:edit.StartOffset]...)
 		after = append(after, edit.NewText...)
@@ -280,10 +283,8 @@ func (g *checkboxGuard) windowTexts(from, to int, edits []fix.TextEdit) ([]byte,
 	return g.content[from:to], after
 }
 
-// scanCandidates returns the number of candidates in text, and whether a
-// line after it would continue a chunk. inChunk tells whether the first
-// line of text continues a chunk, and first whether it starts the content.
-func scanCandidates(text []byte, inChunk, first bool) (int, bool) {
+// countCandidateLines returns the number of candidate lines in text.
+func countCandidateLines(text []byte) int {
 	count := 0
 	starts := lineStarts(text)
 	for idx, start := range starts {
@@ -291,19 +292,11 @@ func scanCandidates(text []byte, inChunk, first bool) (int, bool) {
 		if idx+1 < len(starts) {
 			end = starts[idx+1]
 		}
-		line := trimLineEnding(text[start:end])
-		shape := readLineShape(line, first && idx == 0)
-		switch {
-		case shape.marker:
-			inChunk = true
-		case shape.blank:
-			inChunk = false
-		}
-		if _, ok := candidateEnd(line[shape.rest:], 0); ok && inChunk {
+		if holdsCandidate(trimLineEnding(text[start:end])) {
 			count++
 		}
 	}
-	return count, inChunk
+	return count
 }
 
 // line returns the text of a line without its line ending.
@@ -352,110 +345,29 @@ func trimLineEnding(line []byte) []byte {
 	return bytes.TrimSuffix(line, []byte("\r"))
 }
 
-// lineShape is what the lexical scan reads from one line.
-type lineShape struct {
-	marker   bool // The line holds a list item marker after its prefix.
-	footnote bool // The line's prefix holds a footnote definition label.
-	blank    bool // The line holds nothing but container markers and space.
-	rest     int  // Offset of the text after the prefix and markers.
-}
-
-// maxOrderedMarkerDigits is the most digits an ordered list marker has.
-const maxOrderedMarkerDigits = 9
-
-// readLineShape reads the blockquote markers, spaces, tabs and list item
-// markers that start a line, without its line ending. A byte order mark
-// starts the first line.
-func readLineShape(line []byte, first bool) lineShape {
+// opensFootnote reports whether a line, without its line ending, starts a
+// footnote definition: after blockquote markers, list item markers, spaces
+// and tabs, it holds "[^" and then "]:".
+func opensFootnote(line []byte, first bool) bool {
 	pos := 0
 	if first && bytes.HasPrefix(line, []byte(mdast.ByteOrderMark)) {
 		pos = len(mdast.ByteOrderMark)
 	}
-	var shape lineShape
-	spaceAfter := func(idx int) bool {
-		return idx >= len(line) || line[idx] == ' ' || line[idx] == '\t'
-	}
 	for pos < len(line) {
-		switch char := line[pos]; {
-		case char == ' ' || char == '\t' || char == '>':
+		switch line[pos] {
+		case ' ', '\t', '>':
 			pos++
 			continue
-		case char == '[' && pos+1 < len(line) && line[pos+1] == '^':
-			// A footnote definition is a container too, and its content
-			// can start on its first line, as in "[^a]: - [x] task".
-			if end := bytes.Index(line[pos:], []byte("]:")); end > 0 {
-				shape.footnote = true
-				pos += end + len("]:")
-				continue
-			}
-		case (char == '-' || char == '+' || char == '*') && spaceAfter(pos+1):
-			shape.marker = true
-			pos++
-			continue
-		case char >= '0' && char <= '9':
-			end := pos
-			for end < len(line) && end-pos < maxOrderedMarkerDigits && line[end] >= '0' && line[end] <= '9' {
-				end++
-			}
-			if end < len(line) && (line[end] == '.' || line[end] == ')') && spaceAfter(end+1) {
-				shape.marker = true
-				pos = end + 1
-				continue
-			}
+		case '[':
+			return pos+1 < len(line) && line[pos+1] == '^' && bytes.Contains(line[pos:], []byte("]:"))
 		}
-		break
-	}
-	shape.rest = pos
-	shape.blank = !shape.marker && pos == len(line)
-	return shape
-}
-
-// candidatesOf returns the candidates of content, whose lines start at
-// lines and have the given shapes, in order.
-func candidatesOf(content []byte, lines []int, shapes []lineShape) []checkboxCandidate {
-	lineEnd := func(idx int) int {
-		if idx+1 < len(lines) {
-			return lines[idx+1]
+		end, _, ok := listMarkerEnd(line, pos)
+		if !ok || (end < len(line) && line[end] != ' ' && line[end] != '\t') {
+			return false
 		}
-		return len(content)
+		pos = end
 	}
-	var candidates []checkboxCandidate
-	marker := -1
-	for idx, shape := range shapes {
-		switch {
-		case shape.marker:
-			marker = idx
-		case shape.blank:
-			marker = -1
-		}
-		if marker < 0 {
-			continue
-		}
-		text := trimLineEnding(content[lines[idx]:lineEnd(idx)])[shape.rest:]
-		lastLine, ok := candidateEnd(text, idx)
-		if !ok {
-			continue
-		}
-		candidates = append(candidates, checkboxCandidate{marker: marker, line: idx, last: min(lastLine, len(lines)-1)})
-	}
-	return candidates
-}
-
-// candidateEnd reports whether text, a chunk line's text after its prefix
-// on line idx, is a candidate, and returns the last line of its region.
-func candidateEnd(text []byte, idx int) (int, bool) {
-	if len(text) == 0 || text[0] != '[' {
-		return 0, false
-	}
-	if len(text) == 1 {
-		// A line ending follows the "[": the "]" can start the next line.
-		return idx + 2, true
-	}
-	_, size := utf8.DecodeRune(text[1:])
-	if closing := 1 + size; closing >= len(text) || text[closing] != ']' {
-		return 0, false
-	}
-	return idx + 1, true
+	return false
 }
 
 // mergeRegions merges sorted regions that overlap or touch.
