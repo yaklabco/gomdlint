@@ -453,13 +453,14 @@ func TestRegistryNormalizeOptions_IssuesShareNothing(t *testing.T) {
 			Default: "consistent", Values: []string{"consistent", "dash"},
 		},
 		{Name: "names", Type: lint.OptionStringList, Default: []string{"Go"}},
+		{Name: "lines", Type: lint.OptionIntegerOrList, Default: []int{1, 2}},
 	}})
-	options := map[string]any{"old_style": "zigzag", "names": "Go"}
+	options := map[string]any{"old_style": "zigzag", "names": "Go", "lines": "two"}
 
 	const changed = "changed"
 	_, issues, declared := registry.NormalizeOptions("MD044", options)
 	require.True(t, declared)
-	require.Len(t, issues, 2)
+	require.Len(t, issues, 3)
 	for _, issue := range issues {
 		if len(issue.Option.Aliases) > 0 {
 			issue.Option.Aliases[0].Name = changed
@@ -467,8 +468,11 @@ func TestRegistryNormalizeOptions_IssuesShareNothing(t *testing.T) {
 		if len(issue.Option.Values) > 0 {
 			issue.Option.Values[0] = changed
 		}
-		if names, ok := issue.Option.Default.([]string); ok {
-			names[0] = changed
+		switch list := issue.Option.Default.(type) {
+		case []string:
+			list[0] = changed
+		case []int:
+			list[0] = 9
 		}
 	}
 
@@ -477,10 +481,16 @@ func TestRegistryNormalizeOptions_IssuesShareNothing(t *testing.T) {
 	assert.Equal(t, "old_style", meta.Options[0].Aliases[0].Name)
 	assert.Equal(t, []string{"consistent", "dash"}, meta.Options[0].Values)
 	assert.Equal(t, []string{"Go"}, meta.Options[1].Default)
+	assert.Equal(t, []int{1, 2}, meta.Options[2].Default)
 
 	_, again, _ := registry.NormalizeOptions("MD044", options)
-	assert.Equal(t, issues[0].Key, again[0].Key)
-	assert.Equal(t, []string{"consistent", "dash"}, again[1].Option.Values, "a later issue sees the declaration as it was")
+	require.Len(t, again, 3)
+	for idx, issue := range again {
+		assert.Equal(t, issues[idx].Key, issue.Key)
+	}
+	// The issues come in the order of their keys: lines, names, old_style.
+	assert.Equal(t, meta.Options, []lint.OptionSpec{again[2].Option, again[1].Option, again[0].Option},
+		"a later issue sees the declarations as they were")
 }
 
 func TestRegistryNormalizeOptions_UndeclaredEntry(t *testing.T) {
@@ -552,8 +562,9 @@ func TestRegistryMarkdownlintRuleConfigWritesPinnedOptions(t *testing.T) {
 	registry.Describe(lint.RuleMeta{ID: "MD033", Name: "no-inline-html", OptionsDeclared: true, Options: []lint.OptionSpec{
 		{Name: "allowed_elements", Type: lint.OptionStringList, Default: []string{"br"}, MarkdownlintPinned: true},
 		{Name: "table_allowed_elements", Type: lint.OptionStringList, Default: []string{}},
+		{Name: "levels", Type: lint.OptionIntegerOrList, Default: []int{1, 2}, MarkdownlintPinned: true},
 	}})
-	pinned := map[string]any{"allowed_elements": []string{"br"}}
+	pinned := map[string]any{"allowed_elements": []string{"br"}, "levels": []int{1, 2}}
 
 	values := []any{true, false, nil, "warning", "", float64(0), map[string]any{}, map[string]any{"enabled": false}}
 	for _, value := range values {
@@ -566,16 +577,19 @@ func TestRegistryMarkdownlintRuleConfigWritesPinnedOptions(t *testing.T) {
 	cfg, issues := registry.MarkdownlintRuleConfig("MD033", map[string]any{
 		"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"},
 	})
-	assert.Equal(t, map[string]any{"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"}}, cfg.Options,
-		"the options of the setting win")
+	assert.Equal(t, map[string]any{
+		"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"}, "levels": []int{1, 2},
+	}, cfg.Options, "the options of the setting win")
 	assert.Empty(t, issues)
 
 	cfg, _ = registry.MarkdownlintRuleConfig("MD033", true)
 	cfg.Options["allowed_elements"].([]string)[0] = "hr"
+	cfg.Options["levels"].([]int)[0] = 9
 	assert.Equal(t, pinned, registry.MarkdownlintDefaultRuleConfig("MD033", true).Options, "each setting has its own copy")
 	meta, ok := registry.Meta("MD033")
 	require.True(t, ok)
 	assert.Equal(t, []string{"br"}, meta.Options[0].Default, "the declaration keeps its default")
+	assert.Equal(t, []int{1, 2}, meta.Options[2].Default, "the declaration keeps its default")
 
 	assert.Nil(t, registry.MarkdownlintDefaultRuleConfig("MD404", true).Options, "an unknown rule writes no options")
 }

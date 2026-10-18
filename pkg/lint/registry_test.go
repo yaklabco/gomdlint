@@ -332,6 +332,7 @@ func TestRegistry_MetaCopiesOptions(t *testing.T) {
 			Default: "consistent", Values: []string{"consistent", "dash"},
 		},
 		{Name: "names", Type: OptionStringList, Default: []string{"Go"}},
+		{Name: "lines", Type: OptionIntegerOrList, Default: []int{1, 2}},
 	}})
 
 	meta, ok := reg.Meta("MD013")
@@ -341,12 +342,16 @@ func TestRegistry_MetaCopiesOptions(t *testing.T) {
 	names, ok := meta.Options[1].Default.([]string)
 	require.True(t, ok)
 	names[0] = overwritten
+	lines, ok := meta.Options[2].Default.([]int)
+	require.True(t, ok)
+	lines[0] = 9
 
 	again, ok := reg.Meta("MD013")
 	require.True(t, ok)
 	assert.Equal(t, "old_style", again.Options[0].Aliases[0].Name)
 	assert.Equal(t, []string{"consistent", "dash"}, again.Options[0].Values)
 	assert.Equal(t, []string{"Go"}, again.Options[1].Default)
+	assert.Equal(t, []int{1, 2}, again.Options[2].Default)
 	assert.True(t, again.OptionsDeclared)
 }
 

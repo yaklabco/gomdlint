@@ -166,10 +166,13 @@ func (spec OptionSpec) clone() OptionSpec {
 }
 
 // cloneOptionValue returns a copy of value, an option's value, that shares
-// no list with it.
+// no list with it: a list of strings, of integers or of any values, as the
+// option types hold, gets a copy of its own.
 func cloneOptionValue(value any) any {
 	switch typed := value.(type) {
 	case []string:
+		return slices.Clone(typed)
+	case []int:
 		return slices.Clone(typed)
 	case []any:
 		return slices.Clone(typed)
