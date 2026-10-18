@@ -90,6 +90,22 @@ func optionSpec(t *testing.T, id, name string) lint.OptionSpec {
 	return lint.OptionSpec{}
 }
 
+// TestCatalogOptionsAreNotSpelledLikeRuleSettings checks that no option of
+// a built-in rule is spelled like a rule setting, such as enabled or
+// severity. A config file may write options directly under the rule key,
+// next to the settings, and a key spelled like a setting is always the
+// setting there, so such an option could be set only under options.
+func TestCatalogOptionsAreNotSpelledLikeRuleSettings(t *testing.T) {
+	settings := config.RuleSettingKeys()
+	for _, meta := range Catalog() {
+		for _, spec := range meta.Options {
+			for _, spelling := range append([]string{spec.Name}, aliasNames(spec)...) {
+				assert.NotContains(t, settings, spelling, "%s option %s", meta.ID, spec.Name)
+			}
+		}
+	}
+}
+
 // TestCatalogOptionsFollowMarkdownlint checks the options of every rule
 // that markdownlint has against markdownlint 0.41.1's parameters: each
 // parameter is one option, under its own name or as an alias, with the

@@ -57,7 +57,9 @@ func yamlKeys(value any) []string {
 // file that gomdlint does not read. YAML decoding drops them silently, so a
 // typo such as "flavour" would otherwise leave the default in force without
 // a trace. Keys under rules and rule_defaults that name no rule in registry
-// are reported too. The keys checked are those that decoding reads, after
+// are reported too, and so are the options of a rule that it cannot use,
+// whether written under options or directly under the rule key (see
+// ruleEntryWarnings). The keys checked are those that decoding reads, after
 // YAML's merge keys and aliases; see mappingEntries.
 func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []string {
 	if len(doc.Content) == 0 {
@@ -66,7 +68,6 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 
 	topKeys := yamlKeys(config.Config{})
 	backupKeys := yamlKeys(config.BackupsConfig{})
-	ruleKeys := yamlKeys(config.RuleConfig{})
 
 	var warnings []string
 	warn := func(entry keyEntry, message string) {
@@ -100,20 +101,15 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 			for _, rule := range mappingEntries(entry.value, entry.through) {
 				known, isRule := registry.Lookup(rule.name)
 				if !isRule {
+					// The settings of a key that names no rule configure
+					// nothing, so there is nothing to check them against.
 					warn(rule, unknownRuleMessage(registry, rule.name))
+					continue
 				}
 				prefix := name + "." + rule.name + "."
 				for _, nested := range mappingEntries(rule.value, rule.through) {
-					switch {
-					case !slices.Contains(ruleKeys, nested.name):
-						warn(nested, fmt.Sprintf("unknown key %q; rule options belong under %q",
-							prefix+nested.name, prefix+"options"))
-					case nested.name == "options" && isRule:
-						for _, option := range mappingEntries(nested.value, nested.through) {
-							for _, warning := range optionWarnings(registry, known, option) {
-								warn(warning.at, warning.message)
-							}
-						}
+					for _, warning := range ruleEntryWarnings(registry, known, prefix, nested) {
+						warn(warning.at, warning.message)
 					}
 				}
 			}
@@ -123,6 +119,67 @@ func unknownKeyWarnings(path string, doc *yaml.Node, registry *lint.Registry) []
 	return warnings
 }
 
+// ruleEntryWarnings describes the problems of entry, a key under the
+// settings of rule, which a warning names after prefix, such as
+// "rules.line-length.". A rule setting gets a warning when the rule has an
+// option spelled like it, since the setting wins (see
+// config.RuleConfig.UnmarshalYAML), and the options under options get
+// optionWarnings. Any other key is an option written directly under the
+// rule key, which gets optionWarnings too, unless it looks like a typo of
+// a rule setting rather than of an option (see misspelledSetting).
+func ruleEntryWarnings(registry *lint.Registry, rule lint.Rule, prefix string, entry keyEntry) []optionWarning {
+	settingKeys := config.RuleSettingKeys()
+	if !slices.Contains(settingKeys, entry.name) {
+		if misspelledSetting(registry, rule, entry.name) {
+			return []optionWarning{{at: entry, message: unknownKeyMessage(prefix, entry.name, settingKeys)}}
+		}
+		return optionWarnings(registry, rule, entry)
+	}
+
+	var warnings []optionWarning
+	if option, ok := declaredOption(registry, rule, entry.name); ok {
+		warnings = append(warnings, optionWarning{at: entry, message: fmt.Sprintf(
+			"%q is a rule setting, not %s option %q; to set the option, write it under %q",
+			prefix+entry.name, rule.Name(), option, prefix+"options")})
+	}
+	if entry.name == "options" {
+		for _, option := range mappingEntries(entry.value, entry.through) {
+			warnings = append(warnings, optionWarnings(registry, rule, option)...)
+		}
+	}
+	return warnings
+}
+
+// declaredOption returns the canonical name of the option of rule that
+// spelling spells, when the rule declares its options and one of them is
+// spelled so, by its name or an alias. It asks NormalizeOptions with a null
+// value, which suits every option type, so the only issue it can report is
+// that spelling spells no option.
+func declaredOption(registry *lint.Registry, rule lint.Rule, spelling string) (string, bool) {
+	normalized, issues, declared := registry.NormalizeOptions(rule.ID(), map[string]any{spelling: nil})
+	if !declared || len(issues) > 0 {
+		return "", false
+	}
+	for name := range normalized {
+		return name, true
+	}
+	return "", false
+}
+
+// misspelledSetting reports whether name, a key written directly under the
+// settings of rule, which reads as an option of rule, more likely misspells
+// a rule setting, such as severty for severity: it spells no option of the
+// rule and is close to none, but close to a setting. A rule that does not
+// declare its options has none to tell a typo by.
+func misspelledSetting(registry *lint.Registry, rule lint.Rule, name string) bool {
+	_, issues, declared := registry.NormalizeOptions(rule.ID(), map[string]any{name: nil})
+	if !declared || len(issues) != 1 || issues[0].Kind != lint.OptionIssueUnknown || len(issues[0].Suggestions) > 0 {
+		return false
+	}
+	_, near := closestKey(name, config.RuleSettingKeys())
+	return near
+}
+
 // optionWarning is a warning about an option of a rule, with the entry
 // whose place it names.
 type optionWarning struct {
@@ -130,13 +187,13 @@ type optionWarning struct {
 	message string
 }
 
-// optionWarnings describes the problems of option, an entry under the
-// options of rule: an option that the rule does not read, with the closest
-// spellings, a value of the wrong type, or a list with items of the wrong
-// type, which loading drops, as if the file did not set it, and a value
-// that the option does not allow. A warning about an item of a list names
-// the item's line. Two spellings of one option fail loading instead (see
-// normalizeRuleOptions).
+// optionWarnings describes the problems of option, an option of rule,
+// written under the rule's options or directly under the rule key: an
+// option that the rule does not read, with the closest spellings, a value
+// of the wrong type, or a list with items of the wrong type, which loading
+// drops, as if the file did not set it, and a value that the option does
+// not allow. A warning about an item of a list names the item's line. Two
+// spellings of one option fail loading instead (see normalizeRuleOptions).
 func optionWarnings(registry *lint.Registry, rule lint.Rule, option keyEntry) []optionWarning {
 	var value any
 	if err := option.value.Decode(&value); err != nil {

@@ -2,6 +2,8 @@
 // These types are pure data structures with no external dependencies on Viper or other config loaders.
 package config
 
+import "slices"
+
 // Severity represents the severity level of a lint diagnostic.
 type Severity string
 
@@ -11,12 +13,37 @@ const (
 	SeverityInfo    Severity = "info"
 )
 
-// RuleConfig holds per-rule configuration options.
+// RuleConfig holds the settings of one rule: whether it runs, its severity,
+// whether --fix applies its fixes, and its options.
+//
+// A configuration file may write the options under the options key, the
+// shape that gomdlint writes, or directly under the rule key, the flat
+// shape that markdownlint uses, or both (see UnmarshalYAML). Either way
+// they end up in Options.
 type RuleConfig struct {
 	Enabled  *bool          `mapstructure:"enabled" yaml:"enabled"`
 	Severity *string        `mapstructure:"severity" yaml:"severity"`
 	AutoFix  *bool          `mapstructure:"auto_fix" yaml:"auto_fix"`
 	Options  map[string]any `mapstructure:"options" yaml:"options"`
+}
+
+// ruleSettingKeys are the keys that RuleConfig's fields read; see
+// RuleSettingKeys.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var ruleSettingKeys = [...]string{"enabled", "severity", "auto_fix", "options"}
+
+// RuleSettingKeys returns the keys of a rule's settings that RuleConfig's
+// fields read, in their order: enabled, severity, auto_fix and options.
+// Every other key under a rule is one of its options. The caller may keep
+// the list.
+func RuleSettingKeys() []string {
+	return slices.Clone(ruleSettingKeys[:])
+}
+
+// isRuleSettingKey reports whether key is one of RuleSettingKeys.
+func isRuleSettingKey(key string) bool {
+	return slices.Contains(ruleSettingKeys[:], key)
 }
 
 // BackupsConfig controls backup behavior when fixing files.

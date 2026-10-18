@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"maps"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -113,12 +114,23 @@ func withHeader(header string, yamlBytes []byte) []byte {
 	return buf.Bytes()
 }
 
-// UnmarshalYAML decodes the settings of one rule: a mapping of enabled,
-// severity, auto_fix and options, or markdownlint's shorthand of a bare
-// boolean, which enables (true) or disables (false) the rule and leaves its
-// other settings alone. Strings such as "yes" are not booleans here, as in
-// markdownlint. YAML is a superset of JSON, so JSON config files get the
-// shorthand too.
+// UnmarshalYAML decodes the settings of one rule: a mapping, or
+// markdownlint's shorthand of a bare boolean, which enables (true) or
+// disables (false) the rule and leaves its other settings alone. Strings
+// such as "yes" are not booleans here, as in markdownlint.
+//
+// In a mapping, the keys of RuleSettingKeys are the rule's settings, and
+// every other key is an option written directly under the rule key, the
+// flat shape that markdownlint uses. The flat options join the options
+// mapping, so a mapping may write options either way, or both. A key that
+// is a setting is always the setting, so an option spelled like one can be
+// set only under options. An option written both flat and under options is
+// an error, since either value could win. Two spellings of one option,
+// such as markdownlint's and gomdlint's, decode side by side; the rule's
+// declared options tell that they are one.
+//
+// YAML is a superset of JSON, so JSON config files get the shorthand and
+// the flat shape too.
 func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 	switch {
 	case value.Kind == yaml.ScalarNode && value.ShortTag() == "!!bool":
@@ -130,18 +142,82 @@ func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	case value.Kind == yaml.MappingNode:
 		// The settings type without this method decodes the mapping as
-		// usual, field by field.
+		// usual, field by field, and skips the other keys.
 		type settings RuleConfig
 		var decoded settings
 		if err := value.Decode(&decoded); err != nil {
-			return err //nolint:wrapcheck // A *yaml.TypeError keeps its line numbers only when returned as is.
+			return err //nolint:wrapcheck // yaml.v3 reports a *yaml.TypeError with the document's other errors only when it is returned unwrapped.
 		}
-		*rc = RuleConfig(decoded)
+		cfg := RuleConfig(decoded)
+		if err := cfg.addFlatOptions(value); err != nil {
+			return err
+		}
+		*rc = cfg
 		return nil
 	default:
 		return &yaml.TypeError{Errors: []string{fmt.Sprintf(
 			"line %d: rule settings must be true, false or a mapping, not %s", value.Line, describeNode(value))}}
 	}
+}
+
+// addFlatOptions adds the options that mapping, the settings of the rule,
+// writes directly under the rule key to rc's options: every key that
+// decoding reads from mapping, after YAML's merge keys and aliases, that is
+// not a rule setting. An option that rc's options set already is an error
+// at the line of the flat key.
+func (rc *RuleConfig) addFlatOptions(mapping *yaml.Node) error {
+	if !mayHoldFlatOptions(mapping) {
+		return nil
+	}
+	var entries map[string]any
+	if err := mapping.Decode(&entries); err != nil {
+		return err //nolint:wrapcheck // yaml.v3 reports a *yaml.TypeError with the document's other errors only when it is returned unwrapped.
+	}
+
+	// Sorted keys keep the error message stable.
+	for _, key := range slices.Sorted(maps.Keys(entries)) {
+		if isRuleSettingKey(key) {
+			continue
+		}
+		if _, nested := rc.Options[key]; nested {
+			return &yaml.TypeError{Errors: []string{fmt.Sprintf(
+				"line %d: %q and %q both set option %q; keep one of them",
+				keyLine(mapping, key), key, "options."+key, key)}}
+		}
+		if rc.Options == nil {
+			rc.Options = make(map[string]any, len(entries))
+		}
+		rc.Options[key] = entries[key]
+	}
+	return nil
+}
+
+// mayHoldFlatOptions reports whether mapping, the settings of a rule, may
+// hold a key that is not a rule setting: whether it writes one, or a key
+// whose name only decoding tells, such as an alias, or a merge key, which
+// may bring one in. The settings that gomdlint writes, which Clone reads
+// back, hold none, so they decode once.
+func mayHoldFlatOptions(mapping *yaml.Node) bool {
+	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
+		key := mapping.Content[idx]
+		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" || !isRuleSettingKey(key.Value) {
+			return true
+		}
+	}
+	return false
+}
+
+// keyLine returns the line of the entry of mapping whose key reads as name,
+// or the line of mapping itself when the entry is not written there, as
+// when a merge key brings it in.
+func keyLine(mapping *yaml.Node, name string) int {
+	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
+		var key string
+		if mapping.Content[idx].Decode(&key) == nil && key == name {
+			return mapping.Content[idx].Line
+		}
+	}
+	return mapping.Line
 }
 
 // describeNode names the value of a YAML node for an error message.

@@ -369,19 +369,25 @@ func TestLintChecksTheRuleKeysThatDecodingReads(t *testing.T) {
 	})
 }
 
-// TestLintWarnsAboutRuleOptionsOutsideOptions covers a rule option written
-// directly in the rule entry, where gomdlint does not read it.
-func TestLintWarnsAboutRuleOptionsOutsideOptions(t *testing.T) {
-	inProject(t, map[string]string{
-		"doc.md":        fixedDoc,
-		".gomdlint.yml": "rules:\n  MD035:\n    style: \"***\"\n",
-	})
+// TestLintReadsRuleOptionsOutsideOptions covers rule options written
+// directly in the rule entry, as markdownlint writes them, in YAML and in
+// JSON, under markdownlint's names: they apply, without a warning.
+func TestLintReadsRuleOptionsOutsideOptions(t *testing.T) {
+	const doc = "# Title\n\nA line of more than twenty characters.\n"
+	for name, content := range map[string]string{
+		".gomdlint.yml":  "rules:\n  line-length:\n    line_length: 20\n",
+		".gomdlint.json": `{"rules": {"MD013": {"line_length": 20, "severity": "error"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": doc, name: content})
 
-	got := execute(t, "lint", "doc.md")
+			got := execute(t, "lint", "--color", "never", "--no-context", "doc.md")
 
-	assert.Equal(t, cli.ExitSuccess, got.code)
-	assert.Contains(t, got.stderr,
-		`unknown key "rules.MD035.style"; rule options belong under "rules.MD035.options"`)
+			assert.Empty(t, got.stderr)
+			assert.Contains(t, got.stdout, "doc.md:3:21")
+			assert.Contains(t, got.stdout, "line-length")
+		})
+	}
 }
 
 func TestLintAppliesSeverityDefault(t *testing.T) {
