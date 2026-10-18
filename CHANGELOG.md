@@ -138,6 +138,9 @@ formats change. The first entries under Changed may need action.
   that differ from it, its category and its markdownlint tags. A rule can be
   named by ID, name or markdownlint name, in any case, in config files, in
   the rule flags, in inline comments and in `markdownlint-configure-file`.
+- `gomdlint rules`, shell completion and SARIF rule descriptors describe
+  each rule from the catalog, saying what correct Markdown looks like, why
+  it matters and what the fix does.
 - `--enable`, `--disable` and `--fix-rules` accept markdownlint tags, such as
   `whitespace`, which stand for every rule they cover.
 - Unknown rule names get suggestions in the rule flags, config files,

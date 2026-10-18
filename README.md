@@ -164,8 +164,8 @@ blockquotes.
 Every rule has an ID and a name. markdownlint's own names for five rules
 also work: `ul-style` (MD004), `no-multiple-blanks` (MD012),
 `blanks-around-headings` (MD022), `single-title` (MD025) and `first-line-h1`
-(MD041). `gomdlint rules` lists every rule with its severity and
-description.
+(MD041). `gomdlint rules` lists every rule with its severity and a one-line
+description of what correct Markdown looks like.
 
 | ID | Name | Category | Fix |
 | --- | --- | --- | --- |
@@ -297,7 +297,9 @@ highest first, with ties in rule ID and path order.
 
 SARIF output follows SARIF 2.1.0. Its file locations are relative to the
 root of the Git working tree, as GitHub code scanning expects, and its
-columns count UTF-16 code units.
+columns count UTF-16 code units. Each rule descriptor gives the rule's
+one-line description as `shortDescription`, and the description, the reason
+for the rule and what its fix does as `fullDescription`.
 
 ### Color
 
@@ -432,7 +434,7 @@ A name that matches no rule gets an error or a warning that suggests the
 closest rules, such as `unknown rule "no-trailling-spaces" (did you mean
 "no-trailing-spaces"?)`. In a config file, the warning names the file and
 line. Shell completion offers rule names, IDs, markdownlint's names and
-tags for the three flags.
+tags for the three flags, with each rule's one-line description.
 
 ### Rule Settings
 
@@ -705,7 +707,8 @@ the `security-events: write` permission.
 | `gomdlint version` | Show version information |
 
 `gomdlint rules` lists each rule's name, default severity, whether it can
-fix, and description, and takes `--rule-format` like `lint`.
+fix, and the one-line description of what correct Markdown looks like, and
+takes `--rule-format` like `lint`.
 `gomdlint completion` writes a script for bash, zsh, fish or powershell.
 Release archives and the Homebrew formula include the bash, zsh and fish
 completions.

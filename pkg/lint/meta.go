@@ -6,12 +6,14 @@ import (
 )
 
 // Category groups rules by the Markdown construct they check. Each rule
-// belongs to exactly one. Categories order rule listings and documentation.
-// Unlike tags, they are not accepted where a rule can be named: several
-// share a name with a markdownlint tag that covers different rules.
+// belongs to exactly one. Documentation, such as the README's rule
+// categories, groups the rules by category, while rule listings such as
+// gomdlint rules keep rule ID order. Unlike tags, categories are not
+// accepted where a rule can be named: several share a name with a
+// markdownlint tag that covers different rules.
 type Category string
 
-// The categories, in the order that rule listings present them.
+// The categories, in the order that documentation presents them.
 const (
 	CategoryHeadings    Category = "headings"
 	CategoryLists       Category = "lists"
@@ -25,8 +27,8 @@ const (
 	CategorySpelling    Category = "spelling"
 )
 
-// Categories returns every category, in the order that rule listings
-// present them.
+// Categories returns every category, in the order that documentation
+// presents them.
 func Categories() []Category {
 	return []Category{
 		CategoryHeadings, CategoryLists, CategoryLayout, CategoryCode, CategoryLinks,
