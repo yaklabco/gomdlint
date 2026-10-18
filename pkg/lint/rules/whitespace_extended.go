@@ -93,8 +93,11 @@ func (r *HardTabsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 			if !includeCodeBlocks {
 				continue
 			}
-			// Skip if the language is in the ignore list.
-			if info.language != "" && ignoreCodeLanguages[strings.ToLower(info.language)] {
+			// Skip a fenced block when every language its fences name is
+			// in the ignore list, as markdownlint does, which a fence that
+			// names no language passes when the list is not empty.
+			if info.fenced && len(ignoreCodeLanguages) > 0 &&
+				(info.language == "" || ignoreCodeLanguages[strings.ToLower(info.language)]) {
 				continue
 			}
 		}
@@ -215,6 +218,7 @@ func visualColumn(text []byte) int {
 // codeBlockLineInfo stores information about a line inside a code block.
 type codeBlockLineInfo struct {
 	language string
+	fenced   bool
 }
 
 // buildCodeBlockInfo returns a map of the code lines of code blocks, along
@@ -242,7 +246,7 @@ func buildCodeBlockInfo(root *mdast.Node) map[int]codeBlockLineInfo {
 		}
 
 		for lineNum := range lint.CodeContentLines([]*mdast.Node{codeBlock}) {
-			info[lineNum] = codeBlockLineInfo{language: langName}
+			info[lineNum] = codeBlockLineInfo{language: langName, fenced: lint.IsFencedCodeBlock(codeBlock)}
 		}
 	}
 

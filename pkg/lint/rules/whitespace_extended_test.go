@@ -300,6 +300,25 @@ func TestHardTabsRule_IgnoreCodeLanguages(t *testing.T) {
 			config:    map[string]any{"code_blocks": false},
 		},
 		{
+			// markdownlint ignores a fenced block when every language its
+			// fences name is ignored, which a fence that names none passes.
+			name:      "fence without a language when languages are ignored",
+			input:     "```\n\tcode\n```\n\n~~~\n\tcode\n~~~\n",
+			wantDiags: 0,
+			config:    map[string]any{"ignore_code_languages": []any{"makefile"}},
+		},
+		{
+			name:      "fence without a language when no languages are ignored",
+			input:     "```\n\tcode\n```\n",
+			wantDiags: 1,
+		},
+		{
+			name:      "indented code when languages are ignored",
+			input:     "Text.\n\n    \tcode\n",
+			wantDiags: 1,
+			config:    map[string]any{"ignore_code_languages": []any{"makefile"}},
+		},
+		{
 			name:      "code spans are excluded with code blocks",
 			input:     "Text `a\tb` more\n",
 			wantDiags: 0,
