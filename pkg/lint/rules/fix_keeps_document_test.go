@@ -85,6 +85,13 @@ func TestFix_RuleFixesKeepTheDocument(t *testing.T) {
 			wantLines: []int{3},
 		},
 		{
+			name:      "fence holding only a no-break space",
+			input:     "# Title\n\n```\u00a0\n#!/bin/bash\necho hi\n```\n",
+			options:   map[string]map[string]any{"MD040": {"allowed_languages": []any{"bash"}}},
+			ruleID:    "MD040",
+			wantLines: []int{3},
+		},
+		{
 			name:      "detected language that allowed_languages names",
 			input:     "# Title\n\n```\n#!/bin/bash\necho hi\n```\n",
 			options:   map[string]map[string]any{"MD040": {"allowed_languages": []any{"go", "bash"}}},

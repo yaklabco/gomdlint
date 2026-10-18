@@ -382,6 +382,91 @@ func TestCodeBlockLanguageRule_AllowedLanguageMessages(t *testing.T) {
 	}
 }
 
+// TestCodeBlockLanguageRule_InfoStringWords verifies that MD040 splits an
+// info string into its language and the rest at spaces and tabs only, as GFM
+// and markdownlint do, so that another space character such as U+00A0 is
+// part of the language, and that its fix leaves a fence whose language is
+// exactly the detected one.
+func TestCodeBlockLanguageRule_InfoStringWords(t *testing.T) {
+	const shebang = "#!/bin/bash\necho hi\n```\n"
+	allowBash := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
+	tests := []struct {
+		name         string
+		input        string
+		options      map[string]any
+		wantMessages []string
+		wantFixed    string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "no-break space alone", input: "```\u00a0\n" + shebang, options: allowBash,
+			wantMessages: []string{"Language '\u00a0' is not in the allowed list"}},
+		{name: "no-break space alone without options", input: "```\u00a0\n" + shebang},
+		{name: "em space alone", input: "```\u2003\n" + shebang, options: allowBash,
+			wantMessages: []string{"Language '\u2003' is not in the allowed list"}},
+		{name: "form feed alone", input: "```\f\n" + shebang, options: allowBash,
+			wantMessages: []string{"Language '\f' is not in the allowed list"}},
+		{name: "vertical tab alone without options", input: "```\v\n" + shebang},
+		{name: "title after a tab", input: "```bash\ttitle=x\ncode\n```\n", options: allowBash,
+			wantMessages: []string{"Code fence info must contain only a language identifier"}},
+		{name: "title after a no-break space", input: "```bash\u00a0title=x\ncode\n```\n", options: allowBash,
+			wantMessages: []string{"Language 'bash\u00a0title=x' is not in the allowed list"}},
+		{name: "tab before the language", input: "```\tbash\ncode\n```\n", options: allowBash},
+		{name: "tab after the fence", input: "```\t\n" + shebang, options: allowBash,
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "```bash\t\n" + shebang},
+		{name: "spaces after the fence", input: "```  \n" + shebang, options: allowBash,
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "```bash  \n" + shebang},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			messages := make([]string, 0, len(diags))
+			for _, diag := range diags {
+				messages = append(messages, diag.Message)
+			}
+			assert.ElementsMatch(t, tt.wantMessages, messages)
+
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			fixed := applyAllEdits(t, tt.input, diags)
+			assert.Equal(t, want, fixed)
+			if fixed != tt.input {
+				// The inserted language is the fence's whole language, and allowed.
+				assert.Empty(t, applyRuleWithOptions(t, NewCodeBlockLanguageRule(), fixed, tt.options))
+			}
+		})
+	}
+}
+
+// TestFenceLanguageAfterInsert verifies that the language a fence would name
+// after the MD040 fix inserts text after its fence characters is the first
+// word of the line that follows, split at spaces and tabs only.
+func TestFenceLanguageAfterInsert(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "nothing after the fence", content: "```\ncode\n```\n", want: "bash"},
+		{name: "spaces after the fence", content: "```  \ncode\n```\n", want: "bash"},
+		{name: "tab after the fence", content: "```\t\ncode\n```\n", want: "bash"},
+		{name: "carriage return line ending", content: "```\r\ncode\r\n```\r\n", want: "bash"},
+		{name: "fence on the last line", content: "```", want: "bash"},
+		{name: "no-break space after the fence", content: "```\u00a0\ncode\n```\n", want: "bash\u00a0"},
+		{name: "word after the fence", content: "```sh x\ncode\n```\n", want: "bashsh"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(tt.content))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, fenceLanguageAfterInsert(file, len("```"), "bash"))
+		})
+	}
+}
+
 func TestCodeBlockStyleRule(t *testing.T) {
 	tests := []struct {
 		name  string
