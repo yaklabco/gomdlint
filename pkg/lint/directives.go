@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -55,6 +56,18 @@ func takesRules(action string) bool {
 // feed, carriage return, the line and paragraph separators, the byte order
 // mark and every space separator, such as the no-break space.
 const jsWhitespace = `[\t\n\v\f\r\x{2028}\x{2029}\x{feff}\p{Zs}]`
+
+// isJSWhitespace reports whether char is one that jsWhitespace matches.
+// Unlike unicode.IsSpace, it holds the byte order mark and not the
+// next-line character U+0085.
+func isJSWhitespace(char rune) bool {
+	switch char {
+	case '\t', '\n', '\v', '\f', '\r', '\u2028', '\u2029', '\ufeff':
+		return true
+	default:
+		return unicode.Is(unicode.Zs, char)
+	}
+}
 
 // directiveStart matches the start of a markdownlint comment as markdownlint
 // 0.41.1's inlineCommentStartRe (helpers/helpers.cjs) does: "<!--", any
@@ -211,7 +224,7 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 				}
 				continue
 			}
-			rules, meaning := configureFileRules(key, registry)
+			rules, meaning := lookupWord(key, registry)
 			if meaning == unknownWord {
 				suggestions := registry.markdownlintSuggestions(registry.Closest(key))
 				return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s", directive.line, registry.unknownKeyText(key, suggestions))
@@ -232,17 +245,20 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 	return result, nil
 }
 
-// configureFileRules returns the registered rules that key, a key of a
-// markdownlint-configure-file object, names, and how it names them. Like
-// markdownlint, which looks each key up whole after only upper-casing it,
-// it reads the key as one word: unlike the parameter of a
-// markdownlint-disable comment, a key of several words names no rules, and
-// an empty key names none rather than all.
-func configureFileRules(key string, registry *Registry) ([]Rule, wordMeaning) {
-	if !IsSingleWord(key) {
+// lookupWord returns the registered rules that word, one word of a
+// markdownlint comment or a key of a markdownlint-configure-file object,
+// names, and how it names them. Like markdownlint, which looks each up
+// whole after only upper-casing it, it reads word as one word: a word that
+// is empty or holds whitespace names no rules. A comment's parameter splits
+// into words at JavaScript's whitespace, so its words hold no whitespace but
+// the next-line character, which Go counts and JavaScript does not. Unlike
+// the parameter of a markdownlint-disable comment, a key of several words
+// names no rules, and an empty key names none rather than all.
+func lookupWord(word string, registry *Registry) ([]Rule, wordMeaning) {
+	if !IsSingleWord(word) {
 		return nil, unknownWord
 	}
-	return directiveRules(key, registry)
+	return directiveRules(word, registry)
 }
 
 // wordMeaning says how a word of a markdownlint comment names rules.
@@ -362,13 +378,15 @@ type wordResolver struct {
 }
 
 // ruleList returns the IDs of the rules that the words of directive's
-// parameter name, in ID order, or every rule when it has no words. Each word
-// is a rule ID, name or alias, or a tag, in any case, as in markdownlint.
-// Words that are not known are ignored. It also returns, in the order of
-// the words, a notice for each word that names no rule or tag and for each
-// deprecated tag, once for a word that the comment repeats in any case.
+// parameter name, in ID order, or every rule when it has no words. As in
+// markdownlint, the words are the parts of the parameter between runs of
+// JavaScript's whitespace, and each is a rule ID, name or alias, or a tag,
+// in any case. Words that are not known are ignored. It also returns, in
+// the order of the words, a notice for each word that names no rule or tag
+// and for each deprecated tag, once for a word that the comment repeats in
+// any case.
 func (w *wordResolver) ruleList(directive *inlineDirective) ([]string, []Notice) {
-	words := strings.Fields(directive.parameter)
+	words := strings.FieldsFunc(directive.parameter, isJSWhitespace)
 	if len(words) == 0 {
 		return w.registry.IDs(), nil
 	}
@@ -377,7 +395,7 @@ func (w *wordResolver) ruleList(directive *inlineDirective) ([]string, []Notice)
 	var notices []Notice
 	var noticed map[string]bool // Lower-cased words with a notice, once one has.
 	for _, word := range words {
-		rules, meaning := directiveRules(word, w.registry)
+		rules, meaning := lookupWord(word, w.registry)
 		named = append(named, rules...)
 		if meaning == knownWord {
 			continue

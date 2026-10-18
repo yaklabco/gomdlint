@@ -77,8 +77,8 @@ func TestEngineDirectiveGrammarFollowsMarkdownlint(t *testing.T) {
 		{name: "disable-file2", input: "# T\n\n<!-- markdownlint-disable-file2 MD009 -->\nbad \n", want: []int{4}, plain: true},
 		{name: "configure-file-brace", input: "# T\n\n<!-- markdownlint-configure-file{\"MD009\": false} -->\nbad \n", want: []int{4}, plain: true},
 		{name: "dashes-then-space", input: "# T\n\n<!-- markdownlint-disable--  -->\nbad \n", want: []int{4}, plain: true},
-		{name: "kelvin-sign", input: "# T\n\n<!-- marKdownlint-disable MD009 -->\nbad \n", want: []int{4}, plain: true},
-		{name: "long-s", input: "# T\n\n<!-- markdownlint-diſable MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "kelvin-sign", input: "# T\n\n<!-- mar\u212adownlint-disable MD009 -->\nbad \n", want: []int{4}, plain: true},
+		{name: "long-s", input: "# T\n\n<!-- markdownlint-di\u017fable MD009 -->\nbad \n", want: []int{4}, plain: true},
 		{name: "disable-closed", input: "# T\n\n<!-- markdownlint-disable-->\nbad \n"},
 		{name: "disable-file-closed", input: "# T\n\nbad \n\n<!-- markdownlint-disable-file-->\n"},
 		{name: "disable-next-line-closed", input: "# T\n\n<!-- markdownlint-disable-next-line-->\nbad \nbad \n", want: []int{5}},
@@ -93,8 +93,14 @@ func TestEngineDirectiveGrammarFollowsMarkdownlint(t *testing.T) {
 		{name: "configure-file-closed", input: "# T\n\n<!-- markdownlint-configure-file {\"MD009\": false}-->\nbad \n"},
 		{name: "upper-case", input: "# T\n\n<!-- MARKDOWNLINT-DISABLE MD009 -->\nbad \n"},
 		{name: "tab", input: "# T\n\n<!-- markdownlint-disable\tMD009 -->\nbad \n"},
-		{name: "no-break-spaces", input: "# T\n\n<!-- markdownlint-disable MD009 -->\nbad \n"},
+		{name: "no-break-spaces", input: "# T\n\n<!--\u00a0markdownlint-disable\u00a0MD009 -->\nbad \n"},
 		{name: "nested", input: "# T\n\n<!-- markdownlint-disable <!-- markdownlint-enable MD009 -->\nbad \n", want: []int{4}},
+		// The parameter splits into words at JavaScript's whitespace too,
+		// which holds the byte order mark but not the next-line character.
+		{name: "feff-separator", input: "# T\n\n<!-- markdownlint-disable\ufeffMD009 -->\nbad \n"},
+		{name: "feff-between-words", input: "# T\n\n<!-- markdownlint-disable MD010\ufeffMD009 -->\nbad \n"},
+		{name: "next-line-is-no-space", input: "# T\n\n<!-- markdownlint-disable MD010\u0085MD009 -->\nbad \n", want: []int{4}},
+		{name: "next-line-after-word", input: "# T\n\n<!-- markdownlint-disable MD009\u0085 -->\nbad \n", want: []int{4}},
 	}
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())
