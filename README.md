@@ -216,6 +216,9 @@ rule IDs, aliases, or tags. Suppressed findings produce no fixes. Comments insid
 code or frontmatter do not change lint settings. As in markdownlint, whitespace
 or `-->` must follow the comment's kind, so a comment such as
 `<!-- markdownlint-disable-next-lines MD009 -->` is plain text and does nothing.
+Unlike markdownlint, gomdlint also reads a comment split over several lines,
+and it reads every comment after one that lacks its closing `-->`, where
+markdownlint can skip some.
 
 A word in such a comment that names no rule or tag does nothing, as in
 markdownlint. gomdlint warns about it, and names the rules and tags that the
