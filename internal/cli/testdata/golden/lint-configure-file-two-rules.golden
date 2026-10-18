@@ -1,6 +1,13 @@
-exit code 74
+exit code 0
 -- stdout --
-configured.md: error: parse failure: file configuration: markdownlint-configure-file at line 1: unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys)
-1 file could not be linted (0 files checked, no issues found)
+configured.md (3 issues)
+  configured.md:3:8   warning  no-trailing-punctuation  Heading ends with trailing punctuation "."
+    Suggestion: Remove trailing punctuation from the heading
+  configured.md:5:5   warning  no-hard-tabs             Hard tab character found
+    Suggestion: Replace tabs with spaces
+  configured.md:5:37  warning  no-trailing-spaces       Trailing whitespace
+    Suggestion: Remove trailing whitespace
+
+3 issues (3 warnings), in 1 file, 2 fixable
 -- stderr --
-Error: 1 file could not be linted
+WARN configured.md:1: markdownlint-configure-file: unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored

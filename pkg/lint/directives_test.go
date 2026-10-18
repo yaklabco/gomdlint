@@ -454,14 +454,21 @@ func TestEngineConfigureFileDefaultValue(t *testing.T) {
 	}
 }
 
-func TestEngineConfigureFileRejectsInvalidConfiguration(t *testing.T) {
+// TestEngineConfigureFileIgnoresInvalidConfiguration covers configure-file
+// comments that configure nothing in markdownlint 0.41.1: invalid JSON,
+// null, and a key that names no rule. gomdlint used to fail the file. The
+// file is linted, MD009 reports, and a notice names each problem but null,
+// which holds no settings.
+func TestEngineConfigureFileIgnoresInvalidConfiguration(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())
-	for _, value := range []string{`{"MD009":`, `null`, `{"unknown-rule": false}`} {
+	for value, notices := range map[string]int{`{"MD009":`: 1, `null`: 0, `{"unknown-rule": false}`: 1} {
 		input := "<!-- markdownlint-configure-file " + value + " -->\nbad \n"
 		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
-		require.ErrorContains(t, err, "line 1")
-		require.Nil(t, result)
+		require.NoError(t, err, value)
+		require.Len(t, result.Diagnostics, 1, value)
+		assert.Equal(t, 2, result.Diagnostics[0].StartLine, value)
+		assert.Len(t, result.Notices, notices, value)
 	}
 }
 
@@ -470,8 +477,9 @@ func TestEngineConfigureFileRejectsInvalidConfiguration(t *testing.T) {
 // lib/markdownlint.mjs looks each key up whole, after only upper-casing
 // it, so a key of several words, a key with surrounding whitespace and an
 // empty key name no rule there. gomdlint used to apply such a key to each
-// of its words, or to every rule when it was empty. It now rejects them as
-// it rejects other unknown keys.
+// of its words, or to every rule when it was empty, and then to fail the
+// file. It now ignores them, as it ignores other unknown keys, with a
+// notice, so both rules report.
 func TestEngineConfigureFileKeysNameOneRuleOrTag(t *testing.T) {
 	const body = "bad \ntab\there\n"
 	registry := lint.NewRegistry()
@@ -508,8 +516,10 @@ func TestEngineConfigureFileKeysNameOneRuleOrTag(t *testing.T) {
 
 			result, err := engine.LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
 
-			require.ErrorContains(t, err, "markdownlint-configure-file at line 1: "+tt.want)
-			assert.Nil(t, result)
+			require.NoError(t, err)
+			assert.Len(t, result.Diagnostics, 2, "the key configures neither rule")
+			require.Len(t, result.Notices, 1)
+			assert.Equal(t, "markdownlint-configure-file: "+tt.want+"; it is ignored", result.Notices[0].Message)
 		})
 	}
 }
@@ -517,11 +527,15 @@ func TestEngineConfigureFileKeysNameOneRuleOrTag(t *testing.T) {
 func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
 	input := "<!-- markdownlint-configure-file {\"no-trailling-spaces\": false} -->\nbad \n"
 
-	_, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
 		context.Background(), "test.md", []byte(input), config.NewConfig())
 
-	require.ErrorContains(t, err,
-		`markdownlint-configure-file at line 1: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?)`)
+	require.NoError(t, err)
+	require.Len(t, result.Notices, 1)
+	assert.Equal(t, []string{"no-trailing-spaces"}, result.Notices[0].Suggestions)
+	assert.Equal(t,
+		`markdownlint-configure-file: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+		result.Notices[0].Message)
 }
 
 // TestEngineConfigureFileSettingReplacesRuleDefaults covers a

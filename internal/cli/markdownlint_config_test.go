@@ -442,6 +442,26 @@ func TestLint_ConfigureFileAppliesKeysInWrittenOrder(t *testing.T) {
 	}
 }
 
+// TestLint_ConfigureFileReadsAsMarkdownlintCLI2Does covers configure-file
+// parameters with a trailing comma, with a comment, or in YAML. markdownlint
+// 0.41.1 reads a parameter with the parsers that markdownlint-cli2 0.23.3
+// gives it, JSONC first and YAML last, so it applies each, and reports
+// trailingSpaceDoc's trailing space with none of them. gomdlint used to
+// fail the file.
+func TestLint_ConfigureFileReadsAsMarkdownlintCLI2Does(t *testing.T) {
+	for _, parameter := range []string{`{"MD009": false,}`, `{"MD009": false /* off */}`, `{ MD009: false }`} {
+		t.Run(parameter, func(t *testing.T) {
+			doc := "<!-- markdownlint-configure-file " + parameter + " -->\n\n" + trailingSpaceDoc
+			inProject(t, map[string]string{"doc.md": doc})
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, map[string][]string{"doc.md": nil}, reportedFiles(t, got.stdout))
+		})
+	}
+}
+
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config
 // sets and a markdownlint config cannot: its ignore patterns, flavor,
 // gitignore and default_ignores settings and backups. While gomdlint

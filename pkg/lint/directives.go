@@ -234,36 +234,43 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // it. gomdlint applies the comments over its settings, which are no such
 // object, so their keys apply in the order the comments write them.
 //
-// A key that names no rule or tag is an error. A key that is a deprecated
-// tag gets a notice, which configureFile records on its comment, once for a
-// tag that the comment's keys repeat in any spelling that markdownlint reads
-// as the same word.
+// Like markdownlint, configureFile reads each comment's parameter as
+// markdownlint-cli2 makes markdownlint read it (see ReadMarkdownlintConfig),
+// as JSON with comments and trailing commas, or as YAML, and it never
+// fails. A comment whose parameter is neither, or holds a value other than
+// an object, such as a list, changes nothing and gets a notice; one that
+// holds null or nothing changes nothing without a notice. A key that names
+// no rule or tag configures nothing and gets a notice that offers the
+// closest rules and tags. A key that is a deprecated tag gets a notice too.
+// configureFile records the notices on their comments, once for a key that
+// a comment repeats in any spelling that markdownlint reads as the same
+// word.
 func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
 	var settings MarkdownlintSettings
 	lines := make(map[string]int) // key -> the line of the comment that last set it
 	configured := false
+	resolver := &wordResolver{registry: registry} // It remembers the suggestions for unknown keys.
 	for idx := range directives {
 		directive := &directives[idx]
 		if directive.action != configureFileAction {
 			continue
 		}
+		read, ok := readConfigureFile(directive)
+		if !ok {
+			continue
+		}
 		configured = true
-		parsed, err := decodeSettings([]byte(directive.parameter), false)
-		if errors.Is(err, ErrNotJSONObject) {
-			return nil, fmt.Errorf("markdownlint-configure-file at line %d must contain a JSON object", directive.line)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("markdownlint-configure-file at line %d: %w", directive.line, err)
-		}
-		var noticed wordSet // The deprecated tags with a notice.
-		for _, setting := range parsed.settings {
+		var noticed wordSet // The unknown keys and deprecated tags with a notice.
+		for _, setting := range read.Settings.settings {
 			if !IsMarkdownlintDefaultKey(setting.Key) {
 				rules, meaning := lookupWord(setting.Key, registry)
-				if meaning == unknownWord {
-					return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s",
-						directive.line, registry.configureFileKeyText(setting.Key))
-				}
-				if meaning == formerTag && noticed.add(setting.Key) {
+				switch {
+				case meaning == unknownWord:
+					if noticed.add(setting.Key) {
+						directive.notices = append(directive.notices, resolver.configureFileKeyNotice(directive, setting.Key))
+					}
+					continue // markdownlint applies the key to no rule.
+				case meaning == formerTag && noticed.add(setting.Key):
 					directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, setting.Key, rules))
 				}
 			}
@@ -309,6 +316,39 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 	}
 	return result, nil
+}
+
+// readConfigureFile reads the parameter of directive, a
+// markdownlint-configure-file comment, and reports whether it holds an
+// object of settings, which markdownlint applies. A parameter that holds
+// none changes nothing, as in markdownlint: one that neither JSON with
+// comments nor YAML reads, or that holds a value other than an object,
+// gets a notice, and null or nothing gets none.
+func readConfigureFile(directive *inlineDirective) (*MarkdownlintSource, bool) {
+	read, err := ReadMarkdownlintConfig([]byte(directive.parameter))
+	var problem string
+	switch {
+	case err != nil:
+		// configure-file comments are documented as JSON, so the JSON error
+		// says best what to change.
+		var syntaxErr *MarkdownlintSyntaxError
+		if errors.As(err, &syntaxErr) {
+			err = syntaxErr.JSON
+		}
+		problem = "invalid JSON (" + err.Error() + "); it is ignored"
+	case read.NotObject != "":
+		problem = NotObjectText(read.NotObject)
+	default:
+		return read, true
+	}
+	kind := directive.kind()
+	directive.notices = append(directive.notices, Notice{
+		Kind:      NoticeInvalidConfiguration,
+		Line:      directive.line,
+		Directive: kind,
+		Message:   kind + ": " + problem,
+	})
+	return nil, false
 }
 
 // configureFileRule converts value, the setting of the rule with the given
@@ -592,26 +632,35 @@ func (r *Registry) markdownlintSuggestions(word string) []Suggestion {
 	return named
 }
 
-// configureFileKeyText describes key, a key of a markdownlint-configure-file
-// object that names no rule or tag, for an error, as UnknownKeyText does
-// for configuration files, but in the terms of a markdownlint comment. A
-// key of several words that each name a rule or tag gets a note that says
-// to write them as separate keys, and any other key the closest rules and
-// tags; both name each rule as markdownlint names it (see markdownlintTerm).
-func (r *Registry) configureFileKeyText(key string) string {
+// configureFileKeyNotice is the notice for key, a key of directive, a
+// markdownlint-configure-file comment, that names no rule or tag, which the
+// comment ignores, as markdownlint does. It describes the key as
+// UnknownKeyText does for configuration files, but in the terms of a
+// markdownlint comment. A key of several words that each name a rule or
+// tag gets a note that says to write them as separate keys, and any other
+// key the closest rules and tags; both name each rule as markdownlint
+// names it (see markdownlintTerm).
+func (w *wordResolver) configureFileKeyNotice(directive *inlineDirective, key string) Notice {
 	words := strings.FieldsFunc(key, isJSWhitespace)
 	terms := make([]string, len(words))
 	for idx, word := range words {
-		if _, meaning := lookupWord(word, r); meaning != knownWord {
+		if _, meaning := lookupWord(word, w.registry); meaning != knownWord {
 			terms = nil
 			break
 		}
-		terms[idx] = r.markdownlintTerm(word)
+		terms[idx] = w.registry.markdownlintTerm(word)
 	}
-	if len(terms) >= 2 {
-		return severalWordsKeyText(key, terms)
+	if len(terms) < 2 {
+		return unknownRuleNotice(directive, key, w.suggestions(key))
 	}
-	return UnknownRuleText(key, r.markdownlintSuggestions(key))
+	kind := directive.kind()
+	return Notice{
+		Kind:      NoticeUnknownRule,
+		Line:      directive.line,
+		Directive: kind,
+		Name:      key,
+		Message:   kind + ": " + severalWordsKeyText(key, terms) + "; it is ignored",
+	}
 }
 
 // wordResolver resolves the words of the markdownlint comments of one file.

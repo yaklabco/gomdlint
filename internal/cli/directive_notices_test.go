@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -159,4 +160,117 @@ func TestLint_JSONCarriesDirectiveNotices(t *testing.T) {
 		},
 	}, got.Files[0].Notices)
 	assert.Equal(t, strings.Join(wantNoticeWarnings, "\n")+"\n", run.stderr)
+}
+
+// configureFileNoticeDoc holds three markdownlint-configure-file comments
+// that markdownlint 0.41.1, run by markdownlint-cli2 0.23.3, ignores, and a
+// trailing space on line 7, which it reports: invalid JSON, a list, and a
+// key that names no rule. quietConfigureFileDoc holds plain comments of
+// the same length in their places.
+var (
+	configureFileNoticeDoc = "# Notices\n\n" +
+		"<!-- markdownlint-configure-file {\"MD009\": false -->\n" +
+		"<!-- markdownlint-configure-file [1] -->\n" +
+		"<!-- markdownlint-configure-file {\"MD999\": false} -->\n\n" +
+		"Trailing space \n"
+	quietConfigureFileDoc = strings.ReplaceAll(configureFileNoticeDoc, "markdownlint-", "notdirective-")
+)
+
+// wantConfigureFileWarnings are the warnings that linting
+// configureFileNoticeDoc as doc.md writes to stderr.
+var wantConfigureFileWarnings = []string{
+	`WARN doc.md:3: markdownlint-configure-file: invalid JSON (unexpected end of JSON input); it is ignored`,
+	`WARN doc.md:4: markdownlint-configure-file: a list instead of an object of settings; it is ignored`,
+	`WARN doc.md:5: markdownlint-configure-file: unknown rule "MD999"; it is ignored`,
+}
+
+// TestLint_ConfigureFileNoticesChangeNoFindings lints a document whose
+// configure-file comments markdownlint ignores, and the same document with
+// plain comments in their places, in every human format and under
+// --strict. gomdlint used to fail the file. Now the findings, the rest of
+// the output and the exit code are the same for both documents, and the
+// notices go to stderr.
+func TestLint_ConfigureFileNoticesChangeNoFindings(t *testing.T) {
+	for _, flags := range [][]string{{"--format", "text"}, {"--strict"}, {"--format", "table"}, {"--format", "summary"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			args := append([]string{"lint", "--color", "never"}, append(flags, "doc.md")...)
+
+			inProject(t, map[string]string{"doc.md": quietConfigureFileDoc})
+			want := execute(t, args...)
+			require.Empty(t, want.stderr)
+
+			inProject(t, map[string]string{"doc.md": configureFileNoticeDoc})
+			got := execute(t, args...)
+
+			assert.Equal(t, want.code, got.code, "notices never change the exit code")
+			assert.Equal(t, want.stdout, got.stdout, "notices never change the findings")
+			assert.Equal(t, strings.Join(wantConfigureFileWarnings, "\n")+"\n", got.stderr)
+		})
+	}
+}
+
+// TestLint_MachineFormatsCarryConfigureFileNotices covers JSON output, which
+// lists the notices of each file under notices, and SARIF output, which
+// records them as configuration notifications at their comments' lines.
+func TestLint_MachineFormatsCarryConfigureFileNotices(t *testing.T) {
+	inProject(t, map[string]string{"doc.md": configureFileNoticeDoc})
+
+	run := execute(t, "lint", "--format", "json", "doc.md")
+
+	var report struct {
+		Files []struct {
+			Notices []jsonNotice `json:"notices"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(run.stdout), &report), run.stdout)
+	require.Len(t, report.Files, 1)
+	assert.Equal(t, []jsonNotice{
+		{
+			Line: 3, Kind: "invalid-configuration", Directive: "markdownlint-configure-file",
+			Message: "markdownlint-configure-file: invalid JSON (unexpected end of JSON input); it is ignored",
+		},
+		{
+			Line: 4, Kind: "invalid-configuration", Directive: "markdownlint-configure-file",
+			Message: "markdownlint-configure-file: a list instead of an object of settings; it is ignored",
+		},
+		{
+			Line: 5, Kind: "unknown-rule", Directive: "markdownlint-configure-file", Name: "MD999",
+			Message: `markdownlint-configure-file: unknown rule "MD999"; it is ignored`,
+		},
+	}, report.Files[0].Notices)
+	assert.NotContains(t, run.stdout, `"name": ""`, "a notice without a name has no name key")
+
+	run = execute(t, "lint", "--format", "sarif", "doc.md")
+
+	var log struct {
+		Runs []struct {
+			Invocations []struct {
+				ToolConfigurationNotifications []struct {
+					Message struct {
+						Text string `json:"text"`
+					} `json:"message"`
+					Locations []struct {
+						PhysicalLocation struct {
+							Region struct {
+								StartLine int `json:"startLine"`
+							} `json:"region"`
+						} `json:"physicalLocation"`
+					} `json:"locations"`
+				} `json:"toolConfigurationNotifications"`
+			} `json:"invocations"`
+		} `json:"runs"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(run.stdout), &log), run.stdout)
+	require.Len(t, log.Runs, 1)
+	require.Len(t, log.Runs[0].Invocations, 1)
+	var got []string
+	for _, notification := range log.Runs[0].Invocations[0].ToolConfigurationNotifications {
+		require.Len(t, notification.Locations, 1)
+		got = append(got, fmt.Sprintf("%d: %s", notification.Locations[0].PhysicalLocation.Region.StartLine, notification.Message.Text))
+	}
+	assert.Equal(t, []string{
+		"3: markdownlint-configure-file: invalid JSON (unexpected end of JSON input); it is ignored",
+		"4: markdownlint-configure-file: a list instead of an object of settings; it is ignored",
+		`5: markdownlint-configure-file: unknown rule "MD999"; it is ignored`,
+	}, got)
 }
