@@ -343,6 +343,7 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 		end -= len(regionSentinel)
 	}
 	verifier := m.verifier
+	m.parsed += 1 + len(text)
 	snapshot, err := verifier.parser.ParseWithReferences(verifier.ctx, verifier.file.Path,
 		append([]byte{'\n'}, text...), m.refIndex)
 	if err != nil {

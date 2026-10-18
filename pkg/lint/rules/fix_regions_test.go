@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -98,6 +99,11 @@ var regionSnippets = []string{
 	"    indented code\nText after indented code   \n",
 	"<div>\nhtml six\n</div>\nText after html\n",
 	"[docs]: /closed\n***\n- [d16]: /sixteen\n  text\n- b\n",
+	// A GFM table made from an item's first paragraph comes before the setext
+	// heading made from the same paragraph, which keeps its blank-line flag.
+	"***\n- a\n  b|c\n  -|-\n  ===\n",
+	"## Heading\n- [t1]: /t1\n  a\n  b|c\n  -|-\n  ===\n",
+	"- x\n- a\n  b|c\n  -|-\n  ===\n- y   \n- z\n- w\n",
 }
 
 // regionEditTexts are the texts random edits insert.
@@ -609,7 +615,9 @@ func TestRegionChecksAfterClosedBlocks(t *testing.T) {
 		{name: "comment left open", old: "<!-- comment 6 -->", new: "<!-- comment 6"},
 		{name: "comment closed later", old: "<!-- comment 6 -->\n", new: "<!-- comment 6\n-->\n"},
 		{name: "fence left open", old: "```\ncode 7\n```\n", new: "```\ncode 7\n"},
-		{name: "paragraph joined to a break", old: "***\nParagraph 9", new: "***\n    Paragraph 9"},
+		{name: "paragraph indented after a break", old: "***\nParagraph 9", new: "***\n    Paragraph 9"},
+		{name: "blank line inserted before the next paragraph", old: "## Heading 5\n", new: "## Heading 5\n\n"},
+		{name: "break line ending doubled", old: "line   \n***\nParagraph 9", new: "line   \n***\n\nParagraph 9"},
 	}
 	cases, decided := 0, 0
 	for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
@@ -642,6 +650,45 @@ func TestRegionChecksAfterClosedBlocks(t *testing.T) {
 	assert.Equal(t, cases, decided, "both region checks decide every case")
 }
 
+// TestRegionChecksOnTablesBeforeSetextHeadings checks region checks on list
+// items whose first paragraph becomes a GFM table and a setext heading: the
+// table comes first and the heading keeps the blank-line flag of the item's
+// first line, which differs where a region starts after a closed block or
+// at the item before a list region. Both region checks decide as the
+// whole-document checks do.
+func TestRegionChecksOnTablesBeforeSetextHeadings(t *testing.T) {
+	tests := []struct {
+		name, doc, old, new string
+	}{
+		{"blank line inserted after a break", "# Title\n\n***\n- a\n  b|c\n  -|-\n  ===\n", "***\n- a", "***\n\n- a"},
+		{"blank line after a break removed", "# Title\n\n***\n\n- a\n  b|c\n  -|-\n  ===\n", "***\n\n- a", "***\n- a"},
+		{"trailing spaces in the table", "# Title\n\n***\n- a\n  b|c   \n  -|-\n  ===\n", "b|c   ", "b|c"},
+		{"trailing spaces after the item", "# Title\n\n- x\n- a\n  b|c\n  -|-\n  ===\n- y   \n- z\n- w\n- v\n", "- y   ", "- y"},
+		{"blank line removed in the list", "# Title\n\n- x\n- a\n  b|c\n  -|-\n  ===\n- y\n\n- z\n- w\n- v\n", "- y\n\n- z", "- y\n- z"},
+	}
+	for _, tt := range tests {
+		for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+			t.Run(tt.name+"/"+string(flavor), func(t *testing.T) {
+				snapshot := parseForCheckWith(t, flavor, tt.doc)
+				check := newFixCheck(snapshot, flavor)
+				change := []fix.TextEdit{replaceOnce(t, tt.doc, tt.old, tt.new)}
+				want := check.unchanged(fix.ApplyEdits(snapshot.Content, change))
+				if ok, got := check.regionsUnchanged(change); ok {
+					assert.Equal(t, want, got, "render signature")
+				}
+				cfg := config.NewConfig()
+				cfg.Flavor = flavor
+				verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
+				if model := verifier.regions(); model != nil {
+					if ok, got := model.checkEdits(change); ok {
+						assert.Equal(t, verifier.acceptsWhole(change), got, "outline")
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestGroupsStartAfterClosedBlocks checks where docLayout's groups start
 // when blocks follow one another with no blank line: after a top-level
 // thematic break, ATX heading or one-line HTML block, and after a closed
@@ -656,6 +703,12 @@ func TestGroupsStartAfterClosedBlocks(t *testing.T) {
 		{"thematic break", "a\n***\nb\n", []string{"a", "b"}},
 		{"ATX heading", "# H\nb\n", []string{"# H", "b"}},
 		{"one-line HTML block", "<!-- c -->\nb\n", []string{"<!-- c -->", "b"}},
+		{"one-line script", "<script>x</script>\nb\n", []string{"<script>x</script>", "b"}},
+		{"one-line processing instruction", "<?php x ?>\nb\n", []string{"<?php x ?>", "b"}},
+		{"one-line declaration", "<!DOCTYPE html>\nb\n", []string{"<!DOCTYPE html>", "b"}},
+		{"one-line CDATA", "<![CDATA[ x ]]>\nb\n", []string{"<![CDATA[ x ]]>", "b"}},
+		{"thematic break with CRLF", "a\r\n***\r\nb\r\n", []string{"a\r", "b\r"}},
+		{"break before a blank line", "a\n***\n\nb\n", []string{"a", "b"}},
 		{"closed fence", "```\nx\n```\nb\n", []string{"```", "b"}},
 		{"heading after a paragraph", "a\n# H\nb\n", []string{"a", "b"}},
 		{"break after a list", "- a\n***\nb\n", []string{"- a", "b"}},
@@ -664,18 +717,20 @@ func TestGroupsStartAfterClosedBlocks(t *testing.T) {
 		{"HTML block that runs on", "<div>\nx\n</div>\nb\n", []string{"<div>"}},
 		{"heading in a quote", "> # H\nb\n", []string{"> # H"}},
 	}
-	gfm, _ := recordingInstances()
+	gfm, commonMark := recordingInstances()
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			layout := newDocLayout(gfm, []byte(tt.input))
-			require.NotNil(t, layout)
-			var starts []string
-			for _, offset := range layout.bounds[:len(layout.bounds)-1] {
-				line, _, _ := strings.Cut(tt.input[offset:], "\n")
-				starts = append(starts, line)
-			}
-			assert.Equal(t, tt.starts, starts)
-		})
+		for flavor, markdown := range map[string]goldmark.Markdown{"gfm": gfm, "commonmark": commonMark} {
+			t.Run(tt.name+"/"+flavor, func(t *testing.T) {
+				layout := newDocLayout(markdown, []byte(tt.input))
+				require.NotNil(t, layout)
+				var starts []string
+				for _, offset := range layout.bounds[:len(layout.bounds)-1] {
+					line, _, _ := strings.Cut(tt.input[offset:], "\n")
+					starts = append(starts, line)
+				}
+				assert.Equal(t, tt.starts, starts)
+			})
+		}
 	}
 }
 

@@ -51,19 +51,22 @@ import (
 // block, goldmark opens it from its inner loop, with that block still on the
 // stack, and closes the old block after. That block counts as no block for
 // every decision openBlocks and the block parsers make on the line: it is
-// not a paragraph (no interruption rules, no setext heading) and not a list;
-// no context flag is set (fence data and the setext paragraph live only
-// while their own block is open, and the list item flag is set and read on
-// the line an item ends); and its Close changes nothing in the tree. Two
-// things differ from a fresh start. The blocks opened on the line are marked
-// as not following a blank line when the line before is not blank; nothing
-// a check compares reads that flag, since list tightness comes from
-// gmparser.ListTight, which never reads the flags of a list's first item or
-// of an item's first block (goldmark's own IsTight can, but it only decides
-// whether a list's paragraphs are text blocks, which signatures and outlines
-// write alike). And the blank-line statistics keep the old block's line, but
-// the next lookup is of this line, which is not blank either way. A setext
-// heading does not start a group so: its Close can add its underline to the
+// not a paragraph (no interruption rules, no setext heading) and not a list.
+// No context flag is read: fence data lives only while a fence is open, the
+// setext paragraph is set by a setext heading's Open and read only by its
+// Close, and the list item flag is set and read on the line an item ends.
+// And its Close changes nothing in the tree. Two things differ from a fresh
+// start. The blocks opened on the line are marked as not following a blank
+// line, since the line before is not blank, where a fresh start marks them
+// as following one. Nothing a check compares reads that flag: list tightness
+// comes from gmparser.ListTight, which never reads the flags of a list's
+// first item or of an item's first block, and an item's first block takes in
+// every node goldmark makes from the paragraph the item starts with
+// (goldmark's own IsTight can read them, but it only decides whether a list's
+// paragraphs are text blocks, which signatures and outlines write alike).
+// And the blank-line statistics keep the old block's line, but the next
+// lookup is of this line, which is not blank either way. A setext heading
+// does not start a group so: its Close can add its underline to the
 // paragraph opened after it. Nor does an indented code block: whether it
 // closes depends on the indentation of the next line, which the sentinel
 // line of a group region does not stand for.
@@ -79,13 +82,18 @@ import (
 // Group regions. A group region is a run of whole groups that holds every
 // line an edit changes; an edit that changes the line ending of a line
 // changes the next line too. The lines before the region are the same after
-// the edits, so the parser reaches the region with no block open, as before.
-// The region, edited, is parsed on its own, followed by a sentinel line. When
-// the parser starts a group at the sentinel, the region left no block open,
-// so the lines after it, unchanged, parse as before. When it does not, the
-// region grows into the next groups, up to the end of the document. Regions
-// that hold, taken in document order, make up the edited document: the
-// original's blocks outside them and each region's blocks.
+// the edits, so the parser reaches the region as it did: with no block open,
+// or with only a closed block open that closes on the region's first line
+// whatever it holds. Either way the region parses as it does on its own. The
+// region, edited, is parsed on its own, followed by a sentinel line. When the
+// parser starts a group at the sentinel, the region left no block open, or
+// only a closed block that closes on the next line whatever it holds, so
+// the lines after it, unchanged, parse as before; the group must start as
+// the original's next group did, after a closed block or not, so that the
+// blank-line flags of its first blocks are as before too. When it does not
+// start so, the region grows into the next groups, up to the end of the
+// document. Regions that hold, taken in document order, make up the edited
+// document: the original's blocks outside them and each region's blocks.
 //
 // List regions. A long list is one group. Inside a top-level list, the items
 // that edits change are parsed with the item before them and the item after
@@ -227,6 +235,9 @@ func (r *parseRecord) closesAlone(blocks []goldparser.Block) bool {
 type groupStart struct {
 	offset int
 	last   gmast.Node
+	// closed reports a start after a closed block (see Groups), where the
+	// blocks opened follow no blank line, rather than one with no block open.
+	closed bool
 }
 
 // groupBlocks returns, for each group start, the number of the top-level
@@ -361,7 +372,7 @@ func (p *recordingBlockParser) Open(
 	rc, recording := pc.(*recordingContext)
 	// The open blocks are read before the block opens, as openBlocks has
 	// them when it decides; the old block closes after.
-	starts := recording && parent.Kind() == gmast.KindDocument && rc.rec.closesAlone(pc.OpenedBlocks())
+	startsGroup := recording && parent.Kind() == gmast.KindDocument && rc.rec.closesAlone(pc.OpenedBlocks())
 	node, state := p.BlockParser.Open(parent, reader, pc)
 	if !recording || node == nil {
 		return node, state
@@ -372,10 +383,11 @@ func (p *recordingBlockParser) Open(
 	}
 	if parent.Kind() == gmast.KindDocument {
 		rc.rec.doc = parent
-		if starts {
+		if startsGroup {
 			rc.rec.groups = append(rc.rec.groups, groupStart{
 				offset: lineStartIn(reader.Source(), segment.Start),
 				last:   parent.LastChild(),
+				closed: true,
 			})
 		}
 	}
@@ -464,9 +476,11 @@ type docLayout struct {
 	// nodes holds the top-level blocks of the original.
 	nodes []gmast.Node
 	// bounds holds the source offset where each group starts, 0 for the
-	// first, and the length of the source; groupNodes holds the index in
+	// first, and the length of the source; closed reports for each group
+	// whether it starts after a closed block; groupNodes holds the index in
 	// nodes of the first block of each group, and the number of nodes.
 	bounds     []int
+	closed     []bool
 	groupNodes []int
 	// lists holds the top-level lists with items, in document order, and
 	// listIndex the index in lists of each list node. searchable holds the
@@ -545,11 +559,13 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		refIndex:      referenceIndex(parsed.rec.refs),
 	}
 	layout.bounds = append(layout.bounds, 0)
+	layout.closed = append(layout.closed, false)
 	for _, start := range starts[1:] {
 		if start.offset <= layout.bounds[len(layout.bounds)-1] {
 			return nil
 		}
 		layout.bounds = append(layout.bounds, start.offset)
+		layout.closed = append(layout.closed, start.closed)
 	}
 	layout.bounds = append(layout.bounds, len(source))
 	group := 0
@@ -1037,7 +1053,7 @@ func (l *docLayout) parseRegion(reg region, edits []fix.TextEdit) regionParse {
 
 // parseGroupRegion parses a group region. Unless it ends the document, the
 // sentinel line follows it, and the region holds when the parser starts a
-// group at the sentinel.
+// group at the sentinel of the kind the original's next group starts with.
 func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionParse {
 	from, to := l.span(reg)
 	text := applyWithin(l.source, from, to, edits)
@@ -1054,7 +1070,8 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 	blocks := children(parsed.doc)
 	if !final {
 		groups := parsed.rec.groups
-		if len(groups) == 0 || groups[len(groups)-1].offset != length {
+		if len(groups) == 0 || groups[len(groups)-1].offset != length ||
+			groups[len(groups)-1].closed != l.closed[reg.last+1] {
 			return regionParse{}
 		}
 		counts, ok := groupBlocks(blocks, groups[len(groups)-1:])
