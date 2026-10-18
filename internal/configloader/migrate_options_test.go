@@ -210,9 +210,10 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 }
 
 // TestSourceLocatorReadsEachEntryOnce guards the cost of placing option
-// warnings: however many warnings name keys of one mapping, lookups read
-// each entry of the config once, so placing a warning for every option of
-// a rule takes time linear in the size of the config, not quadratic.
+// warnings: the reading that loads the config records where each key is
+// written, in one pass, and each warning looks its option up in constant
+// time, so placing a warning for every option of a rule takes time linear
+// in the size of the config, not quadratic.
 func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 	t.Parallel()
 
@@ -223,13 +224,14 @@ func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 		fmt.Fprintf(&content, "  option_%03d: %d\n", idx, idx)
 	}
 
-	locate := newSourceLocator(lint.MarkdownlintYAML, []byte(content.String()))
+	read, err := lint.ReadMarkdownlintConfig([]byte(content.String()))
+	require.NoError(t, err)
+	locate := newSourceLocator(read, []byte(content.String()))
 	for idx := range options {
 		require.Equal(t, idx+2, locate.optionLine("MD013", fmt.Sprintf("option_%03d", idx), 0))
 	}
 	assert.Zero(t, locate.optionLine("MD013", "absent", 0))
 	assert.Zero(t, locate.optionLine("MD999", "option_000", 0))
-	assert.LessOrEqual(t, locate.reads, options+1, "the rule key and each option, read once")
 
 	result := convertFile(t, ".markdownlint.yaml", content.String())
 	require.Len(t, result.Warnings, options)

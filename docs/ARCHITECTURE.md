@@ -923,8 +923,10 @@ and YAML second. yaml.v3 parses the YAML into nodes, and
 `pkg/lint/markdownlint_yaml.go` turns them into values as js-yaml 5.4.1's
 core schema reads them for markdownlint-cli2: plain scalars as YAML 1.2
 reads them, every key a string, a key written twice an error anywhere in
-the document, only the core schema's tags, and no merge keys. gomdlint's
-own config files keep their own YAML decoder.
+the document, only the core schema's tags, and no merge keys. It also
+records the line of each key and item (`lint.MarkdownlintPosition`), which
+warnings about options name, so loading and placing a warning read the keys
+alike. gomdlint's own config files keep their own YAML decoder.
 
 ### Per-Rule Resolution
 

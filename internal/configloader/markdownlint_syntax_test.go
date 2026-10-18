@@ -3,6 +3,7 @@ package configloader
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -389,5 +390,50 @@ func TestConvertMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
 		_, err := ConvertMarkdownlintConfig(path)
 
 		assert.Error(t, err, tt.content)
+	}
+}
+
+// TestConvertMarkdownlintConfig_YAMLWarningLinesAsLoaded covers the lines
+// of option warnings in YAML configs, which come from the reading that
+// loads the config, so the two agree. A config that starts with a %YAML
+// 1.2 directive, which yaml.v3 alone rejects, used to give its warnings no
+// line, and so did a key that loads as another string, such as 0x0, which
+// loads as the option "0". The alias case places the warning where the
+// option is written.
+func TestConvertMarkdownlintConfig_YAMLWarningLinesAsLoaded(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name, content, warning string
+		line                   int
+	}{
+		{
+			name:    "YAML 1.2",
+			content: "%YAML 1.2\n---\nMD013:\n  lin_length: 100\n",
+			warning: `unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored`,
+			line:    4,
+		},
+		{
+			name:    "numeric key",
+			content: "MD013:\n  line_length: 200\n  0x0: ignored\n",
+			warning: `unknown option "0" for line-length; it is ignored`,
+			line:    3,
+		},
+		{
+			name:    "alias",
+			content: "base: &b\n  lin_length: 100\nMD013: *b\n",
+			warning: `unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored`,
+			line:    2,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, ".markdownlint.yaml", tt.content)
+
+			idx := slices.Index(result.Warnings, tt.warning)
+			require.GreaterOrEqual(t, idx, 0, "%q", result.Warnings)
+			assert.Equal(t, tt.line, result.WarningLine(idx))
+		})
 	}
 }

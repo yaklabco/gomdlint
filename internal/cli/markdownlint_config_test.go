@@ -272,8 +272,10 @@ func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 // string, so an option named 0 is one that MD009 does not read, with a
 // warning, and the rest of MD009's object applies, where gomdlint used to
 // lose the whole object. A %YAML directive of version 1.2 loads, where
-// gomdlint used to stop with a config error. markdownlint-cli2 reports
-// trailingSpaceDoc's trailing space with the configs that turn MD009 on.
+// gomdlint used to stop with a config error. A warning names the line of
+// its option, which a key spelled 0x0 and a %YAML 1.2 directive used to
+// lose. markdownlint-cli2 reports trailingSpaceDoc's trailing space with
+// the configs that turn MD009 on.
 func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 	tests := []struct {
 		name, settings, warning string
@@ -283,7 +285,15 @@ func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 		{name: "0o0", settings: "MD009: 0o0\n"},
 		{name: "non-specific tag after a line break", settings: "MD009: &a\n  ! false\n", want: []string{"MD009"}},
 		{name: "numeric key", settings: "MD009: {enabled: false, 0: x}\n", warning: `unknown option "0" for no-trailing-spaces`},
+		{
+			name: "numeric key with its line", settings: "MD009:\n  enabled: false\n  0x0: x\n",
+			warning: `.markdownlint.yaml:3: unknown option "0" for no-trailing-spaces`,
+		},
 		{name: "YAML 1.2", settings: "%YAML 1.2\n---\nMD009: false\n"},
+		{
+			name: "YAML 1.2 with a warning line", settings: "%YAML 1.2\n---\nMD009:\n  enabled: false\n  br_space: 2\n",
+			warning: `.markdownlint.yaml:5: unknown option "br_space" for no-trailing-spaces`,
+		},
 	}
 
 	for _, tt := range tests {

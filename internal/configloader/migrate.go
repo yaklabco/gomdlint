@@ -123,7 +123,7 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 		return nil, markdownlintParseError(path, err)
 	}
 	settings := read.Settings
-	locate := newSourceLocator(read.Syntax, content)
+	locate := newSourceLocator(read, content)
 	if read.NotObject != "" {
 		// markdownlint reads the value as an object without keys, so every
 		// rule keeps its defaults.
@@ -250,120 +250,64 @@ func (c *markdownlintConversion) warn(line int, message string) {
 // sourceLocator finds the lines of the keys of a markdownlint config in its
 // source, for warnings that name them.
 type sourceLocator struct {
-	// root is the config's top-level mapping, or nil when the source holds
-	// none.
-	root *yaml.Node
-
-	// taken indexes, for each mapping that a lookup has searched, the
-	// entries whose values the config takes, by name (see
-	// indexTakenEntries), so that each mapping is read once, however many
-	// warnings name its keys.
-	taken map[*yaml.Node]map[string]*writtenEntry
-
-	// reads counts the written entries that indexing has read.
-	reads int
+	// root holds the places of the config's keys, or is nil when the
+	// source shows none.
+	root *lint.MarkdownlintPosition
 }
 
-// newSourceLocator reads content, a markdownlint config that
-// lint.ReadMarkdownlintConfig read in syntax, into a tree of nodes that
-// record their lines: as JSON with comments and trailing commas, which
-// jsonDocument reads once jsonc.Strip has blanked them, or as YAML.
-// Content that it cannot read has no lines to find.
-func newSourceLocator(syntax lint.MarkdownlintSyntax, content []byte) *sourceLocator {
-	var doc *yaml.Node
-	if syntax == lint.MarkdownlintJSONC {
-		parsed, err := jsonDocument(jsonc.Strip(content))
-		if err != nil {
-			return &sourceLocator{}
-		}
-		doc = parsed
-	} else {
-		doc = &yaml.Node{}
-		if err := yaml.Unmarshal(content, doc); err != nil {
-			return &sourceLocator{}
-		}
+// newSourceLocator returns the locator for content, a markdownlint config
+// that lint.ReadMarkdownlintConfig read as read. YAML comes with the places
+// of its keys from that reading, so that loading and placing a warning
+// read each key alike, whatever directives, aliases or spellings of keys
+// the text holds. JSON with comments and trailing commas is read again by
+// jsonDocument, once jsonc.Strip has blanked them, which reads each key as
+// the JSON decoder does. Content that it cannot read has no lines to find.
+func newSourceLocator(read *lint.MarkdownlintSource, content []byte) *sourceLocator {
+	if read.Syntax != lint.MarkdownlintJSONC {
+		return &sourceLocator{root: read.Positions}
 	}
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+	doc, err := jsonDocument(jsonc.Strip(content))
+	if err != nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 		return &sourceLocator{}
 	}
-	return &sourceLocator{root: doc.Content[0]}
+	return &sourceLocator{root: jsonPositions(doc.Content[0])}
+}
+
+// jsonPositions returns the places of node, a JSON value that jsonDocument
+// read, and of its keys and items. A key written twice takes the place of
+// its last entry, whose value JSON takes.
+func jsonPositions(node *yaml.Node) *lint.MarkdownlintPosition {
+	place := &lint.MarkdownlintPosition{Line: node.Line}
+	switch node.Kind {
+	case yaml.MappingNode:
+		place.Keys = make(map[string]*lint.MarkdownlintPosition, len(node.Content)/2)
+		for idx := 0; idx+1 < len(node.Content); idx += 2 {
+			key := node.Content[idx]
+			entry := jsonPositions(node.Content[idx+1])
+			entry.Line = key.Line
+			place.Keys[key.Value] = entry
+		}
+	case yaml.SequenceNode:
+		place.Items = make([]*lint.MarkdownlintPosition, len(node.Content))
+		for idx, item := range node.Content {
+			place.Items[idx] = jsonPositions(item)
+		}
+	}
+	return place
 }
 
 // optionLine returns the line of option, a key under the config's key key,
 // or, when item is not 0, the line of the option's item at that position,
 // counted from 1. It returns 0 when the source does not show it.
 func (l *sourceLocator) optionLine(key, option string, item int) int {
-	setting := l.entry(l.root, key)
-	if setting == nil {
-		return 0
-	}
-	entry := l.entry(setting.value, option)
+	entry := l.root.Key(key).Key(option)
 	if entry == nil {
 		return 0
 	}
-	if line := itemLine(entry.value, item); line > 0 {
-		return line
+	if at := entry.Item(item); at != nil {
+		return at.Line
 	}
-	return entry.key.Line
-}
-
-// entry returns the entry for name of mapping, a mapping or an alias to
-// one, whose value the config takes (see indexTakenEntries), or nil when
-// there is none. The first lookup in a mapping indexes its entries.
-func (l *sourceLocator) entry(mapping *yaml.Node, name string) *writtenEntry {
-	for mapping != nil && mapping.Kind == yaml.AliasNode {
-		mapping = mapping.Alias
-	}
-	if mapping == nil {
-		return nil
-	}
-	index, indexed := l.taken[mapping]
-	if !indexed {
-		entries := markdownlintEntries(mapping)
-		l.reads += len(entries)
-		index = indexTakenEntries(entries)
-		if l.taken == nil {
-			l.taken = make(map[*yaml.Node]map[string]*writtenEntry)
-		}
-		l.taken[mapping] = index
-	}
-	return index[name]
-}
-
-// markdownlintEntries lists the entries written in mapping itself, each
-// named by the text of its key. js-yaml 5, which markdownlint-cli2 reads
-// YAML with, reads a merge key (<<) as an ordinary key, so a merged mapping
-// brings in no entries, and JSON has no merge keys. A key that js-yaml
-// reads as another string, such as 0x10 as "16", is not found by that
-// string, which leaves a warning about it without a line.
-func markdownlintEntries(mapping *yaml.Node) []writtenEntry {
-	if mapping.Kind != yaml.MappingNode {
-		return nil
-	}
-	entries := make([]writtenEntry, 0, len(mapping.Content)/2)
-	for idx := 0; idx+1 < len(mapping.Content); idx += 2 {
-		key := mapping.Content[idx]
-		named := key
-		for named.Kind == yaml.AliasNode && named.Alias != nil {
-			named = named.Alias
-		}
-		if named.Kind == yaml.ScalarNode {
-			entries = append(entries, writtenEntry{name: named.Value, key: key, value: mapping.Content[idx+1]})
-		}
-	}
-	return entries
-}
-
-// indexTakenEntries indexes entries, the entries of a mapping as
-// markdownlintEntries lists them, by name, keeping for each name the entry
-// whose value the config takes: the last one written, since JSON keeps the
-// last of a key written twice, and YAML has no key twice.
-func indexTakenEntries(entries []writtenEntry) map[string]*writtenEntry {
-	index := make(map[string]*writtenEntry, len(entries))
-	for idx := range entries {
-		index[entries[idx].name] = &entries[idx]
-	}
-	return index
+	return entry.Line
 }
 
 // processRuleKey applies key, one key of the markdownlint config, and its
