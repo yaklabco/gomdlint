@@ -1087,6 +1087,54 @@ func TestNoTrailingPunctuationRule_RawText(t *testing.T) {
 	}
 }
 
+// TestNoTrailingPunctuationRule_KeepsHeadingContent verifies that MD026
+// reports a heading of nothing but punctuation, as markdownlint does, but
+// withholds the fix whenever deleting the punctuation would leave the heading
+// showing nothing: no text other than whitespace, no code span and no image.
+func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantFixed string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "period alone", input: "## .\n"},
+		{name: "ellipsis alone", input: "## ...\n"},
+		{name: "exclamation marks alone", input: "## !!\n"},
+		{name: "full-width period alone", input: "# \u3002\n"},
+		{name: "escaped period alone", input: "## \\.\n"},
+		{name: "period alone in a closed heading", input: "## . ##\n"},
+		{name: "period alone after extra spaces", input: "##   .\n"},
+		{name: "period after a no-break space", input: "## \u00a0.\n"},
+		{name: "period after a no-break space reference", input: "## &nbsp;.\n"},
+		{name: "period after a link without text", input: "## [](https://example.com).\n"},
+		{name: "period alone in a heading in a blockquote", input: "> ## .\n"},
+		{name: "period alone in a heading in a list item", input: "- ## .\n"},
+		{name: "ellipsis alone in a setext heading", input: "...\n---\n"},
+		{name: "period after a code span", input: "## `x`.\n", wantFixed: "## `x`\n"},
+		{name: "period after an image", input: "## ![logo](logo.png).\n", wantFixed: "## ![logo](logo.png)\n"},
+		{name: "period after an image without alt text", input: "## ![](logo.png).\n", wantFixed: "## ![](logo.png)\n"},
+		{name: "period after emphasis", input: "## *x*.\n", wantFixed: "## *x*\n"},
+		{name: "period after link text", input: "## [docs](https://example.com) .\n", wantFixed: "## [docs](https://example.com)\n"},
+		{name: "period after a character reference", input: "## &copy;.\n", wantFixed: "## &copy;\n"},
+		// The run is both periods, so the fix deletes the backslash too.
+		{name: "escaped period and period alone", input: "## \\..\n"},
+		{name: "escaped period and period after text", input: "## a\\..\n", wantFixed: "## a\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), tt.input, nil)
+			require.Len(t, diags, 1)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, tt.wantFixed != "", diags[0].HasFix())
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 func TestHeadingStartLeftRule_Metadata(t *testing.T) {
 	rule := NewHeadingStartLeftRule()
 

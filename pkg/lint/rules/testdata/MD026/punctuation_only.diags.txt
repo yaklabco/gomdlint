@@ -1,0 +1,10 @@
+punctuation_only.input.md:3:4 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation)
+punctuation_only.input.md:5:4 warning Heading ends with trailing punctuation "..." (MD026/no-trailing-punctuation)
+punctuation_only.input.md:7:5 warning Heading ends with trailing punctuation "!" (MD026/no-trailing-punctuation)
+punctuation_only.input.md:9:4 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation)
+punctuation_only.input.md:11:1 warning Heading ends with trailing punctuation "..." (MD026/no-trailing-punctuation)
+punctuation_only.input.md:14:6 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation)
+punctuation_only.input.md:16:6 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation)
+punctuation_only.input.md:18:10 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]
+punctuation_only.input.md:20:21 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]
+punctuation_only.input.md:22:22 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]

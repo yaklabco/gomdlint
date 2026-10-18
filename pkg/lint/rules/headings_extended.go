@@ -1,11 +1,15 @@
 package rules
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -721,9 +725,10 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 // backslash that escapes it and the whitespace before them on the same line.
 // It returns nil unless the fix changes nothing but the heading's text, and
 // that only by the deleted characters: removing the punctuation must not
-// leave a setext line blank or turn it into a thematic break, underline or
-// other block, expose a closing hash sequence, leave a backslash showing, or
-// change an anchor that a fragment link uses.
+// leave the heading showing nothing (see showsContent), leave a setext line
+// blank or turn it into a thematic break, underline or other block, expose a
+// closing hash sequence, leave a backslash showing, or change an anchor that
+// a fragment link uses.
 func trailingPunctuationFix(
 	ctx *lint.RuleContext,
 	checker *fixChecker,
@@ -744,10 +749,52 @@ func trailingPunctuationFix(
 	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
 		deleteStart--
 	}
+	if !showsContent(file, heading, deleteStart) {
+		return nil
+	}
 	deleted := mdast.SourceRange{StartOffset: deleteStart, EndOffset: content.EndOffset}
 	builder := fix.NewEditBuilder()
 	builder.Delete(deleted.StartOffset, deleted.EndOffset)
 	return checker.offer(builder, changeText(heading, textSub{rng: deleted}).withLocal(true))
+}
+
+// showsContent reports whether the inline content of node that starts before
+// offset shows something: text other than whitespace once escapes and
+// character references are resolved, a code span, or an image. Raw HTML and
+// a link without text show nothing that counts. MD026 deletes everything in
+// a heading from offset on, so a heading whose content before offset shows
+// nothing would be left empty, which changes how it renders and what anchor
+// it gets.
+func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
+	for child := node.FirstChild; child != nil; child = child.Next {
+		span := child.SourceRange()
+		if span.StartOffset >= offset || span.EndOffset > len(file.Content) {
+			break
+		}
+		switch child.Kind {
+		case mdast.NodeCodeSpan, mdast.NodeImage:
+			return true
+		case mdast.NodeText:
+			if showsText(file.Content[span.StartOffset:min(span.EndOffset, offset)]) {
+				return true
+			}
+		case mdast.NodeHTMLInline:
+		default:
+			if showsContent(file, child, offset) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// showsText reports whether source text renders as anything but whitespace.
+func showsText(source []byte) bool {
+	var rendered bytes.Buffer
+	writer := bufio.NewWriter(&rendered)
+	gmhtml.DefaultWriter.Write(writer, source)
+	_ = writer.Flush() // A bytes.Buffer never fails to write.
+	return len(bytes.TrimFunc(rendered.Bytes(), unicode.IsSpace)) > 0
 }
 
 // escapedAt reports whether the byte at offset follows an odd number of
