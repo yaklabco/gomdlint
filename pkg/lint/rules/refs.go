@@ -279,7 +279,7 @@ const maxContainerIndent = 3
 // footnote closes only after a blank line.
 type footnoteScan struct {
 	ctx          *lint.RuleContext
-	holders      []*mdast.Node
+	containers   *micromarkContainers
 	htmlLines    map[int]bool
 	math         mathRegions
 	indentedCode map[int]bool
@@ -304,11 +304,11 @@ type footnoteFence struct {
 func newFootnoteScan(ctx *lint.RuleContext) *footnoteScan {
 	scan := &footnoteScan{
 		ctx:          ctx,
-		holders:      innermostContainers(ctx),
 		htmlLines:    htmlBlockLines(ctx),
 		math:         findMath(ctx),
 		indentedCode: make(map[int]bool),
 	}
+	scan.containers = newMicromarkContainers(ctx, &scan.math)
 	for _, block := range ctx.CodeBlocks() {
 		if !lint.IsFencedCodeBlock(block) {
 			for line := range lint.CodeContentLines([]*mdast.Node{block}) {
@@ -326,10 +326,7 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 		s.afterBlank = true
 		return
 	}
-	container := s.holders[line]
-	for container != nil && !lint.ContinuesContainers(file, container, line) {
-		container = enclosingContainer(container)
-	}
+	container := s.containers.at(line)
 	indent, start, ok := lint.IndentAfterContainers(file, container, line)
 	if !ok {
 		return
@@ -349,6 +346,12 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 	if s.depth > 0 && indent >= tabStop*s.depth && indent-tabStop*s.depth <= maxFenceIndent {
 		if char, size, opens := footnoteFenceOpening(rest); opens {
 			s.fence = footnoteFence{open: true, char: char, size: size, depth: s.depth}
+			return
+		}
+		// Math in a footnote's content, which goldmark does not read, holds
+		// no definition either.
+		if size, opens := mathFenceOpening(rest); opens {
+			s.fence = footnoteFence{open: true, char: '$', size: size, depth: s.depth}
 			return
 		}
 	}

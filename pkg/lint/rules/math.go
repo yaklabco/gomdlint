@@ -21,8 +21,9 @@ type mathRegions struct {
 
 // findMath finds the math in a document the way micromark-extension-math
 // reads it. A math block opens with a line of two or more dollar signs and
-// text without a dollar sign, after its container prefix, and runs to a
-// line of at least as many dollar signs, or to the end of its container;
+// text without a dollar sign, after its container prefix and at most three
+// columns of space, where a block may start (see mathOpening), and runs to
+// a line of at least as many dollar signs, or to the end of its container;
 // it may hold blank lines. Inline math runs from a run of dollar signs to
 // the next run of the same length in the same block, like a code span, and
 // a dollar sign that a backslash escapes, or that is code, raw HTML or a
@@ -41,54 +42,417 @@ func findMath(ctx *lint.RuleContext) mathRegions {
 func (m *mathRegions) findBlocks(ctx *lint.RuleContext) {
 	file := ctx.File
 	htmlLines := htmlBlockLines(ctx)
-	var holders []*mdast.Node // Built at the first math block.
+	tableLines := nodeLines(ctx.Tables())
+	var scan *blockScan // Built at the first line that needs it.
+	var item *virtualItem
 	for line := file.FrontMatterLines + 1; line <= len(file.Lines); line++ {
 		if ctx.IsLineInCodeBlock(line) || htmlLines[line] {
+			item = nil
 			continue
 		}
-		fence, ok := mathFenceOpening(withoutContainerPrefix(lint.LineText(file, line)))
+		hasFence := bytes.Contains(lint.RawLineContent(file, line), []byte("$$"))
+		// micromark starts a list where goldmark reads paragraph or table
+		// text right after a math block, which leaves nothing open, and in
+		// a table, which a list ends.
+		listMayStart := m.lines[line-1] || tableLines[line]
+		if !hasFence && !listMayStart && item == nil {
+			continue
+		}
+		if scan == nil {
+			scan = newBlockScan(ctx, m)
+		}
+		if item != nil && !item.holds(file, line, scan.continuations) {
+			item = nil
+		}
+		if item == nil && listMayStart {
+			item = startItem(file, scan.containers, line)
+		}
+		if !hasFence {
+			continue
+		}
+		container, offset, markerLine := scan.containers.at(line), 0, false
+		if item != nil {
+			container, offset, markerLine = item.container, item.col, item.line == line
+		}
+		fence, ok := mathOpening(file, container, line, offset, markerLine)
 		if !ok {
 			continue
 		}
-		if holders == nil {
-			holders = innermostContainers(ctx)
-		}
-		// goldmark takes a lazy line into the containers of the paragraph it
-		// continues. A fence opens no paragraph, so micromark reads it in the
-		// containers the line continues explicitly.
-		container := holders[line]
-		for container != nil && !lint.ContinuesContainers(file, container, line) {
-			container = enclosingContainer(container)
-		}
-		closing := mathBlockEnd(file, container, line, fence)
+		closing := mathBlockEnd(file, container, line, fence, offset)
 		for covered := line; covered <= closing; covered++ {
 			m.lines[covered] = true
+		}
+		if item != nil {
+			// Math leaves nothing open for a lazy line to continue.
+			item.open = false
 		}
 		line = closing
 	}
 }
 
+// blockScan holds what findBlocks reads about the blocks of a document:
+// the containers micromark reads, and the lines that continue a paragraph
+// or table that goldmark reads from an earlier line.
+type blockScan struct {
+	containers    *micromarkContainers
+	continuations map[int]bool
+}
+
+// newBlockScan builds the scan of ctx's file, reading math from math.
+func newBlockScan(ctx *lint.RuleContext, math *mathRegions) *blockScan {
+	scan := &blockScan{containers: newMicromarkContainers(ctx, math), continuations: make(map[int]bool)}
+	for _, nodes := range [][]*mdast.Node{ctx.Paragraphs(), ctx.Tables()} {
+		for _, node := range nodes {
+			if pos := node.SourcePosition(); pos.IsValid() {
+				for line := pos.StartLine + 1; line <= pos.EndLine; line++ {
+					scan.continuations[line] = true
+				}
+			}
+		}
+	}
+	return scan
+}
+
+// mathOpening returns the length of the fence that opens a math block on
+// line, inside container, which micromark reads around it, or outside
+// every container when container is nil, with the block's lines offset
+// columns past the container's content. The fence follows the container's
+// prefix, offset columns and at most three more columns of space, as
+// micromark-extension-math reads it. With more space the line is paragraph
+// text or indented code. A fence may interrupt a paragraph, as in
+// micromark. On markerLine, the first line of an item that micromark
+// starts where goldmark reads text, the fence follows the item's marker.
+func mathOpening(file *mdast.FileSnapshot, container *mdast.Node, line, offset int, markerLine bool) (int, bool) {
+	indent, start, ok := lint.IndentAfterContainers(file, container, line)
+	if !ok {
+		return 0, false
+	}
+	raw := lint.RawLineContent(file, line)
+	if markerLine {
+		_, after, isItem := listItemContent(raw, start, indent)
+		if !isItem {
+			return 0, false
+		}
+		return mathFenceOpening(raw[after:])
+	}
+	if indent < offset || indent-offset > maxFenceIndent {
+		return 0, false
+	}
+	return mathFenceOpening(raw[start:])
+}
+
+// virtualItem is a list item that micromark starts on line, where goldmark
+// reads paragraph or table text: in container, with its content col
+// columns past the container's content. open tells whether its last line
+// holds paragraph text, which a lazy line may continue.
+type virtualItem struct {
+	container *mdast.Node
+	col, line int
+	open      bool
+}
+
+// startItem returns the list item that micromark starts on line, where
+// goldmark reads text, or nil when the line holds no list item marker
+// where a block may start, or goldmark reads the item too.
+func startItem(file *mdast.FileSnapshot, containers *micromarkContainers, line int) *virtualItem {
+	container := containers.at(line)
+	if container != nil && container.Kind == mdast.NodeListItem && container.SourcePosition().StartLine == line {
+		return nil
+	}
+	indent, start, ok := lint.IndentAfterContainers(file, container, line)
+	if !ok || indent > maxFenceIndent {
+		return nil
+	}
+	col, _, isItem := listItemContent(lint.RawLineContent(file, line), start, indent)
+	if !isItem {
+		return nil
+	}
+	return &virtualItem{container: container, col: col, line: line, open: true}
+}
+
+// holds reports whether the item goes on to line: the line continues the
+// item's container and is blank or indented to the item's content, or it
+// continues lazily the paragraph of the item's last line, as a line that
+// goldmark reads as the continuation of a paragraph or table
+// (continuations) and that opens no math. holds also records whether the
+// item's paragraph stays open.
+func (v *virtualItem) holds(file *mdast.FileSnapshot, line int, continuations map[int]bool) bool {
+	if line == v.line {
+		return true
+	}
+	raw := lint.RawLineContent(file, line)
+	container := v.container
+	if container != nil && !lint.ContinuesContainers(file, container, line) {
+		// A lazy line, judged from the start of the line.
+		container = nil
+	}
+	indent, start, ok := lint.IndentAfterContainers(file, container, line)
+	if !ok {
+		return false
+	}
+	if container == v.container {
+		switch {
+		case len(bytes.TrimSpace(raw[start:])) == 0:
+			v.open = false
+			return true
+		case indent >= v.col:
+			v.open = true
+			return true
+		}
+	}
+	if !v.open || !continuations[line] {
+		return false
+	}
+	_, opens := mathFenceOpening(raw[start:])
+	return indent > maxFenceIndent || !opens
+}
+
+// nodeLines returns the 1-based lines that nodes span.
+func nodeLines(nodes []*mdast.Node) map[int]bool {
+	lines := make(map[int]bool)
+	for _, node := range nodes {
+		if pos := node.SourcePosition(); pos.IsValid() {
+			for line := pos.StartLine; line <= pos.EndLine; line++ {
+				lines[line] = true
+			}
+		}
+	}
+	return lines
+}
+
+// listItemContent reads a list item marker at raw[start:], indent columns
+// past its container's content, and returns the column past that content
+// where the item's content starts, and the offset in raw of its first
+// byte: after the marker and one to four columns of space, or one column
+// after the marker when more space follows. Tabs stop at every fourth
+// column of the line.
+func listItemContent(raw []byte, start, indent int) (int, int, bool) {
+	text := raw[start:]
+	marker := 0
+	switch {
+	case len(text) > 0 && (text[0] == '-' || text[0] == '+' || text[0] == '*'):
+		marker = 1
+	default:
+		for marker < len(text) && marker < maxOrderedDigits && text[marker] >= '0' && text[marker] <= '9' {
+			marker++
+		}
+		if marker == 0 || marker >= len(text) || (text[marker] != '.' && text[marker] != ')') {
+			return 0, 0, false
+		}
+		marker++
+	}
+	markerCol := lineColumn(raw, start)
+	base := markerCol - indent
+	afterMarker := markerCol + marker
+	col, pos := afterMarker, start+marker
+	for pos < len(raw) && (raw[pos] == ' ' || raw[pos] == '\t') {
+		if raw[pos] == '\t' {
+			col += tabStop - col%tabStop
+		} else {
+			col++
+		}
+		pos++
+	}
+	if pos == start+marker || pos == len(raw) {
+		return 0, 0, false
+	}
+	if col-afterMarker > tabStop {
+		return afterMarker + 1 - base, start + marker + 1, true
+	}
+	return col - base, pos, true
+}
+
+// lineColumn returns the column where raw[offset] starts in its line, with
+// tabs that stop at every fourth column and a byte order mark that takes
+// none.
+func lineColumn(raw []byte, offset int) int {
+	col, pos := 0, 0
+	if bytes.HasPrefix(raw, []byte(mdast.ByteOrderMark)) {
+		pos = len(mdast.ByteOrderMark)
+	}
+	for ; pos < offset && pos < len(raw); pos++ {
+		if raw[pos] == '\t' {
+			col += tabStop - col%tabStop
+		} else {
+			col++
+		}
+	}
+	return col
+}
+
+// maxOrderedDigits is the most digits an ordered list marker has.
+const maxOrderedDigits = 9
+
+// micromarkContainers tells which blockquote or list item micromark reads
+// around a line: goldmark's innermost container, without the containers
+// the line does not continue explicitly, and without a list item that
+// micromark does not start (refuses).
+type micromarkContainers struct {
+	file    *mdast.FileSnapshot
+	holders []*mdast.Node
+	math    *mathRegions // The math found above the line asked about.
+	refused map[*mdast.Node]bool
+}
+
+// newMicromarkContainers builds the containers of ctx's file, reading math
+// from math.
+func newMicromarkContainers(ctx *lint.RuleContext, math *mathRegions) *micromarkContainers {
+	return &micromarkContainers{
+		file:    ctx.File,
+		holders: innermostContainers(ctx),
+		math:    math,
+		refused: make(map[*mdast.Node]bool),
+	}
+}
+
+// at returns the innermost container micromark reads around line, or nil
+// when there is none.
+func (c *micromarkContainers) at(line int) *mdast.Node {
+	container := c.holders[line]
+	for container != nil && (c.inRefusedItem(container) || !lint.ContinuesContainers(c.file, container, line)) {
+		container = enclosingContainer(container)
+	}
+	return container
+}
+
+// inRefusedItem reports whether node, a blockquote or list item, is or lies
+// in a list item that micromark does not start.
+func (c *micromarkContainers) inRefusedItem(node *mdast.Node) bool {
+	for ; node != nil; node = enclosingContainer(node) {
+		if node.Kind == mdast.NodeListItem && c.isRefused(node) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRefused reports, once for each item, whether micromark does not start
+// list item (see refuses).
+func (c *micromarkContainers) isRefused(item *mdast.Node) bool {
+	refused, known := c.refused[item]
+	if !known {
+		refused = c.refuses(item)
+		c.refused[item] = refused
+	}
+	return refused
+}
+
+// refuses reports whether micromark does not start list item, which
+// goldmark reads. micromark lets a list start after an open paragraph,
+// indented code block or link reference definition only with a bullet or
+// the marker "1." or "1)", and it reads what came before the outermost
+// container that starts on the item's line, so a blockquote that starts on
+// the line opens nothing new ("Intro\n> 3. $$" is text). Indented code
+// stays open across blank lines. After any other block micromark starts
+// the list, and it starts an item after another of its list. After an item
+// it does not start, whose text continues the paragraph, it starts one
+// only as it would after paragraph text.
+func (c *micromarkContainers) refuses(item *mdast.Node) bool {
+	list := item.Parent
+	if list == nil || startsListAfterText(c.file.Content, item) {
+		return false
+	}
+	before := item.SourcePosition().StartLine - 1
+	if before <= c.file.FrontMatterLines || c.math.lines[before] {
+		return false
+	}
+	if list.FirstChild != item {
+		return item.Prev != nil && c.isRefused(item.Prev) && c.holdsTextIn(enclosingContainer(item), before)
+	}
+	outer := list
+	for outer.Parent != nil && outer.Parent.Kind != mdast.NodeDocument &&
+		outer.Parent.SourcePosition().StartLine == before+1 {
+		outer = outer.Parent
+	}
+	prev := outer.Prev
+	switch {
+	case prev != nil && prev.Kind == mdast.NodeCodeBlock && !lint.IsFencedCodeBlock(prev):
+		return true
+	case prev != nil && prev.SourcePosition().EndLine == before:
+		return prev.Kind == mdast.NodeParagraph
+	default:
+		// Text on the line before that no block holds is a link reference
+		// definition, which micromark reads as open content.
+		return c.holdsTextIn(enclosingContainer(outer), before)
+	}
+}
+
+// holdsTextIn reports whether line holds text past the prefix of
+// container, or does not continue container explicitly.
+func (c *micromarkContainers) holdsTextIn(container *mdast.Node, line int) bool {
+	_, at, ok := lint.IndentAfterContainers(c.file, container, line)
+	return !ok || holdsText(lint.RawLineContent(c.file, line)[at:])
+}
+
+// startsListAfterText reports whether micromark lets list item, the first
+// of its list, start the list after paragraph text: it is a bullet item or
+// one marked "1." or "1)", the single digit 1. The item's span starts at
+// its marker.
+func startsListAfterText(content []byte, item *mdast.Node) bool {
+	at := item.SourceRange().StartOffset
+	if at < 0 || at >= len(content) {
+		return false
+	}
+	switch content[at] {
+	case '-', '+', '*':
+		return true
+	case '1':
+		return at+1 < len(content) && (content[at+1] == '.' || content[at+1] == ')')
+	default:
+		return false
+	}
+}
+
+// holdsText reports whether a line, without its line ending, holds anything
+// but spaces, tabs and blockquote markers. A marker follows at most three
+// columns of space, or four after another marker, whose one optional space
+// they include.
+func holdsText(text []byte) bool {
+	col, pos, limit := 0, 0, maxContainerIndent
+	for {
+		start := col
+		for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t') {
+			if text[pos] == '\t' {
+				col += tabStop - col%tabStop
+			} else {
+				col++
+			}
+			pos++
+		}
+		if pos >= len(text) || text[pos] != '>' || col-start > limit {
+			break
+		}
+		pos++
+		col++
+		limit = maxContainerIndent + 1
+	}
+	return len(bytes.Trim(text[pos:], " \t")) > 0
+}
+
 // mathBlockEnd returns the last line of a math block whose fence, fence
 // dollar signs long, opens on line opening inside container, or outside
-// every container when container is nil: the line of its closing fence, or
-// the line before the first line that does not continue the container
-// explicitly, since micromark-extension-math allows no lazy line, or the
-// last line of the document.
+// every container when container is nil, with its lines offset columns
+// past the container's content: the line of its closing fence, or the line
+// before the first line that does not continue the container explicitly,
+// or that holds text less than offset columns in, since
+// micromark-extension-math allows no lazy line, or the last line of the
+// document.
 //
-// The closing fence follows the container's own prefix and at most three
-// columns of space. No container starts inside math, so a fence after other
-// blockquote or list markers, or after four columns of space, is math. An
-// opening fence further in, as in the content of a footnote definition,
-// which goldmark does not read, lets its closing fence sit as far in.
-func mathBlockEnd(file *mdast.FileSnapshot, container *mdast.Node, opening, fence int) int {
-	openIndent, _, _ := lint.IndentAfterContainers(file, container, opening)
-	maxIndent := openIndent/tabStop*tabStop + maxFenceIndent
+// The closing fence follows the container's own prefix, offset columns and
+// at most three more columns of space, as the opening fence does. No
+// container starts inside math, so a fence after other blockquote or list
+// markers, or after four columns of space, is math.
+func mathBlockEnd(file *mdast.FileSnapshot, container *mdast.Node, opening, fence, offset int) int {
 	for next := opening + 1; next <= len(file.Lines); next++ {
 		if container != nil && !lint.ContinuesContainers(file, container, next) {
 			return next - 1
 		}
 		indent, start, ok := lint.IndentAfterContainers(file, container, next)
-		if ok && indent <= maxIndent && mathFenceCloses(lint.RawLineContent(file, next)[start:], fence) {
+		rest := lint.RawLineContent(file, next)[start:]
+		if !ok || (indent < offset && len(bytes.TrimSpace(rest)) > 0) {
+			return next - 1
+		}
+		if indent >= offset && indent-offset <= maxFenceIndent && mathFenceCloses(rest, fence) {
 			return next
 		}
 	}

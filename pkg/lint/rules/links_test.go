@@ -525,7 +525,8 @@ func TestImageAltTextRule_Math(t *testing.T) {
 		"<div>\n$$\n<img>\n$$\n</div>\n\n" + // 7-11
 		"$<img src=\"a.png\">$ and $![](a.png)$\n\n" + // 13
 		"![](b.png) outside.\n\n" + // 15
-		"$$\n> $$\n\n![](c.png) <img src=\"d.png\">\n$$\n" // 17-21: the quoted fence is math
+		"$$\n> $$\n\n![](c.png) <img src=\"d.png\">\n$$\n\n" + // 17-21: the quoted fence is math
+		"Intro\n    $$\n\n![](e.png)\n" // 23-26: the indented line is text
 
 	type position struct{ line, column int }
 	diags := applyRuleWithOptions(t, NewImageAltTextRule(), markdown, nil)
@@ -533,7 +534,101 @@ func TestImageAltTextRule_Math(t *testing.T) {
 	for _, diag := range diags {
 		got = append(got, position{diag.StartLine, diag.StartColumn})
 	}
-	assert.Equal(t, []position{{15, 1}}, got)
+	assert.Equal(t, []position{{15, 1}, {26, 1}}, got)
+}
+
+// TestReversedLinkRule_MathOpensWhereABlockStarts checks MD011 against
+// markdownlint 0.41.1 on lines that look like a math fence after their
+// prefix. A fence opens math only after the prefix of the containers
+// micromark reads on the line and at most three columns of space. micromark
+// starts no list with a marker other than a bullet, "1." or "1)" after an
+// open paragraph, indented code block or link reference definition, so such
+// an item, which goldmark may read, holds no math, and its lines are read
+// in the containers around it. A fence that interrupts a paragraph opens
+// math, as in micromark, and so does one after a list marker where
+// micromark starts a list on a line that goldmark reads as text.
+func TestReversedLinkRule_MathOpensWhereABlockStarts(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  []position
+	}{
+		// Not a fence: the line continues the paragraph.
+		{name: "fence indented four spaces after text", input: "Intro\n    $$\n\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "fence after a tab after text", input: "Intro\n\t$$\n\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "ordered marker 3 after text", input: "Intro\n3. $$\n\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "ordered marker 01 after text", input: "Intro\n01. $$\n    (a)[b]\n", want: []position{{3, 5}}},
+		{name: "quoted fence indented four spaces", input: "> Intro\n>     $$\n> (a)[b]\n", want: []position{{3, 3}}},
+		{name: "ordered marker 3 in a quote after text", input: "Intro\n> 3. $$\n>    (a)[b]\n", want: []position{{3, 6}}},
+		{name: "item fence indented four columns", input: "- a\n      $$\n  (a)[b]\n", want: []position{{3, 3}}},
+		{name: "ordered marker 3 after indented code", input: "    code\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "ordered marker 3 in an item after text", input: "Intro\n- 3. $$\n    (a)[b]\n", want: []position{{3, 5}}},
+		// A fence.
+		{name: "fence after a blank line", input: "Intro\n\n$$\n\n(a)[b]\n", want: []position{}},
+		{name: "fence indented three spaces after a blank line", input: "Intro\n\n   $$\n\n(a)[b]\n", want: []position{}},
+		{name: "fence right after text", input: "Intro\n$$\n\n(a)[b]\n", want: []position{}},
+		{name: "fence indented three spaces after text", input: "Intro\n   $$\n\n(a)[b]\n", want: []position{}},
+		{name: "quoted fence after quoted text", input: "> Intro\n> $$\n> (a)[b]\n", want: []position{}},
+		{name: "quoted fence after a tab", input: "> Intro\n>\t$$\n> (a)[b]\n", want: []position{}},
+		{name: "item fence indented three columns", input: "- a\n     $$\n  (a)[b]\n", want: []position{}},
+		{name: "ordered marker 1 after text", input: "Intro\n1. $$\n   (a)[b]\n", want: []position{}},
+		{name: "second item of an ordered list", input: "1. a\n2. $$\n   (a)[b]\n", want: []position{}},
+		{name: "ordered marker 01 after a blank line", input: "Intro\n\n01. $$\n    (a)[b]\n", want: []position{}},
+		{name: "bullet in a quote after text", input: "Intro\n> - $$\n>   (a)[b]\n", want: []position{}},
+		// micromark starts a list after other blocks.
+		{name: "ordered marker 3 after a heading", input: "# T\n3. $$\n   (a)[b]\n", want: []position{}},
+		{name: "math in an item after a heading ends there", input: "# T\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "math in a second list ends there", input: "1. a\n2) $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "ordered marker 3 after a thematic break", input: "Para\n\n***\n3. $$\n   (a)[b]\n", want: []position{}},
+		{name: "ordered marker 3 after a table", input: "| a |\n| - |\n3. $$\n   (a)[b]\n", want: []position{}},
+		{name: "ordered marker 3 in an empty item", input: "-\n  3. $$\n     (a)[b]\n", want: []position{}},
+		{name: "ordered marker 3 after math", input: "$$\nx\n$$\n3. $$\n   (a)[b]\n", want: []position{}},
+		{name: "ordered marker 3 after a quote", input: "> Intro\n3. $$\n   (a)[b]\n", want: []position{}},
+		{name: "math in an item after a quote ends there", input: "> Intro\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "ordered marker 3 after a bullet item", input: "- a\n3. $$\n   (a)[b]\n", want: []position{}},
+		// Where goldmark reads paragraph or table text, micromark starts a
+		// list right after math and in a table, and math in that item ends
+		// with it.
+		{name: "item after math", input: "$$\nx\n$$\n3. a\n   $$\n   y\n(a)[b]\n", want: []position{{7, 1}}},
+		{name: "item in a table", input: "| a |\n| - |\n3. a\n   $$\n   y\n(a)[b]\n", want: []position{{6, 1}}},
+		{name: "item after math with a lazy line", input: "$$\nx\n$$\n3. a\nb\n   $$\n   y\n(a)[b]\n", want: []position{{8, 1}}},
+		{name: "math closed in an item after math", input: "$$\nx\n$$\n3. a\n   $$\n   y\n   $$\n   (a)[b]\n", want: []position{{8, 4}}},
+		{name: "blank line in an item after math", input: "$$\nx\n$$\n3. a\n\n   $$\n   y\n(a)[b]\n", want: []position{{8, 1}}},
+		{name: "fence after an item after math", input: "$$\nx\n$$\n3. a\n$$\n(a)[b]\n", want: []position{}},
+		{name: "tab after the marker of a quoted item after math", input: "> $$\n> x\n> $$\n>3.\t$$\n>    (a)[b]\n", want: []position{}},
+		// An item micromark does not start holds no math, on any of its lines.
+		{name: "later line of an item marked 01", input: "Intro\n01. a\n    $$\n    (a)[b]\n", want: []position{{4, 5}}},
+		{name: "item marked 3 after an item marked 01", input: "Intro\n01. a\n3. $$\n   (a)[b]\n", want: []position{{4, 4}}},
+		{name: "item marked 02 after an item marked 01", input: "Intro\n01. a\n02. $$\n    (a)[b]\n", want: []position{{4, 5}}},
+		{name: "item marked 4 after an item marked 3 after code", input: "    code\n3. a\n4. $$\n   (a)[b]\n", want: []position{{4, 4}}},
+		{name: "item after a blank line after a refused item", input: "    code\n3. a\n\n4. $$\n   (a)[b]\n", want: []position{}},
+		{name: "item marked 1 after a refused item", input: "    code\n3. a\n1. $$\n   (a)[b]\n", want: []position{}},
+		{name: "later line of an item marked 10 after code", input: "    code\n10. a\n    $$\n    (a)[b]\n", want: []position{{4, 5}}},
+		{name: "fence in an item marked 01 and its closing", input: "Intro\n01. $$\n    x\n    $$\n    (a)[b]\n", want: []position{{5, 5}}},
+		{name: "ordered marker 3 after code and a blank line", input: "    code\n\n3. $$\n   (a)[b]\n", want: []position{{4, 4}}},
+		{name: "quoted ordered marker 3 after code and a blank line", input: ">     code\n>\n> 3. $$\n>    (a)[b]\n", want: []position{{4, 6}}},
+		{name: "ordered marker 3 after a definition", input: "[x]: /url\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "ordered marker 3 in a nested quote after text", input: "> Intro\n>\t> 3. $$\n>\t>    (a)[b]\n", want: []position{{3, 8}}},
+		{name: "fence interrupting text after a refused item", input: "    code\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{}},
+		// Line endings, a byte order mark and leading spaces.
+		{name: "fence indented four spaces after text with CRLF", input: "Intro\r\n    $$\r\n\r\n(a)[b]\r\n", want: []position{{4, 1}}},
+		{name: "ordered marker 3 after code with CRLF", input: "    code\r\n3. $$\r\n   (a)[b]\r\n", want: []position{{3, 4}}},
+		{name: "ordered marker 3 after code after a byte order mark", input: "\ufeff    code\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "spaced bullet after text", input: "Intro\n - $$\n   (a)[b]\n", want: []position{}},
+		{name: "spaced ordered marker 3 after code", input: "    code\n 3. $$\n    (a)[b]\n", want: []position{{3, 5}}},
+		{name: "fence after an indented line", input: "Intro\n    $$\n$$\n(a)[b]\n", want: []position{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewReversedLinkRule(), tt.input, nil)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 // TestImageAltTextRule_HTMLImages checks HTML img elements like markdownlint:

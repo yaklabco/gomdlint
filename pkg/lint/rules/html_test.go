@@ -325,6 +325,9 @@ func TestInlineHTMLRule_MathAndTablesInHTMLBlocks(t *testing.T) {
 		},
 		{name: "inline math outside blocks", input: "Text $<b>$ here.\n\n$<img src=\"a.png\">$\n"},
 		{name: "quoted fence in math", input: "$$\n> $$\n\n<b>x</b> <img src=\"a.png\">\n$$\n"},
+		{name: "indented line after text opens no math", input: "Intro\n    $$\n\n<b>x</b>\n", want: []htmlDiagWant{{4, 1, "b"}}},
+		{name: "ordered marker 3 after text opens no math", input: "Intro\n3. $$\n\n<b>x</b>\n", want: []htmlDiagWant{{4, 1, "b"}}},
+		{name: "fence after a blank line opens math", input: "Intro\n\n$$\n\n<b>x</b>\n"},
 		{
 			name:    "table in a block",
 			input:   "<div>\n| a | b |\n| - | - |\n| <span> | <img> |\n</div>\n",

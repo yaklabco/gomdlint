@@ -1017,6 +1017,33 @@ func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
 			want:     []position{{9, 1}},
 			wantFull: []position{{9, 1}},
 		},
+		{
+			// An indented line after text continues the paragraph and
+			// opens no math.
+			name:     "indented line after text",
+			input:    "Intro\n    $$\n\n[a][b]\n",
+			want:     []position{{4, 1}},
+			wantFull: []position{{4, 1}},
+		},
+		{
+			// Math in a footnote's content holds no definition.
+			name:  "definition in math in a footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n    $$\n    [^n]: x\n    $$\n",
+			want:  []position{{3, 5}},
+		},
+		{
+			// micromark starts the list after a heading and reads math in it.
+			name:  "definition in math in an item after a heading",
+			input: "# T\n\nUse [^n].\n\n## H\n3. $$\n   [^n]: y\n   $$\n\nEnd.\n",
+			want:  []position{{3, 5}},
+		},
+		{
+			// micromark starts no list marked 01 after text, so the
+			// indented line continues the paragraph and defines nothing.
+			name:  "indented line in an item marked 01",
+			input: "# T\n\nUse [^n].\n\nIntro\n01. $$\n    [^n]: y\n    $$\n\nEnd.\n",
+			want:  []position{{3, 5}},
+		},
 	}
 
 	positions := func(input string, options map[string]any) []position {
