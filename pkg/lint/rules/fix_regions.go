@@ -163,7 +163,13 @@ import (
 // interrupts, setext headings or indented code blocks followed directly by
 // text, and everything inside one container. A document whose fixes sit in
 // one big block other than a top-level list, such as a long table or
-// blockquote, still costs a parse of that block per check.
+// blockquote, still costs a parse of that block per check. Beside its
+// parses, a check's work is linear in its regions and edits and in the
+// headings whose anchors change: edits are placed each from the one before
+// it, a region that grows takes in only the regions it meets, one pass gives
+// the tightness of every edited list, a slug's number is found from an index
+// of the numbered keys, and the outline's anchors are taken only where
+// counts differ (see fix_anchors.go).
 
 // regionSentinel is the line parsed after a group region to find out whether
 // the region leaves a block open.
@@ -507,10 +513,11 @@ type docLayout struct {
 }
 
 // regionWork counts the work of region checks: the bytes their parses read,
-// the regions their merges took, and the regions their list tightness
-// checks visited.
+// the regions their merges took, the regions their list tightness checks
+// visited, the bytes of edited first lines they read, and the bytes they
+// read to place edits on their lines.
 type regionWork struct {
-	parsed, merged, tightVisits int
+	parsed, merged, tightVisits, firstLine, placing int
 }
 
 // layoutList is a top-level list of the original document.
@@ -700,9 +707,44 @@ func (l *docLayout) firstLineKeeps(edits, more []placedEdit) bool {
 			return l.firstLineOK(line)
 		}
 		if end := bytes.IndexByte(piece, '\n'); end >= 0 {
+			l.work.firstLine += end + 1
 			return l.firstLineOK(append(line, piece[:end]...))
 		}
+		l.work.firstLine += len(piece)
 		line = append(line, piece...)
+	}
+}
+
+// firstLineEnd returns where the first line of the source with edits, in
+// source offsets and sorted, ends, as firstLineKeeps reads it: the offset of
+// its line ending, or of the edit whose text holds it, or the length of the
+// source. firstLineKeeps reads no edit that starts after it, so with edits
+// after it as well it reads the line it reads with these alone.
+func (l *docLayout) firstLineEnd(edits []placedEdit) int {
+	pos := 0
+	for {
+		switch {
+		case len(edits) > 0 && edits[0].edit.StartOffset == pos:
+			l.work.firstLine += len(edits[0].edit.NewText)
+			if strings.Contains(edits[0].edit.NewText, "\n") {
+				return pos
+			}
+			pos = edits[0].edit.EndOffset
+			edits = edits[1:]
+		case pos < len(l.source):
+			end := len(l.source)
+			if len(edits) > 0 {
+				end = min(end, edits[0].edit.StartOffset)
+			}
+			if newline := bytes.IndexByte(l.source[pos:end], '\n'); newline >= 0 {
+				l.work.firstLine += newline + 1
+				return pos + newline
+			}
+			l.work.firstLine += end - pos
+			pos = end
+		default:
+			return len(l.source)
+		}
 	}
 }
 
@@ -742,14 +784,18 @@ func compareEdits(a, b placedEdit) int {
 	return cmp.Compare(a.edit.EndOffset, b.edit.EndOffset)
 }
 
-// placeEdits returns edits, prepared and in content offsets, in source
-// offsets and placed on their lines. early reports whether an edit starts
-// before frontLimit, so that firstLineKeeps must clear the edits; ok is
-// false when an edit could reach the front matter or the byte order mark
+// placeEdits returns edits, prepared, so sorted, and in content offsets, in
+// source offsets and placed on their lines. early reports whether an edit
+// starts before frontLimit, so that firstLineKeeps must clear the edits; ok
+// is false when an edit could reach the front matter or the byte order mark
 // otherwise.
 func (l *docLayout) placeEdits(edits []fix.TextEdit) ([]placedEdit, bool, bool) {
 	placed := make([]placedEdit, 0, len(edits))
 	early := false
+	// The edits are sorted, so each is placed from the one before it: its
+	// line starts at that one's line, or after the last line ending between
+	// them, and many edits on one long line read it once.
+	after, afterLine := 0, 0
 	for _, edit := range edits {
 		if edit.StartOffset < l.frontLimit {
 			if !l.firstLineFree || edit.StartOffset < l.base {
@@ -759,19 +805,23 @@ func (l *docLayout) placeEdits(edits []fix.TextEdit) ([]placedEdit, bool, bool) 
 		}
 		edit.StartOffset -= l.base
 		edit.EndOffset -= l.base
-		placed = append(placed, l.placeEdit(edit))
+		next := l.placeAfter(edit, after, afterLine)
+		placed = append(placed, next)
+		after, afterLine = edit.StartOffset, next.firstLine
 	}
 	return placed, early, true
 }
 
-// startsEarly reports whether the first of placed edits, sorted, starts
-// before frontLimit.
-func (l *docLayout) startsEarly(placed []placedEdit) bool {
-	return len(placed) > 0 && placed[0].edit.StartOffset < l.frontLimit-l.base
-}
-
 // placeEdit places an edit, in source offsets, on its lines.
 func (l *docLayout) placeEdit(edit fix.TextEdit) placedEdit {
+	return l.placeAfter(edit, 0, 0)
+}
+
+// placeAfter places an edit, in source offsets, on its lines, given that
+// the line holding the offset after, at or before the edit's start, starts
+// at afterLine. It reads back from the edit's start to after or to the line
+// ending before the start, whichever comes first, and the edit's range.
+func (l *docLayout) placeAfter(edit fix.TextEdit, after, afterLine int) placedEdit {
 	last := edit.StartOffset
 	if edit.EndOffset > edit.StartOffset {
 		last = edit.EndOffset - 1
@@ -779,11 +829,21 @@ func (l *docLayout) placeEdit(edit fix.TextEdit) placedEdit {
 			last = edit.EndOffset
 		}
 	}
-	return placedEdit{
-		edit:      edit,
-		firstLine: lineStartIn(l.source, edit.StartOffset),
-		lastLine:  lineStartIn(l.source, last),
+	firstLine := l.lineStartFrom(edit.StartOffset, after, afterLine)
+	return placedEdit{edit: edit, firstLine: firstLine, lastLine: l.lineStartFrom(last, edit.StartOffset, firstLine)}
+}
+
+// lineStartFrom returns the offset of the start of the line holding offset,
+// given that the line holding from, at or before offset, starts at fromLine.
+func (l *docLayout) lineStartFrom(offset, from, fromLine int) int {
+	offset = min(offset, len(l.source))
+	newline := bytes.LastIndexByte(l.source[from:offset], '\n')
+	if newline < 0 {
+		l.work.placing += offset - from
+		return fromLine
 	}
+	l.work.placing += offset - from - newline
+	return from + newline + 1
 }
 
 // groupOf returns the group that holds the line starting at offset.

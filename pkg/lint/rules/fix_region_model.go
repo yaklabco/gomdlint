@@ -388,16 +388,23 @@ type regionState struct {
 	// list regions that make it loose, and loosening its list regions that
 	// make it loose.
 	inside, loosening []int
+	// firstEnd is where the edited first line ends (see firstLineEnd) when
+	// the edits start before frontLimit, and -1 otherwise. The edits leave a
+	// first line that keeps (see firstLineKeeps).
+	firstEnd int
 }
 
 // newRegionState returns the state of the edits, prepared and in content
 // offsets, or nil when some region of theirs does not keep its part of the
 // signature or region checks cannot tell.
 func (m *regionModel) newRegionState(edits []fix.TextEdit) *regionState {
-	state := &regionState{inside: make([]int, len(m.lists)), loosening: make([]int, len(m.lists))}
+	state := &regionState{inside: make([]int, len(m.lists)), loosening: make([]int, len(m.lists)), firstEnd: -1}
 	placed, early, ok := m.placeEdits(edits)
 	if !ok || (early && !m.firstLineKeeps(placed, nil)) {
 		return nil
+	}
+	if early {
+		state.firstEnd = m.firstLineEnd(placed)
 	}
 	regions, outcomes, ok := m.decompose(placed)
 	if !ok {
@@ -483,8 +490,11 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 		}
 	}
 	// An edit that joins the first line with the next makes the edits there
-	// part of the first line, so the edits are cleared together.
-	if (early || m.startsEarly(state.edits)) && !m.firstLineKeeps(state.edits, placed) {
+	// part of the first line, so the edits are cleared together. Edits that
+	// all start after the state's first line leave it as the state has it,
+	// which keeps.
+	onFirstLine := len(placed) > 0 && placed[0].edit.StartOffset <= state.firstEnd
+	if (early || onFirstLine) && !m.firstLineKeeps(state.edits, placed) {
 		return false, false, nil
 	}
 	regions, outcomes, absorbed, ok := m.settle(state, placed)
@@ -568,6 +578,11 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 		for _, edit := range placed {
 			pos := sort.Search(len(state.edits), func(i int) bool { return compareEdits(state.edits[i], edit) > 0 })
 			state.edits = slices.Insert(state.edits, pos, edit)
+		}
+		// Only edits that start early or on the first line can change it,
+		// and their check read it already.
+		if early || onFirstLine {
+			state.firstEnd = m.firstLineEnd(state.edits)
 		}
 	}
 	return true, true, commit

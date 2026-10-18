@@ -493,6 +493,101 @@ func TestRegionChecksOnListsThatStartWithDefinitions(t *testing.T) {
 	assert.Equal(t, cases, decided, "both region checks decide every case")
 }
 
+// TestKeptInOrderOnFirstLines checks keeping fixes one at a time with region
+// states against checking the whole document at each step, where fixes join
+// the first lines, so that later fixes fall on the first line, and where the
+// joined first line opens front matter or gains a byte order mark.
+func TestKeptInOrderOnFirstLines(t *testing.T) {
+	documents := 600
+	if testing.Short() || raceEnabled {
+		documents = 100
+	}
+	pieces := []string{
+		"-", "--", "---", "+", "++", "+++", "{", "x", "  ", "", "", "# t", "\xef\xbb\xbf", "  ---", "  +++", " {",
+	}
+	texts := []string{"", "", "-", "+", "{", "\xef\xbb\xbf", "\n", "x", " "}
+	closers := []string{"", "---\n", "+++\n", "}\n"}
+	// Joining the empty first line with "  ---" keeps the document, and the
+	// first line does not open front matter while it is indented. Taking
+	// the spaces away then makes it open front matter, which runs to the
+	// "---" below, though the fix starts after the first line.
+	opener := "\n  ---\n\nText   \n\n---\n\nMore text   \n"
+	openerFixes := []lint.Diagnostic{
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: 0, EndOffset: 1}}},
+		{RuleID: "T1", FixEdits: []fix.TextEdit{{StartOffset: 1, EndOffset: 3}}},
+	}
+	for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+		snapshot := parseForCheckWith(t, flavor, opener)
+		require.Equal(t, []int{0}, wholeKeptInOrder(newFixCheck(snapshot, flavor), openerFixes, []int{0, 1}))
+		got, statesDecided := newFixCheck(snapshot, flavor).keptInOrder(openerFixes, []int{0, 1})
+		assert.Equal(t, []int{0}, got, "flavor %s", flavor)
+		assert.Equal(t, 1, statesDecided, "the states decide the join, and leave the opener to the whole check")
+	}
+	rng := rand.New(rand.NewPCG(20261018, 5))
+	steps, decided := 0, 0
+	for range documents {
+		var head strings.Builder
+		head.WriteString([]string{"", "", "  ", "x"}[rng.IntN(4)] + "\n")
+		for range 1 + rng.IntN(4) {
+			head.WriteString(pieces[rng.IntN(len(pieces))] + "\n")
+		}
+		text := head.String() + "\nText   \n\n" + closers[rng.IntN(len(closers))] + "\nMore text   \n"
+		var newlines, indents []int
+		for idx := range head.Len() {
+			switch {
+			case text[idx] == '\n':
+				newlines = append(newlines, idx)
+			case text[idx] == ' ' && (idx == 0 || text[idx-1] == '\n'):
+				indents = append(indents, idx)
+			}
+		}
+		var diags []lint.Diagnostic
+		for range 2 + rng.IntN(6) {
+			var edit fix.TextEdit
+			switch rng.IntN(4) {
+			case 0:
+				at := newlines[rng.IntN(len(newlines))]
+				edit = fix.TextEdit{StartOffset: at, EndOffset: at + 1}
+			case 1:
+				at := rng.IntN(head.Len() + 1)
+				edit = fix.TextEdit{StartOffset: at, EndOffset: at, NewText: texts[rng.IntN(len(texts))]}
+			case 2:
+				if len(indents) == 0 {
+					continue
+				}
+				// Remove the spaces that start a line.
+				at := indents[rng.IntN(len(indents))]
+				end := at
+				for text[end] == ' ' {
+					end++
+				}
+				edit = fix.TextEdit{StartOffset: at, EndOffset: end}
+			default:
+				edits := trailingSpaceEdits(text)
+				edit = edits[rng.IntN(len(edits))]
+			}
+			diags = append(diags, lint.Diagnostic{RuleID: "T1", FixEdits: []fix.TextEdit{edit}})
+		}
+		slices.SortStableFunc(diags, func(a, b lint.Diagnostic) int {
+			return a.FixEdits[0].StartOffset - b.FixEdits[0].StartOffset
+		})
+		kept := make([]int, len(diags))
+		for idx := range kept {
+			kept[idx] = idx
+		}
+		for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+			snapshot := parseForCheckWith(t, flavor, text)
+			want := wholeKeptInOrder(newFixCheck(snapshot, flavor), diags, kept)
+			got, statesDecided := newFixCheck(snapshot, flavor).keptInOrder(diags, kept)
+			require.Equal(t, want, got, "flavor %s, document %q, fixes %v", flavor, text, diags)
+			steps += len(kept)
+			decided += statesDecided
+		}
+	}
+	t.Logf("%d steps, %d decided by region states", steps, decided)
+	assert.Greater(t, decided, steps/4, "region states decide many steps")
+}
+
 // leafRunDocument returns a document of n paragraphs of two lines that end
 // in trailing spaces, each followed, with no blank line, by the line closing.
 func leafRunDocument(n int, closing string) string {
@@ -648,6 +743,7 @@ func regionWorkOf(t *testing.T, input string, edits []fix.TextEdit) regionWork {
 			total.parsed += work.parsed
 			total.merged += work.merged
 			total.tightVisits += work.tightVisits
+			total.placing += work.placing
 		}
 	}
 	return total
@@ -694,6 +790,62 @@ func TestRegionWorkGrowsWithTheDocument(t *testing.T) {
 		t.Logf("regions merged %d for %d breaks, %d for %d", short.merged, small, long.merged, factor*small)
 		assert.Less(t, ratio(short.merged, long.merged), 1.5*factor, "merge work grows faster than the document")
 	})
+	t.Run("many edits on one line", func(t *testing.T) {
+		work := func(spans int) regionWork {
+			input := "# Title\n\n" + strings.Repeat("word ` a` ", spans) + "\n"
+			var edits []fix.TextEdit
+			for idx := range len(input) {
+				if strings.HasPrefix(input[idx:], "` a`") {
+					edits = append(edits, fix.TextEdit{StartOffset: idx + 1, EndOffset: idx + 2})
+				}
+			}
+			require.Len(t, edits, spans)
+			return regionWorkOf(t, input, edits)
+		}
+		short, long := work(small), work(factor*small)
+		t.Logf("bytes read to place edits %d for %d edits, %d for %d", short.placing, small, long.placing, factor*small)
+		assert.Less(t, ratio(short.placing, long.placing), 1.5*factor, "placing edits grows faster than the document")
+	})
+	t.Run("fixes after a long first line with a fix", func(t *testing.T) {
+		work := func(n int) int {
+			input := longFirstLineDocument(n)
+			edits := trailingSpaceEdits(input)
+			require.Len(t, edits, n+1)
+			total := 0
+			for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+				diags := make([]lint.Diagnostic, len(edits))
+				kept := make([]int, len(edits))
+				for idx, edit := range edits {
+					diags[idx] = lint.Diagnostic{RuleID: "MD009", FixEdits: []fix.TextEdit{edit}}
+					kept[idx] = idx
+				}
+				check := newFixCheck(parseForCheckWith(t, flavor, input), flavor)
+				got, decided := check.keptInOrder(diags, kept)
+				require.Equal(t, kept, got, "every fix keeps the document")
+				require.Equal(t, len(kept), decided, "region states decide every step")
+				for _, model := range check.models {
+					total += model.work.firstLine
+				}
+			}
+			return total
+		}
+		short, long := work(small), work(factor*small)
+		t.Logf("first line bytes read %d for %d fixes, %d for %d", short, small, long, factor*small)
+		assert.Less(t, ratio(short, long), 1.5*factor, "first line work grows faster than the document")
+	})
+}
+
+// longFirstLineDocument returns a document whose first line is a paragraph
+// of 8n words that ends in trailing spaces, followed by n paragraphs that
+// end in trailing spaces. Once the fix of the first line is kept, a check of
+// a later fix need not read the first line again.
+func longFirstLineDocument(n int) string {
+	var doc strings.Builder
+	doc.WriteString(strings.Repeat("word ", 8*n) + "  \n\n")
+	for idx := range n {
+		fmt.Fprintf(&doc, "Text %d   \n\n", idx)
+	}
+	return doc.String()
 }
 
 // stubOutcome is the outcome of a region in TestDecomposeRegionsMatchesFullMerges,
@@ -977,6 +1129,118 @@ func TestGroupsStartAfterClosedBlocks(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestPlaceEditsFindsTheirLines checks that placing sorted edits each from
+// the one before it finds the lines that searching back from each finds.
+func TestPlaceEditsFindsTheirLines(t *testing.T) {
+	rng := rand.New(rand.NewPCG(20261018, 6))
+	checked := 0
+	for range 300 {
+		text := randomRegionDocument(rng)
+		if text == "" || strings.HasPrefix(text, "---") || strings.HasPrefix(text, "\xef\xbb\xbf") {
+			continue
+		}
+		layout := newDocLayout(regionMarkdowns(config.FlavorGFM)[0], []byte(text))
+		if layout == nil {
+			continue
+		}
+		edits, err := fix.PrepareEdits(randomRegionEdits(rng, text, false), len(text))
+		if err != nil {
+			continue
+		}
+		placed, _, ok := layout.placeEdits(edits)
+		if !ok {
+			continue
+		}
+		for _, edit := range placed {
+			last := edit.edit.StartOffset
+			if edit.edit.EndOffset > edit.edit.StartOffset {
+				last = edit.edit.EndOffset - 1
+				if layout.source[last] == '\n' {
+					last = edit.edit.EndOffset
+				}
+			}
+			require.Equal(t, lineStartIn(layout.source, edit.edit.StartOffset), edit.firstLine, "text %q, edit %+v", text, edit.edit)
+			require.Equal(t, lineStartIn(layout.source, last), edit.lastLine, "text %q, edit %+v", text, edit.edit)
+			checked++
+		}
+	}
+	assert.Greater(t, checked, 300, "many edits are placed")
+}
+
+// randomHeadEdits returns sorted edits that do not overlap, at random places
+// of the first lines of text (before limit): insertions, deletions and
+// replacements, of texts that make or break front matter openers and line
+// endings.
+func randomHeadEdits(rng *rand.Rand, layout *docLayout, limit int, texts []string) []placedEdit {
+	var edits []placedEdit
+	pos := 0
+	for range rng.IntN(4) {
+		if pos > limit {
+			break
+		}
+		start := pos + rng.IntN(limit-pos+1)
+		end := min(len(layout.source), start+rng.IntN(3))
+		edit := fix.TextEdit{StartOffset: start, EndOffset: end, NewText: texts[rng.IntN(len(texts))]}
+		edits = append(edits, layout.placeEdit(edit))
+		pos = end + rng.IntN(2)
+		if end == start {
+			pos = end + 1
+		}
+	}
+	return edits
+}
+
+// TestFirstLineEndBoundsTheFirstLine checks the claim that tryAdd's skip
+// rests on: firstLineKeeps reads no edit that starts after firstLineEnd of
+// the other edits, so with such edits it decides as without them. Edits
+// that start right after the bound, and replacements whose text holds the
+// line ending, which edits at their start come before, are made often.
+func TestFirstLineEndBoundsTheFirstLine(t *testing.T) {
+	rng := rand.New(rand.NewPCG(20261018, 8))
+	lines := []string{"-", "--", "  ---", "", "x", "{", "+++", "# t", "  "}
+	texts := []string{"", "-", "--", "---", "+", "{", "x", " ", "\n", "x\n", "---\n", "\n-", "\xef\xbb\xbf"}
+	checked := 0
+	for range 4000 {
+		var doc strings.Builder
+		for range 2 + rng.IntN(4) {
+			doc.WriteString(lines[rng.IntN(len(lines))] + "\n")
+		}
+		head := doc.Len()
+		doc.WriteString("\ntext\n")
+		layout := newDocLayout(regionMarkdowns(config.FlavorGFM)[0], []byte(doc.String()))
+		if layout == nil || !layout.firstLineFree {
+			continue
+		}
+		state := randomHeadEdits(rng, layout, head, texts)
+		end := layout.firstLineEnd(state)
+		var more []placedEdit
+		at := end + 1 + rng.IntN(2)
+		for range 1 + rng.IntN(2) {
+			if at > len(layout.source) {
+				break
+			}
+			edit := fix.TextEdit{StartOffset: at, EndOffset: at, NewText: texts[rng.IntN(len(texts))]}
+			clash := false
+			for _, other := range state {
+				inside := edit.StartOffset > other.edit.StartOffset && edit.StartOffset < other.edit.EndOffset
+				sameRange := other.edit.StartOffset == at && other.edit.EndOffset == at
+				clash = clash || inside || sameRange
+			}
+			if !clash {
+				more = append(more, layout.placeEdit(edit))
+			}
+			at += 1 + rng.IntN(3)
+		}
+		if len(more) == 0 {
+			continue
+		}
+		require.Equal(t, layout.firstLineKeeps(state, nil), layout.firstLineKeeps(state, more),
+			"source %q, edits %+v, more %+v, end %d", layout.source, state, more, end)
+		checked++
+	}
+	assert.Greater(t, checked, 2000, "most cases are checked")
 }
 
 // TestFirstLineKeepsOnALongLine checks that clearing edits on the first line
