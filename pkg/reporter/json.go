@@ -44,33 +44,51 @@ type JSONFileResult struct {
 	Notices []JSONNotice `json:"notices,omitempty"`
 }
 
-// JSONNotice describes a word in a markdownlint comment that names no rule
-// or tag, which the comment ignores, as markdownlint does, or that is one of
-// gomdlint's deprecated tags, which still work but will stop working in a
-// later release.
+// JSONNotice describes a problem with a markdownlint comment that changes
+// neither the findings nor the exit code. It is about a word of the
+// comment, or a key of a markdownlint-configure-file comment, that names no
+// rule or tag, which the comment ignores, as markdownlint does. Or it is
+// about a word that is one of gomdlint's deprecated tags, which still work
+// but will stop working in a later release. A configure-file comment also
+// gets one for an option that the rules of its setting do not read, for an
+// option that it writes in gomdlint's spelling beside markdownlint's, for
+// holding no object of settings, which markdownlint ignores, and for
+// running on through later comments past what gomdlint reads of such
+// comments, which markdownlint reads.
 type JSONNotice struct {
 	// Line is the 1-based line on which the comment starts.
 	Line int `json:"line"`
 
-	// Kind is "unknown-rule" for a word that names no rule or tag, and
-	// "deprecated-tag" for a deprecated tag.
+	// Kind is "unknown-rule" for a word or key that names no rule or tag,
+	// "deprecated-tag" for a deprecated tag, "unknown-option" for an option
+	// that the rules of a configure-file setting do not read,
+	// "option-conflict" for an option that a configure-file setting writes
+	// in gomdlint's spelling beside markdownlint's, which applies,
+	// "invalid-configuration" for a configure-file comment that holds no
+	// object of settings, and "unread-configuration" for a configure-file
+	// comment without a "-->" of its own that gomdlint does not read.
 	Kind string `json:"kind"`
 
 	// Directive is the kind of comment, such as "markdownlint-disable".
 	Directive string `json:"directive"`
 
-	// Name is the word as the comment writes it.
-	Name string `json:"name"`
+	// Name is the word, key or option as the comment writes it. The key is
+	// absent for an "invalid-configuration" or "unread-configuration"
+	// notice.
+	Name string `json:"name,omitempty"`
 
 	// Suggestions are, for an unknown word, the rules and tags it most
-	// likely means, any one of which may be meant. The key is absent when
-	// none is close enough. Rules are named as markdownlint names them,
-	// such as ul-style for unordered-list-style.
+	// likely means, any one of which may be meant, and, for an unknown
+	// option of one rule, the option names it most likely means. The key is
+	// absent when none is close enough. Rules are named as markdownlint
+	// names them, such as ul-style for unordered-list-style.
 	Suggestions []string `json:"suggestions,omitempty"`
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead, named as markdownlint names them.
-	// The key is absent otherwise.
+	// which the comment can name instead, for an unknown option, the rules
+	// whose setting holds it, none of which reads it, and, for an option
+	// conflict, the rule whose option it is, named as markdownlint names
+	// them. The key is absent otherwise.
 	Rules []string `json:"rules,omitempty"`
 
 	// Message describes the problem, starting with the kind of comment.

@@ -478,8 +478,10 @@ spellings:
 
 An inverted name holds the opposite value, so `tables: false` means
 `ignore_tables: true`. Setting both spellings of one option for a rule is
-an error. Options that markdownlint lacks keep markdownlint's behaviour by
-default.
+an error in a config file. A `markdownlint-configure-file` comment that
+sets both reads markdownlint's spelling, as markdownlint does, and warns
+that gomdlint's spelling is ignored. Options that markdownlint lacks keep
+markdownlint's behaviour by default.
 
 A config file gets a warning, with its path and line, for an option that
 the rule does not read, with the closest names, such as `unknown option
@@ -535,16 +537,40 @@ fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
 Migration does not evaluate JavaScript configuration or resolve `extends`.
 
-gomdlint reads a markdownlint config as markdownlint 0.41 does. It compares
-keys by their JavaScript upper case, as it does the words of markdownlint
-comments. Keys apply in the order they are written, and a later key
-overrides an earlier one for the rules both name. For example,
+gomdlint reads a markdownlint config file as markdownlint-cli2 0.23 reads
+one that it finds. In a directory with several, it uses the first of
+`.markdownlint.jsonc`, `.markdownlint.json`, `.markdownlint.yaml` and
+`.markdownlint.yml`. Whatever the file's name, gomdlint skips a leading
+byte order mark, reads the file as JSON with comments and trailing commas,
+and reads it as YAML when that fails. So a `.markdownlint.yaml` file that
+holds JSON loads, and a key that the JSON writes twice takes its last value
+in its first place. A file that holds a list, a string, a number or nothing
+loads as an empty config, so every rule keeps markdownlint's defaults. A
+value other than an object gets a warning.
+
+YAML reads as js-yaml 5 reads it for markdownlint-cli2, with the core
+schema of YAML 1.2. So `yes`, `off` and `0b1` are strings, which turn a
+rule on, while `0o7` and `0x1F` are numbers. Every key is a string, so a
+numeric option such as `0` is an option that the rule does not read. A key
+written twice is an error anywhere in the file, even when two spellings
+such as `16` and `0x10` only become the same string, and so is a tag that
+the core schema lacks, such as `!!binary` or `!unknown`. A `%YAML 1.2`
+directive is accepted. A merge key (`<<`) is an ordinary key, which names
+no rule, so the settings it would merge do not apply. None of this applies
+to gomdlint's own config files.
+
+gomdlint applies a markdownlint config as markdownlint 0.41 does. It
+compares keys by their JavaScript upper case, as it does the words of
+markdownlint comments. Keys apply in the order they are written, and a
+later key overrides an earlier one for the rules both name. For example,
 `{"MD009": true, "whitespace": false}` turns `no-trailing-spaces` (MD009)
 off. The first `default` key, in any case, sets every rule's baseline
 before the other keys apply. A value that JavaScript reads as false, such
 as `0`, `""` or `null`, turns rules off. A rule's object turns the rule off
 only when its `enabled` key holds such a value, and an object as the
-default always turns the rules on.
+default always turns the rules on. A rule's `severity` gives warnings when
+it is `warning` and errors for any other value. So gomdlint's `info` gives
+errors in a markdownlint config, while gomdlint's own config files keep it.
 
 ### markdownlint Comments
 
@@ -571,14 +597,22 @@ output format. JSON output also lists them under each file's `notices`, and
 SARIF output as `toolConfigurationNotifications`. They never change findings
 or the exit code, even with `--strict`.
 
-`markdownlint-configure-file` accepts a JSON object of markdownlint settings
-and applies it to the whole file. Invalid JSON, unknown rule keys and two
-spellings of one option fail that file, while an option that the rule does
-not read changes nothing, as in markdownlint. As in markdownlint, the keys
-apply in the order they are written, and the first `default` key, in any
-case, sets every rule's baseline. The configure-file comments of one file
-act as one object. A key that a later comment writes again keeps its first
-place and takes the later value.
+`markdownlint-configure-file` accepts an object of markdownlint settings and
+applies it to the whole file. As in markdownlint-cli2, the object may be
+written as JSON with comments and trailing commas, or as YAML, which reads
+as in a markdownlint config file. Like markdownlint, gomdlint never fails a
+file over such a comment. A comment that holds no object changes nothing. A
+key that names no rule configures nothing, and the other keys still apply.
+An option that the rule does not read changes nothing. Of two spellings of
+one option, markdownlint's applies. Each of these gets a warning on stderr,
+in JSON `notices` and in SARIF `toolConfigurationNotifications`, and none
+changes the findings or the exit code. As in markdownlint, the keys apply
+in the order they are written, and the first `default` key, in any case,
+sets every rule's baseline. The configure-file comments of one file act as
+one object. A key that a later comment writes again keeps its first place
+and takes the later value. A comment without a `-->` of its own runs on to
+the `-->` of a later one, as in markdownlint, so it holds the comments
+after it.
 
 ## Markdown Support
 
@@ -695,10 +729,33 @@ Some of its fix checks are also stricter than they need to be.
   `{"default": true}`, so there a comment's `Default` key, written in
   another case, changes nothing. gomdlint applies the comments over its own
   settings, so their keys always apply in the order the comments write them.
-- markdownlint-cli2 0.23 reads a YAML merge key (`<<`) in a markdownlint
-  config as an ordinary key, which names no rule. gomdlint applies merge
-  keys, as js-yaml 4 does, and places the keys a merge brings in where the
-  merge key is written.
+- markdownlint reads every `markdownlint-configure-file` comment in full,
+  so comments without a `-->` of their own, each of which holds every
+  comment after it up to a shared `-->`, take time that grows with the
+  square of their number: about 51 seconds for 8,000. gomdlint reads such
+  comments only while their text comes to at most four times the file's
+  length and 1 MiB more, and ignores the rest, each with a warning. A
+  comment with its own `-->` is always read.
+- gomdlint parses YAML with yaml.v3, which follows libyaml, and reads what
+  it parses as js-yaml 5 does. A few constructs parse differently. js-yaml
+  parses an empty value with only a tag, such as `[!!str]`, an empty key,
+  such as `: x`, and the escapes `\/` and `\ud83d` in double-quoted
+  strings, which fail in gomdlint. gomdlint parses `[-]` and `&a: x`, which
+  fail in js-yaml. yaml.v3 ends a line at U+2028 and U+2029, which js-yaml
+  reads as text. A config that fails to parse fails to load, and a
+  `markdownlint-configure-file` comment that fails configures nothing, with
+  a warning. An alias inside the value it names, such as `&r [*r]`, gives
+  js-yaml a value that holds itself, and gomdlint an empty list or object in
+  place of the alias.
+- markdownlint-cli2 also tries TOML, between JSON and YAML, when it reads a
+  markdownlint config or a `markdownlint-configure-file` comment. gomdlint
+  does not read TOML. A config written in TOML gets a warning or a config
+  error, and a comment written in TOML configures nothing, with a warning.
+- markdownlint-cli2 reads a `.markdownlint.json` or `.jsonc` file that
+  starts with a byte order mark as YAML, because its JSON parser rejects the
+  mark. YAML reads each comment in such a file together with the key after
+  it as one key that names nothing, so that setting does not apply there.
+  gomdlint skips the mark and reads the file as JSON with comments.
 
 ## Development
 

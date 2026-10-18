@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 )
 
 // MarkdownlintSetting is one key of a markdownlint configuration object, as
@@ -114,17 +115,12 @@ var ErrNotJSONObject = errors.New("not a JSON object")
 // DecodeMarkdownlintJSON reads data, one JSON value, as a markdownlint
 // configuration object, into its settings in the order of its keys (see
 // MarkdownlintSettings). Values decode as encoding/json decodes into an
-// interface value, with numbers as float64. A syntax error reads as
-// json.Unmarshal reports it. null holds no settings, as markdownlint reads
-// it, and any other value that is not an object is an error that wraps
-// ErrNotJSONObject.
+// interface value, with numbers as float64, the float64 that JSON.parse
+// reads for each: a number beyond float64's range is an infinity, where
+// encoding/json fails. A syntax error reads as json.Unmarshal reports it.
+// null holds no settings, as markdownlint reads it, and any other value
+// that is not an object is an error that wraps ErrNotJSONObject.
 func DecodeMarkdownlintJSON(data []byte) (*MarkdownlintSettings, error) {
-	return decodeSettings(data, true)
-}
-
-// decodeSettings is DecodeMarkdownlintJSON, which reads null as an object
-// without keys when allowNull is set, and as an error otherwise.
-func decodeSettings(data []byte, allowNull bool) (*MarkdownlintSettings, error) {
 	// Checking all of data first gives syntax errors json.Unmarshal's
 	// wording, and leaves the decoder below only valid JSON to read.
 	if err := json.Unmarshal(data, new(json.RawMessage)); err != nil {
@@ -132,12 +128,13 @@ func decodeSettings(data []byte, allowNull bool) (*MarkdownlintSettings, error) 
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
 	token, err := decoder.Token()
 	if err != nil {
 		return nil, fmt.Errorf("read JSON: %w", err)
 	}
 	settings := &MarkdownlintSettings{}
-	if token == nil && allowNull {
+	if token == nil {
 		return settings, nil
 	}
 	if token != json.Delim('{') {
@@ -156,7 +153,31 @@ func decodeSettings(data []byte, allowNull bool) (*MarkdownlintSettings, error) 
 		if err := decoder.Decode(&value); err != nil {
 			return nil, fmt.Errorf("read JSON: %w", err)
 		}
-		settings.Set(key, value)
+		settings.Set(key, javaScriptNumbers(value))
 	}
 	return settings, nil
+}
+
+// javaScriptNumbers returns value, which a decoder decoded with json.Number
+// for numbers, with each number, however deep, as the float64 that
+// JSON.parse reads: the nearest one, an infinity beyond float64's range,
+// and zero below it. It changes the maps and lists of value in place.
+func javaScriptNumbers(value any) any {
+	switch typed := value.(type) {
+	case json.Number:
+		number, err := strconv.ParseFloat(typed.String(), 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
+			return value // A JSON number always parses; this is unreachable.
+		}
+		return number
+	case map[string]any:
+		for key, item := range typed {
+			typed[key] = javaScriptNumbers(item)
+		}
+	case []any:
+		for idx, item := range typed {
+			typed[idx] = javaScriptNumbers(item)
+		}
+	}
+	return value
 }

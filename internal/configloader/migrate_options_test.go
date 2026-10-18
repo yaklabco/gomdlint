@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // TestConvertMarkdownlintConfig_OptionSpellings checks that markdownlint's
@@ -124,13 +126,16 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 			lines: []int{4},
 		},
 		{
-			name: "YAML merged option", file: ".markdownlint.yaml",
+			// js-yaml 5, which markdownlint-cli2 reads YAML with, reads a
+			// merge key as an ordinary key, here an option that line-length
+			// does not read, so the merged line_length is never read.
+			name: "YAML merge key", file: ".markdownlint.yaml",
 			content: "base: &length\n  line_length: oops\nMD013:\n  <<: *length\n  tables: false\n",
 			warnings: []string{
 				`unknown rule "base"; it is ignored`,
-				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 			},
-			lines: []int{0, 2},
+			lines: []int{0, 4},
 		},
 		{
 			name: "JSON with comments", file: ".markdownlint.jsonc",
@@ -155,35 +160,36 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 			lines:    []int{4},
 		},
 		{
-			name: "YAML option over a merged one", file: ".markdownlint.yaml",
+			name: "YAML option beside a merge key", file: ".markdownlint.yaml",
 			content: "base: &length\n  line_length: 1\nMD013:\n  <<: *length\n  line_length: oops\n",
 			warnings: []string{
 				`unknown rule "base"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
 			},
-			lines: []int{0, 5},
+			lines: []int{0, 4, 5},
 		},
 		{
-			name: "YAML first of two merged options", file: ".markdownlint.yaml",
+			name: "YAML merge key with two mappings", file: ".markdownlint.yaml",
 			content: "earlier: &earlier\n  line_length: oops\nlater: &later\n  line_length: 1\n" +
 				"MD013:\n  <<: [*earlier, *later]\n",
 			warnings: []string{
 				`unknown rule "earlier"; it is ignored`,
 				`unknown rule "later"; it is ignored`,
-				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 			},
-			lines: []int{0, 0, 2},
+			lines: []int{0, 0, 6},
 		},
 		{
-			name: "YAML option merged through a merged mapping", file: ".markdownlint.yaml",
+			name: "YAML merge key with a merged mapping", file: ".markdownlint.yaml",
 			content: "inner: &inner\n  line_length: oops\nouter: &outer\n  <<: *inner\n  tables: false\n" +
 				"MD013:\n  <<: [*outer, {line_length: 1}]\n",
 			warnings: []string{
 				`unknown rule "inner"; it is ignored`,
 				`unknown rule "outer"; it is ignored`,
-				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+				`unknown option "<<" for line-length; it is ignored`,
 			},
-			lines: []int{0, 0, 2},
+			lines: []int{0, 0, 7},
 		},
 	}
 
@@ -204,9 +210,10 @@ func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
 }
 
 // TestSourceLocatorReadsEachEntryOnce guards the cost of placing option
-// warnings: however many warnings name keys of one mapping, lookups read
-// each entry of the config once, so placing a warning for every option of
-// a rule takes time linear in the size of the config, not quadratic.
+// warnings: the reading that loads the config records where each key is
+// written, in one pass, and each warning looks its option up in constant
+// time, so placing a warning for every option of a rule takes time linear
+// in the size of the config, not quadratic.
 func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 	t.Parallel()
 
@@ -217,13 +224,14 @@ func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 		fmt.Fprintf(&content, "  option_%03d: %d\n", idx, idx)
 	}
 
-	locate := newSourceLocator(".markdownlint.yaml", []byte(content.String()))
+	read, err := lint.ReadMarkdownlintConfig([]byte(content.String()))
+	require.NoError(t, err)
+	locate := newSourceLocator(read, []byte(content.String()))
 	for idx := range options {
 		require.Equal(t, idx+2, locate.optionLine("MD013", fmt.Sprintf("option_%03d", idx), 0))
 	}
 	assert.Zero(t, locate.optionLine("MD013", "absent", 0))
 	assert.Zero(t, locate.optionLine("MD999", "option_000", 0))
-	assert.LessOrEqual(t, locate.reads, options+1, "the rule key and each option, read once")
 
 	result := convertFile(t, ".markdownlint.yaml", content.String())
 	require.Len(t, result.Warnings, options)

@@ -362,8 +362,8 @@ func TestEngineKnownDirectiveNamesNeedNoNotice(t *testing.T) {
 // TestEngineDirectiveNoticesForEveryKind covers every kind of markdownlint
 // comment that names rules. Each names the comment and its line, and the
 // word changes nothing about what the comment does to the other rule it
-// names. The configure-file comment rejects unknown keys as an error, so
-// only its former tags get notices.
+// names. A configure-file comment gets notices for its former tags here,
+// and for its unknown keys in TestEngineConfigureFileIgnoresUnknownKeys.
 func TestEngineDirectiveNoticesForEveryKind(t *testing.T) {
 	tests := []struct {
 		directive, word string
@@ -504,7 +504,7 @@ func TestEngineNestedDirectiveNotices(t *testing.T) {
 	}
 }
 
-// TestEngineConfigureFileSeveralWordsKeySaysWhatToWrite covers the error
+// TestEngineConfigureFileSeveralWordsKeySaysWhatToWrite covers the notice
 // for a configure-file key of several words that each name a rule or tag,
 // which names nothing, because markdownlint reads it as one name. The
 // remedy names each rule as markdownlint names it, so that the keys it
@@ -538,12 +538,19 @@ func TestEngineConfigureFileSeveralWordsKeySaysWhatToWrite(t *testing.T) {
 			require.NoError(t, err)
 			input := "<!-- markdownlint-configure-file " + string(parameter) + " -->\n- one\n"
 
-			_, err = lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
 				context.Background(), "test.md", []byte(input), config.NewConfig())
 
-			require.ErrorContains(t, err, "markdownlint-configure-file at line 1: "+tt.want)
+			require.NoError(t, err)
+			require.Len(t, result.Notices, 1)
+			notice := result.Notices[0]
+			assert.Equal(t, lint.NoticeUnknownRule, notice.Kind)
+			assert.Equal(t, tt.key, notice.Name)
+			assert.Contains(t, notice.Message, "markdownlint-configure-file: "+tt.want)
 			if tt.without != "" {
-				assert.NotContains(t, err.Error(), tt.without)
+				assert.NotContains(t, notice.Message, tt.without)
+			} else {
+				assert.Empty(t, notice.Suggestions, "the words are no alternatives")
 			}
 		})
 	}
@@ -663,7 +670,7 @@ func TestEngineDirectiveNoticeSuggestions(t *testing.T) {
 	}
 }
 
-// TestEngineConfigureFileSuggestsMarkdownlintNames covers the error for an
+// TestEngineConfigureFileSuggestsMarkdownlintNames covers the notice for an
 // unknown key of a configure-file comment, which offers the rule by
 // markdownlint's name, as notices in markdownlint comments do, for the key
 // as markdownlint reads it.
@@ -672,11 +679,15 @@ func TestEngineConfigureFileSuggestsMarkdownlintNames(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			input := "<!-- markdownlint-configure-file {\"" + key + "\": false} -->\n- one\n"
 
-			_, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
 				context.Background(), "test.md", []byte(input), config.NewConfig())
 
-			require.ErrorContains(t, err,
-				"markdownlint-configure-file at line 1: unknown rule \""+key+"\" (did you mean \"ul-style\"?)")
+			require.NoError(t, err)
+			require.Len(t, result.Notices, 1)
+			assert.Equal(t, []string{"ul-style"}, result.Notices[0].Suggestions)
+			assert.Equal(t,
+				"markdownlint-configure-file: unknown rule \""+key+"\" (did you mean \"ul-style\"?); it is ignored",
+				result.Notices[0].Message)
 		})
 	}
 }

@@ -111,6 +111,33 @@ func TestJSONReporter_OmitsEmptySuggestions(t *testing.T) {
 	assert.NotContains(t, output.Files[0].Notices[0], "rules", "an unknown word covers no rules")
 }
 
+// TestJSONReporter_OmitsEmptyNoticeName covers a notice about a whole
+// configure-file comment, which names no word.
+func TestJSONReporter_OmitsEmptyNoticeName(t *testing.T) {
+	t.Parallel()
+
+	file := sarifFile("a.md", "# A\n")
+	file.Notices = []lint.Notice{{
+		Kind: lint.NoticeInvalidConfiguration, Line: 1, Directive: "markdownlint-configure-file",
+		Message: "markdownlint-configure-file: a list instead of an object of settings; it is ignored",
+	}}
+	var buf bytes.Buffer
+	_, err := reporter.NewJSONReporter(reporter.Options{Writer: &buf}).
+		Report(context.Background(), &runner.Result{Files: []runner.FileOutcome{file}})
+	require.NoError(t, err)
+
+	var output struct {
+		Files []struct {
+			Notices []map[string]json.RawMessage `json:"notices"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	require.Len(t, output.Files, 1)
+	require.Len(t, output.Files[0].Notices, 1)
+	assert.NotContains(t, output.Files[0].Notices[0], "name")
+	assert.JSONEq(t, `"invalid-configuration"`, string(output.Files[0].Notices[0]["kind"]))
+}
+
 func TestSARIFReporter_RecordsNoticesAsConfigurationNotifications(t *testing.T) {
 	t.Parallel()
 

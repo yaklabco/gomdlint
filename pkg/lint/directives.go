@@ -19,10 +19,20 @@ import (
 // inlineDirective is a markdownlint comment, such as
 // <!-- markdownlint-disable MD009 -->.
 type inlineDirective struct {
-	line      int
-	offset    int
-	action    string
-	parameter string
+	line   int
+	offset int
+	action string
+
+	// parameter is the text from the end of the comment's kind to its
+	// closing "-->", as a slice of the file's content. Comments that share a
+	// "-->" share its text, so a configure-file comment reads only as much of
+	// its parameter as it needs (see ReadMarkdownlintConfig).
+	parameter []byte
+
+	// runsOn reports whether the parameter holds the start of a later
+	// comment, so that the comment has no "-->" of its own and runs on to
+	// that of the later one (see configureFile).
+	runsOn bool
 
 	// rules holds the IDs of the rules that the comment names, for an
 	// action that takes rules (see takesRules): every rule when the
@@ -166,6 +176,12 @@ func findDirectives(text string) []directiveMatch {
 	return slices.Collect(directiveMatches(text))
 }
 
+// runsOn reports whether the parameter of matches[idx] holds the start of
+// the next comment, so that the two share one "-->".
+func runsOn(matches []directiveMatch, idx int) bool {
+	return idx+1 < len(matches) && matches[idx+1].kindEnd <= matches[idx].close
+}
+
 // HasInlineDirective reports whether text holds a markdownlint comment that
 // turns rules on or off, read as the engine reads comments: one of any kind
 // but configure-file. A rule whose fixes must not rewrite lines that such a
@@ -196,7 +212,7 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 		if !directiveStart.Match(content) {
 			continue
 		}
-		text := string(content) // The comments' parameters are slices of it.
+		text := string(content) // The comments' words are slices of it.
 		matches := findDirectives(text)
 		found := make([]inlineDirective, len(matches))
 		for idx, match := range matches {
@@ -205,7 +221,8 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 			found[idx] = inlineDirective{
 				line: line, offset: offset,
 				action:    match.kind,
-				parameter: text[match.kindEnd:match.close],
+				parameter: content[match.kindEnd:match.close:match.close],
+				runsOn:    runsOn(matches, idx),
 			}
 		}
 		resolver.resolveComments(text, matches, found)
@@ -234,45 +251,72 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // it. gomdlint applies the comments over its settings, which are no such
 // object, so their keys apply in the order the comments write them.
 //
-// A key that names no rule or tag is an error. A key that is a deprecated
-// tag gets a notice, which configureFile records on its comment, once for a
-// tag that the comment's keys repeat in any spelling that markdownlint reads
-// as the same word.
-func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
+// Like markdownlint, configureFile reads each comment's parameter as
+// markdownlint-cli2 makes markdownlint read it (see ReadMarkdownlintConfig),
+// as JSON with comments and trailing commas, or as YAML, and it never
+// fails. A comment whose parameter is neither, or holds a value other than
+// an object, such as a list, changes nothing and gets a notice. One that
+// holds null or nothing changes nothing without a notice. A key that names
+// no rule or tag configures nothing and gets a notice that offers the
+// closest rules and tags. A key that is a deprecated tag gets a notice too.
+// configureFile records the notices on their comments, once for a key that
+// a comment repeats in any spelling that markdownlint reads as the same
+// word.
+//
+// A comment without a "-->" of its own runs on to that of a later comment,
+// as in markdownlint, so its parameter holds the later comments. Reading
+// each of many such comments in full takes time that grows with the square
+// of their number, as it does in markdownlint. So configureFile reads such
+// a comment only while the parameters of those it has read, with its own,
+// come to no more than runOnTextPerByte bytes for each of the file's length
+// bytes, and runOnTextExtra bytes more. It ignores the others, each with a
+// notice (NoticeUnreadConfiguration). Comments with a "-->" of their own
+// are always read: their parameters do not overlap, so they never come to
+// more than the file's length.
+func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config, length int) *config.Config {
 	var settings MarkdownlintSettings
-	lines := make(map[string]int) // key -> the line of the comment that last set it
 	configured := false
+	resolver := &wordResolver{registry: registry} // It remembers the suggestions for unknown keys.
+	// runOnText is how much more text of comments that run on is read.
+	runOnText := runOnTextPerByte*length + runOnTextExtra
 	for idx := range directives {
 		directive := &directives[idx]
 		if directive.action != configureFileAction {
 			continue
 		}
+		if directive.runsOn {
+			if len(directive.parameter) > runOnText {
+				directive.notices = append(directive.notices, unreadNotice(directive))
+				continue
+			}
+			runOnText -= len(directive.parameter)
+		}
+		read, ok := readConfigureFile(directive)
+		if !ok {
+			continue
+		}
 		configured = true
-		parsed, err := decodeSettings([]byte(directive.parameter), false)
-		if errors.Is(err, ErrNotJSONObject) {
-			return nil, fmt.Errorf("markdownlint-configure-file at line %d must contain a JSON object", directive.line)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("markdownlint-configure-file at line %d: %w", directive.line, err)
-		}
-		var noticed wordSet // The deprecated tags with a notice.
-		for _, setting := range parsed.settings {
+		var noticed wordSet // The unknown keys and deprecated tags with a notice.
+		for _, setting := range read.Settings.settings {
 			if !IsMarkdownlintDefaultKey(setting.Key) {
 				rules, meaning := lookupWord(setting.Key, registry)
-				if meaning == unknownWord {
-					return nil, fmt.Errorf("markdownlint-configure-file at line %d: %s",
-						directive.line, registry.configureFileKeyText(setting.Key))
-				}
-				if meaning == formerTag && noticed.add(setting.Key) {
+				switch {
+				case meaning == unknownWord:
+					if noticed.add(setting.Key) {
+						directive.notices = append(directive.notices, resolver.configureFileKeyNotice(directive, setting.Key))
+					}
+					continue // markdownlint applies the key to no rule.
+				case meaning == formerTag && noticed.add(setting.Key):
 					directive.notices = append(directive.notices, deprecatedTagNotice(registry, directive, setting.Key, rules))
 				}
+				directive.notices = append(directive.notices,
+					optionNotices(registry, directive, setting.Key, rules, setting.Value)...)
 			}
 			settings.Set(setting.Key, setting.Value)
-			lines[setting.Key] = directive.line
 		}
 	}
 	if !configured {
-		return cfg, nil
+		return cfg
 	}
 
 	result := cfg.Clone()
@@ -300,36 +344,176 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 		rules, _ := lookupWord(setting.Key, registry)
 		for _, id := range sortedIDs(rules) {
-			converted, err := configureFileRule(registry, lines[setting.Key], id, setting.Value)
-			if err != nil {
-				return nil, err
-			}
+			converted := configureFileRule(registry, id, setting.Value)
 			converted.AutoFix = result.Rules[id].AutoFix
 			result.Rules[id] = converted
 		}
 	}
-	return result, nil
+	return result
+}
+
+// optionNotices returns the notices for the options in value, the setting
+// of key in directive, a markdownlint-configure-file comment, that the rules
+// that key names do not read (see Registry.MarkdownlintRuleConfig), or that
+// the setting writes in two spellings. markdownlint ignores an option that
+// it does not know, as gomdlint does, so the notices change nothing.
+//
+// For a key that names one rule there is one for each option that the rule
+// does not read, which offers the closest option names, and for a key that
+// names several, a tag, one for each option that none of its rules reads,
+// as configuration files warn about them. An option written in both
+// spellings gets one for each rule that reads it, which says that
+// gomdlint's spelling is ignored (see configureFileRule). Each names the
+// rules as markdownlint names them, in ID order.
+func optionNotices(registry *Registry, directive *inlineDirective, key string, rules []Rule, value any) []Notice {
+	if options, ok := value.(map[string]any); !ok || len(options) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(rules)
+	slices.SortFunc(sorted, func(a, b Rule) int { return cmp.Compare(a.ID(), b.ID()) })
+	sorted = slices.CompactFunc(sorted, func(a, b Rule) bool { return a.ID() == b.ID() })
+
+	kind := directive.kind()
+	notice := func(noticeKind NoticeKind, option string, suggestions, rules []string, text string) Notice {
+		return Notice{
+			Kind: noticeKind, Line: directive.line, Directive: kind,
+			Name: option, Suggestions: suggestions, Rules: rules, Message: kind + ": " + text,
+		}
+	}
+
+	names := make([]string, len(sorted))
+	unread := make(map[string]int) // option -> the rules that do not read it
+	var issues []OptionIssue       // The unknown options of the one rule.
+	var conflicts []Notice
+	for idx, rule := range sorted {
+		names[idx] = registry.markdownlintName(rule)
+		_, found := registry.MarkdownlintRuleConfig(rule.ID(), value)
+		for _, issue := range found {
+			switch issue.Kind {
+			case OptionIssueUnknown:
+				unread[issue.Key]++
+				issues = append(issues, issue)
+			case OptionIssueConflict:
+				conflicts = append(conflicts, notice(NoticeOptionConflict, issue.Option.Name, nil,
+					[]string{names[idx]}, conflictText(issue, names[idx])))
+			}
+		}
+	}
+
+	var notices []Notice
+	if len(sorted) == 1 {
+		for _, issue := range issues {
+			notices = append(notices, notice(NoticeUnknownOption, issue.Key, issue.Suggestions, names, issue.Text(names[0])))
+		}
+		return append(notices, conflicts...)
+	}
+	for _, option := range slices.Sorted(maps.Keys(unread)) {
+		if unread[option] == len(sorted) {
+			notices = append(notices, notice(NoticeUnknownOption, option, nil, names, UnknownTagOptionText(option, key)))
+		}
+	}
+	return append(notices, conflicts...)
+}
+
+// conflictText describes issue, two spellings of one option of the rule
+// named ruleName in a markdownlint-configure-file setting
+// (OptionIssueConflict), of which markdownlint reads its own spelling and
+// gomdlint's canonical one is ignored (see configureFileRule).
+func conflictText(issue OptionIssue, ruleName string) string {
+	markdownlintSpelling := issue.Key
+	if markdownlintSpelling == issue.Option.Name {
+		markdownlintSpelling = issue.Other
+	}
+	return fmt.Sprintf("%q and %q both set %s option %q; markdownlint reads %q, so %q is ignored",
+		issue.Key, issue.Other, ruleName, issue.Option.Name, markdownlintSpelling, issue.Option.Name)
+}
+
+// The text of configure-file comments that run on that configureFile reads
+// in one file: runOnTextPerByte bytes for each byte of the file, and
+// runOnTextExtra bytes more. That reads every comment of a file with a few
+// such comments, as markdownlint does, and keeps the work for a file with
+// thousands in proportion to its length.
+const (
+	runOnTextPerByte = 4
+	runOnTextExtra   = 1 << 20
+)
+
+// unreadNotice is the notice for directive, a markdownlint-configure-file
+// comment that runs on, which configureFile does not read.
+func unreadNotice(directive *inlineDirective) Notice {
+	kind := directive.kind()
+	return Notice{
+		Kind:      NoticeUnreadConfiguration,
+		Line:      directive.line,
+		Directive: kind,
+		Message: kind + `: has no "-->" of its own, and the comments like it in this file ` +
+			`hold more text than gomdlint reads; it is ignored`,
+	}
+}
+
+// readConfigureFile reads the parameter of directive, a
+// markdownlint-configure-file comment, and reports whether it holds an
+// object of settings, which markdownlint applies. A parameter that holds
+// none changes nothing, as in markdownlint: one that neither JSON with
+// comments nor YAML reads, or that holds a value other than an object,
+// gets a notice, and null or nothing gets none.
+func readConfigureFile(directive *inlineDirective) (*MarkdownlintSource, bool) {
+	read, err := ReadMarkdownlintConfig(directive.parameter)
+	var problem string
+	switch {
+	case err != nil:
+		// configure-file comments are documented as JSON, so the JSON error
+		// says best what to change.
+		var syntaxErr *MarkdownlintSyntaxError
+		if errors.As(err, &syntaxErr) {
+			err = syntaxErr.JSON
+		}
+		problem = "invalid JSON (" + err.Error() + "); it is ignored"
+	case read.NotObject != "":
+		problem = NotObjectText(read.NotObject)
+	default:
+		return read, true
+	}
+	kind := directive.kind()
+	directive.notices = append(directive.notices, Notice{
+		Kind:      NoticeInvalidConfiguration,
+		Line:      directive.line,
+		Directive: kind,
+		Message:   kind + ": " + problem,
+	})
+	return nil, false
 }
 
 // configureFileRule converts value, the setting of the rule with the given
-// ID in a markdownlint-configure-file comment on the given line, as a
-// markdownlint configuration file's is converted. Options that the rule
-// does not read, or whose values have the wrong type, change nothing, as
-// in markdownlint, but two spellings of one option are an error, as in a
-// config file.
-func configureFileRule(registry *Registry, line int, id string, value any) (config.RuleConfig, error) {
+// ID in a markdownlint-configure-file comment, as a markdownlint
+// configuration file's is converted. Options that the rule does not read,
+// or whose values have the wrong type, change nothing, as in markdownlint.
+// Two spellings of one option, which a config file rejects, read as
+// markdownlint reads them: markdownlint knows an option by its own
+// spelling only, an alias of the option's canonical name, such as
+// line_length for max, so that spelling applies and the canonical one is
+// left out.
+func configureFileRule(registry *Registry, id string, value any) config.RuleConfig {
 	converted, issues := registry.MarkdownlintRuleConfig(id, value)
+	var canonical []string // The canonical spellings that conflict with markdownlint's.
 	for _, issue := range issues {
-		if issue.Kind != OptionIssueConflict {
-			continue
+		if issue.Kind == OptionIssueConflict {
+			canonical = append(canonical, issue.Option.Name)
 		}
-		name := id
-		if rule, ok := registry.GetByID(id); ok {
-			name = rule.Name()
-		}
-		return config.RuleConfig{}, fmt.Errorf("markdownlint-configure-file at line %d: %s", line, issue.Text(name))
 	}
-	return converted, nil
+	if len(canonical) == 0 {
+		return converted
+	}
+	options, ok := value.(map[string]any)
+	if !ok {
+		return converted // Only an object holds options, which can conflict.
+	}
+	options = maps.Clone(options)
+	for _, name := range canonical {
+		delete(options, name)
+	}
+	converted, _ = registry.MarkdownlintRuleConfig(id, options)
+	return converted
 }
 
 // markdownlintKey returns the key by which markdownlint knows word, a word
@@ -592,26 +776,35 @@ func (r *Registry) markdownlintSuggestions(word string) []Suggestion {
 	return named
 }
 
-// configureFileKeyText describes key, a key of a markdownlint-configure-file
-// object that names no rule or tag, for an error, as UnknownKeyText does
-// for configuration files, but in the terms of a markdownlint comment. A
-// key of several words that each name a rule or tag gets a note that says
-// to write them as separate keys, and any other key the closest rules and
-// tags; both name each rule as markdownlint names it (see markdownlintTerm).
-func (r *Registry) configureFileKeyText(key string) string {
+// configureFileKeyNotice is the notice for key, a key of directive, a
+// markdownlint-configure-file comment, that names no rule or tag, which the
+// comment ignores, as markdownlint does. It describes the key as
+// UnknownKeyText does for configuration files, but in the terms of a
+// markdownlint comment. A key of several words that each name a rule or
+// tag gets a note that says to write them as separate keys, and any other
+// key gets the closest rules and tags. Both name each rule as markdownlint
+// names it (see markdownlintTerm).
+func (w *wordResolver) configureFileKeyNotice(directive *inlineDirective, key string) Notice {
 	words := strings.FieldsFunc(key, isJSWhitespace)
 	terms := make([]string, len(words))
 	for idx, word := range words {
-		if _, meaning := lookupWord(word, r); meaning != knownWord {
+		if _, meaning := lookupWord(word, w.registry); meaning != knownWord {
 			terms = nil
 			break
 		}
-		terms[idx] = r.markdownlintTerm(word)
+		terms[idx] = w.registry.markdownlintTerm(word)
 	}
-	if len(terms) >= 2 {
-		return severalWordsKeyText(key, terms)
+	if len(terms) < 2 {
+		return unknownRuleNotice(directive, key, w.suggestions(key))
 	}
-	return UnknownRuleText(key, r.markdownlintSuggestions(key))
+	kind := directive.kind()
+	return Notice{
+		Kind:      NoticeUnknownRule,
+		Line:      directive.line,
+		Directive: kind,
+		Name:      key,
+		Message:   kind + ": " + severalWordsKeyText(key, terms) + "; it is ignored",
+	}
 }
 
 // wordResolver resolves the words of the markdownlint comments of one file.
@@ -659,7 +852,7 @@ func (w *wordResolver) resolveComments(text string, matches []directiveMatch, di
 	)
 	for idx := len(matches) - 1; idx >= 0; idx-- {
 		match := matches[idx]
-		end, shares := match.close, idx+1 < len(matches) && matches[idx+1].kindEnd <= match.close
+		end, shares := match.close, runsOn(matches, idx)
 		if shares {
 			end = matches[idx+1].kindEnd
 		} else {

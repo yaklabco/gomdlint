@@ -16,6 +16,7 @@ internal/               Application-specific wiring (not importable)
   display/              Character columns and display paths for reporters
   editdistance/         Edit distance for rule name suggestions
   ignore/               gitignore-style matching for directory walks
+  jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
   logging/              Structured logging setup
   ui/                   Terminal output styling (Lipgloss)
 pkg/                    Reusable library packages
@@ -468,12 +469,21 @@ A notice reports a problem in a file that changes no finding and no exit
 code (`lint.Notice`). The engine records one for each word in a
 markdownlint comment that names no rule or tag (`NoticeUnknownRule`, with
 the closest suggestions), and for each use of one of gomdlint's former tags
-(`NoticeDeprecatedTag`, with the rules it covers). Comments are read with
-markdownlint 0.41.1's grammar: the comment's kind must be followed by
-whitespace or `-->`, and words fold case as JavaScript's `toUpperCase`
-does. Notices travel in `FileResult.Notices` and `runner.FileOutcome.Notices`.
-The CLI writes them to stderr, JSON output lists them under each file's
-`notices`, and SARIF output records them as
+(`NoticeDeprecatedTag`, with the rules it covers). A
+`markdownlint-configure-file` comment never fails the file. It gets a
+notice for each key that names no rule, for each option that its rules do
+not read (`NoticeUnknownOption`), for each option written in gomdlint's
+spelling beside markdownlint's (`NoticeOptionConflict`), and for holding no
+object of settings (`NoticeInvalidConfiguration`). A configure-file comment
+without a `-->` of its own runs on to that of a later comment, so the
+engine reads such comments only while their text comes to at most four
+times the file's length and 1 MiB more, and gives each of the rest a notice
+(`NoticeUnreadConfiguration`), so a file lints in time in proportion to its
+length. Comments are read with markdownlint 0.41.1's grammar: the comment's
+kind must be followed by whitespace or `-->`, and words fold case as
+JavaScript's `toUpperCase` does. Notices travel in `FileResult.Notices` and
+`runner.FileOutcome.Notices`. The CLI writes them to stderr, JSON output
+lists them under each file's `notices`, and SARIF output records them as
 `toolConfigurationNotifications` at level warning, which leave
 `executionSuccessful` true.
 
@@ -905,7 +915,18 @@ and the user config (`$XDG_CONFIG_HOME/gomdlint`) are looked up on their
 own, as `config.yaml`, `config.yml` or `config.json`, and merged under the
 project config. The markdownlint config is searched upward the same way,
 and stands in for the project config only when there is none. `--config`
-replaces project discovery.
+replaces project discovery. A markdownlint config is read as
+markdownlint-cli2 reads one that it finds, whatever its name
+(`lint.ReadMarkdownlintConfig`). The reader tries JSON with comments and
+trailing commas first, which `internal/jsonc` blanks for the JSON decoder,
+and YAML second. yaml.v3 parses the YAML into nodes, and
+`pkg/lint/markdownlint_yaml.go` turns them into values as js-yaml 5.4.1's
+core schema reads them for markdownlint-cli2: plain scalars as YAML 1.2
+reads them, every key a string, a key written twice an error anywhere in
+the document, only the core schema's tags, and no merge keys. It also
+records the line of each key and item (`lint.MarkdownlintPosition`), which
+warnings about options name, so loading and placing a warning read the keys
+alike. gomdlint's own config files keep their own YAML decoder.
 
 ### Per-Rule Resolution
 
@@ -944,10 +965,9 @@ which `lint.MarkdownlintSettings` keeps, and the configure-file comments of
 a file merge into one such object first. A word that names
 no rule or tag, and a former gomdlint tag that still resolves through the
 rules' own `Tags()`, give the file a notice (see [Notices](#notices)).
-Notices, and the errors for unknown configure-file keys, name rules as
-markdownlint does, by `RuleMeta.MarkdownlintName` where a rule's own name is
-not markdownlint's first name, so that a comment written from them works in
-both tools.
+Notices name rules as markdownlint does, by `RuleMeta.MarkdownlintName`
+where a rule's own name is not markdownlint's first name, so that a comment
+written from them works in both tools.
 
 ## Design Principles
 

@@ -130,6 +130,13 @@ func TestMarkdownlintRuleConfig(t *testing.T) {
 			name: "enabled and severity of other types", value: map[string]any{"enabled": "no", "severity": 2},
 			enabled: true, severity: "error",
 		},
+		// getEffectiveConfig in markdownlint 0.41.1 reads a severity that is
+		// not exactly "warning" as "error", gomdlint's info among them.
+		{name: "severity info", value: map[string]any{"severity": "info"}, enabled: true, severity: "error"},
+		{name: "unknown severity", value: map[string]any{"severity": "bogus"}, enabled: true, severity: "error"},
+		{name: "severity in another case", value: map[string]any{"severity": "Warning"}, enabled: true, severity: "error"},
+		{name: "severity error", value: map[string]any{"severity": "error"}, enabled: true, severity: "error"},
+		{name: "null severity", value: map[string]any{"severity": nil}, enabled: true, severity: "error"},
 	}
 
 	for _, tt := range tests {

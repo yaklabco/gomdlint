@@ -59,6 +59,15 @@ var markdownlintModes = []string{"applied for the run", "migrated"}
 func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings string) (map[string][]string, string) {
 	t.Helper()
 
+	report, warnings := markdownlintConfigReport(t, mode, name, settings)
+	return reportedFiles(t, report), warnings
+}
+
+// markdownlintConfigReport is lintWithMarkdownlintConfig, which returns the
+// JSON report itself.
+func markdownlintConfigReport(t *testing.T, mode, name, settings string) (string, string) {
+	t.Helper()
+
 	dir := inProject(t, map[string]string{"doc.md": trailingSpaceDoc, name: settings})
 	var warnings string
 	if mode == "migrated" {
@@ -73,7 +82,41 @@ func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings string) (map[
 	if mode != "migrated" {
 		warnings = got.stderr
 	}
-	return reportedFiles(t, got.stdout), warnings
+	return got.stdout, warnings
+}
+
+// nestedYAMLBlockItems returns a YAML block sequence nested levels deep,
+// each item indented two spaces further than the one before, whose
+// innermost item is empty.
+func nestedYAMLBlockItems(levels int) string {
+	var text strings.Builder
+	for idx := range levels {
+		text.WriteString(strings.Repeat("  ", idx) + "-\n")
+	}
+	return text.String()
+}
+
+// reportedSeverities returns the severities of the findings that a JSON
+// report lists for doc.md, in order.
+func reportedSeverities(t *testing.T, report string) []string {
+	t.Helper()
+
+	var parsed struct {
+		Files []struct {
+			Diagnostics []struct {
+				Severity string `json:"severity"`
+			} `json:"diagnostics"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(report), &parsed), report)
+
+	var severities []string
+	for _, file := range parsed.Files {
+		for _, diag := range file.Diagnostics {
+			severities = append(severities, diag.Severity)
+		}
+	}
+	return severities
 }
 
 // TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem covers keys beyond
@@ -110,6 +153,274 @@ func TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestMarkdownlintConfig_TrailingCommas covers markdownlint configs with
+// comments and a comma after their last member, which markdownlint-cli2
+// 0.23.3 reads with jsonc-parser and its allowTrailingComma option, in
+// .markdownlint.json and .markdownlint.jsonc alike. gomdlint used to stop
+// with a config error. markdownlint-cli2 reports trailingSpaceDoc's
+// trailing space with neither config.
+func TestMarkdownlintConfig_TrailingCommas(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+	}{
+		{name: "JSON", file: ".markdownlint.json", settings: `{"MD009": false,}`},
+		{name: "JSONC", file: ".markdownlint.jsonc", settings: "{\n  // Trailing spaces are fine.\n  \"MD009\": false,\n}\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": nil}, got)
+				assert.NotContains(t, warnings, "WARN")
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_ByteOrderMark covers markdownlint configs that
+// start with a UTF-8 byte order mark, which markdownlint-cli2 0.23.3 loads
+// in every format. gomdlint used to stop with a config error on a JSON
+// one. markdownlint-cli2 reports trailingSpaceDoc's trailing space with
+// none of them.
+func TestMarkdownlintConfig_ByteOrderMark(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+	}{
+		{name: "JSON", file: ".markdownlint.json", settings: "\ufeff{\"MD009\": false}\n"},
+		{name: "JSONC", file: ".markdownlint.jsonc", settings: "\ufeff{\"MD009\": false,}\n"},
+		{name: "YAML", file: ".markdownlint.yaml", settings: "\ufeffMD009: false\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": nil}, got)
+				assert.NotContains(t, warnings, "WARN")
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_ReadsEveryNameAsMarkdownlintCLI2Does covers
+// markdownlint configs whose content does not match their name, which
+// markdownlint-cli2 0.23.3 reads whatever the name: with its JSONC parser
+// first, then as YAML. A .markdownlint.yaml that holds JSON with a key
+// written twice keeps the key's first place and takes its last value, so
+// in the second config the whitespace tag, which follows MD009's first
+// place, turns no-trailing-spaces (MD009) back on. gomdlint used to reject
+// both JSON configs in YAML files, as YAML rejects a key written twice, and
+// the YAML in a JSON file. markdownlint-cli2 reports trailingSpaceDoc's
+// trailing space with the second config only.
+func TestMarkdownlintConfig_ReadsEveryNameAsMarkdownlintCLI2Does(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+		want                 []string
+	}{
+		{name: "JSON in YAML", file: ".markdownlint.yaml", settings: `{"MD009": true, "MD009": false}`},
+		{
+			name: "JSON in YAML first place", file: ".markdownlint.yaml",
+			settings: `{"MD009": false, "whitespace": true, "MD009": false}`, want: []string{"MD009"},
+		},
+		{name: "YAML in JSON", file: ".markdownlint.json", settings: "MD009: false\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+				assert.NotContains(t, warnings, "WARN")
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_ValuesOtherThanAnObject covers markdownlint
+// configs that hold no object: markdownlint-cli2 0.23.3 loads them as an
+// object without keys, so every rule runs with its defaults, where
+// gomdlint used to stop with a config error. gomdlint warns about a value
+// other than an object, but not about an empty file. markdownlint-cli2
+// reports trailingSpaceDoc's trailing space with each config.
+func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
+	tests := []struct {
+		name, file, settings, warning string
+	}{
+		{name: "list", file: ".markdownlint.json", settings: `["MD009"]`, warning: "a list instead of an object of settings"},
+		{name: "empty", file: ".markdownlint.json", settings: ""},
+		{name: "YAML list", file: ".markdownlint.yaml", settings: "- MD009\n", warning: "a list instead of an object of settings"},
+		{name: "YAML string", file: ".markdownlint.yaml", settings: "MD009\n", warning: "a string instead of an object of settings"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": {"MD009"}}, got)
+				if tt.warning == "" {
+					assert.NotContains(t, warnings, "WARN")
+				} else {
+					assert.Contains(t, warnings, tt.warning)
+				}
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt covers YAML that
+// markdownlint-cli2 0.23.3 reads with js-yaml 5.4.1's core schema, where
+// gomdlint used to decode YAML 1.1 with yaml.v3. 0b0 is a string, which
+// turns no-trailing-spaces (MD009) on, and 0o0 is the number 0, which turns
+// it off. false after the non-specific tag !, which may follow the anchor
+// on the next line, is a string, which turns MD009 on. A numeric key is a
+// string, so an option named 0 is one that MD009 does not read, with a
+// warning, and the rest of MD009's object applies, where gomdlint used to
+// lose the whole object. A %YAML directive of version 1.2 loads, where
+// gomdlint used to stop with a config error, and so does a directive whose
+// name js-yaml does not know, such as #foo, which it ignores, as it ignores
+// a byte order mark at the start of a line after the end marker "...". A
+// config nested 100 levels deep loads, as it does on gomdlint's main line.
+// A warning names the line of its option, which a key spelled 0x0 and a
+// %YAML 1.2 directive used to lose. markdownlint-cli2 reports
+// trailingSpaceDoc's trailing space with the configs that turn MD009 on.
+func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
+	tests := []struct {
+		name, settings, warning string
+		want                    []string
+	}{
+		{name: "0b0", settings: "MD009: 0b0\n", want: []string{"MD009"}},
+		{name: "0o0", settings: "MD009: 0o0\n"},
+		{name: "non-specific tag after a line break", settings: "MD009: &a\n  ! false\n", want: []string{"MD009"}},
+		{name: "byte order mark after the end marker", settings: "MD009: false\n...\n\ufeff\n"},
+		{name: "directive named #foo", settings: "%#foo\n---\nMD009: false\n"},
+		{name: "directive name with a no-break space", settings: "%YAML\u00a01.2\n---\nMD009: false\n"},
+		{
+			name: "block items 100 deep", settings: "MD009: false\nignored:\n" + nestedYAMLBlockItems(99),
+			warning: `unknown rule "ignored"`,
+		},
+		{name: "numeric key", settings: "MD009: {enabled: false, 0: x}\n", warning: `unknown option "0" for no-trailing-spaces`},
+		{
+			name: "numeric key with its line", settings: "MD009:\n  enabled: false\n  0x0: x\n",
+			warning: `.markdownlint.yaml:3: unknown option "0" for no-trailing-spaces`,
+		},
+		{name: "YAML 1.2", settings: "%YAML 1.2\n---\nMD009: false\n"},
+		{
+			name: "YAML 1.2 with a warning line", settings: "%YAML 1.2\n---\nMD009:\n  enabled: false\n  br_space: 2\n",
+			warning: `.markdownlint.yaml:5: unknown option "br_space" for no-trailing-spaces`,
+		},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint.yaml", tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+				if tt.warning == "" {
+					assert.NotContains(t, warnings, "WARN")
+				} else {
+					assert.Contains(t, warnings, tt.warning)
+				}
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_YAMLThatJSYAMLRejects covers YAML that js-yaml
+// 5.4.1 rejects, so markdownlint-cli2 0.23.3 stops with an error: an unknown
+// tag, which gomdlint used to ignore, a tag that the core schema lacks,
+// keys that are duplicates once they are strings, a key written twice in a
+// list, which gomdlint used to load from a JSON file name as a list that
+// holds no settings, and a second document after a byte order mark, which
+// js-yaml skips only at the start of a line, as a document starts.
+// gomdlint stops with a config error.
+func TestMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
+	tests := []struct {
+		name, file, settings, want string
+	}{
+		{name: "unknown tag", file: ".markdownlint.yaml", settings: "!unknown {MD009: false}\n", want: "unknown mapping tag !unknown"},
+		{name: "binary", file: ".markdownlint.yaml", settings: "MD009: !!binary aGk=\n", want: "unknown scalar tag !!binary"},
+		{
+			name: "numeric duplicate", file: ".markdownlint.yaml", settings: "0x10: a\n16: b\nMD009: false\n",
+			want: `line 2: duplicated mapping key "16"`,
+		},
+		{name: "duplicate in a list", file: ".markdownlint.json", settings: "- MD009: true\n  MD009: false\n", want: ".markdownlint.json"},
+		{
+			name: "second document after a byte order mark", file: ".markdownlint.yaml",
+			settings: "MD009: false\n...\n\ufeffMD010: false\n", want: ".markdownlint.yaml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": trailingSpaceDoc, tt.file: tt.settings})
+
+			got := execute(t, "lint", "doc.md")
+
+			assert.Equal(t, cli.ExitConfigError, got.code)
+			assert.Contains(t, got.stderr, tt.want)
+		})
+	}
+}
+
+// TestMarkdownlintConfig_SeverityAsMarkdownlintReadsIt covers the severity
+// key of a rule's object in a markdownlint config, which markdownlint
+// 0.41.1 reads as "warning" when it is exactly that, and as "error"
+// otherwise, so gomdlint's info and a misspelling such as bogus or Warning
+// make errors. gomdlint used to keep info, which never fails a run, and to
+// reject bogus and Warning with a config error. markdownlint-cli2 reports
+// trailingSpaceDoc's trailing space with each config, as a warning with the
+// fourth only.
+func TestMarkdownlintConfig_SeverityAsMarkdownlintReadsIt(t *testing.T) {
+	tests := []struct {
+		name, file, settings, want string
+	}{
+		{name: "info", file: ".markdownlint.json", settings: `{"MD009": {"severity": "info"}}`, want: "error"},
+		{name: "bogus", file: ".markdownlint.json", settings: `{"MD009": {"severity": "bogus"}}`, want: "error"},
+		{name: "Warning", file: ".markdownlint.json", settings: `{"MD009": {"severity": "Warning"}}`, want: "error"},
+		{name: "warning", file: ".markdownlint.json", settings: `{"MD009": {"severity": "warning"}}`, want: "warning"},
+		{name: "YAML info", file: ".markdownlint.yaml", settings: "MD009:\n  severity: info\n", want: "error"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				report, _ := markdownlintConfigReport(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, []string{tt.want}, reportedSeverities(t, report))
+			})
+		}
+	}
+
+	t.Run("in markdownlint-configure-file", func(t *testing.T) {
+		doc := "<!-- markdownlint-configure-file {\"MD009\": {\"severity\": \"info\"}} -->\n\n" + trailingSpaceDoc
+		inProject(t, map[string]string{"doc.md": doc})
+
+		got := execute(t, "lint", "--format", "json", "doc.md")
+
+		assert.Equal(t, []string{"error"}, reportedSeverities(t, got.stdout))
+	})
+}
+
+// TestLint_OwnConfigKeepsItsSeverities covers gomdlint's own config files,
+// whose severities are gomdlint's: info stays info, and an unknown
+// severity is a config error.
+func TestLint_OwnConfigKeepsItsSeverities(t *testing.T) {
+	inProject(t, map[string]string{"doc.md": trailingSpaceDoc, ".gomdlint.yml": "rules:\n  MD009:\n    severity: info\n"})
+	got := execute(t, "lint", "--format", "json", "doc.md")
+	assert.Equal(t, []string{"info"}, reportedSeverities(t, got.stdout))
+
+	inProject(t, map[string]string{"doc.md": trailingSpaceDoc, ".gomdlint.yml": "rules:\n  MD009:\n    severity: bogus\n"})
+	got = execute(t, "lint", "--format", "json", "doc.md")
+	assert.Equal(t, cli.ExitConfigError, got.code)
+	assert.Contains(t, got.stderr, `invalid severity "bogus"`)
 }
 
 // TestMarkdownlintConfig_DefaultKeyInAnyCase covers the default key of a
@@ -236,6 +547,43 @@ func TestLint_ConfigureFileAppliesKeysInWrittenOrder(t *testing.T) {
 			assert.Equal(t, map[string][]string{"doc.md": tt.want}, reportedFiles(t, got.stdout))
 		})
 	}
+}
+
+// TestLint_ConfigureFileReadsAsMarkdownlintCLI2Does covers configure-file
+// parameters with a trailing comma, with a comment, or in YAML. markdownlint
+// 0.41.1 reads a parameter with the parsers that markdownlint-cli2 0.23.3
+// gives it, JSONC first and YAML last, so it applies each, and reports
+// trailingSpaceDoc's trailing space with none of them. gomdlint used to
+// fail the file.
+func TestLint_ConfigureFileReadsAsMarkdownlintCLI2Does(t *testing.T) {
+	for _, parameter := range []string{`{"MD009": false,}`, `{"MD009": false /* off */}`, `{ MD009: false }`} {
+		t.Run(parameter, func(t *testing.T) {
+			doc := "<!-- markdownlint-configure-file " + parameter + " -->\n\n" + trailingSpaceDoc
+			inProject(t, map[string]string{"doc.md": doc})
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, map[string][]string{"doc.md": nil}, reportedFiles(t, got.stdout))
+		})
+	}
+}
+
+// TestLint_ConfigureFileReadsMarkdownlintsSpelling covers a configure-file
+// setting that writes an option in markdownlint's spelling and gomdlint's.
+// markdownlint reads its own, line_length, so markdownlint-cli2 reports the
+// comment's own line as longer than 10 characters, and the trailing space.
+// gomdlint used to fail the file. It now reads line_length too, with a
+// notice that max is ignored.
+func TestLint_ConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
+	doc := "<!-- markdownlint-configure-file {\"MD013\": {\"line_length\": 10, \"max\": 100}} -->\n\n" + trailingSpaceDoc
+	inProject(t, map[string]string{"doc.md": doc})
+
+	got := execute(t, "lint", "--format", "json", "doc.md")
+
+	assert.Equal(t, map[string][]string{"doc.md": {"MD009", "MD013"}}, reportedFiles(t, got.stdout))
+	assert.Equal(t, `WARN doc.md:1: markdownlint-configure-file: "line_length" and "max" both set line-length option "max"; `+
+		`markdownlint reads "line_length", so "max" is ignored`+"\n", got.stderr)
 }
 
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config
