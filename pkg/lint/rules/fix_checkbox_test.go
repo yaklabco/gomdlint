@@ -65,12 +65,14 @@ func TestFixChecksReadCheckboxesAsTheParser(t *testing.T) {
 
 // TestFixKeepsCheckboxes runs --fix with every default rule over a corpus
 // of task list documents: the cases of earlier review rounds, fixes that
-// could make a checkbox, and checkboxes that micromark and GitHub's
-// cmark-gfm read differently. The engine withholds every fix that changes
-// or makes a possible checkbox (lint's checkbox guard), so only fixes away
-// from them apply. micromark is the checkbox count of micromark with
-// micromark-extension-gfm, and cmark that of cmark-gfm 0.29.0.gfm.0; both
-// were counted on the input and on the expected output, and are the same.
+// could make a checkbox, checkboxes that micromark and GitHub's cmark-gfm
+// read differently, and plain task lists that each list rule fixes. The
+// engine withholds every fix that changes or makes a possible checkbox
+// (lint's checkbox guard), except the marker, spacing, indentation and
+// trailing whitespace changes it lets through on plain task items.
+// micromark is the checkbox count of micromark with micromark-extension-gfm,
+// and cmark that of cmark-gfm 0.29.0.gfm.0; both were counted on the input
+// and on the expected output, and are the same.
 func TestFixKeepsCheckboxes(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -90,7 +92,7 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 		{name: "after definition used", input: "- [c]: /url\n  [x] done [c]\n", micromark: 1, cmark: 0},
 		{name: "trailing spaces", input: "- [ ]   \n  task\n", micromark: 1, cmark: 1},
 		{name: "tab after checkbox", input: "- [x]\ttask\n", micromark: 1, cmark: 1},
-		{name: "md030 plain", input: "-  [x] task\n", micromark: 1, cmark: 1},
+		{name: "md030 plain", input: "-  [x] task\n", want: "- [x] task\n", micromark: 1, cmark: 1},
 		{name: "one trailing space", input: "- [x] \n  task\n", micromark: 1, cmark: 1},
 		{name: "quoted multiline md027", input: ">  - [\n>    ] task\n", micromark: 1, cmark: 0},
 		{name: "quoted multiline", input: "> - [\n>   ] task\n", micromark: 1, cmark: 0},
@@ -100,11 +102,17 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 		{name: "md039 link text", input: "- [ x](u)\n", micromark: 0, cmark: 0},
 		{name: "md011 reversed link", input: "- (x)[y]\n", micromark: 0, cmark: 0},
 		{name: "md004 marker style", input: "* [x] a\n- [ ] b\n", micromark: 2, cmark: 2},
-		{name: "md029 numbering", input: "1. [x] a\n3. [ ] b\n", options: map[string]map[string]any{"MD029": {"style": "ordered"}}, micromark: 2, cmark: 2},
-		{name: "md007 nested", input: "- a\n    - [x] b\n", micromark: 1, cmark: 1},
-		{name: "md027 quote spacing", input: ">  - [x] a\n", micromark: 1, cmark: 0},
+		{
+			name:      "md029 numbering",
+			input:     "1. [x] a\n3. [ ] b\n",
+			options:   map[string]map[string]any{"MD029": {"style": "ordered"}},
+			want:      "1. [x] a\n2. [ ] b\n",
+			micromark: 2, cmark: 2,
+		},
+		{name: "md007 nested", input: "- a\n    - [x] b\n", want: "- a\n  - [x] b\n", micromark: 1, cmark: 1},
+		{name: "md027 quote spacing", input: ">  - [x] a\n", want: "> - [x] a\n", micromark: 1, cmark: 0},
 		{name: "md010 tab after text", input: "- [x] a\tb\n", micromark: 1, cmark: 1},
-		{name: "md009 text after", input: "- [x] task   \n", micromark: 1, cmark: 1},
+		{name: "md009 text after", input: "- [x] task   \n", want: "- [x] task\n", micromark: 1, cmark: 1},
 		{name: "md032 list after paragraph", input: "Text\n- [x] a\n- [ ] b\nMore\n", want: "Text\n\n- [x] a\n- [ ] b\nMore\n", micromark: 2, cmark: 2},
 		{name: "md012 blank lines in item", input: "- [x] a\n\n\n  b\n", micromark: 1, cmark: 1},
 		{name: "md047 final newline", input: "- [x] a", micromark: 1, cmark: 1},
@@ -116,6 +124,70 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 		{name: "quoted footnote list", input: "> [^a]: - [x] task \n\nUse [^a].\n", micromark: 1, cmark: 0},
 		{name: "footnote list in an item", input: "- a\n  [^b]: - [x] c \n\nUse [^b].\n", micromark: 1, cmark: 0},
 		{name: "footnote list, space after an empty marker", input: "[^a]: - \n    [x] task\n\nUse [^a].\n", micromark: 0, cmark: 0},
+		{name: "plain md004", input: "* [ ] a\n- [x] b\n* [ ] c\n", micromark: 3, cmark: 3},
+		{name: "plain md004 nested", input: "* [ ] a\n  - [x] b\n  - [ ] c\n", want: "* [ ] a\n  * [x] b\n  * [ ] c\n", micromark: 3, cmark: 3},
+		{name: "plain md005", input: "- [ ] a\n - [x] b\n- [ ] c\n", want: "- [ ] a\n- [x] b\n- [ ] c\n", micromark: 3, cmark: 3},
+		{name: "plain md007", input: "- [ ] a\n    - [x] b\n", want: "- [ ] a\n  - [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain md009", input: "- [ ] a   \n- [x] b\n", want: "- [ ] a\n- [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain md010 indentation", input: "- [ ] a\n\t- [x] b\n", want: "- [ ] a\n  - [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain md010 after the marker", input: "-\t[ ] a\n-\t[x] b\n", want: "- [ ] a\n- [x] b\n", micromark: 2, cmark: 2},
+		{
+			name:      "plain md029",
+			input:     "1. [ ] a\n3. [x] b\n",
+			options:   map[string]map[string]any{"MD029": {"style": "ordered"}},
+			want:      "1. [ ] a\n2. [x] b\n",
+			micromark: 2, cmark: 2,
+		},
+		{
+			name: "plain md029 nine to ten",
+			input: "1. [ ] item 1\n" +
+				"2. [ ] item 2\n" +
+				"3. [ ] item 3\n" +
+				"4. [ ] item 4\n" +
+				"5. [ ] item 5\n" +
+				"6. [ ] item 6\n" +
+				"7. [ ] item 7\n" +
+				"8. [ ] item 8\n" +
+				"9. [ ] item 9\n" +
+				"9. [x] item ten\n",
+			options: map[string]map[string]any{"MD029": {"style": "ordered"}},
+			want: "1. [ ] item 1\n" +
+				"2. [ ] item 2\n" +
+				"3. [ ] item 3\n" +
+				"4. [ ] item 4\n" +
+				"5. [ ] item 5\n" +
+				"6. [ ] item 6\n" +
+				"7. [ ] item 7\n" +
+				"8. [ ] item 8\n" +
+				"9. [ ] item 9\n" +
+				"10. [x] item ten\n",
+			micromark: 10, cmark: 10,
+		},
+		{name: "plain md030", input: "-  [ ] a\n-  [x] b\n", want: "- [ ] a\n- [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain md030 ordered", input: "1.  [ ] a\n2.  [x] b\n", want: "1. [ ] a\n2. [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain md027", input: ">  - [ ] a\n>  - [x] b\n", want: "> - [ ] a\n> - [x] b\n", micromark: 2, cmark: 0},
+		{name: "plain nested", input: "- [ ] a\n  - [x] b\n    - [ ] c   \n", want: "- [ ] a\n  - [x] b\n    - [ ] c\n", micromark: 3, cmark: 3},
+		{name: "plain nested, wrong indent", input: "- [ ] a\n   - [x] b\n      - [ ] c\n", want: "- [ ] a\n  - [x] b\n    - [ ] c\n", micromark: 3, cmark: 3},
+		{
+			name:      "plain ordered nine to ten, wide",
+			input:     "9.  [ ] a\n9.  [x] b\n",
+			options:   map[string]map[string]any{"MD029": {"style": "ordered"}},
+			want:      "9. [ ] a\n9. [x] b\n",
+			micromark: 2, cmark: 2,
+		},
+		{name: "plain in a blockquote", input: "> - [ ] a   \n> - [x] b\n", want: "> - [ ] a\n> - [x] b\n", micromark: 2, cmark: 0},
+		{name: "plain in a nested blockquote", input: "> > - [ ] a\n> >   - [x] b   \n", want: "> > - [ ] a\n> >   - [x] b\n", micromark: 2, cmark: 0},
+		{name: "plain with tabs", input: "-\t[ ] a\t\n\t-\t[x] b\n", want: "- [ ] a\n  - [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain with trailing spaces", input: "- [ ] a \n- [x] b  \n- [ ] c   \n", want: "- [ ] a\n- [x] b  \n- [ ] c\n", micromark: 3, cmark: 3},
+		{name: "plain with text after", input: "- [ ] a\n  more text   \n- [x] b\n", want: "- [ ] a\n  more text\n- [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain then underline-like line", input: "- [ ] a\n      ---\n", micromark: 1, cmark: 1},
+		{name: "plain after a paragraph", input: "Intro\n- [ ] a\n- [x] b\n", want: "Intro\n\n- [ ] a\n- [x] b\n", micromark: 2, cmark: 2},
+		{name: "plain loose list", input: "- [ ] a\n\n- [x] b  \n\n- [ ] c\n", micromark: 3, cmark: 3},
+		{name: "plain checked uppercase", input: "* [X] a\n- [X] b\n", micromark: 2, cmark: 2},
+		{name: "plain with a link", input: "-  [ ] see [docs](https://example.com)\n", want: "- [ ] see [docs](https://example.com)\n", micromark: 1, cmark: 1},
+		{name: "plain mixed with non-plain", input: "- [ ] a   \n- [\t] b   \n- [x] c   \n", want: "- [ ] a\n- [\t] b   \n- [x] c   \n", micromark: 3, cmark: 2},
+		{name: "plain after a footnote", input: "[^n]: note\n\n- [ ] a   \n\nUse [^n].\n", micromark: 1, cmark: 1},
+		{name: "plain before a footnote", input: "- [ ] a   \n\nUse [^n].\n\n[^n]: note\n", want: "- [ ] a\n\nUse [^n].\n\n[^n]: note\n", micromark: 1, cmark: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,23 +224,38 @@ func TestFixKeepsCheckboxFindings(t *testing.T) {
 	}
 }
 
-// checkboxLinePattern matches a line whose text, after blockquote markers,
-// list item markers, spaces and tabs, starts with "[", and a list item's
-// marker line that holds nothing else, after which an item's first
+// checkboxLinePattern reads a line whose text, after blockquote markers
+// and indentation, holds list item markers and then starts with "[", or
+// holds nothing but a list item marker, after which an item's first
 // paragraph starts on the next line.
 var checkboxLinePattern = regexp.MustCompile(
-	`^[ \t>]*(?:(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))*\[|^[ \t>]*(?:(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))+$`)
+	`^([ \t>]*)((?:(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))*)(\[.*)?$`)
 
-// checkboxLines returns the lines of text that checkboxLinePattern
-// matches, in order, with their line endings.
+// orderedMarkerPattern and bulletMarkerPattern match list item markers, so
+// that checkboxLines can name their kinds.
+var (
+	orderedMarkerPattern = regexp.MustCompile(`[0-9]+[.)]`)
+	bulletMarkerPattern  = regexp.MustCompile(`[-+*]`)
+)
+
+// checkboxLines returns a key for each line of text that a checkbox could be
+// read from, in order: its blockquote markers, the kinds of its list item
+// markers, and its text from the "[" on without trailing whitespace. A fix
+// that the checkbox guard lets through may change the indentation, the
+// markers for others of their kind, the space after them and the trailing
+// whitespace, which the keys leave out.
 func checkboxLines(text string) []string {
-	var lines []string
+	var keys []string
 	for _, line := range strings.SplitAfter(text, "\n") {
-		if checkboxLinePattern.MatchString(strings.TrimRight(line, "\r\n")) {
-			lines = append(lines, line)
+		match := checkboxLinePattern.FindStringSubmatch(strings.TrimRight(line, " \t\r\n"))
+		if match == nil || (match[3] == "" && match[2] == "") {
+			continue
 		}
+		kinds := orderedMarkerPattern.ReplaceAllString(match[2], "1.")
+		kinds = bulletMarkerPattern.ReplaceAllString(kinds, "-")
+		keys = append(keys, strings.Repeat(">", strings.Count(match[1], ">"))+"|"+strings.Join(strings.Fields(kinds), " ")+"|"+match[3])
 	}
-	return lines
+	return keys
 }
 
 // goldmarkCheckboxes returns the task checkboxes of a goldmark tree.

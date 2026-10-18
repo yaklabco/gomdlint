@@ -301,7 +301,7 @@ func (e *Engine) lintFile(
 					// A fix that changes or makes a possible task list
 					// checkbox is withheld; the finding stays.
 					if checkboxes == nil {
-						checkboxes = newCheckboxGuard(content)
+						checkboxes = newCheckboxGuard(content, snapshot.Root)
 					}
 					if checkboxes.withholds(diag.FixEdits) {
 						diag.FixEdits = nil

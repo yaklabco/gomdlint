@@ -345,9 +345,13 @@ formats change. The first entries under Changed may need action.
   cmark-gfm read checkboxes in different places, so every fix that touches
   a list item's text from its marker through a `[`, one character or a line
   ending, and `]` at the start of its content, or that makes such text, is
-  withheld, and its finding is reported without a fix. MD030, MD007 and
-  MD010 used to turn text such as `-  [\t] task` into a checkbox, and MD009
-  removed checkboxes or the hard line break after one.
+  withheld, and its finding is reported without a fix. Plain task items such
+  as `- [ ] todo` still get the fixes that change only their marker for one
+  of its kind, the spacing after it, their indentation or their trailing
+  whitespace (MD004, MD005, MD007, MD009, MD010, MD027, MD029, MD030), which
+  both renderers read the same. MD030, MD007 and MD010 used to turn text
+  such as `-  [\t] task` into a checkbox, and MD009 removed checkboxes or the
+  hard line break after one.
 - Fixes of two rules no longer combine to corrupt a file. MD014 removing
   prompts while MD048 changed the fences could close a code block early, and
   MD007 moving an item right while MD030 narrowed the item above could nest

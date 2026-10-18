@@ -343,7 +343,12 @@ blank line or the next item, a line whose text starts with `[`, one
 character or a line ending, and `]`. A fix may not change the text from the
 start of the item's marker line through the line after the one holding the
 `]`, join that marker line to the line before, or leave the lines around it
-with a candidate they did not have.
+with a candidate they did not have. Plain task items, `[ ]`, `[x]` or `[X]`
+followed by spacing and text on the marker line of an item goldmark reads
+as a list item, above any footnote definition, still take fixes that change
+only the marker for one of its kind, the spacing after it, the indentation
+and trailing whitespace (`pkg/lint/checkbox_plain.go`, which states why
+both renderers read the same checkbox after them).
 
 Fixes of different rules can each be safe and still corrupt a file
 together. One rule removing `$` prompts in a code block while another

@@ -74,10 +74,21 @@ type checkboxGuard struct {
 	// lines from it that are neither blank nor marker lines, or the line
 	// before it when it is one.
 	chunkMarker, runEnd []int
+	// kinds tells how each line of a region is guarded, and plain holds the
+	// parts of each plain candidate's marker line (see checkbox_plain.go).
+	kinds []lineKind
+	plain map[int]plainLine
 }
 
-// newCheckboxGuard builds the guard for content.
-func newCheckboxGuard(content []byte) *checkboxGuard {
+// checkboxCandidate is a candidate: its marker line, the line holding its
+// "[", and the last line of its region.
+type checkboxCandidate struct {
+	marker, line, last int
+}
+
+// newCheckboxGuard builds the guard for content, which goldmark parsed into
+// the tree at root.
+func newCheckboxGuard(content []byte, root *mdast.Node) *checkboxGuard {
 	guard := &checkboxGuard{content: content, lines: lineStarts(content)}
 	count := len(guard.lines)
 	shapes := make([]lineShape, count)
@@ -106,23 +117,50 @@ func newCheckboxGuard(content []byte) *checkboxGuard {
 			guard.runEnd[idx] = idx
 		}
 	}
-	guard.regions = mergeRegions(candidateRegions(content, guard.lines, shapes))
+	candidates := candidatesOf(content, guard.lines, shapes)
+	regions := make([]checkboxRegion, 0, len(candidates))
+	for _, candidate := range candidates {
+		regions = append(regions, checkboxRegion{start: guard.lines[candidate.marker], end: guard.lineEnd(candidate.last)})
+	}
+	guard.regions = mergeRegions(regions)
+	guard.classifyLines(candidates, shapes, root)
 	return guard
 }
 
 // withholds reports whether a fix, edits in content offsets, changes or
 // makes a checkbox candidate: an edit changes the text of a candidate's
-// region or joins its first line to the line before, or a window of lines
-// around the edits holds a candidate after them that it did not hold
+// region or joins its first line to the line before, unless the change is
+// one that a plain candidate allows (see checkbox_plain.go), or a window of
+// lines around the edits holds a candidate after them that it did not hold
 // before.
 func (g *checkboxGuard) withholds(edits []fix.TextEdit) bool {
+	edits = slices.Clone(edits)
+	slices.SortFunc(edits, func(a, b fix.TextEdit) int { return a.StartOffset - b.StartOffset })
+	carved := make(map[int][]fix.TextEdit)
 	for _, edit := range edits {
-		if g.touches(edit) {
+		if !g.touches(edit) {
+			continue
+		}
+		pieces, ok := splitAtLineEndings(g.content, edit)
+		if !ok {
+			return true
+		}
+		for _, piece := range pieces {
+			if !g.touches(piece) {
+				continue
+			}
+			line, ok := g.carvedOut(piece)
+			if !ok {
+				return true
+			}
+			carved[line] = append(carved[line], piece)
+		}
+	}
+	for line, onLine := range carved {
+		if !g.allowsOnLine(line, onLine) {
 			return true
 		}
 	}
-	edits = slices.Clone(edits)
-	slices.SortFunc(edits, func(a, b fix.TextEdit) int { return a.StartOffset - b.StartOffset })
 	for _, window := range g.windows(edits) {
 		if g.makesCandidate(window, edits) {
 			return true
@@ -316,9 +354,10 @@ func trimLineEnding(line []byte) []byte {
 
 // lineShape is what the lexical scan reads from one line.
 type lineShape struct {
-	marker bool // The line holds a list item marker after its prefix.
-	blank  bool // The line holds nothing but ">", spaces and tabs.
-	rest   int  // Offset of the text after the prefix and markers.
+	marker   bool // The line holds a list item marker after its prefix.
+	footnote bool // The line's prefix holds a footnote definition label.
+	blank    bool // The line holds nothing but container markers and space.
+	rest     int  // Offset of the text after the prefix and markers.
 }
 
 // maxOrderedMarkerDigits is the most digits an ordered list marker has.
@@ -345,6 +384,7 @@ func readLineShape(line []byte, first bool) lineShape {
 			// A footnote definition is a container too, and its content
 			// can start on its first line, as in "[^a]: - [x] task".
 			if end := bytes.Index(line[pos:], []byte("]:")); end > 0 {
+				shape.footnote = true
 				pos += end + len("]:")
 				continue
 			}
@@ -370,16 +410,16 @@ func readLineShape(line []byte, first bool) lineShape {
 	return shape
 }
 
-// candidateRegions returns the region of each candidate of content, whose
-// lines start at lines and have the given shapes, in order.
-func candidateRegions(content []byte, lines []int, shapes []lineShape) []checkboxRegion {
+// candidatesOf returns the candidates of content, whose lines start at
+// lines and have the given shapes, in order.
+func candidatesOf(content []byte, lines []int, shapes []lineShape) []checkboxCandidate {
 	lineEnd := func(idx int) int {
 		if idx+1 < len(lines) {
 			return lines[idx+1]
 		}
 		return len(content)
 	}
-	var regions []checkboxRegion
+	var candidates []checkboxCandidate
 	marker := -1
 	for idx, shape := range shapes {
 		switch {
@@ -396,9 +436,9 @@ func candidateRegions(content []byte, lines []int, shapes []lineShape) []checkbo
 		if !ok {
 			continue
 		}
-		regions = append(regions, checkboxRegion{start: lines[marker], end: lineEnd(min(lastLine, len(lines)-1))})
+		candidates = append(candidates, checkboxCandidate{marker: marker, line: idx, last: min(lastLine, len(lines)-1)})
 	}
-	return regions
+	return candidates
 }
 
 // candidateEnd reports whether text, a chunk line's text after its prefix
