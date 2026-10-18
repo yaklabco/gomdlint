@@ -103,6 +103,74 @@ func TestConvertMarkdownlintConfig_OptionWarningLinesWithTrailingCommas(t *testi
 	assert.InDelta(t, 40, result.Config.Rules["MD013"].Options["max"], 0)
 }
 
+// TestConvertMarkdownlintConfig_ByteOrderMark covers markdownlint configs
+// that start with a UTF-8 byte order mark, as some editors write them,
+// which markdownlint-cli2 loads in every format. gomdlint skips the mark,
+// so the option warnings keep their lines.
+func TestConvertMarkdownlintConfig_ByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ file, content string }{
+		{".markdownlint.json", "\ufeff{\"MD013\": false}\n"},
+		{".markdownlint.json", "\ufeff{\"MD013\": false,}\n"},
+		{".markdownlint.jsonc", "\ufeff{\"MD013\": false}\n"},
+		{".markdownlint.yaml", "\ufeffMD013: false\n"},
+		{".markdownlint.yml", "\ufeffMD013: false\n"},
+	} {
+		t.Run(tt.file+" "+tt.content, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			assert.True(t, lineLengthOff(t, result))
+			assert.Empty(t, result.Warnings)
+		})
+	}
+
+	t.Run("option warning lines", func(t *testing.T) {
+		t.Parallel()
+
+		for _, file := range []string{".markdownlint.json", ".markdownlint.yaml"} {
+			result := convertFile(t, file, "\ufeff{\n  \"MD013\": {\"stirct\": true}\n}\n")
+
+			require.Len(t, result.Warnings, 1, file)
+			assert.Equal(t, 2, result.WarningLine(0), file)
+		}
+	})
+}
+
+// TestConvertMarkdownlintConfig_ByteOrderMarkBeforeComments covers a JSON
+// config with a byte order mark and comments. markdownlint-cli2's JSONC
+// parser rejects the mark, so markdownlint-cli2 falls back to reading the
+// file as YAML, which reads the comment and the key after it as one key
+// that names nothing, and leaves line-length (MD013) on. gomdlint skips the
+// mark and reads the file as JSON with comments, as written, so the
+// setting applies. The README lists this difference.
+func TestConvertMarkdownlintConfig_ByteOrderMarkBeforeComments(t *testing.T) {
+	t.Parallel()
+
+	result := convertFile(t, ".markdownlint.json", "\ufeff{\n  // Long lines are fine.\n  \"MD013\": false\n}\n")
+
+	assert.True(t, lineLengthOff(t, result))
+	assert.Empty(t, result.Warnings)
+}
+
+// TestLoad_YAMLProjectConfigWithByteOrderMark covers gomdlint's own YAML
+// config files, which load with a leading byte order mark, as JSON ones
+// do (see TestLoad_JSONProjectConfig).
+func TestLoad_YAMLProjectConfigWithByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	result, err := loadProject(t, "\ufeffflavor: commonmark\nrules:\n  MD009: false\n")
+	require.NoError(t, err)
+
+	assert.Equal(t, "commonmark", string(result.Config.Flavor))
+	rule := result.Config.Rules["MD009"]
+	require.NotNil(t, rule.Enabled)
+	assert.False(t, *rule.Enabled)
+	assert.Empty(t, result.Warnings)
+}
+
 // TestLoad_AppliesMarkdownlintConfigWithTrailingCommas covers a project
 // whose only configuration is a JSONC markdownlint config with trailing
 // commas: it applies to the run.

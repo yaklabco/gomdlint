@@ -1,6 +1,7 @@
 package configloader
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
@@ -108,6 +109,10 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
+	// markdownlint-cli2 loads a config that starts with a byte order mark
+	// in every format, so the mark is skipped, and lines count from the
+	// text after it.
+	content = bytes.TrimPrefix(content, utf8BOM)
 
 	settings, err := readMarkdownlintSettings(path, content)
 	if err != nil {

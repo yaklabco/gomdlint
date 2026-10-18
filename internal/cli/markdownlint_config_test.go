@@ -138,6 +138,32 @@ func TestMarkdownlintConfig_TrailingCommas(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintConfig_ByteOrderMark covers markdownlint configs that
+// start with a UTF-8 byte order mark, which markdownlint-cli2 0.23.3 loads
+// in every format. gomdlint used to stop with a config error on a JSON
+// one. markdownlint-cli2 reports trailingSpaceDoc's trailing space with
+// none of them.
+func TestMarkdownlintConfig_ByteOrderMark(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+	}{
+		{name: "JSON", file: ".markdownlint.json", settings: "\ufeff{\"MD009\": false}\n"},
+		{name: "JSONC", file: ".markdownlint.jsonc", settings: "\ufeff{\"MD009\": false,}\n"},
+		{name: "YAML", file: ".markdownlint.yaml", settings: "\ufeffMD009: false\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": nil}, got)
+				assert.NotContains(t, warnings, "WARN")
+			})
+		}
+	}
+}
+
 // TestMarkdownlintConfig_DefaultKeyInAnyCase covers the default key of a
 // markdownlint config, which markdownlint 0.41.1 reads in any case, taking
 // the first one written. gomdlint used to read only "default", so it warned
