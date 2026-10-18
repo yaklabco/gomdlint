@@ -36,7 +36,9 @@ func configuredDoc(parameter string) string {
 // TestEngineConfigureFileReadsJSONCAndYAML covers parameters that
 // markdownlint-cli2's JSONC parser reads, with comments or a trailing
 // comma, and parameters that only its YAML parser reads, among them one
-// with a %YAML directive of version 1.2, which gomdlint used to ignore.
+// with a %YAML directive of version 1.2, which gomdlint used to ignore, one
+// with a directive whose name js-yaml does not know, which it ignores, and
+// one with a byte order mark after the end marker "...", which it skips.
 // Each turns MD009 off without a notice.
 func TestEngineConfigureFileReadsJSONCAndYAML(t *testing.T) {
 	for _, parameter := range []string{
@@ -46,6 +48,9 @@ func TestEngineConfigureFileReadsJSONCAndYAML(t *testing.T) {
 		`{ MD009: false }`,
 		`MD009: false`,
 		"%YAML 1.2\n---\nMD009: false\n",
+		"%#foo\n---\nMD009: false\n",
+		"%YAML\u00a01.2\n---\nMD009: false\n",
+		"\nMD009: false\n...\n\ufeff\n",
 	} {
 		t.Run(parameter, func(t *testing.T) {
 			result := lintDefault(t, configuredDoc(parameter))

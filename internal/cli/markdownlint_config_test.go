@@ -85,6 +85,17 @@ func markdownlintConfigReport(t *testing.T, mode, name, settings string) (string
 	return got.stdout, warnings
 }
 
+// nestedYAMLBlockItems returns a YAML block sequence nested levels deep,
+// each item indented two spaces further than the one before, whose
+// innermost item is empty.
+func nestedYAMLBlockItems(levels int) string {
+	var text strings.Builder
+	for idx := range levels {
+		text.WriteString(strings.Repeat("  ", idx) + "-\n")
+	}
+	return text.String()
+}
+
 // reportedSeverities returns the severities of the findings that a JSON
 // report lists for doc.md, in order.
 func reportedSeverities(t *testing.T, report string) []string {
@@ -272,10 +283,13 @@ func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 // string, so an option named 0 is one that MD009 does not read, with a
 // warning, and the rest of MD009's object applies, where gomdlint used to
 // lose the whole object. A %YAML directive of version 1.2 loads, where
-// gomdlint used to stop with a config error. A warning names the line of
-// its option, which a key spelled 0x0 and a %YAML 1.2 directive used to
-// lose. markdownlint-cli2 reports trailingSpaceDoc's trailing space with
-// the configs that turn MD009 on.
+// gomdlint used to stop with a config error, and so does a directive whose
+// name js-yaml does not know, such as #foo, which it ignores, as it ignores
+// a byte order mark at the start of a line after the end marker "...". A
+// config nested 100 levels deep loads, as it does on gomdlint's main line.
+// A warning names the line of its option, which a key spelled 0x0 and a
+// %YAML 1.2 directive used to lose. markdownlint-cli2 reports
+// trailingSpaceDoc's trailing space with the configs that turn MD009 on.
 func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 	tests := []struct {
 		name, settings, warning string
@@ -284,6 +298,13 @@ func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 		{name: "0b0", settings: "MD009: 0b0\n", want: []string{"MD009"}},
 		{name: "0o0", settings: "MD009: 0o0\n"},
 		{name: "non-specific tag after a line break", settings: "MD009: &a\n  ! false\n", want: []string{"MD009"}},
+		{name: "byte order mark after the end marker", settings: "MD009: false\n...\n\ufeff\n"},
+		{name: "directive named #foo", settings: "%#foo\n---\nMD009: false\n"},
+		{name: "directive name with a no-break space", settings: "%YAML\u00a01.2\n---\nMD009: false\n"},
+		{
+			name: "block items 100 deep", settings: "MD009: false\nignored:\n" + nestedYAMLBlockItems(99),
+			warning: `unknown rule "ignored"`,
+		},
 		{name: "numeric key", settings: "MD009: {enabled: false, 0: x}\n", warning: `unknown option "0" for no-trailing-spaces`},
 		{
 			name: "numeric key with its line", settings: "MD009:\n  enabled: false\n  0x0: x\n",
@@ -317,8 +338,9 @@ func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 // tag, which gomdlint used to ignore, a tag that the core schema lacks,
 // keys that are duplicates once they are strings, a key written twice in a
 // list, which gomdlint used to load from a JSON file name as a list that
-// holds no settings, and an alias 101 levels deep, past js-yaml's maximum
-// depth, which gomdlint used to load. gomdlint stops with a config error.
+// holds no settings, and a second document after a byte order mark, which
+// js-yaml skips only at the start of a line, as a document starts.
+// gomdlint stops with a config error.
 func TestMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
 	tests := []struct {
 		name, file, settings, want string
@@ -331,9 +353,8 @@ func TestMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
 		},
 		{name: "duplicate in a list", file: ".markdownlint.json", settings: "- MD009: true\n  MD009: false\n", want: ".markdownlint.json"},
 		{
-			name: "alias beyond the maximum depth", file: ".markdownlint.yaml",
-			settings: "a: &a false\nMD009: " + strings.Repeat("[", 99) + "*a" + strings.Repeat("]", 99) + "\n",
-			want:     "maximum depth of 100",
+			name: "second document after a byte order mark", file: ".markdownlint.yaml",
+			settings: "MD009: false\n...\n\ufeffMD010: false\n", want: ".markdownlint.yaml",
 		},
 	}
 

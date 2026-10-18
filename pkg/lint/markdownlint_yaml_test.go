@@ -96,6 +96,30 @@ func TestReadMarkdownlintConfigYAMLAsJSYAMLReads(t *testing.T) {
 		{text: "MD009: &a\n  !\nMD010: x\n", want: `"MD009": "", "MD010": "x"`},
 		{text: "MD009: &a\n! MD010: x\n", want: `"MD009": <nil>, "MD010": "x"`},
 		{text: "MD009: &a\nMD010: ! false\n", want: `"MD009": <nil>, "MD010": "false"`},
+		// js-yaml skips one byte order mark at the start of a line where a
+		// document may start: after the end marker "...", and the spaces,
+		// comments and line breaks after it.
+		{text: "MD009: false\n...\n\ufeff\n", want: `"MD009": false`},
+		{text: "MD009: false\n...\n\ufeff", want: `"MD009": false`},
+		{text: "MD009: false\n...\n\ufeff# note\n", want: `"MD009": false`},
+		{text: "MD009: false\n...\n\ufeff # note\n", want: `"MD009": false`},
+		{text: "MD009: false\n... # note\n\ufeff\n", want: `"MD009": false`},
+		{text: "MD009: false\n...\n# note\n\ufeff\n", want: `"MD009": false`},
+		{text: "MD009: false\n...\n\n\ufeff\n", want: `"MD009": false`},
+		{text: "MD009: false\n...\n\ufeff...\n", want: `"MD009": false`},
+		{text: "MD009: false\n...\n\ufeff\n...\n\ufeff\n", want: `"MD009": false`},
+		{text: "MD009: false\r\n...\r\n\ufeff\r\n", want: `"MD009": false`},
+		{text: "---\nMD009: false\n...\n\ufeff\n", want: `"MD009": false`},
+		// A directive's name runs to a space or a tab, and a directive other
+		// than YAML and TAG is ignored, whatever its name holds.
+		{text: "%#foo\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: "%FOO#bar baz\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: "%YAML\u00a01.2\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: "%YAML#c 1.2\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: "%YAML\t1.2\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: "%YAML 1.2 #c\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: "%YAML 1.2\t#c\n---\nMD009: false\n", want: `"MD009": false`},
+		{text: " %#foo\n---\nMD009: false\n", want: `"MD009": false`},
 	}
 
 	for _, tt := range tests {
@@ -138,6 +162,20 @@ func TestReadMarkdownlintConfigRejectsWhatJSYAMLRejects(t *testing.T) {
 		" %YAML 1.2\nMD009: false\n",
 		"\n %YAML 1.2\n---\nMD009: false\n",
 		" MD009: false\nMD013: false\n",
+		// A byte order mark that js-yaml does not skip is text, which
+		// starts a second document.
+		"MD009: false\n...\n\ufeffMD010: false\n",
+		"MD009: false\n...\n\ufeff\n\ufeff\n",
+		"MD009: false\n...\n\ufeff---\nMD010: false\n",
+		"MD009: false\n...\n  \ufeff\n",
+		"MD009: false\n\ufeff\n",
+		// Directives that js-yaml rejects: two arguments for YAML, as the
+		// no-break space joins no words, no name, and an ill-formed version.
+		"%YAML 1.2\u00a0# c\n---\nMD009: false\n",
+		"% YAML 1.2\n---\nMD009: false\n",
+		"%YAML 1.2#c\n---\nMD009: false\n",
+		"%YAML 1.1 extra\n---\nMD009: false\n",
+		"%#foo\nMD009: false\n",
 	} {
 		_, err := lint.ReadMarkdownlintConfig([]byte(text))
 
@@ -145,36 +183,47 @@ func TestReadMarkdownlintConfigRejectsWhatJSYAMLRejects(t *testing.T) {
 	}
 }
 
-// TestReadMarkdownlintConfigLimitsDepthAsJSYAMLDoes covers js-yaml's
-// maxDepth of 100, which counts every node from the document's root,
-// aliases among them, so markdownlint-cli2 fails to load a config with a
-// node 101 levels deep. An alias that deep used to load.
-func TestReadMarkdownlintConfigLimitsDepthAsJSYAMLDoes(t *testing.T) {
+// nestedBlockItems returns a block sequence nested levels deep, each item
+// indented two spaces further than the one before, whose innermost item is
+// empty, or last when it is not empty.
+func nestedBlockItems(levels int, last string) string {
+	var text strings.Builder
+	for idx := range levels {
+		text.WriteString(strings.Repeat("  ", idx) + "-\n")
+	}
+	if last != "" {
+		text.WriteString(strings.Repeat("  ", levels) + "- " + last + "\n")
+	}
+	return text.String()
+}
+
+// TestReadMarkdownlintConfigReadsDeepNesting covers YAML nested deeply,
+// which loads however deep it is, as it does on gomdlint's main line, as
+// far as yaml.v3's parser reads: 10,000 levels of flow collections and
+// 10,000 of indentation. js-yaml stops at a depth of 100, which it counts
+// its own way, so markdownlint-cli2 loads the first config and fails the
+// second, and gomdlint does not follow it there. The converter recurses as
+// deep as the nesting, as yaml.v3's parser does.
+func TestReadMarkdownlintConfigReadsDeepNesting(t *testing.T) {
 	t.Parallel()
 
-	nested := func(levels int, inner string) string {
-		return strings.Repeat("[", levels) + inner + strings.Repeat("]", levels)
-	}
-	for _, tt := range []struct {
-		name, text string
-		loads      bool
-	}{
-		{name: "alias at depth 100", text: "a: &a false\nMD009: " + nested(98, "*a") + "\n", loads: true},
-		{name: "alias at depth 101", text: "a: &a false\nMD009: " + nested(99, "*a") + "\n"},
-		{name: "scalar at depth 101", text: "MD009: " + nested(99, "x") + "\n"},
-		{name: "aliases at depth 100", text: "a: &a k\nMD009: " + nested(97, "{*a : *a}") + "\n", loads: true},
-		{name: "aliases at depth 101", text: "a: &a k\nMD009: " + nested(98, "{*a : *a}") + "\n"},
+	for _, tt := range []struct{ name, text string }{
+		{name: "block items 100 deep", text: "MD009: false\nignored:\n" + nestedBlockItems(99, "")},
+		{name: "block items 100 deep with an alias", text: "a: &a x\nMD009: false\nignored:\n" + nestedBlockItems(98, "*a")},
+		{name: "an alias 101 deep", text: "a: &a x\nMD009: false\nignored: " + strings.Repeat("[", 99) + "*a" + strings.Repeat("]", 99) + "\n"},
+		{name: "flow sequences 9,999 deep", text: "MD009: false\nignored: " + strings.Repeat("[", 9999) + strings.Repeat("]", 9999) + "\n"},
+		{
+			name: "flow sequences in block sequences, 18,000 deep",
+			text: "MD009: false\nignored:\n" + strings.Repeat("- ", 9000) + strings.Repeat("[", 9000) + "x" + strings.Repeat("]", 9000) + "\n",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := lint.ReadMarkdownlintConfig([]byte(tt.text))
+			source, err := lint.ReadMarkdownlintConfig([]byte(tt.text))
 
-			if tt.loads {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, "maximum depth of 100")
-			}
+			require.NoError(t, err)
+			assert.Contains(t, settingValues(source.Settings), `"MD009": false`)
 		})
 	}
 }

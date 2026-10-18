@@ -24,10 +24,13 @@ import (
 // nodes, and the converter below gives each node js-yaml's value, without
 // yaml.v3's own decoding, which reads scalars as YAML 1.1 does, applies
 // merge keys, and compares every pair of keys of a mapping.
-
-// yamlMaxDepth is js-yaml's maxDepth: a node may sit at most this many
-// levels deep, counting the document's root as the first level.
-const yamlMaxDepth = 100
+//
+// js-yaml stops at a depth of 100, which it counts its own way, and the
+// converter has no such limit, so a deeply nested config loads, as it did
+// when gomdlint decoded YAML with yaml.v3. The converter recurses once for
+// each level of nesting, as yaml.v3's parser does, whose scanner stops at
+// 10,000 levels of flow collections and 10,000 of indentation, and Go's
+// stacks grow as the recursion needs.
 
 // jsNull is null as JavaScript writes it, which String(null) gives.
 const jsNull = "null"
@@ -67,6 +70,7 @@ func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
 	if err != nil {
 		return nil, err
 	}
+	text = jsYAMLEpilogue(text)
 	source := &MarkdownlintSource{Settings: &MarkdownlintSettings{}, Syntax: MarkdownlintYAML}
 	decoder := yaml.NewDecoder(bytes.NewReader(text))
 	var doc yaml.Node
@@ -95,7 +99,7 @@ func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
 		source.Settings, source.Positions = settings, place
 		return source, nil
 	}
-	value, err := converter.value(root, 1, nil)
+	value, err := converter.value(root, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +139,8 @@ func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
 // to its end.
 func jsYAMLPrologue(text []byte) ([]byte, error) {
 	start := 0
-	if bytes.HasPrefix(text, []byte("\ufeff")) {
-		start = len("\ufeff")
+	if bytes.HasPrefix(text, []byte(byteOrderMark)) {
+		start = len(byteOrderMark)
 	}
 	var rewritten []byte
 	if first := text[start:lineEnd(text, start)]; len(first) > 0 && (first[0] == ' ' || first[0] == '\t') {
@@ -193,41 +197,143 @@ func jsYAMLPrologue(text []byte) ([]byte, error) {
 
 // rewriteDirective returns the line of a directive as yaml.v3 should read
 // it, or nil when it should read the line as it is (see jsYAMLPrologue).
-// The result has the line's length.
+// The result has the line's length. The line is read as js-yaml's
+// readDirective reads it: the name runs from the % to a space or a tab, so
+// it may hold # or a no-break space, and the arguments are the words that
+// spaces and tabs separate, up to a word that starts with #.
 func rewriteDirective(line []byte) []byte {
-	fields := strings.Fields(string(line[1:]))
-	name, args := "", fields
-	if len(fields) > 0 && !strings.HasPrefix(fields[0], "#") {
-		name, args = fields[0], fields[1:]
+	isSeparator := func(char byte) bool { return char == ' ' || char == '\t' }
+	nameEnd := 1
+	for nameEnd < len(line) && !isSeparator(line[nameEnd]) {
+		nameEnd++
 	}
-	for idx, arg := range args {
-		if strings.HasPrefix(arg, "#") {
-			args = args[:idx]
+	var args [][2]int // The start and end of each argument in line.
+	for at := nameEnd; at < len(line); {
+		for at < len(line) && isSeparator(line[at]) {
+			at++
+		}
+		if at == len(line) || line[at] == '#' {
 			break
 		}
+		start := at
+		for at < len(line) && !isSeparator(line[at]) {
+			at++
+		}
+		args = append(args, [2]int{start, at})
 	}
-	switch name {
+	switch string(line[1:nameEnd]) {
 	case "":
-		return nil // js-yaml rejects a directive without a name.
+		return nil // js-yaml rejects a directive without a name, as yaml.v3 does.
 	case "TAG":
 		return nil
 	case "YAML":
-		match := yamlVersion.FindStringSubmatch(strings.Join(args, " "))
-		if len(args) != 1 || match == nil {
+		if len(args) != 1 {
 			return nil
 		}
-		if major, err := strconv.Atoi(match[1]); err != nil || major != 1 {
+		start, end := args[0][0], args[0][1]
+		match := yamlVersion.FindSubmatch(line[start:end])
+		if match == nil {
 			return nil
 		}
-		at := bytes.Index(line, []byte(args[0]))
+		if major, err := strconv.Atoi(string(match[1])); err != nil || major != 1 {
+			return nil
+		}
 		replacement := bytes.Clone(line)
-		copy(replacement[at:at+len(args[0])], "1.1"+strings.Repeat(" ", len(args[0])-len("1.1")))
+		copy(replacement[start:end], "1.1"+strings.Repeat(" ", end-start-len("1.1")))
 		return replacement
 	default:
 		replacement := bytes.Clone(line)
 		replacement[0] = '#' // js-yaml ignores the directive.
 		return replacement
 	}
+}
+
+// byteOrderMark is the byte order mark in UTF-8.
+const byteOrderMark = "\xef\xbb\xbf"
+
+// jsYAMLEpilogue returns text with the byte order marks after its first
+// document that js-yaml skips made acceptable to yaml.v3, keeping every
+// byte's offset. js-yaml skips one byte order mark at the start of a line
+// where a document may start (parseEvents in js-yaml 5.4.1): after the end
+// marker "..." and the spaces, comments and line breaks that follow it, and
+// again after each further "...". yaml.v3 reads such a mark as text, which
+// starts a second document. So each such mark moves to the end of its line
+// as three spaces, and what follows it on the line, such as a comment or
+// another "...", moves to the start. What else follows the first document
+// stays as it is, so yaml.v3 rejects a second document, as js-yaml does.
+func jsYAMLEpilogue(text []byte) []byte {
+	at := firstDocumentEnd(text)
+	if at < 0 {
+		return text
+	}
+	var rewritten []byte
+	for {
+		at = skipJSYAMLSeparation(text, at+len("..."), false)
+		lineStart := at > 0 && (text[at-1] == '\n' || text[at-1] == '\r')
+		if lineStart && bytes.HasPrefix(text[at:], []byte(byteOrderMark)) {
+			if rewritten == nil {
+				rewritten = bytes.Clone(text)
+			}
+			end := lineEnd(text, at)
+			copy(rewritten[at:], text[at+len(byteOrderMark):end])
+			copy(rewritten[end-len(byteOrderMark):end], "   ")
+			// js-yaml starts the line after the mark that it skipped.
+			afterMark := at + len(byteOrderMark)
+			at = skipJSYAMLSeparation(text, afterMark, true)
+			lineStart = at == afterMark || text[at-1] == '\n' || text[at-1] == '\r'
+		}
+		if !lineStart || !isDocumentEnd(text[at:lineEnd(text, at)]) {
+			break
+		}
+	}
+	if rewritten == nil {
+		return text
+	}
+	return rewritten
+}
+
+// firstDocumentEnd returns the offset in text of the first document end
+// marker "..." at the start of a line, or -1 when there is none.
+func firstDocumentEnd(text []byte) int {
+	for at := 0; at < len(text); {
+		end := lineEnd(text, at)
+		if isDocumentEnd(text[at:end]) {
+			return at
+		}
+		at = nextLineStart(text, end)
+	}
+	return -1
+}
+
+// nextLineStart returns the offset in text of the start of the line after
+// the line break at end, or the end of text.
+func nextLineStart(text []byte, end int) int {
+	if end < len(text) && text[end] == '\r' && end+1 < len(text) && text[end+1] == '\n' {
+		end++
+	}
+	return min(end+1, len(text))
+}
+
+// skipJSYAMLSeparation returns the offset in text of the first character at
+// or after at that js-yaml's skipSeparationSpace does not skip: spaces,
+// tabs and line breaks, and comments, which start with # where a line
+// starts or after a space, a tab or a line break. lineStart says whether
+// at starts a line for js-yaml, as it does after a byte order mark that it
+// skipped.
+func skipJSYAMLSeparation(text []byte, at int, lineStart bool) int {
+	separated := lineStart || at == 0 || strings.IndexByte(" \t\r\n", text[at-1]) >= 0
+	for at < len(text) {
+		switch char := text[at]; {
+		case char == ' ' || char == '\t' || char == '\n' || char == '\r':
+			at++
+			separated = true
+		case char == '#' && separated:
+			at = lineEnd(text, at)
+		default:
+			return at
+		}
+	}
+	return at
 }
 
 // lineEnd returns the offset of the line feed or carriage return that ends
@@ -294,7 +400,7 @@ func newYAMLConverter(text []byte) *yamlConverter {
 // settings, keeping its keys in the order they are written, and returns
 // the places of its keys.
 func (c *yamlConverter) root(node *yaml.Node) (*MarkdownlintSettings, *MarkdownlintPosition, error) {
-	pairs, place, err := c.mapping(node, 1, nil)
+	pairs, place, err := c.mapping(node, nil)
 	c.remember(node, yamlValue{value: pairsValue(pairs), place: place})
 	if err != nil {
 		return nil, nil, err
@@ -313,15 +419,11 @@ func (c *yamlConverter) remember(node *yaml.Node, value yamlValue) {
 	}
 }
 
-// value converts node, which sits depth levels deep in the document, and
-// which next, the node after it in the document, follows, or nothing when
-// next is nil. A mapping becomes a map[string]any, a sequence a []any, and
-// a scalar nil, a bool, a float64 or a string. As in js-yaml, every node
-// counts towards the depth, aliases among them.
-func (c *yamlConverter) value(node *yaml.Node, depth int, next *yaml.Node) (yamlValue, error) {
-	if depth > yamlMaxDepth {
-		return yamlValue{}, fmt.Errorf("line %d: nesting exceeded the maximum depth of %d", node.Line, yamlMaxDepth)
-	}
+// value converts node, which next, the node after it in the document,
+// follows, or nothing when next is nil. A mapping becomes a
+// map[string]any, a sequence a []any, and a scalar nil, a bool, a float64
+// or a string.
+func (c *yamlConverter) value(node, next *yaml.Node) (yamlValue, error) {
 	if node.Kind == yaml.AliasNode {
 		return c.alias(node), nil
 	}
@@ -330,10 +432,10 @@ func (c *yamlConverter) value(node *yaml.Node, depth int, next *yaml.Node) (yaml
 	switch node.Kind {
 	case yaml.MappingNode:
 		var pairs []MarkdownlintSetting
-		pairs, result.place, err = c.mapping(node, depth, next)
+		pairs, result.place, err = c.mapping(node, next)
 		result.value = pairsValue(pairs)
 	case yaml.SequenceNode:
-		result.value, result.place, err = c.sequence(node, depth, next)
+		result.value, result.place, err = c.sequence(node, next)
 	default:
 		result.value, err = c.scalar(node, next)
 	}
@@ -375,12 +477,12 @@ func entryPlace(line int, place *MarkdownlintPosition) *MarkdownlintPosition {
 	return entry
 }
 
-// mapping converts the pairs of node, a mapping that sits depth levels deep
-// and that next follows (see value), in the order they are written, and
-// returns the places of its keys. Each key becomes a string, as the key of
-// a JavaScript object does (see jsString), and a key whose string repeats
-// an earlier one's is an error, found in constant time per key.
-func (c *yamlConverter) mapping(node *yaml.Node, depth int, next *yaml.Node) ([]MarkdownlintSetting, *MarkdownlintPosition, error) {
+// mapping converts the pairs of node, a mapping that next follows (see
+// value), in the order they are written, and returns the places of its
+// keys. Each key becomes a string, as the key of a JavaScript object does
+// (see jsString), and a key whose string repeats an earlier one's is an
+// error, found in constant time per key.
+func (c *yamlConverter) mapping(node, next *yaml.Node) ([]MarkdownlintSetting, *MarkdownlintPosition, error) {
 	if node.Style&yaml.TaggedStyle != 0 && node.Tag != "!!map" {
 		return nil, nil, fmt.Errorf("line %d: unknown mapping tag %s", node.Line, node.Tag)
 	}
@@ -392,7 +494,7 @@ func (c *yamlConverter) mapping(node *yaml.Node, depth int, next *yaml.Node) ([]
 		if idx+2 < len(node.Content) {
 			valueNext = node.Content[idx+2]
 		}
-		key, err := c.value(keyNode, depth+1, valueNode)
+		key, err := c.value(keyNode, valueNode)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -403,7 +505,7 @@ func (c *yamlConverter) mapping(node *yaml.Node, depth int, next *yaml.Node) ([]
 		if _, repeated := place.Keys[name]; repeated {
 			return nil, nil, fmt.Errorf("line %d: duplicated mapping key %q", keyNode.Line, name)
 		}
-		value, err := c.value(valueNode, depth+1, valueNext)
+		value, err := c.value(valueNode, valueNext)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -413,9 +515,9 @@ func (c *yamlConverter) mapping(node *yaml.Node, depth int, next *yaml.Node) ([]
 	return pairs, place, nil
 }
 
-// sequence converts the items of node, a sequence that sits depth levels
-// deep and that next follows (see value), and returns their places.
-func (c *yamlConverter) sequence(node *yaml.Node, depth int, next *yaml.Node) ([]any, *MarkdownlintPosition, error) {
+// sequence converts the items of node, a sequence that next follows (see
+// value), and returns their places.
+func (c *yamlConverter) sequence(node, next *yaml.Node) ([]any, *MarkdownlintPosition, error) {
 	if node.Style&yaml.TaggedStyle != 0 && node.Tag != "!!seq" {
 		return nil, nil, fmt.Errorf("line %d: unknown sequence tag %s", node.Line, node.Tag)
 	}
@@ -426,7 +528,7 @@ func (c *yamlConverter) sequence(node *yaml.Node, depth int, next *yaml.Node) ([
 		if idx+1 < len(node.Content) {
 			itemNext = node.Content[idx+1]
 		}
-		value, err := c.value(item, depth+1, itemNext)
+		value, err := c.value(item, itemNext)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -591,8 +693,8 @@ func asciiOnly(text []byte) bool {
 // lines broken as yaml.v3 breaks them (see yamlPositions).
 func yamlLineStarts(text []byte) []int {
 	starts := []int{0}
-	if bytes.HasPrefix(text, []byte("\ufeff")) {
-		starts[0] = len("\ufeff")
+	if bytes.HasPrefix(text, []byte(byteOrderMark)) {
+		starts[0] = len(byteOrderMark)
 	}
 	for at := starts[0]; at < len(text); {
 		char, size := utf8.DecodeRune(text[at:])
