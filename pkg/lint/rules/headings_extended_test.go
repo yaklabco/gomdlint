@@ -836,6 +836,20 @@ func TestNoDuplicateHeadingRule_MarkdownlintText(t *testing.T) {
 		{name: "HTML at both ends is left out", input: "# Title\n\n## <b>Foo</b>\n\n## Foo\n", wantLines: []int{5}},
 		{name: "space before HTML is kept", input: "# Title\n\n## Foo <br>\n\n## Foo\n\n## Foo \n", wantLines: []int{7}},
 		{name: "HTML inside emphasis is kept", input: "# Title\n\n## *Foo <b>x</b>*\n\n## *Foo x*\n\n## *Foo <b>x</b>*\n", wantLines: []int{7}},
+		{
+			// markdownlint parses no strikethrough, so HTML in one is directly
+			// in the heading, and HTML in emphasis in one is not.
+			name: "HTML in strikethrough is left out",
+			input: "# Title\n\n## ~~<b>Foo</b>~~\n\n## ~~Foo~~\n\n## ~~*<b>Bar</b>*~~\n\n## ~~*Bar*~~\n\n" +
+				"## ~<i>Baz</i>~\n\n## ~Baz~\n\n## a ~~b <i>c</i>~~ d\n\n## a ~~b c~~ d\n",
+			wantLines: []int{5, 13, 17},
+		},
+		{
+			// markdownlint parses math, which holds no HTML.
+			name:      "a tag in inline math is math",
+			input:     "# Title\n\n## $<b>$ a\n\n## $$ a\n\n## x $y<i>z$ w\n\n## x $yz$ w\n",
+			wantLines: []int{},
+		},
 		{name: "closing sequences and spaces", input: "# Title\n\n## Foo ##\n\n## Foo\n\n## Foo   #\n", wantLines: []int{5, 7}},
 		{name: "escapes and references as written", input: "# Title\n\n## Foo\\!\n\n## Foo!\n\n## Foo&#33;\n\n## Foo!\n", wantLines: []int{9}},
 		{name: "links as written", input: "# Title\n\n## [Foo](a)\n\n## [Foo](b)\n\n## Foo\n", wantLines: []int{}},

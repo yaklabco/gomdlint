@@ -875,6 +875,31 @@ func TestDescriptiveLinkTextRule_MarkdownlintPositions(t *testing.T) {
 	}, positions(map[string]any{"prohibited_texts": []any{"https example com", "here"}}))
 }
 
+// TestDescriptiveLinkTextRule_StrikethroughAndMath checks MD059 against
+// markdownlint 0.41.1, which parses no strikethrough and parses math. Code
+// or HTML in a strikethrough is directly in the link text for it, so the
+// link is skipped, and code or HTML in math is math, so it is not.
+func TestDescriptiveLinkTextRule_StrikethroughAndMath(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"[~~`here`~~](x)\n\n" + // 3: the code is direct
+		"[~~*`here`*~~](x)\n\n" + // 5: emphasis holds the code
+		"[~here~](x)\n\n" + // 7
+		"[~~here <b>x</b>~~](x)\n\n" + // 9
+		"[*~~`here`~~*](x)\n\n" + // 11: emphasis holds the code
+		"[~~`a`~~ here](x)\n\n" + // 13
+		"[$<here>$](x)\n\n" + // 15: the tag is math
+		"[$`here`$](x)\n\n" + // 17: the code is math
+		"[here $<b>$](x)\n" // 19
+
+	diags := applyRuleWithOptions(t, NewDescriptiveLinkTextRule(), markdown, nil)
+	type position struct{ line, column int }
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{5, 2}, {7, 2}, {11, 2}, {15, 2}, {17, 2}}, got)
+}
+
 // TestReferenceLinkImagesRule_Footnotes checks MD052 against markdownlint
 // 0.41.1, which reads GFM footnotes: "[^label]" calls a footnote when a line
 // starts with "[^label]:", in any container and before or after the call,

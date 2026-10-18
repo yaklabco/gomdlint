@@ -78,7 +78,7 @@ func (r *NoEmphasisAsHeadingRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		if emphasis == nil {
 			continue
 		}
-		text := plainEmphasisText(emphasis)
+		text := plainEmphasisText(ctx.File.Content, emphasis)
 		if text == nil {
 			continue
 		}
@@ -123,14 +123,28 @@ func soleEmphasisChild(para *mdast.Node) *mdast.Node {
 	return emphasis
 }
 
-// plainEmphasisText returns the raw text of emphasis whose only child is a
-// single line of plain text, or nil.
-func plainEmphasisText(emphasis *mdast.Node) []byte {
-	child := emphasis.FirstChild
-	if child == nil || child.Next != nil || child.Kind != mdast.NodeText || child.Inline == nil {
+// plainEmphasisText returns the raw text of emphasis that holds a single
+// line of plain text, or nil. markdownlint parses no strikethrough, so a
+// strikethrough of plain text, tildes and all, is plain text too (see
+// markdownlintChildren).
+func plainEmphasisText(content []byte, emphasis *mdast.Node) []byte {
+	children := markdownlintChildren(emphasis)
+	if len(children) == 0 {
 		return nil
 	}
-	text := child.Inline.Text
+	for _, child := range children {
+		if child.Kind != mdast.NodeText || child.Inline == nil {
+			return nil
+		}
+	}
+	text := children[0].Inline.Text
+	if len(children) > 1 || children[0].Parent != emphasis {
+		span := emphasis.ContentRange()
+		if span.StartOffset < 0 || span.EndOffset > len(content) || span.StartOffset >= span.EndOffset {
+			return nil
+		}
+		text = content[span.StartOffset:span.EndOffset]
+	}
 	if len(text) == 0 || bytes.ContainsAny(text, "\r\n") || escapeOrReferencePattern.Match(text) {
 		return nil
 	}

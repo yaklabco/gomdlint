@@ -224,6 +224,22 @@ func closingDollarRun(content []byte, offset, size int) (int, bool) {
 	return 0, false
 }
 
+// lazyMath finds the math of a document the first time a rule asks about
+// it, so that a rule that seldom needs it pays only then.
+type lazyMath struct {
+	ctx   *lint.RuleContext
+	found *mathRegions
+}
+
+// overlaps reports whether content[start:end] lies partly in inline math.
+func (l *lazyMath) overlaps(start, end int) bool {
+	if l.found == nil {
+		found := findMath(l.ctx)
+		l.found = &found
+	}
+	return l.found.overlaps(start, end)
+}
+
 // overlaps reports whether content[start:end] lies partly in inline math.
 func (m mathRegions) overlaps(start, end int) bool {
 	idx := sort.Search(len(m.ranges), func(idx int) bool { return m.ranges[idx].EndOffset > start })

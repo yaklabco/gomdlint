@@ -112,6 +112,15 @@ func TestNoEmphasisAsHeadingRule_MarkdownlintParity(t *testing.T) {
 		{name: "list item paragraph", input: "- **Listed Title**\n", wantLines: []int{}},
 		{name: "multi-line emphasis", input: "**Two\nlines**\n", wantLines: []int{}},
 		{name: "strikethrough", input: "~~Struck paragraph~~\n", wantLines: []int{}},
+		{
+			// markdownlint parses no strikethrough, so the tildes are text.
+			name:      "strikethrough in bold",
+			input:     "**~~Struck~~ title**\n",
+			wantLines: []int{1},
+			wantFix:   true,
+			wantFixed: "## ~~Struck~~ title\n",
+		},
+		{name: "code in strikethrough in bold", input: "**~~`code`~~ title**\n", wantLines: []int{}},
 		{name: "character reference", input: "**Price &amp; Value**\n", wantLines: []int{}},
 		{name: "backslash escape", input: "**Price \\* Value**\n", wantLines: []int{}},
 		{name: "nested emphasis", input: "***Both***\n", wantLines: []int{}},

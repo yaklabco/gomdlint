@@ -649,6 +649,7 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	var diags []lint.Diagnostic
+	math := &lazyMath{ctx: ctx}
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
@@ -662,7 +663,7 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			continue
 		}
 		label, hasLabel := linkLabel(ctx.File, usage.Node)
-		if compatible && hasDirectChild(usage.Node, mdast.NodeCodeSpan, mdast.NodeHTMLInline) {
+		if compatible && holdsMarkdownlintChild(usage.Node, math, mdast.NodeCodeSpan, mdast.NodeHTMLInline) {
 			continue
 		}
 
@@ -728,10 +729,32 @@ func visibleLinkText(link *mdast.Node) string {
 	return text.String()
 }
 
-// hasDirectChild reports whether node has a child of one of kinds.
-func hasDirectChild(node *mdast.Node, kinds ...mdast.NodeKind) bool {
+// markdownlintChildren returns the children of node that markdownlint's
+// micromark tree gives it, in order: the node's children, with the children
+// of a strikethrough in its place, because markdownlint parses no
+// strikethrough.
+func markdownlintChildren(node *mdast.Node) []*mdast.Node {
+	var children []*mdast.Node
 	for child := node.FirstChild; child != nil; child = child.Next {
-		if slices.Contains(kinds, child.Kind) {
+		if child.Kind == mdast.NodeStrikethrough {
+			children = append(children, markdownlintChildren(child)...)
+			continue
+		}
+		children = append(children, child)
+	}
+	return children
+}
+
+// holdsMarkdownlintChild reports whether markdownlint's micromark tree gives
+// node a child of one of kinds (see markdownlintChildren). A child in
+// inline math does not count: markdownlint parses math and reads it as
+// math, not as the code or HTML goldmark finds there.
+func holdsMarkdownlintChild(node *mdast.Node, math *lazyMath, kinds ...mdast.NodeKind) bool {
+	for _, child := range markdownlintChildren(node) {
+		if !slices.Contains(kinds, child.Kind) {
+			continue
+		}
+		if span := child.SourceRange(); !math.overlaps(span.StartOffset, span.EndOffset) {
 			return true
 		}
 	}

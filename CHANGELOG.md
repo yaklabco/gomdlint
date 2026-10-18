@@ -298,15 +298,19 @@ formats change. The first entries under Changed may need action.
   line and MD022 on the heading, and a definition before the first H1 means
   the document has no title for MD025.
 - **MD024**: Compares headings as written, without their raw HTML, so
-  `## Foo` and `## *Foo*` differ, and reports a repeated empty heading. With
-  `siblings_only`, it compares a heading with the earlier headings of its
-  level since the last heading of a lower level.
+  `## Foo` and `## *Foo*` differ, and reports a repeated empty heading. HTML
+  in a strikethrough is left out too, since markdownlint parses no
+  strikethrough, and a tag in inline math stays. With `siblings_only`, it
+  compares a heading with the earlier headings of its level since the last
+  heading of a lower level.
 - **MD028**: Reports blank lines between blockquotes that are indented or in
   a list item, one finding for each line, and no longer takes quote markers
   in an HTML block for blockquotes.
 - **MD033**, **MD045**: Read the lines of an HTML block as Markdown, as
   markdownlint does, so a tag in a code span, in a fenced code block or
   after a backslash is not HTML.
+- **MD036**: Reads a strikethrough in bold or italic text as plain text, as
+  markdownlint does, so `**~~Old~~ title**` is reported.
 - **MD045**: Reports a Markdown image only when nothing is written between
   its brackets, so `![ ](a.png)` passes, as in markdownlint.
 - **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
@@ -314,9 +318,10 @@ formats change. The first entries under Changed may need action.
 - **MD052**: With `shortcut_syntax`, no longer reports GFM footnote calls
   such as `[^1]` whose footnote the document defines.
 - **MD059**: Compares link text as written and skips only links whose text
-  holds code or HTML directly, so it reports ``[*`here`*](x)``. Findings
-  point at the link text, one column after the bracket, and autolinks are
-  never checked.
+  holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
+  strikethrough counts as direct, and code or HTML in inline math does not.
+  Findings point at the link text, one column after the bracket, and
+  autolinks are never checked.
 - `[ ]`, `[x]` and `[X]` make a task checkbox where micromark reads one:
   at the start of a list item's first paragraph, after any link reference
   definitions that start it, and before whitespace or a line ending with
