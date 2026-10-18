@@ -2,27 +2,38 @@
 
 A blisteringly fast, self-fixing Markdown linter written in Go.
 
-Inspired by [markdownlint](https://github.com/DavidAnson/markdownlint) by David Anson, which has set the standard for markdown linting. Without this epic work, this project would not have been possible.
+Inspired by [markdownlint](https://github.com/DavidAnson/markdownlint) by
+David Anson, which has set the standard for markdown linting. Without this
+epic work, this project would not have been possible.
 
 ## Why gomdlint?
 
-|                    | gomdlint | markdownlint |
-|--------------------|----------|--------------|
-| **Performance**    | **507x faster** average | baseline |
-| **Auto-fixable**   | 67% (37 of 55 rules) | Limited      |
-| **Language**       | Go       | Node.js      |
+| Feature | gomdlint | markdownlint |
+| --- | --- | --- |
+| **Performance** | **507x faster** average | baseline |
+| **Auto-fixable** | 67% (37 of 55 rules) | Limited |
+| **Language** | Go | Node.js |
 
-gomdlint is **dramatically faster** than markdownlint. Benchmarks on real-world repositories show an average **507x speedup**, with improvements ranging from 72x to over 1100x depending on repository size. 37 of 55 rules support automatic fixing. Built in Go with no runtime dependencies.
+gomdlint is **dramatically faster** than markdownlint. Benchmarks run on
+real-world repositories in January 2026 showed an average **507x speedup**,
+with improvements ranging from 72x to over 1100x depending on repository
+size. 37 of 55 rules support automatic fixing. Built in Go with no runtime
+dependencies.
 
-See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for detailed benchmark methodology and results.
+See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for detailed benchmark
+methodology and results.
 
 ## Features
 
-- **40+ lint rules** covering headings, lists, whitespace, code blocks, links, emphasis, blockquotes, and tables
-- **Automatic fixing** for most issues with safe conflict detection
-- **Multiple output formats** including text, table, JSON, SARIF, diff, and summary
+- **55 lint rules**: markdownlint's 53 rules with its defaults, and two of
+  gomdlint's own
+- **Automatic fixing** for 37 rules, with every fix checked against the
+  document's structure before it is applied
+- **Multiple output formats** including text, table, JSON, SARIF, diff, and
+  summary
 - **CommonMark and GFM support** with flavor-specific rules
-- **Flexible configuration** via YAML files with hierarchical discovery
+- **Flexible configuration** via YAML or JSON files with hierarchical
+  discovery
 - **Fast parallel processing** with deterministic ordering
 - **Human-readable rule names** with optional traditional ID format
 
@@ -56,29 +67,161 @@ gomdlint lint --fix --dry-run    # Preview fixes without applying
 
 ## Linting and Fixing
 
-Lint Markdown files with over 40 rules. Run `gomdlint lint` on files or directories to detect issues, with parallel processing for large codebases.
+Lint Markdown files with 55 rules. Run `gomdlint lint` on files or
+directories to detect issues, with parallel processing for large codebases.
+Directory walks skip files that `.gitignore` files ignore, and the
+`node_modules` and `vendor` directories. `--no-gitignore` and
+`--no-default-ignores` lint those files too. Files named on the command line
+are always linted.
 
-Automatically fix most issues with `--fix`. The autofix system handles conflicting edits safely, supports multi-pass fixing for cascading issues, and creates backups by default. Preview changes before applying them with `--dry-run`, which shows a unified diff (when invoked with `--format diff`) of proposed fixes.
+Automatically fix most issues with `--fix`. Fixing runs in passes. Each pass
+applies the fixes of one rule to each top-level block, such as a list or a
+paragraph, and then lints the result again, until nothing is left to fix or
+the pass limit is reached. gomdlint backs up each file it changes as
+`<file>.gomdlint.bak` and never replaces an existing backup. Disable backups
+with `--no-backups` if your files are under version control.
 
-Limit auto-fixing to specific rules with `--fix-rules` when you want targeted corrections. Disable backups with `--no-backups` if your files are under version control.
+Preview changes before applying them with `--dry-run`, or show them as a
+unified diff with `--format diff`, which writes nothing unless you add
+`--fix`.
+
+Limit auto-fixing to specific rules with `--fix-rules`, which takes rule
+names, IDs and markdownlint tags.
+
+### Fix Safety
+
+A fix must not change what a document means. Every fixing rule applies its
+fixes, parses the result again with the same flavor, and compares it with
+the original: block kinds and nesting, heading levels, lists, code, raw HTML,
+link destinations, and the text a renderer shows. A fix that would change
+anything other than what the rule intends is withheld, and the finding is
+still reported without a fix. Fixes are checked one at a time and together,
+because the fix engine may apply only some of them.
+
+Some fixes that markdownlint makes are withheld for this reason. For
+example, `no-bare-urls` (MD034) fixes a URL only where GitHub, micromark and
+goldmark all link the same address, so URLs in tables, emphasis or quotes are
+reported without a fix. Fixes that markdownlint does not offer, such as
+those of `line-length` (MD013), `no-emphasis-as-heading` (MD036) and
+`fenced-code-language` (MD040), are held to the same check. MD040 adds a
+language only when the whole code block shows which one it is. See
+[Known Limitations](#known-limitations) for the cases where gomdlint
+withholds more fixes than it needs to.
 
 ## Rule Categories
 
-**Headings** - Enforce heading level increments (no jumping from H1 to H3), consistent style (ATX or setext), proper spacing, unique heading text, single H1 per document, and no trailing punctuation. Most heading issues auto-fix.
+**Headings** - Enforce heading level increments (no jumping from H1 to H3),
+a consistent style (ATX or setext), spacing around headings and after their
+hashes, unique heading text, a single top-level heading, no trailing
+punctuation, a heading on the first line, and an optional required heading
+structure. Emphasis used as a heading becomes a real heading, one level
+below the heading before it. Most heading issues auto-fix.
 
-**Lists** - Ensure consistent bullet markers, proper indentation at each nesting level, correct ordered list numbering, and appropriate spacing. List formatting issues auto-fix to your configured style.
+**Lists** - Ensure consistent bullet markers, proper indentation at each
+nesting level, correct ordered list numbering, and appropriate spacing.
+List formatting issues auto-fix to your configured style, and a fix never
+changes the number a list starts with.
 
-**Whitespace** - Remove trailing spaces, convert tabs to spaces, collapse multiple blank lines, and ensure files end with a single newline. All whitespace issues auto-fix.
+**Layout** - Remove trailing spaces, convert tabs to spaces, collapse
+multiple blank lines, keep a consistent horizontal rule style, and ensure
+files end with a newline. Tabs in code text are reported but never changed.
+Line length is enforced with word wrapping that applies to paragraph text
+only, and keeps blockquote and list prefixes, code spans, inline HTML and
+link destinations intact.
 
-**Code Blocks** - Require language identifiers on fenced code blocks (with auto-detection for 10 languages including Go, Python, JavaScript, and Bash), enforce consistent fence style, and ensure proper blank lines around blocks. Missing language identifiers auto-fix based on content analysis.
+**Code** - Require language identifiers on fenced code blocks, enforce a
+consistent code block and fence style, and ensure blank lines around fences,
+no spaces inside code spans, and no `$` prompts before commands without
+output. A missing language is added only when the whole block shows which
+one it is: a shebang line, JSON, an XML document, an HTML page with a
+doctype, a PHP opening tag, a complete unified diff, or a Dockerfile.
 
-**Links** - Detect reversed link syntax, bare URLs, empty links, invalid reference links, and missing image alt text. Reversed links and bare URLs auto-fix.
+**Links** - Detect reversed link syntax, bare URLs, spaces inside link text,
+empty links, missing image alt text, broken link fragments, undefined and
+unused reference definitions, inconsistent link and image style, and
+non-descriptive link text such as "click here". gomdlint's own
+`link-destination-style` (MDL001) keeps link destinations consistently
+relative or absolute. Reversed links, spaces in link text, unused
+definitions and bare URLs auto-fix.
 
-**Emphasis** - Detect bold text used as headings (converts to proper headings with intelligent level inference), spaces inside emphasis markers, and inconsistent emphasis/strong style. All emphasis issues auto-fix.
+**Tables** (GFM) - Validate table structure including consistent column
+counts, pipe style, column spacing and surrounding blank lines. gomdlint's
+own `table-alignment` (MDL003) formats the delimiter row.
 
-**Line Length** - Enforce maximum line length with intelligent word-wrapping that preserves list indentation, blockquote prefixes, and code blocks.
+**Emphasis** - Detect spaces inside emphasis markers and inconsistent
+emphasis and strong style. Emphasis issues auto-fix, except where changing a
+marker could change which markers pair up.
 
-**Tables** (GFM) - Validate table structure including consistent column counts, pipe alignment, and surrounding blank lines.
+**Blockquotes** - Detect multiple spaces after `>` and blank lines inside
+blockquotes.
+
+**HTML** - Report raw HTML, with an optional list of allowed elements.
+
+**Spelling** - Enforce the capitalization of the proper names you configure.
+
+Every rule has an ID and a name. markdownlint's own names for five rules
+also work: `ul-style` (MD004), `no-multiple-blanks` (MD012),
+`blanks-around-headings` (MD022), `single-title` (MD025) and `first-line-h1`
+(MD041). `gomdlint rules` lists every rule with its severity and
+description.
+
+| ID | Name | Category | Fix |
+| --- | --- | --- | --- |
+| MD001 | `heading-increment` | headings | no |
+| MD003 | `heading-style` | headings | yes |
+| MD004 | `unordered-list-style` | lists | yes |
+| MD005 | `list-indent` | lists | yes |
+| MD007 | `ul-indent` | lists | yes |
+| MD009 | `no-trailing-spaces` | layout | yes |
+| MD010 | `no-hard-tabs` | layout | yes |
+| MD011 | `no-reversed-links` | links | yes |
+| MD012 | `no-multiple-blank-lines` | layout | yes |
+| MD013 | `line-length` | layout | yes |
+| MD014 | `commands-show-output` | code | yes |
+| MD018 | `no-missing-space-atx` | headings | yes |
+| MD019 | `no-multiple-space-atx` | headings | yes |
+| MD020 | `no-missing-space-closed-atx` | headings | yes |
+| MD021 | `no-multiple-space-closed-atx` | headings | yes |
+| MD022 | `heading-blank-lines` | headings | yes |
+| MD023 | `heading-start-left` | headings | yes |
+| MD024 | `no-duplicate-heading` | headings | no |
+| MD025 | `single-h1` | headings | no |
+| MD026 | `no-trailing-punctuation` | headings | yes |
+| MD027 | `no-multiple-space-blockquote` | blockquotes | yes |
+| MD028 | `no-blanks-blockquote` | blockquotes | no |
+| MD029 | `ol-prefix` | lists | yes |
+| MD030 | `list-marker-space` | lists | yes |
+| MD031 | `blanks-around-fences` | code | yes |
+| MD032 | `blanks-around-lists` | lists | yes |
+| MD033 | `no-inline-html` | html | no |
+| MD034 | `no-bare-urls` | links | yes |
+| MD035 | `hr-style` | layout | yes |
+| MD036 | `no-emphasis-as-heading` | headings | yes |
+| MD037 | `no-space-in-emphasis` | emphasis | yes |
+| MD038 | `no-space-in-code` | code | yes |
+| MD039 | `no-space-in-links` | links | yes |
+| MD040 | `fenced-code-language` | code | yes |
+| MD041 | `first-line-heading` | headings | no |
+| MD042 | `no-empty-links` | links | no |
+| MD043 | `required-headings` | headings | no |
+| MD044 | `proper-names` | spelling | yes |
+| MD045 | `no-alt-text` | links | no |
+| MD046 | `code-block-style` | code | no |
+| MD047 | `single-trailing-newline` | layout | yes |
+| MD048 | `code-fence-style` | code | yes |
+| MD049 | `emphasis-style` | emphasis | yes |
+| MD050 | `strong-style` | emphasis | yes |
+| MD051 | `link-fragments` | links | no |
+| MD052 | `reference-links-images` | links | no |
+| MD053 | `link-image-reference-definitions` | links | yes |
+| MD054 | `link-image-style` | links | no |
+| MD055 | `table-pipe-style` | tables | no |
+| MD056 | `table-column-count` | tables | no |
+| MD058 | `blanks-around-tables` | tables | yes |
+| MD059 | `descriptive-link-text` | links | no |
+| MD060 | `table-column-style` | tables | no |
+| MDL001 | `link-destination-style` | links | no |
+| MDL003 | `table-alignment` | tables | yes |
 
 ## Output Formats
 
@@ -90,25 +233,53 @@ gomdlint lint --format table file.md       # table - columnar output
 gomdlint lint --format summary file.md     # summary - aggregated statistics
 gomdlint lint --format json file.md        # json - machine-readable
 gomdlint lint --format sarif file.md       # sarif - GitHub code scanning
-gomdlint lint --format diff --fix file.md  # diff - unified diff of fixes
+gomdlint lint --format diff file.md        # diff - the fixes --fix would make
+gomdlint lint --format diff --fix file.md  # diff - the fixes --fix made
 ```
+
+Text output lists each finding with its location, severity, rule and
+message, the order markdownlint-cli2 uses, followed by the source line and a
+suggestion. `--no-context` leaves out the source lines.
+
+```text
+README.md (3 issues)
+  README.md:3:1   warning  heading-increment        Heading level jumped from H1 to H3
+        ### Details
+        ^
+    Suggestion: Use H2 instead
+  README.md:5:5   warning  no-bare-urls             Bare URL used
+        See http://example.com for more.
+            ^
+    Suggestion: Wrap the URL/email in angle brackets
+  README.md:7:11  warning  no-trailing-punctuation  Heading ends with trailing punctuation ":"
+        ## Install:
+                  ^
+    Suggestion: Remove trailing punctuation from the heading
+
+3 issues (3 warnings), in 1 file, 2 fixable
+```
+
+Columns count characters, so a finding after multibyte text points at its
+target. JSON output reports the same character columns, while the offsets of
+its fixes are byte offsets. Every format except SARIF shows a path relative
+to the working directory when the file lies inside it.
 
 The summary format shows aggregated statistics:
 
 ```text
 Rules Summary
-──────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────────
 Rule                 Count  Errors Warnings  Fixable
-──────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────────
 no-trailing-spaces       5       0        5        ✓
 no-hard-tabs             2       0        2        ✓
 
 Files Summary
-──────────────────────────────────────────────────────────────────────
-File                                  Count  Errors Warnings
-──────────────────────────────────────────────────────────────────────
-docs/guide.md                             4       0        4
-README.md                                 3       0        3
+──────────────────────────────────────────────────────────────────────────────────────────
+File                                                           Count  Errors Warnings
+──────────────────────────────────────────────────────────────────────────────────────────
+docs/guide.md                                                      4       0        4
+README.md                                                          3       0        3
 
 Total: 7 issues (7 warnings) in 2 files
 ```
@@ -118,6 +289,10 @@ Control table order with `--summary-order rules` (default) or `--summary-order f
 Every format lists findings file by file, in path order. Within a file, as
 in markdownlint-cli2, findings follow line order, then column, rule ID and
 message.
+
+SARIF output follows SARIF 2.1.0. Its file locations are relative to the
+root of the Git working tree, as GitHub code scanning expects, and its
+columns count UTF-16 code units.
 
 ### Color
 
@@ -134,7 +309,8 @@ Text, table, summary and diff output, and help, use color on a terminal.
 
 JSON and SARIF output never contain color. Table rows start with a severity
 marker, `E`, `W` or `I`, which the legend under the table explains, so a
-table reads the same without color.
+table reads the same without color. A `+` at the end of a row marks a
+finding that `--fix` would fix.
 
 ## Rule Identifier Format
 
@@ -196,29 +372,107 @@ rules:
       max: 120
       ignore_code_blocks: true
 
+  # A bare true or false turns a rule on or off, as in markdownlint
+  no-inline-html: false
+
 ignore:
   - "vendor/**"
   - "node_modules/**"
 ```
 
-Generate a starter configuration with `gomdlint init` or a comprehensive template with `gomdlint init --full`.
+Generate a starter configuration with `gomdlint init` or a comprehensive
+template that documents every rule with `gomdlint init --full`.
 
-Migrate existing markdownlint configurations with `gomdlint migrate`.
+Ignore patterns are matched like `.gitignore` patterns. Patterns in a
+project config, or in a file named with `--config`, are relative to that
+file's directory. Patterns from a user or system config, the environment or
+`--ignore` are relative to the working directory. Run-time settings such as
+`--fix`, `--format` and `--jobs` are command-line flags, and a config file
+that sets one gets a warning.
+
+### Defaults
+
+Without a config file, gomdlint runs every rule, as markdownlint does, with
+markdownlint 0.41's option defaults and the `gfm` flavor. For example,
+`heading-style` (MD003) and `unordered-list-style` (MD004) expect a
+consistent style, `ol-prefix` (MD029) accepts `one_or_ordered` numbering,
+`no-trailing-spaces` (MD009) allows two-space hard breaks, and `line-length`
+(MD013) allows 80 characters. Where a rule has an option that markdownlint
+lacks, its default keeps markdownlint's behaviour.
+
+Every rule reports warnings, except `blanks-around-tables` (MD058), which
+reports info. Warnings fail a run only with `--strict`. Set
+`severity_default: error`, or a rule's `severity`, to fail on findings
+without it.
+
+`required-headings` (MD043) and `proper-names` (MD044) check nothing until
+they are given headings or names, and `link-image-style` (MD054) reports
+nothing until an option disallows a style. Turn any rule off by name or ID,
+under `rules` or with `--disable`.
+
+### Naming Rules
+
+Wherever a rule can be named, use its ID (`MD013`), its name
+(`line-length`) or one of markdownlint's names for it (`ul-style` for MD004),
+in any case: under `rules`, in `--enable`, `--disable` and `--fix-rules`, in
+markdownlint comments, and in `markdownlint-configure-file`. The flags, the
+comments and `markdownlint-configure-file` also accept markdownlint's tags,
+such as `whitespace`, for every rule a tag covers. Keys under `rules` take
+rules only.
+
+A name that matches no rule gets an error or a warning that suggests the
+closest rules, such as `unknown rule "no-trailling-spaces" (did you mean
+"no-trailing-spaces"?)`. In a config file, the warning names the file and
+line. Shell completion offers rule names, IDs, markdownlint's names and
+tags for the three flags.
+
+### Precedence
+
+Settings apply in this order, each layer overriding the ones before it:
+
+1. Built-in defaults
+2. The system config, then the user config
+3. The project config, or a markdownlint config translated for the run
+4. A config file named with `--config`, which replaces the project config
+5. Environment variables
+6. Command-line flags
+
+Within one file, a rule's own settings under `rules` override
+`severity_default`. `--disable` wins over `--enable` for the same rule.
+
+These environment variables set the matching settings: `GOMDLINT_FLAVOR`,
+`GOMDLINT_SEVERITY_DEFAULT`, `GOMDLINT_FIX`, `GOMDLINT_DRY_RUN`,
+`GOMDLINT_JOBS`, `GOMDLINT_FORMAT`, `GOMDLINT_RULE_FORMAT`,
+`GOMDLINT_BACKUPS_ENABLED`, `GOMDLINT_BACKUPS_MODE`, `GOMDLINT_NO_BACKUPS`,
+`GOMDLINT_IGNORE` (a comma-separated list), `GOMDLINT_GITIGNORE` and
+`GOMDLINT_DEFAULT_IGNORES`.
+
+### Migrating from markdownlint
+
+Migrate existing markdownlint configurations with `gomdlint migrate`. When a
+project has no gomdlint config, gomdlint translates a markdownlint config
+that it finds and applies it for the run. It offers to save the translation
+only when stdin and stderr are both terminals.
 
 Migration writes markdownlint's rule defaults and translated options into
-`rule_defaults`, with source overrides under `rules`. It keeps gomdlint-only rules
-disabled. Native configurations retain gomdlint's defaults. For example, migrated
-MD025 checks document titles, while native MD025 checks all H1 headings.
+`rule_defaults`, with the settings of the source file under `rules`. As in
+markdownlint, a migrated config makes every finding an error, so findings
+fail the run without `--strict`, and it keeps gomdlint's own rules,
+`link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
+Migration does not evaluate JavaScript configuration or resolve `extends`.
+
+### markdownlint Comments
 
 Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
-`disable-next-line`, `disable-file`, `enable-file`, `capture`, and `restore`, with
-rule IDs, aliases, or tags. Suppressed findings produce no fixes. Comments inside
-code or frontmatter do not change lint settings. As in markdownlint, whitespace
-or `-->` must follow the comment's kind, so a comment such as
-`<!-- markdownlint-disable-next-lines MD009 -->` is plain text and does nothing.
-Unlike markdownlint, gomdlint also reads a comment split over several lines,
-and it reads every comment after one that lacks its closing `-->`, where
-markdownlint can skip some.
+`disable-next-line`, `disable-file`, `enable-file`, `capture`, and
+`restore`, with rule IDs, aliases, or tags. Suppressed findings produce no
+fixes. Comments inside code or frontmatter do not change lint settings,
+while markdownlint also reads comments inside code blocks. As in
+markdownlint, whitespace or `-->` must follow the comment's kind, so a
+comment such as `<!-- markdownlint-disable-next-lines MD009 -->` is plain
+text and does nothing. Unlike markdownlint, gomdlint also reads a comment
+split over several lines, and it reads every comment after one that lacks
+its closing `-->`, where markdownlint can skip some.
 
 A word in such a comment that names no rule or tag does nothing, as in
 markdownlint. gomdlint warns about it, and names the rules and tags that the
@@ -232,22 +486,38 @@ output format. JSON output also lists them under each file's `notices`, and
 SARIF output as `toolConfigurationNotifications`. They never change findings
 or the exit code, even with `--strict`.
 
-`markdownlint-configure-file` accepts a JSON object of markdownlint settings and
-applies it to the whole file. Invalid JSON and unknown rule keys fail that file.
-markdownlint applies the object's keys in the order they are written, while
-gomdlint applies the keys that name rules after the others, so a rule's own
-setting wins over its tag's wherever it is written.
-Migration does not evaluate JavaScript configuration or resolve `extends`.
-
-Override configuration via command line (`--enable`, `--disable`) or environment variables (`GOMDLINT_*`).
+`markdownlint-configure-file` accepts a JSON object of markdownlint settings
+and applies it to the whole file. Invalid JSON and unknown rule keys fail
+that file. markdownlint applies the object's keys in the order they are
+written, while gomdlint applies the keys that name rules after the others,
+so a rule's own setting wins over its tag's wherever it is written.
 
 ## Markdown Support
 
-Supports both CommonMark and GitHub Flavored Markdown (GFM) via `--flavor`. GFM mode enables table rules and handles GFM-specific syntax like task lists and strikethrough.
+Supports both CommonMark and GitHub Flavored Markdown (GFM) via `--flavor`
+or the `flavor` setting. The default is `gfm`, as in markdownlint, which
+parses tables, task lists, strikethrough and autolink literals. With
+`commonmark`, a table is a paragraph, so the table rules find nothing.
 
 ## CI Integration
 
-Use `--strict` to treat warnings as errors for CI pipelines. JSON and SARIF output formats integrate with analysis tools and GitHub's code scanning. Exit codes indicate whether issues were found.
+Use `--strict` to treat warnings as errors for CI pipelines. JSON and SARIF
+output formats integrate with analysis tools and GitHub's code scanning. The
+exit code tells a CI job what happened:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | No errors, and no warnings with `--strict` |
+| 1 | Error findings |
+| 2 | Warning findings with `--strict` |
+| 64 | Invalid command-line usage |
+| 65 | Invalid configuration |
+| 70 | An internal error, a rule that failed, or an interrupted run |
+| 74 | A file or directory could not be read or written |
+
+When several apply, 74 comes first, then 70, then the codes for findings.
+gomdlint names each file it could not lint and each rule that failed on
+stderr.
 
 ```yaml
 # GitHub Actions example
@@ -255,42 +525,102 @@ Use `--strict` to treat warnings as errors for CI pipelines. JSON and SARIF outp
   run: gomdlint lint --strict --format sarif > results.sarif
 
 - name: Upload SARIF
+  if: always()
   uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: results.sarif
 ```
 
+The upload step runs even when the lint step fails on findings, and it needs
+the `security-events: write` permission.
+
 ## Commands
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `gomdlint lint [paths...]` | Lint files and directories |
 | `gomdlint rules` | List all available rules |
 | `gomdlint init` | Generate configuration file |
 | `gomdlint migrate` | Convert markdownlint config |
+| `gomdlint completion <shell>` | Generate a shell completion script |
 | `gomdlint version` | Show version information |
+
+`gomdlint rules` lists each rule's name, default severity, whether it can
+fix, and description, and takes `--rule-format` like `lint`.
+`gomdlint completion` writes a script for bash, zsh, fish or powershell.
+Release archives and the Homebrew formula include the bash, zsh and fish
+completions.
+
+## Known Limitations
+
+gomdlint parses Markdown with goldmark, which reads a few constructs
+differently from GitHub and from micromark, the parser behind markdownlint.
+Some of its fix checks are also stricter than they need to be.
+
+- Twelve list and whitespace rules withhold every fix in a document that
+  holds raw HTML other than comments and `br`, `wbr`, `hr` and `img` tags,
+  because such HTML can change how the whole page shows. One inline `<kbd>`
+  is enough. The rules are `unordered-list-style` (MD004), `list-indent`
+  (MD005), `ul-indent` (MD007), `no-trailing-spaces` (MD009),
+  `no-hard-tabs` (MD010), `no-multiple-blank-lines` (MD012), `line-length`
+  (MD013), `no-multiple-space-blockquote` (MD027), `ol-prefix` (MD029),
+  `list-marker-space` (MD030), `blanks-around-lists` (MD032) and
+  `single-trailing-newline` (MD047). Their findings are still reported.
+- goldmark reads `> -  first item` followed by `> <tab>- second item`, where
+  `<tab>` is a tab character, as one list item that continues with the text
+  `- second item`. CommonMark reads two items, so the list rules see one
+  item where markdownlint sees two.
+- Inside a blockquote or list item, goldmark takes a following line that
+  lacks the container's marker into a table. For `> | a | b |`, `> | - | - |`
+  and then `| 1 | 2 | 3 |`, gomdlint reports `table-column-count` (MD056)
+  where markdownlint reports `blanks-around-tables` (MD058).
+- goldmark reads some tables that GitHub and markdownlint read as
+  paragraphs, such as a header row with fewer cells than its delimiter row.
+  There `no-bare-urls` (MD034) reads cells, so a `www.` address right after
+  a pipe is reported, and an address that runs across a pipe is reported as
+  two. MD034 never fixes a URL in such a block.
+- A file that ends with `> foo` and then `--`, without a final newline, gets
+  a `single-trailing-newline` (MD047) finding without a fix. With the
+  newline, goldmark reads the two lines as a table, while GitHub reads a
+  paragraph.
+- Two kinds of document still lint slowly. Removing a long run of unused
+  reference definitions with `link-image-reference-definitions` (MD053)
+  takes time that grows with the square of the run's length. Many fixes
+  inside one large block other than a list, such as a long table or
+  blockquote, cost a parse of that block each.
+- gomdlint reads a markdownlint comment split over two lines, which
+  markdownlint ignores, and ignores markdownlint comments inside code
+  blocks, which markdownlint honours.
+- `markdownlint-configure-file` applies the keys that name rules after the
+  others, where markdownlint applies keys in the order they are written.
 
 ## Development
 
-This project uses [stave](https://github.com/yaklabco/stave) for build automation.
+This project uses [stave](https://github.com/yaklabco/stave) for build
+automation.
 
 ### Prerequisites
 
-- Go 1.25+
-- [golangci-lint](https://golangci-lint.run/usage/install/)
-- [stave](https://github.com/yaklabco/stave) - `go install github.com/yaklabco/stave@latest`
+- Go 1.25.4 or later. `go.mod` selects the Go 1.26.9 toolchain for this
+  repository, which the `go` command downloads on first use.
+- [golangci-lint](https://golangci-lint.run/usage/install/) v2.11.4, or
+  another release built with Go 1.26 or later
+- [stave](https://github.com/yaklabco/stave):
+  `go install github.com/yaklabco/stave@latest`
 
 ### Build Tasks
 
 ```bash
-stave build      # Build the project
-stave test       # Run tests
-stave lint       # Run linters
-stave cigate     # Run CI gate checks (fmt, vet, lint, build)
-stave check      # Run all checks (format, lint, test)
+stave build      # Build bin/gomdlint
+stave test       # Run tests with the race detector
+stave lint       # Run golangci-lint and apply its fixes
+stave ci:gate    # Run every check that CI runs
+stave check      # Format, lint and test
 stave install    # Install to GOPATH/bin
 stave -l         # List all available tasks
 ```
+
+[CI_CD.md](CI_CD.md) describes the CI workflows and the release process.
 
 ### Project Structure
 
@@ -299,23 +629,32 @@ gomdlint/
   cmd/gomdlint/        # CLI entry point
   internal/
     cli/               # Cobra commands and flag handling
-    configloader/      # Viper + XDG config resolution
-    ui/pretty/         # Lipgloss-based styled output
+    configloader/      # Config discovery, loading, merging and migration
+    display/           # Character columns and paths for reporters
+    editdistance/      # Edit distance for rule name suggestions
+    ignore/            # gitignore matching for directory walks
     logging/           # Structured logging setup
+    ui/pretty/         # Lipgloss-based styled output
   pkg/
-    mdast/             # AST types, FileSnapshot, Parser interface
-    lint/              # Rule interfaces, registry, engine
-    lint/rules/        # 40+ built-in rules
-    fix/               # TextEdit, EditBuilder, conflict detection
+    analysis/          # Result aggregation and statistics
     config/            # Core config types
-    parser/goldmark/   # Goldmark-based parser implementation
-    runner/            # Multi-file runner with concurrency
-    reporter/          # Output formatters (text, JSON, SARIF, diff, summary)
+    fix/               # Text edits, fix resolution, line endings, diffs
+    fsutil/            # Pinned file writes and backups
+    langdetect/        # Code language detection for MD040
+    lint/              # Rule interface, catalog types, registry, engine
+    lint/mdscan/       # Scanners for inline HTML and autolink literals
+    lint/refs/         # Reference definitions, usages and heading anchors
+    lint/rules/        # The 55 built-in rules, their catalog, fix checks
+    mdast/             # AST types, source spans, FileSnapshot
+    parser/goldmark/   # Goldmark-based parser with exact source spans
+    reporter/          # Formatters: text, table, JSON, SARIF, diff, summary
+    runner/            # File discovery and the concurrent runner
 ```
 
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architectural design, including layer diagrams, extension points, and design patterns.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architectural
+design, including layer diagrams, extension points, and design patterns.
 
 ## License
 
