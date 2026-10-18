@@ -228,7 +228,7 @@ func newGoldmarkInstance(flavor string, spans spanKey) goldmark.Markdown {
 	// Configure extensions based on flavor.
 	switch flavor {
 	case FlavorGFM:
-		opts = append(opts, goldmark.WithExtensions(gfmExtensions...))
+		opts = append(opts, goldmark.WithExtensions(GFMExtensions()...))
 	case FlavorCommonMark:
 		// No extensions for pure CommonMark.
 	}

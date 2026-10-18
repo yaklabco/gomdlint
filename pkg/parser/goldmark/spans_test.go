@@ -695,14 +695,17 @@ func TestTaskCheckboxNodes(t *testing.T) {
 	}
 }
 
-// TestTaskMarkerAfterDefinitionIsText checks that a task marker on the line
-// after a link reference definition that starts an item is text: the item
-// does not start with it, so GitHub and micromark make no checkbox of it.
-func TestTaskMarkerAfterDefinitionIsText(t *testing.T) {
+// TestTaskMarkerAfterDefinitionIsACheckbox checks that a task marker on the
+// line after a link reference definition that starts an item is a checkbox,
+// as micromark reads it: the definition comes off the start of the item's
+// first paragraph, which then starts with the marker. GitHub's cmark-gfm
+// reads text there.
+func TestTaskMarkerAfterDefinitionIsACheckbox(t *testing.T) {
 	file := parseForSpans(t, FlavorGFM, "- [c]: /url\n  [x] done\n- [ ] b\n")
 	boxes := mdast.FindByKind(file.Root, mdast.NodeTaskCheckbox)
-	require.Len(t, boxes, 1)
-	require.Equal(t, "[ ]", string(boxes[0].Text()))
+	require.Len(t, boxes, 2)
+	require.Equal(t, "[x]", string(boxes[0].Text()))
+	require.Equal(t, "[ ]", string(boxes[1].Text()))
 	require.Equal(t, "[x] done", string(nthNode(file.Root, mdast.NodeParagraph, 0).Text()))
 }
 

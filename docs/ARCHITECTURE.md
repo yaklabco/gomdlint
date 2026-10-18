@@ -276,8 +276,9 @@ ranges are derived from the spans. Code, HTML block and front matter tokens
 follow the parse, while other markers are recognized line by line, so rules
 use spans for structure. The `gfm` flavor adds goldmark's linkify, table
 and strikethrough extensions and a task list extension of its own, which
-reads a checkbox only at the start of a paragraph and before whitespace, as
-GFM does. `commonmark` adds none.
+reads a checkbox where micromark does (`GFMExtensions`). Every goldmark
+instance that a fix check builds for GFM uses the same extensions, so the
+checks and the rules read the same checkboxes. `commonmark` adds none.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark
@@ -382,16 +383,19 @@ because the engine may apply any subset of them.
   MD029, MD030, MD032 and MD047. It compares render signatures: the front
   matter, block kinds and nesting, heading levels with the anchors GitHub
   gives them, list kinds, start numbers and tightness, code and raw HTML
-  byte for byte, resolved link destinations and titles, and inline text with
-  the whitespace that HTML collapses. With the `commonmark` flavor it also
-  parses as GFM. A document whose raw HTML is anything other than
-  whitespace, well-formed comments, and start tags of `br`, `wbr`, `hr` and
-  `img` with only the presentational attributes that `benignAttribute`
-  allows, each used once (`benignHTML`), keeps none of these rules' fixes,
-  because no signature models how a style sheet, an event handler or an
-  element left open changes the page. `list_fix_safety.go` plans
-  list item moves together, so that moves which are only safe together form
-  one fix.
+  byte for byte, resolved link destinations and titles, task checkboxes, and
+  inline text with the whitespace that HTML collapses. A checkbox keeps the
+  forms that micromark reads as a checkbox and GitHub's cmark-gfm as text: a
+  tab or a line ending between the brackets, a line ending right after
+  them, and brackets off the line of the item's marker (`checkboxForm`).
+  With the `commonmark` flavor it also parses as GFM. A document whose raw
+  HTML is anything other than whitespace, well-formed comments, and start
+  tags of `br`, `wbr`, `hr` and `img` with only the presentational
+  attributes that `benignAttribute` allows, each used once (`benignHTML`),
+  keeps none of these rules' fixes, because no signature models how a style
+  sheet, an event handler or an element left open changes the page.
+  `list_fix_safety.go` plans list item moves together, so that moves which
+  are only safe together form one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through
   `verifyFixes`: MD011, MD014, MD031, MD034, MD038 to MD040, MD048, MD053,
   MD058 and MDL003. Each rule names the one change its fix may make

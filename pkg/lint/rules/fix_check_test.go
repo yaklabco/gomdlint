@@ -197,7 +197,8 @@ func TestFixCheckKeeps(t *testing.T) {
 		},
 		{
 			// GFM renderers read the checkbox even when the file is linted
-			// as CommonMark.
+			// as CommonMark. micromark still reads one with a line ending
+			// between the brackets, but GitHub's cmark-gfm reads text.
 			name:   "breaking a task checkbox under CommonMark",
 			flavor: config.FlavorCommonMark,
 			input:  "- [ ] task\n",
@@ -211,10 +212,26 @@ func TestFixCheckKeeps(t *testing.T) {
 			want: false,
 		},
 		{
+			// GitHub's cmark-gfm reads text once a line ending comes
+			// between the brackets, where micromark reads a checkbox.
 			name:  "removing a task checkbox",
 			input: "- [ ] task\n",
 			old:   "[ ]", new: "[\n  ]",
 			want: false,
+		},
+		{
+			// cmark-gfm reads "[\t]" as text and micromark reads a
+			// checkbox, so the space would add a checkbox on GitHub.
+			name:  "replacing the tab between task brackets",
+			input: "- [\t] task\n",
+			old:   "[\t]", new: "[ ]",
+			want: false,
+		},
+		{
+			name:  "widening the space after a task checkbox",
+			input: "- [x] task\n",
+			old:   "] task", new: "]  task",
+			want: true,
 		},
 		{
 			name:  "changing a link destination",

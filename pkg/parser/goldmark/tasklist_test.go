@@ -1,6 +1,7 @@
 package goldmark
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,6 +44,39 @@ func TestTaskCheckboxOnlyStartsAParagraph(t *testing.T) {
 		{name: "blockquote in item", input: "- > [ ] quote\n"},
 		{name: "second block of item", input: "- a\n\n  [ ] b\n"},
 		{name: "not a list", input: "[ ] text\n"},
+		// micromark expands a tab to the next multiple of four columns, so
+		// "[\t]" is a checkbox only where the tab is one column wide.
+		{name: "tab four columns wide", input: "-  [\t] task\n"},
+		{name: "tab three columns wide", input: "-   [\t] task\n"},
+		{name: "tab two columns wide", input: "-    [\t] task\n"},
+		{name: "tab in an ordered item", input: "1. [\t] task\n"},
+		{name: "tab in a quoted item", input: "> - [\t] task\n"},
+		{name: "tab in a nested item", input: "- a\n  - [\t] task\n"},
+		{name: "tabs after the marker and inside", input: "-\t[\t] task\n"},
+		{name: "tab after the marker", input: "-\t[x] foo\n", boxes: []string{"[x]"}},
+		{name: "wide ordered item", input: "1.  [x] wide\n", boxes: []string{"[x]"}},
+		{name: "form feed inside", input: "- [\f] done\n"},
+		// A line ending inside the brackets counts as their space when the
+		// next line of the paragraph starts with "]".
+		{name: "line ending inside", input: "- [\n  ] task\n", boxes: []string{"[\n  ]"}},
+		{name: "carriage return and line feed inside", input: "- [\r\n  ] task\r\n", boxes: []string{"[\r\n  ]"}},
+		{name: "line ending inside and a lazy bracket", input: "- [\n] task\n", boxes: []string{"[\n]"}},
+		{name: "line ending inside in a quoted item", input: "> - [\n>   ] task\n", boxes: []string{"[\n>   ]"}},
+		{name: "line ending inside and a line ending after", input: "- [\n  ]\n  task\n", boxes: []string{"[\n  ]"}},
+		{name: "line ending inside and a space before the bracket", input: "- [\n   ] task\n"},
+		{name: "line ending inside and a tab before the bracket", input: "- [\n\t] task\n"},
+		{name: "line ending inside and nothing after", input: "- [\n  ]\n"},
+		{name: "letter and line ending inside", input: "- [x\n  ] task\n"},
+		{name: "tab after the brackets", input: "- [ ]\ttask\n", boxes: []string{"[ ]"}},
+		{name: "blank first line", input: "-\n  [x] done\n", boxes: []string{"[x]"}},
+		{name: "code before the brackets", input: "- `x` [x] a\n"},
+		// Definitions that start the paragraph leave it the item's first
+		// content, as in micromark, unless a blank line comes between.
+		{name: "after a definition", input: "- [c]: /url\n  [x] done\n", boxes: []string{"[x]"}},
+		{name: "unchecked after a definition", input: "- [c]: /url\n  [ ] done\n", boxes: []string{"[ ]"}},
+		{name: "after two definitions", input: "- [c]: /url\n  [d]: /other\n  [x] done\n", boxes: []string{"[x]"}},
+		{name: "after a definition and a blank line", input: "- [c]: /url\n\n  [x] done\n"},
+		{name: "after a blank first line and a definition", input: "-\n  [c]: /url\n  [x] done\n", boxes: []string{"[x]"}},
 	}
 
 	for _, tt := range tests {
@@ -64,6 +98,41 @@ func TestTaskCheckboxOnlyStartsAParagraph(t *testing.T) {
 
 			commonMark := parseForSpans(t, FlavorCommonMark, tt.input)
 			require.Empty(t, mdast.FindByKind(commonMark.Root, mdast.NodeTaskCheckbox), "CommonMark has no task lists")
+		})
+	}
+}
+
+// TestTaskCheckboxKeepsAHardBreak checks that two or more spaces between a
+// checkbox and the end of its line make a hard line break, as micromark
+// reads them: micromark renders "- [ ]   \n  task" with a <br /> after the
+// checkbox. The checkbox takes the spaces before text on its own line, so
+// the text starts after them.
+func TestTaskCheckboxKeepsAHardBreak(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		breaks int // Hard breaks micromark renders.
+		text   string
+	}{
+		{name: "three spaces", input: "- [ ]   \n  task\n", breaks: 1, text: "task"},
+		{name: "two spaces", input: "- [x]  \n  task\n", breaks: 1, text: "task"},
+		{name: "one space", input: "- [ ] \n  task\n", text: "task"},
+		{name: "spaces and a tab", input: "- [ ]  \t\n  task\n", text: "task"},
+		{name: "line ending inside and three spaces", input: "- [\n  ]   \n  task\n", breaks: 1, text: "task"},
+		{name: "text after", input: "- [ ]   todo\n", text: "todo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := parseForSpans(t, FlavorGFM, tt.input)
+			require.Len(t, mdast.FindByKind(file.Root, mdast.NodeTaskCheckbox), 1)
+			require.Len(t, mdast.FindByKind(file.Root, mdast.NodeHardBreak), tt.breaks)
+			var texts []string
+			for _, text := range mdast.FindByKind(file.Root, mdast.NodeText) {
+				if value := strings.TrimSpace(string(text.Text())); value != "" {
+					texts = append(texts, value)
+				}
+			}
+			require.Equal(t, []string{tt.text}, texts)
 		})
 	}
 }

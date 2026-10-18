@@ -317,11 +317,19 @@ formats change. The first entries under Changed may need action.
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Findings
   point at the link text, one column after the bracket, and autolinks are
   never checked.
-- `[ ]`, `[x]` and `[X]` make a task checkbox only at the start of a
-  paragraph and before whitespace, as in GFM. In a heading, or right before
-  other text, they are text or a link, so **MD039** reports
-  `- ## [ ](/url).` and **MD034** no longer reports the address in
-  `- [x](https://example.com)`.
+- `[ ]`, `[x]` and `[X]` make a task checkbox where micromark reads one:
+  at the start of a list item's first paragraph, after any link reference
+  definitions that start it, and before whitespace or a line ending with
+  more of the paragraph after it. A tab between the brackets counts only
+  where it is one column wide, and a line ending counts when the next line
+  starts with the `]`. In a heading, or right before other text, they are
+  text or a link, so **MD039** reports `- ## [ ](/url).` and **MD034** no
+  longer reports the address in `- [x](https://example.com)`.
+- Fix checks read task checkboxes as the rules do, so MD030, MD007 and
+  MD010 no longer turn text with a tab between brackets into a checkbox,
+  and MD009 keeps the hard line break that spaces after a checkbox make. A
+  fix that changes a checkbox that GitHub reads as text, such as one with a
+  tab between its brackets, is withheld.
 - Fixes of two rules no longer combine to corrupt a file. MD014 removing
   prompts while MD048 changed the fences could close a code block early, and
   MD007 moving an item right while MD030 narrowed the item above could nest
