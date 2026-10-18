@@ -61,17 +61,21 @@ func (m *mathRegions) findBlocks(ctx *lint.RuleContext) {
 		if scan == nil {
 			scan = newBlockScan(ctx, m)
 		}
+		ended := false
 		if item != nil && !item.holds(file, line, scan.continuations) {
-			item = nil
+			// A line that ends the item may start the next one.
+			item, ended = nil, true
 		}
-		if item == nil && listMayStart {
+		if item == nil && (listMayStart || ended) {
 			item = startItem(file, scan.containers, line)
 		}
 		if !hasFence {
 			continue
 		}
+		// A container that goldmark reads from this line on, inside the
+		// item, holds the fence; otherwise the item does.
 		container, offset, markerLine := scan.containers.at(line), 0, false
-		if item != nil {
+		if item != nil && (container == nil || container.SourcePosition().StartLine != line) {
 			container, offset, markerLine = item.container, item.col, item.line == line
 		}
 		fence, ok := mathOpening(file, container, line, offset, markerLine)
@@ -174,8 +178,8 @@ func startItem(file *mdast.FileSnapshot, containers *micromarkContainers, line i
 // item's container and is blank or indented to the item's content, or it
 // continues lazily the paragraph of the item's last line, as a line that
 // goldmark reads as the continuation of a paragraph or table
-// (continuations) and that opens no math. holds also records whether the
-// item's paragraph stays open.
+// (continuations) and that opens no math and no list item. holds also
+// records whether the item's paragraph stays open.
 func (v *virtualItem) holds(file *mdast.FileSnapshot, line int, continuations map[int]bool) bool {
 	if line == v.line {
 		return true
@@ -203,8 +207,13 @@ func (v *virtualItem) holds(file *mdast.FileSnapshot, line int, continuations ma
 	if !v.open || !continuations[line] {
 		return false
 	}
+	if indent > maxFenceIndent {
+		return true
+	}
+	// A fence or a list item marker starts a block, not a lazy line.
 	_, opens := mathFenceOpening(raw[start:])
-	return indent > maxFenceIndent || !opens
+	_, _, isItem := listItemContent(raw, start, indent)
+	return !opens && !isItem
 }
 
 // nodeLines returns the 1-based lines that nodes span.
@@ -346,7 +355,8 @@ func (c *micromarkContainers) isRefused(item *mdast.Node) bool {
 // stays open across blank lines. After any other block micromark starts
 // the list, and it starts an item after another of its list. After an item
 // it does not start, whose text continues the paragraph, it starts one
-// only as it would after paragraph text.
+// only as it would after paragraph text, or after indented code when that
+// item ends in indented code.
 func (c *micromarkContainers) refuses(item *mdast.Node) bool {
 	list := item.Parent
 	if list == nil || startsListAfterText(c.file.Content, item) {
@@ -357,7 +367,9 @@ func (c *micromarkContainers) refuses(item *mdast.Node) bool {
 		return false
 	}
 	if list.FirstChild != item {
-		return item.Prev != nil && c.isRefused(item.Prev) && c.holdsTextIn(enclosingContainer(item), before)
+		prev := item.Prev
+		return prev != nil && c.isRefused(prev) &&
+			(c.holdsTextIn(enclosingContainer(item), before) || endsInIndentedCode(prev))
 	}
 	outer := list
 	for outer.Parent != nil && outer.Parent.Kind != mdast.NodeDocument &&
@@ -375,6 +387,13 @@ func (c *micromarkContainers) refuses(item *mdast.Node) bool {
 		// definition, which micromark reads as open content.
 		return c.holdsTextIn(enclosingContainer(outer), before)
 	}
+}
+
+// endsInIndentedCode reports whether the last block of list item is an
+// indented code block, which micromark keeps open across blank lines.
+func endsInIndentedCode(item *mdast.Node) bool {
+	last := item.LastChild
+	return last != nil && last.Kind == mdast.NodeCodeBlock && !lint.IsFencedCodeBlock(last)
 }
 
 // holdsTextIn reports whether line holds text past the prefix of

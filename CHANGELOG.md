@@ -349,7 +349,7 @@ formats change. The first entries under Changed may need action.
   cmark-gfm read checkboxes in different places, so any line that holds a
   `[`, one character or a line ending, and `]`, wherever on the line, keeps
   fixes off its paragraph and the lines on either side of it, and a fix that
-  makes such a line is withheld too; its finding is reported without a fix.
+  makes such a line is withheld too. Its finding is reported without a fix.
   A paragraph that holds `[1]` or `a[i]` keeps its fixes that way as well.
   Plain task items such as `- [ ] todo` still get the fixes that change only
   their marker for one of its kind, the spacing after it, their indentation
