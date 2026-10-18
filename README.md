@@ -720,6 +720,18 @@ Some of its fix checks are also stricter than they need to be.
   takes time that grows with the square of the run's length. Many fixes
   inside one large block other than a list, such as a long table or
   blockquote, cost a parse of that block each.
+- gomdlint reads a math block only when its `$$` fence starts the line,
+  with no indentation and no blockquote or list marker before it.
+  markdownlint also reads math inside blockquotes, list items, footnotes
+  and tables, which `no-reversed-links` (MD011), `no-inline-html` (MD033),
+  `no-alt-text` (MD045) and `reference-links-images` (MD052) skip, while
+  gomdlint reports there. gomdlint also stops reading math blocks for the
+  rest of a document at a fence where micromark may read the lines before
+  it differently from goldmark: after an indented `$$` fence, which
+  markdownlint may read as math, after an HTML block that goldmark does not
+  read, or inside a `:::` directive. A line that looks like a footnote
+  definition inside math that gomdlint does not read counts as one for
+  MD052.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

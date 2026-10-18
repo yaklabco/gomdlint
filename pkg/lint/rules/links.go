@@ -435,7 +435,7 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 // not copied for each element.
 func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext, math *lazyMath) []htmlImage {
 	var images []htmlImage
-	sources := htmlSources{file: ctx.File}
+	sources := htmlSources{file: ctx.File, math: math}
 	keep := func(source []byte, construct mdscan.HTMLConstruct, _ bool) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
 			// The source is valid only while it is read, so the image keeps

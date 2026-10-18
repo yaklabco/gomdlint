@@ -67,7 +67,11 @@ type blockHTML struct {
 // HTML block: the block's whole lines are parsed as Markdown (see
 // parsedBlockHTML). A line's container prefix is part of what is parsed,
 // as in markdownlint, so a block in a blockquote is read as a blockquote.
-func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node) []blockHTML {
+// readMath tells whether the parse leaves out raw HTML in math. It does not
+// for a block that goldmark starts in math, which micromark does not read
+// as one block, so that the rules report there as they did before they
+// skipped math.
+func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node, readMath bool) []blockHTML {
 	span := block.SourceRange()
 	if file == nil || span.StartOffset < 0 || span.EndOffset <= span.StartOffset || span.EndOffset > len(file.Content) {
 		return nil
@@ -82,20 +86,23 @@ func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node) []blockHTM
 	if !bytes.ContainsAny(source, "$|") {
 		return plainBlockHTML(source, start)
 	}
-	return parsedBlockHTML(file.Path, source, start)
+	return parsedBlockHTML(file.Path, source, start, readMath)
 }
 
 // parsedBlockHTML returns the raw HTML in the lines of a block, source,
 // that start at offset start in the file: the lines are parsed with
-// htmlBlockParser, and each inline HTML node there that is not in math is
-// raw HTML, in a table or not.
-func parsedBlockHTML(path string, source []byte, start int) []blockHTML {
+// htmlBlockParser, and each inline HTML node there that is not in math,
+// when readMath is set, is raw HTML, in a table or not.
+func parsedBlockHTML(path string, source []byte, start int, readMath bool) []blockHTML {
 	parsed, err := htmlBlockParser.Parse(context.Background(), path, source)
 	if err != nil {
 		return nil
 	}
 	lines := lint.NewRuleContext(context.Background(), parsed, nil, nil)
-	math := findMath(lines)
+	var math mathRegions
+	if readMath {
+		math = findMathInHTMLBlock(lines)
+	}
 	var tags []blockHTML
 	for _, node := range lines.HTMLInlines() {
 		raw := node.SourceRange()

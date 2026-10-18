@@ -4,6 +4,7 @@ package rules
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -256,6 +257,51 @@ func gfmFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 	return labels
 }
 
+// innermostContainers returns, for each line, the innermost blockquote or
+// list item whose span holds it, or nil. The containers are written from
+// the longest to the shortest, and from the outermost to the innermost
+// among equally long ones, so an inner one overwrites the outer ones, in
+// time that grows with the lines the containers hold.
+func innermostContainers(ctx *lint.RuleContext) []*mdast.Node {
+	type heldLines struct {
+		node               *mdast.Node
+		first, last, depth int
+	}
+	var spans []heldLines
+	for _, containers := range [][]*mdast.Node{ctx.Blockquotes(), ctx.ListItems()} {
+		for _, container := range containers {
+			if pos := container.SourcePosition(); pos.IsValid() {
+				depth := 0
+				for parent := container.Parent; parent != nil; parent = parent.Parent {
+					depth++
+				}
+				spans = append(spans, heldLines{container, pos.StartLine, pos.EndLine, depth})
+			}
+		}
+	}
+	slices.SortFunc(spans, func(a, b heldLines) int {
+		return cmp.Or(cmp.Compare(b.last-b.first, a.last-a.first), cmp.Compare(a.depth, b.depth))
+	})
+	holders := make([]*mdast.Node, len(ctx.File.Lines)+1)
+	for _, span := range spans {
+		for line := max(span.first, 1); line <= span.last && line < len(holders); line++ {
+			holders[line] = span.node
+		}
+	}
+	return holders
+}
+
+// enclosingContainer returns the blockquote or list item around node, or
+// nil when there is none.
+func enclosingContainer(node *mdast.Node) *mdast.Node {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeBlockquote || parent.Kind == mdast.NodeListItem {
+			return parent
+		}
+	}
+	return nil
+}
+
 // maxContainerIndent is the most columns of space before the marker that
 // starts a container, such as a blockquote or a footnote definition.
 const maxContainerIndent = 3
@@ -270,7 +316,8 @@ const maxContainerIndent = 3
 // columns in, inside an open footnote, and a line after a blank line that
 // is not indented as far closes the footnotes it does not reach. Indented
 // code and fenced code in a footnote's content hold no definition, nor do
-// goldmark's code, HTML and math blocks outside footnotes.
+// goldmark's code and HTML blocks outside footnotes, or math blocks that a
+// fence at column 0 opens (possibleMathLines).
 //
 // Where goldmark's blocks and micromark's differ inside a footnote's
 // content, the scan errs towards reading a definition, so that MD052 never
@@ -279,7 +326,7 @@ const maxContainerIndent = 3
 // footnote closes only after a blank line.
 type footnoteScan struct {
 	ctx          *lint.RuleContext
-	containers   *micromarkContainers
+	holders      []*mdast.Node
 	htmlLines    map[int]bool
 	math         mathRegions
 	indentedCode map[int]bool
@@ -304,11 +351,11 @@ type footnoteFence struct {
 func newFootnoteScan(ctx *lint.RuleContext) *footnoteScan {
 	scan := &footnoteScan{
 		ctx:          ctx,
+		holders:      innermostContainers(ctx),
 		htmlLines:    htmlBlockLines(ctx),
-		math:         findMath(ctx),
+		math:         mathRegions{lines: possibleMathLines(ctx)},
 		indentedCode: make(map[int]bool),
 	}
-	scan.containers = newMicromarkContainers(ctx, &scan.math)
 	for _, block := range ctx.CodeBlocks() {
 		if !lint.IsFencedCodeBlock(block) {
 			for line := range lint.CodeContentLines([]*mdast.Node{block}) {
@@ -326,7 +373,10 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 		s.afterBlank = true
 		return
 	}
-	container := s.containers.at(line)
+	container := s.holders[line]
+	for container != nil && !lint.ContinuesContainers(file, container, line) {
+		container = enclosingContainer(container)
+	}
 	indent, start, ok := lint.IndentAfterContainers(file, container, line)
 	if !ok {
 		return
@@ -348,12 +398,6 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 			s.fence = footnoteFence{open: true, char: char, size: size, depth: s.depth}
 			return
 		}
-		// Math in a footnote's content, which goldmark does not read, holds
-		// no definition either.
-		if size, opens := mathFenceOpening(rest); opens {
-			s.fence = footnoteFence{open: true, char: '$', size: size, depth: s.depth}
-			return
-		}
 	}
 	if s.excluded(line) {
 		return
@@ -366,8 +410,8 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 	s.depth = indent/tabStop + 1
 }
 
-// excluded reports whether a line is in goldmark's code, HTML or math
-// blocks, where no definition starts. In a footnote's content goldmark
+// excluded reports whether a line is in goldmark's code or HTML blocks, or
+// in a math block, where no definition starts. In a footnote's content goldmark
 // reads an indented line after a blank line as indented code, which the
 // indentation rule judges instead.
 func (s *footnoteScan) excluded(line int) bool {

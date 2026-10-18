@@ -280,15 +280,17 @@ formats change. The first entries under Changed may need action.
 - **MD010**: Reports each run of tabs, as markdownlint does, instead of one
   finding per line. With `ignore_code_languages` set, it skips fences that
   name no language.
-- **MD011**: Skips math, which markdownlint parses: blocks fenced by `$$`
-  and inline math such as `$(a)[b]$`. A fence opens math only after the
-  prefix of the blockquotes and list items that micromark reads on its
-  line and at most three spaces, so `Intro\n    $$` is paragraph text, and
-  so is `Intro\n01. $$`, since micromark starts no list marked `01.` after
-  text. A math block ends before a line that does not continue its
-  blockquotes and list items, such as a lazy line, and only a fence after
-  its own container prefix and at most three spaces closes it, so `> $$`
-  inside top-level math is math.
+- **MD011**: Skips math, which markdownlint parses: inline math such as
+  `$(a)[b]$`, and math blocks whose `$$` fence starts its line, with no
+  indentation and no blockquote or list marker before it. Such a block
+  runs to its closing fence, a line of at least as many dollar signs after
+  at most three spaces, or to the end of the document, so `> $$` inside it
+  is math. Math inside blockquotes, list items, footnotes and tables, and
+  behind an indented fence, is read as text, so its findings are reported.
+  So is every math block from a fence where micromark may read the lines
+  before it differently from goldmark, such as one after an indented fence
+  or inside a `:::` directive. Inline math never pairs dollar signs across
+  a math fence.
 - **MD012**: Reports each blank line past the maximum, as markdownlint
   does, and no longer reports the blank lines right after front matter. One
   pass of fixes still removes a whole run.

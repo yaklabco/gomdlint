@@ -325,6 +325,13 @@ func TestInlineHTMLRule_MathAndTablesInHTMLBlocks(t *testing.T) {
 		},
 		{name: "inline math outside blocks", input: "Text $<b>$ here.\n\n$<img src=\"a.png\">$\n"},
 		{name: "quoted fence in math", input: "$$\n> $$\n\n<b>x</b> <img src=\"a.png\">\n$$\n"},
+		{
+			// micromark reads top-level math at the indented fence, whose
+			// closing fence at column 0 opens no math in gomdlint.
+			name:  "indented fence in a block",
+			input: "<div>\n  $$\nx\n$$\n<b>y</b> (a)[b]\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {5, 1, "b"}},
+		},
 		{name: "indented line after text opens no math", input: "Intro\n    $$\n\n<b>x</b>\n", want: []htmlDiagWant{{4, 1, "b"}}},
 		{name: "ordered marker 3 after text opens no math", input: "Intro\n3. $$\n\n<b>x</b>\n", want: []htmlDiagWant{{4, 1, "b"}}},
 		{name: "fence after a blank line opens math", input: "Intro\n\n$$\n\n<b>x</b>\n"},
@@ -367,7 +374,7 @@ func TestPlainBlockHTMLMatchesTheParsedLines(t *testing.T) {
 	} {
 		t.Run(source, func(t *testing.T) {
 			const start = 7
-			assert.Equal(t, parsedBlockHTML("test.md", []byte(source), start), plainBlockHTML([]byte(source), start))
+			assert.Equal(t, parsedBlockHTML("test.md", []byte(source), start, true), plainBlockHTML([]byte(source), start))
 		})
 	}
 }

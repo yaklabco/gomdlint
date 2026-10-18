@@ -186,11 +186,16 @@ func TestReversedLinkRule_SkipsMath(t *testing.T) {
 	assert.Equal(t, []position{{3, 10}, {15, 12}, {17, 15}, {38, 12}}, got)
 }
 
-// TestReversedLinkRule_MathEndsAtALazyLine checks MD011 against markdownlint
-// 0.41.1, where a math block ends at the first line that does not continue
-// its blockquotes and list items explicitly: a lazy line ends it and is not
-// math, as micromark-extension-math allows no lazy continuation.
-func TestReversedLinkRule_MathEndsAtALazyLine(t *testing.T) {
+// TestReversedLinkRule_MathAndContainers checks MD011 against markdownlint
+// 0.41.1 on math next to lazy lines and fences in blockquotes and list
+// items. markdownlint ends a math block at the first line that does not
+// continue its blockquotes and list items explicitly. gomdlint reads only
+// top-level math from a fence at column 0, which a lazy line cannot end,
+// and closes it at a fence after at most three spaces. Rows where
+// markdownlint skips math in a container and gomdlint reports, as main
+// does, come last. Some of the other rows agree because inline math
+// between two "$$" runs of one paragraph covers the same text.
+func TestReversedLinkRule_MathAndContainers(t *testing.T) {
 	type position struct{ line, column int }
 	tests := []struct {
 		name  string
@@ -199,21 +204,13 @@ func TestReversedLinkRule_MathEndsAtALazyLine(t *testing.T) {
 	}{
 		{name: "lazy line in a blockquote", input: "> $$\n(a)[b]\n", want: []position{{2, 1}}},
 		{name: "lazy line in a list item", input: "- $$\n(a)[b]\n", want: []position{{2, 1}}},
-		{name: "lazy line after math", input: "> $$\n> (a)[b]\n(c)[d]\n", want: []position{{3, 1}}},
-		{name: "blank quoted line", input: "> $$\n>\n> (a)[b]\n", want: []position{}},
-		{name: "blank line in a list item", input: "- $$\n\n  (a)[b]\n", want: []position{}},
 		{name: "list item ended by a blank line", input: "- $$\n\n(a)[b]\n", want: []position{{3, 1}}},
-		{name: "quoted line lazy for the list item", input: "> - $$\n>   (a)[b]\n> (c)[d]\n", want: []position{{3, 3}}},
 		{name: "lazy fence opens math of its own", input: "> $$\n> a\n$$\n(e)[f]\n", want: []position{}},
-		{name: "ordered item indentation", input: "1. $$\n   (a)[b]\n  (c)[d]\n", want: []position{{3, 3}}},
-		{name: "quote markers without spaces", input: ">  $$\n> (a)[b]\n>(c)[d]\n", want: []position{}},
 		// A fence on a lazy line opens math outside the containers it does
 		// not continue, where goldmark reads a lazy paragraph line.
 		{name: "lazy fence after a quoted paragraph", input: "> a\n$$\n(b)[c]\n", want: []position{}},
 		{name: "lazy fence after a list item", input: "- a\n$$\n(b)[c]\n", want: []position{}},
-		{name: "fence lazy for the list item", input: "> - a\n> $$\n> (b)[c]\n", want: []position{}},
 		{name: "fence in the list item", input: "> - a\n>   $$\n> (b)[c]\n", want: []position{{3, 3}}},
-		{name: "blockquote in a list item", input: "- > $$\n  > (a)[b]\n  (c)[d]\n", want: []position{{3, 3}}},
 		// A closing fence follows the opening block's own container prefix
 		// and at most three spaces. No container starts inside math, so a
 		// fence after other markers, or after four columns of space, is
@@ -227,6 +224,17 @@ func TestReversedLinkRule_MathEndsAtALazyLine(t *testing.T) {
 		{name: "fence indented three spaces", input: "$$\n   $$\n(a)[b]\n", want: []position{{3, 1}}},
 		{name: "quoted fence indented three spaces", input: "> $$\n>    $$\n> (a)[b]\n", want: []position{{3, 3}}},
 		{name: "item fence indented three spaces", input: "- $$\n     $$\n  (a)[b]\n", want: []position{{3, 3}}},
+		// Indented or contained math, which markdownlint reads and gomdlint
+		// does not: gomdlint reads a math block only from a fence at column 0,
+		// so MD011 reports here, as main does.
+		{name: "lazy line after math", input: "> $$\n> (a)[b]\n(c)[d]\n", want: []position{{2, 3}, {3, 1}}},
+		{name: "blank quoted line", input: "> $$\n>\n> (a)[b]\n", want: []position{{3, 3}}},
+		{name: "blank line in a list item", input: "- $$\n\n  (a)[b]\n", want: []position{{3, 3}}},
+		{name: "quoted line lazy for the list item", input: "> - $$\n>   (a)[b]\n> (c)[d]\n", want: []position{{2, 5}, {3, 3}}},
+		{name: "ordered item indentation", input: "1. $$\n   (a)[b]\n  (c)[d]\n", want: []position{{2, 4}, {3, 3}}},
+		{name: "quote markers without spaces", input: ">  $$\n> (a)[b]\n>(c)[d]\n", want: []position{{2, 3}, {3, 2}}},
+		{name: "fence lazy for the list item", input: "> - a\n> $$\n> (b)[c]\n", want: []position{{3, 3}}},
+		{name: "blockquote in a list item", input: "- > $$\n  > (a)[b]\n  (c)[d]\n", want: []position{{2, 5}, {3, 3}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -537,24 +545,48 @@ func TestImageAltTextRule_Math(t *testing.T) {
 	assert.Equal(t, []position{{15, 1}, {26, 1}}, got)
 }
 
-// TestReversedLinkRule_MathOpensWhereABlockStarts checks MD011 against
-// markdownlint 0.41.1 on lines that look like a math fence after their
-// prefix. A fence opens math only after the prefix of the containers
-// micromark reads on the line and at most three columns of space. micromark
-// starts no list with a marker other than a bullet, "1." or "1)" after an
-// open paragraph, indented code block or link reference definition, so such
-// an item, which goldmark may read, holds no math, and its lines are read
-// in the containers around it. A fence that interrupts a paragraph opens
-// math, as in micromark, and so does one after a list marker where
-// micromark starts a list on a line that goldmark reads as text.
-func TestReversedLinkRule_MathOpensWhereABlockStarts(t *testing.T) {
+// TestReversedLinkRule_MathBlocksStartAtColumnZero checks MD011 against
+// markdownlint 0.41.1 on lines that look like a math fence. gomdlint reads
+// a math block only when its opening fence starts its line at column 0,
+// outside code and HTML blocks, which micromark reads as top-level math
+// too, so the block holds exactly the lines up to its closing fence. A
+// fence anywhere else opens no math in gomdlint: where markdownlint reads
+// no math either, both report; where markdownlint reads indented or
+// contained math, gomdlint reports there as main does. From the first fence
+// where micromark may read the blocks before it differently from goldmark,
+// gomdlint reads no more math blocks, and reports there as main does.
+func TestReversedLinkRule_MathBlocksStartAtColumnZero(t *testing.T) {
 	type position struct{ line, column int }
 	tests := []struct {
 		name  string
 		input string
 		want  []position
 	}{
-		// Not a fence: the line continues the paragraph.
+		// A fence at column 0 opens math, as in markdownlint.
+		{name: "fence after a blank line", input: "Intro\n\n$$\n\n(a)[b]\n", want: []position{}},
+		{name: "fence right after text", input: "Intro\n$$\n\n(a)[b]\n", want: []position{}},
+		{name: "fence after an item after math", input: "$$\nx\n$$\n3. a\n$$\n(a)[b]\n", want: []position{}},
+		{name: "fence after an indented line", input: "Intro\n    $$\n$$\n(a)[b]\n", want: []position{}},
+		{name: "fence in a table", input: "| a |\n| - |\n$$\n(a)[b]\n$$\n", want: []position{}},
+		{name: "fence after a byte order mark", input: "\ufeff$$\n(a)[b]\n$$\n(c)[d]\n", want: []position{{4, 1}}},
+		{name: "fence with CRLF", input: "$$\r\n(a)[b]\r\n$$\r\n(c)[d]\r\n", want: []position{{4, 1}}},
+		{name: "closing fence after three spaces", input: "$$\n(a)[b]\n   $$\n(c)[d]\n", want: []position{{4, 1}}},
+		{name: "text after a closing fence", input: "$$\n(a)[b]\n$$ x\n(c)[d]\n$$\n(e)[f]\n", want: []position{{6, 1}}},
+		{name: "fence in code", input: "```\n$$\n```\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "fence in an HTML block", input: "<div>\n$$\n</div>\n\n(a)[b]\n", want: []position{{5, 1}}},
+		{name: "comment right before math", input: "<!-- prettier-ignore -->\n$$\n(a)[b]\n$$\n\n(c)[d]\n", want: []position{{6, 1}}},
+		{name: "closed code block right before math", input: "```\nx\n```\n$$\n(a)[b]\n$$\n\n(c)[d]\n", want: []position{{8, 1}}},
+		{name: "list item right before math", input: "1. Step\n$$\n(a)[b]\n$$\n\n(c)[d]\n", want: []position{{6, 1}}},
+		{name: "inline HTML right before math", input: "<b>Note:</b> the formula\n$$\n(a)[b]\n$$\n\n(c)[d]\n", want: []position{{6, 1}}},
+		{name: "math after a closed directive", input: ":::note\ntext\n:::\n\n$$\nx\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{9, 1}}},
+		{name: "item fence and a column-0 fence after it", input: "- a\n  $$\n  x\n$$\n(a)[b]\n$$\n(c)[d]\n", want: []position{{7, 1}}},
+		{name: "fence in an item numbered 1 and a column-0 fence", input: "1. a\n   $$\n   x\n$$\n(a)[b]\n$$\n(c)[d]\n", want: []position{{7, 1}}},
+		{name: "fence in a list from 3 after a blank line", input: "Intro\n\n3. a\n   $$\n   x\n$$\n(a)[b]\n$$\n(c)[d]\n", want: []position{{9, 1}}},
+		{name: "math in a fenced div", input: "::: {.callout-note}\n$$\nf(x)[y]\n$$\n:::\n\n$$\n(a)[b]\n$$\n(c)[d]\n", want: []position{{10, 1}}},
+		{name: "math in a Pandoc div", input: "::: note\n$$\nf(x)[y]\n$$\n:::\n", want: []position{}},
+		// No math, and markdownlint reads none here either: the line is
+		// paragraph text, or the math markdownlint reads ends before the
+		// reversed link.
 		{name: "fence indented four spaces after text", input: "Intro\n    $$\n\n(a)[b]\n", want: []position{{4, 1}}},
 		{name: "fence after a tab after text", input: "Intro\n\t$$\n\n(a)[b]\n", want: []position{{4, 1}}},
 		{name: "ordered marker 3 after text", input: "Intro\n3. $$\n\n(a)[b]\n", want: []position{{4, 1}}},
@@ -564,52 +596,18 @@ func TestReversedLinkRule_MathOpensWhereABlockStarts(t *testing.T) {
 		{name: "item fence indented four columns", input: "- a\n      $$\n  (a)[b]\n", want: []position{{3, 3}}},
 		{name: "ordered marker 3 after indented code", input: "    code\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
 		{name: "ordered marker 3 in an item after text", input: "Intro\n- 3. $$\n    (a)[b]\n", want: []position{{3, 5}}},
-		// A fence.
-		{name: "fence after a blank line", input: "Intro\n\n$$\n\n(a)[b]\n", want: []position{}},
-		{name: "fence indented three spaces after a blank line", input: "Intro\n\n   $$\n\n(a)[b]\n", want: []position{}},
-		{name: "fence right after text", input: "Intro\n$$\n\n(a)[b]\n", want: []position{}},
-		{name: "fence indented three spaces after text", input: "Intro\n   $$\n\n(a)[b]\n", want: []position{}},
-		{name: "quoted fence after quoted text", input: "> Intro\n> $$\n> (a)[b]\n", want: []position{}},
-		{name: "quoted fence after a tab", input: "> Intro\n>\t$$\n> (a)[b]\n", want: []position{}},
-		{name: "item fence indented three columns", input: "- a\n     $$\n  (a)[b]\n", want: []position{}},
-		{name: "ordered marker 1 after text", input: "Intro\n1. $$\n   (a)[b]\n", want: []position{}},
-		{name: "second item of an ordered list", input: "1. a\n2. $$\n   (a)[b]\n", want: []position{}},
-		{name: "ordered marker 01 after a blank line", input: "Intro\n\n01. $$\n    (a)[b]\n", want: []position{}},
-		{name: "bullet in a quote after text", input: "Intro\n> - $$\n>   (a)[b]\n", want: []position{}},
-		// micromark starts a list after other blocks.
-		{name: "ordered marker 3 after a heading", input: "# T\n3. $$\n   (a)[b]\n", want: []position{}},
 		{name: "math in an item after a heading ends there", input: "# T\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
 		{name: "math in a second list ends there", input: "1. a\n2) $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
-		{name: "ordered marker 3 after a thematic break", input: "Para\n\n***\n3. $$\n   (a)[b]\n", want: []position{}},
-		{name: "ordered marker 3 after a table", input: "| a |\n| - |\n3. $$\n   (a)[b]\n", want: []position{}},
-		{name: "ordered marker 3 in an empty item", input: "-\n  3. $$\n     (a)[b]\n", want: []position{}},
-		{name: "ordered marker 3 after math", input: "$$\nx\n$$\n3. $$\n   (a)[b]\n", want: []position{}},
-		{name: "ordered marker 3 after a quote", input: "> Intro\n3. $$\n   (a)[b]\n", want: []position{}},
 		{name: "math in an item after a quote ends there", input: "> Intro\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
-		{name: "ordered marker 3 after a bullet item", input: "- a\n3. $$\n   (a)[b]\n", want: []position{}},
-		// Where goldmark reads paragraph or table text, micromark starts a
-		// list right after math and in a table, and math in that item ends
-		// with it.
 		{name: "item after math", input: "$$\nx\n$$\n3. a\n   $$\n   y\n(a)[b]\n", want: []position{{7, 1}}},
 		{name: "item in a table", input: "| a |\n| - |\n3. a\n   $$\n   y\n(a)[b]\n", want: []position{{6, 1}}},
 		{name: "item after math with a lazy line", input: "$$\nx\n$$\n3. a\nb\n   $$\n   y\n(a)[b]\n", want: []position{{8, 1}}},
 		{name: "math closed in an item after math", input: "$$\nx\n$$\n3. a\n   $$\n   y\n   $$\n   (a)[b]\n", want: []position{{8, 4}}},
 		{name: "blank line in an item after math", input: "$$\nx\n$$\n3. a\n\n   $$\n   y\n(a)[b]\n", want: []position{{8, 1}}},
-		{name: "fence after an item after math", input: "$$\nx\n$$\n3. a\n$$\n(a)[b]\n", want: []position{}},
-		{name: "tab after the marker of a quoted item after math", input: "> $$\n> x\n> $$\n>3.\t$$\n>    (a)[b]\n", want: []position{}},
-		{name: "list nested in an item after math", input: "$$\nx\n$$\n3. a\n   - $$\n     (a)[b]\n", want: []position{}},
-		{name: "item marked 1 nested in an item after math", input: "$$\nx\n$$\n3. a\n   1. $$\n      (a)[b]\n", want: []position{}},
-		{name: "quote in an item after math", input: "$$\nx\n$$\n3. a\n   > $$\n   > (a)[b]\n", want: []position{}},
-		{name: "list nested in an item in a table", input: "| a |\n| - |\n3. a\n   - $$\n     (a)[b]\n", want: []position{}},
-		{name: "next item in a table", input: "| a |\n| - |\n3. a\n4. $$\n   (a)[b]\n", want: []position{}},
-		{name: "next item after math", input: "$$\nx\n$$\n3. a\n4. $$\n   (a)[b]\n", want: []position{}},
-		// An item micromark does not start holds no math, on any of its lines.
 		{name: "later line of an item marked 01", input: "Intro\n01. a\n    $$\n    (a)[b]\n", want: []position{{4, 5}}},
 		{name: "item marked 3 after an item marked 01", input: "Intro\n01. a\n3. $$\n   (a)[b]\n", want: []position{{4, 4}}},
 		{name: "item marked 02 after an item marked 01", input: "Intro\n01. a\n02. $$\n    (a)[b]\n", want: []position{{4, 5}}},
 		{name: "item marked 4 after an item marked 3 after code", input: "    code\n3. a\n4. $$\n   (a)[b]\n", want: []position{{4, 4}}},
-		{name: "item after a blank line after a refused item", input: "    code\n3. a\n\n4. $$\n   (a)[b]\n", want: []position{}},
-		{name: "item marked 1 after a refused item", input: "    code\n3. a\n1. $$\n   (a)[b]\n", want: []position{}},
 		{name: "item after a refused item that ends in indented code", input: "Intro\n01. a\n\n        code\n\n3. $$\n   (a)[b]\n", want: []position{{7, 4}}},
 		{name: "later line of an item marked 10 after code", input: "    code\n10. a\n    $$\n    (a)[b]\n", want: []position{{4, 5}}},
 		{name: "fence in an item marked 01 and its closing", input: "Intro\n01. $$\n    x\n    $$\n    (a)[b]\n", want: []position{{5, 5}}},
@@ -617,14 +615,79 @@ func TestReversedLinkRule_MathOpensWhereABlockStarts(t *testing.T) {
 		{name: "quoted ordered marker 3 after code and a blank line", input: ">     code\n>\n> 3. $$\n>    (a)[b]\n", want: []position{{4, 6}}},
 		{name: "ordered marker 3 after a definition", input: "[x]: /url\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
 		{name: "ordered marker 3 in a nested quote after text", input: "> Intro\n>\t> 3. $$\n>\t>    (a)[b]\n", want: []position{{3, 8}}},
-		{name: "fence interrupting text after a refused item", input: "    code\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{}},
-		// Line endings, a byte order mark and leading spaces.
 		{name: "fence indented four spaces after text with CRLF", input: "Intro\r\n    $$\r\n\r\n(a)[b]\r\n", want: []position{{4, 1}}},
 		{name: "ordered marker 3 after code with CRLF", input: "    code\r\n3. $$\r\n   (a)[b]\r\n", want: []position{{3, 4}}},
 		{name: "ordered marker 3 after code after a byte order mark", input: "\ufeff    code\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
-		{name: "spaced bullet after text", input: "Intro\n - $$\n   (a)[b]\n", want: []position{}},
 		{name: "spaced ordered marker 3 after code", input: "    code\n 3. $$\n    (a)[b]\n", want: []position{{3, 5}}},
-		{name: "fence after an indented line", input: "Intro\n    $$\n$$\n(a)[b]\n", want: []position{}},
+		{name: "fence after code in an item in a table", input: "| a |\n| - |\n3. a\n   ```\n   ```\n   $$\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{7, 1}}},
+		{name: "indented fence after math holding a list marker", input: "$$\n- a\n$$\n    $$\n\n  (a)[b] <i> ![](x) [missing][label]\n", want: []position{{6, 3}}},
+		// Where micromark may read the blocks before a fence differently from
+		// goldmark, gomdlint reads no more math blocks, and reports as main
+		// does: markdownlint's results here. Main reports (a)[b] on line 6 of
+		// the first two too, which markdownlint reads as math, and gomdlint
+		// reads no front matter past the dots, where markdownlint does. With a
+		// carriage return alone, markdownlint numbers the lines differently.
+		{name: "code fence opened in math", input: "$$\n```\n$$\n$$\n```\n(a)[b]\n$$\n(c)[d]\n", want: []position{{6, 1}, {8, 1}}},
+		{name: "HTML block opened in math", input: "$$\n<div>\n$$\n$$\n</div>\n(a)[b]\n$$\n(c)[d]\n", want: []position{{6, 1}, {8, 1}}},
+		{name: "HTML block opened in math and micromark's after it", input: "$$\n<div>\n$$\n<del>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{7, 1}}},
+		{name: "comment after math that opened an HTML block", input: "$$\n<div>\n$$\n<!--\n$$\n\n-->\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{9, 1}}},
+		{name: "tilde fence after math that opened a code block", input: "$$\n```\n$$\n~~~\n$$\n```\n<div>\n~~~\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{10, 1}}},
+		{name: "closing fence that micromark reads as opening", input: "$$\n```\n$$\n```\n$$\n<div>\n```\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{9, 1}}},
+		{name: "HTML block after math", input: "$$\nx\n$$\n<del>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{7, 1}}},
+		{name: "HTML block after a table row", input: "| a |\n| - |\n<del>\n$$\n(a)[b]\n\n(c)[d]\n", want: []position{{5, 1}, {7, 1}}},
+		{name: "tag that goldmark does not read", input: "<del\t>\n$$\n\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "HTML block in an item that holds math", input: "- a\n$$\nx\n$$\n  <div>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{8, 1}}},
+		{name: "HTML block in an item opened in math", input: "$$\n- a\n$$\n  <div>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{7, 1}}},
+		{name: "text after an HTML block in an item that holds math", input: "- a\n$$\nx\n$$\n  <div>\nfoo\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{9, 1}}},
+		{name: "math in a directive", input: ":::note\n$$\nx\n:::\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{6, 1}}},
+		{name: "closed math in a directive", input: ":::note\n$$\nx\n$$\n:::\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{7, 1}}},
+		{name: "front matter closed with dots", input: "---\na: b\n...\n$$\n(a)[b]\n---\n(c)[d]\n", want: []position{{5, 1}, {7, 1}}},
+		{name: "carriage return alone after a fence", input: "$$\nx\n$$\r(a)[b]\n\n(c)[d]\n", want: []position{{3, 4}, {5, 1}}},
+		{name: "prices around math", input: "Costs $5\n$$\nx\n$$\nSee (a)[b] <i> ![](x) [missing][label] for $6.\n", want: []position{{5, 5}}},
+		{name: "prices around math in an item", input: "- Costs $5\n  $$\n  x\n  $$\n  See (a)[b] <i> ![](x) [missing][label] for $6.\n", want: []position{{5, 7}}},
+		{name: "indented fence after text", input: "Intro\n  $$\nx\n$$\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{5, 1}}},
+		{name: "indented fence on the first line", input: " $$\nx\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{5, 1}}},
+		{name: "indented fence on a lazy line of a quote", input: "> a\n  $$\nx\n$$\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{5, 1}}},
+		{name: "indented fence on a lazy line of an item", input: "- a\n $$\nx\n$$\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{5, 1}}},
+		{name: "indented fence in an item that micromark does not read", input: "    code\n3. a\n   $$\n   x\n$$\n(a)[b] <i> ![](x) [missing][label]\n", want: []position{{6, 1}}},
+		{name: "code block in an item that micromark does not read", input: "    code\n3. ```\n   $$\n   x\n   ```\n$$\n(a)[b]\n", want: []position{{7, 1}}},
+		{name: "front matter opened with a no-break space", input: "---\u00a0\na: b\n$$\n---\n(a)[b]\n", want: []position{{5, 1}}},
+		{name: "two byte order marks", input: "\ufeff\ufeff$$\nx\n$$\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "prices around a footnote definition", input: "Costs $5\n[^1]: See (a)[b] <i> ![](x) [missing][label] for $6.\n\nUse [^1].\n", want: []position{{2, 11}}},
+		{name: "prices around a container directive", input: "Costs $5\n:::note\nSee (a)[b] <i> ![](x) [missing][label] for $6.\n:::\n", want: []position{{3, 5}}},
+		{name: "prices around a leaf directive", input: "Costs $5\n::note\nSee (a)[b] <i> ![](x) [missing][label] for $6.\n", want: []position{{3, 5}}},
+		{name: "inline math after a tag that goldmark does not read", input: "<del\t>\n$x (a)[b] y$\n", want: []position{{2, 4}}},
+		{name: "inline math in a table after a tag line", input: "| a |\n| - |\n<del>\n$x (a)[b] y$\n", want: []position{{4, 4}}},
+		// Indented or contained math, which markdownlint reads and gomdlint
+		// does not: gomdlint reads a math block only from a fence at column 0,
+		// so MD011 reports here, as main does.
+		{name: "fence indented three spaces after a blank line", input: "Intro\n\n   $$\n\n(a)[b]\n", want: []position{{5, 1}}},
+		{name: "fence indented three spaces after text", input: "Intro\n   $$\n\n(a)[b]\n", want: []position{{4, 1}}},
+		{name: "quoted fence after quoted text", input: "> Intro\n> $$\n> (a)[b]\n", want: []position{{3, 3}}},
+		{name: "quoted fence after a tab", input: "> Intro\n>\t$$\n> (a)[b]\n", want: []position{{3, 3}}},
+		{name: "item fence indented three columns", input: "- a\n     $$\n  (a)[b]\n", want: []position{{3, 3}}},
+		{name: "ordered marker 1 after text", input: "Intro\n1. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "second item of an ordered list", input: "1. a\n2. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "ordered marker 01 after a blank line", input: "Intro\n\n01. $$\n    (a)[b]\n", want: []position{{4, 5}}},
+		{name: "bullet in a quote after text", input: "Intro\n> - $$\n>   (a)[b]\n", want: []position{{3, 5}}},
+		{name: "ordered marker 3 after a heading", input: "# T\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "ordered marker 3 after a thematic break", input: "Para\n\n***\n3. $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "ordered marker 3 after a table", input: "| a |\n| - |\n3. $$\n   (a)[b]\n", want: []position{{4, 4}}},
+		{name: "ordered marker 3 in an empty item", input: "-\n  3. $$\n     (a)[b]\n", want: []position{{3, 6}}},
+		{name: "ordered marker 3 after math", input: "$$\nx\n$$\n3. $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "ordered marker 3 after a quote", input: "> Intro\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "ordered marker 3 after a bullet item", input: "- a\n3. $$\n   (a)[b]\n", want: []position{{3, 4}}},
+		{name: "tab after the marker of a quoted item after math", input: "> $$\n> x\n> $$\n>3.\t$$\n>    (a)[b]\n", want: []position{{5, 6}}},
+		{name: "list nested in an item after math", input: "$$\nx\n$$\n3. a\n   - $$\n     (a)[b]\n", want: []position{{6, 6}}},
+		{name: "item marked 1 nested in an item after math", input: "$$\nx\n$$\n3. a\n   1. $$\n      (a)[b]\n", want: []position{{6, 7}}},
+		{name: "quote in an item after math", input: "$$\nx\n$$\n3. a\n   > $$\n   > (a)[b]\n", want: []position{{6, 6}}},
+		{name: "list nested in an item in a table", input: "| a |\n| - |\n3. a\n   - $$\n     (a)[b]\n", want: []position{{5, 6}}},
+		{name: "next item in a table", input: "| a |\n| - |\n3. a\n4. $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "next item after math", input: "$$\nx\n$$\n3. a\n4. $$\n   (a)[b]\n", want: []position{{6, 4}}},
+		{name: "item after a blank line after a refused item", input: "    code\n3. a\n\n4. $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "item marked 1 after a refused item", input: "    code\n3. a\n1. $$\n   (a)[b]\n", want: []position{{4, 4}}},
+		{name: "fence interrupting text after a refused item", input: "    code\n3. $$\n   x\n   $$\n   (a)[b]\n", want: []position{{5, 4}}},
+		{name: "spaced bullet after text", input: "Intro\n - $$\n   (a)[b]\n", want: []position{{3, 4}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -635,6 +698,105 @@ func TestReversedLinkRule_MathOpensWhereABlockStarts(t *testing.T) {
 			}
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+// TestRulesReportWhereGomdlintReadsNoMath checks the four rules that skip
+// math against markdownlint 0.41.1 where gomdlint reads no math: after a
+// fence in a list item, after an indented fence, and after fences where
+// micromark may read the blocks before them differently from goldmark.
+// main reports the same, and also <div> on line 2 of the HTML block opened
+// in math, which markdownlint reads as math.
+func TestRulesReportWhereGomdlintReadsNoMath(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  map[string][]position // By rule ID.
+	}{
+		{
+			name:  "fence after code in an item in a table",
+			input: "| a |\n| - |\n3. a\n   ```\n   ```\n   $$\n(a)[b] <i> ![](x) [missing][label]\n",
+			want:  map[string][]position{"MD011": {{7, 1}}, "MD033": {{7, 8}}, "MD045": {{7, 12}}, "MD052": {{7, 19}}},
+		},
+		{
+			name:  "indented fence after math holding a list marker",
+			input: "$$\n- a\n$$\n    $$\n\n  (a)[b] <i> ![](x) [missing][label]\n",
+			want:  map[string][]position{"MD011": {{6, 3}}, "MD033": {{6, 10}}, "MD045": {{6, 14}}, "MD052": {{6, 21}}},
+		},
+		{
+			name:  "HTML block opened in math and micromark's after it",
+			input: "$$\n<div>\n$$\n<del>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n",
+			want: map[string][]position{
+				"MD011": {{7, 1}}, "MD033": {{2, 1}, {4, 1}, {7, 8}}, "MD045": {{7, 12}}, "MD052": {{7, 19}},
+			},
+		},
+		{
+			name:  "HTML block after math",
+			input: "$$\nx\n$$\n<del>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n",
+			want:  map[string][]position{"MD011": {{7, 1}}, "MD033": {{4, 1}, {7, 8}}, "MD045": {{7, 12}}, "MD052": {{7, 19}}},
+		},
+		{
+			name:  "HTML block in an item that holds math",
+			input: "- a\n$$\nx\n$$\n  <div>\n$$\n\n(a)[b] <i> ![](x) [missing][label]\n",
+			want:  map[string][]position{"MD011": {{8, 1}}, "MD033": {{5, 3}, {8, 8}}, "MD045": {{8, 12}}, "MD052": {{8, 19}}},
+		},
+		{
+			name:  "math in a directive",
+			input: ":::note\n$$\nx\n:::\n\n(a)[b] <i> ![](x) [missing][label]\n",
+			want:  map[string][]position{"MD011": {{6, 1}}, "MD033": {{6, 8}}, "MD045": {{6, 12}}, "MD052": {{6, 19}}},
+		},
+		{
+			name:  "prices around math",
+			input: "Costs $5\n$$\nx\n$$\nSee (a)[b] <i> ![](x) [missing][label] for $6.\n",
+			want:  map[string][]position{"MD011": {{5, 5}}, "MD033": {{5, 12}}, "MD045": {{5, 16}}, "MD052": {{5, 23}}},
+		},
+	}
+	rules := []lint.Rule{NewReversedLinkRule(), NewInlineHTMLRule(), NewImageAltTextRule(), NewReferenceLinkImagesRule()}
+	for _, tt := range tests {
+		for _, rule := range rules {
+			t.Run(tt.name+" "+rule.ID(), func(t *testing.T) {
+				diags := applyRuleWithOptions(t, rule, tt.input, nil)
+				got := make([]position, 0, len(diags))
+				for _, diag := range diags {
+					got = append(got, position{diag.StartLine, diag.StartColumn})
+				}
+				assert.Equal(t, tt.want[rule.ID()], got)
+			})
+		}
+	}
+}
+
+// TestHTMLBlockStart checks which lines could start an HTML block, by the
+// kinds CommonMark defines, for the math guards: inline HTML starts none.
+func TestHTMLBlockStart(t *testing.T) {
+	tests := []struct {
+		line string
+		want htmlKind
+	}{
+		{line: "<!-- note", want: htmlHoldsBlankLines},
+		{line: "<?php echo 1; ?>", want: htmlHoldsBlankLines},
+		{line: "<!DOCTYPE html>", want: htmlHoldsBlankLines},
+		{line: "<![CDATA[ x", want: htmlHoldsBlankLines},
+		{line: "<script>", want: htmlHoldsBlankLines},
+		{line: "<PRE class=x>", want: htmlHoldsBlankLines},
+		{line: "<textarea", want: htmlHoldsBlankLines},
+		{line: "<div>", want: htmlEndsAtBlankLine},
+		{line: "</div>", want: htmlEndsAtBlankLine},
+		{line: "<p/>", want: htmlEndsAtBlankLine},
+		{line: "<param>", want: htmlEndsAtBlankLine},
+		{line: "<table class=x>text", want: htmlEndsAtBlankLine},
+		{line: "<del>", want: htmlEndsAtBlankLine},
+		{line: "</del>  ", want: htmlEndsAtBlankLine},
+		{line: "<img src=\"a.png\">", want: htmlEndsAtBlankLine},
+		{line: "<b>Note:</b> text", want: htmlNone},
+		{line: "<https://example.com> text", want: htmlNone},
+		{line: "<", want: htmlNone},
+		{line: "text <div>", want: htmlNone},
+	}
+	for _, tt := range tests {
+		got, _ := htmlBlockStart([]byte(tt.line))
+		assert.Equal(t, tt.want, got, "%q", tt.line)
 	}
 }
 

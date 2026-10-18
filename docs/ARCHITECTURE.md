@@ -302,9 +302,15 @@ HTML block as markdownlint does, by parsing the block's lines again as
 Markdown without HTML blocks and indented code
 (`pkg/lint/rules/html_block_markdown.go`, with the parser from
 `NewHTMLBlockContent`), leaving out tags in math and marking tags in
-tables. Rules that markdownlint runs on its micromark parse read math the
-way micromark-extension-math does (`pkg/lint/rules/math.go`), since
-goldmark reads none.
+tables. Rules that markdownlint runs on its micromark parse read inline
+math, and math blocks whose `$$` fence starts its line, the way
+micromark-extension-math does (`pkg/lint/rules/math.go`), since goldmark
+reads none. micromark reads such a fence as top-level math while it reads
+the blocks before it as goldmark does, so these blocks need no reading of
+containers. From the first fence where the two parsers may disagree, such
+as after an HTML block that only micromark reads or inside a `:::`
+directive, no more math blocks are read. Math inside containers is not
+read.
 
 ## Fix Engine
 

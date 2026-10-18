@@ -1026,23 +1026,25 @@ func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
 			wantFull: []position{{4, 1}},
 		},
 		{
-			// Math in a footnote's content holds no definition.
+			// A known difference: markdownlint reads math in the footnote's
+			// content, which holds no definition, and reports 3:5. gomdlint
+			// reads math only from a fence at column 0, so the line defines
+			// the footnote.
 			name:  "definition in math in a footnote",
 			input: "# T\n\nUse [^n].\n\n[^o]: a\n    $$\n    [^n]: x\n    $$\n",
-			want:  []position{{3, 5}},
 		},
 		{
-			// micromark starts the list after a heading and reads math in it.
+			// A known difference: markdownlint reads math in the list item,
+			// which holds no definition, and reports 3:5.
 			name:  "definition in math in an item after a heading",
 			input: "# T\n\nUse [^n].\n\n## H\n3. $$\n   [^n]: y\n   $$\n\nEnd.\n",
-			want:  []position{{3, 5}},
 		},
 		{
-			// micromark starts no list marked 01 after text, so the
-			// indented line continues the paragraph and defines nothing.
+			// A known difference: micromark starts no list marked 01 after
+			// text, so markdownlint reads paragraph text and reports 3:5.
+			// gomdlint reads the definition in goldmark's list item.
 			name:  "indented line in an item marked 01",
 			input: "# T\n\nUse [^n].\n\nIntro\n01. $$\n    [^n]: y\n    $$\n\nEnd.\n",
-			want:  []position{{3, 5}},
 		},
 	}
 
