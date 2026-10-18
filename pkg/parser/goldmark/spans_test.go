@@ -629,6 +629,8 @@ func TestListTightnessFollowsCommonMark(t *testing.T) {
 		{"table and setext heading from the first paragraph", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n- d\n", []bool{true}},
 		{"definition, table and setext heading", "Intro\n\n- [x]: /u\n  a\n  b|c\n  -|-\n  ===\n- d\n", []bool{true}},
 		{"table and setext heading, then a blank line", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n\n  more\n- d\n", []bool{false}},
+		{"setext heading after a table and a blank line", "Intro\n\n- b|c\n  -|-\n\n  x\n  ===\n- d\n", []bool{false}},
+		{"ATX heading after a table and a blank line", "Intro\n\n- b|c\n  -|-\n\n  # x\n- d\n", []bool{false}},
 	}
 	for _, tt := range tests {
 		for _, flavor := range []string{FlavorCommonMark, FlavorGFM} {

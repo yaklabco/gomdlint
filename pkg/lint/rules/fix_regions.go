@@ -61,9 +61,11 @@ import (
 // as following one. Nothing a check compares reads that flag: list tightness
 // comes from gmparser.ListTight, which never reads the flags of a list's
 // first item or of an item's first block, and an item's first block takes in
-// every node goldmark makes from the paragraph the item starts with
-// (goldmark's own IsTight can read them, but it only decides whether a list's
-// paragraphs are text blocks, which signatures and outlines write alike).
+// every node made from the paragraph the item starts with that keeps the
+// paragraph's flag (its first definition, its rest, a setext heading made
+// from it) and a table between them (goldmark's own IsTight can read them,
+// but it only decides whether a list's paragraphs are text blocks, which
+// signatures and outlines write alike).
 // And the blank-line statistics keep the old block's line, but the next
 // lookup is of this line, which is not blank either way. A setext heading
 // does not start a group so: its Close can add its underline to the
@@ -84,7 +86,9 @@ import (
 // changes the next line too. The lines before the region are the same after
 // the edits, so the parser reaches the region as it did: with no block open,
 // or with only a closed block open that closes on the region's first line
-// whatever it holds. Either way the region parses as it does on its own. The
+// whatever it holds. Either way the region parses as it does on its own, but
+// for the blank-line flags of the blocks opened on its first line (see
+// Groups). The
 // region, edited, is parsed on its own, followed by a sentinel line. When the
 // parser starts a group at the sentinel, the region left no block open, or
 // only a closed block that closes on the next line whatever it holds, so
@@ -115,8 +119,9 @@ import (
 // makes from a paragraph opened there (its definitions, the rest of it, or
 // a setext heading made from it). ListItemLoose reads none of them: an
 // item's own flag only when it is not its list's first item, and blocks
-// only after an item's first block, which takes in a paragraph's
-// definitions and its rest. So the region's list decides for its items as
+// only after an item's first block, which takes in what goldmark makes from
+// a paragraph opened there (see gmparser.ListItemLoose). So the region's
+// list decides for its items as
 // the document does, but for whether the item before follows a blank line,
 // which comes from the original, as do the items outside the regions, and
 // the tightness of the edited list follows. goldmark's own IsTight is not
@@ -235,9 +240,10 @@ func (r *parseRecord) closesAlone(blocks []goldparser.Block) bool {
 type groupStart struct {
 	offset int
 	last   gmast.Node
-	// closed reports a start after a closed block (see Groups), where the
-	// blocks opened follow no blank line, rather than one with no block open.
-	closed bool
+	// afterClosed reports a start after a closed block (see Groups), where
+	// the blocks opened follow no blank line, rather than one with no block
+	// open.
+	afterClosed bool
 }
 
 // groupBlocks returns, for each group start, the number of the top-level
@@ -385,9 +391,9 @@ func (p *recordingBlockParser) Open(
 		rc.rec.doc = parent
 		if startsGroup {
 			rc.rec.groups = append(rc.rec.groups, groupStart{
-				offset: lineStartIn(reader.Source(), segment.Start),
-				last:   parent.LastChild(),
-				closed: true,
+				offset:      lineStartIn(reader.Source(), segment.Start),
+				last:        parent.LastChild(),
+				afterClosed: true,
 			})
 		}
 	}
@@ -476,12 +482,13 @@ type docLayout struct {
 	// nodes holds the top-level blocks of the original.
 	nodes []gmast.Node
 	// bounds holds the source offset where each group starts, 0 for the
-	// first, and the length of the source; closed reports for each group
-	// whether it starts after a closed block; groupNodes holds the index in
-	// nodes of the first block of each group, and the number of nodes.
-	bounds     []int
-	closed     []bool
-	groupNodes []int
+	// first, and the length of the source; afterClosed reports for each
+	// group whether it starts after a closed block; groupNodes holds the
+	// index in nodes of the first block of each group, and the number of
+	// nodes.
+	bounds      []int
+	afterClosed []bool
+	groupNodes  []int
 	// lists holds the top-level lists with items, in document order, and
 	// listIndex the index in lists of each list node. searchable holds the
 	// lists that may have list regions.
@@ -559,13 +566,13 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		refIndex:      referenceIndex(parsed.rec.refs),
 	}
 	layout.bounds = append(layout.bounds, 0)
-	layout.closed = append(layout.closed, false)
+	layout.afterClosed = append(layout.afterClosed, false)
 	for _, start := range starts[1:] {
 		if start.offset <= layout.bounds[len(layout.bounds)-1] {
 			return nil
 		}
 		layout.bounds = append(layout.bounds, start.offset)
-		layout.closed = append(layout.closed, start.closed)
+		layout.afterClosed = append(layout.afterClosed, start.afterClosed)
 	}
 	layout.bounds = append(layout.bounds, len(source))
 	group := 0
@@ -1070,11 +1077,14 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 	blocks := children(parsed.doc)
 	if !final {
 		groups := parsed.rec.groups
-		if len(groups) == 0 || groups[len(groups)-1].offset != length ||
-			groups[len(groups)-1].closed != l.closed[reg.last+1] {
+		if len(groups) == 0 {
 			return regionParse{}
 		}
-		counts, ok := groupBlocks(blocks, groups[len(groups)-1:])
+		last := groups[len(groups)-1]
+		if last.offset != length || last.afterClosed != l.afterClosed[reg.last+1] {
+			return regionParse{}
+		}
+		counts, ok := groupBlocks(blocks, []groupStart{last})
 		if !ok {
 			return regionParse{undecided: true}
 		}

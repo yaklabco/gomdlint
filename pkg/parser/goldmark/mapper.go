@@ -359,7 +359,7 @@ func ListItemLoose(item ast.Node, source []byte) bool {
 // nodes. Each link reference definition the paragraph starts with gets a node
 // placed before it; GFM makes a table of its lines from a header row on,
 // placed after it; and a setext underline makes a heading of what text is
-// left, placed after that table, where the paragraph itself goes. The
+// left, placed after that table, and the paragraph is removed. The
 // paragraph, the heading and the first definition keep the paragraph's
 // blank-line flag, the flag of the item's first line.
 //
@@ -391,19 +391,26 @@ func firstBlockEnd(node ast.Node, source []byte) ast.Node {
 			break
 		}
 	}
-	if table, ok := node.(*east.Table); ok {
-		if heading, ok := table.NextSibling().(*ast.Heading); ok {
-			if start, found := blockStart(heading); found && start <= table.Pos() {
-				node = heading
-			}
-		}
+	table, ok := node.(*east.Table)
+	if !ok {
+		return node
+	}
+	heading, ok := table.NextSibling().(*ast.Heading)
+	if !ok {
+		return node
+	}
+	if start, found := blockStart(heading); found && start <= table.Pos() {
+		return heading
 	}
 	return node
 }
 
-// blockStart returns where a block starts: its first line, or the position
-// goldmark gives a block without lines, such as a table, which starts where
-// the paragraph it was made from did.
+// blockStart returns where a block starts: its first line of content (for a
+// fenced code block, the line after the fence), or for a block without lines
+// the position goldmark gives it. A table's position is that of the
+// paragraph it was made from, when it was made: the first line the
+// paragraph kept after its definitions, which is where the setext heading
+// made from the same paragraph starts.
 func blockStart(node ast.Node) (int, bool) {
 	if lines := node.Lines(); lines.Len() > 0 {
 		return lines.At(0).Start, true
@@ -416,7 +423,7 @@ func blockStart(node ast.Node) (int, bool) {
 
 // startsInside reports whether next starts before prev ends, as the rest of
 // a paragraph does when its lines come between the definitions taken from
-// it. A block without lines ends where it starts.
+// it. It never does when prev has no lines or next cannot be placed.
 func startsInside(prev, next ast.Node) bool {
 	prevLines := prev.Lines()
 	start, found := blockStart(next)

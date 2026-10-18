@@ -660,8 +660,8 @@ func TestRegionChecksOnTablesBeforeSetextHeadings(t *testing.T) {
 	tests := []struct {
 		name, doc, old, new string
 	}{
-		{"blank line inserted after a break", "# Title\n\n***\n- a\n  b|c\n  -|-\n  ===\n", "***\n- a", "***\n\n- a"},
-		{"blank line after a break removed", "# Title\n\n***\n\n- a\n  b|c\n  -|-\n  ===\n", "***\n\n- a", "***\n- a"},
+		{"blank line inserted after a break", "# Title\n\n***\n- a\n  b|c\n  -|-\n  ===\n", "***", "***\n"},
+		{"blank line after a break removed", "# Title\n\n***\n\n- a\n  b|c\n  -|-\n  ===\n", "***\n", "***"},
 		{"trailing spaces in the table", "# Title\n\n***\n- a\n  b|c   \n  -|-\n  ===\n", "b|c   ", "b|c"},
 		{"trailing spaces after the item", "# Title\n\n- x\n- a\n  b|c\n  -|-\n  ===\n- y   \n- z\n- w\n- v\n", "- y   ", "- y"},
 		{"blank line removed in the list", "# Title\n\n- x\n- a\n  b|c\n  -|-\n  ===\n- y\n\n- z\n- w\n- v\n", "- y\n\n- z", "- y\n- z"},
@@ -673,20 +673,39 @@ func TestRegionChecksOnTablesBeforeSetextHeadings(t *testing.T) {
 				check := newFixCheck(snapshot, flavor)
 				change := []fix.TextEdit{replaceOnce(t, tt.doc, tt.old, tt.new)}
 				want := check.unchanged(fix.ApplyEdits(snapshot.Content, change))
-				if ok, got := check.regionsUnchanged(change); ok {
-					assert.Equal(t, want, got, "render signature")
-				}
+				ok, got := check.regionsUnchanged(change)
+				require.True(t, ok, "region checks decide")
+				assert.Equal(t, want, got, "render signature")
 				cfg := config.NewConfig()
 				cfg.Flavor = flavor
 				verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
-				if model := verifier.regions(); model != nil {
-					if ok, got := model.checkEdits(change); ok {
-						assert.Equal(t, verifier.acceptsWhole(change), got, "outline")
-					}
-				}
+				model := verifier.regions()
+				require.NotNil(t, model)
+				ok, got = model.checkEdits(change)
+				require.True(t, ok, "outline region checks decide")
+				assert.Equal(t, verifier.acceptsWhole(change), got, "outline")
 			})
 		}
 	}
+}
+
+// TestGroupRegionsEndAtTheOriginalKind checks that a group region holds only
+// when the group after it starts as the original's next group does: after a
+// closed block, where its first blocks follow no blank line, or with no
+// block open.
+func TestGroupRegionsEndAtTheOriginalKind(t *testing.T) {
+	input := "# Title\n\n***   \nText\n"
+	gfm, _ := recordingInstances()
+	layout := newDocLayout(gfm, []byte(input))
+	require.NotNil(t, layout)
+	require.Equal(t, []bool{false, false, true}, layout.afterClosed)
+	reg := region{list: -1, first: 1, last: 1}
+	at := strings.Index(input, "***   ") + len("***   ")
+	// A blank line after the break makes the next group start with no block
+	// open, though the edit does not reach its line.
+	assert.False(t, layout.parseGroupRegion(reg, []fix.TextEdit{{StartOffset: at, EndOffset: at, NewText: "\n"}}).holds)
+	// Removing the spaces keeps the break and the kind of the next start.
+	assert.True(t, layout.parseGroupRegion(reg, []fix.TextEdit{{StartOffset: at - 3, EndOffset: at}}).holds)
 }
 
 // TestGroupsStartAfterClosedBlocks checks where docLayout's groups start
@@ -696,32 +715,37 @@ func TestRegionChecksOnTablesBeforeSetextHeadings(t *testing.T) {
 // block that runs on, or a closed block inside a container.
 func TestGroupsStartAfterClosedBlocks(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  string
-		starts []string
+		name        string
+		input       string
+		starts      []string
+		afterClosed []bool
 	}{
-		{"thematic break", "a\n***\nb\n", []string{"a", "b"}},
-		{"ATX heading", "# H\nb\n", []string{"# H", "b"}},
-		{"one-line HTML block", "<!-- c -->\nb\n", []string{"<!-- c -->", "b"}},
-		{"one-line script", "<script>x</script>\nb\n", []string{"<script>x</script>", "b"}},
-		{"one-line processing instruction", "<?php x ?>\nb\n", []string{"<?php x ?>", "b"}},
-		{"one-line declaration", "<!DOCTYPE html>\nb\n", []string{"<!DOCTYPE html>", "b"}},
-		{"one-line CDATA", "<![CDATA[ x ]]>\nb\n", []string{"<![CDATA[ x ]]>", "b"}},
-		{"thematic break with CRLF", "a\r\n***\r\nb\r\n", []string{"a\r", "b\r"}},
-		{"break before a blank line", "a\n***\n\nb\n", []string{"a", "b"}},
-		{"closed fence", "```\nx\n```\nb\n", []string{"```", "b"}},
-		{"heading after a paragraph", "a\n# H\nb\n", []string{"a", "b"}},
-		{"break after a list", "- a\n***\nb\n", []string{"- a", "b"}},
-		{"setext heading", "H\n---\nb\n", []string{"H"}},
-		{"indented code", "    x\nb\n", []string{"    x"}},
-		{"HTML block that runs on", "<div>\nx\n</div>\nb\n", []string{"<div>"}},
-		{"heading in a quote", "> # H\nb\n", []string{"> # H"}},
+		{"thematic break", "a\n***\nb\n", []string{"a", "b"}, []bool{false, true}},
+		{"ATX heading", "# H\nb\n", []string{"# H", "b"}, []bool{false, true}},
+		{"one-line HTML block", "<!-- c -->\nb\n", []string{"<!-- c -->", "b"}, []bool{false, true}},
+		{"one-line script", "<script>x</script>\nb\n", []string{"<script>x</script>", "b"}, []bool{false, true}},
+		{"one-line processing instruction", "<?php x ?>\nb\n", []string{"<?php x ?>", "b"}, []bool{false, true}},
+		{"one-line declaration", "<!DOCTYPE html>\nb\n", []string{"<!DOCTYPE html>", "b"}, []bool{false, true}},
+		{"one-line CDATA", "<![CDATA[ x ]]>\nb\n", []string{"<![CDATA[ x ]]>", "b"}, []bool{false, true}},
+		{"thematic break with CRLF", "a\r\n***\r\nb\r\n", []string{"a\r", "b\r"}, []bool{false, true}},
+		{"break before a blank line", "a\n***\n\nb\n", []string{"a", "b"}, []bool{false, false}},
+		{"closed fence", "```\nx\n```\nb\n", []string{"```", "b"}, []bool{false, false}},
+		{"heading after a paragraph", "a\n# H\nb\n", []string{"a", "b"}, []bool{false, true}},
+		{"break after a list", "- a\n***\nb\n", []string{"- a", "b"}, []bool{false, true}},
+		{"setext heading", "H\n---\nb\n", []string{"H"}, []bool{false}},
+		{"indented code", "    x\nb\n", []string{"    x"}, []bool{false}},
+		{"HTML block that runs on", "<div>\nx\n</div>\nb\n", []string{"<div>"}, []bool{false}},
+		{"heading in a quote", "> # H\nb\n", []string{"> # H"}, []bool{false}},
 	}
 	gfm, commonMark := recordingInstances()
+	markdowns := []struct {
+		name     string
+		markdown goldmark.Markdown
+	}{{"gfm", gfm}, {"commonmark", commonMark}}
 	for _, tt := range tests {
-		for flavor, markdown := range map[string]goldmark.Markdown{"gfm": gfm, "commonmark": commonMark} {
-			t.Run(tt.name+"/"+flavor, func(t *testing.T) {
-				layout := newDocLayout(markdown, []byte(tt.input))
+		for _, md := range markdowns {
+			t.Run(tt.name+"/"+md.name, func(t *testing.T) {
+				layout := newDocLayout(md.markdown, []byte(tt.input))
 				require.NotNil(t, layout)
 				var starts []string
 				for _, offset := range layout.bounds[:len(layout.bounds)-1] {
@@ -729,6 +753,7 @@ func TestGroupsStartAfterClosedBlocks(t *testing.T) {
 					starts = append(starts, line)
 				}
 				assert.Equal(t, tt.starts, starts)
+				assert.Equal(t, tt.afterClosed, layout.afterClosed)
 			})
 		}
 	}

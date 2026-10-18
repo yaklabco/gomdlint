@@ -513,23 +513,34 @@ func TestListItemLoose(t *testing.T) {
 		{"same, after a blank line in a later item", "- z\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, true, false}},
 		{"table and setext heading from the first paragraph", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n- d\n", []bool{false, false}},
 		{"definition, table and setext heading", "Intro\n\n- [x]: /u\n  a\n  b|c\n  -|-\n  ===\n- d\n", []bool{false, false}},
+		{"setext heading after a table and a blank line", "Intro\n\n- b|c\n  -|-\n\n  x\n  ===\n- d\n", []bool{true, false}},
+		{"ATX heading after a table and a blank line", "Intro\n\n- b|c\n  -|-\n\n  # x\n- d\n", []bool{true, false}},
+	}
+	markdowns := []struct {
+		name     string
+		markdown goldmark.Markdown
+	}{
+		{"commonmark", goldmark.New()},
+		{"gfm", goldmark.New(goldmark.WithExtensions(extension.GFM))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			source := []byte(tt.input)
-			doc := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser().Parse(text.NewReader(source))
-			var list *ast.List
-			for node := doc.FirstChild(); node != nil && list == nil; node = node.NextSibling() {
-				if found, ok := node.(*ast.List); ok {
-					list = found
+		for _, md := range markdowns {
+			t.Run(tt.name+"/"+md.name, func(t *testing.T) {
+				source := []byte(tt.input)
+				doc := md.markdown.Parser().Parse(text.NewReader(source))
+				var list *ast.List
+				for node := doc.FirstChild(); node != nil && list == nil; node = node.NextSibling() {
+					if found, ok := node.(*ast.List); ok {
+						list = found
+					}
 				}
-			}
-			require.NotNil(t, list)
-			var loose []bool
-			for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-				loose = append(loose, ListItemLoose(item, source))
-			}
-			assert.Equal(t, tt.loose, loose)
-		})
+				require.NotNil(t, list)
+				var loose []bool
+				for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+					loose = append(loose, ListItemLoose(item, source))
+				}
+				assert.Equal(t, tt.loose, loose)
+			})
+		}
 	}
 }
