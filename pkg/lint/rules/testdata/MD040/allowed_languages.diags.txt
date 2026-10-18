@@ -1,0 +1,3 @@
+allowed_languages.input.md:5:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
+allowed_languages.input.md:12:1 warning Fenced code block has no language specified (MD040/fenced-code-language) [fixable]
+allowed_languages.input.md:19:1 warning Language 'Go' is not in the allowed list (MD040/fenced-code-language)

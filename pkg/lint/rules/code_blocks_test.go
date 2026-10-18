@@ -232,9 +232,28 @@ func TestCodeBlockLanguageRule_AllowedLanguages(t *testing.T) {
 			wantN:   1,
 		},
 		{
-			name:    "case insensitive",
+			// markdownlint compares the language with each allowed name exactly.
+			name:    "capitalized language with a lowercase name",
 			input:   "```Go\ncode\n```",
 			allowed: []any{"go"},
+			wantN:   1,
+		},
+		{
+			name:    "lowercase language with a capitalized name",
+			input:   "```go\ncode\n```",
+			allowed: []any{"Go"},
+			wantN:   1,
+		},
+		{
+			name:    "language written as allowed",
+			input:   "```Go\ncode\n```",
+			allowed: []any{"Go"},
+			wantN:   0,
+		},
+		{
+			name:    "empty list allows every language",
+			input:   "```rust\ncode\n```",
+			allowed: []any{},
 			wantN:   0,
 		},
 	}
@@ -264,6 +283,101 @@ func TestCodeBlockLanguageRule_AllowedLanguages(t *testing.T) {
 			if len(diags) != tt.wantN {
 				t.Errorf("got %d diagnostics, want %d", len(diags), tt.wantN)
 			}
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_FixKeepsToAllowedLanguages verifies that MD040
+// inserts a detected language only when allowed_languages, matched exactly
+// as markdownlint matches it, permits that language, so that the fix never
+// writes a language the rule would report on the next run.
+func TestCodeBlockLanguageRule_FixKeepsToAllowedLanguages(t *testing.T) {
+	const bashBlock = "```\n#!/bin/bash\necho hi\n```\n"
+	tests := []struct {
+		name      string
+		input     string
+		options   map[string]any
+		wantFixed string // Output after the fixes; empty means unchanged.
+	}{
+		{name: "detected language not allowed", input: bashBlock,
+			options: map[string]any{"allowed_languages": []any{"go", "ruby"}}},
+		{name: "detected language allowed", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{"go", "bash"}},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+		{name: "detected language allowed only in another case", input: bashBlock,
+			options: map[string]any{"allowed_languages": []any{"Bash"}}},
+		{name: "detected JSON allowed", input: "```\n{\"a\": 1}\n```\n",
+			options:   map[string]any{"allowed_languages": []any{"json"}},
+			wantFixed: "```json\n{\"a\": 1}\n```\n"},
+		{name: "empty list allows the detected language", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{}},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+		{name: "no list allows the detected language", input: bashBlock,
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+		{name: "list without names allows no language", input: bashBlock,
+			options: map[string]any{"allowed_languages": []any{1}}},
+		{name: "detected language allowed with language only", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{"bash"}, "language_only": true},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			require.Len(t, diags, 1)
+			assert.Equal(t, "Fenced code block has no language specified", diags[0].Message)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			fixed := applyAllEdits(t, tt.input, diags)
+			assert.Equal(t, want, fixed)
+			// A fixed block passes; an unfixed one is reported again without a fix.
+			again := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), fixed, tt.options)
+			if fixed != tt.input {
+				assert.Empty(t, again)
+			}
+			for _, diag := range again {
+				assert.False(t, diag.HasFix())
+			}
+		})
+	}
+}
+
+// TestCodeBlockLanguageRule_AllowedLanguageMessages verifies that MD040 names
+// a language that allowed_languages leaves out as it is written, and that,
+// like markdownlint, it checks the allowed languages of a fence whose info
+// string language_only also reports.
+func TestCodeBlockLanguageRule_AllowedLanguageMessages(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		options      map[string]any
+		wantMessages []string
+	}{
+		{name: "language in another case", input: "```Go\ncode\n```\n",
+			options:      map[string]any{"allowed_languages": []any{"go"}},
+			wantMessages: []string{"Language 'Go' is not in the allowed list"}},
+		{name: "info string with more than a language", input: "```bash title=x\ncode\n```\n",
+			options: map[string]any{"allowed_languages": []any{"go"}, "language_only": true},
+			wantMessages: []string{
+				"Code fence info must contain only a language identifier",
+				"Language 'bash' is not in the allowed list",
+			}},
+		{name: "allowed language with more than a language", input: "```go title=x\ncode\n```\n",
+			options:      map[string]any{"allowed_languages": []any{"go"}, "language_only": true},
+			wantMessages: []string{"Code fence info must contain only a language identifier"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), tt.input, tt.options)
+			messages := make([]string, 0, len(diags))
+			for _, diag := range diags {
+				messages = append(messages, diag.Message)
+				assert.False(t, diag.HasFix())
+			}
+			assert.ElementsMatch(t, tt.wantMessages, messages)
 		})
 	}
 }

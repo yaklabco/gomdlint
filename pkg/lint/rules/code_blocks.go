@@ -31,23 +31,16 @@ func NewCodeBlockLanguageRule() *CodeBlockLanguageRule {
 	}
 }
 
-// Apply checks that fenced code blocks have an info string.
+// Apply checks that fenced code blocks have an info string. Like
+// markdownlint, it compares the language, the first word of the info string,
+// with each name in allowed_languages exactly, so case matters, and it checks
+// that list and language_only independently.
 func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
 	}
 
-	allowedLanguages := ctx.Option("allowed_languages", nil)
-	var allowedSet map[string]bool
-	if langs, ok := allowedLanguages.([]any); ok && len(langs) > 0 {
-		allowedSet = make(map[string]bool)
-		for _, l := range langs {
-			if s, ok := l.(string); ok {
-				allowedSet[strings.ToLower(s)] = true
-			}
-		}
-	}
-
+	allowed := allowedLanguages(ctx)
 	codeBlocks := ctx.CodeBlocks()
 	var diags []lint.Diagnostic
 
@@ -61,20 +54,13 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 			continue
 		}
 
-		info := lint.CodeBlockInfo(cb)
-		if ctx.OptionBool("language_only", false) && len(strings.Fields(info)) > 1 {
+		words := strings.Fields(lint.CodeBlockInfo(cb))
+		if ctx.OptionBool("language_only", false) && len(words) > 1 {
 			diags = append(diags, lint.NewDiagnostic(r.ID(), cb, "Code fence info must contain only a language identifier").
 				WithSeverity(config.SeverityWarning).Build())
-			continue
-		}
-		// Extract just the language part (first word).
-		lang := strings.Fields(info)
-		langName := ""
-		if len(lang) > 0 {
-			langName = strings.ToLower(lang[0])
 		}
 
-		if langName == "" {
+		if len(words) == 0 {
 			diagBuilder := lint.NewDiagnostic(r.ID(), cb,
 				"Fenced code block has no language specified").
 				WithSeverity(config.SeverityWarning).
@@ -82,7 +68,7 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 
 			// Add autofix if file is available.
 			if ctx.File != nil {
-				if fixer := r.buildLanguageFix(ctx.File, cb); fixer != nil {
+				if fixer := r.buildLanguageFix(ctx.File, cb, allowed); fixer != nil {
 					diagBuilder = diagBuilder.WithFix(fixer)
 				}
 			}
@@ -92,9 +78,9 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		}
 
 		// Check against allowed languages if configured.
-		if allowedSet != nil && !allowedSet[langName] {
+		if language := words[0]; allowed != nil && !allowed[language] {
 			diag := lint.NewDiagnostic(r.ID(), cb,
-				fmt.Sprintf("Language '%s' is not in the allowed list", langName)).
+				fmt.Sprintf("Language '%s' is not in the allowed list", language)).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion("Use one of the allowed language identifiers").
 				Build()
@@ -105,10 +91,32 @@ func (r *CodeBlockLanguageRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 	return verifyFixes(ctx, diags, fixAllowance{codeInfo: true}), nil
 }
 
-// buildLanguageFix detects the language and creates a fix to insert it.
+// allowedLanguages returns the names that allowed_languages permits, or nil
+// when it sets no list and every language is allowed. As in markdownlint, an
+// empty list allows every language, and a list that holds no string allows
+// none.
+func allowedLanguages(ctx *lint.RuleContext) map[string]bool {
+	names, ok := ctx.Option("allowed_languages", nil).([]any)
+	if !ok || len(names) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		if language, ok := name.(string); ok {
+			allowed[language] = true
+		}
+	}
+	return allowed
+}
+
+// buildLanguageFix detects the language and creates a fix to insert it. It
+// returns nil when no language is detected, or when allowed, which is nil
+// when every language is allowed, leaves out the language detected: the
+// rule would report the inserted language on the next run.
 func (r *CodeBlockLanguageRule) buildLanguageFix(
 	file *mdast.FileSnapshot,
 	cb *mdast.Node,
+	allowed map[string]bool,
 ) *fix.EditBuilder {
 	// Get code block content for detection.
 	content := r.getCodeBlockContent(file, cb)
@@ -120,6 +128,9 @@ func (r *CodeBlockLanguageRule) buildLanguageFix(
 	detectedLang := langdetect.Detect(content)
 	if detectedLang == "text" {
 		return nil // Don't insert "text" as language.
+	}
+	if allowed != nil && !allowed[detectedLang] {
+		return nil
 	}
 
 	// The full span of a fenced code block starts at its opening fence.
