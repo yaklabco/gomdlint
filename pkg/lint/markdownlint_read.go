@@ -38,6 +38,46 @@ type MarkdownlintSource struct {
 	// without keys (see NotObjectText). It is empty when the text holds an
 	// object, null or nothing.
 	NotObject string
+
+	// Positions records where YAML text writes the keys and items of the
+	// configuration, by the names that Settings reads them as, so that a
+	// message about a key can name its line. It is nil for JSON text, whose
+	// keys are written as they read.
+	Positions *MarkdownlintPosition
+}
+
+// MarkdownlintPosition records where the text of a markdownlint
+// configuration writes a value: the line of the key or item that holds it,
+// counted from 1, and, for a mapping or a sequence, the positions of its
+// keys or items.
+type MarkdownlintPosition struct {
+	// Line is the line of the key of the value, or of the item.
+	Line int
+
+	// Keys holds, for a mapping, the position of each key, by the name that
+	// the configuration reads it as.
+	Keys map[string]*MarkdownlintPosition
+
+	// Items holds, for a sequence, the position of each item.
+	Items []*MarkdownlintPosition
+}
+
+// Key returns the position of the key name of the mapping at p, or nil
+// when p is nil or holds no such key.
+func (p *MarkdownlintPosition) Key(name string) *MarkdownlintPosition {
+	if p == nil {
+		return nil
+	}
+	return p.Keys[name]
+}
+
+// Item returns the position of the item at index idx, counted from 1, of
+// the sequence at p, or nil when p is nil or holds no such item.
+func (p *MarkdownlintPosition) Item(idx int) *MarkdownlintPosition {
+	if p == nil || idx < 1 || idx > len(p.Items) {
+		return nil
+	}
+	return p.Items[idx-1]
 }
 
 // MarkdownlintSyntaxError reports text that ReadMarkdownlintConfig reads

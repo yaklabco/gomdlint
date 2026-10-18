@@ -2,6 +2,9 @@ package lint_test
 
 import (
 	"fmt"
+	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +76,26 @@ func TestReadMarkdownlintConfigYAMLAsJSYAMLReads(t *testing.T) {
 		{text: "  %FOO\n---\nMD009: false\n", want: `"MD009": false`},
 		{text: " ---\nMD009: false\n", want: `"MD009": false`},
 		{text: " MD009: false\n MD013: false\n", want: `"MD009": false, "MD013": false`},
+		// The non-specific tag ! makes a plain scalar a string. It may follow
+		// the anchor after spaces, line breaks and comments, and precede it.
+		{text: "MD009: &a\n  ! false\n", want: `"MD009": "false"`},
+		{text: "MD009: &a # note\n  ! false\n", want: `"MD009": "false"`},
+		{text: "MD009: &a\n# note\n  ! false\n", want: `"MD009": "false"`},
+		{text: "MD009: &a\n\n  ! false\n", want: `"MD009": "false"`},
+		{text: "MD009: &a\r\n  ! false\r\n", want: `"MD009": "false"`},
+		{text: "MD009: &a\t! 7\n", want: `"MD009": "7"`},
+		{text: "MD009: &a !\tnull\n", want: `"MD009": "null"`},
+		{text: "MD009: !\n  false\n", want: `"MD009": "false"`},
+		{text: "MD009: ! &a\n  false\n", want: `"MD009": "false"`},
+		{text: "MD009: &a\n  ! false\nMD010: *a\n", want: `"MD009": "false", "MD010": "false"`},
+		{text: "MD009:\n  - &a\n    ! 5\n", want: `"MD009": []interface {}{"5"}`},
+		{text: "MD009: [&a\n  ! 5, 6]\n", want: `"MD009": []interface {}{"5", 6}`},
+		{text: "? &k\n  ! .inf\n: x\n", want: `".inf": "x"`},
+		// An empty value takes a ! on a later line only while it is indented
+		// under the value's key. The next key's ! is its own.
+		{text: "MD009: &a\n  !\nMD010: x\n", want: `"MD009": "", "MD010": "x"`},
+		{text: "MD009: &a\n! MD010: x\n", want: `"MD009": <nil>, "MD010": "x"`},
+		{text: "MD009: &a\nMD010: ! false\n", want: `"MD009": <nil>, "MD010": "false"`},
 	}
 
 	for _, tt := range tests {
@@ -119,6 +142,40 @@ func TestReadMarkdownlintConfigRejectsWhatJSYAMLRejects(t *testing.T) {
 		_, err := lint.ReadMarkdownlintConfig([]byte(text))
 
 		require.Error(t, err, "%q", text)
+	}
+}
+
+// TestReadMarkdownlintConfigLimitsDepthAsJSYAMLDoes covers js-yaml's
+// maxDepth of 100, which counts every node from the document's root,
+// aliases among them, so markdownlint-cli2 fails to load a config with a
+// node 101 levels deep. An alias that deep used to load.
+func TestReadMarkdownlintConfigLimitsDepthAsJSYAMLDoes(t *testing.T) {
+	t.Parallel()
+
+	nested := func(levels int, inner string) string {
+		return strings.Repeat("[", levels) + inner + strings.Repeat("]", levels)
+	}
+	for _, tt := range []struct {
+		name, text string
+		loads      bool
+	}{
+		{name: "alias at depth 100", text: "a: &a false\nMD009: " + nested(98, "*a") + "\n", loads: true},
+		{name: "alias at depth 101", text: "a: &a false\nMD009: " + nested(99, "*a") + "\n"},
+		{name: "scalar at depth 101", text: "MD009: " + nested(99, "x") + "\n"},
+		{name: "aliases at depth 100", text: "a: &a k\nMD009: " + nested(97, "{*a : *a}") + "\n", loads: true},
+		{name: "aliases at depth 101", text: "a: &a k\nMD009: " + nested(98, "{*a : *a}") + "\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := lint.ReadMarkdownlintConfig([]byte(tt.text))
+
+			if tt.loads {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "maximum depth of 100")
+			}
+		})
 	}
 }
 
@@ -172,4 +229,99 @@ func TestReadMarkdownlintConfigFindsDuplicatesInLinearTime(t *testing.T) {
 	text.WriteString("key_0: again\n")
 	_, err = lint.ReadMarkdownlintConfig([]byte(text.String()))
 	require.Error(t, err, "the last key repeats the first")
+}
+
+// TestReadMarkdownlintConfigReadsYAMLInLinearTime guards the YAML reader
+// against work that grows faster than the text, as finding each plain
+// scalar's place in its line did: a flow sequence of 16,000 items on one
+// line took almost a second, and a 96 KB config seven times as long as
+// yaml.v3's decoding.
+//
+// As TestManyClosingBracketsParseInLinearTime in pkg/parser/goldmark does,
+// it compares two measurements of the same amount of text: one read of a
+// long input against a batch of reads of an input an eighth as long. A
+// linear reader takes about as long either way, and a quadratic one about
+// eight times as long for the long input. The measurements run in turns,
+// the fastest of each counts, and garbage collection is paused while they
+// are timed.
+func TestReadMarkdownlintConfigReadsYAMLInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing")
+	}
+	const (
+		small  = 2000
+		factor = 8
+		rounds = 5
+		// A linear reader gives a ratio near one and a quadratic one near
+		// eight. The bound leaves room for a busy machine.
+		maxRatio = 3
+	)
+	items := func(prefix string, item func(idx int) string) func(int) string {
+		return func(count int) string {
+			var text strings.Builder
+			text.WriteString(prefix)
+			for idx := range count {
+				if idx > 0 {
+					text.WriteString(", ")
+				}
+				text.WriteString(item(idx))
+			}
+			text.WriteString("]}\n")
+			return text.String()
+		}
+	}
+	inputs := map[string]func(int) string{
+		"words":                                  items("MD013: {unused: [", func(int) string { return "word" }),
+		"numbers":                                items("MD013: {unused: [", strconv.Itoa),
+		"numbers after a character beyond ASCII": items("MD013: {é: [", strconv.Itoa),
+		"anchored numbers": items("MD013: {unused: [", func(idx int) string {
+			return fmt.Sprintf("&a%d %d", idx, idx)
+		}),
+		"keys on their own lines": func(count int) string {
+			var text strings.Builder
+			for idx := range count {
+				fmt.Fprintf(&text, "key_%d: %d\n", idx, idx)
+			}
+			return text.String()
+		},
+	}
+	for name, generate := range inputs {
+		t.Run(name, func(t *testing.T) {
+			short, long := []byte(generate(small)), []byte(generate(factor*small))
+			runtime.GC()
+			defer debug.SetGCPercent(debug.SetGCPercent(-1))
+
+			// Warm up both inputs before timing them.
+			readDuration(t, short)
+			readDuration(t, long)
+
+			bestBatch, bestLong := time.Duration(1<<63-1), time.Duration(1<<63-1)
+			for range rounds {
+				runtime.GC()
+				var batch time.Duration
+				for range factor {
+					batch += readDuration(t, short)
+				}
+				bestBatch = min(bestBatch, batch)
+				runtime.GC()
+				bestLong = min(bestLong, readDuration(t, long))
+			}
+			ratio := float64(bestLong) / float64(bestBatch)
+			t.Logf("%d reads of %d items in %v, one read of %d in %v, ratio %.2f",
+				factor, small, bestBatch, factor*small, bestLong, ratio)
+			require.Less(t, ratio, float64(maxRatio), "reading time grows faster than the text")
+		})
+	}
+}
+
+// readDuration reads text, a markdownlint config in YAML, and returns how
+// long the reading took.
+func readDuration(t *testing.T, text []byte) time.Duration {
+	t.Helper()
+	start := time.Now()
+	source, err := lint.ReadMarkdownlintConfig(text)
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+	require.Equal(t, lint.MarkdownlintYAML, source.Syntax)
+	return elapsed
 }

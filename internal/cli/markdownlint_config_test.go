@@ -267,12 +267,13 @@ func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 // markdownlint-cli2 0.23.3 reads with js-yaml 5.4.1's core schema, where
 // gomdlint used to decode YAML 1.1 with yaml.v3. 0b0 is a string, which
 // turns no-trailing-spaces (MD009) on, and 0o0 is the number 0, which turns
-// it off. A numeric key is a string, so an option named 0 is one that MD009
-// does not read, with a warning, and the rest of MD009's object applies,
-// where gomdlint used to lose the whole object. A %YAML directive of
-// version 1.2 loads, where gomdlint used to stop with a config error.
-// markdownlint-cli2 reports trailingSpaceDoc's trailing space with the
-// first config only.
+// it off. false after the non-specific tag !, which may follow the anchor
+// on the next line, is a string, which turns MD009 on. A numeric key is a
+// string, so an option named 0 is one that MD009 does not read, with a
+// warning, and the rest of MD009's object applies, where gomdlint used to
+// lose the whole object. A %YAML directive of version 1.2 loads, where
+// gomdlint used to stop with a config error. markdownlint-cli2 reports
+// trailingSpaceDoc's trailing space with the configs that turn MD009 on.
 func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 	tests := []struct {
 		name, settings, warning string
@@ -280,6 +281,7 @@ func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 	}{
 		{name: "0b0", settings: "MD009: 0b0\n", want: []string{"MD009"}},
 		{name: "0o0", settings: "MD009: 0o0\n"},
+		{name: "non-specific tag after a line break", settings: "MD009: &a\n  ! false\n", want: []string{"MD009"}},
 		{name: "numeric key", settings: "MD009: {enabled: false, 0: x}\n", warning: `unknown option "0" for no-trailing-spaces`},
 		{name: "YAML 1.2", settings: "%YAML 1.2\n---\nMD009: false\n"},
 	}
@@ -303,9 +305,10 @@ func TestMarkdownlintConfig_YAMLAsJSYAMLReadsIt(t *testing.T) {
 // TestMarkdownlintConfig_YAMLThatJSYAMLRejects covers YAML that js-yaml
 // 5.4.1 rejects, so markdownlint-cli2 0.23.3 stops with an error: an unknown
 // tag, which gomdlint used to ignore, a tag that the core schema lacks,
-// keys that are duplicates once they are strings, and a key written twice
-// in a list, which gomdlint used to load from a JSON file name as a list
-// that holds no settings. gomdlint stops with a config error.
+// keys that are duplicates once they are strings, a key written twice in a
+// list, which gomdlint used to load from a JSON file name as a list that
+// holds no settings, and an alias 101 levels deep, past js-yaml's maximum
+// depth, which gomdlint used to load. gomdlint stops with a config error.
 func TestMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
 	tests := []struct {
 		name, file, settings, want string
@@ -317,6 +320,11 @@ func TestMarkdownlintConfig_YAMLThatJSYAMLRejects(t *testing.T) {
 			want: `line 2: duplicated mapping key "16"`,
 		},
 		{name: "duplicate in a list", file: ".markdownlint.json", settings: "- MD009: true\n  MD009: false\n", want: ".markdownlint.json"},
+		{
+			name: "alias beyond the maximum depth", file: ".markdownlint.yaml",
+			settings: "a: &a false\nMD009: " + strings.Repeat("[", 99) + "*a" + strings.Repeat("]", 99) + "\n",
+			want:     "maximum depth of 100",
+		},
 	}
 
 	for _, tt := range tests {

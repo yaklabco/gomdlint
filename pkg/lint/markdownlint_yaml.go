@@ -88,18 +88,18 @@ func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
 	converter := newYAMLConverter(text)
 	root := doc.Content[0]
 	if root.Kind == yaml.MappingNode {
-		settings, err := converter.root(root)
+		settings, place, err := converter.root(root)
 		if err != nil {
 			return nil, err
 		}
-		source.Settings = settings
+		source.Settings, source.Positions = settings, place
 		return source, nil
 	}
-	value, err := converter.value(root, 1)
+	value, err := converter.value(root, 1, nil)
 	if err != nil {
 		return nil, err
 	}
-	switch value.(type) {
+	switch value.value.(type) {
 	case nil, map[string]any:
 		// Null, or a scalar tagged !!map, which holds no keys.
 	case []any:
@@ -258,101 +258,102 @@ func isMarker(line []byte, marker string) bool {
 }
 
 // yamlConverter converts the nodes of one YAML document to the values that
-// js-yaml 5.4.1 reads from them with its default core schema.
+// js-yaml 5.4.1 reads from them with its default core schema, and records
+// where each key and item is written.
 type yamlConverter struct {
 	// text is the document's text, in which nodes have their positions.
 	text []byte
 
-	// lineStarts holds the offset of the start of each line of text, as
-	// yaml.v3 counts lines, to find a node from its position.
-	lineStarts []int
+	// positions finds the offset in text of a node's position.
+	positions yamlPositions
 
-	// done holds the values of the anchored nodes converted so far. js-yaml
-	// reads an alias as the value of its anchor itself, so values shared
-	// this way are converted once, however many aliases repeat them.
-	done map[*yaml.Node]any
+	// done holds the values of the anchored nodes converted so far, with
+	// the places of their entries. js-yaml reads an alias as the value of
+	// its anchor itself, so values shared this way are converted once,
+	// however many aliases repeat them. An alias inside the node it names
+	// finds no value here yet (see alias).
+	done map[*yaml.Node]yamlValue
+}
 
-	// converting holds the anchored nodes whose conversion is under way.
-	converting map[*yaml.Node]bool
+// yamlValue is the value of a node, with the places of its keys or items
+// when it is a mapping or a sequence.
+type yamlValue struct {
+	value any
+
+	// place holds the places of the keys or items, and is nil for a
+	// scalar.
+	place *MarkdownlintPosition
 }
 
 // newYAMLConverter returns a converter for the nodes of a document of text.
 func newYAMLConverter(text []byte) *yamlConverter {
-	return &yamlConverter{text: text, done: make(map[*yaml.Node]any), converting: make(map[*yaml.Node]bool)}
+	return &yamlConverter{text: text, positions: yamlPositions{text: text}, done: make(map[*yaml.Node]yamlValue)}
 }
 
 // root converts node, the mapping at the root of a document, into
-// settings, keeping its keys in the order they are written.
-func (c *yamlConverter) root(node *yaml.Node) (*MarkdownlintSettings, error) {
-	c.enter(node)
-	pairs, err := c.mapping(node, 1)
-	c.leave(node, pairsValue(pairs))
+// settings, keeping its keys in the order they are written, and returns
+// the places of its keys.
+func (c *yamlConverter) root(node *yaml.Node) (*MarkdownlintSettings, *MarkdownlintPosition, error) {
+	pairs, place, err := c.mapping(node, 1, nil)
+	c.remember(node, yamlValue{value: pairsValue(pairs), place: place})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	settings := &MarkdownlintSettings{}
 	for _, pair := range pairs {
 		settings.Set(pair.Key, pair.Value)
 	}
-	return settings, nil
+	return settings, place, nil
 }
 
-// enter records that node's conversion is under way, when aliases may name
-// it.
-func (c *yamlConverter) enter(node *yaml.Node) {
+// remember records value as the value of node, when aliases may name it.
+func (c *yamlConverter) remember(node *yaml.Node, value yamlValue) {
 	if node.Anchor != "" {
-		c.converting[node] = true
-	}
-}
-
-// leave records value as the value of node, when aliases may name it.
-func (c *yamlConverter) leave(node *yaml.Node, value any) {
-	if node.Anchor != "" {
-		delete(c.converting, node)
 		c.done[node] = value
 	}
 }
 
-// value converts node, which sits depth levels deep in the document. A
-// mapping becomes a map[string]any, a sequence a []any, and a scalar nil,
-// a bool, a float64 or a string.
-func (c *yamlConverter) value(node *yaml.Node, depth int) (any, error) {
+// value converts node, which sits depth levels deep in the document, and
+// which next, the node after it in the document, follows, or nothing when
+// next is nil. A mapping becomes a map[string]any, a sequence a []any, and
+// a scalar nil, a bool, a float64 or a string. As in js-yaml, every node
+// counts towards the depth, aliases among them.
+func (c *yamlConverter) value(node *yaml.Node, depth int, next *yaml.Node) (yamlValue, error) {
+	if depth > yamlMaxDepth {
+		return yamlValue{}, fmt.Errorf("line %d: nesting exceeded the maximum depth of %d", node.Line, yamlMaxDepth)
+	}
 	if node.Kind == yaml.AliasNode {
 		return c.alias(node), nil
 	}
-	if depth > yamlMaxDepth {
-		return nil, fmt.Errorf("line %d: nesting exceeded the maximum depth of %d", node.Line, yamlMaxDepth)
-	}
-	c.enter(node)
-	var value any
+	var result yamlValue
 	var err error
 	switch node.Kind {
 	case yaml.MappingNode:
 		var pairs []MarkdownlintSetting
-		pairs, err = c.mapping(node, depth)
-		value = pairsValue(pairs)
+		pairs, result.place, err = c.mapping(node, depth, next)
+		result.value = pairsValue(pairs)
 	case yaml.SequenceNode:
-		value, err = c.sequence(node, depth)
+		result.value, result.place, err = c.sequence(node, depth, next)
 	default:
-		value, err = c.scalar(node)
+		result.value, err = c.scalar(node, next)
 	}
-	c.leave(node, value)
-	return value, err
+	c.remember(node, result)
+	return result, err
 }
 
 // alias returns the value of the node that node, an alias, names. js-yaml
 // reads an alias inside the node it names as a value that holds itself;
 // that reads as an empty collection of the node's kind here, so that no
 // value holds a cycle.
-func (c *yamlConverter) alias(node *yaml.Node) any {
+func (c *yamlConverter) alias(node *yaml.Node) yamlValue {
 	target := node.Alias
 	if value, ok := c.done[target]; ok {
 		return value
 	}
 	if target.Kind == yaml.MappingNode {
-		return map[string]any{}
+		return yamlValue{value: map[string]any{}}
 	}
-	return []any{}
+	return yamlValue{value: []any{}}
 }
 
 // pairsValue returns the pairs of a mapping as a map.
@@ -364,114 +365,230 @@ func pairsValue(pairs []MarkdownlintSetting) map[string]any {
 	return value
 }
 
-// mapping converts the pairs of node, a mapping that sits depth levels deep,
-// in the order they are written. Each key becomes a string, as the key of a
-// JavaScript object does (see jsString), and a key whose string repeats an
-// earlier one's is an error, found in constant time per key.
-func (c *yamlConverter) mapping(node *yaml.Node, depth int) ([]MarkdownlintSetting, error) {
+// entryPlace returns the place of an entry written on line whose value's
+// keys or items are at place, which is nil for a scalar.
+func entryPlace(line int, place *MarkdownlintPosition) *MarkdownlintPosition {
+	entry := &MarkdownlintPosition{Line: line}
+	if place != nil {
+		entry.Keys, entry.Items = place.Keys, place.Items
+	}
+	return entry
+}
+
+// mapping converts the pairs of node, a mapping that sits depth levels deep
+// and that next follows (see value), in the order they are written, and
+// returns the places of its keys. Each key becomes a string, as the key of
+// a JavaScript object does (see jsString), and a key whose string repeats
+// an earlier one's is an error, found in constant time per key.
+func (c *yamlConverter) mapping(node *yaml.Node, depth int, next *yaml.Node) ([]MarkdownlintSetting, *MarkdownlintPosition, error) {
 	if node.Style&yaml.TaggedStyle != 0 && node.Tag != "!!map" {
-		return nil, fmt.Errorf("line %d: unknown mapping tag %s", node.Line, node.Tag)
+		return nil, nil, fmt.Errorf("line %d: unknown mapping tag %s", node.Line, node.Tag)
 	}
 	pairs := make([]MarkdownlintSetting, 0, len(node.Content)/2)
-	seen := make(map[string]bool, len(node.Content)/2)
+	place := &MarkdownlintPosition{Line: node.Line, Keys: make(map[string]*MarkdownlintPosition, len(node.Content)/2)}
 	for idx := 0; idx+1 < len(node.Content); idx += 2 {
 		keyNode, valueNode := node.Content[idx], node.Content[idx+1]
-		key, err := c.value(keyNode, depth+1)
-		if err != nil {
-			return nil, err
+		valueNext := next
+		if idx+2 < len(node.Content) {
+			valueNext = node.Content[idx+2]
 		}
-		name, ok := jsString(key)
+		key, err := c.value(keyNode, depth+1, valueNode)
+		if err != nil {
+			return nil, nil, err
+		}
+		name, ok := jsString(key.value)
 		if !ok {
-			return nil, fmt.Errorf("line %d: a mapping or a sequence cannot be a key", keyNode.Line)
+			return nil, nil, fmt.Errorf("line %d: a mapping or a sequence cannot be a key", keyNode.Line)
 		}
-		if seen[name] {
-			return nil, fmt.Errorf("line %d: duplicated mapping key %q", keyNode.Line, name)
+		if _, repeated := place.Keys[name]; repeated {
+			return nil, nil, fmt.Errorf("line %d: duplicated mapping key %q", keyNode.Line, name)
 		}
-		seen[name] = true
-		value, err := c.value(valueNode, depth+1)
+		value, err := c.value(valueNode, depth+1, valueNext)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		pairs = append(pairs, MarkdownlintSetting{Key: name, Value: value})
+		pairs = append(pairs, MarkdownlintSetting{Key: name, Value: value.value})
+		place.Keys[name] = entryPlace(keyNode.Line, value.place)
 	}
-	return pairs, nil
+	return pairs, place, nil
 }
 
 // sequence converts the items of node, a sequence that sits depth levels
-// deep.
-func (c *yamlConverter) sequence(node *yaml.Node, depth int) ([]any, error) {
+// deep and that next follows (see value), and returns their places.
+func (c *yamlConverter) sequence(node *yaml.Node, depth int, next *yaml.Node) ([]any, *MarkdownlintPosition, error) {
 	if node.Style&yaml.TaggedStyle != 0 && node.Tag != "!!seq" {
-		return nil, fmt.Errorf("line %d: unknown sequence tag %s", node.Line, node.Tag)
+		return nil, nil, fmt.Errorf("line %d: unknown sequence tag %s", node.Line, node.Tag)
 	}
 	items := make([]any, len(node.Content))
+	place := &MarkdownlintPosition{Line: node.Line, Items: make([]*MarkdownlintPosition, len(node.Content))}
 	for idx, item := range node.Content {
-		value, err := c.value(item, depth+1)
-		if err != nil {
-			return nil, err
+		itemNext := next
+		if idx+1 < len(node.Content) {
+			itemNext = node.Content[idx+1]
 		}
-		items[idx] = value
+		value, err := c.value(item, depth+1, itemNext)
+		if err != nil {
+			return nil, nil, err
+		}
+		items[idx] = value.value
+		place.Items[idx] = entryPlace(item.Line, value.place)
 	}
-	return items, nil
+	return items, place, nil
 }
 
-// scalar converts node, a scalar, as js-yaml's core schema reads it. A
-// quoted scalar, a block scalar and a scalar with the non-specific tag !
-// are strings. A plain scalar resolves to null, a bool, an int or a float
-// when its text has one of their forms (see implicitScalar), and is a
-// string otherwise. An explicit tag must be one that the schema knows.
-func (c *yamlConverter) scalar(node *yaml.Node) (any, error) {
+// scalar converts node, a scalar that next follows (see value), as js-yaml's
+// core schema reads it. A quoted scalar, a block scalar and a scalar with
+// the non-specific tag ! are strings. A plain scalar resolves to null, a
+// bool, an int or a float when its text has one of their forms (see
+// implicitScalar), and is a string otherwise. An explicit tag must be one
+// that the schema knows.
+func (c *yamlConverter) scalar(node, next *yaml.Node) (any, error) {
 	if node.Style&yaml.TaggedStyle != 0 {
 		return explicitScalar(node)
 	}
-	if node.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) != 0 ||
-		c.nonSpecific(node) {
+	if node.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
 		return node.Value, nil
 	}
-	return implicitScalar(node.Value), nil
+	value := implicitScalar(node.Value)
+	if _, isString := value.(string); !isString && c.nonSpecific(node, next) {
+		return node.Value, nil
+	}
+	return value, nil
 }
 
-// nonSpecific reports whether node, a plain scalar that yaml.v3 records no
-// tag for, has the non-specific tag ! in the text, which yaml.v3 does not
-// record: whether the node starts with !, after its anchor if it has one.
-func (c *yamlConverter) nonSpecific(node *yaml.Node) bool {
-	at, ok := c.offset(node.Line, node.Column)
+// nonSpecific reports whether node, a plain scalar that next follows (see
+// value), has the non-specific tag !. yaml.v3 reads a scalar tagged ! as
+// one without a tag, so its node records nothing of it, and the tag is
+// found in the text: yaml.v3 places a node at its first property, so the
+// tag is there, or after the anchor and the spaces, line breaks and
+// comments that may follow it. A ! at or after the place of next is next's
+// own, as is the tag of a key after an empty value.
+func (c *yamlConverter) nonSpecific(node, next *yaml.Node) bool {
+	at, ok := c.positions.offset(node.Line, node.Column)
 	if !ok {
 		return false
 	}
-	if node.Anchor != "" && at < len(c.text) && c.text[at] == '&' {
-		at += 1 + len(node.Anchor)
-		for at < len(c.text) && (c.text[at] == ' ' || c.text[at] == '\t') {
-			at++
+	end := len(c.text)
+	if next != nil {
+		if limit, found := c.positions.offset(next.Line, next.Column); found && limit < end {
+			end = limit
 		}
 	}
-	return at < len(c.text) && c.text[at] == '!' &&
-		(at+1 == len(c.text) || strings.IndexByte(" \t\r\n", c.text[at+1]) >= 0)
+	if node.Anchor != "" && at < end && c.text[at] == '&' {
+		at = skipYAMLSeparation(c.text, at+1+len(node.Anchor), end)
+	}
+	if at >= end || c.text[at] != '!' {
+		return false
+	}
+	after, _ := utf8.DecodeRune(c.text[at+1:])
+	return at+1 == len(c.text) || isYAMLSpace(after)
 }
 
-// offset returns the offset in the converter's text of the character at
-// line and column, both counted from 1 as yaml.v3 counts them: lines end at
-// a line feed, a carriage return or both, or at the characters U+0085,
-// U+2028 and U+2029, and columns count characters.
-func (c *yamlConverter) offset(line, column int) (int, bool) {
-	if c.lineStarts == nil {
-		c.lineStarts = yamlLineStarts(c.text)
+// skipYAMLSeparation returns the offset in text of the first character at
+// or after at, and before end, that is neither a space, a tab or a line
+// break, nor in a comment, or end.
+func skipYAMLSeparation(text []byte, at, end int) int {
+	for at < end {
+		char, size := utf8.DecodeRune(text[at:])
+		switch {
+		case isYAMLSpace(char):
+			at += size
+		case char == '#' && at > 0:
+			// A comment starts after a space or a line break.
+			if before, _ := utf8.DecodeLastRune(text[:at]); !isYAMLSpace(before) {
+				return at
+			}
+			at = min(lineEnd(text, at), end)
+		default:
+			return at
+		}
 	}
-	if line < 1 || line > len(c.lineStarts) || column < 1 {
+	return end
+}
+
+// isYAMLSpace reports whether char is a space, a tab or a character that
+// ends a line in yaml.v3 (see yamlLineStarts).
+func isYAMLSpace(char rune) bool {
+	switch char {
+	case ' ', '\t', '\r', '\n', '\u0085', '\u2028', '\u2029':
+		return true
+	}
+	return false
+}
+
+// yamlPositions finds the offsets in text of positions as yaml.v3 gives
+// them, by line and column, both counted from 1: lines end at a line feed,
+// a carriage return or both, or at the characters U+0085, U+2028 and
+// U+2029, and columns count characters. Each line is looked at once, the
+// first time a position on it is wanted, so finding every node of a
+// document takes time in proportion to its length.
+type yamlPositions struct {
+	text []byte
+
+	// lineStarts holds the offset of the start of each line of text.
+	lineStarts []int
+
+	// looked records which lines have been looked at.
+	looked []bool
+
+	// columns holds, for each line that has been looked at and holds a
+	// character beyond ASCII, the offset of each of its characters and of
+	// its end. A line of ASCII text needs none, since each of its columns
+	// is one byte.
+	columns [][]int
+}
+
+// offset returns the offset in text of the character at line and column,
+// and whether the text has that position.
+func (p *yamlPositions) offset(line, column int) (int, bool) {
+	if p.lineStarts == nil {
+		p.lineStarts = yamlLineStarts(p.text)
+		p.looked = make([]bool, len(p.lineStarts))
+		p.columns = make([][]int, len(p.lineStarts))
+	}
+	if line < 1 || line > len(p.lineStarts) || column < 1 {
 		return 0, false
 	}
-	at := c.lineStarts[line-1]
-	for range column - 1 {
-		if at >= len(c.text) {
+	start, end := p.lineStarts[line-1], len(p.text)
+	if line < len(p.lineStarts) {
+		end = p.lineStarts[line]
+	}
+	if !p.looked[line-1] {
+		p.looked[line-1] = true
+		if !asciiOnly(p.text[start:end]) {
+			offsets := make([]int, 0, end-start+1)
+			for at := start; at < end; {
+				offsets = append(offsets, at)
+				_, size := utf8.DecodeRune(p.text[at:end])
+				at += size
+			}
+			p.columns[line-1] = append(offsets, end)
+		}
+	}
+	if offsets := p.columns[line-1]; offsets != nil {
+		if column > len(offsets) {
 			return 0, false
 		}
-		_, size := utf8.DecodeRune(c.text[at:])
-		at += size
+		return offsets[column-1], true
 	}
-	return at, true
+	if at := start + column - 1; at <= end {
+		return at, true
+	}
+	return 0, false
+}
+
+// asciiOnly reports whether text holds ASCII characters only.
+func asciiOnly(text []byte) bool {
+	for _, char := range text {
+		if char >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // yamlLineStarts returns the offset of the start of each line of text, with
-// lines broken as yaml.v3 breaks them (see yamlConverter.offset).
+// lines broken as yaml.v3 breaks them (see yamlPositions).
 func yamlLineStarts(text []byte) []int {
 	starts := []int{0}
 	if bytes.HasPrefix(text, []byte("\ufeff")) {
