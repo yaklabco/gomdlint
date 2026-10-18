@@ -600,9 +600,10 @@ func separateListsDocument(n int) string {
 }
 
 // breaksBeforeTextDocument returns a document of n thematic breaks, each
-// followed with no blank line by a paragraph and a blank line, and the
-// edits that put a blank line after each break. Each edit changes how the
-// group after its break starts, so its region must grow by that group.
+// followed with no blank line by a paragraph of one line that ends in three
+// spaces and a blank line, and the edits that put a blank line after each
+// break. Each edit changes how the group after its break starts, so its
+// region must grow by that group.
 func breaksBeforeTextDocument(n int) (string, []fix.TextEdit) {
 	var doc strings.Builder
 	var edits []fix.TextEdit
@@ -650,8 +651,9 @@ func regionWorkOf(t *testing.T, input string, edits []fix.TextEdit) regionWork {
 // TestRegionWorkGrowsWithTheDocument checks that combining the regions of
 // one check takes work that grows with the document, not with its square:
 // list tightness over many separate lists, each with one edit, and the
-// merging of regions that grow, one for each edit. Four times the document
-// must take about four times the work, not sixteen.
+// merging of regions that grow, one for each edit, with other regions
+// between them or with a region in every group, next to one another. Four
+// times the document must take about four times the work, not sixteen.
 func TestRegionWorkGrowsWithTheDocument(t *testing.T) {
 	const small, factor = 50, 4
 	ratio := func(short, long int) float64 { return float64(long) / float64(short) }
@@ -692,11 +694,11 @@ func TestRegionWorkGrowsWithTheDocument(t *testing.T) {
 // stubOutcome is the outcome of a region in TestDecomposeRegionsMatchesFullMerges,
 // which holds or not as a function of the region alone.
 type stubOutcome struct {
-	reg   region
-	holds bool
+	reg                region
+	holds, cannotCheck bool
 }
 
-func (o stubOutcome) verdict() (bool, bool) { return o.holds, false }
+func (o stubOutcome) verdict() (bool, bool) { return o.holds, o.cannotCheck }
 
 // decomposeWithFullMerges is decomposeRegions as it was before regions grew
 // by windows: after each growth it merges all the regions again and goes on
@@ -711,6 +713,9 @@ func decomposeWithFullMerges(layout *docLayout, placed []placedEdit, evaluate fu
 	for idx := 0; idx < len(regions); {
 		from, to := layout.editSpan(regions[idx])
 		outcome := evaluate(regions[idx], regionEdits(from, to, placed))
+		if outcome.cannotCheck {
+			return nil, nil, false
+		}
 		if !outcome.holds {
 			grown := layout.grow(regions[idx])
 			if grown == regions[idx] {
@@ -729,6 +734,16 @@ func decomposeWithFullMerges(layout *docLayout, placed []placedEdit, evaluate fu
 	return regions, outcomes, true
 }
 
+// firstDifference returns the index of the first region that differs
+// between two sorted lists, or the length of the shorter.
+func firstDifference(a, b []region) int {
+	idx := 0
+	for idx < len(a) && idx < len(b) && a[idx] == b[idx] {
+		idx++
+	}
+	return idx
+}
+
 // TestDecomposeRegionsMatchesFullMerges checks that growing regions by
 // windows gives the regions and outcomes that merging all the regions after
 // each growth gives, on random edits in random documents with lists, under
@@ -738,8 +753,12 @@ func TestDecomposeRegionsMatchesFullMerges(t *testing.T) {
 	rng := rand.New(rand.NewPCG(20261018, 23))
 	gfm, commonMark := recordingInstances()
 	checks, growths := 0, 0
-	for range 1500 {
+	for trial := range 1500 {
 		text := randomRegionDocument(rng) + randomRegionDocument(rng) + randomRegionDocument(rng)
+		if trial%3 == 0 {
+			// Long lists give list regions that grow and become groups.
+			text += string(longListDocument(8+rng.IntN(20))) + separateListsDocument(2+rng.IntN(4))
+		}
 		for _, markdown := range []goldmark.Markdown{gfm, commonMark} {
 			layout := newDocLayout(markdown, []byte(text))
 			if layout == nil || len(layout.source) == 0 {
@@ -759,19 +778,23 @@ func TestDecomposeRegionsMatchesFullMerges(t *testing.T) {
 				placed[idx] = layout.placeEdit(edit)
 			}
 			seed := rng.Uint64()
-			evaluate := func(reg region, _ []placedEdit) stubOutcome {
-				key := uint64(reg.list+2)*1000003 + uint64(reg.first)*1009 + uint64(reg.last)*7 + seed
-				holds := key%5 < 3
-				if !holds {
-					growths++
+			stub := func(calls *[]region) func(region, []placedEdit) stubOutcome {
+				return func(reg region, _ []placedEdit) stubOutcome {
+					*calls = append(*calls, reg)
+					key := uint64(reg.list+2)*1000003 + uint64(reg.first)*1009 + uint64(reg.last)*7 + seed
+					return stubOutcome{reg: reg, holds: key%5 < 3, cannotCheck: key%50 == 7}
 				}
-				return stubOutcome{reg: reg, holds: holds}
 			}
-			wantRegions, wantOutcomes, wantOK := decomposeWithFullMerges(layout, placed, evaluate)
-			gotRegions, gotOutcomes, gotOK := decomposeRegions(layout, placed, evaluate)
+			var wantCalls, gotCalls []region
+			wantRegions, wantOutcomes, wantOK := decomposeWithFullMerges(layout, placed, stub(&wantCalls))
+			gotRegions, gotOutcomes, gotOK := decomposeRegions(layout, placed, stub(&gotCalls))
 			require.Equal(t, wantOK, gotOK, "document %q, edits %v", text, prepared)
-			require.Equal(t, wantRegions, gotRegions, "document %q, edits %v", text, prepared)
-			require.Equal(t, wantOutcomes, gotOutcomes, "document %q, edits %v", text, prepared)
+			require.Equal(t, wantCalls, gotCalls, "document %q, edits %v", text, prepared)
+			if wantOK {
+				require.Equal(t, wantRegions, gotRegions, "document %q, edits %v", text, prepared)
+				require.Equal(t, wantOutcomes, gotOutcomes, "document %q, edits %v", text, prepared)
+			}
+			growths += len(gotCalls) - len(gotOutcomes)
 			checks++
 		}
 	}
@@ -1047,6 +1070,49 @@ func TestRegionModelMatchesSignature(t *testing.T) {
 				assert.Equal(t, check.baseline[idx], model.sig)
 			}
 		}
+	}
+}
+
+// TestReplacementsKeepTheirOrder checks that replacements that start at one
+// offset are decided in order, an empty one first, however they come: the
+// outline part of a group of definitions alone is empty and starts where the
+// next part does, and a list token can be added after it. Sorted by start
+// alone, more than twelve replacements could put the token first and make
+// the comparison slice backwards.
+func TestReplacementsKeepTheirOrder(t *testing.T) {
+	input := "# Title\n\n[a]: /x   \n\nB0 text   \n\n- i0\n- i1\n- i2\n- i3\n- i4\n- i5\n- i6\n\nAfter the list.\n\n" +
+		"A0 text   \n\nA1 text   \n\nA2 text   \n\nA3 text   \n\nA4 text   \n\nA5 text   \n\nA6 text   \n\nA7 text   \n\nPZ textX\n"
+	edits := trailingSpaceEdits(input)
+	at := strings.Index(input, "- i3")
+	edits = append(edits, fix.TextEdit{StartOffset: at, EndOffset: at, NewText: "\n"})
+	at = strings.Index(input, "textX") + len("text")
+	edits = append(edits, fix.TextEdit{StartOffset: at, EndOffset: at + 1})
+	prepared, err := fix.PrepareEdits(edits, len(input))
+	require.NoError(t, err)
+	snapshot := parseForCheckWith(t, config.FlavorGFM, input)
+	cfg := config.NewConfig()
+	cfg.Flavor = config.FlavorGFM
+	verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
+	model := verifier.regions()
+	require.NotNil(t, model)
+	decided, unchanged := model.checkEdits(prepared)
+	require.True(t, decided)
+	assert.Equal(t, verifier.acceptsWhole(prepared), unchanged)
+	assert.False(t, unchanged, "the list turns loose")
+
+	// The decision does not depend on the order replacements come in.
+	orig := strings.Repeat("abcdefghij", 4)
+	reps := []replacement{{start: 5, end: 5, text: "Q"}, {start: 5, end: 9, text: "fghi"}}
+	for idx := range 14 {
+		reps = append(reps, replacement{start: 10 + 2*idx, end: 11 + 2*idx, text: orig[10+2*idx : 11+2*idx]})
+	}
+	_, want := decideReplacements(orig, slices.Clone(reps))
+	rng := rand.New(rand.NewPCG(20261018, 5))
+	for range 200 {
+		shuffled := slices.Clone(reps)
+		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		_, got := decideReplacements(orig, shuffled)
+		require.Equal(t, want, got)
 	}
 }
 

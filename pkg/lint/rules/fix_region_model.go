@@ -419,9 +419,11 @@ func (m *regionModel) compare(regions []region, outcomes []*regionOutcome) (bool
 // unknown and the part up to its end does not already differ: the anchors
 // after a region whose anchor counts changed are not known.
 func decideReplacements(orig string, reps []replacement) (bool, bool) {
-	// By start, then end, so that an empty replacement comes before one that
-	// starts where it does, and the order is total.
-	slices.SortFunc(reps, func(a, b replacement) int {
+	// By start, then end, so that an empty replacement, such as the part of
+	// a group of definitions alone, comes before one that starts where it
+	// does; replacements of one range keep their order, which is the
+	// document's.
+	slices.SortStableFunc(reps, func(a, b replacement) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
 	})
 	for idx, rep := range reps {

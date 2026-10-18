@@ -1046,9 +1046,12 @@ func decomposeRegions[O regionVerdict](
 // share a group, list regions of one list where first <= other.last+2, and a
 // list region and a group region of its list's group, whose span holds the
 // list region's. So the regions taken in are those whose spans overlap the
-// grown region's, or the merged regions' as they reach further; regions
-// whose spans only touch stay. grown must be a region that grow returns: a
-// list region that fits, or a group region.
+// grown region's; regions whose spans only touch it stay. One pass finds
+// them all: the spans of the regions are disjoint and sorted, so the region
+// after the last one taken in starts at or after the end of every span in
+// the window, and the merged region, whose span covers theirs, ends there.
+// grown must be a region that grow returns: a list region that fits, or a
+// group region.
 func (l *docLayout) absorbGrown(done, pending []region, next int, grown region) (int, int, []region) {
 	start, end := l.span(grown)
 	lo := len(done)
@@ -1060,38 +1063,14 @@ func (l *docLayout) absorbGrown(done, pending []region, next int, grown region) 
 	}
 	window := append(slices.Clone(done[lo:]), grown)
 	hi := next + 1
-	for {
-		for hi < len(pending) {
-			if nextStart, _ := l.span(pending[hi]); nextStart >= end {
-				break
-			}
-			window = append(window, pending[hi])
-			hi++
+	for hi < len(pending) {
+		if nextStart, _ := l.span(pending[hi]); nextStart >= end {
+			break
 		}
-		merged := l.mergeRegions(window)
-		reach := end
-		for _, reg := range merged {
-			_, regEnd := l.span(reg)
-			reach = max(reach, regEnd)
-		}
-		if hi == len(pending) {
-			return lo, hi, merged
-		}
-		if nextStart, _ := l.span(pending[hi]); nextStart >= reach {
-			return lo, hi, merged
-		}
-		end, window = reach, merged
+		window = append(window, pending[hi])
+		hi++
 	}
-}
-
-// firstDifference returns the index of the first region that differs
-// between two sorted lists, or the length of the shorter.
-func firstDifference(a, b []region) int {
-	idx := 0
-	for idx < len(a) && idx < len(b) && a[idx] == b[idx] {
-		idx++
-	}
-	return idx
+	return lo, hi, l.mergeRegions(window)
 }
 
 // listsTightAfter reports, for each top-level list that a list region of
@@ -1123,7 +1102,7 @@ func (l *docLayout) listsTightAfter(regions []region, loosens func(int) bool) ma
 }
 
 // tightWith reports whether the list is tight when its list regions hold the
-// given number of its loose items, and one of them makes it loose or not.
+// given number of its loose items, and whether one of them makes it loose.
 // Without list regions, that is the list's tightness in the original.
 func (l *layoutList) tightWith(inside int, loosened bool) bool {
 	return !loosened && l.loose[len(l.loose)-1]-inside == 0
