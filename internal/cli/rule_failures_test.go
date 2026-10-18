@@ -96,9 +96,9 @@ func TestLint_RuleFailureIsAnInternalError(t *testing.T) {
 		content string
 		cause   string
 	}{
-		{name: "panic", content: "panic\n", cause: "rule TEST001 failed on a.md: rule panicked: cannot lint this"},
-		{name: "returned error", content: "boom\n", cause: "rule TEST002 failed on a.md: frobnicator missing"},
-		{name: "invalid fix", content: "invalid\n", cause: "rule TEST003 failed on a.md: invalid fix: fix for line 1:"},
+		{name: "panic", content: "panic\n", cause: "rule rule-TEST001 (TEST001) failed on a.md: rule panicked: cannot lint this"},
+		{name: "returned error", content: "boom\n", cause: "rule rule-TEST002 (TEST002) failed on a.md: frobnicator missing"},
+		{name: "invalid fix", content: "invalid\n", cause: "rule rule-TEST003 (TEST003) failed on a.md: invalid fix: fix for line 1:"},
 	}
 
 	for _, tt := range tests {
@@ -126,7 +126,7 @@ func TestLint_UnreadableFileOutranksRuleFailure(t *testing.T) {
 
 	assert.Equal(t, cli.ExitIOError, got.code, "stderr: %s", got.stderr)
 	assert.Contains(t, got.stderr, "1 file could not be linted")
-	assert.Contains(t, got.stderr, "rule TEST001 failed on a.md: rule panicked: cannot lint this",
+	assert.Contains(t, got.stderr, "rule rule-TEST001 (TEST001) failed on a.md: rule panicked: cannot lint this",
 		"the rule failure is still reported")
 }
 
@@ -141,7 +141,7 @@ func TestLint_DiffPreviewReportsRuleFailuresOfTheFixedContent(t *testing.T) {
 			got := executeWithFailingRules(t, args...)
 
 			assert.Equal(t, cli.ExitInternalError, got.code, "stderr: %s", got.stderr)
-			assert.Contains(t, got.stderr, "rule TEST005 failed on a.md: rule panicked: cannot lint fixed content")
+			assert.Contains(t, got.stderr, "rule rule-TEST005 (TEST005) failed on a.md: rule panicked: cannot lint fixed content")
 		})
 	}
 }

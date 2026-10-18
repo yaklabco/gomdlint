@@ -8,7 +8,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -660,6 +663,273 @@ func TestLoad_WarnsAboutUnknownKeysInJSON(t *testing.T) {
 	}
 }
 
+// relativeWarnings returns warnings with the directory of the config file,
+// the part before name, cut off.
+func relativeWarnings(warnings []string, name string) []string {
+	relative := make([]string, len(warnings))
+	for idx, warning := range warnings {
+		relative[idx] = warning[max(strings.Index(warning, name), 0):]
+	}
+	return relative
+}
+
+// TestLoad_WarnsAboutUnknownRules covers keys under rules and rule_defaults
+// that name no rule. The warning names the file and line of the key and the
+// closest rule. Those keys take rules only, so a typo is never offered a
+// tag, and a tag gets the names of its rules.
+func TestLoad_WarnsAboutUnknownRules(t *testing.T) {
+	t.Parallel()
+
+	content := `rules:
+  no-trailling-spaces:
+    enabled: false
+  blockquote: false
+  tables: false
+  MD009:
+    severity: error
+rule_defaults:
+  linelength:
+    enabled: false
+`
+	result, err := loadProject(t, content)
+	if err != nil {
+		t.Fatalf("unknown rules must not fail loading: %v", err)
+	}
+
+	want := []string{
+		`.gomdlint.yml:2: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+		`.gomdlint.yml:4: unknown rule "blockquote" (it is a tag; configure its rules instead: ` +
+			`no-multiple-space-blockquote, no-blanks-blockquote); it is ignored`,
+		`.gomdlint.yml:5: unknown rule "tables" (did you mean "blanks-around-tables"?); it is ignored`,
+		`.gomdlint.yml:9: unknown rule "linelength" (did you mean "line-length"?); it is ignored`,
+	}
+	assert.Equal(t, want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+}
+
+// TestLoad_RuleKeysFromYAMLMergeKeys covers YAML merge keys, which bring in
+// the keys of an anchored mapping: under rules, the rules of another
+// section, and under a rule, the settings of another rule. A merge key is
+// not a rule or a setting, so it must not be reported as unknown, and the
+// merged keys apply.
+func TestLoad_RuleKeysFromYAMLMergeKeys(t *testing.T) {
+	t.Parallel()
+
+	content := `rule_defaults: &base
+  MD013:
+    enabled: false
+rules:
+  <<: *base
+  MD009: &off
+    enabled: false
+  MD010:
+    <<: *off
+    severity: error
+`
+	result, err := loadProject(t, content)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	assert.Empty(t, result.Warnings)
+	for _, ruleID := range []string{"MD009", "MD010", "MD013"} {
+		rule, ok := result.Config.Rules[ruleID]
+		if assert.True(t, ok, "%s is configured: %v", ruleID, result.Config.Rules) && assert.NotNil(t, rule.Enabled, ruleID) {
+			assert.False(t, *rule.Enabled, ruleID)
+		}
+	}
+}
+
+// TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases covers keys that a
+// YAML merge key or an alias brings into a mapping. Decoding applies them,
+// so a typo among them warns like any other key, at the line where it is
+// written, and says which merge or alias brought it in.
+func TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases(t *testing.T) {
+	t.Parallel()
+
+	const typo = `unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "merge of an anchored mapping under rules",
+			content: "rules:\n  <<: &rules\n    no-trailling-spaces: false\n",
+			want:    []string{`.gomdlint.yml:3: ` + typo + ` (through the merge at line 2)`},
+		},
+		{
+			name: "merge of a sequence of mappings",
+			content: "rule_defaults: &defaults\n" +
+				"  MD013: false\n" +
+				"rules:\n" +
+				"  <<:\n" +
+				"    - *defaults\n" +
+				"    - &more\n" +
+				"      no-trailling-spaces: false\n" +
+				"  MD009: false\n",
+			want: []string{`.gomdlint.yml:7: ` + typo + ` (through the merge at line 4)`},
+		},
+		{
+			name:    "alias as the rules",
+			content: "rule_defaults: &defaults\n  no-trailling-spaces: false\nrules: *defaults\n",
+			want: []string{
+				`.gomdlint.yml:2: ` + typo,
+				`.gomdlint.yml:2: ` + typo + ` (through the alias at line 3)`,
+			},
+		},
+		{
+			name:    "alias as the settings of a rule",
+			content: "rule_defaults:\n  MD013: &off\n    enabled: false\n    style: x\nrules:\n  MD033: *off\n",
+			want: []string{
+				`.gomdlint.yml:4: unknown key "rule_defaults.MD013.style"; rule options belong under "rule_defaults.MD013.options"`,
+				`.gomdlint.yml:4: unknown key "rules.MD033.style"; rule options belong under "rules.MD033.options" (through the alias at line 6)`,
+			},
+		},
+		{
+			name:    "merge at the top level",
+			content: "<<: &common\n  flavour: gfm\n  rules:\n    no-trailling-spaces: false\n",
+			want: []string{
+				`.gomdlint.yml:2: unknown key "flavour" (did you mean "flavor"?); it is ignored (through the merge at line 1)`,
+				`.gomdlint.yml:4: ` + typo + ` (through the merge at line 1)`,
+			},
+		},
+		{
+			name:    "merge under backups",
+			content: "backups:\n  <<: {enable: false}\n",
+			want: []string{
+				`.gomdlint.yml:2: unknown key "backups.enable" (did you mean "backups.enabled"?); it is ignored (through the merge at line 2)`,
+			},
+		},
+		{
+			// The alias names the mapping that holds it. Decoding reads the
+			// rules mapping as the settings of MD013 and skips its unknown
+			// key, and the key check must end too.
+			name:    "alias to the mapping that holds it",
+			content: "rules: &rules\n  MD013: *rules\n",
+			want: []string{
+				`.gomdlint.yml:2: unknown key "rules.MD013.MD013"; rule options belong under "rules.MD013.options" (through the alias at line 2)`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := loadProject(t, tt.content)
+			if err != nil {
+				t.Fatalf("unknown keys must not fail loading: %v", err)
+			}
+
+			assert.Equal(t, tt.want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+		})
+	}
+}
+
+// TestLoad_ChecksTheKeysThatDecodingReads covers YAML's own rules for
+// merges and aliases. Only the keys that decoding reads are checked: an
+// alias key reads as the scalar it names, a written key replaces a merged
+// one, and an earlier merged mapping replaces a later one.
+func TestLoad_ChecksTheKeysThatDecodingReads(t *testing.T) {
+	t.Parallel()
+
+	const typo = `unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "alias key that names an unknown rule",
+			content: "ignore: [&MD013 no-trailling-spaces]\nrules:\n  *MD013 : false\n",
+			want:    []string{`.gomdlint.yml:3: ` + typo},
+		},
+		{
+			name:    "alias key that names a rule, from an anchor named like a word",
+			content: "ignore: [&rule MD013]\nrules:\n  *rule : false\n",
+			want:    []string{},
+		},
+		{
+			name:    "merged rules replaced by written rules",
+			content: "<<:\n  rules:\n    no-trailling-spaces: false\nrules:\n  MD009: false\n",
+			want:    []string{},
+		},
+		{
+			name:    "merged rule replaced by a written rule",
+			content: "rules:\n  <<:\n    MD013:\n      enabled: false\n      style: x\n  MD013:\n    enabled: true\n",
+			want:    []string{},
+		},
+		{
+			name:    "merged typo replaced by the same typo written",
+			content: "rules:\n  <<:\n    no-trailling-spaces: false\n  no-trailling-spaces: true\n",
+			want:    []string{`.gomdlint.yml:4: ` + typo},
+		},
+		{
+			name:    "typo in two merged mappings",
+			content: "rules:\n  <<:\n    - no-trailling-spaces: false\n    - no-trailling-spaces: true\n",
+			want:    []string{`.gomdlint.yml:3: ` + typo + ` (through the merge at line 2)`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := loadProject(t, tt.content)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			assert.Equal(t, tt.want, relativeWarnings(result.Warnings, ".gomdlint.yml"))
+		})
+	}
+}
+
+// TestUnknownKeyWarnings_EndsOnAMappingThatMergesItself covers a mapping
+// whose merge key names the mapping itself. Decoding rejects it, and the
+// key check, which reads the parsed document, must end on it too.
+func TestUnknownKeyWarnings_EndsOnAMappingThatMergesItself(t *testing.T) {
+	t.Parallel()
+
+	content := "rules: &rules\n  <<: *rules\n  no-trailling-spaces: false\n"
+	doc, err := parseYAMLDocument([]byte(content))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	done := make(chan []string, 1)
+	go func() { done <- unknownKeyWarnings(".gomdlint.yml", doc, lint.DefaultRegistry) }()
+	select {
+	case warnings := <-done:
+		assert.Equal(t, []string{
+			`.gomdlint.yml:3: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+		}, warnings)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the key check does not end on a mapping that merges itself")
+	}
+
+	if _, err := loadProject(t, content); err == nil || !strings.Contains(err.Error(), "contains itself") {
+		t.Errorf("Load() error = %v, want the decoder's error about a value that contains itself", err)
+	}
+}
+
+// TestLoad_WarnsAboutUnknownRulesInJSON covers JSON configs, whose keys are
+// strings: a JSON key "<<" is no merge key, so it is an unknown rule.
+func TestLoad_WarnsAboutUnknownRulesInJSON(t *testing.T) {
+	t.Parallel()
+
+	content := "{\n  \"rules\": {\n    \"no-trailling-spaces\": false,\n    \"<<\": false\n  }\n}\n"
+	result, err := loadProjectFile(t, ".gomdlint.json", content)
+	if err != nil {
+		t.Fatalf("unknown rules must not fail loading: %v", err)
+	}
+
+	assert.Equal(t, []string{
+		`.gomdlint.json:3: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+		`.gomdlint.json:4: unknown rule "<<"; it is ignored`,
+	}, relativeWarnings(result.Warnings, ".gomdlint.json"))
+}
+
 // TestLoad_IgnoreBaseDir covers the directory ignore patterns are relative
 // to: the config file's own directory for project and explicit configs, and
 // the working directory otherwise.
@@ -990,30 +1260,31 @@ func TestLoad_EnvRuleFormat(t *testing.T) {
 func TestLoader_RejectsDuplicateRules(t *testing.T) {
 	t.Parallel()
 
+	// The message names the rule by name, then ID.
 	tests := []struct {
 		name    string
 		content string
-		keys    []string
+		want    string
 	}{
 		{
 			name:    "ID and name",
 			content: "rules:\n  MD009:\n    enabled: false\n  no-trailing-spaces:\n    enabled: true\n",
-			keys:    []string{`"MD009"`, `"no-trailing-spaces"`},
+			want:    `rules: "MD009" and "no-trailing-spaces" both configure no-trailing-spaces (MD009); keep one of them`,
 		},
 		{
 			name:    "ID and alias",
 			content: "rules:\n  MD004:\n    enabled: false\n  ul-style:\n    enabled: true\n",
-			keys:    []string{`"MD004"`, `"ul-style"`},
+			want:    `rules: "MD004" and "ul-style" both configure unordered-list-style (MD004); keep one of them`,
 		},
 		{
 			name:    "ID in two cases",
 			content: "rules:\n  MD009:\n    enabled: false\n  md009:\n    enabled: true\n",
-			keys:    []string{`"MD009"`, `"md009"`},
+			want:    `rules: "MD009" and "md009" both configure no-trailing-spaces (MD009); keep one of them`,
 		},
 		{
 			name:    "rule_defaults",
 			content: "rule_defaults:\n  MD009:\n    enabled: false\n  no-trailing-spaces:\n    enabled: true\n",
-			keys:    []string{`"MD009"`, `"no-trailing-spaces"`, "rule_defaults"},
+			want:    `rule_defaults: "MD009" and "no-trailing-spaces" both configure no-trailing-spaces (MD009); keep one of them`,
 		},
 	}
 
@@ -1026,10 +1297,8 @@ func TestLoader_RejectsDuplicateRules(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected an error for a rule configured under two keys")
 				}
-				for _, key := range tt.keys {
-					if !strings.Contains(err.Error(), key) {
-						t.Errorf("error %q does not name %s", err, key)
-					}
+				if !strings.HasSuffix(err.Error(), ".gomdlint.yml: "+tt.want) {
+					t.Errorf("error = %q, want it to end with %q", err, ".gomdlint.yml: "+tt.want)
 				}
 			}
 		})

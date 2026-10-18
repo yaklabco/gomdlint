@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -40,11 +41,11 @@ Examples:
   gomdlint migrate .markdownlint.json    Convert specific file
   gomdlint migrate --output config.yml   Write to custom output path`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				flags.input = args[0]
 			}
-			return runMigrate(flags)
+			return runMigrate(cmd.OutOrStdout(), flags)
 		},
 	}
 
@@ -54,8 +55,10 @@ Examples:
 	return cmd
 }
 
-func runMigrate(flags *migrateFlags) error {
-	logger := logging.NewInteractive()
+// runMigrate converts a markdownlint config, reporting progress and
+// warnings to out.
+func runMigrate(out io.Writer, flags *migrateFlags) error {
+	logger := logging.NewWithWriter(out, "info")
 
 	// Find input file
 	inputPath := flags.input

@@ -412,3 +412,46 @@ func TestRegistry_SuggestNothing(t *testing.T) {
 		assert.Empty(t, reg.Suggest(key), "key %q", key)
 	}
 }
+
+func TestRegistry_ClosestOffersTheBestSuggestions(t *testing.T) {
+	reg := describedRegistry()
+
+	var (
+		spaces      = Suggestion{Name: "no-trailing-spaces", RuleID: "MD009"}
+		punctuation = Suggestion{Name: "no-trailing-punctuation", RuleID: "MD026"}
+		newline     = Suggestion{Name: "single-trailing-newline", RuleID: "MD047"}
+	)
+
+	assert.Equal(t, []Suggestion{spaces}, reg.Closest("no-trailling-spaces"))
+	assert.Equal(t, []Suggestion{{Name: "table"}}, reg.Closest("tables"), "a typo of a tag")
+	assert.Equal(t, []Suggestion{punctuation, spaces, newline}, reg.Closest("trailing"), "substrings of equal rank")
+
+	// Suggest also offers required-headings, which contains the key, but
+	// the tag is one edit away and so closer.
+	require.Len(t, reg.Suggest("heading"), 2)
+	assert.Equal(t, []Suggestion{{Name: "headings"}}, reg.Closest("heading"))
+
+	assert.Empty(t, reg.Closest("zzzzzz"))
+	assert.Empty(t, reg.Closest(""))
+}
+
+// TestRegistry_ClosestSkipsAmbiguousKeys covers a key as close to many
+// rules as to any. Rule IDs are dense, so a mistyped ID is often as close
+// to several of them, and naming some would mislead.
+func TestRegistry_ClosestSkipsAmbiguousKeys(t *testing.T) {
+	reg := describedRegistry()
+
+	require.Len(t, reg.Suggest("MD0"), 6, "two edits from each registered ID")
+	assert.Empty(t, reg.Closest("MD0"))
+	assert.Empty(t, reg.ClosestRules("MD0"))
+}
+
+func TestRegistry_ClosestRulesLeavesOutTags(t *testing.T) {
+	reg := describedRegistry()
+
+	assert.Equal(t, []Suggestion{{Name: "no-trailing-spaces", RuleID: "MD009"}}, reg.ClosestRules("no-trailling-spaces"))
+	// Without the tag headings, the rule that contains the key is closest.
+	assert.Equal(t, []Suggestion{{Name: "required-headings", RuleID: "MD043"}}, reg.ClosestRules("heading"))
+	assert.Empty(t, reg.ClosestRules("tables"), "only a tag is close")
+	assert.Empty(t, reg.ClosestRules("bulet"))
+}

@@ -1,0 +1,7 @@
+MD001	Heading levels should only increment by one level at a time
+MD003	Heading style should be consistent
+MD004	Unordered list style should be consistent
+MD005	Inconsistent indentation for list items at the same level
+MD007	Unordered list indentation
+MD009	Lines should not have trailing spaces
+:4

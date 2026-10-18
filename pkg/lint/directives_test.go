@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -296,6 +297,65 @@ func TestEngineConfigureFileRejectsInvalidConfiguration(t *testing.T) {
 		require.ErrorContains(t, err, "line 1")
 		require.Nil(t, result)
 	}
+}
+
+// TestEngineConfigureFileKeysNameOneRuleOrTag covers configure-file keys
+// that markdownlint 0.41 ignores. getEffectiveConfig in its
+// lib/markdownlint.mjs looks each key up whole, after only upper-casing
+// it, so a key of several words, a key with surrounding whitespace and an
+// empty key name no rule there. gomdlint used to apply such a key to each
+// of its words, or to every rule when it was empty. It now rejects them as
+// it rejects other unknown keys.
+func TestEngineConfigureFileKeysNameOneRuleOrTag(t *testing.T) {
+	const body = "bad \ntab\there\n"
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	registry.Register(rules.NewHardTabsRule())
+	describeCatalog(registry)
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+
+	result, err := engine.LintFile(context.Background(), "test.md", []byte(body), config.NewConfig())
+	require.NoError(t, err)
+	require.Len(t, result.Diagnostics, 2, "the body must make MD009 and MD010 report")
+
+	tests := []struct {
+		name, key, want string
+	}{
+		{
+			name: "two rules", key: "MD009 MD010",
+			want: `unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys)`,
+		},
+		{
+			name: "two rules and a tag", key: "no-trailing-spaces\tno-hard-tabs  whitespace",
+			want: `unknown rule "no-trailing-spaces\tno-hard-tabs  whitespace" ` +
+				`(a key names one rule or tag; write "no-trailing-spaces", "no-hard-tabs" and "whitespace" as separate keys)`,
+		},
+		{name: "empty", key: "", want: `unknown rule ""`},
+		{name: "space before", key: " MD009", want: `unknown rule " MD009" (did you mean "no-trailing-spaces"?)`},
+		{name: "space after", key: "whitespace ", want: `unknown rule "whitespace " (did you mean the tag "whitespace"?)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parameter, err := json.Marshal(map[string]bool{tt.key: false})
+			require.NoError(t, err)
+			input := "<!-- markdownlint-configure-file " + string(parameter) + " -->\n" + body
+
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
+
+			require.ErrorContains(t, err, "markdownlint-configure-file at line 1: "+tt.want)
+			assert.Nil(t, result)
+		})
+	}
+}
+
+func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
+	input := "<!-- markdownlint-configure-file {\"no-trailling-spaces\": false} -->\nbad \n"
+
+	_, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+		context.Background(), "test.md", []byte(input), config.NewConfig())
+
+	require.ErrorContains(t, err,
+		`markdownlint-configure-file at line 1: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?)`)
 }
 
 func TestEngineConfigureFileRuleOverridesTag(t *testing.T) {

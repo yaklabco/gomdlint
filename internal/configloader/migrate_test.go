@@ -571,7 +571,43 @@ func TestConvertMarkdownlintConfig_UnknownRuleIDs(t *testing.T) {
 
 	assert.NotContains(t, result.Config.Rules, "MD002")
 	assert.NotContains(t, result.Config.Rules, "MD999")
-	assert.Equal(t, []string{`unknown key "MD002"; skipping`, `unknown key "MD999"; skipping`}, result.Warnings)
+	// Each is as close to several rules as to any, so neither gets a
+	// suggestion.
+	assert.Equal(t, []string{`unknown rule "MD002"; it is ignored`, `unknown rule "MD999"; it is ignored`}, result.Warnings)
+}
+
+// TestConvertMarkdownlintConfig_SuggestsRulesForUnknownKeys covers typos in
+// a markdownlint config, which takes rules and tags alike, so either may be
+// suggested.
+func TestConvertMarkdownlintConfig_SuggestsRulesForUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	result := convertSettings(t, `{"no-trailling-spaces": false, "tables": false}`)
+
+	assert.Equal(t, []string{
+		`unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`,
+		`unknown rule "tables" (did you mean the tag "table"?); it is ignored`,
+	}, result.Warnings)
+}
+
+// TestConvertMarkdownlintConfig_KeysNameOneRuleOrTag covers keys that
+// markdownlint looks up whole, after only upper-casing them: a key of
+// several words, a key with surrounding whitespace and an empty key name
+// nothing there, so migration does not configure their rules either.
+func TestConvertMarkdownlintConfig_KeysNameOneRuleOrTag(t *testing.T) {
+	t.Parallel()
+
+	result := convertSettings(t, `{"MD009 MD010": false, " MD013": false, "whitespace ": false, "": false}`)
+
+	for _, ruleID := range []string{"MD009", "MD010", "MD013"} {
+		assert.NotContains(t, result.Config.Rules, ruleID)
+	}
+	assert.Equal(t, []string{
+		`unknown rule ""; it is ignored`,
+		`unknown rule " MD013" (did you mean "line-length"?); it is ignored`,
+		`unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored`,
+		`unknown rule "whitespace " (did you mean the tag "whitespace"?); it is ignored`,
+	}, result.Warnings)
 }
 
 func TestConvertMarkdownlintConfig_TagsCoverMarkdownlintRulesOnly(t *testing.T) {

@@ -1,0 +1,9 @@
+exit code 0
+-- stdout --
+WARN unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored
+WARN unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
+WARN unknown rule "tables" (did you mean the tag "table"?); it is ignored
+INFO migration complete input=.markdownlint.json output=.gomdlint.yml
+WARN review warnings above and verify the migrated configuration
+INFO you can now delete the old markdownlint configuration file
+-- stderr --

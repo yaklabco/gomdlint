@@ -24,6 +24,10 @@ const (
 	// minSubstringLength is the shortest key that Suggest looks for within
 	// names, aliases and tags.
 	minSubstringLength = 3
+
+	// maxClosest is the most suggestions that Closest offers. A key that is
+	// as close to more rules and tags is ambiguous.
+	maxClosest = 3
 )
 
 // Registry holds the registered lint rules and their catalog entries, and
@@ -227,6 +231,43 @@ func (s Suggestion) IsTag() bool {
 // in order of name. A rule is offered by its canonical name, whichever
 // identifier matched.
 func (r *Registry) Suggest(key string) []Suggestion {
+	ranked := r.rankSuggestions(key)
+	if len(ranked) == 0 {
+		return nil
+	}
+	suggestions := make([]Suggestion, len(ranked))
+	for idx, entry := range ranked {
+		suggestions[idx] = entry.Suggestion
+	}
+	return suggestions
+}
+
+// Closest returns the rules and tags that key most likely means, for a
+// message about a key that names neither: those that Suggest ranks best, in
+// its order. A key that is as close to more than three rules and tags gets
+// none, because naming some of them would mislead. Rule IDs are dense, so a
+// mistyped ID such as MD002 is one edit away from eleven rules.
+func (r *Registry) Closest(key string) []Suggestion {
+	return closest(r.rankSuggestions(key), true)
+}
+
+// ClosestRules is Closest for a key in a place that takes rules but not
+// tags: it leaves tags out before it picks the best suggestions.
+func (r *Registry) ClosestRules(key string) []Suggestion {
+	return closest(r.rankSuggestions(key), false)
+}
+
+// rankedSuggestion is a suggestion with its rank: the edit distance of a
+// typo, or substringRank.
+type rankedSuggestion struct {
+	Suggestion
+
+	rank int
+}
+
+// rankSuggestions returns the suggestions for key, in Suggest's order, with
+// their ranks.
+func (r *Registry) rankSuggestions(key string) []rankedSuggestion {
 	key = foldKey(key)
 	if key == "" {
 		return nil
@@ -250,15 +291,41 @@ func (r *Registry) Suggest(key string) []Suggestion {
 		offer(Suggestion{Name: tag}, matchRank(key, tag, true))
 	}
 
-	suggestions := slices.Collect(maps.Keys(ranks))
-	slices.SortFunc(suggestions, func(left, right Suggestion) int {
+	ranked := make([]rankedSuggestion, 0, len(ranks))
+	for suggestion, rank := range ranks {
+		ranked = append(ranked, rankedSuggestion{Suggestion: suggestion, rank: rank})
+	}
+	slices.SortFunc(ranked, func(left, right rankedSuggestion) int {
 		return cmp.Or(
-			cmp.Compare(ranks[left], ranks[right]),
+			cmp.Compare(left.rank, right.rank),
 			cmp.Compare(left.Name, right.Name),
 			cmp.Compare(left.RuleID, right.RuleID),
 		)
 	})
-	return suggestions
+	return ranked
+}
+
+// closest returns the suggestions of the best rank in ranked, which is in
+// Suggest's order, leaving tags out unless withTags is set. It returns none
+// when more than maxClosest share that rank.
+func closest(ranked []rankedSuggestion, withTags bool) []Suggestion {
+	var best []Suggestion
+	bestRank := noMatch
+	for _, entry := range ranked {
+		if entry.IsTag() && !withTags {
+			continue
+		}
+		if bestRank == noMatch {
+			bestRank = entry.rank
+		} else if entry.rank != bestRank {
+			break // The rest rank worse.
+		}
+		best = append(best, entry.Suggestion)
+	}
+	if len(best) > maxClosest {
+		return nil
+	}
+	return best
 }
 
 // matchRank ranks how well key matches word, both lower-cased: by edit

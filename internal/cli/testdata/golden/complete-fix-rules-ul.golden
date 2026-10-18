@@ -1,0 +1,4 @@
+ul	Tag: unordered-list-style, list-indent, ul-indent, list-marker-space, blanks-around-lists
+ul-indent	Unordered list indentation
+ul-style	Unordered list style should be consistent
+:4

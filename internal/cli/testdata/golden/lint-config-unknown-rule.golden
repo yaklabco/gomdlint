@@ -1,0 +1,14 @@
+exit code 0
+-- stdout --
+doc.md (3 issues)
+  doc.md:1:8   warning  no-trailing-punctuation  Heading ends with trailing punctuation "."
+    Suggestion: Remove trailing punctuation from the heading
+  doc.md:3:5   warning  no-hard-tabs             Hard tab character found
+    Suggestion: Replace tabs with spaces
+  doc.md:3:37  warning  no-trailing-spaces       Trailing whitespace
+    Suggestion: Remove trailing whitespace
+
+3 issues (3 warnings), in 1 file, 3 fixable
+-- stderr --
+WARN $PROJECT/.gomdlint.yml:2: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
+WARN $PROJECT/.gomdlint.yml:3: unknown rule "hard_tab" (it is a tag; configure its rules instead: no-hard-tabs); it is ignored

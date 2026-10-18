@@ -324,6 +324,51 @@ func TestLintWarnsAboutUnknownConfigKeys(t *testing.T) {
 	assert.NotContains(t, got.stdout, "flavour")
 }
 
+// TestLintWarnsAboutUnknownRulesThroughMerges covers a typo that a YAML
+// merge key brings into rules, in a config given with --config. The typo
+// leaves its rule enabled, so it must warn.
+func TestLintWarnsAboutUnknownRulesThroughMerges(t *testing.T) {
+	inProject(t, map[string]string{
+		"doc.md":     trailingDoc,
+		"config.yml": "rules:\n  <<: &rules\n    no-trailling-spaces: false\n",
+	})
+
+	got := execute(t, "lint", "--config", "config.yml", "doc.md")
+
+	assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.Contains(t, got.stderr, `config.yml:3: unknown rule "no-trailling-spaces" `+
+		`(did you mean "no-trailing-spaces"?); it is ignored (through the merge at line 2)`)
+}
+
+// TestLintChecksTheRuleKeysThatDecodingReads covers configs, given with
+// --config, whose rule keys YAML's merge and alias rules change.
+func TestLintChecksTheRuleKeysThatDecodingReads(t *testing.T) {
+	t.Run("alias key", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":     trailingDoc,
+			"config.yml": "ignore: [&MD013 no-trailling-spaces]\nrules:\n  *MD013 : false\n",
+		})
+
+		got := execute(t, "lint", "--config", "config.yml", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Contains(t, got.stderr,
+			`config.yml:3: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored`)
+	})
+
+	t.Run("merged rules replaced by written rules", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":     trailingDoc,
+			"config.yml": "<<:\n  rules:\n    no-trailling-spaces: false\nrules:\n  MD009: false\n",
+		})
+
+		got := execute(t, "lint", "--config", "config.yml", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.NotContains(t, got.stderr, "unknown rule")
+	})
+}
+
 // TestLintWarnsAboutRuleOptionsOutsideOptions covers a rule option written
 // directly in the rule entry, where gomdlint does not read it.
 func TestLintWarnsAboutRuleOptionsOutsideOptions(t *testing.T) {
@@ -392,6 +437,56 @@ func TestLintRuleListFlags(t *testing.T) {
 			assert.Empty(t, got.stdout)
 		})
 	}
+
+	// A markdownlint tag stands for every rule it covers, in any case.
+	t.Run("disable by tag", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--color", "never", "--disable", "WhiteSpace", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.NotContains(t, got.stdout, "no-trailing-spaces")
+	})
+
+	t.Run("enable by tag overrides a config disable", func(t *testing.T) {
+		inProject(t, map[string]string{
+			"doc.md":        trailingDoc,
+			".gomdlint.yml": "rules:\n  MD009:\n    enabled: false\n",
+		})
+
+		got := execute(t, "lint", "--color", "never", "--enable", "whitespace", "doc.md")
+
+		assert.Contains(t, got.stdout, "no-trailing-spaces")
+	})
+
+	t.Run("fix-rules by tag", func(t *testing.T) {
+		dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--fix", "--no-backups", "--fix-rules", "whitespace", "doc.md")
+
+		require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Equal(t, fixedDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	})
+
+	t.Run("fix-rules leaves out rules outside the tag", func(t *testing.T) {
+		dir := inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--fix", "--no-backups", "--fix-rules", "headings", "doc.md")
+
+		require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+		assert.Equal(t, trailingDoc, readFile(t, filepath.Join(dir, "doc.md")))
+	})
+
+	// Inline directives still accept gomdlint's former tags for now, but
+	// the flags take only the tags markdownlint knows.
+	t.Run("former gomdlint tags are unknown", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": trailingDoc})
+
+		got := execute(t, "lint", "--disable", "style", "doc.md")
+
+		assert.Equal(t, cli.ExitInvalidUsage, got.code)
+		assert.Contains(t, got.stderr, `unknown rule "style"`)
+	})
 }
 
 // TestLintDryRunSummary covers --fix --dry-run, which writes nothing: the
