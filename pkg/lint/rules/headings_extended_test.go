@@ -1107,6 +1107,8 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 		{name: "period after a no-break space", input: "## \u00a0.\n"},
 		{name: "period after a no-break space reference", input: "## &nbsp;.\n"},
 		{name: "period after a link without text", input: "## [](https://example.com).\n"},
+		{name: "period after a zero-width non-joiner reference", input: "## &zwnj;.\n"},
+		{name: "period after a zero-width space", input: "## \u200b.\n"},
 		{name: "period alone in a heading in a blockquote", input: "> ## .\n"},
 		{name: "period alone in a heading in a list item", input: "- ## .\n"},
 		{name: "ellipsis alone in a setext heading", input: "...\n---\n"},

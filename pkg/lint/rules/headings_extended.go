@@ -759,10 +759,10 @@ func trailingPunctuationFix(
 }
 
 // showsContent reports whether the inline content of node that starts before
-// offset shows something: text other than whitespace once escapes and
-// character references are resolved, a code span, or an image. Raw HTML and
-// a link without text show nothing that counts. MD026 deletes everything in
-// a heading from offset on, so a heading whose content before offset shows
+// offset shows something: a visible character once escapes and character
+// references are resolved, a code span, or an image. Raw HTML and a link
+// without text show nothing that counts. MD026 deletes everything in a
+// heading from offset on, so a heading whose content before offset shows
 // nothing would be left empty, which changes how it renders and what anchor
 // it gets.
 func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
@@ -788,13 +788,17 @@ func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
 	return false
 }
 
-// showsText reports whether source text renders as anything but whitespace.
+// showsText reports whether source text renders a visible character: one
+// that is graphic and not a space, so neither whitespace nor a zero-width
+// character such as U+200B counts.
 func showsText(source []byte) bool {
 	var rendered bytes.Buffer
 	writer := bufio.NewWriter(&rendered)
 	gmhtml.DefaultWriter.Write(writer, source)
 	_ = writer.Flush() // A bytes.Buffer never fails to write.
-	return len(bytes.TrimFunc(rendered.Bytes(), unicode.IsSpace)) > 0
+	return bytes.ContainsFunc(rendered.Bytes(), func(r rune) bool {
+		return unicode.IsGraphic(r) && !unicode.IsSpace(r)
+	})
 }
 
 // escapedAt reports whether the byte at offset follows an odd number of
