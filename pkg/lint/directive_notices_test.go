@@ -3,6 +3,7 @@ package lint_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -201,6 +202,125 @@ func TestEngineOnlyFormerTagsAreDeprecated(t *testing.T) {
 		assert.Empty(t, result.Diagnostics, "acme still silences acme-rule")
 		assert.Empty(t, result.Notices)
 	})
+}
+
+// TestEngineDirectivesNameCustomRulesBeyondASCII covers custom rules whose
+// names and tags hold letters beyond ASCII. markdownlint compares a word
+// with a rule's names and tags after upper-casing both, so a word names
+// such a rule in upper or lower case, as a word names a built-in rule, while a Kelvin
+// sign or a dotted capital I in a name still differs from k and i. Each
+// rule reports line 3; markdownlint 0.41.1, given the same rules, reports
+// the same lines for every document.
+func TestEngineDirectivesNameCustomRulesBeyondASCII(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(&taggedRule{BaseRule: lint.NewBaseRule("X001", "caf\u00e9-check", "", []string{"t\u00e2che"}, false)})
+	registry.Register(&taggedRule{BaseRule: lint.NewBaseRule("X002", "\u212aelvin-check", "", []string{"kelvin-free"}, false)})
+	registry.Register(&taggedRule{BaseRule: lint.NewBaseRule("X003", "\u0130nfo-check", "", []string{"info-free"}, false)})
+	type notice struct {
+		name        string
+		suggestions []string
+	}
+	tests := []struct {
+		name, input string
+		want        []string
+		notices     []notice
+	}{
+		{name: "no comment", input: "Line one.\n\nText.\n", want: []string{"3:X001", "3:X002", "3:X003"}},
+		{
+			name:  "disable by name",
+			input: "<!-- markdownlint-disable caf\u00e9-check -->\n\nText.\n", want: []string{"3:X002", "3:X003"},
+		},
+		{
+			name:  "disable by name in capitals",
+			input: "<!-- markdownlint-disable CAF\u00c9-CHECK -->\n\nText.\n", want: []string{"3:X002", "3:X003"},
+		},
+		{
+			name:  "disable by tag",
+			input: "<!-- markdownlint-disable T\u00c2CHE -->\n\nText.\n", want: []string{"3:X002", "3:X003"},
+		},
+		{
+			name:  "enable by name",
+			input: "<!-- markdownlint-disable -->\n<!-- markdownlint-enable caf\u00e9-check -->\nText.\n", want: []string{"3:X001"},
+		},
+		{
+			name:  "configure-file by name",
+			input: "<!-- markdownlint-configure-file {\"caf\u00e9-check\": false} -->\n\nText.\n", want: []string{"3:X002", "3:X003"},
+		},
+		{
+			name:  "configure-file by tag",
+			input: "<!-- markdownlint-configure-file {\"T\u00c2CHE\": false} -->\n\nText.\n", want: []string{"3:X002", "3:X003"},
+		},
+		{
+			name:    "k for a Kelvin sign",
+			input:   "<!-- markdownlint-disable kelvin-check -->\n\nText.\n",
+			want:    []string{"3:X001", "3:X002", "3:X003"},
+			notices: []notice{{name: "kelvin-check", suggestions: []string{"\u212aelvin-check"}}},
+		},
+		{
+			name:  "Kelvin sign",
+			input: "<!-- markdownlint-disable \u212aELVIN-CHECK -->\n\nText.\n", want: []string{"3:X001", "3:X003"},
+		},
+		{
+			name:    "i for a dotted capital I",
+			input:   "<!-- markdownlint-disable info-check -->\n\nText.\n",
+			want:    []string{"3:X001", "3:X002", "3:X003"},
+			notices: []notice{{name: "info-check", suggestions: []string{"\u0130nfo-check"}}},
+		},
+		{
+			name:  "dotted capital I",
+			input: "<!-- markdownlint-disable \u0130NFO-CHECK -->\n\nText.\n", want: []string{"3:X001", "3:X002"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+				context.Background(), "doc.md", []byte(tt.input), config.NewConfig())
+			require.NoError(t, err)
+
+			var got []string
+			for _, diag := range result.Diagnostics {
+				got = append(got, fmt.Sprintf("%d:%s", diag.StartLine, diag.RuleID))
+			}
+			slices.Sort(got)
+			assert.Equal(t, tt.want, got)
+			var notices []notice
+			for _, n := range result.Notices {
+				notices = append(notices, notice{name: n.Name, suggestions: n.Suggestions})
+			}
+			assert.Equal(t, tt.notices, notices)
+		})
+	}
+}
+
+// TestEngineDirectivesIgnoreWhitespaceAroundCustomNames covers a custom rule
+// registered with whitespace around its name, which no comment word can
+// hold. Words and configure-file keys name it without the whitespace, as
+// configuration files do through Registry.Lookup and as on main, and
+// suggestions offer the name without it.
+func TestEngineDirectivesIgnoreWhitespaceAroundCustomNames(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(&taggedRule{BaseRule: lint.NewBaseRule("X007", " spaced ", "", nil, false)})
+	lintWith := func(t *testing.T, input string) *lint.FileResult {
+		t.Helper()
+		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+			context.Background(), "doc.md", []byte(input), config.NewConfig())
+		require.NoError(t, err)
+		return result
+	}
+
+	for _, input := range []string{
+		"<!-- markdownlint-disable spaced -->\n\nText.\n",
+		"<!-- markdownlint-disable SPACED -->\n\nText.\n",
+		"<!-- markdownlint-configure-file {\"spaced\": false} -->\n\nText.\n",
+	} {
+		result := lintWith(t, input)
+		assert.Empty(t, result.Diagnostics, input)
+		assert.Empty(t, result.Notices, input)
+	}
+
+	result := lintWith(t, "<!-- markdownlint-disable spaced-x -->\n\nText.\n")
+	require.Len(t, result.Notices, 1)
+	assert.Equal(t, []string{"spaced"}, result.Notices[0].Suggestions)
 }
 
 // catalogWords returns every rule ID, name and alias and every tag of the

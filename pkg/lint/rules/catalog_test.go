@@ -86,8 +86,10 @@ func TestCatalogIdentifiersNameOneRule(t *testing.T) {
 }
 
 // TestCatalogWordsAreASCII checks that every identifier and tag is ASCII.
-// Words in markdownlint comments fold case as JavaScript's toUpperCase does,
-// which only matches the catalog that way.
+// Configuration files resolve them through Registry.Lookup, which folds
+// case Go's way, and markdownlint comments by markdownlint's key, which
+// folds it as JavaScript's toUpperCase does. The two agree on ASCII words,
+// so keeping the built-in words ASCII keeps them in agreement.
 func TestCatalogWordsAreASCII(t *testing.T) {
 	for _, meta := range Catalog() {
 		words := append(append([]string{meta.ID, meta.Name, meta.MarkdownlintName}, meta.Aliases...), meta.Tags...)

@@ -42,6 +42,13 @@ func TestWordResolverRuleList(t *testing.T) {
 		reg.Register(&mockRule{id: "ACME001", name: "acme-rule", tags: []string{"acme"}})
 		return reg
 	}
+	// withPhantomBeyondASCII adds a catalog entry, for a rule that is not
+	// registered, whose alias holds a letter beyond ASCII.
+	withPhantomBeyondASCII := func() *Registry {
+		reg := describedRegistry()
+		reg.Describe(RuleMeta{ID: "MD997", Name: "phantom-two", Aliases: []string{"fant\u00f4me"}})
+		return reg
+	}
 	// withoutCatalog holds rules that tag themselves, without catalog
 	// entries.
 	withoutCatalog := func() *Registry {
@@ -81,6 +88,10 @@ func TestWordResolverRuleList(t *testing.T) {
 		{name: "an alias and a catalog tag", registry: describedRegistry, parameter: "ul-style bullet", rules: []string{"MD004"}},
 		{name: "catalog words of a rule that is not registered", registry: describedRegistry, parameter: "phantom-alias MD998 phantom-rule"},
 		{
+			name: "a catalog alias beyond ASCII of a rule that is not registered", registry: withPhantomBeyondASCII,
+			parameter: "fant\u00f4me FANT\u00d4ME",
+		},
+		{
 			name: "a former tag", registry: describedRegistry, parameter: "lists LISTS",
 			rules:   []string{"MD004"},
 			notices: []noticed{{kind: NoticeDeprecatedTag, name: "lists", rules: []string{"unordered-list-style"}}},
@@ -114,12 +125,19 @@ func TestWordResolverRuleList(t *testing.T) {
 }
 
 // identityRegistry holds three rules with catalog entries, two of which
-// markdownlint knows by other names.
+// markdownlint knows by other names, four rules without, whose names and
+// tag hold letters beyond ASCII, and one whose catalog alias and tag do.
 func identityRegistry() *Registry {
 	reg := NewRegistry()
 	reg.Register(&mockRule{id: "MD004", name: "unordered-list-style"})
 	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
 	reg.Register(&mockRule{id: "MD012", name: "no-multiple-blank-lines"})
+	reg.Register(&mockRule{id: "X001", name: "caf\u00e9-check", tags: []string{"t\u00e2che"}})
+	reg.Register(&mockRule{id: "X002", name: "\u212aelvin-check"})
+	reg.Register(&mockRule{id: "X003", name: "\u0130nfo-check"})
+	reg.Register(&mockRule{id: "X004", name: "stra\u00dfe-check"})
+	reg.Register(&mockRule{id: "X005", name: "x-five"})
+	reg.Describe(RuleMeta{ID: "X005", Name: "x-five", Aliases: []string{"cr\u00e8me"}, Tags: []string{"\u00e9t\u00e9"}})
 	reg.Describe(RuleMeta{
 		ID: "MD004", Name: "unordered-list-style", Aliases: []string{"ul-style"}, MarkdownlintName: "ul-style",
 		Tags: []string{"bullet", "ul"},
@@ -132,45 +150,83 @@ func identityRegistry() *Registry {
 	return reg
 }
 
-// TestKeyIdentityAgrees runs spellings of a rule's name through the three
-// places that compare the words of markdownlint comments and the keys of
-// configure-file objects: resolution, the order of configure-file keys and
-// the deduplication of notices. They use one key identity, markdownlint's,
-// so they agree on whether each spelling means the same as the ASCII one.
+// TestKeyIdentityAgrees runs spellings of a rule's name or tag through the
+// three places that compare the words of markdownlint comments and the keys
+// of configure-file objects: resolution, the order of configure-file keys
+// and the deduplication of notices. They use one key identity,
+// markdownlint's, so they agree on whether each spelling means the same as
+// the one the rule was registered with, ASCII or not.
 func TestKeyIdentityAgrees(t *testing.T) {
 	registry := identityRegistry()
 	tests := []struct {
-		name, ascii, spelling string
-		same                  bool
+		name, base, spelling string
+		same                 bool
+		tag                  bool // base is a tag, which no configure-file key orders as a rule.
 	}{
-		{name: "ASCII case", ascii: "no-trailing-spaces", spelling: "No-Trailing-SPACES", same: true},
-		{name: "long s", ascii: "no-trailing-spaces", spelling: "no-trailing-\u017fpaces", same: true},
-		{name: "dotless i", ascii: "no-trailing-spaces", spelling: "no-tra\u0131ling-spaces", same: true},
-		{name: "Kelvin sign", ascii: "no-multiple-blanks", spelling: "no-multiple-blan\u212as"},
-		{name: "dotted capital I", ascii: "no-trailing-spaces", spelling: "NO-TRA\u0130LING-SPACES"},
+		{name: "ASCII case", base: "no-trailing-spaces", spelling: "No-Trailing-SPACES", same: true},
+		{name: "long s", base: "no-trailing-spaces", spelling: "no-trailing-\u017fpaces", same: true},
+		{name: "dotless i", base: "no-trailing-spaces", spelling: "no-tra\u0131ling-spaces", same: true},
+		{name: "Kelvin sign", base: "no-multiple-blanks", spelling: "no-multiple-blan\u212as"},
+		{name: "dotted capital I", base: "no-trailing-spaces", spelling: "NO-TRA\u0130LING-SPACES"},
+		{name: "custom name beyond ASCII", base: "caf\u00e9-check", spelling: "CAF\u00c9-CHECK", same: true},
+		{name: "custom tag beyond ASCII", base: "t\u00e2che", spelling: "T\u00c2CHE", same: true, tag: true},
+		{name: "k for a Kelvin sign", base: "\u212aelvin-check", spelling: "kelvin-check"},
+		{name: "i for a dotted capital I", base: "\u0130nfo-check", spelling: "info-check"},
+		{name: "sharp s", base: "stra\u00dfe-check", spelling: "STRASSE-CHECK", same: true},
+		{name: "catalog alias beyond ASCII", base: "cr\u00e8me", spelling: "CR\u00c8ME", same: true},
+		{name: "catalog tag beyond ASCII", base: "\u00e9t\u00e9", spelling: "\u00c9T\u00c9", same: true, tag: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			asciiRules, asciiMeaning := lookupWord(tt.ascii, registry)
-			require.Equal(t, knownWord, asciiMeaning)
+			baseRules, baseMeaning := lookupWord(tt.base, registry)
+			require.Equal(t, knownWord, baseMeaning)
 			rules, meaning := lookupWord(tt.spelling, registry)
 			if tt.same {
-				assert.Equal(t, sortedIDs(asciiRules), sortedIDs(rules), "resolution")
+				assert.Equal(t, sortedIDs(baseRules), sortedIDs(rules), "resolution")
 			} else {
 				assert.Equal(t, unknownWord, meaning, "resolution")
 			}
 
-			require.True(t, ruleKey(tt.ascii, registry))
-			assert.Equal(t, tt.same, ruleKey(tt.spelling, registry), "the order of configure-file keys")
+			require.Equal(t, !tt.tag, ruleKey(tt.base, registry))
+			assert.Equal(t, tt.same && !tt.tag, ruleKey(tt.spelling, registry), "the order of configure-file keys")
 
 			wantNotices := 2
 			if tt.same {
 				wantNotices = 1
 			}
-			directive := resolveOne(registry, tt.ascii+"-x "+tt.spelling+"-x")
+			directive := resolveOne(registry, tt.base+"-x "+tt.spelling+"-x")
 			assert.Len(t, directive.notices, wantNotices, "deduplication of notices")
 		})
 	}
+}
+
+// TestMarkdownlintSuggestionsNeverOfferTheWord covers the suggestions for a
+// word: never a rule or tag whose name has the word's key, which is the
+// word itself as markdownlint reads it, and tags as their catalog entries
+// write them, which markdownlint reads too.
+func TestMarkdownlintSuggestionsNeverOfferTheWord(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(&mockRule{id: "X001", name: "caf\u00e9-check"})
+	registry.Register(&mockRule{id: "X004", name: "tagged-rule"})
+	registry.Describe(RuleMeta{ID: "X004", Name: "tagged-rule", Tags: []string{"\u212aelvin-tag"}})
+	// A catalog entry whose markdownlint name is not one of its aliases,
+	// against RuleMeta's contract, so the name names nothing.
+	registry.Register(&mockRule{id: "X006", name: "acme-four"})
+	registry.Describe(RuleMeta{ID: "X006", Name: "acme-four", MarkdownlintName: "acme-fours"})
+
+	for _, word := range []string{"caf\u00e9-check", "CAF\u00c9-CHECK", "\u212aelvin-tag", "\u212aELVIN-TAG", "acme-fours"} {
+		assert.Empty(t, registry.markdownlintSuggestions(word), word)
+	}
+	assert.Equal(t, []Suggestion{{Name: "caf\u00e9-check", RuleID: "X001"}}, registry.markdownlintSuggestions("cafe-check"))
+	assert.Equal(t, []Suggestion{{Name: "\u212aelvin-tag"}}, registry.markdownlintSuggestions("kelvin-tag"))
+
+	// Where one catalog entry writes a tag in capitals and another in lower
+	// case, the suggestion takes the lower case, whichever comes first.
+	registry.Register(&mockRule{id: "ACME1", name: "acme-one"})
+	registry.Describe(RuleMeta{ID: "ACME1", Name: "acme-one", Tags: []string{"BULLET"}})
+	registry.Register(&mockRule{id: "MD004", name: "unordered-list-style"})
+	registry.Describe(RuleMeta{ID: "MD004", Name: "unordered-list-style", Tags: []string{"bullet"}})
+	assert.Equal(t, []Suggestion{{Name: "bullet"}}, registry.markdownlintSuggestions("bullt"))
 }
 
 // TestMarkdownlintTerm covers how a remedy writes a word for a markdownlint

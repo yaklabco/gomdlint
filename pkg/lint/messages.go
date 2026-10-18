@@ -48,12 +48,14 @@ func deprecatedTagText(tag string, names []string) string {
 }
 
 // IsSingleWord reports whether key is one word: not empty, and free of
-// whitespace. Only such a key can name a rule or a tag in a markdownlint
-// configuration object, such as a .markdownlint.json file or a
-// markdownlint-configure-file comment: markdownlint looks those keys up
-// whole, ignoring only case, and no rule identifier or tag holds
-// whitespace. Lookup and RulesByTag ignore surrounding whitespace, so check
-// a key with IsSingleWord before resolving it as markdownlint would.
+// whitespace. Only such a key can name a built-in rule or tag in a
+// markdownlint configuration file, such as .markdownlint.json:
+// markdownlint looks those keys up whole, ignoring only case, and no
+// built-in identifier or tag holds whitespace. Lookup and RulesByTag ignore
+// surrounding whitespace, so check a key with IsSingleWord before resolving
+// it through them as markdownlint would. markdownlint-configure-file
+// comments resolve their keys through the registry's index of
+// markdownlint keys instead (see lookupWord).
 func IsSingleWord(key string) bool {
 	return key != "" && !strings.ContainsFunc(key, unicode.IsSpace)
 }

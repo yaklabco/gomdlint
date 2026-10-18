@@ -306,18 +306,22 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 // also lag the JavaScript engine's, so a character that only a newer
 // version of Unicode gives an upper case, such as U+0264, keeps its own. In
 // both cases two spellings can have different keys where markdownlint reads
-// one word. Such a key is not ASCII and names nothing in either tool, so at
-// most the spelling gets a notice of its own.
+// one word. Such a character is beyond ASCII, so this matters only for a
+// custom rule whose name or tag holds one: a word written as the rule
+// writes it still names the rule, as does any spelling that differs from it
+// only in the case of characters that Go and JavaScript upper-case alike.
 //
 // Everything that compares the words of comments or the keys of
 // configure-file objects goes through this key: their resolution
-// (lookupWord), the order of configure-file keys (ruleKey), the default
-// key, the deduplication of notices (wordSet), the suggestions for unknown
+// (lookupWord, against the registry's index of every identifier and tag by
+// this key), the order of configure-file keys (ruleKey), the default key,
+// the deduplication of notices (wordSet), the suggestions for unknown
 // words (Registry.markdownlintSuggestions) and the words of remedies
 // (Registry.markdownlintTerm). Registry.Closest, which ranks the
 // suggestions, lower-cases the key once more with foldKey. That decides no
 // word's meaning; it only lets a word with a Kelvin sign be offered its
-// ASCII spelling.
+// ASCII spelling, and an ASCII word a spelling with a Kelvin sign or a
+// dotted capital I.
 func markdownlintKey(word string) string {
 	if isASCII(word) {
 		return strings.ToLower(word)
@@ -367,38 +371,23 @@ func isASCII(text string) bool {
 	return true
 }
 
-// lookupKey returns the key of word (see markdownlintKey), and whether that
-// key can name a rule or a tag: it is not empty and holds no whitespace, and
-// it is ASCII, as every rule identifier and tag is.
-func lookupKey(word string) (string, bool) {
-	key := markdownlintKey(word)
-	return key, IsSingleWord(key) && isASCII(key)
-}
-
 // lookupWord returns the registered rules that word, one word of a
 // markdownlint comment or a key of a markdownlint-configure-file object,
-// names, and how it names them. markdownlint looks each up whole by its key
-// (see markdownlintKey). A word that is empty or holds whitespace names no
-// rules, so a configure-file key of several words names none, and an empty
-// key none rather than all.
+// names, and how it names them. markdownlint looks each up whole, so a word
+// names an identifier or tag exactly when the two have the same key (see
+// markdownlintKey), beyond ASCII too. An empty word names no rules, and so
+// does a configure-file key of several words, unless a rule's name or tag
+// holds the same whitespace between its words.
 func lookupWord(word string, registry *Registry) ([]Rule, wordMeaning) {
-	key, ok := lookupKey(word)
-	if !ok {
-		return nil, unknownWord
-	}
-	return directiveRules(key, registry)
+	return directiveRules(markdownlintKey(word), registry)
 }
 
 // ruleKey reports whether key, a key of a markdownlint-configure-file
 // object, identifies a registered rule by its ID, name or an alias, as
 // lookupWord reads it, rather than a tag or nothing.
 func ruleKey(key string, registry *Registry) bool {
-	identity, ok := lookupKey(key)
-	if !ok {
-		return false
-	}
-	_, isRule := registry.Lookup(identity)
-	return isRule
+	word := registry.lookups().words[markdownlintKey(key)]
+	return word != nil && word.rule != nil
 }
 
 // asciiUpperCase returns, in lower case, the ASCII letters that JavaScript's
@@ -448,11 +437,11 @@ const (
 	formerTag
 )
 
-// isFormerTag reports whether key, the key of a word (see lookupKey), is
-// one of gomdlint's former tags: the tags that its built-in rules report
-// themselves that markdownlint does not have. Directives resolved tags
-// through Rule.Tags before they used markdownlint's tags, so these still
-// work there, with a notice, until a later release.
+// isFormerTag reports whether key, the key of a word (see
+// markdownlintKey), is one of gomdlint's former tags: the tags that its
+// built-in rules report themselves that markdownlint does not have.
+// Directives resolved tags through Rule.Tags before they used markdownlint's
+// tags, so these still work there, with a notice, until a later release.
 func isFormerTag(key string) bool {
 	switch key {
 	case "style", "lists", "layout", "metadata", "gfm", "tables":
@@ -463,33 +452,31 @@ func isFormerTag(key string) bool {
 }
 
 // directiveRules returns the registered rules that key, the key of one
-// word of a markdownlint comment (see lookupKey), names, and how it names
-// them. The word names the rule it identifies and the rules its tag covers.
-// Tags come from the rules' catalog entries, which carry markdownlint's
-// tags. A word that is an identifier or a tag in the catalog names only
-// those rules, even when none of them is registered, so that a registry
-// holding some of the rules resolves it as the full one does. Any other
-// word falls back to the tags that rules report themselves through
+// word of a markdownlint comment (see markdownlintKey), names, and how it
+// names them. The word names the rule it identifies and the rules its tag
+// covers. Tags come from the rules' catalog entries, which carry
+// markdownlint's tags. A word that is an identifier or a tag in the catalog
+// names only those rules, even when none of them is registered, so that a
+// registry holding some of the rules resolves it as the full one does. Any
+// other word falls back to the tags that rules report themselves through
 // Rule.Tags, so that gomdlint's former tags, such as style, keep working for
 // now, as do the tags of rules without catalog entries.
 func directiveRules(key string, registry *Registry) ([]Rule, wordMeaning) {
-	rules := registry.RulesByTag(key)
-	rule, isRule := registry.Lookup(key)
-	if isRule {
-		rules = append(rules, rule)
-	}
-	if isRule || registry.inCatalog(key) {
-		return rules, knownWord
-	}
-
-	rules = registry.rulesByOwnTag(key)
+	word := registry.lookups().words[key]
 	switch {
-	case len(rules) == 0:
+	case word == nil:
 		return nil, unknownWord
-	case isFormerTag(key):
-		return rules, formerTag
-	default:
+	case word.rule != nil || word.catalog:
+		rules := slices.Clone(word.tagged)
+		if word.rule != nil {
+			rules = append(rules, word.rule)
+		}
 		return rules, knownWord
+	case isFormerTag(key):
+		return slices.Clone(word.owned), formerTag
+	default:
+		// Every other entry is a tag that rules report themselves.
+		return slices.Clone(word.owned), knownWord
 	}
 }
 
@@ -516,17 +503,14 @@ func sortedIDs(rules []Rule) []string {
 // configure-file errors through it, and suggestions and the rules of a
 // former tag through markdownlintRuleName.
 func (r *Registry) markdownlintTerm(word string) string {
-	key, ok := lookupKey(word)
-	if !ok {
-		return word
-	}
-	return cmp.Or(r.lookups().markdownlintNames[key], word)
+	return cmp.Or(r.lookups().markdownlintNames[markdownlintKey(word)], word)
 }
 
 // markdownlintRuleName returns the name that a markdownlint comment should
 // use for the registered rule with the given ID and name: the name that
 // markdownlint lists first for that ID (RuleMeta.MarkdownlintName), or else
-// its name as markdownlintTerm writes it, or its ID when it has no name.
+// its name as markdownlintTerm writes it, without surrounding whitespace,
+// which no comment word can hold, or its ID when it has no name.
 // Both ways give the same name for a built-in rule, whose name is its
 // catalog entry's. The ID comes first for a library's rule registered under
 // a built-in ID with a name of its own, which markdownlint does not know.
@@ -537,7 +521,7 @@ func (r *Registry) markdownlintRuleName(id, name string) string {
 	if term != "" {
 		return term
 	}
-	return cmp.Or(r.markdownlintTerm(name), id)
+	return cmp.Or(r.markdownlintTerm(strings.TrimSpace(name)), id)
 }
 
 // markdownlintName is markdownlintRuleName for rule.
@@ -549,19 +533,24 @@ func (r *Registry) markdownlintName(rule Rule) string {
 // markdownlint comment or a key of a configure-file object that names
 // nothing, most likely means: those that Closest offers for the word as
 // markdownlint reads it, its key (see markdownlintKey), with each rule named
-// as a markdownlint comment should name it (see markdownlintRuleName). Tags
-// keep their names, which are markdownlint's.
+// as a markdownlint comment should name it (see markdownlintRuleName) and
+// each tag as its catalog entry writes it, which markdownlint reads too. It
+// never offers the word itself: a name with the word's key, which the word
+// would name if it named anything.
 func (r *Registry) markdownlintSuggestions(word string) []Suggestion {
-	suggestions := r.Closest(markdownlintKey(word))
-	if len(suggestions) == 0 {
-		return nil
-	}
-	named := make([]Suggestion, len(suggestions))
-	for idx, suggestion := range suggestions {
-		if !suggestion.IsTag() {
+	key := markdownlintKey(word)
+	suggestions := r.Closest(key)
+	tagSpellings := r.lookups().tagSpellings
+	var named []Suggestion
+	for _, suggestion := range suggestions {
+		if suggestion.IsTag() {
+			suggestion.Name = cmp.Or(tagSpellings[suggestion.Name], suggestion.Name)
+		} else {
 			suggestion.Name = r.markdownlintRuleName(suggestion.RuleID, suggestion.Name)
 		}
-		named[idx] = suggestion
+		if markdownlintKey(suggestion.Name) != key {
+			named = append(named, suggestion)
+		}
 	}
 	return named
 }
