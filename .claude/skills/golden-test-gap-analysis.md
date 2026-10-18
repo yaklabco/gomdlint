@@ -11,17 +11,18 @@ Analyze gomdlint rules to determine which lack golden test coverage and which ed
 
 ## Context
 
-Golden tests live in `pkg/lint/rules/testdata/<RULE_ID>/`. Each test case consists of 4 files:
-- `<name>.input.md` — the markdown input with violations
-- `<name>.golden.md` — the expected output after fixes are applied
-- `<name>.diags.json` — the expected diagnostics as JSON
-- `<name>.diags.txt` — the expected diagnostics as human-readable text
+Golden tests live in `pkg/lint/rules/testdata/<RULE_ID>/`. Each test case consists of 4 files, and an optional fifth:
+- `<name>.input.md`: the markdown input with violations
+- `<name>.config.yml` (optional, hand-written): the flavor and rule options for this case
+- `<name>.golden.md`: the expected output after fixes are applied
+- `<name>.diags.json`: the expected diagnostics as JSON
+- `<name>.diags.txt`: the expected diagnostics as human-readable text
 
-The test harness auto-discovers these via `TestGoldenPerRule` in `golden_test.go`.
+The test harness auto-discovers these via `TestGoldenPerRule` in `golden_test.go`. Cases without a sidecar run with the `gfm` flavor and no rule options, so a rule that only reports with options, such as MD043 or MD044, needs a sidecar.
 
 ## Edge Case Categories
 
-For each rule, determine which of these categories are applicable. Not every category applies to every rule — skip categories that are meaningless for a given rule.
+For each rule, determine which of these categories are applicable. Not every category applies to every rule. Skip categories that are meaningless for a given rule.
 
 | Category | File Name | Description | When Applicable |
 |----------|-----------|-------------|-----------------|
@@ -32,10 +33,10 @@ For each rule, determine which of these categories are applicable. Not every cat
 | Unicode content | `unicode` | Multi-byte characters (emoji, CJK, accented) near violation site | Rules that do byte-offset edits or column calculations |
 | Nested structures | `nested` | Violations inside blockquotes, list items | Rules whose violations can appear in nested contexts |
 | CRLF line endings | `crlf` | Same violations with `\r\n` line endings | Rules that do line-ending-sensitive edits |
-| Multiple violations | `multiple` | Many violations in a single file | All fixable rules — tests batch fix correctness |
+| Multiple violations | `multiple` | Many violations in a single file | All fixable rules, to test batch fix correctness |
 | Adjacent violations | `adjacent` | Two violations on same/consecutive lines | Fixable rules where offset shifts could conflict |
 | Empty file | `empty_file` | Completely empty file or whitespace-only | Rules that check document-level properties (MD041, MD047) |
-| Large content | `large_content` | Violation buried after 200+ lines | Fixable rules — stress tests offset math |
+| Large content | `large_content` | Violation buried after 200+ lines | Fixable rules, to stress offset math |
 | Mixed HTML | `html_mixed` | Violations near inline HTML elements | Rules that scan inline content |
 | Table context | `table_context` | Violations inside GFM table cells | Rules whose violations could appear in tables |
 | Link context | `link_context` | Violations inside link text or destinations | Rules that scan inline content near links |
@@ -54,14 +55,14 @@ For each of the 55 rules:
    - What contexts it skips (e.g., `ctx.IsLineInCodeBlock()`)
    - What byte-level operations its fixes perform
 
-2. **Check existing coverage** — list what test cases already exist in `testdata/<RULE_ID>/`
+2. **Check existing coverage**. List what test cases already exist in `testdata/<RULE_ID>/`
 
-3. **Determine applicable categories** — for each edge-case category, decide yes/no/already-covered based on the rule's behavior
+3. **Determine applicable categories**. For each edge-case category, decide yes/no/already-covered based on the rule's behavior
 
 4. **Output a structured report** with this format per rule:
 
 ```
-## MD009 (no-trailing-spaces) — Fixable: Yes
+## MD009 (no-trailing-spaces), Fixable: Yes
 Existing cases: basic, clean
 Missing cases: frontmatter, unicode, crlf, multiple, adjacent, large_content
 Not applicable: table_context (trailing spaces in table cells are structural)
