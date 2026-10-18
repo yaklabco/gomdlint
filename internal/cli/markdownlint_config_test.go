@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,16 +50,16 @@ func reportedFiles(t *testing.T, report string) map[string][]string {
 // translated for each run, or migrated to a gomdlint config first.
 var markdownlintModes = []string{"applied for the run", "migrated"}
 
-// lintWithMarkdownlintConfig lints doc.md, which holds doc, under the
-// markdownlint config name, which holds settings, as mode says: translated
-// for the run, or migrated with gomdlint migrate, after which the
-// markdownlint config goes, as migrate advises. It returns the rules that
-// each file reports and the warnings: the run's for a translated config,
-// and migrate's for a migrated one.
-func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings, doc string) (map[string][]string, string) {
+// lintWithMarkdownlintConfig lints doc.md, which holds trailingSpaceDoc,
+// under the markdownlint config name, which holds settings, as mode says:
+// translated for the run, or migrated with gomdlint migrate, after which
+// the markdownlint config goes, as migrate advises. It returns the rules
+// that each file reports and the warnings: the run's for a translated
+// config, and migrate's for a migrated one.
+func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings string) (map[string][]string, string) {
 	t.Helper()
 
-	dir := inProject(t, map[string]string{"doc.md": doc, name: settings})
+	dir := inProject(t, map[string]string{"doc.md": trailingSpaceDoc, name: settings})
 	var warnings string
 	if mode == "migrated" {
 		migrated := execute(t, "migrate", name, "--output", ".gomdlint.yml")
@@ -98,7 +99,7 @@ func TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
 	for _, tt := range tests {
 		for _, mode := range markdownlintModes {
 			t.Run(tt.name+" "+mode, func(t *testing.T) {
-				got, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint.json", tt.settings, trailingSpaceDoc)
+				got, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint.json", tt.settings)
 
 				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
 				if tt.warning == "" {
@@ -132,7 +133,7 @@ func TestMarkdownlintConfig_DefaultKeyInAnyCase(t *testing.T) {
 	for _, tt := range tests {
 		for _, mode := range markdownlintModes {
 			t.Run(tt.name+" "+mode, func(t *testing.T) {
-				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings, trailingSpaceDoc)
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
 
 				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
 				assert.NotContains(t, warnings, "unknown rule")
@@ -149,7 +150,7 @@ func TestMarkdownlintConfig_FalsyRuleValues(t *testing.T) {
 	for _, settings := range []string{`{"MD009": 0}`, `{"MD009": ""}`, `{"MD009": {"enabled": null}}`} {
 		for _, mode := range markdownlintModes {
 			t.Run(settings+" "+mode, func(t *testing.T) {
-				got, _ := lintWithMarkdownlintConfig(t, mode, ".markdownlint.json", settings, trailingSpaceDoc)
+				got, _ := lintWithMarkdownlintConfig(t, mode, ".markdownlint.json", settings)
 
 				assert.Equal(t, map[string][]string{"doc.md": nil}, got)
 			})
@@ -193,7 +194,7 @@ func TestMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 	for _, tt := range tests {
 		for _, mode := range markdownlintModes {
 			t.Run(tt.name+" "+mode, func(t *testing.T) {
-				got, _ := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings, trailingSpaceDoc)
+				got, _ := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
 
 				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
 			})
@@ -222,11 +223,12 @@ func TestLint_ConfigureFileAppliesKeysInWrittenOrder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var doc string
+			var doc strings.Builder
 			for _, comment := range tt.comments {
-				doc += "<!-- markdownlint-configure-file " + comment + " -->\n\n"
+				doc.WriteString("<!-- markdownlint-configure-file " + comment + " -->\n\n")
 			}
-			inProject(t, map[string]string{"doc.md": doc + trailingSpaceDoc})
+			doc.WriteString(trailingSpaceDoc)
+			inProject(t, map[string]string{"doc.md": doc.String()})
 
 			got := execute(t, "lint", "--format", "json", "doc.md")
 

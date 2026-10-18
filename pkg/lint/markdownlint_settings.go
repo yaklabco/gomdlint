@@ -148,7 +148,10 @@ func decodeSettings(data []byte, allowNull bool) (*MarkdownlintSettings, error) 
 		if err != nil {
 			return nil, fmt.Errorf("read JSON: %w", err)
 		}
-		key, _ := token.(string) // The keys of an object are strings.
+		key, isKey := token.(string)
+		if !isKey { // Valid JSON, which the check above ensures, has string keys.
+			return nil, fmt.Errorf("read JSON: object key %v is not a string", token)
+		}
 		var value any
 		if err := decoder.Decode(&value); err != nil {
 			return nil, fmt.Errorf("read JSON: %w", err)

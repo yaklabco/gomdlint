@@ -22,8 +22,8 @@ const markdownlintWarning = string(SeverityWarning)
 // otherwise. Nothing else comes from the value, so an object turns the rule
 // on whatever it holds, and the rule keeps markdownlint's option defaults.
 func MarkdownlintDefaultRuleConfig(ruleID string, value any) RuleConfig {
-	switch text, _ := value.(string); {
-	case text == markdownlintWarning:
+	switch text, isText := value.(string); {
+	case isText && text == markdownlintWarning:
 		return MarkdownlintRuleConfig(ruleID, markdownlintWarning)
 	case markdownlintTruthy(value):
 		return MarkdownlintRuleConfig(ruleID, true)
