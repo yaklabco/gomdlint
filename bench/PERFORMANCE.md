@@ -88,14 +88,11 @@ Both tools:
 
 ### Profiling Integration
 
-Each gomdlint benchmark run generates CPU profiles, memory profiles, and execution traces:
+Each gomdlint benchmark run generates CPU profiles, memory profiles, and execution traces, in these files:
 
-```
-bench/results/profiles/<timestamp>/<repo>/
-├── cpu.pprof    # CPU profile (go tool pprof compatible)
-├── mem.pprof    # Memory allocation profile
-└── trace.out    # Execution trace (go tool trace compatible)
-```
+- `bench/results/profiles/<timestamp>/<repo>/cpu.pprof`: CPU profile, readable with `go tool pprof`
+- `bench/results/profiles/<timestamp>/<repo>/mem.pprof`: memory allocation profile
+- `bench/results/profiles/<timestamp>/<repo>/trace.out`: execution trace, readable with `go tool trace`
 
 These profiles enable post-hoc analysis of performance characteristics.
 
@@ -176,7 +173,7 @@ microsoft/vscode-docs
 
 ### Rule Parity
 
-gomdlint implements equivalent functionality for most markdownlint rules but is not a 1:1 port. Some markdownlint rules have no gomdlint equivalent, and vice versa. Benchmarks run both tools with their default rule sets.
+gomdlint has a rule for each of markdownlint 0.41's 53 rules, plus two of its own, MDL001 and MDL003, but it is not a 1:1 port. It parses with goldmark instead of micromark, so a few constructs read differently (see [Known Limitations](../README.md#known-limitations) in the README), and it fixes a different set of rules. It fixes some that markdownlint leaves unfixed, such as `line-length` (MD013), and leaves unfixed some that markdownlint fixes, such as `link-fragments` (MD051). Benchmarks run both tools with their default rule sets.
 
 ### Platform Variance
 
