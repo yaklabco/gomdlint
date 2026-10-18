@@ -88,6 +88,73 @@ func TestConvertMarkdownlintConfig_TagOptions(t *testing.T) {
 	assert.Nil(t, result.Config.Rules["MD010"].Options, "an option of another rule configures nothing")
 }
 
+// TestConvertMarkdownlintConfig_OptionWarningLines checks that a warning
+// about an option of a markdownlint config knows the line of the source
+// file that it is about: the line of the option's key, or, for an item of
+// a list, the item's line, in YAML and in JSON with comments.
+func TestConvertMarkdownlintConfig_OptionWarningLines(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, file, content string
+		warnings            []string
+		lines               []int
+	}{
+		{
+			name: "YAML", file: ".markdownlint.yaml", content: "MD013:\n  line_length: oops\n",
+			warnings: []string{`line-length option "line_length" must be an integer, not "oops"; it is ignored`},
+			lines:    []int{2},
+		},
+		{
+			name: "YAML list item", file: ".markdownlint.yml", content: "MD022:\n  lines_above:\n    - 1\n    - 2.5\n",
+			warnings: []string{
+				`heading-blank-lines option "lines_above" item 2 must be an integer, not 2.5; the option is ignored`,
+			},
+			lines: []int{4},
+		},
+		{
+			name: "YAML merged option", file: ".markdownlint.yaml",
+			content: "base: &length\n  line_length: oops\nMD013:\n  <<: *length\n  tables: false\n",
+			warnings: []string{
+				`unknown rule "base"; it is ignored`,
+				`line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+			},
+			lines: []int{0, 2},
+		},
+		{
+			name: "JSON with comments", file: ".markdownlint.jsonc",
+			content: "{\n  /* A comment\n     over two lines */\n  \"MD013\": {\n    \"stirct\": true,\n" +
+				"    \"line_length\": 80\n  },\n  // A tag.\n  \"whitespace\": {\"br_spcaes\": 3}\n}\n",
+			warnings: []string{
+				`unknown option "stirct" for line-length (did you mean "strict"?); it is ignored`,
+				`unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored`,
+			},
+			lines: []int{5, 9},
+		},
+		{
+			name: "JSON key written twice", file: ".markdownlint.json",
+			content:  "{\n  \"MD013\": {\"tables\": 1},\n  \"MD013\": {\n    \"tables\": \"no\"\n  }\n}\n",
+			warnings: []string{`line-length option "tables" must be true or false, not "no"; it is ignored`},
+			lines:    []int{4},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			assert.Equal(t, tt.warnings, result.Warnings)
+			lines := make([]int, len(result.Warnings))
+			for idx := range result.Warnings {
+				lines[idx] = result.WarningLine(idx)
+			}
+			assert.Equal(t, tt.lines, lines)
+		})
+	}
+}
+
 // TestConvertMarkdownlintConfig_OptionConflict checks that two spellings
 // of one option fail the migration, as in a gomdlint config file.
 func TestConvertMarkdownlintConfig_OptionConflict(t *testing.T) {

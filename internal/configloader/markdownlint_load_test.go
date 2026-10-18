@@ -305,3 +305,22 @@ func TestInteractiveTerminalNeedsTerminals(t *testing.T) {
 	assert.False(t, interactiveTerminal(reader, writer), "pipes are not terminals")
 	assert.False(t, interactiveTerminal(strings.NewReader(""), io.Discard), "non-file streams are not terminals")
 }
+
+// TestLoad_MarkdownlintOptionWarningsNameTheLine covers the warnings about
+// options of a markdownlint config that gomdlint translates for a run: each
+// names the file and the line of the option, as a warning about a gomdlint
+// config does. A warning about a key that names no rule names the file.
+func TestLoad_MarkdownlintOptionWarningsNameTheLine(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := writeMarkdownlint(t, dir, ".markdownlint.yaml", "MD013:\n  line_length: oops\nno-such-rule: false\n")
+
+	result, err := Load(context.Background(), markdownlintOptions(dir, false, "", io.Discard))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		source + `:2: line-length option "line_length" must be an integer, not "oops"; it is ignored`,
+		source + `: unknown rule "no-such-rule"; it is ignored`,
+	}, result.Warnings)
+}

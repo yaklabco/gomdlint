@@ -25,10 +25,34 @@ type MigrationResult struct {
 	Config *config.Config
 
 	// Warnings contains non-fatal issues encountered during conversion.
+	// WarningLine gives the line of the source file that each is about.
 	Warnings []string
 
 	// SourcePath is the path to the original markdownlint config.
 	SourcePath string
+
+	// warningLines maps the index in Warnings of each warning about one
+	// line of the source file to that line.
+	warningLines map[int]int
+}
+
+// WarningLine returns the line of the source file that Warnings[idx] is
+// about, such as the line of an option that its rule does not read, or 0
+// for a warning about no single line.
+func (r *MigrationResult) WarningLine(idx int) int {
+	return r.warningLines[idx]
+}
+
+// addWarning records message, a warning about the given line of the source
+// file, or about no single line when line is 0.
+func (r *MigrationResult) addWarning(line int, message string) {
+	if line > 0 {
+		if r.warningLines == nil {
+			r.warningLines = make(map[int]int)
+		}
+		r.warningLines[len(r.Warnings)] = line
+	}
+	r.Warnings = append(r.Warnings, message)
 }
 
 // ruleTranslator converts the setting of the rule with the given ID in a
@@ -76,6 +100,7 @@ func convertMarkdownlintConfig(path string, translate ruleTranslator) (*Migratio
 	if err != nil {
 		return nil, err
 	}
+	locate := newSourceLocator(path, content)
 
 	cfg := &config.Config{Rules: make(map[string]config.RuleConfig)}
 	defaultValue, found := settings.Default()
@@ -93,7 +118,9 @@ func convertMarkdownlintConfig(path string, translate ruleTranslator) (*Migratio
 		cfg.RuleDefaults[id] = config.MarkdownlintDefaultRuleConfig(id, value)
 	}
 
-	conversion := &markdownlintConversion{registry: registry, translate: translate, cfg: cfg, result: result}
+	conversion := &markdownlintConversion{
+		registry: registry, translate: translate, cfg: cfg, result: result, locate: locate,
+	}
 	for _, setting := range settings.Settings() {
 		if lint.IsMarkdownlintDefaultKey(setting.Key) {
 			continue // The first default key is the baseline, and later ones do nothing.
@@ -103,7 +130,7 @@ func convertMarkdownlintConfig(path string, translate ruleTranslator) (*Migratio
 			continue
 		case "extends":
 			if extends, ok := setting.Value.(string); ok {
-				result.Warnings = append(result.Warnings,
+				result.addWarning(0,
 					fmt.Sprintf("'extends: %q' is not yet supported; you may need to merge configs manually", extends))
 				continue
 			}
@@ -237,8 +264,9 @@ func (r *MigrationResult) FileContent(path string) ([]byte, error) {
 	return content, nil
 }
 
-// stripJSONComments removes JavaScript-style comments from JSON content.
-// Valid JSON, which holds no comments, comes back as it is.
+// stripJSONComments removes JavaScript-style comments from JSON content,
+// keeping their line endings, so that every line keeps its number. Valid
+// JSON, which holds no comments, comes back as it is.
 func stripJSONComments(content []byte) []byte {
 	var result []byte
 	inString := false
@@ -260,6 +288,8 @@ func stripJSONComments(content []byte) []byte {
 			if char == '*' && idx+1 < len(content) && content[idx+1] == '/' {
 				inMultiComment = false
 				idx++ // skip the closing /
+			} else if char == '\n' {
+				result = append(result, char) // Lines keep their numbers, for warnings.
 			}
 			continue
 		}
@@ -308,6 +338,7 @@ type markdownlintConversion struct {
 	translate ruleTranslator
 	cfg       *config.Config
 	result    *MigrationResult
+	locate    sourceLocator
 }
 
 // rule converts value, the setting of the rule with the given ID, and
@@ -331,9 +362,84 @@ func (c *markdownlintConversion) ruleName(id string) string {
 	return id
 }
 
-// warn records a warning about the configuration.
-func (c *markdownlintConversion) warn(message string) {
-	c.result.Warnings = append(c.result.Warnings, message)
+// warn records a warning about the given line of the configuration, or
+// about no single line when line is 0.
+func (c *markdownlintConversion) warn(line int, message string) {
+	c.result.addWarning(line, message)
+}
+
+// sourceLocator finds the lines of the keys of a markdownlint config in its
+// source, for warnings that name them.
+type sourceLocator struct {
+	// root is the config's top-level mapping, or nil when the source holds
+	// none.
+	root *yaml.Node
+}
+
+// newSourceLocator reads content, the markdownlint config at path, into a
+// tree of nodes that record their lines: as JSON with comments for a name
+// that ends in .json or .jsonc, which jsonDocument reads, and as YAML
+// otherwise. Content that it cannot read has no lines to find.
+func newSourceLocator(path string, content []byte) sourceLocator {
+	var doc *yaml.Node
+	if IsJSONConfig(path) {
+		parsed, err := jsonDocument(stripJSONComments(content))
+		if err != nil {
+			return sourceLocator{}
+		}
+		doc = parsed
+	} else {
+		doc = &yaml.Node{}
+		if err := yaml.Unmarshal(content, doc); err != nil {
+			return sourceLocator{}
+		}
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return sourceLocator{}
+	}
+	return sourceLocator{root: doc.Content[0]}
+}
+
+// optionLine returns the line of option, a key under the config's key key,
+// or, when item is not 0, the line of the option's item at that position,
+// counted from 1. It returns 0 when the source does not show it.
+func (l sourceLocator) optionLine(key, option string, item int) int {
+	setting := takenSourceEntry(l.root, key)
+	if setting == nil {
+		return 0
+	}
+	entry := takenSourceEntry(setting.value, option)
+	if entry == nil {
+		return 0
+	}
+	if line := itemLine(entry.value, item); line > 0 {
+		return line
+	}
+	return entry.key.Line
+}
+
+// takenSourceEntry returns the entry for name of mapping, a mapping or an
+// alias to one, whose value the config takes: the last one written in the
+// mapping itself, since JSON keeps the last of a key written twice and
+// YAML has no key twice, or else the first that a merge key brings in, as
+// YAML takes it. It returns nil when there is none.
+func takenSourceEntry(mapping *yaml.Node, name string) *writtenEntry {
+	var own, merged *writtenEntry
+	entries := writtenEntries(mapping)
+	for idx := range entries {
+		entry := &entries[idx]
+		switch {
+		case entry.name != name:
+		case entry.merge == nil:
+			own = entry
+		case merged == nil:
+			merged = entry
+		}
+	}
+	if own != nil {
+		return own
+	}
+	return merged
 }
 
 // processRuleKey applies key, one key of the markdownlint config, and its
@@ -352,7 +458,7 @@ func (c *markdownlintConversion) warn(message string) {
 func (c *markdownlintConversion) processRuleKey(key string, value any) error {
 	ruleIDs, known := c.registry.MarkdownlintConfigRuleIDs(key)
 	if !known {
-		c.warn(c.registry.UnknownKeyText(key) + "; it is ignored")
+		c.warn(0, c.registry.UnknownKeyText(key)+"; it is ignored")
 		return nil
 	}
 	unread := make(map[string]int) // option key -> the rules that do not read it
@@ -366,13 +472,14 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) error {
 				unread[issue.Key]++
 				continue
 			}
-			c.warn(issue.Text(c.ruleName(id)))
+			c.warn(c.locate.optionLine(key, issue.Key, issue.Item), issue.Text(c.ruleName(id)))
 		}
 		c.cfg.Rules[id] = converted
 	}
 	for _, option := range slices.Sorted(maps.Keys(unread)) {
 		if unread[option] == len(ruleIDs) {
-			c.warn(fmt.Sprintf("unknown option %q for the rules of the tag %q; it is ignored", option, key))
+			c.warn(c.locate.optionLine(key, option, 0),
+				fmt.Sprintf("unknown option %q for the rules of the tag %q; it is ignored", option, key))
 		}
 	}
 	return nil

@@ -464,7 +464,7 @@ that the rule does not know. A list with an item of the wrong type, such
 as `lines_above: [1, 2.5]`, counts as a value of the wrong type: each such
 item gets a warning, and the rule uses the option's default. A markdownlint
 config that gomdlint migrates or translates for a run gets these warnings
-too.
+too, with the line of each option.
 
 ### Precedence
 

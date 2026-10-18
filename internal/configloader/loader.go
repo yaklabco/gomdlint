@@ -349,7 +349,11 @@ func applyMarkdownlint(path string, opts LoadOptions, result *LoadResult) (*conf
 	if err != nil {
 		return nil, fmt.Errorf("load markdownlint config %s: %w", path, err)
 	}
-	for _, warning := range converted.Warnings {
+	for idx, warning := range converted.Warnings {
+		if line := converted.WarningLine(idx); line > 0 {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s:%d: %s", path, line, warning))
+			continue
+		}
 		result.Warnings = append(result.Warnings, path+": "+warning)
 	}
 	result.LoadedFrom = append(result.LoadedFrom, path)

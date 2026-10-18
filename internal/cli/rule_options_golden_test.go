@@ -12,9 +12,18 @@ import (
 const optionDoc = "# Title\n\nThis line is longer than forty characters, by some margin.\n"
 
 // optionMarkdownlintConfig is a markdownlint config with markdownlint's
-// spellings of line-length options, a typo of an option, and an option
-// under a tag that none of the tag's rules reads.
-const optionMarkdownlintConfig = `{"MD013": {"line_length": 40, "tables": false, "stirct": true}, "whitespace": {"br_spcaes": 3}}` + "\n"
+// spellings of line-length options, a typo of an option on line 4, and an
+// option on line 7, under a tag that none of the tag's rules reads.
+const optionMarkdownlintConfig = `{
+  "MD013": {
+    "line_length": 40, "tables": false,
+    "stirct": true
+  },
+  "whitespace": {
+    "br_spcaes": 3
+  }
+}
+`
 
 // TestRuleOptionMessagesGolden runs command lines whose configuration sets
 // rule options in markdownlint's spellings, with mistakes, and compares the
