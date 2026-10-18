@@ -21,8 +21,9 @@ import (
 // parse takes about as long either way and a quadratic one about eight
 // times as long for the long input. Both measurements last about as long,
 // so they meet the same disturbances; they run in turns, the fastest of
-// each counts, and garbage collection is paused while they run, because
-// marking the long parse's growing tree would otherwise weigh on it alone.
+// each counts, and garbage collection is paused while they are timed,
+// because marking the long parse's growing tree would otherwise weigh on it
+// alone.
 func TestManyClosingBracketsParseInLinearTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing")
@@ -53,13 +54,18 @@ func TestManyClosingBracketsParseInLinearTime(t *testing.T) {
 			parseDuration(t, short)
 			parseDuration(t, long)
 
+			// Collecting before each measurement, outside the timers, keeps
+			// the paused collector from letting the heap grow for the whole
+			// test.
 			bestBatch, bestLong := time.Duration(1<<63-1), time.Duration(1<<63-1)
 			for range rounds {
+				runtime.GC()
 				var batch time.Duration
 				for range factor {
 					batch += parseDuration(t, short)
 				}
 				bestBatch = min(bestBatch, batch)
+				runtime.GC()
 				bestLong = min(bestLong, parseDuration(t, long))
 			}
 			ratio := float64(bestLong) / float64(bestBatch)
