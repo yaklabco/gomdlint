@@ -53,6 +53,7 @@ func TestCheckboxCandidateRegions(t *testing.T) {
 		},
 		{name: "ten digits are no marker", input: "1234567890. [x] a\n"},
 		{name: "carriage returns", input: "- [x] a\r\n- b\r\n", regions: []string{"- [x] a\r\n- b\r\n"}},
+		{name: "carriage returns alone", input: "-\r  [x] a\r\rb\r", regions: []string{"-\r  [x] a\r\r"}},
 		{name: "byte order mark", input: "\ufeff- [x] a\n", regions: []string{"\ufeff- [x] a\n"}},
 		{name: "marker without a space", input: "-[x] a\n"},
 		// micromark reads a checkbox in a list that starts a footnote
@@ -100,6 +101,10 @@ func TestCheckboxGuardWithholds(t *testing.T) {
 		{
 			name: "space after an empty marker in a footnote", input: "[^a]: - \n    [x] task\n",
 			old: "- \n", new: "-\n", want: true,
+		},
+		{
+			name: "carriage returns alone end lines", input: "- \r  [x] task\r",
+			old: "- \r", new: "-\r", want: true,
 		},
 		{name: "space after the brackets", input: "- [x] \n", old: "] \n", new: "]\n", want: true},
 		{name: "marker spacing", input: "-  [x] task\n", old: "-  [", new: "- [", want: true},

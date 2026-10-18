@@ -160,7 +160,7 @@ func (g *checkboxGuard) appendsToUnterminatedEnd(edit fix.TextEdit, region check
 	if edit.StartOffset != edit.EndOffset || edit.StartOffset != len(g.content) {
 		return false
 	}
-	return region.end == len(g.content) && !bytes.HasSuffix(g.content, []byte("\n"))
+	return region.end == len(g.content) && (len(g.content) == 0 || !isLineEnd(g.content[len(g.content)-1]))
 }
 
 // lineStartAfter reports whether the text after edit starts a line once the
@@ -168,9 +168,9 @@ func (g *checkboxGuard) appendsToUnterminatedEnd(edit fix.TextEdit, region check
 // and a line ending, or the start of the content, comes before it.
 func (g *checkboxGuard) lineStartAfter(edit fix.TextEdit) bool {
 	if edit.NewText != "" {
-		return edit.NewText[len(edit.NewText)-1] == '\n'
+		return isLineEnd(edit.NewText[len(edit.NewText)-1])
 	}
-	return edit.StartOffset == 0 || g.content[edit.StartOffset-1] == '\n'
+	return edit.StartOffset == 0 || isLineEnd(g.content[edit.StartOffset-1])
 }
 
 // lineWindow is a range of lines, first to last: from an edit's first
@@ -287,17 +287,25 @@ func (g *checkboxGuard) lineOf(offset int) int {
 	return max(sort.SearchInts(g.lines, offset+1)-1, 0)
 }
 
-// lineStarts returns the offset where each line of content starts. Empty
-// content has one empty line; content that ends with a line ending has no
-// line after it.
+// lineStarts returns the offset where each line of content starts. A line
+// ends with a line feed, a carriage return and a line feed, or a carriage
+// return alone, as CommonMark reads them. Empty content has one empty
+// line; content that ends with a line ending has no line after it.
 func lineStarts(content []byte) []int {
 	starts := []int{0}
 	for idx, char := range content {
-		if char == '\n' && idx+1 < len(content) {
+		ends := char == '\n' || (char == '\r' && (idx+1 == len(content) || content[idx+1] != '\n'))
+		if ends && idx+1 < len(content) {
 			starts = append(starts, idx+1)
 		}
 	}
 	return starts
+}
+
+// isLineEnd reports whether char ends a line: a line feed, or a carriage
+// return, which fix.Validator never parts from a line feed after it.
+func isLineEnd(char byte) bool {
+	return char == '\n' || char == '\r'
 }
 
 // trimLineEnding returns line without its line ending.
