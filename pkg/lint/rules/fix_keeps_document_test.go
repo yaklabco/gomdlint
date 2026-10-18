@@ -124,6 +124,14 @@ func TestFix_RuleFixesKeepTheDocument(t *testing.T) {
 			wantLines: []int{3},
 		},
 		{
+			// GFM reads "[ ](/url)" as a link with a space as its text, which
+			// goldmark reads as a task checkbox and text.
+			name:      "heading of a link with a space as its text in a list item",
+			input:     "# Title\n\n- ## [ ](/url).\n",
+			ruleID:    "MD026",
+			wantLines: []int{3},
+		},
+		{
 			name:      "heading that ends with a period",
 			input:     "# Title\n\n## Usage.\n",
 			ruleID:    "MD026",
