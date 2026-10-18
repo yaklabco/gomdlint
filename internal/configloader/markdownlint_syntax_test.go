@@ -155,6 +155,116 @@ func TestConvertMarkdownlintConfig_ByteOrderMarkBeforeComments(t *testing.T) {
 	assert.Empty(t, result.Warnings)
 }
 
+// TestConvertMarkdownlintConfig_JSONInAYAMLFile covers a .markdownlint.yaml
+// or .yml file that holds JSON. markdownlint-cli2 reads every config that
+// it finds with its JSONC parser first, so it reads such a file as JSON
+// with comments and trailing commas: a key written twice keeps its first
+// place and takes its last value, where YAML rejects a key written twice.
+// The option warnings keep their lines.
+func TestConvertMarkdownlintConfig_JSONInAYAMLFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a key written twice", func(t *testing.T) {
+		t.Parallel()
+
+		for _, file := range []string{".markdownlint.yaml", ".markdownlint.yml"} {
+			result := convertFile(t, file, `{"MD013": true, "MD009": false, "MD013": false}`)
+
+			assert.True(t, lineLengthOff(t, result), file)
+			assert.Empty(t, result.Warnings, file)
+		}
+	})
+
+	t.Run("the first place holds", func(t *testing.T) {
+		t.Parallel()
+
+		// MD009 applies first, then the whitespace tag turns it back on,
+		// though MD009 is written again after the tag.
+		result := convertFile(t, ".markdownlint.yaml", `{"MD009": false, "whitespace": true, "MD009": false}`)
+
+		rule := result.Config.Rules["MD009"]
+		require.NotNil(t, rule.Enabled)
+		assert.True(t, *rule.Enabled)
+	})
+
+	t.Run("comments, trailing commas and tabs", func(t *testing.T) {
+		t.Parallel()
+
+		for _, content := range []string{
+			`{"MD013": true, "MD013": false,}`,
+			"{\"MD013\": false} // Long lines are fine.\n",
+			"{\n\t\"MD013\": false\n}\n",
+		} {
+			result := convertFile(t, ".markdownlint.yaml", content)
+
+			assert.True(t, lineLengthOff(t, result), content)
+			assert.Empty(t, result.Warnings, content)
+		}
+	})
+
+	t.Run("option warning lines", func(t *testing.T) {
+		t.Parallel()
+
+		content := "{\n  \"MD013\": {\"stirct\": true},\n  \"MD013\": {\"line_length\": 40,\n    \"lin_length\": 30},\n}\n"
+
+		result := convertFile(t, ".markdownlint.yaml", content)
+
+		require.Len(t, result.Warnings, 1)
+		assert.Contains(t, result.Warnings[0], `unknown option "lin_length" for line-length`)
+		assert.Equal(t, 4, result.WarningLine(0), "the warning names the value that applies")
+	})
+}
+
+// TestConvertMarkdownlintConfig_YAMLInAJSONFile covers a .markdownlint.json
+// file that holds YAML rather than JSON, which markdownlint-cli2 reads as
+// YAML once its JSONC parser rejects it, as gomdlint now does. A flow
+// mapping with a key that is not quoted is YAML too, so { invalid json }
+// holds the key "invalid json", which names no rule.
+func TestConvertMarkdownlintConfig_YAMLInAJSONFile(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{"MD013: false\n", "{MD013: false}\n"} {
+		result := convertFile(t, ".markdownlint.json", content)
+
+		assert.True(t, lineLengthOff(t, result), content)
+		assert.Empty(t, result.Warnings, content)
+	}
+
+	result := convertFile(t, ".markdownlint.json", "{ invalid json }\n")
+
+	assert.Empty(t, result.Config.Rules)
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], `unknown rule "invalid json"`)
+}
+
+// TestConvertMarkdownlintConfig_ValuesOtherThanAnObject covers markdownlint
+// configs that hold a list, a string, a number or a boolean.
+// markdownlint-cli2 loads each as an object without keys, so every rule
+// keeps markdownlint's defaults. gomdlint does the same, with a warning.
+func TestConvertMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ file, content, held string }{
+		{".markdownlint.json", `["MD013"]`, "a list"},
+		{".markdownlint.json", `"MD013"`, "a string"},
+		{".markdownlint.jsonc", "// Off:\n42\n", "a number"},
+		{".markdownlint.json", `false`, "a boolean"},
+		{".markdownlint.yaml", "- MD013\n", "a list"},
+		{".markdownlint.yml", "MD013\n", "a string"},
+	} {
+		t.Run(tt.file+" "+tt.content, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			assert.Empty(t, result.Config.Rules)
+			assert.True(t, *result.Config.RuleDefaults["MD013"].Enabled)
+			assert.Equal(t, []string{tt.held + " instead of an object of settings; it is ignored"}, result.Warnings)
+			assert.Zero(t, result.WarningLine(0))
+		})
+	}
+}
+
 // TestLoad_YAMLProjectConfigWithByteOrderMark covers gomdlint's own YAML
 // config files, which load with a leading byte order mark, as JSON ones
 // do (see TestLoad_JSONProjectConfig).

@@ -712,12 +712,19 @@ func TestConvertMarkdownlintConfig_DefaultKey(t *testing.T) {
 
 // TestConvertMarkdownlintConfig_EmptyConfigs covers configs that hold no
 // settings, which keep markdownlint's defaults, as markdownlint-cli2 reads
-// them, and configs that hold a value other than an object, which fail.
+// them: null, an empty object, and nothing but whitespace and comments,
+// in any format. markdownlint-cli2 loads an empty .markdownlint.json too,
+// which gomdlint used to reject. A config that holds a value other than an
+// object loads the same way, with a warning (see
+// TestConvertMarkdownlintConfig_ValuesOtherThanAnObject), and only text
+// that markdownlint-cli2 cannot read fails.
 func TestConvertMarkdownlintConfig_EmptyConfigs(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct{ file, content string }{
 		{".markdownlint.json", "null\n"},
+		{".markdownlint.json", ""},
+		{".markdownlint.json", "// Nothing yet.\n"},
 		{".markdownlint.jsonc", "// Nothing yet.\n{}\n"},
 		{".markdownlint.yaml", ""},
 		{".markdownlint.yaml", "# Nothing yet.\n"},
@@ -731,10 +738,8 @@ func TestConvertMarkdownlintConfig_EmptyConfigs(t *testing.T) {
 	}
 
 	for _, tt := range []struct{ file, content string }{
-		{".markdownlint.json", `["MD009"]`},
-		{".markdownlint.json", ""},
-		{".markdownlint.yaml", "- MD009\n"},
-		{".markdownlint.yaml", "MD009\n"},
+		{".markdownlint.json", `["MD009",,]`},
+		{".markdownlint.yaml", "- MD009\n-- MD010\n  x: [\n"},
 	} {
 		path := filepath.Join(t.TempDir(), tt.file)
 		require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o600))
@@ -966,9 +971,10 @@ func TestConvertMarkdownlintConfig_InvalidJSON(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	// Create an invalid JSON config
+	// Create a config that is neither JSON nor YAML. markdownlint-cli2
+	// reads "{ invalid json }", with its closing brace, as a YAML mapping.
 	configPath := filepath.Join(tmpDir, ".markdownlint.json")
-	if err := os.WriteFile(configPath, []byte("{ invalid json }"), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte("{ invalid json"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

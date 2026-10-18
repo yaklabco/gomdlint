@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // TestConvertMarkdownlintConfig_OptionSpellings checks that markdownlint's
@@ -217,7 +219,7 @@ func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 		fmt.Fprintf(&content, "  option_%03d: %d\n", idx, idx)
 	}
 
-	locate := newSourceLocator(".markdownlint.yaml", []byte(content.String()))
+	locate := newSourceLocator(lint.MarkdownlintYAML, []byte(content.String()))
 	for idx := range options {
 		require.Equal(t, idx+2, locate.optionLine("MD013", fmt.Sprintf("option_%03d", idx), 0))
 	}

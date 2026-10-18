@@ -70,13 +70,17 @@ type markdownlintTranslator struct {
 }
 
 // ConvertMarkdownlintConfig converts a markdownlint config file to gomdlint
-// format. As in markdownlint 0.41.1, the default key, the first key named
-// default in any case, gives every rule its baseline (see
-// config.MarkdownlintDefaultRuleConfig), and the other keys apply in the
-// order they are written, each replacing what an earlier key set for the
-// rules it names (see lint.MarkdownlintSettings). It returns the converted
-// config with any warnings, or an error if the file cannot be read or
-// parsed.
+// format. It reads the file as markdownlint-cli2 0.23.3 reads a config that
+// it finds, whatever its name says (see lint.ReadMarkdownlintConfig): as
+// JSON with comments and trailing commas, or failing that as YAML, after a
+// byte order mark. A file that holds a value other than an object holds no
+// settings, as markdownlint reads it, with a warning. As in markdownlint
+// 0.41.1, the default key, the first key named default in any case, gives
+// every rule its baseline (see config.MarkdownlintDefaultRuleConfig), and
+// the other keys apply in the order they are written, each replacing what
+// an earlier key set for the rules it names (see lint.MarkdownlintSettings).
+// It returns the converted config with any warnings, or an error if the
+// file cannot be read or parsed.
 //
 // Rule options are translated through the rule catalog: markdownlint's
 // spellings become gomdlint's canonical names, such as max for
@@ -114,11 +118,17 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 	// text after it.
 	content = bytes.TrimPrefix(content, utf8BOM)
 
-	settings, err := readMarkdownlintSettings(path, content)
+	read, err := lint.ReadMarkdownlintConfig(content)
 	if err != nil {
-		return nil, err
+		return nil, markdownlintParseError(path, err)
 	}
-	locate := newSourceLocator(path, content)
+	settings := read.Settings
+	locate := newSourceLocator(read.Syntax, content)
+	if read.NotObject != "" {
+		// markdownlint reads the value as an object without keys, so every
+		// rule keeps its defaults.
+		result.addWarning(0, lint.NotObjectText(read.NotObject))
+	}
 
 	cfg := &config.Config{Rules: make(map[string]config.RuleConfig)}
 	defaultValue, found := settings.Default()
@@ -162,104 +172,21 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 	return result, nil
 }
 
-// readMarkdownlintSettings reads content, the markdownlint config at path,
-// into its settings in the order of its keys: as JSON with comments and
-// trailing commas (see jsonc.Strip) for a name that ends in .json or
-// .jsonc, and as YAML otherwise.
-func readMarkdownlintSettings(path string, content []byte) (*lint.MarkdownlintSettings, error) {
-	if IsJSONConfig(path) {
-		settings, err := lint.DecodeMarkdownlintJSON(jsonc.Strip(content))
-		if err != nil {
-			return nil, fmt.Errorf("parse JSON: %w", err)
-		}
-		return settings, nil
+// markdownlintParseError describes err, the error that reading the
+// markdownlint config at path gave. Text that is neither JSON nor YAML (see
+// lint.MarkdownlintSyntaxError) gets the error of the syntax that the
+// file's name suggests: JSON for a name that ends in .json or .jsonc, and
+// YAML otherwise.
+func markdownlintParseError(path string, err error) error {
+	var syntaxErr *lint.MarkdownlintSyntaxError
+	switch {
+	case !errors.As(err, &syntaxErr):
+		return fmt.Errorf("parse JSON: %w", err)
+	case IsJSONConfig(path):
+		return fmt.Errorf("parse JSON: %w", syntaxErr.JSON)
+	default:
+		return fmt.Errorf("parse YAML: %w", syntaxErr.YAML)
 	}
-	settings, err := markdownlintYAMLSettings(content)
-	if err != nil {
-		return nil, fmt.Errorf("parse YAML: %w", err)
-	}
-	return settings, nil
-}
-
-// markdownlintYAMLSettings reads content, a markdownlint config in YAML,
-// into its settings: the keys of its mapping in the order of yamlKeyOrder,
-// with the values that decoding gives them. Empty content and null hold no
-// settings.
-func markdownlintYAMLSettings(content []byte) (*lint.MarkdownlintSettings, error) {
-	var values map[string]any
-	if err := yaml.Unmarshal(content, &values); err != nil {
-		return nil, err //nolint:wrapcheck // The caller names the format.
-	}
-	settings := &lint.MarkdownlintSettings{}
-	if len(values) == 0 {
-		return settings, nil
-	}
-
-	var doc yaml.Node
-	if err := yaml.Unmarshal(content, &doc); err != nil {
-		return nil, err //nolint:wrapcheck // Decoding the same content succeeded.
-	}
-	for _, key := range yamlKeyOrder(doc.Content[0]) {
-		if value, ok := values[key]; ok {
-			settings.Set(key, value)
-			delete(values, key)
-		}
-	}
-	// The order holds every key that decoding reads. Should one be missing,
-	// it still applies, after the others.
-	for _, key := range slices.Sorted(maps.Keys(values)) {
-		settings.Set(key, values[key])
-	}
-	return settings, nil
-}
-
-// yamlKeyOrder returns the keys of node, a YAML mapping or an alias of one,
-// in the order in which js-yaml 4 adds them to an object: each key written
-// in the mapping in its place, and the keys of the mappings that a merge key
-// (<<) brings in, in their own order, in the place of the merge key. A key
-// comes once, in its first place, which keeps it when a later entry
-// replaces its value. Decoding gives a key written in the mapping the value
-// written with it, and a merged key the value of the first mapping that
-// brings it in, as js-yaml 4 does too.
-//
-// Each mapping is walked once. Its keys, and those of the mappings it
-// merges, have their places once it has been walked, so a later merge of it
-// adds nothing, and a mapping that merges itself ends the walk there.
-func yamlKeyOrder(node *yaml.Node) []string {
-	var keys []string
-	seen := make(map[string]bool)
-	walked := make(map[*yaml.Node]bool)
-	var walk func(node *yaml.Node)
-	walk = func(node *yaml.Node) {
-		for node != nil && node.Kind == yaml.AliasNode {
-			node = node.Alias
-		}
-		if node == nil || node.Kind != yaml.MappingNode || walked[node] {
-			return
-		}
-		walked[node] = true
-
-		for idx := 0; idx+1 < len(node.Content); idx += 2 {
-			key, value := node.Content[idx], node.Content[idx+1]
-			if isMergeKey(key) {
-				sources := []*yaml.Node{value}
-				if value.Kind == yaml.SequenceNode {
-					sources = value.Content
-				}
-				for _, source := range sources {
-					walk(source)
-				}
-				continue
-			}
-			var name string
-			if key.Decode(&name) == nil && !seen[name] {
-				seen[name] = true
-				keys = append(keys, name)
-			}
-		}
-	}
-	walk(node)
-	return keys
 }
 
 // FileContent returns the content of a gomdlint config file at path that
@@ -337,14 +264,14 @@ type sourceLocator struct {
 	reads int
 }
 
-// newSourceLocator reads content, the markdownlint config at path, into a
-// tree of nodes that record their lines: as JSON with comments and trailing
-// commas for a name that ends in .json or .jsonc, which jsonDocument reads
-// once jsonc.Strip has blanked them, and as YAML otherwise. Content that it
-// cannot read has no lines to find.
-func newSourceLocator(path string, content []byte) *sourceLocator {
+// newSourceLocator reads content, a markdownlint config that
+// lint.ReadMarkdownlintConfig read in syntax, into a tree of nodes that
+// record their lines: as JSON with comments and trailing commas, which
+// jsonDocument reads once jsonc.Strip has blanked them, or as YAML.
+// Content that it cannot read has no lines to find.
+func newSourceLocator(syntax lint.MarkdownlintSyntax, content []byte) *sourceLocator {
 	var doc *yaml.Node
-	if IsJSONConfig(path) {
+	if syntax == lint.MarkdownlintJSONC {
 		parsed, err := jsonDocument(jsonc.Strip(content))
 		if err != nil {
 			return &sourceLocator{}

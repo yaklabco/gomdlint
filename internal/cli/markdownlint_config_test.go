@@ -164,6 +164,73 @@ func TestMarkdownlintConfig_ByteOrderMark(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintConfig_ReadsEveryNameAsMarkdownlintCLI2Does covers
+// markdownlint configs whose content does not match their name, which
+// markdownlint-cli2 0.23.3 reads whatever the name: with its JSONC parser
+// first, then as YAML. A .markdownlint.yaml that holds JSON with a key
+// written twice keeps the key's first place and takes its last value, so
+// in the second config the whitespace tag, which follows MD009's first
+// place, turns no-trailing-spaces (MD009) back on. gomdlint used to reject
+// both JSON configs in YAML files, as YAML rejects a key written twice, and
+// the YAML in a JSON file. markdownlint-cli2 reports trailingSpaceDoc's
+// trailing space with the second config only.
+func TestMarkdownlintConfig_ReadsEveryNameAsMarkdownlintCLI2Does(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+		want                 []string
+	}{
+		{name: "JSON in YAML", file: ".markdownlint.yaml", settings: `{"MD009": true, "MD009": false}`},
+		{
+			name: "JSON in YAML first place", file: ".markdownlint.yaml",
+			settings: `{"MD009": false, "whitespace": true, "MD009": false}`, want: []string{"MD009"},
+		},
+		{name: "YAML in JSON", file: ".markdownlint.json", settings: "MD009: false\n"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+				assert.NotContains(t, warnings, "WARN")
+			})
+		}
+	}
+}
+
+// TestMarkdownlintConfig_ValuesOtherThanAnObject covers markdownlint
+// configs that hold no object: markdownlint-cli2 0.23.3 loads them as an
+// object without keys, so every rule runs with its defaults, where
+// gomdlint used to stop with a config error. gomdlint warns about a value
+// other than an object, but not about an empty file. markdownlint-cli2
+// reports trailingSpaceDoc's trailing space with each config.
+func TestMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
+	tests := []struct {
+		name, file, settings, warning string
+	}{
+		{name: "list", file: ".markdownlint.json", settings: `["MD009"]`, warning: "a list instead of an object of settings"},
+		{name: "empty", file: ".markdownlint.json", settings: ""},
+		{name: "YAML list", file: ".markdownlint.yaml", settings: "- MD009\n", warning: "a list instead of an object of settings"},
+		{name: "YAML string", file: ".markdownlint.yaml", settings: "MD009\n", warning: "a string instead of an object of settings"},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings)
+
+				assert.Equal(t, map[string][]string{"doc.md": {"MD009"}}, got)
+				if tt.warning == "" {
+					assert.NotContains(t, warnings, "WARN")
+				} else {
+					assert.Contains(t, warnings, tt.warning)
+				}
+			})
+		}
+	}
+}
+
 // TestMarkdownlintConfig_DefaultKeyInAnyCase covers the default key of a
 // markdownlint config, which markdownlint 0.41.1 reads in any case, taking
 // the first one written. gomdlint used to read only "default", so it warned
