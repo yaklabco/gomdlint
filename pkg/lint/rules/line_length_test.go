@@ -172,6 +172,45 @@ func TestMaxLineLengthRule_MarkdownlintOptions(t *testing.T) {
 			wantDiags: 0,
 			config:    map[string]any{"line_length": 40, "code_block_line_length": 70},
 		},
+		// markdownlint reads each length as "value || default", so 0 means
+		// the default: 80 for the line length, and the line length for
+		// headings and code blocks.
+		{
+			name:      "line_length of 0 means 80",
+			input:     spacedLine(85) + "\n",
+			wantDiags: 1,
+			config:    map[string]any{"line_length": 0},
+		},
+		{
+			name:      "max of 0 means 80",
+			input:     spacedLine(85) + "\n",
+			wantDiags: 1,
+			config:    map[string]any{"max": 0},
+		},
+		{
+			name:      "heading_line_length of 0 means the line length",
+			input:     "# " + spacedLine(60) + "\n",
+			wantDiags: 1,
+			config:    map[string]any{"line_length": 40, "heading_line_length": 0},
+		},
+		{
+			name:      "code_block_line_length of 0 means the line length",
+			input:     "```\n" + spacedLine(60) + "\n```\n",
+			wantDiags: 1,
+			config:    map[string]any{"line_length": 40, "code_block_line_length": 0},
+		},
+		{
+			name:      "heading_max of 0 means the line length",
+			input:     "# " + spacedLine(60) + "\n",
+			wantDiags: 1,
+			config:    map[string]any{"max": 40, "heading_max": 0},
+		},
+		{
+			name:      "negative line_length checks nothing",
+			input:     spacedLine(85) + "\n",
+			wantDiags: 0,
+			config:    map[string]any{"line_length": -1},
+		},
 		{
 			name:      "code_blocks false",
 			input:     "```\n" + spacedLine(100) + "\n```\n",
