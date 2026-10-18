@@ -141,6 +141,32 @@ func TestMarkdownlintConfig_DefaultKeyInAnyCase(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintConfig_FalsyRuleValues covers rule values that are falsy
+// in JavaScript, which markdownlint 0.41.1 reads as turning the rule off,
+// in a markdownlint config and in a markdownlint-configure-file comment.
+// markdownlint reports trailingSpaceDoc's trailing space with none of them.
+func TestMarkdownlintConfig_FalsyRuleValues(t *testing.T) {
+	for _, settings := range []string{`{"MD009": 0}`, `{"MD009": ""}`, `{"MD009": {"enabled": null}}`} {
+		for _, mode := range markdownlintModes {
+			t.Run(settings+" "+mode, func(t *testing.T) {
+				got, _ := lintWithMarkdownlintConfig(t, mode, ".markdownlint.json", settings, trailingSpaceDoc)
+
+				assert.Equal(t, map[string][]string{"doc.md": nil}, got)
+			})
+		}
+
+		t.Run(settings+" in markdownlint-configure-file", func(t *testing.T) {
+			doc := "<!-- markdownlint-configure-file " + settings + " -->\n\n" + trailingSpaceDoc
+			inProject(t, map[string]string{"doc.md": doc})
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, map[string][]string{"doc.md": nil}, reportedFiles(t, got.stdout))
+		})
+	}
+}
+
 // TestMarkdownlintConfig_AppliesKeysInWrittenOrder covers the order in which
 // a markdownlint config's keys apply, in JSON and in YAML: the order they
 // are written, as in markdownlint 0.41.1, so a later key overrides an

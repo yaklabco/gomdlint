@@ -60,6 +60,9 @@ func markdownlintTruthy(value any) bool {
 
 // MarkdownlintRuleConfig converts a markdownlint rule value to explicit gomdlint
 // options. Native gomdlint defaults remain independent of migrated settings.
+// As in getEffectiveConfig in markdownlint 0.41.1, a value that is falsy in
+// JavaScript turns the rule off, and an object turns it on unless its
+// enabled key is present and falsy.
 func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 	enabled := true
 	severity := string(SeverityError)
@@ -89,12 +92,9 @@ func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 		}
 	}
 	switch typed := value.(type) {
-	case bool:
-		*cfg.Enabled = typed
-	case nil:
-		*cfg.Enabled = false
 	case string:
-		if typed == "warning" {
+		*cfg.Enabled = typed != ""
+		if typed == markdownlintWarning {
 			severity = typed
 		}
 	case map[string]any:
@@ -110,9 +110,7 @@ func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 			}
 			switch key {
 			case "enabled":
-				if state, ok := option.(bool); ok {
-					*cfg.Enabled = state
-				}
+				*cfg.Enabled = markdownlintTruthy(option)
 				continue
 			case "severity":
 				if explicitSeverity, ok := option.(string); ok {
@@ -143,6 +141,9 @@ func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 			}
 			cfg.Options[key] = option
 		}
+	default:
+		// Booleans, null, numbers and arrays, as JavaScript tests them.
+		*cfg.Enabled = markdownlintTruthy(value)
 	}
 	return cfg
 }
