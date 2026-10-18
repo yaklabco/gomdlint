@@ -976,6 +976,40 @@ func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
 			name:  "defined link text before a footnote that is also a link definition",
 			input: "# T\n\nUse [text][^n].\n\n[text]: /a\n[^n]: /url\n",
 		},
+		// A footnote definition is a container whose content lines are
+		// indented four columns, so a definition can start four to seven
+		// columns in, and code in its content holds none.
+		{name: "definition in a footnote's content", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^n]: inner\n"},
+		{name: "definition after text in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: text\n    [^n]: inner\n"},
+		{name: "definition after a blank line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n\n    [^n]: inner\n"},
+		{name: "definition two footnotes deep", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^p]:\n        [^n]: inner\n"},
+		{name: "seven columns into a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n       [^n]: seven\n"},
+		{name: "lazy line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\nlazy\n    [^n]: inner\n"},
+		{name: "footnote in a list item", input: "# T\n\nUse [^n].\n\n- [^o]:\n      [^n]: inner\n"},
+		{
+			name:  "indented code in a footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]:\n\n        [^n]: code\n",
+			want:  []position{{3, 5}},
+		},
+		{
+			name:  "fenced code in a footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: note\n    ```\n    [^n]: code\n    ```\n",
+			want:  []position{{3, 5}},
+		},
+		{
+			// A known gap, on the side of reporting nothing: markdownlint
+			// reports 3:5, as the definition line is code in the footnote's
+			// content, but goldmark reads the fence line as the destination
+			// of "[^o]:" and "[^n]: code" as a link reference definition, so
+			// the reference resolves.
+			name:  "fenced code after an empty footnote line",
+			input: "# T\n\nUse [^n].\n\n[^o]:\n    ```\n    [^n]: code\n    ```\n",
+		},
+		{
+			name:  "line after a closed footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n\ntext\n    [^n]: not\n",
+			want:  []position{{3, 5}, {8, 5}},
+		},
 		{
 			// markdownlint reads math, which holds no references.
 			name:     "references in math",

@@ -323,7 +323,8 @@ formats change. The first entries under Changed may need action.
 - **MD052**: With `shortcut_syntax`, no longer reports GFM footnote calls
   such as `[^1]` whose footnote the document defines. A footnote definition
   counts only where a container could start, after at most three spaces
-  past the prefixes of its line's containers, and not in code, HTML or
+  past the prefixes of its line's containers, or four more for each
+  footnote definition whose content holds it, and not in code, HTML or
   math. In `[text][^1]`, `[text]` is a shortcut reference even when
   `[^1]: /url` also reads as a link reference definition. References in
   math are skipped.

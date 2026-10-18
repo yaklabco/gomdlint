@@ -236,28 +236,22 @@ func validShortcutLabel(text string) bool {
 }
 
 // gfmFootnoteLabels returns the normalized labels, each with its "^", of
-// the footnote definitions GFM reads in the file: lines outside code, HTML
-// and math blocks that start with "[^label]:" where a container can start
-// (see footnoteDefinitionAt).
+// the footnote definitions GFM reads in the file (see footnoteScan).
 func gfmFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 	labels := make(map[string]bool)
-	var htmlLines map[int]bool
-	var math mathRegions
-	var holders []*mdast.Node
+	first := 0
 	for line := ctx.File.FrontMatterLines + 1; line <= len(ctx.File.Lines); line++ {
-		if _, ok := footnoteDefinitionLabel(withoutContainerPrefix(lint.LineText(ctx.File, line))); !ok ||
-			ctx.IsLineInCodeBlock(line) {
-			continue
+		if _, ok := footnoteDefinitionLabel(withoutContainerPrefix(lint.LineText(ctx.File, line))); ok {
+			first = line
+			break
 		}
-		if holders == nil {
-			htmlLines, math, holders = htmlBlockLines(ctx), findMath(ctx), innermostContainers(ctx)
-		}
-		if htmlLines[line] || math.lines[line] {
-			continue
-		}
-		if label, ok := footnoteDefinitionAt(ctx.File, holders[line], line); ok {
-			labels[refs.NormalizeLabel("^"+label)] = true
-		}
+	}
+	if first == 0 {
+		return labels
+	}
+	scan := newFootnoteScan(ctx)
+	for line := first; line <= len(ctx.File.Lines); line++ {
+		scan.visit(line, labels)
 	}
 	return labels
 }
@@ -266,24 +260,149 @@ func gfmFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 // starts a container, such as a blockquote or a footnote definition.
 const maxContainerIndent = 3
 
-// footnoteDefinitionAt returns the label of the footnote definition that
-// starts a line, as micromark-extension-gfm-footnote reads one: a footnote
-// definition is a container, so it starts after the prefixes of the
-// containers the line continues explicitly, then at most three columns of
-// space, with "[^label]:". holder is the innermost blockquote or list item
-// whose span holds the line, and a lazy line is outside the containers it
-// does not continue. Four columns of space make indented code or the rest
-// of a paragraph.
-func footnoteDefinitionAt(file *mdast.FileSnapshot, holder *mdast.Node, line int) (string, bool) {
-	container := holder
+// footnoteScan reads footnote definitions line by line, as
+// micromark-extension-gfm-footnote reads them and goldmark does not. A
+// footnote definition is a container: it starts after the prefixes of the
+// containers its line continues explicitly (a lazy line is outside those it
+// does not continue) and at most three columns of space, with
+// "[^label]:", and its content lines are indented four columns, or are a
+// lazy line of a paragraph in it. So a definition can start four to seven
+// columns in, inside an open footnote, and a line after a blank line that
+// is not indented as far closes the footnotes it does not reach. Indented
+// code and fenced code in a footnote's content hold no definition, nor do
+// goldmark's code, HTML and math blocks outside footnotes.
+//
+// Where goldmark's blocks and micromark's differ inside a footnote's
+// content, the scan errs towards reading a definition, so that MD052 never
+// reports a footnote that markdownlint finds: an HTML block in a footnote's
+// content, and a fence after a lazy line, are not read as such, and a
+// footnote closes only after a blank line.
+type footnoteScan struct {
+	ctx          *lint.RuleContext
+	holders      []*mdast.Node
+	htmlLines    map[int]bool
+	math         mathRegions
+	indentedCode map[int]bool
+	// depth counts the footnote definitions that may be open, afterBlank
+	// whether a blank line came after the last line read, and fence the
+	// fenced code open in a footnote's content.
+	depth      int
+	afterBlank bool
+	fence      footnoteFence
+}
+
+// footnoteFence is a fenced code block in the content of the depth
+// footnote definitions that hold it.
+type footnoteFence struct {
+	open  bool
+	char  byte
+	size  int
+	depth int
+}
+
+// newFootnoteScan builds a scan of the file of ctx.
+func newFootnoteScan(ctx *lint.RuleContext) *footnoteScan {
+	scan := &footnoteScan{
+		ctx:          ctx,
+		holders:      innermostContainers(ctx),
+		htmlLines:    htmlBlockLines(ctx),
+		math:         findMath(ctx),
+		indentedCode: make(map[int]bool),
+	}
+	for _, block := range ctx.CodeBlocks() {
+		if !lint.IsFencedCodeBlock(block) {
+			for line := range lint.CodeContentLines([]*mdast.Node{block}) {
+				scan.indentedCode[line] = true
+			}
+		}
+	}
+	return scan
+}
+
+// visit reads one line, adding the label of a definition on it to labels.
+func (s *footnoteScan) visit(line int, labels map[string]bool) {
+	file := s.ctx.File
+	if len(bytes.TrimSpace(withoutContainerPrefix(lint.LineText(file, line)))) == 0 {
+		s.afterBlank = true
+		return
+	}
+	container := s.holders[line]
 	for container != nil && !lint.ContinuesContainers(file, container, line) {
 		container = enclosingContainer(container)
 	}
 	indent, start, ok := lint.IndentAfterContainers(file, container, line)
-	if !ok || indent > maxContainerIndent {
-		return "", false
+	if !ok {
+		return
 	}
-	return footnoteDefinitionLabel(lint.RawLineContent(file, line)[start:])
+	if s.afterBlank && indent < tabStop*s.depth {
+		s.depth = indent / tabStop
+	}
+	s.afterBlank = false
+	rest := lint.RawLineContent(file, line)[start:]
+	if s.fence.open && s.fence.depth <= s.depth {
+		if indent-tabStop*s.fence.depth <= maxFenceIndent && s.fence.closedBy(rest) {
+			s.fence.open = false
+		}
+		return
+	}
+	s.fence.open = false
+	if s.depth > 0 && indent >= tabStop*s.depth && indent-tabStop*s.depth <= maxFenceIndent {
+		if char, size, opens := footnoteFenceOpening(rest); opens {
+			s.fence = footnoteFence{open: true, char: char, size: size, depth: s.depth}
+			return
+		}
+	}
+	if s.excluded(line) {
+		return
+	}
+	label, ok := footnoteDefinitionLabel(rest)
+	if !ok || indent > maxContainerIndent+tabStop*s.depth {
+		return
+	}
+	labels[refs.NormalizeLabel("^"+label)] = true
+	s.depth = indent/tabStop + 1
+}
+
+// excluded reports whether a line is in goldmark's code, HTML or math
+// blocks, where no definition starts. In a footnote's content goldmark
+// reads an indented line after a blank line as indented code, which the
+// indentation rule judges instead.
+func (s *footnoteScan) excluded(line int) bool {
+	if s.htmlLines[line] || s.math.lines[line] {
+		return true
+	}
+	return s.ctx.IsLineInCodeBlock(line) && (s.depth == 0 || !s.indentedCode[line])
+}
+
+// minFenceSize is the fewest backticks or tildes that open a code fence.
+const minFenceSize = 3
+
+// footnoteFenceOpening reports whether text opens a code fence, and returns
+// its character and length: three or more backticks, with no backtick in
+// the info string after them, or three or more tildes.
+func footnoteFenceOpening(text []byte) (byte, int, bool) {
+	if len(text) == 0 || (text[0] != '`' && text[0] != '~') {
+		return 0, 0, false
+	}
+	char := text[0]
+	size := 0
+	for size < len(text) && text[size] == char {
+		size++
+	}
+	if size < minFenceSize || (char == '`' && bytes.IndexByte(text[size:], '`') >= 0) {
+		return 0, 0, false
+	}
+	return char, size, true
+}
+
+// closedBy reports whether text closes the fence: at least as many of its
+// characters, then only spaces and tabs.
+func (fence footnoteFence) closedBy(text []byte) bool {
+	size := 0
+	for size < len(text) && text[size] == fence.char {
+		size++
+	}
+	return size >= fence.size && len(bytes.Trim(text[size:], " \t\r\n")) == 0
 }
 
 // withoutContainerPrefix returns text after the blockquote markers, list
