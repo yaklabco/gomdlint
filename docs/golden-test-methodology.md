@@ -18,11 +18,11 @@ Linters are deceptively hard to build well. Parsing is the easy part. The real d
 
 Markdown makes this harder than most languages. The CommonMark spec is over 600 pages of edge cases. Inline syntax (emphasis, links, code spans) interacts in ways that surprise even experienced users. Different parsers disagree on ambiguous constructs. And source positions from the parser are sometimes approximate or missing entirely, as we discovered when goldmark's `ThematicBreak` nodes turned out to have no line information at all.
 
-The dominant tool in this space is David Anson's [markdownlint](https://github.com/DavidAnson/markdownlint), a JavaScript library (with the [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) CLI) that powers the widely-used VS Code extension and countless CI pipelines. It's a well-maintained, battle-tested project with ~53 active rules, a clean plugin API for custom rules, and a large community. If you need a markdown linter today, markdownlint is the safe choice.
+The dominant tool in this space is David Anson's [markdownlint](https://github.com/DavidAnson/markdownlint), a JavaScript library (with the [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) CLI) that powers the widely-used VS Code extension and countless CI pipelines. It's a well-maintained, battle-tested project with 53 rules in version 0.41, a clean plugin API for custom rules, and a large community. If you need a markdown linter today, markdownlint is the safe choice.
 
 gomdlint was motivated by gaps that mattered for our specific use case:
 
-**More auto-fix coverage.** markdownlint supports auto-fix for ~31 of its rules (~58%). Each fix is described by a single `fixInfo` object operating on one line, and fixes are applied in a single pass. Conflicting edits on the same line are skipped. gomdlint fixes 37 of 55 rules (67%) using byte-range edits (`TextEdit`) that can span multiple lines, with a multi-pass loop that re-lints after each pass so previously conflicting edits get a second chance.
+**More auto-fix coverage.** markdownlint 0.41 supports auto-fix for 33 of its 53 rules (62%). Each fix is described by a single `fixInfo` object operating on one line, and fixes are applied in a single pass. Conflicting edits on the same line are skipped. gomdlint fixes 37 of 55 rules (67%) using byte-range edits (`TextEdit`) that can span multiple lines, with a multi-pass loop that re-lints after each pass so previously conflicting edits get a second chance. Each fix is checked by parsing the fixed document again, and withheld if it would change the document in a way its rule does not intend.
 
 **Performance on large codebases.** Node.js has unavoidable startup overhead and single-threaded execution. gomdlint compiles to a native binary and processes files in parallel across all CPU cores. For a single file the difference is negligible, but across a monorepo with thousands of markdown files, it adds up.
 
@@ -32,16 +32,16 @@ None of this diminishes markdownlint's value. Anson has maintained it since 2015
 
 ### By the numbers
 
-| | gomdlint | markdownlint |
-|---|---|---|
+| Aspect | gomdlint | markdownlint 0.41 |
+| --- | --- | --- |
 | Language | Go | JavaScript (Node.js) |
-| Rules | 55 | ~53 |
-| Auto-fixable | 37 (67%) | ~31 (58%) |
-| Fix model | Byte-range `TextEdit`, multi-pass with conflict resolution | Line-based `fixInfo`, single-pass |
-| Parser | goldmark (AST + token stream) | micromark |
+| Rules | 55 | 53 |
+| Auto-fixable | 37 (67%) | 33 (62%) |
+| Fix model | Byte-range `TextEdit`, multi-pass with conflict resolution, each fix checked by re-parsing | Line-based `fixInfo`, single-pass |
+| Parser | goldmark (AST with exact source spans, plus a token stream) | micromark |
 | Parallel execution | Worker pool, `NumCPU()` goroutines | Single-threaded |
 | Output formats | text, table, JSON, SARIF, diff, summary | JSON, SARIF (via CLI) |
-| Configuration | YAML (flavors, per-rule options) | JSON/YAML (per-rule options, custom rules) |
+| Configuration | YAML or JSON (flavors, per-rule options) | JSON/YAML (per-rule options, custom rules) |
 | Ecosystem | CLI, Go library | CLI, VS Code extension, GitHub Action, npm library, custom rule plugins |
 
 ## How gomdlint works
@@ -55,11 +55,11 @@ graph LR
     C --> D[Report]
 ```
 
-**Parse.** A [goldmark](https://github.com/yuin/goldmark)-based parser converts markdown into two parallel representations: an AST (`mdast.Node` tree) for structural analysis, and a token stream (`[]mdast.Token`) that classifies every byte in the source by kind, such as heading markers, list bullets, emphasis markers, and code fences. Rules need both: the AST for understanding document structure (is this heading inside a blockquote?), and the token stream for precise source-level work (what character is at byte offset 47?).
+**Parse.** A [goldmark](https://github.com/yuin/goldmark)-based parser converts markdown into two parallel representations: an AST (`mdast.Node` tree) for structural analysis, and a token stream (`[]mdast.Token`) that classifies every byte in the source by kind, such as heading markers, list bullets, emphasis markers, and code fences. Every node records its exact source span, markers included, and the span of its content, so rules find both the structure (is this heading inside a blockquote?) and the precise source position (where does its marker start?) from the tree. The token stream answers byte-level questions about the source.
 
-**Lint.** Each enabled rule receives a `RuleContext` containing the parsed file, configuration, and a lazy-initialized cache of typed node queries (`ctx.Headings()`, `ctx.CodeBlocks()`, etc.). The rule inspects the document and returns diagnostics. Fixable rules also populate an `EditBuilder` with `TextEdit` values, byte-range replacements that describe how to correct each violation.
+**Lint.** Each enabled rule receives a `RuleContext` containing the parsed file, configuration, and a lazy-initialized cache of typed node queries (`ctx.Headings()`, `ctx.CodeBlocks()`, etc.). The rule inspects the document and returns diagnostics. Fixable rules also populate an `EditBuilder` with `TextEdit` values, byte-range replacements that describe how to correct each violation. Before a rule returns, a fix check parses the document with its fixes applied and withholds any fix that would change the document in a way the rule does not intend.
 
-**Fix.** Collected edits go through validation (bounds checking), sorting (by start offset), and conflict resolution (overlapping edits resolved greedily, first by position wins). The accepted edits are applied in memory, and the result is re-parsed and re-linted. This loop repeats until no new edits are produced. The multi-pass approach handles cases where fixing one violation reveals or resolves another. A configurable pass limit (currently [hardcoded at 10](https://github.com/yaklabco/gomdlint/issues/11)) prevents infinite loops from buggy rules. The final output is written atomically with optional backup.
+**Fix.** Each fix is validated on its own: its edits must lie within the document, must not overlap, and must not split a CRLF pair or a UTF-8 character. In each pass, each top-level block gets the fixes of one rule, and the other rules' fixes there wait for the next pass. The chosen fixes are resolved whole, so the earlier of two conflicting fixes wins and the other is never half applied, and overlapping deletions merge. The accepted edits are applied in memory, and the result is re-parsed and re-linted. This loop repeats until no edits are left, the content repeats an earlier pass, or the pass limit is reached: 10 passes plus one for each rule that can fix (see [#11](https://github.com/yaklabco/gomdlint/issues/11)). The multi-pass approach handles cases where fixing one violation reveals or resolves another. The final output is written through a pinned file handle, only while the file still holds what was linted, with an optional backup.
 
 **Report.** Results are rendered in one of six formats: human-readable text, table, JSON, SARIF (for CI integration), unified diff, or statistical summary.
 
@@ -67,9 +67,9 @@ Files are processed in parallel across a worker pool sized to `runtime.NumCPU()`
 
 ### Why the dual representation matters
 
-Most markdown linters work from the AST alone. gomdlint adds the token stream because some rules need information the AST doesn't provide, or provides incorrectly. For example, goldmark's `ThematicBreak` nodes have no source position data (`Lines.Len() == 0`), but the tokenizer correctly emits `TokThematicBreak` tokens with byte offsets. Rules can fall back to the token stream when the AST is incomplete, which is exactly what the MD035 fix (described later) does.
+Most markdown linters work from the AST alone. gomdlint added the token stream because some rules needed information the AST didn't provide, or provided incorrectly. For example, goldmark's `ThematicBreak` nodes have no source lines (`Lines.Len() == 0`), but the tokenizer emits `TokThematicBreak` tokens with byte offsets. The first MD035 fix (described later) fell back to the token stream for that reason.
 
-The token stream also matters for fix generation. A rule that wants to change `__text__` to `*text*` needs to know where the underscore markers are in the source bytes, not just that an emphasis node exists in the AST.
+The parser has since learned to record where goldmark opens each block and which lines it owns, so every node now carries a full span, markers included, and a content span. Rules read thematic breaks, fences and setext underlines from the tree, and token ranges are derived from those spans. The spans also matter for fix generation. A rule that wants to change `__text__` to `*text*` needs to know where the underscore markers are in the source bytes, not just that an emphasis node exists in the AST, and the emphasis node's full span and content span say exactly that.
 
 ## The Problem
 
@@ -104,8 +104,10 @@ When you create a new test case or change a rule:
 
 ```bash
 # Regenerate golden files for a rule
-go test ./pkg/lint/rules/... -run TestGoldenPerRule/MD009 -args -update
+go test ./pkg/lint/rules/ -run 'TestGoldenPerRule/MD009' -update
 ```
+
+Put `-update` after the package path. `go test` stops reading package paths at the first flag it does not know, so `go test -update ./pkg/lint/rules/` tests the repository root instead.
 
 This runs the rule against the input, captures the diagnostics and fixed output, and writes them to disk. Decide what the rule should report and what the fix should produce before you generate. For a rule that markdownlint also has, base that on the markdownlint rule documentation. Then compare the generated files with your expectation, and commit them only if they match.
 
@@ -116,15 +118,17 @@ From that point on, the golden files are locked. Any future change that produces
 **TestGoldenPerRule** runs a single rule against each input file in its directory, using the scenario's configuration. It checks two things:
 
 1. The diagnostics match `diags.json` exactly: the same rule ID and name, line, column, message, severity, and fixability. The `diags.txt` file must match the same diagnostics.
-2. After applying all fixes, the output matches `golden.md` byte-for-byte.
+2. After applying the fixes, the output matches `golden.md` byte-for-byte.
 
-Each scenario is linted through `lint.Engine.LintFile`, the same entry point the CLI pipeline calls on every pass, with fixes on and only the scenario's rules enabled. Every other rule is replaced by an inert stand-in with the same ID, name, tags and aliases, so inline directives resolve as in the product but cannot make another rule report, not even a bare `markdownlint-enable`. Severities, rule names and the preparation of fix edits match the product as well. The harness applies one pass of fixes, while the CLI repeats passes until nothing changes. A rule error, or a diagnostic that carries another rule's ID or name, fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
+Each scenario is linted through `lint.Engine.LintFile`, the same entry point the CLI pipeline calls on every pass, with fixes on and only the scenario's rules enabled. Every other rule is replaced by an inert stand-in with the same ID, name, tags, aliases and catalog entry, so inline directives resolve as in the product but cannot make another rule report, not even a bare `markdownlint-enable`. Severities, rule names and the preparation of fix edits match the product as well. A per-rule scenario's `golden.md` is the input with the fixes of that one engine pass applied: with a single rule running, the engine defers no fix to a later pass. A rule error, or a diagnostic that carries another rule's ID or name, fails the test. Each line of `diags.txt` shows the position, severity, message, rule ID and name, and whether the diagnostic has a fix:
 
 ```text
 basic.input.md:3:30 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]
 ```
 
-**TestGoldenRoundTrip** goes further. It applies the fixes, then re-parses the fixed document and runs the rule again. If any fixable diagnostics remain, the test fails. This catches a class of bugs that are otherwise hard to detect:
+**TestGoldenRealWorld** runs every rule over the documents in `testdata/real-world/`. Its `diags.json` holds the findings of one lint of the input, sorted by line, column and rule. Its `golden.md` is the output of `lint.Pipeline` with fixes on, the code path `--fix` takes: the pipeline applies one pass of fixes, lints the result again and repeats, because the engine applies only one rule's fixes to each top-level block in a pass and leaves the others for the next one.
+
+**TestGoldenRoundTrip** goes further, for every scenario, per-rule and real-world alike. It fixes the input through `lint.Pipeline`, as `--fix` does, re-parsing and re-linting after each pass. The test fails if the passes do not converge, by reaching the pass limit or by producing content an earlier pass produced, or if any fixable diagnostics remain. This catches a class of bugs that are otherwise hard to detect:
 
 - Fixes that shift byte offsets and break subsequent edits
 - Fixes that introduce new violations
@@ -138,7 +142,7 @@ The test harness discovers cases automatically. Drop an `.input.md` file, with a
 
 ### Per-Scenario Configuration
 
-Without a sidecar, a scenario runs with the product defaults from `config.NewConfig()`: the default Markdown flavor and no rule options. Such scenarios follow the product's default flavor, so they change when it changes.
+Without a sidecar, a scenario runs with the product defaults from `config.NewConfig()`: the default Markdown flavor, `gfm`, and no rule options. Such scenarios follow the product's default flavor, so they change when it changes.
 
 A scenario that needs a different setup puts a sidecar next to its input, named `<scenario>.config.yml`. The sidecar uses the `.gomdlint.yml` schema, limited to two settings, so it is also a valid gomdlint config file:
 
@@ -173,12 +177,13 @@ Option names are not checked. A rule reads the options it knows by name and igno
 
 ### Fix Application
 
-The fix pipeline is the same one users get. Diagnostics produce `TextEdit` values (byte offset ranges + replacement text). The edits go through:
+The fix pipeline is the same one users get. Diagnostics produce `TextEdit` values (byte offset ranges + replacement text), and the edits of one diagnostic form one fix. The fixes go through:
 
-1. **Validation.** Bounds checking against document length.
-2. **Sorting.** By start offset.
-3. **Merge/conflict resolution.** Overlapping deletions get merged into a single edit; other overlaps are resolved greedily (earlier edit wins).
-4. **Application.** Cursor-based splice of the original content.
+1. **Fix check.** Before the rule returns, its fix check parses the document with the fixes applied and withholds any fix that would change the document in a way the rule does not intend.
+2. **Validation.** Each fix on its own: its edits lie within the document, do not overlap, and do not split a CRLF pair or a UTF-8 character.
+3. **Selection.** Each top-level block gets the fixes of one rule in a pass. The others are deferred to the next pass, which only real-world scenarios and round trips reach.
+4. **Resolution.** Fixes are accepted or skipped whole, the earlier of two conflicting fixes wins, and overlapping deletions merge.
+5. **Application.** Cursor-based splice of the original content.
 
 This means the golden tests exercise the real fix pipeline, not a simplified test double. If there's a bug in edit merging or offset calculation, a golden test will catch it.
 
@@ -260,10 +265,10 @@ We added three things: a way for agents to detect anomalies, a way to report the
 The [authoring skill](../.claude/skills/golden-test-authoring.md) now includes an anomaly checklist that agents must run after every `go test -update`:
 
 | Anomaly | How to Detect | What It Means |
-|---------|--------------|---------------|
+| --- | --- | --- |
 | Zero-diagnostic | `.diags.json` is `[]` for a non-clean, non-code_block_immunity scenario | Rule detection is broken |
 | Golden-equals-input | `.golden.md` is byte-identical to `.input.md` for a fixable rule with violations | Rule fix is broken |
-| Round-trip failure | Fixable diagnostics remain after one pass | Fix is non-idempotent or creates new violations |
+| Round-trip failure | Fixable diagnostics remain after fixing, or the fix passes do not converge | Fix is non-idempotent or creates new violations |
 | Position anomaly | Diagnostics report line 0 or column 0 | Position calculation bug |
 
 When an anomaly is detected, the agent must **stop** and not work around it. It deletes the generated golden files and keeps only the hand-written `.input.md` and any `.config.yml` sidecar. It writes a structured bug report and returns to the orchestrator with a blocked status. No broken behavior gets committed.
@@ -272,7 +277,7 @@ When an anomaly is detected, the agent must **stop** and not work around it. It 
 
 Bug reports live in `.claude/bug-reports/<RULE_ID>-<slug>.md` with YAML frontmatter tracking the lifecycle:
 
-```
+```text
 status: open → fixing → fixed → verified
 ```
 
@@ -310,6 +315,8 @@ With this process in place, we fixed all three bugs:
 
 After the fixes, regenerated golden files for all affected rules. `basic.diags.json` for MD035, MD049, and MD050 now contain actual diagnostics instead of empty arrays. The test count went from 2041 to 2050 (9 new tests from the MD034 email edge cases and bug reproduction tests).
 
+Later work replaced all three workarounds. The parser now records an exact span for every node, markers included, so MD035 reads the parsed thematic breaks and MD049 and MD050 read the emphasis delimiters from the node spans, with fixes of their own. MD034 reports exactly the GFM autolink literals that a port of micromark's grammar finds.
+
 ### Process Flow
 
 The full workflow now looks like this:
@@ -337,7 +344,7 @@ The key change is the branch at step 3. Previously, agents had no branch. They a
 Each rule gets test cases from a set of categories based on what's applicable:
 
 | Category | What It Tests |
-|----------|--------------|
+| --- | --- |
 | `basic` | The rule's core detection and fix behavior. |
 | `clean` | A file with no violations. It should produce zero diagnostics. |
 | `frontmatter` | Content after YAML frontmatter (`---` blocks). Catches off-by-N line counting. |
@@ -350,17 +357,33 @@ Each rule gets test cases from a set of categories based on what's applicable:
 
 Not every category applies to every rule. A rule that doesn't skip code blocks doesn't need `code_block_immunity`. A non-fixable rule doesn't need `multiple` (since there's no offset shifting to worry about). The categories are assigned per-rule based on the rule's implementation.
 
+## Beyond the Golden Files
+
+The golden files pin what each rule reports and fixes. Other tests guard what golden files cannot show:
+
+- **CLI output goldens.** `internal/cli/golden_test.go` runs `gomdlint lint` through `cli.Execute` on the fixture project in `internal/cli/testdata/project` and compares the text, table and summary output in each rule format, and the tables in both colour modes, with the files in `internal/cli/testdata/golden`. Other CLI goldens pin error messages, rule name suggestions and shell completion.
+- **Span invariants.** `TestSpanInvariants` parses every golden input and a set of stress documents in both flavors and checks that each node's span is well formed, contains its children, does not overlap its siblings and starts with its markers.
+- **Differential tests.** The region checks must decide exactly as a check of the whole document would. `TestRegionChecksDecideAsWholeDocument`, `TestOutlineRegionsDecideAsWholeDocument` and `TestOutlineAnchorsDecideAsWholeDocument` compare the two decisions on generated documents and edits. `TestNoBareURLsRule_FixesAgreeWithTheParser` checks that every MD034 fix leaves the links that GitHub's parser and goldmark find unchanged.
+- **Timing guards.** Linting must take time that grows linearly with the document. `TestLintTimeWithManyFixes` bounds the time to lint long documents with thousands of fixable findings, and `TestLintTimeGrowsLinearly` checks that a document eight times as long takes about eight times as long. `TestRulesOnLargeDocument` and the other large-document tests in `pkg/lint/rules/largedoc_test.go` give single rules a generous limit that a quadratic loop would exceed, and `TestTextReporter_SourceContextScalesWithTheOutput` does the same for text output. Timing guards skip under `-short`.
+- **markdownlint parity.** `TestCatalogFollowsMarkdownlint` compares every rule's names and tags with markdownlint's table, and the directive grammar tests take their expected findings from markdownlint 0.41.1.
+
 ## Current Coverage
 
-477 golden tests across all 55 rules (2050 total tests including unit tests). Every rule has at least `basic` and `clean` cases. Fixable rules have edge-case coverage for frontmatter, code block immunity, unicode, and batch fix scenarios. Non-fixable rules have frontmatter and (where applicable) code block immunity cases.
+582 golden tests from 291 inputs: 286 per-rule scenarios across all 55 rules and 5 real-world documents, each with a round trip, and 14 sidecar configs. Every rule has at least `basic` and `clean` cases. Fixable rules have edge-case coverage for frontmatter, code block immunity, unicode, and batch fix scenarios. Non-fixable rules have frontmatter and (where applicable) code block immunity cases.
 
 ```bash
 # Run all golden tests
-go test ./pkg/lint/rules/... -run TestGolden
+go test ./pkg/lint/rules/ -run TestGolden
 
 # Run tests for a specific rule
-go test ./pkg/lint/rules/... -run TestGoldenPerRule/MD009
+go test ./pkg/lint/rules/ -run 'TestGoldenPerRule/MD009'
 
 # Regenerate after changing a rule
-go test ./pkg/lint/rules/... -run TestGoldenPerRule/MD009 -args -update
+go test ./pkg/lint/rules/ -run 'TestGoldenPerRule/MD009' -update
+
+# Regenerate the real-world goldens
+go test ./pkg/lint/rules/ -run TestGoldenRealWorld -update
+
+# Regenerate the CLI output goldens
+go test ./internal/cli/ -run Golden -update
 ```
