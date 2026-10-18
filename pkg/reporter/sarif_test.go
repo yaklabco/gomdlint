@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -617,6 +618,8 @@ func TestSARIFReporter_DescribesRulesFromRegistry(t *testing.T) {
 	rules.RegisterAll(registry)
 	md009, ok := registry.GetByID("MD009")
 	require.True(t, ok)
+	md009Meta, ok := registry.Meta("MD009")
+	require.True(t, ok)
 
 	root := newGitWorkTree(t, false)
 	result := &runner.Result{Files: []runner.FileOutcome{
@@ -642,9 +645,10 @@ func TestSARIFReporter_DescribesRulesFromRegistry(t *testing.T) {
 	assert.Equal(t, "MD009", described.ID)
 	assert.Equal(t, md009.Name(), described.Name)
 	require.NotNil(t, described.ShortDescription)
-	assert.Equal(t, md009.Description(), described.ShortDescription.Text, "the rule description, not a message")
+	assert.Equal(t, md009Meta.Description, described.ShortDescription.Text, "the catalog description, not a message")
 	require.NotNil(t, described.FullDescription)
-	assert.Equal(t, md009.Description(), described.FullDescription.Text)
+	assert.Equal(t, md009Meta.Description+" "+md009Meta.Rationale+" "+md009Meta.Fix, described.FullDescription.Text,
+		"the catalog description, rationale and fix")
 	require.NotNil(t, described.DefaultConfig)
 	assert.Equal(t, "warning", described.DefaultConfig.Level, "the default severity of the rule, not the configured one")
 	assert.Equal(t, []any{"whitespace"}, described.Properties["tags"])
@@ -653,6 +657,87 @@ func TestSARIFReporter_DescribesRulesFromRegistry(t *testing.T) {
 		"an unregistered rule is identified without invented metadata")
 
 	assert.Equal(t, "error", log.Runs[0].Results[0].Level, "results keep their configured severity")
+}
+
+// sarifDescriptionLimit is the number of characters of a rule description
+// that GitHub code scanning keeps.
+const sarifDescriptionLimit = 1024
+
+func TestSARIFReporter_DescribesEveryRuleFromTheCatalog(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	catalog := rules.Catalog()
+
+	diags := make([]lint.Diagnostic, 0, len(catalog))
+	for _, meta := range catalog {
+		diags = append(diags, lint.Diagnostic{RuleID: meta.ID, RuleName: meta.Name, StartLine: 1})
+	}
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{sarifFile(filepath.Join(root, "a.md"), "x\n", diags...)}}
+
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry}, result).Runs[0].Tool.Driver.Rules
+
+	require.Len(t, descriptors, len(catalog))
+	for idx, meta := range catalog {
+		descriptor := descriptors[idx]
+		require.Equal(t, meta.ID, descriptor.ID)
+		assert.Equal(t, meta.Name, descriptor.Name)
+		if assert.NotNil(t, descriptor.ShortDescription, meta.ID) {
+			assert.Equal(t, meta.Description, descriptor.ShortDescription.Text, "%s: the one-line description", meta.ID)
+		}
+		if assert.NotNil(t, descriptor.FullDescription, meta.ID) {
+			full := descriptor.FullDescription.Text
+			assert.Equal(t, meta.Description+" "+meta.Rationale+" "+meta.Fix, full,
+				"%s: what correct Markdown looks like, why, and what the fix does", meta.ID)
+			assert.LessOrEqual(t, utf8.RuneCountInString(full), sarifDescriptionLimit, "%s: GitHub keeps the whole text", meta.ID)
+		}
+	}
+}
+
+// TestSARIFReporter_FallsBackToTheRuleDescription covers rules whose catalog
+// entry cannot describe them: a rule without an entry, and a rule whose
+// entry has no description, which keep the rule's own description in both
+// fields. An entry with a description but no rationale or fix gives that
+// description alone.
+func TestSARIFReporter_FallsBackToTheRuleDescription(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	plain := lint.NewBaseRule("ZZ001", "plain-rule", "Described by the rule itself", nil, false)
+	partial := lint.NewBaseRule("ZZ002", "partial-rule", "The rule's own description", nil, false)
+	blank := lint.NewBaseRule("ZZ003", "blank-entry-rule", "The entry leaves this to the rule", nil, false)
+	registry.Register(&plain)
+	registry.Register(&partial)
+	registry.Register(&blank)
+	registry.Describe(lint.RuleMeta{ID: "ZZ002", Name: "partial-rule", Description: "The catalog's one line."})
+	registry.Describe(lint.RuleMeta{
+		ID: "ZZ003", Name: "blank-entry-rule",
+		Rationale: "A reason without a description is not used.", Fix: "There is no automatic fix.",
+	})
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), "x\n",
+			lint.Diagnostic{RuleID: "ZZ001", StartLine: 1},
+			lint.Diagnostic{RuleID: "ZZ002", StartLine: 1},
+			lint.Diagnostic{RuleID: "ZZ003", StartLine: 1},
+		),
+	}}
+
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry}, result).Runs[0].Tool.Driver.Rules
+
+	text := func(value string) *reporter.SARIFMultiformatText {
+		return &reporter.SARIFMultiformatText{Text: value}
+	}
+	require.Len(t, descriptors, 3)
+	assert.Equal(t, text("Described by the rule itself"), descriptors[0].ShortDescription, "a rule without an entry")
+	assert.Equal(t, text("Described by the rule itself"), descriptors[0].FullDescription, "a rule without an entry")
+	assert.Equal(t, text("The catalog's one line."), descriptors[1].ShortDescription, "the entry's description")
+	assert.Equal(t, text("The catalog's one line."), descriptors[1].FullDescription, "an entry without a rationale or a fix")
+	assert.Equal(t, text("The entry leaves this to the rule"), descriptors[2].ShortDescription, "an entry without a description")
+	assert.Equal(t, text("The entry leaves this to the rule"), descriptors[2].FullDescription, "an entry without a description")
 }
 
 func TestSARIFReporter_RecordsFilesThatFailed(t *testing.T) {
@@ -756,6 +841,12 @@ type ruleLookup map[string]lint.Rule
 func (l ruleLookup) GetByID(id string) (lint.Rule, bool) {
 	rule, ok := l[id]
 	return rule, ok
+}
+
+// Meta reports that no rule has a catalog entry, so rules describe
+// themselves.
+func (l ruleLookup) Meta(string) (lint.RuleMeta, bool) {
+	return lint.RuleMeta{}, false
 }
 
 func TestSARIFReporter_AcceptsAnyRuleLookup(t *testing.T) {

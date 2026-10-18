@@ -478,9 +478,9 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	}
 
 	rule.Name = registered.Name()
-	if description := registered.Description(); description != "" {
-		rule.ShortDescription = &SARIFMultiformatText{Text: description}
-		rule.FullDescription = &SARIFMultiformatText{Text: description}
+	if short, full := b.ruleDescriptions(registered); short != "" {
+		rule.ShortDescription = &SARIFMultiformatText{Text: short}
+		rule.FullDescription = &SARIFMultiformatText{Text: full}
 	}
 	rule.DefaultConfig = &SARIFRuleConfig{Level: severityToSARIFLevel(registered.DefaultSeverity())}
 	if tags := uniqueTags(registered.Tags()); len(tags) > 0 {
@@ -488,6 +488,27 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	}
 
 	return rule
+}
+
+// ruleDescriptions returns the short and the full SARIF description of rule.
+// When the registry holds a catalog entry with a description for the rule,
+// the short description is the entry's one line, and the full description
+// follows it with the entry's rationale and the sentences on its fix.
+// Otherwise both are the rule's own description.
+func (b *sarifRunBuilder) ruleDescriptions(rule lint.Rule) (string, string) {
+	meta, _ := b.registry.Meta(rule.ID()) // A rule without an entry gets the zero entry.
+	short := lint.RuleDescription(rule, meta)
+	if meta.Description == "" {
+		return short, short
+	}
+
+	full := []string{meta.Description}
+	for _, text := range []string{meta.Rationale, meta.Fix} {
+		if text != "" {
+			full = append(full, text)
+		}
+	}
+	return short, strings.Join(full, " ")
 }
 
 // uniqueTags returns the non-empty tags in order without duplicates, as SARIF
