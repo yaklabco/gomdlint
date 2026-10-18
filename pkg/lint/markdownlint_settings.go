@@ -121,12 +121,6 @@ var ErrNotJSONObject = errors.New("not a JSON object")
 // null holds no settings, as markdownlint reads it, and any other value
 // that is not an object is an error that wraps ErrNotJSONObject.
 func DecodeMarkdownlintJSON(data []byte) (*MarkdownlintSettings, error) {
-	return decodeSettings(data, true)
-}
-
-// decodeSettings is DecodeMarkdownlintJSON, which reads null as an object
-// without keys when allowNull is set, and as an error otherwise.
-func decodeSettings(data []byte, allowNull bool) (*MarkdownlintSettings, error) {
 	// Checking all of data first gives syntax errors json.Unmarshal's
 	// wording, and leaves the decoder below only valid JSON to read.
 	if err := json.Unmarshal(data, new(json.RawMessage)); err != nil {
@@ -140,7 +134,7 @@ func decodeSettings(data []byte, allowNull bool) (*MarkdownlintSettings, error) 
 		return nil, fmt.Errorf("read JSON: %w", err)
 	}
 	settings := &MarkdownlintSettings{}
-	if token == nil && allowNull {
+	if token == nil {
 		return settings, nil
 	}
 	if token != json.Delim('{') {
