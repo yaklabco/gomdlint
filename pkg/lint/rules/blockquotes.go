@@ -299,73 +299,62 @@ func NewNoBlanksBlockquoteRule() *NoBlanksBlockquoteRule {
 	}
 }
 
-// Apply checks for blank lines separating blockquotes.
+// Apply reports each blank line between two blockquotes that are next to
+// each other in the document, a list or a list item, as markdownlint does.
+// The blockquotes may start anywhere on their lines, such as after a list
+// item's indentation. Only blank lines may lie between them: a link
+// reference definition, which leaves no node in the tree, keeps them apart.
+// Blockquotes inside another blockquote are not reported, because markdownlint
+// stops at the outer blockquote's ">" on the lines between them.
 func (r *NoBlanksBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.File == nil || len(ctx.File.Lines) < 3 {
+	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
 	}
 
 	var diags []lint.Diagnostic
-	var inBlockquote bool
-	var lastBlockquoteLine int
-	// The fence lines of quoted code start with '>' too, so only the code
-	// itself is skipped.
-	codeLines := lint.CodeContentLines(ctx.CodeBlocks())
-
-	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for _, quote := range ctx.Blockquotes() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		lineContent := lint.LineText(ctx.File, lineNum)
-
-		// Skip lines of code.
-		if codeLines[lineNum] {
+		next := quote.Next
+		if next == nil || next.Kind != mdast.NodeBlockquote || insideBlockquote(quote) {
 			continue
 		}
-
-		isBlockquoteLine := len(lineContent) > 0 && lineContent[0] == '>'
-		isBlankLine := len(bytes.TrimSpace(lineContent)) == 0
-
-		if isBlockquoteLine {
-			// Check if we're returning to a blockquote after a gap.
-			if inBlockquote && lastBlockquoteLine > 0 && lastBlockquoteLine < lineNum-1 {
-				// There was a gap - check if it was just blank lines.
-				allBlank := true
-				for checkLine := lastBlockquoteLine + 1; checkLine < lineNum; checkLine++ {
-					checkContent := lint.LineContent(ctx.File, checkLine)
-					if len(bytes.TrimSpace(checkContent)) > 0 {
-						allBlank = false
-						break
-					}
-				}
-
-				if allBlank {
-					pos := mdast.SourcePosition{
-						StartLine:   lastBlockquoteLine + 1,
-						StartColumn: 1,
-						EndLine:     lineNum - 1,
-						EndColumn:   1,
-					}
-
-					diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-						"Blank line inside blockquote separates it into multiple blockquotes").
-						WithSeverity(config.SeverityWarning).
-						WithSuggestion("Add text between blockquotes or use '>' on blank lines").
-						Build()
-					diags = append(diags, diag)
-				}
-			}
-
-			inBlockquote = true
-			lastBlockquoteLine = lineNum
-		} else if !isBlankLine {
-			// Non-blank, non-blockquote line resets the tracking.
-			inBlockquote = false
-			lastBlockquoteLine = 0
+		first, last := quote.SourcePosition().EndLine+1, next.SourcePosition().StartLine-1
+		if first > last || !allBlankLines(ctx.File, first, last) {
+			continue
 		}
-		// Blank lines don't reset tracking - we want to find gaps.
+		for line := first; line <= last; line++ {
+			pos := mdast.SourcePosition{StartLine: line, StartColumn: 1, EndLine: line, EndColumn: 1}
+			diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+				"Blank line inside blockquote separates it into multiple blockquotes").
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion("Add text between blockquotes or use '>' on blank lines").
+				Build())
+		}
 	}
 
+	sortDiagnosticsByPosition(diags)
 	return diags, nil
+}
+
+// insideBlockquote reports whether node has a blockquote among its ancestors.
+func insideBlockquote(node *mdast.Node) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Kind == mdast.NodeBlockquote {
+			return true
+		}
+	}
+	return false
+}
+
+// allBlankLines reports whether the lines from first to last hold nothing
+// but whitespace.
+func allBlankLines(file *mdast.FileSnapshot, first, last int) bool {
+	for line := first; line <= last; line++ {
+		if len(bytes.TrimSpace(lint.LineText(file, line))) > 0 {
+			return false
+		}
+	}
+	return true
 }

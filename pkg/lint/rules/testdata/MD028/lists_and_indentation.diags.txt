@@ -1,0 +1,5 @@
+lists_and_indentation.input.md:6:1 warning Blank line inside blockquote separates it into multiple blockquotes (MD028/no-blanks-blockquote)
+lists_and_indentation.input.md:8:1 warning Blank line inside blockquote separates it into multiple blockquotes (MD028/no-blanks-blockquote)
+lists_and_indentation.input.md:9:1 warning Blank line inside blockquote separates it into multiple blockquotes (MD028/no-blanks-blockquote)
+lists_and_indentation.input.md:15:1 warning Blank line inside blockquote separates it into multiple blockquotes (MD028/no-blanks-blockquote)
+lists_and_indentation.input.md:17:1 warning Blank line inside blockquote separates it into multiple blockquotes (MD028/no-blanks-blockquote)

@@ -237,9 +237,10 @@ func TestNoBlanksBlockquoteRule(t *testing.T) {
 			wantDiags: 0,
 		},
 		{
+			// markdownlint reports each blank line.
 			name:      "multiple blank lines between blockquotes",
 			input:     "> First\n\n\n> Second\n",
-			wantDiags: 1,
+			wantDiags: 2,
 		},
 		{
 			name:      "empty file",
@@ -279,6 +280,47 @@ func TestNoMultipleSpaceBlockquoteRule_Metadata(t *testing.T) {
 	assert.Contains(t, rule.Tags(), "whitespace")
 	assert.True(t, rule.CanFix())
 	assert.True(t, rule.DefaultEnabled())
+}
+
+// TestNoBlanksBlockquoteRule_MarkdownlintParity checks MD028 against
+// markdownlint 0.41.1: each blank line between two blockquotes that are
+// next to each other in the same document, list or list item is reported,
+// wherever the blockquotes start on their lines. A blockquote inside
+// another one is not, because the outer one's ">" is on every line between.
+func TestNoBlanksBlockquoteRule_MarkdownlintParity(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLines []int
+	}{
+		{name: "two blank lines", input: "> a\n\n\n> b\n", wantLines: []int{2, 3}},
+		{name: "three blockquotes", input: "> a\n\n> b\n\n> c\n", wantLines: []int{2, 4}},
+		{name: "indented blockquotes", input: "  > a\n\n  > b\n", wantLines: []int{2}},
+		{name: "differently indented blockquotes", input: " > a\n\n   > b\n", wantLines: []int{2}},
+		{name: "blockquotes in a list item", input: "- item\n\n  > c\n\n  > d\n", wantLines: []int{4}},
+		{name: "blockquotes right after the item text", input: "- item\n  > c\n\n  > d\n", wantLines: []int{3}},
+		{name: "blockquote that starts an item", input: "- > a\n\n  > b\n", wantLines: []int{2}},
+		{name: "blank line with indentation", input: "- > a\n  \n  > b\n", wantLines: []int{2}},
+		{name: "blockquotes in an ordered list item", input: "1. x\n\n   > a\n\n   > b\n", wantLines: []int{4}},
+		{name: "blockquotes in a nested list item", input: "- - > a\n\n    > b\n", wantLines: []int{2}},
+		{name: "whitespace-only line", input: "> a\n   \n> b\n", wantLines: []int{2}},
+		{name: "outer blockquotes holding inner ones", input: "> > a\n\n> > b\n", wantLines: []int{2}},
+		{name: "inner blockquotes", input: "> > a\n>\n> > b\n", wantLines: []int{}},
+		{name: "blockquotes in a list in a blockquote", input: "> - > a\n>\n>   > b\n", wantLines: []int{}},
+		{name: "blockquotes in different list items", input: "- > a\n\n- > b\n", wantLines: []int{}},
+		{name: "blockquote and a list", input: "> a\n\n- > b\n", wantLines: []int{}},
+		{name: "definition between", input: "> a\n\n[x]: /u\n\n> b\n", wantLines: []int{}},
+		{name: "comment between", input: "> a\n\n<!-- c -->\n\n> b\n", wantLines: []int{}},
+		{name: "indented code after", input: "> a\n\n    > b\n", wantLines: []int{}},
+		{name: "quote markers in an HTML block", input: "<div>\n> x\n\n> y\n</div>\n", wantLines: []int{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoBlanksBlockquoteRule(), tt.input, nil)
+			assert.Equal(t, tt.wantLines, diagLines(diags))
+		})
+	}
 }
 
 func TestNoBlanksBlockquoteRule_Metadata(t *testing.T) {
