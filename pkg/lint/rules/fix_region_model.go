@@ -6,7 +6,6 @@ import (
 	"maps"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -15,124 +14,6 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
-
-// anchorHistory records the slugs and anchors the signature writer gives
-// headings and every change to its anchor counts, so that the counts before
-// any heading can be looked up.
-type anchorHistory struct {
-	slugs, anchors []string
-	// writes holds, for each key, its values in order, each with the index
-	// of the heading that set it.
-	writes map[string][]anchorWrite
-	// keys holds, for each heading, the keys it set.
-	keys [][]string
-}
-
-type anchorWrite struct {
-	heading, value int
-}
-
-// write records that the heading being written set key to value.
-func (h *anchorHistory) write(key string, value int) {
-	if h.writes == nil {
-		h.writes = make(map[string][]anchorWrite)
-	}
-	heading := len(h.slugs)
-	h.writes[key] = append(h.writes[key], anchorWrite{heading: heading, value: value})
-	for len(h.keys) <= heading {
-		h.keys = append(h.keys, nil)
-	}
-	h.keys[heading] = append(h.keys[heading], key)
-}
-
-// recordAnchors returns the history of giving headings with the given slugs,
-// in order, the anchors GitHub gives them, numbering repeated slugs as
-// signatureWriter.anchor and refs.AnchorMap do.
-func recordAnchors(slugs []string) anchorHistory {
-	var history anchorHistory
-	counts := make(map[string]int, len(slugs))
-	for _, slug := range slugs {
-		unique := slug
-		for {
-			if _, taken := counts[unique]; !taken {
-				break
-			}
-			counts[slug]++
-			history.write(slug, counts[slug])
-			unique = slug + "-" + strconv.Itoa(counts[slug])
-		}
-		counts[unique] = 0
-		history.write(unique, 0)
-		history.slugs = append(history.slugs, slug)
-		history.anchors = append(history.anchors, unique)
-	}
-	return history
-}
-
-// lookup returns the count of key before the given heading.
-func (h *anchorHistory) lookup(key string, before int) (int, bool) {
-	writes := h.writes[key]
-	idx := sort.Search(len(writes), func(i int) bool { return writes[i].heading >= before })
-	if idx == 0 {
-		return 0, false
-	}
-	return writes[idx-1].value, true
-}
-
-// replay returns the anchors that headings with the given slugs get when
-// they follow the first `before` headings of the document, as
-// signatureWriter.anchor gives them, and the counts they set.
-func (h *anchorHistory) replay(slugs []string, before int) ([]string, map[string]int) {
-	counts := make(map[string]int)
-	get := func(key string) (int, bool) {
-		if value, found := counts[key]; found {
-			return value, true
-		}
-		return h.lookup(key, before)
-	}
-	anchors := make([]string, 0, len(slugs))
-	for _, slug := range slugs {
-		unique := slug
-		for {
-			if _, taken := get(unique); !taken {
-				break
-			}
-			value, _ := get(slug)
-			counts[slug] = value + 1
-			unique = slug + "-" + strconv.Itoa(value+1)
-		}
-		counts[unique] = 0
-		anchors = append(anchors, unique)
-	}
-	return anchors, counts
-}
-
-// sameCounts reports whether replacing headings [from, to) of the document
-// with headings that set counts leaves the anchor counts as the document
-// has them when it reaches heading to, after the replaced headings.
-func (h *anchorHistory) sameCounts(counts map[string]int, from, to int) bool {
-	same := func(key string) bool {
-		want, wantFound := h.lookup(key, to)
-		got, gotFound := counts[key]
-		if !gotFound {
-			got, gotFound = h.lookup(key, from)
-		}
-		return wantFound == gotFound && want == got
-	}
-	for key := range counts {
-		if !same(key) {
-			return false
-		}
-	}
-	for heading := from; heading < to && heading < len(h.keys); heading++ {
-		for _, key := range h.keys[heading] {
-			if !same(key) {
-				return false
-			}
-		}
-	}
-	return true
-}
 
 // regionModel is the original document as one parser reads it, with its
 // render signature, as fixCheck.signatures writes it, cut into the parts

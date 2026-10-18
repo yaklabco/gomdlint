@@ -140,10 +140,13 @@ import (
 // original's definitions); and the anchor counts after each region are as
 // before, so that later headings keep their anchors (a region's headings get
 // their anchors from the counts before it, see anchorHistory). Where
-// definitions change, or anchor counts change and the signature up to that
-// region does not already differ, region checks give up and the whole
-// document is parsed, as before. sameAfterReplacements compares the replaced
-// signature with the original exactly, without writing it out.
+// definitions change, region checks give up and the whole document is
+// parsed, as before. Where anchor counts change, the render signature's
+// checks give up too, unless the signature up to that region already
+// differs; the outline, whose anchors stand together in one item, has the
+// anchors that change worked out instead (see anchorHistory.keeps).
+// sameAfterReplacements compares the replaced signature with the original
+// exactly, without writing it out.
 //
 // The argument depends on goldmark's parser, not on what the signature
 // compares, so docLayout serves both fix checks that use it: regionModel

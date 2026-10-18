@@ -45,6 +45,16 @@ var outlineSnippets = []string{
 	"# Heading one 1\n",
 	"- ## Heading in item ` code`\n- second\n- third\n- fourth\n",
 	"> ## Quoted heading https://example.com/q\n",
+	// Headings whose fixed slugs collide: a padded code span whose slug "a-"
+	// becomes "a", which must pass the numbered "a-1" and "a-2", and reversed
+	// links whose slug "x-1" becomes "x", which keeps the anchor "x-1" when
+	// it is free but counts "x" once more.
+	"# a\n\n# a-1\n\n# a-2\n\n# `a `\n\n# `a `\n",
+	"# x\n\n# (x)[-1]\n",
+	"# (x)[-2]\n\n# x-1\n",
+	"# x\n",
+	"## (x)[-1]\n",
+	"# x-2\n",
 }
 
 // outlineEditPatterns find the places the code and link rules edit.
@@ -54,6 +64,7 @@ var outlineEditPatterns = []*regexp.Regexp{
 	regexp.MustCompile("` | `"),
 	regexp.MustCompile(`(?m)^\s*\$ `),
 	regexp.MustCompile("(?m)^\\s*(```|~~~)"),
+	regexp.MustCompile(`\([^()\n]+\)\[[^\]\n]+\]`),
 }
 
 // randomOutlineEdits returns the edits of a fix like those the code and link
@@ -80,6 +91,10 @@ func randomOutlineEdits(rng *rand.Rand, text string) []fix.TextEdit {
 			return []fix.TextEdit{{StartOffset: match[1], EndOffset: match[1], NewText: "bash"}}
 		}
 		return []fix.TextEdit{{StartOffset: match[1] - 3, EndOffset: match[1], NewText: "```"}}
+	case strings.HasPrefix(found, "(") && strings.HasSuffix(found, "]"):
+		// Turn a reversed link into a link, as MD011 does.
+		text, destination, _ := strings.Cut(found[1:len(found)-1], ")[")
+		return []fix.TextEdit{{StartOffset: match[0], EndOffset: match[1], NewText: "[" + text + "](" + destination + ")"}}
 	default:
 		// Remove the space that pads link text or a code span.
 		at := match[0] + strings.IndexByte(found, ' ')

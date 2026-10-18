@@ -104,6 +104,11 @@ var regionSnippets = []string{
 	"***\n- a\n  b|c\n  -|-\n  ===\n",
 	"## Heading\n- [t1]: /t1\n  a\n  b|c\n  -|-\n  ===\n",
 	"- x\n- a\n  b|c\n  -|-\n  ===\n- y   \n- z\n- w\n",
+	// Headings whose slugs collide with numbered anchors: "a-" and "a- b"
+	// become "a" and "a-b" when their spaces go, and "a" must pass "a-1" and
+	// "a-2" to find a free number.
+	"# a\n\n# a-1\n\n# a-2\n\n# `a `\n\n# `a `\n",
+	"## a-b\n## a-\tb\n## `a ` b\n",
 }
 
 // regionEditTexts are the texts random edits insert.

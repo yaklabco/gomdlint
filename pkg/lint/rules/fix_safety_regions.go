@@ -429,52 +429,16 @@ func (m *outlineModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 }
 
 // anchorsKept reports whether the anchors of the edited document join to
-// the text of the original's anchors item.
-//
-// Regions are taken in order while the anchor counts before each are the
-// original's. A region that keeps its headings' slugs keeps their anchors
-// and the counts. Otherwise its anchors are replayed from the counts before
-// it (see anchorHistory). When there are as many as before and they differ,
-// the anchors at those places of the list differ, so the lists do, and so
-// does their text, since no anchor holds the separator. When they are the
-// same and leave the counts as they were, the next region is taken.
-// Anything else, a region that adds or removes headings or changes the
-// counts, has the anchors of the whole edited document worked out.
+// the text of the original's anchors item: each region that changes the
+// slugs of its headings replaces them, and the anchor walk works out the
+// anchors that change (see anchorHistory.keeps).
 func (m *outlineModel) anchorsKept(regions []region, outcomes []*outlineOutcome) bool {
+	var changes []anchorChange
 	for idx, outcome := range outcomes {
-		if outcome.slugsSame {
-			continue
-		}
-		_, _, from, to := m.outSpan(regions[idx])
-		anchors, counts := m.history.replay(outcome.slugs, from)
-		switch {
-		case len(anchors) != to-from:
-			return m.anchorsRebuilt(regions, outcomes)
-		case !slices.Equal(anchors, m.history.anchors[from:to]):
-			return false
-		case !m.history.sameCounts(counts, from, to):
-			return m.anchorsRebuilt(regions, outcomes)
+		if !outcome.slugsSame {
+			_, _, from, to := m.outSpan(regions[idx])
+			changes = append(changes, anchorChange{from: from, to: to, slugs: outcome.slugs})
 		}
 	}
-	return true
-}
-
-// anchorsRebuilt reports whether the anchors that the slugs of the edited
-// document give, read in order, join to the text of the original's anchors
-// item.
-func (m *outlineModel) anchorsRebuilt(regions []region, outcomes []*outlineOutcome) bool {
-	var slugs []string
-	next := 0
-	for idx, reg := range regions {
-		_, _, from, to := m.outSpan(reg)
-		slugs = append(slugs, m.slugs[next:from]...)
-		if outcomes[idx].slugsSame {
-			slugs = append(slugs, m.slugs[from:to]...)
-		} else {
-			slugs = append(slugs, outcomes[idx].slugs...)
-		}
-		next = to
-	}
-	slugs = append(slugs, m.slugs[next:]...)
-	return strings.Join(recordAnchors(slugs).anchors, "\x00") == m.anchors
+	return m.history.keeps(changes)
 }
