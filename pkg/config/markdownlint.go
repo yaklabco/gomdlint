@@ -1,12 +1,68 @@
 package config
 
+import (
+	"math"
+	"reflect"
+)
+
 const markdownlintLineLength = 80
 
 // MarkdownlintFrontMatterTitlePattern matches conventional metadata title keys.
 const MarkdownlintFrontMatterTitlePattern = `^\s*"?title"?\s*[:=]`
 
+// markdownlintWarning is the value that makes a rule report warnings in a
+// markdownlint configuration.
+const markdownlintWarning = string(SeverityWarning)
+
+// MarkdownlintDefaultRuleConfig converts the value of markdownlint's default
+// key to the settings that it gives the rule with the given ID, as
+// getEffectiveConfig in markdownlint 0.41.1 reads it: the rule is on when
+// the value is truthy in JavaScript, everything but false, null, zero, NaN
+// and the empty string, and it reports warnings for "warning" and errors
+// otherwise. Nothing else comes from the value, so an object turns the rule
+// on whatever it holds, and the rule keeps markdownlint's option defaults.
+func MarkdownlintDefaultRuleConfig(ruleID string, value any) RuleConfig {
+	switch text, isText := value.(string); {
+	case isText && text == markdownlintWarning:
+		return MarkdownlintRuleConfig(ruleID, markdownlintWarning)
+	case markdownlintTruthy(value):
+		return MarkdownlintRuleConfig(ruleID, true)
+	default:
+		return MarkdownlintRuleConfig(ruleID, false)
+	}
+}
+
+// markdownlintTruthy reports whether value, decoded from JSON or YAML, is
+// truthy in JavaScript, as markdownlint tests the values of its
+// configuration: everything but false, null, zero, NaN and the empty
+// string.
+func markdownlintTruthy(value any) bool {
+	if value == nil {
+		return false
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Bool:
+		return reflected.Bool()
+	case reflect.String:
+		return reflected.Len() > 0
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return reflected.Int() != 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return reflected.Uint() != 0
+	case reflect.Float32, reflect.Float64:
+		number := reflected.Float()
+		return number != 0 && !math.IsNaN(number)
+	default:
+		return true
+	}
+}
+
 // MarkdownlintRuleConfig converts a markdownlint rule value to explicit gomdlint
 // options. Native gomdlint defaults remain independent of migrated settings.
+// As in getEffectiveConfig in markdownlint 0.41.1, a value that is falsy in
+// JavaScript turns the rule off, and an object turns it on unless its
+// enabled key is present and falsy.
 func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 	enabled := true
 	severity := string(SeverityError)
@@ -36,12 +92,9 @@ func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 		}
 	}
 	switch typed := value.(type) {
-	case bool:
-		*cfg.Enabled = typed
-	case nil:
-		*cfg.Enabled = false
 	case string:
-		if typed == "warning" {
+		*cfg.Enabled = typed != ""
+		if typed == markdownlintWarning {
 			severity = typed
 		}
 	case map[string]any:
@@ -57,9 +110,7 @@ func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 			}
 			switch key {
 			case "enabled":
-				if state, ok := option.(bool); ok {
-					*cfg.Enabled = state
-				}
+				*cfg.Enabled = markdownlintTruthy(option)
 				continue
 			case "severity":
 				if explicitSeverity, ok := option.(string); ok {
@@ -90,6 +141,9 @@ func MarkdownlintRuleConfig(ruleID string, value any) RuleConfig {
 			}
 			cfg.Options[key] = option
 		}
+	default:
+		// Booleans, null, numbers and arrays, as JavaScript tests them.
+		*cfg.Enabled = markdownlintTruthy(value)
 	}
 	return cfg
 }

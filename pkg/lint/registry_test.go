@@ -339,26 +339,42 @@ func TestRegistry_RulesByTag(t *testing.T) {
 	assert.Equal(t, []string{"MD026", "MD043"}, ruleIDs(reg.RulesByTag("headings")))
 }
 
-func TestRegistry_InCatalog(t *testing.T) {
+// TestRegistry_MarkdownlintConfigKeys covers the keys of a markdownlint
+// configuration file that markdownlint knows: every identifier and tag of
+// every catalog entry, registered or not, and the IDs and names of the
+// registered rules, in any case but whole, as markdownlint looks keys up.
+// Only the rules that are registered get configured.
+func TestRegistry_MarkdownlintConfigKeys(t *testing.T) {
 	reg := describedRegistry()
 
-	// Every identifier and tag of every catalog entry, registered or not.
-	for _, word := range []string{
-		"MD004", "md004", "unordered-list-style", "UL-STYLE", "bullet", " ul ", "headings",
-		"MD998", "phantom-rule", "phantom-alias",
-	} {
-		assert.True(t, reg.inCatalog(word), "word %q", word)
+	known := map[string][]string{
+		"MD004": {"MD004"}, "md004": {"MD004"}, "unordered-list-style": {"MD004"}, "UL-STYLE": {"MD004"},
+		"bullet": {"MD004"}, "ul": {"MD004"}, "headings": {"MD026", "MD043"},
+		"MD998": nil, "phantom-rule": nil, "phantom-alias": nil,
+	}
+	for word, want := range known {
+		ids, ok := reg.MarkdownlintConfigRuleIDs(word)
+		assert.True(t, ok, "word %q", word)
+		assert.Equal(t, want, ids, "word %q", word)
 	}
 
-	// The rules' own tags are not catalog words.
-	for _, word := range []string{"lists", "style", "", "no-such-word", "MD999"} {
-		assert.False(t, reg.inCatalog(word), "word %q", word)
+	// The rules' own tags are not markdownlint's, and a key is read whole.
+	for _, word := range []string{"lists", "style", "", " ul ", "no-such-word", "MD999"} {
+		ids, ok := reg.MarkdownlintConfigRuleIDs(word)
+		assert.False(t, ok, "word %q", word)
+		assert.Empty(t, ids, "word %q", word)
 	}
 
-	// A registered rule without an entry adds nothing to the catalog.
+	// A registered rule without an entry is known by its ID and name, but
+	// not by its own tags.
 	reg.Register(&mockRule{id: "MD999", name: "undescribed", tags: []string{"custom"}})
-	assert.False(t, reg.inCatalog("MD999"))
-	assert.False(t, reg.inCatalog("custom"))
+	for _, word := range []string{"MD999", "Undescribed"} {
+		ids, ok := reg.MarkdownlintConfigRuleIDs(word)
+		assert.True(t, ok, "word %q", word)
+		assert.Equal(t, []string{"MD999"}, ids, "word %q", word)
+	}
+	_, ok := reg.MarkdownlintConfigRuleIDs("custom")
+	assert.False(t, ok)
 }
 
 func TestRegistry_SuggestTypos(t *testing.T) {

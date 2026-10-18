@@ -14,13 +14,16 @@ func (c *Config) ToYAML() ([]byte, error) {
 	if c == nil {
 		return nil, nil
 	}
+	return encodeYAML(c)
+}
 
-	// Marshal to YAML
+// encodeYAML serializes value to YAML, indented by two spaces.
+func encodeYAML(value any) ([]byte, error) {
 	var buf bytes.Buffer
 	encoder := yaml.NewEncoder(&buf)
-	encoder.SetIndent(2)
+	encoder.SetIndent(YAMLIndent())
 
-	if err := encoder.Encode(c); err != nil {
+	if err := encoder.Encode(value); err != nil {
 		return nil, fmt.Errorf("encode config: %w", err)
 	}
 
@@ -29,6 +32,43 @@ func (c *Config) ToYAML() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// ruleSettings holds the rule settings of a configuration, under the keys
+// that Config gives them.
+type ruleSettings struct {
+	Rules        map[string]RuleConfig `yaml:"rules,omitempty"`
+	RuleDefaults map[string]RuleConfig `yaml:"rule_defaults,omitempty"`
+}
+
+// RuleSettingsToYAML serializes the rule settings of the configuration,
+// rules and rule_defaults, and nothing else, after header unless it is
+// empty. It suits a configuration that sets nothing but rules, such as a
+// migrated markdownlint configuration: a file that holds it leaves every
+// other setting to the layers below it, where ToYAML would write settings
+// it does not set, such as an empty ignore list.
+func (c *Config) RuleSettingsToYAML(header string) ([]byte, error) {
+	if c == nil {
+		return nil, nil
+	}
+	yamlBytes, err := encodeYAML(ruleSettings{Rules: c.Rules, RuleDefaults: c.RuleDefaults})
+	if err != nil {
+		return nil, err
+	}
+	return withHeader(header, yamlBytes), nil
+}
+
+// RuleSettingsToJSON is RuleSettingsToYAML in JSON, which has no comments,
+// and so no header.
+func (c *Config) RuleSettingsToJSON() ([]byte, error) {
+	if c == nil {
+		return nil, nil
+	}
+	yamlBytes, err := c.RuleSettingsToYAML("")
+	if err != nil {
+		return nil, err
+	}
+	return templateToJSON(yamlBytes)
 }
 
 // ToJSON serializes the configuration to indented JSON: the settings ToYAML
@@ -52,12 +92,16 @@ func (c *Config) ToYAMLWithHeader(header string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return withHeader(header, yamlBytes), nil
+}
 
+// withHeader returns yamlBytes after header and a blank line, or yamlBytes
+// itself when header is empty.
+func withHeader(header string, yamlBytes []byte) []byte {
 	if header == "" {
-		return yamlBytes, nil
+		return yamlBytes
 	}
 
-	// Prepend header
 	var buf bytes.Buffer
 	buf.WriteString(header)
 	if header[len(header)-1] != '\n' {
@@ -66,7 +110,7 @@ func (c *Config) ToYAMLWithHeader(header string) ([]byte, error) {
 	buf.WriteByte('\n')
 	buf.Write(yamlBytes)
 
-	return buf.Bytes(), nil
+	return buf.Bytes()
 }
 
 // UnmarshalYAML decodes the settings of one rule: a mapping of enabled,

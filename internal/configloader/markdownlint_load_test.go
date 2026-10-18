@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // markdownlintOptions loads from dir with only a markdownlint config in
@@ -239,6 +241,55 @@ func TestLoad_MarkdownlintPrompt(t *testing.T) {
 			assert.NoFileExists(t, filepath.Join(sub, ".gomdlint.yml"))
 		})
 	}
+}
+
+// TestLoad_SavedMigrationKeepsInheritedSettings covers a markdownlint config
+// whose translation is saved, as the prompt offers, under a user config
+// that sets what a markdownlint config cannot: ignore patterns, the flavor,
+// the gitignore and default_ignores settings, backups and a rule's
+// auto_fix. The saved file holds only rule settings, and leaves auto_fix
+// unset, so the user's settings still apply, as they do while the
+// translation applies for a run.
+func TestLoad_SavedMigrationKeepsInheritedSettings(t *testing.T) {
+	root := t.TempDir()
+	userDir := filepath.Join(root, "xdg", "gomdlint")
+	require.NoError(t, os.MkdirAll(userDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(userDir, "config.yaml"), []byte(
+		"ignore:\n  - \"drafts/**\"\n"+
+			"flavor: commonmark\n"+
+			"gitignore: false\n"+
+			"default_ignores: false\n"+
+			"backups:\n  enabled: false\n  mode: none\n"+
+			"rules:\n  MD013:\n    auto_fix: false\n"), 0o644))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
+
+	project := filepath.Join(root, "project")
+	source := writeMarkdownlint(t, project, ".markdownlint.json", `{"MD013": false}`)
+	converted, err := ConvertMarkdownlintConfig(source)
+	require.NoError(t, err)
+	target := filepath.Join(project, ".gomdlint.yml")
+	require.NoError(t, saveMigratedConfig(converted, target))
+	require.NoError(t, os.Remove(source))
+
+	opts := isolatedOptions(project)
+	opts.IgnoreUserConfig = false
+	result, err := Load(context.Background(), opts)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{result.Paths.User, target}, result.LoadedFrom)
+	assert.Equal(t, []string{"drafts/**"}, result.Config.Ignore)
+	assert.Equal(t, project, result.IgnoreBaseDir, "the user's patterns follow the working directory")
+	assert.Equal(t, config.FlavorCommonMark, result.Config.Flavor)
+	assert.False(t, result.Config.GitignoreEnabled())
+	assert.False(t, result.Config.DefaultIgnoresEnabled())
+	assert.False(t, result.Config.Backups.IsEnabled())
+	assert.Equal(t, "none", result.Config.Backups.Mode)
+	rule, ok := result.Config.Rules["MD013"]
+	require.True(t, ok, "the migrated rule settings apply")
+	require.NotNil(t, rule.Enabled)
+	assert.False(t, *rule.Enabled)
+	require.NotNil(t, rule.AutoFix, "the user's auto_fix survives the migrated rule settings")
+	assert.False(t, *rule.AutoFix)
 }
 
 func TestInteractiveTerminalNeedsTerminals(t *testing.T) {

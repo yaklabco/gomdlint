@@ -1,14 +1,20 @@
 package configloader
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/rules"
@@ -21,10 +27,9 @@ func lintMigratedMarkdown(t *testing.T, settings, input string) []lint.Diagnosti
 	require.NoError(t, os.WriteFile(path, []byte(settings), 0o600))
 	converted, err := ConvertMarkdownlintConfig(path)
 	require.NoError(t, err)
-	converted.Config.Flavor = config.FlavorGFM
-	yamlConfig, err := converted.Config.ToYAML()
-	require.NoError(t, err)
 	migratedPath := filepath.Join(filepath.Dir(path), ".gomdlint.yml")
+	yamlConfig, err := converted.FileContent(migratedPath)
+	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(migratedPath, yamlConfig, 0o600))
 	loaded, err := Load(context.Background(), LoadOptions{
 		WorkingDir: filepath.Dir(path), ExplicitPath: migratedPath, IgnoreEnv: true,
@@ -351,6 +356,52 @@ func TestMigrationPreservesEnabledRules(t *testing.T) {
 	}
 }
 
+// TestMigrationFileHoldsOnlyRuleSettings covers the content of a migrated
+// config file, in YAML and in JSON. A markdownlint config sets rules and
+// nothing else, so the file holds rules and rule_defaults only. Any other
+// key, even one at its default value such as ignore: [], would replace the
+// setting of a user or system config. The file loads back to the settings
+// of the migration.
+func TestMigrationFileHoldsOnlyRuleSettings(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			converted := convertSettings(t, `{"MD013": false, "whitespace": {"enabled": false}}`)
+			path := filepath.Join(t.TempDir(), name)
+			content, err := converted.FileContent(path)
+			require.NoError(t, err)
+
+			var keys map[string]any
+			if HoldsJSON(path) {
+				require.NoError(t, json.Unmarshal(content, &keys), string(content))
+			} else {
+				require.NoError(t, yaml.Unmarshal(content, &keys), string(content))
+				assert.True(t, strings.HasPrefix(string(content), GenerateMigrationHeader(converted.SourcePath)))
+			}
+			assert.ElementsMatch(t, []string{"rules", "rule_defaults"}, slices.Collect(maps.Keys(keys)))
+
+			require.NoError(t, os.WriteFile(path, content, 0o600))
+			loaded, warnings, err := loadConfigFile(path)
+			require.NoError(t, err)
+			assert.Empty(t, warnings)
+			assert.Equal(t, enabledStates(converted.Config.Rules), enabledStates(loaded.Rules))
+			assert.Equal(t, enabledStates(converted.Config.RuleDefaults), enabledStates(loaded.RuleDefaults))
+		})
+	}
+}
+
+// enabledStates maps each rule of settings to whether it is enabled.
+func enabledStates(settings map[string]config.RuleConfig) map[string]bool {
+	states := make(map[string]bool, len(settings))
+	for id, rule := range settings {
+		states[id] = rule.Enabled != nil && *rule.Enabled
+	}
+	return states
+}
+
 func TestConvertMarkdownlintConfig_JSON(t *testing.T) {
 	t.Parallel()
 
@@ -532,6 +583,186 @@ func convertSettings(t *testing.T, settings string) *MigrationResult {
 	return result
 }
 
+// convertFile converts the markdownlint config written to a file named
+// name.
+func convertFile(t *testing.T, name, content string) *MigrationResult {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	result, err := ConvertMarkdownlintConfig(path)
+	require.NoError(t, err)
+	return result
+}
+
+// TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder covers the order
+// in which the keys of a markdownlint config apply: the order they are
+// written, as in markdownlint 0.41.1, whose getEffectiveConfig applies the
+// keys of its configuration object in the order JavaScript keeps them. A
+// later key replaces what an earlier one set for the same rule, so whether
+// no-trailing-spaces (MD009) ends up on depends on whether its own key or
+// the whitespace tag comes last. A key written twice in JSON keeps its
+// first place and takes its last value, as JSON.parse and the JSONC parser
+// of markdownlint-cli2 read it. For each JSON config, markdownlint 0.41.1
+// leaves MD009 on exactly when md009 is set, and markdownlint-cli2 0.23.3
+// does the same for the JSONC and YAML files. markdownlint-cli2 reads YAML
+// with js-yaml 5, which reads a merge key (<<) as an ordinary key that
+// names nothing, while gomdlint applies merge keys, as YAML 1.1 and js-yaml
+// 4 do, with the merged keys in the place of the merge key and a key
+// written in the mapping keeping the first place of the merged key it
+// replaces, as js-yaml 4 orders them.
+func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, file, content string
+		md009               bool
+	}{
+		{name: "tag after rule", file: ".markdownlint.json", content: `{"MD009": true, "whitespace": false}`},
+		{name: "rule after tag", file: ".markdownlint.json", content: `{"whitespace": false, "MD009": true}`, md009: true},
+		{name: "ID after name", file: ".markdownlint.json", content: `{"no-trailing-spaces": true, "MD009": false}`},
+		{
+			name: "name after ID", file: ".markdownlint.json",
+			content: `{"MD009": false, "no-trailing-spaces": true}`, md009: true,
+		},
+		{
+			name: "key written twice", file: ".markdownlint.json",
+			content: `{"whitespace": false, "MD009": true, "whitespace": false}`, md009: true,
+		},
+		{
+			name: "JSONC", file: ".markdownlint.jsonc",
+			content: "{\n  // The tag comes last.\n  \"MD009\": true, /* then */ \"whitespace\": false\n}\n",
+		},
+		{name: "YAML tag after rule", file: ".markdownlint.yaml", content: "MD009: true\nwhitespace: false\n"},
+		{name: "YAML rule after tag", file: ".markdownlint.yml", content: "whitespace: false\nMD009: true\n", md009: true},
+		{
+			name: "YAML merge after rule", file: ".markdownlint.yaml",
+			content: "x: &ws\n  whitespace: false\nMD009: true\n<<: *ws\n",
+		},
+		{
+			name: "YAML merge before rule", file: ".markdownlint.yaml",
+			content: "x: &ws\n  whitespace: false\n<<: *ws\nMD009: true\n", md009: true,
+		},
+		{
+			name: "YAML key replacing a merged key", file: ".markdownlint.yaml",
+			content: "x: &m\n  MD009: false\n  whitespace: false\n<<: *m\nMD009: true\n",
+		},
+		{
+			name: "YAML merges in sequence", file: ".markdownlint.yaml",
+			content: "a: &a\n  MD009: true\nb: &b\n  whitespace: false\n  MD009: false\n<<: [*a, *b]\n",
+		},
+		{
+			name: "YAML mapping merged twice", file: ".markdownlint.yaml",
+			content: "a: &a\n  MD009: true\nb: &b\n  <<: *a\n  whitespace: false\n<<: [*b, *a]\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			requireRuleEnabled(t, result, "MD009", tt.md009)
+		})
+	}
+}
+
+// TestConvertMarkdownlintConfig_DefaultKey covers markdownlint's default
+// key. getEffectiveConfig in markdownlint 0.41.1 takes the first key whose
+// upper case is DEFAULT, in any case and wherever it is written, and reads
+// its value as JavaScript does: a truthy value, an object among them,
+// enables every rule, a falsy one such as false, null, 0 or "" disables
+// them, and "warning" makes them warnings. Only the enabled state and the
+// severity come from it, never options. For each config, markdownlint
+// 0.41.1 reports MD009 exactly when enabled is set, at the given severity.
+func TestConvertMarkdownlintConfig_DefaultKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		file, content string
+		enabled       bool
+		severity      string
+	}{
+		{file: ".markdownlint.json", content: `{}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"default": false}`},
+		{file: ".markdownlint.json", content: `{"Default": false}`},
+		{file: ".markdownlint.json", content: `{"DEFAULT": false}`},
+		{file: ".markdownlint.yaml", content: "Default: false\n"},
+		{file: ".markdownlint.json", content: `{"Default": false, "default": true}`},
+		{file: ".markdownlint.json", content: `{"default": true, "Default": false}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"MD013": false, "dEfAuLt": false, "DEFAULT": true}`},
+		{file: ".markdownlint.json", content: `{"default": {"enabled": false, "br_spaces": 5}}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"default": 0}`},
+		{file: ".markdownlint.json", content: `{"default": ""}`},
+		{file: ".markdownlint.json", content: `{"default": null}`},
+		{file: ".markdownlint.json", content: `{"default": "off"}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"Default": "warning"}`, enabled: true, severity: "warning"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.content, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			assert.Empty(t, result.Warnings, "a default key is no unknown rule")
+			assert.NotContains(t, result.Config.Rules, "MD009")
+			baseline := result.Config.RuleDefaults["MD009"]
+			require.NotNil(t, baseline.Enabled)
+			assert.Equal(t, tt.enabled, *baseline.Enabled)
+			require.NotNil(t, baseline.Severity)
+			assert.Equal(t, cmp.Or(tt.severity, "error"), *baseline.Severity)
+			assert.Equal(t, map[string]any{"ignore_code_blocks": true, "br_spaces": 2}, baseline.Options,
+				"the default sets no options")
+			assert.False(t, *result.Config.RuleDefaults["MDL001"].Enabled, "markdownlint never runs gomdlint's rules")
+		})
+	}
+}
+
+// TestConvertMarkdownlintConfig_EmptyConfigs covers configs that hold no
+// settings, which keep markdownlint's defaults, as markdownlint-cli2 reads
+// them, and configs that hold a value other than an object, which fail.
+func TestConvertMarkdownlintConfig_EmptyConfigs(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ file, content string }{
+		{".markdownlint.json", "null\n"},
+		{".markdownlint.jsonc", "// Nothing yet.\n{}\n"},
+		{".markdownlint.yaml", ""},
+		{".markdownlint.yaml", "# Nothing yet.\n"},
+		{".markdownlint.yml", "~\n"},
+	} {
+		result := convertFile(t, tt.file, tt.content)
+		assert.Empty(t, result.Warnings, tt.content)
+		assert.Empty(t, result.Config.Rules, tt.content)
+		require.Contains(t, result.Config.RuleDefaults, "MD009", tt.content)
+		assert.True(t, *result.Config.RuleDefaults["MD009"].Enabled, tt.content)
+	}
+
+	for _, tt := range []struct{ file, content string }{
+		{".markdownlint.json", `["MD009"]`},
+		{".markdownlint.json", ""},
+		{".markdownlint.yaml", "- MD009\n"},
+		{".markdownlint.yaml", "MD009\n"},
+	} {
+		path := filepath.Join(t.TempDir(), tt.file)
+		require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o600))
+		_, err := ConvertMarkdownlintConfig(path)
+		assert.Error(t, err, tt.content)
+	}
+}
+
+// TestMigratedLaterKeyReplacesOptions covers two keys that name one rule,
+// line-length (MD013): as in markdownlint 0.41.1, the later key replaces the
+// earlier one's options, so only its own options and markdownlint's
+// defaults apply. markdownlint 0.41.1 reports the 90-character line with
+// the first config and not with the second.
+func TestMigratedLaterKeyReplacesOptions(t *testing.T) {
+	input := "# Title\n\n" + strings.Repeat("word ", 17) + "words\n"
+	require.Len(t, lintMigratedMarkdown(t,
+		`{"default": false, "MD013": {"line_length": 100}, "line-length": {"tables": false}}`, input), 1)
+	require.Empty(t, lintMigratedMarkdown(t,
+		`{"default": false, "line-length": {"tables": false}, "MD013": {"line_length": 100}}`, input))
+}
+
 // requireRuleEnabled checks that converted settings set the rule's enabled state.
 func requireRuleEnabled(t *testing.T, result *MigrationResult, ruleID string, want bool) {
 	t.Helper()
@@ -551,6 +782,62 @@ func TestConvertMarkdownlintConfig_KeysIgnoreCase(t *testing.T) {
 		requireRuleEnabled(t, result, ruleID, false)
 	}
 	assert.Empty(t, result.Warnings)
+}
+
+// TestConvertMarkdownlintConfig_KeysAsMarkdownlintReadsThem covers keys
+// beyond ASCII, which markdownlint 0.41.1 compares by their JavaScript upper
+// case, as gomdlint compares the words of markdownlint comments and the keys
+// of configure-file comments. The long s, the dotless i, the sharp s and
+// the st ligature upper-case to ASCII letters, so each key below that holds
+// one names the rule or tag it spells. The dotted capital I and the Kelvin
+// sign stay as they are, so those keys name nothing, where lower-casing
+// them would read i and k. For each key, markdownlint 0.41.1 turns off
+// exactly the rules listed.
+func TestConvertMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
+	t.Parallel()
+
+	whitespace := []string{"MD009", "MD010", "MD012", "MD027", "MD028", "MD030", "MD037", "MD038", "MD039"}
+	tests := []struct {
+		name, key string
+		disabled  []string
+		warning   string
+	}{
+		{name: "long s", key: "no-trailing-ſpaces", disabled: []string{"MD009"}},
+		{name: "dotless i", key: "no-traıling-spaces", disabled: []string{"MD009"}},
+		{name: "sharp s", key: "no-mißing-space-atx", disabled: []string{"MD018"}},
+		{name: "st ligature", key: "blanks-around-liﬆs", disabled: []string{"MD032"}},
+		{name: "long s in a tag", key: "whiteſpace", disabled: whitespace},
+		{
+			name: "dotted capital I", key: "NO-TRAİLING-SPACES",
+			warning: `unknown rule "NO-TRA` + "İ" + `LING-SPACES" (did you mean "no-trailing-spaces"?); it is ignored`,
+		},
+		{
+			name: "Kelvin sign", key: "no-multiple-blanKs",
+			warning: `unknown rule "no-multiple-blan` + "K" + `s" (did you mean "no-multiple-blank-lines"?); it is ignored`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			parameter, err := json.Marshal(map[string]bool{tt.key: false})
+			require.NoError(t, err)
+			result := convertSettings(t, string(parameter))
+
+			var disabled []string
+			for id, rule := range result.Config.Rules {
+				if rule.Enabled != nil && !*rule.Enabled {
+					disabled = append(disabled, id)
+				}
+			}
+			assert.ElementsMatch(t, tt.disabled, disabled)
+			if tt.warning == "" {
+				assert.Empty(t, result.Warnings)
+			} else {
+				assert.Equal(t, []string{tt.warning}, result.Warnings)
+			}
+		})
+	}
 }
 
 func TestConvertMarkdownlintConfig_GomdlintNames(t *testing.T) {
@@ -602,11 +889,12 @@ func TestConvertMarkdownlintConfig_KeysNameOneRuleOrTag(t *testing.T) {
 	for _, ruleID := range []string{"MD009", "MD010", "MD013"} {
 		assert.NotContains(t, result.Config.Rules, ruleID)
 	}
+	// The warnings follow the keys, in the order they are written.
 	assert.Equal(t, []string{
-		`unknown rule ""; it is ignored`,
-		`unknown rule " MD013" (did you mean "line-length"?); it is ignored`,
 		`unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored`,
+		`unknown rule " MD013" (did you mean "line-length"?); it is ignored`,
 		`unknown rule "whitespace " (did you mean the tag "whitespace"?); it is ignored`,
+		`unknown rule ""; it is ignored`,
 	}, result.Warnings)
 }
 

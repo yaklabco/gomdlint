@@ -114,13 +114,9 @@ func runMigrate(out io.Writer, flags *migrateFlags) error {
 	}
 
 	// Serialize to YAML, or to JSON for a .json file, which lint reads as
-	// JSON. JSON has no comments, so it goes without the header.
-	var content []byte
-	if configloader.HoldsJSON(absOutput) {
-		content, err = result.Config.ToJSON()
-	} else {
-		content, err = result.Config.ToYAMLWithHeader(configloader.GenerateMigrationHeader(inputPath))
-	}
+	// JSON. The file holds rule settings only, so a user or system config
+	// keeps setting everything else.
+	content, err := result.FileContent(absOutput)
 	if err != nil {
 		return withExitCode(ExitInternalError, fmt.Errorf("serialize configuration: %w", err))
 	}

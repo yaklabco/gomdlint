@@ -47,7 +47,8 @@ type Registry struct {
 // ruleIndex maps the identifiers and tags of the registered rules, and the
 // words of the catalog, to the rules: lower-cased for Lookup, RulesByTag
 // and Suggest, and by markdownlint's key for the words of markdownlint
-// comments and the keys of configure-file objects.
+// comments and the keys of markdownlint configuration objects, in
+// configure-file comments and in configuration files.
 type ruleIndex struct {
 	// keys maps the IDs, names and aliases of the rules to the rules. An ID
 	// takes precedence over a name, and a name over an alias.
@@ -61,13 +62,10 @@ type ruleIndex struct {
 	// first entry that lists it, in rule ID order, does.
 	tagSpellings map[string]string
 
-	// catalog holds the IDs, names, aliases and tags of every catalog
-	// entry, whether or not its rule is registered.
-	catalog map[string]bool
-
 	// words maps the key (see markdownlintKey) of every ID, name, alias and
 	// tag of the registered rules and of the catalog to what a word with
-	// that key names in a markdownlint comment or a configure-file key.
+	// that key names in a markdownlint comment, or as a key of a
+	// markdownlint configuration object.
 	// Unlike the lower-cased maps, it compares identifiers beyond ASCII as
 	// markdownlint does, by their upper case. Like them, it ignores
 	// whitespace around an identifier, which no built-in identifier has and
@@ -231,13 +229,6 @@ func (r *Registry) Resolve(key string) (string, Rule, bool) {
 // tags that rules report themselves through Rule.Tags do not count.
 func (r *Registry) RulesByTag(tag string) []Rule {
 	return slices.Clone(r.lookups().tags[foldKey(tag)])
-}
-
-// inCatalog reports whether word is the ID, name, an alias or a tag of any
-// catalog entry the registry holds, whether or not that entry's rule is
-// registered. Matching ignores case and surrounding whitespace.
-func (r *Registry) inCatalog(word string) bool {
-	return r.lookups().catalog[foldKey(word)]
 }
 
 // Suggestion is a rule or a tag that Suggest offers in place of a key.
@@ -433,10 +424,9 @@ func (r *Registry) lookups() *ruleIndex {
 func (r *Registry) buildIndex() *ruleIndex {
 	ids := slices.Sorted(maps.Keys(r.byID))
 	build := indexBuilder{&ruleIndex{
-		keys:    make(map[string]Rule, 2*len(ids)), // An ID and a name per rule, before aliases.
-		tags:    make(map[string][]Rule),
-		catalog: make(map[string]bool),
-		rules:   make([]indexedRule, 0, len(ids)),
+		keys:  make(map[string]Rule, 2*len(ids)), // An ID and a name per rule, before aliases.
+		tags:  make(map[string][]Rule),
+		rules: make([]indexedRule, 0, len(ids)),
 
 		tagSpellings:      make(map[string]string),
 		words:             make(map[string]*directiveWord),
@@ -499,9 +489,6 @@ func (b indexBuilder) entry(word string) *directiveWord {
 func (b indexBuilder) addCatalogEntry(meta RuleMeta) {
 	for _, group := range [][]string{{meta.ID, meta.Name}, meta.Aliases, meta.Tags} {
 		for _, word := range group {
-			if key := foldKey(word); key != "" {
-				b.catalog[key] = true
-			}
 			if found := b.entry(word); found != nil {
 				found.catalog = true
 			}

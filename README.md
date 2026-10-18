@@ -460,11 +460,25 @@ that it finds and applies it for the run. It offers to save the translation
 only when stdin and stderr are both terminals.
 
 Migration writes markdownlint's rule defaults and translated options into
-`rule_defaults`, with the settings of the source file under `rules`. As in
+`rule_defaults`, with the settings of the source file under `rules`. It
+writes no other setting, so `ignore`, `flavor`, `backups` and the other
+settings of a user or system config still apply after migration, as they do
+while gomdlint translates the markdownlint config for each run. As in
 markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
 Migration does not evaluate JavaScript configuration or resolve `extends`.
+
+gomdlint reads a markdownlint config as markdownlint 0.41 does. It compares
+keys by their JavaScript upper case, as it does the words of markdownlint
+comments. Keys apply in the order they are written, and a later key
+overrides an earlier one for the rules both name. For example,
+`{"MD009": true, "whitespace": false}` turns `no-trailing-spaces` (MD009)
+off. The first `default` key, in any case, sets every rule's baseline
+before the other keys apply. A value that JavaScript reads as false, such
+as `0`, `""` or `null`, turns rules off. A rule's object turns the rule off
+only when its `enabled` key holds such a value, and an object as the
+default always turns the rules on.
 
 ### markdownlint Comments
 
@@ -493,9 +507,10 @@ or the exit code, even with `--strict`.
 
 `markdownlint-configure-file` accepts a JSON object of markdownlint settings
 and applies it to the whole file. Invalid JSON and unknown rule keys fail
-that file. markdownlint applies the object's keys in the order they are
-written, while gomdlint applies the keys that name rules after the others,
-so a rule's own setting wins over its tag's wherever it is written.
+that file. As in markdownlint, the keys apply in the order they are written,
+and the first `default` key, in any case, sets every rule's baseline. The
+configure-file comments of one file act as one object. A key that a later
+comment writes again keeps its first place and takes the later value.
 
 ## Markdown Support
 
@@ -606,8 +621,16 @@ Some of its fix checks are also stricter than they need to be.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.
-- `markdownlint-configure-file` applies the keys that name rules after the
-  others, where markdownlint applies keys in the order they are written.
+- markdownlint merges `markdownlint-configure-file` comments into its own
+  configuration object, where a key that the configuration holds already
+  keeps its earlier place. Without a configuration file, that object is
+  `{"default": true}`, so there a comment's `Default` key, written in
+  another case, changes nothing. gomdlint applies the comments over its own
+  settings, so their keys always apply in the order the comments write them.
+- markdownlint-cli2 0.23 reads a YAML merge key (`<<`) in a markdownlint
+  config as an ordinary key, which names no rule. gomdlint applies merge
+  keys, as js-yaml 4 does, and places the keys a merge brings in where the
+  merge key is written.
 
 ## Development
 

@@ -151,17 +151,17 @@ func identityRegistry() *Registry {
 }
 
 // TestKeyIdentityAgrees runs spellings of a rule's name or tag through the
-// three places that compare the words of markdownlint comments and the keys
-// of configure-file objects: resolution, the order of configure-file keys
-// and the deduplication of notices. They use one key identity,
-// markdownlint's, so they agree on whether each spelling means the same as
-// the one the rule was registered with, ASCII or not.
+// places that compare the words of markdownlint comments and the keys of
+// markdownlint configuration objects: the resolution of comment words and
+// configure-file keys, the deduplication of notices, and the resolution of
+// the keys of configuration files such as .markdownlint.json. They use one
+// key identity, markdownlint's, so they agree on whether each spelling means
+// the same as the one the rule was registered with, ASCII or not.
 func TestKeyIdentityAgrees(t *testing.T) {
 	registry := identityRegistry()
 	tests := []struct {
 		name, base, spelling string
 		same                 bool
-		tag                  bool // base is a tag, which no configure-file key orders as a rule.
 	}{
 		{name: "ASCII case", base: "no-trailing-spaces", spelling: "No-Trailing-SPACES", same: true},
 		{name: "long s", base: "no-trailing-spaces", spelling: "no-trailing-\u017fpaces", same: true},
@@ -169,12 +169,12 @@ func TestKeyIdentityAgrees(t *testing.T) {
 		{name: "Kelvin sign", base: "no-multiple-blanks", spelling: "no-multiple-blan\u212as"},
 		{name: "dotted capital I", base: "no-trailing-spaces", spelling: "NO-TRA\u0130LING-SPACES"},
 		{name: "custom name beyond ASCII", base: "caf\u00e9-check", spelling: "CAF\u00c9-CHECK", same: true},
-		{name: "custom tag beyond ASCII", base: "t\u00e2che", spelling: "T\u00c2CHE", same: true, tag: true},
+		{name: "custom tag beyond ASCII", base: "t\u00e2che", spelling: "T\u00c2CHE", same: true},
 		{name: "k for a Kelvin sign", base: "\u212aelvin-check", spelling: "kelvin-check"},
 		{name: "i for a dotted capital I", base: "\u0130nfo-check", spelling: "info-check"},
 		{name: "sharp s", base: "stra\u00dfe-check", spelling: "STRASSE-CHECK", same: true},
 		{name: "catalog alias beyond ASCII", base: "cr\u00e8me", spelling: "CR\u00c8ME", same: true},
-		{name: "catalog tag beyond ASCII", base: "\u00e9t\u00e9", spelling: "\u00c9T\u00c9", same: true, tag: true},
+		{name: "catalog tag beyond ASCII", base: "\u00e9t\u00e9", spelling: "\u00c9T\u00c9", same: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -187,15 +187,23 @@ func TestKeyIdentityAgrees(t *testing.T) {
 				assert.Equal(t, unknownWord, meaning, "resolution")
 			}
 
-			require.Equal(t, !tt.tag, ruleKey(tt.base, registry))
-			assert.Equal(t, tt.same && !tt.tag, ruleKey(tt.spelling, registry), "the order of configure-file keys")
-
 			wantNotices := 2
 			if tt.same {
 				wantNotices = 1
 			}
 			directive := resolveOne(registry, tt.base+"-x "+tt.spelling+"-x")
 			assert.Len(t, directive.notices, wantNotices, "deduplication of notices")
+
+			// A tag that a rule reports itself names nothing in a
+			// configuration file, so both spellings of one name nothing.
+			baseIDs, baseKnown := registry.MarkdownlintConfigRuleIDs(tt.base)
+			ids, known := registry.MarkdownlintConfigRuleIDs(tt.spelling)
+			if tt.same {
+				assert.Equal(t, baseIDs, ids, "resolution of configuration file keys")
+				assert.Equal(t, baseKnown, known, "resolution of configuration file keys")
+			} else {
+				assert.False(t, known, "resolution of configuration file keys")
+			}
 		})
 	}
 }
