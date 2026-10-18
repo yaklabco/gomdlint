@@ -5,10 +5,10 @@
 // files, and markdownlint-configure-file comments, with jsonc-parser 3.3.1,
 // passing the option allowTrailingComma (parsers/jsonc-parse.mjs), and it
 // rejects the text when the parser reports any error. That dialect is JSON
-// with two additions: comments, which run from // to the next line feed or
-// carriage return or from /* to the next */, wherever whitespace may go;
-// and one comma after the last member of an object or the last item of an
-// array. Everything else is JSON's: only spaces, tabs, line feeds and
+// with two additions. Comments may go wherever whitespace may, and run from
+// // to the next line feed or carriage return, or from /* to the next */.
+// One comma may follow the last member of an object or the last item of an
+// array. Everything else is JSON's. Only spaces, tabs, line feeds and
 // carriage returns are whitespace, so a byte order mark is an error, and
 // strings, numbers and literals are written as JSON writes them.
 package jsonc

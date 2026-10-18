@@ -100,9 +100,10 @@ formats change. The first entries under Changed may need action.
   comment's kind must be followed by whitespace or `-->`. A comment such as
   `<!-- markdownlint-disable-next-lines MD009 -->` is plain text, and no
   longer disables MD009 for the rest of the file.
-- A `markdownlint-configure-file` key that is empty or holds whitespace is an
-  unknown key and fails the file. `{"MD009 MD010": false}` used to disable
-  both rules, and `{"": false}` every rule. markdownlint ignores both.
+- A `markdownlint-configure-file` key that is empty or holds whitespace names
+  no rule, as in markdownlint, so it configures nothing and gets a warning.
+  `{"MD009 MD010": false}` used to disable both rules, and `{"": false}`
+  every rule.
 - Migrated markdownlint configs, and markdownlint configs that gomdlint
   applies for a run, match rule names and tags in any case, accept gomdlint's
   rule names, and skip unknown rule IDs with a warning instead of copying
@@ -152,6 +153,12 @@ formats change. The first entries under Changed may need action.
   to stderr, JSON output lists them under each file's `notices`, and SARIF
   output records them as `toolConfigurationNotifications`. They change no
   finding or exit code.
+- The same warnings for `markdownlint-configure-file` comments that
+  markdownlint ignores in whole or in part. A comment that holds no object
+  of settings, a key that names no rule, an option that its rule does not
+  read, and gomdlint's spelling of an option beside markdownlint's each get
+  one. JSON output gives them the kinds `invalid-configuration`,
+  `unknown-rule`, `unknown-option` and `option-conflict`.
 - JSON output reports rules that failed, under `summary.ruleErrors` and each
   file's `ruleErrors`.
 - `--format diff` previews the fixes without writing them, and
@@ -337,6 +344,26 @@ formats change. The first entries under Changed may need action.
   JavaScript upper case, as markdownlint does and as markdownlint comments
   already did. A key with the long s, such as `no-trailing-ſpaces`, names
   MD009, while `NO-TRAİLING-SPACES`, with a dotted capital I, names no rule.
+- Markdownlint configs load as markdownlint-cli2 0.23 loads them.
+  `.markdownlint.json` and `.jsonc` files accept comments and trailing
+  commas, and a leading byte order mark is skipped in every format. Each file
+  is read as JSON first and as YAML second, whatever its name, so a
+  `.markdownlint.yaml` file that holds JSON with a key written twice takes
+  the last value in the key's first place. A file that holds a list, a
+  string, a number or nothing loads as an empty config, with a warning for a
+  value. Each of these used to stop lint with a config error, and so did a
+  number too large for a float64, which now reads as Infinity.
+- A rule's `severity` in a markdownlint config or a
+  `markdownlint-configure-file` comment gives warnings for `warning` and
+  errors for any other value, as in markdownlint. `info` used to give info
+  findings, which never fail a run, and other values failed the config.
+  gomdlint's own config files keep their severities.
+- `markdownlint-configure-file` comments no longer fail the file, as
+  markdownlint never does. A comment that is not JSON or YAML, or holds no
+  object, changes nothing. A key that names no rule configures nothing, and
+  the other keys still apply. Of two spellings of one option, markdownlint's
+  applies. The comments accept JSON with comments and trailing commas, and
+  YAML, as markdownlint-cli2 does.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up
   after wide characters and tabs.

@@ -45,14 +45,14 @@ type JSONFileResult struct {
 }
 
 // JSONNotice describes a problem with a markdownlint comment that changes
-// neither the findings nor the exit code: a word of the comment, or a key
-// of a markdownlint-configure-file comment, that names no rule or tag, which
-// the comment ignores, as markdownlint does; a word that is one of
-// gomdlint's deprecated tags, which still work but will stop working in a
-// later release; an option in a configure-file setting that its rules do
-// not read, or that the setting also writes in markdownlint's spelling; or
-// a configure-file comment that markdownlint ignores because it holds no
-// object of settings.
+// neither the findings nor the exit code. It is about a word of the
+// comment, or a key of a markdownlint-configure-file comment, that names no
+// rule or tag, which the comment ignores, as markdownlint does. Or it is
+// about a word that is one of gomdlint's deprecated tags, which still work
+// but will stop working in a later release. A configure-file comment also
+// gets one for an option that the rules of its setting do not read, for an
+// option that it writes in gomdlint's spelling beside markdownlint's, and
+// for holding no object of settings, which markdownlint ignores.
 type JSONNotice struct {
 	// Line is the 1-based line on which the comment starts.
 	Line int `json:"line"`

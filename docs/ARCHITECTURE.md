@@ -16,6 +16,7 @@ internal/               Application-specific wiring (not importable)
   display/              Character columns and display paths for reporters
   editdistance/         Edit distance for rule name suggestions
   ignore/               gitignore-style matching for directory walks
+  jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
   logging/              Structured logging setup
   ui/                   Terminal output styling (Lipgloss)
 pkg/                    Reusable library packages
@@ -468,7 +469,12 @@ A notice reports a problem in a file that changes no finding and no exit
 code (`lint.Notice`). The engine records one for each word in a
 markdownlint comment that names no rule or tag (`NoticeUnknownRule`, with
 the closest suggestions), and for each use of one of gomdlint's former tags
-(`NoticeDeprecatedTag`, with the rules it covers). Comments are read with
+(`NoticeDeprecatedTag`, with the rules it covers). A
+`markdownlint-configure-file` comment never fails the file. It gets a
+notice for each key that names no rule, for each option that its rules do
+not read (`NoticeUnknownOption`), for each option written in gomdlint's
+spelling beside markdownlint's (`NoticeOptionConflict`), and for holding no
+object of settings (`NoticeInvalidConfiguration`). Comments are read with
 markdownlint 0.41.1's grammar: the comment's kind must be followed by
 whitespace or `-->`, and words fold case as JavaScript's `toUpperCase`
 does. Notices travel in `FileResult.Notices` and `runner.FileOutcome.Notices`.
@@ -905,7 +911,11 @@ and the user config (`$XDG_CONFIG_HOME/gomdlint`) are looked up on their
 own, as `config.yaml`, `config.yml` or `config.json`, and merged under the
 project config. The markdownlint config is searched upward the same way,
 and stands in for the project config only when there is none. `--config`
-replaces project discovery.
+replaces project discovery. A markdownlint config is read as
+markdownlint-cli2 reads one that it finds, whatever its name
+(`lint.ReadMarkdownlintConfig`). The reader tries JSON with comments and
+trailing commas first, which `internal/jsonc` blanks for the JSON decoder,
+and YAML second.
 
 ### Per-Rule Resolution
 
@@ -944,10 +954,9 @@ which `lint.MarkdownlintSettings` keeps, and the configure-file comments of
 a file merge into one such object first. A word that names
 no rule or tag, and a former gomdlint tag that still resolves through the
 rules' own `Tags()`, give the file a notice (see [Notices](#notices)).
-Notices, and the errors for unknown configure-file keys, name rules as
-markdownlint does, by `RuleMeta.MarkdownlintName` where a rule's own name is
-not markdownlint's first name, so that a comment written from them works in
-both tools.
+Notices name rules as markdownlint does, by `RuleMeta.MarkdownlintName`
+where a rule's own name is not markdownlint's first name, so that a comment
+written from them works in both tools.
 
 ## Design Principles
 

@@ -238,7 +238,7 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // markdownlint-cli2 makes markdownlint read it (see ReadMarkdownlintConfig),
 // as JSON with comments and trailing commas, or as YAML, and it never
 // fails. A comment whose parameter is neither, or holds a value other than
-// an object, such as a list, changes nothing and gets a notice; one that
+// an object, such as a list, changes nothing and gets a notice. One that
 // holds null or nothing changes nothing without a notice. A key that names
 // no rule or tag configures nothing and gets a notice that offers the
 // closest rules and tags. A key that is a deprecated tag gets a notice too.
@@ -722,7 +722,7 @@ func (r *Registry) markdownlintSuggestions(word string) []Suggestion {
 // UnknownKeyText does for configuration files, but in the terms of a
 // markdownlint comment. A key of several words that each name a rule or
 // tag gets a note that says to write them as separate keys, and any other
-// key the closest rules and tags; both name each rule as markdownlint
+// key gets the closest rules and tags. Both name each rule as markdownlint
 // names it (see markdownlintTerm).
 func (w *wordResolver) configureFileKeyNotice(directive *inlineDirective, key string) Notice {
 	words := strings.FieldsFunc(key, isJSWhitespace)
