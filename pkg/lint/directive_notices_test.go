@@ -338,6 +338,51 @@ func TestEngineDirectiveNoticesFollowTheComments(t *testing.T) {
 	}, got)
 }
 
+// TestEngineNestedDirectiveNotices covers a comment whose parameter holds
+// the start of another comment, as markdownlint reads it: the outer
+// comment reads every word up to the shared "-->", the inner one only its
+// own. Each word gets one notice, on the last comment before it that takes
+// rules: a capture comment takes none, so the outer comment gets the
+// notices for its words.
+func TestEngineNestedDirectiveNotices(t *testing.T) {
+	type placed struct {
+		directive, name string
+	}
+	tests := []struct {
+		name, comment string
+		want          []placed
+	}{
+		{
+			name:    "inner comment that takes rules",
+			comment: "<!-- markdownlint-disable <!-- markdownlint-enable frobnicate -->",
+			want: []placed{
+				{"markdownlint-disable", "<!--"}, {"markdownlint-disable", "markdownlint-enable"},
+				{"markdownlint-enable", "frobnicate"},
+			},
+		},
+		{
+			name:    "inner comment that takes none",
+			comment: "<!-- markdownlint-disable <!-- markdownlint-capture MD009 frobnicate -->",
+			want: []placed{
+				{"markdownlint-disable", "<!--"}, {"markdownlint-disable", "markdownlint-capture"},
+				{"markdownlint-disable", "frobnicate"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lintDefault(t, "# Title\n\n"+tt.comment+"\n")
+
+			var got []placed
+			for _, notice := range result.Notices {
+				assert.Equal(t, 3, notice.Line)
+				got = append(got, placed{notice.Directive, notice.Name})
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // TestEngineDirectiveNoticeSuggestions covers the suggestions that notices
 // offer: the closest rules and tags, as unknown keys elsewhere get them, and
 // none when too many are as close. A rule is offered by the name that

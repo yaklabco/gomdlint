@@ -64,11 +64,13 @@ type JSONNotice struct {
 
 	// Suggestions are, for an unknown word, the rules and tags it most
 	// likely means, any one of which may be meant. The key is absent when
-	// none is close enough.
+	// none is close enough. Rules are named as markdownlint names them,
+	// such as ul-style for unordered-list-style.
 	Suggestions []string `json:"suggestions,omitempty"`
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead. The key is absent otherwise.
+	// which the comment can name instead, named as markdownlint names them.
+	// The key is absent otherwise.
 	Rules []string `json:"rules,omitempty"`
 
 	// Message describes the problem, starting with the kind of comment.

@@ -38,10 +38,13 @@ type Notice struct {
 	// Suggestions are, for an unknown word, the rules and tags it most
 	// likely means, any one of which may be meant (see Registry.Closest).
 	// There are none when nothing is close enough, or when too many are.
+	// Rules are named as markdownlint names them (RuleMeta.MarkdownlintName),
+	// so that a comment written from them works in markdownlint too.
 	Suggestions []string
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead, in rule ID order.
+	// which the comment can name instead, in rule ID order, named as
+	// markdownlint names them.
 	Rules []string
 
 	// Message describes the problem in a sentence that starts with

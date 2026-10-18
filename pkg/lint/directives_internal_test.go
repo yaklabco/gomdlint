@@ -3,9 +3,14 @@ package lint
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +19,19 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
+
+// resolveOne resolves the words of <!-- markdownlint-disable parameter -->,
+// a comment on line 7, as collectDirectives resolves them.
+func resolveOne(registry *Registry, parameter string) inlineDirective {
+	text := "<!-- markdownlint-disable " + parameter + " -->"
+	matches := findDirectives(text)
+	directives := make([]inlineDirective, len(matches))
+	for idx, match := range matches {
+		directives[idx] = inlineDirective{line: 7, action: match.kind, parameter: text[match.kindEnd:match.close]}
+	}
+	(&wordResolver{registry: registry}).resolveComments(text, matches, directives)
+	return directives[0]
+}
 
 // TestWordResolverRuleList pins how the words of a markdownlint comment
 // resolve to rules, as before notices existed, and which words get notices.
@@ -77,17 +95,15 @@ func TestWordResolverRuleList(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			directive := &inlineDirective{line: 7, action: "disable", parameter: tt.parameter}
-
-			ids, notices := (&wordResolver{registry: tt.registry()}).ruleList(directive)
+			directive := resolveOne(tt.registry(), tt.parameter)
 
 			if len(tt.rules) == 0 {
-				assert.Empty(t, ids)
+				assert.Empty(t, directive.rules)
 			} else {
-				assert.Equal(t, tt.rules, ids)
+				assert.Equal(t, tt.rules, directive.rules)
 			}
 			var got []noticed
-			for _, notice := range notices {
+			for _, notice := range directive.notices {
 				assert.Equal(t, 7, notice.Line)
 				assert.Equal(t, "markdownlint-disable", notice.Directive)
 				got = append(got, noticed{kind: notice.Kind, name: notice.Name, rules: notice.Rules})
@@ -95,6 +111,67 @@ func TestWordResolverRuleList(t *testing.T) {
 			assert.Equal(t, tt.notices, got)
 		})
 	}
+}
+
+// TestFindDirectives covers where comments start, their kinds, and where
+// their parameters end: at the next "-->" after the kind, which a comment
+// inside another comment's parameter shares. The search resumes right after
+// the kind, so it finds that inner comment, and it stops at a comment
+// without a closing "-->".
+func TestFindDirectives(t *testing.T) {
+	text := "x <!-- markdownlint-disable a <!-- MARKDOWNLINT-ENABLE b --> y <!-- markdownlint-capture--> " +
+		"<!-- markdownlint-disablex --> <!-- markdownlint-restore z"
+
+	var got []string
+	for _, match := range findDirectives(text) {
+		got = append(got, fmt.Sprintf("%d %s %q", match.start, match.kind, text[match.kindEnd:match.close]))
+	}
+
+	assert.Equal(t, []string{
+		`2 disable " a <!-- MARKDOWNLINT-ENABLE b "`,
+		`30 enable " b "`,
+		`63 capture ""`,
+	}, got)
+}
+
+// TestJSWhitespaceAgreesWithItsPattern checks that isJSWhitespace and the
+// jsWhitespace pattern hold the same characters, every one of them.
+func TestJSWhitespaceAgreesWithItsPattern(t *testing.T) {
+	pattern := regexp.MustCompile(`^` + jsWhitespace + `$`)
+	for char := rune(0); char <= utf8.MaxRune; char++ {
+		if !utf8.ValidRune(char) {
+			continue
+		}
+		if pattern.MatchString(string(char)) != isJSWhitespace(char) {
+			t.Fatalf("U+%04X: the pattern says %v", char, pattern.MatchString(string(char)))
+		}
+	}
+}
+
+// TestNestedDirectivesCostLinearWork reads a comment that holds many
+// comment starts before its one "-->". Each start is a comment whose
+// parameter runs to that "-->", so the parameters overlap. Reading them
+// must cost memory in proportion to the text, not to the square of the
+// number of comments.
+func TestNestedDirectivesCostLinearWork(t *testing.T) {
+	registry := describedRegistry()
+	allocated := func(starts int) uint64 {
+		content := "# T\n\n" + strings.Repeat("<!-- markdownlint-disable a\n", starts) + "-->\n"
+		snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "doc.md", []byte(content))
+		require.NoError(t, err)
+
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		directives := collectDirectives(snapshot, registry)
+		runtime.ReadMemStats(&after)
+
+		require.Len(t, directives, starts)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+
+	small, large := allocated(1000), allocated(4000)
+
+	assert.Less(t, large, 8*small, "four times the comments may cost about four times the memory, not sixteen")
 }
 
 // blankLineRule removes one blank line from the first run of two or more.

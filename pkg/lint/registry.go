@@ -209,7 +209,9 @@ func (r *Registry) inCatalog(word string) bool {
 
 // Suggestion is a rule or a tag that Suggest offers in place of a key.
 type Suggestion struct {
-	// Name is the canonical name of the rule, or the tag.
+	// Name is the name to show for the rule, or the tag. Suggest and
+	// Closest give a rule's canonical name; suggestions for markdownlint
+	// comments give markdownlint's name for it instead.
 	Name string
 
 	// RuleID is the ID of the suggested rule. It is empty for a tag.
