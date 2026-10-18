@@ -349,8 +349,10 @@ var (
 	imgAriaHiddenAttributePattern = regexp.MustCompile(`(?i)\saria-hidden\s*=\s*['"]?([^'"\s>]*)`)
 )
 
-// Apply checks that Markdown images have non-empty alt text and that HTML img
+// Apply checks that Markdown images have alt text and that HTML img
 // elements have an alt attribute or are hidden with aria-hidden="true".
+// Like markdownlint, a Markdown image lacks alt text only when nothing at
+// all is written between its brackets, so "![ ](a.png)" passes.
 func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -364,8 +366,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			return diags, ctx.Ctx.Err()
 		}
 
-		alt := lint.ImageAlt(img)
-		if len(bytes.TrimSpace([]byte(alt))) > 0 {
+		if hasAltText(img) {
 			continue
 		}
 
@@ -402,6 +403,18 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 	sortDiagnosticsByPosition(diags)
 	return diags, nil
+}
+
+// hasAltText reports whether something is written between the brackets of a
+// Markdown image, which markdownlint counts as alt text even when it is only
+// whitespace or raw HTML. Without the source range of the brackets it falls
+// back to the image's text.
+func hasAltText(img *mdast.Node) bool {
+	label, full := img.ContentRange(), img.SourceRange()
+	if label.StartOffset > full.StartOffset && label.EndOffset >= label.StartOffset && label.EndOffset < full.EndOffset {
+		return label.EndOffset > label.StartOffset
+	}
+	return len(bytes.TrimSpace([]byte(lint.ImageAlt(img)))) > 0
 }
 
 // sortDiagnosticsByPosition orders diagnostics by start line, then start column.

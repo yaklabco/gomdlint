@@ -1,0 +1,2 @@
+empty_brackets.input.md:3:60 warning Image is missing alt text (MD045/no-alt-text)
+empty_brackets.input.md:9:59 warning Image is missing alt text (MD045/no-alt-text)

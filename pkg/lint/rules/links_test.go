@@ -372,9 +372,11 @@ func TestImageAltTextRule(t *testing.T) {
 			wantN: 1,
 		},
 		{
+			// markdownlint counts whitespace between the brackets as alt
+			// text.
 			name:  "image with whitespace alt",
 			input: "![   ](image.png)",
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			name:  "multiple images mixed",
@@ -408,6 +410,28 @@ func TestImageAltTextRule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestImageAltTextRule_EmptyLabel checks MD045 against markdownlint 0.41.1,
+// which reports a Markdown image only when nothing at all is written between
+// its brackets: whitespace, a line ending or raw HTML there is alt text.
+func TestImageAltTextRule_EmptyLabel(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"![ ](a.png) and ![](b.png) and ![  ](c.png) and ![alt](d.png)\n\n" + // 3
+		"![<b></b>](e.png) and ![*](f.png) and ![&nbsp;](g.png)\n\n" + // 5
+		"![][ref] and ![ ][ref] and ![ref] and ![ref][]\n\n" + // 7
+		"![\n](h.png)\n\n" + // 9
+		"[![](i.png)](https://example.com)\n\n" + // 12
+		"> ![](j.png) quoted\n\n" + // 14
+		"[ref]: /image.png\n"
+
+	type position struct{ line, column int }
+	diags := applyRuleWithOptions(t, NewImageAltTextRule(), markdown, nil)
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{3, 17}, {7, 1}, {12, 2}, {14, 3}}, got)
 }
 
 // TestImageAltTextRule_HTMLImages checks HTML img elements like markdownlint:
