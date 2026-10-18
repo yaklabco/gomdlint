@@ -27,7 +27,7 @@ func resolveOne(registry *Registry, parameter string) inlineDirective {
 	matches := findDirectives(text)
 	directives := make([]inlineDirective, len(matches))
 	for idx, match := range matches {
-		directives[idx] = inlineDirective{line: 7, action: match.kind, parameter: text[match.kindEnd:match.close]}
+		directives[idx] = inlineDirective{line: 7, action: match.kind, parameter: []byte(text[match.kindEnd:match.close])}
 	}
 	(&wordResolver{registry: registry}).resolveComments(text, matches, directives)
 	return directives[0]

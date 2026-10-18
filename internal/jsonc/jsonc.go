@@ -15,10 +15,10 @@ package jsonc
 
 import "bytes"
 
-// Strip returns a copy of text in which every comment and every trailing
-// comma is replaced by spaces, keeping the line feeds and carriage returns
-// within comments. Each byte keeps its offset and each token its line, so
-// an error or a position found in the result holds for text.
+// Strip returns text with every comment and every trailing comma replaced
+// by spaces, keeping the line feeds and carriage returns within comments.
+// Each byte keeps its offset and each token its line, so an error or a
+// position found in the result holds for text.
 //
 // The result is valid JSON exactly when jsonc-parser 3.3.1 with
 // allowTrailingComma reads text without an error, and it then holds the
@@ -26,8 +26,14 @@ import "bytes"
 // and nothing that text holds in error, such as a comment without its
 // closing */, a lone slash or a comma that follows no value, so that JSON
 // rejects such text too.
+//
+// Strip returns text itself, without copying it, when it holds nothing to
+// replace, and as soon as it holds a word that starts no JSON value, such
+// as a stray <!--, which no blanking could make valid. So it reads text
+// only as far as such an error, and a caller must not change the result.
 func Strip(text []byte) []byte {
-	stripped := bytes.Clone(text)
+	// blanks are the comments and trailing commas to replace, in order.
+	var blanks [][2]int
 
 	// valueEnded reports whether the last token ended a value: a string, a
 	// number, a literal, or a closing brace or bracket.
@@ -43,7 +49,7 @@ func Strip(text []byte) []byte {
 			continue
 		case char == '/' && pos+1 < len(text) && text[pos+1] == '/':
 			end := lineCommentEnd(text, pos)
-			blank(stripped[pos:end])
+			blanks = append(blanks, [2]int{pos, end})
 			pos = end
 			continue
 		case char == '/' && pos+1 < len(text) && text[pos+1] == '*':
@@ -51,10 +57,10 @@ func Strip(text []byte) []byte {
 			if end < 0 {
 				// A comment without its end is an error, which the
 				// comment, left as it is, makes an error in JSON too.
-				return stripped
+				return text
 			}
 			end += pos + len("/**/")
-			blank(stripped[pos:end])
+			blanks = append(blanks, [2]int{pos, end})
 			pos = end
 			continue
 		}
@@ -63,7 +69,7 @@ func Strip(text []byte) []byte {
 		// it trails when the token closes an object or an array.
 		char := text[pos]
 		if comma >= 0 && (char == '}' || char == ']') {
-			stripped[comma] = ' '
+			blanks = append(blanks, [2]int{comma, comma + 1})
 		}
 		comma = -1
 
@@ -85,11 +91,36 @@ func Strip(text []byte) []byte {
 			valueEnded = false
 			pos++
 		default:
-			pos = wordEnd(text, pos)
+			end := wordEnd(text, pos)
+			if !mayBeValue(text[pos:end]) {
+				return text // An error in jsonc-parser and in JSON alike.
+			}
+			pos = end
 			valueEnded = true
 		}
 	}
+
+	if len(blanks) == 0 {
+		return text
+	}
+	stripped := bytes.Clone(text)
+	for _, span := range blanks {
+		blank(stripped[span[0]:span[1]])
+	}
 	return stripped
+}
+
+// mayBeValue reports whether word, a word as wordEnd reads it, may be a
+// JSON value: a number, which starts with a minus sign or a digit and which
+// JSON checks in full, or one of the literals true, false and null. Every
+// other word is an error in jsonc-parser, which reads it as an unknown
+// symbol, and in JSON.
+func mayBeValue(word []byte) bool {
+	switch string(word) {
+	case "true", "false", "null":
+		return true
+	}
+	return word[0] == '-' || '0' <= word[0] && word[0] <= '9'
 }
 
 // lineCommentEnd returns the offset where the line comment that starts at

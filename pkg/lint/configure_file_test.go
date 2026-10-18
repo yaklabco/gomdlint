@@ -1,13 +1,18 @@
 package lint_test
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // The tests in this file cover markdownlint-configure-file comments that
@@ -298,6 +303,41 @@ func TestEngineConfigureFileNoticesChangeNoFindings(t *testing.T) {
 			assert.Equal(t, diagnosticSummary(quiet.Diagnostics), diagnosticSummary(noticed.Diagnostics))
 		})
 	}
+}
+
+// TestEngineConfigureFileCommentsWithoutTheirEndLintInLinearTime covers
+// configure-file comments that lack their closing "-->", so that each one's
+// parameter runs to the one "-->" at the end of the file and holds every
+// later comment. markdownlint reads each such parameter in full, but none
+// is valid JSON, since the next comment's "<!--" stands outside any string,
+// and reading stops there. gomdlint used to fail the file at the first
+// comment. Copying or scanning each parameter whole takes time that grows
+// with the square of the number of comments: about 11 seconds for 10,000
+// and 43 for these 20,000. The race detector slows everything down several
+// times, so it gets fewer comments and more time.
+func TestEngineConfigureFileCommentsWithoutTheirEndLintInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long document")
+	}
+	comments, limit := 20000, 5*time.Second
+	if raceEnabled {
+		comments, limit = 5000, 30*time.Second
+	}
+	var input strings.Builder
+	input.WriteString("# Title\n\n")
+	for idx := range comments {
+		fmt.Fprintf(&input, "<!-- markdownlint-configure-file {\"MD0%02d\": false}\n\nText %d\n\n", idx%60, idx)
+	}
+	input.WriteString("-->\n")
+
+	start := time.Now()
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+		context.Background(), "doc.md", []byte(input.String()), config.NewConfig())
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Len(t, result.Notices, comments, "each comment that markdownlint cannot read gets a notice")
+	assert.Less(t, elapsed, limit, "configure-file comments must take time in proportion to the file")
 }
 
 // diagnosticSummary describes each diagnostic by its rule, its position

@@ -19,10 +19,15 @@ import (
 // inlineDirective is a markdownlint comment, such as
 // <!-- markdownlint-disable MD009 -->.
 type inlineDirective struct {
-	line      int
-	offset    int
-	action    string
-	parameter string
+	line   int
+	offset int
+	action string
+
+	// parameter is the text from the end of the comment's kind to its
+	// closing "-->", as a slice of the file's content. Comments that share a
+	// "-->" share its text, so a configure-file comment reads only as much of
+	// its parameter as it needs (see ReadMarkdownlintConfig).
+	parameter []byte
 
 	// rules holds the IDs of the rules that the comment names, for an
 	// action that takes rules (see takesRules): every rule when the
@@ -196,7 +201,7 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 		if !directiveStart.Match(content) {
 			continue
 		}
-		text := string(content) // The comments' parameters are slices of it.
+		text := string(content) // The comments' words are slices of it.
 		matches := findDirectives(text)
 		found := make([]inlineDirective, len(matches))
 		for idx, match := range matches {
@@ -205,7 +210,7 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 			found[idx] = inlineDirective{
 				line: line, offset: offset,
 				action:    match.kind,
-				parameter: text[match.kindEnd:match.close],
+				parameter: content[match.kindEnd:match.close:match.close],
 			}
 		}
 		resolver.resolveComments(text, matches, found)
@@ -398,7 +403,7 @@ func conflictText(issue OptionIssue, ruleName string) string {
 // comments nor YAML reads, or that holds a value other than an object,
 // gets a notice, and null or nothing gets none.
 func readConfigureFile(directive *inlineDirective) (*MarkdownlintSource, bool) {
-	read, err := ReadMarkdownlintConfig([]byte(directive.parameter))
+	read, err := ReadMarkdownlintConfig(directive.parameter)
 	var problem string
 	switch {
 	case err != nil:
