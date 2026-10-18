@@ -40,8 +40,10 @@ const defaultMaxLineLength = 80
 // column separator, after any blockquote markers and indentation.
 var tableDelimiterRowPattern = regexp.MustCompile(`^[ \t>]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$`)
 
-// lineLengthOptions holds the MD013 settings. Each gomdlint option also
-// accepts its markdownlint name; when both are set the gomdlint name wins.
+// lineLengthOptions holds the MD013 settings. The rule reads each option
+// under its canonical name: the registry rewrites markdownlint's spellings,
+// such as line_length and the inverted tables, to these names before the
+// rule runs (see catalogOptions).
 type lineLengthOptions struct {
 	max              int
 	headingMax       int
@@ -56,36 +58,19 @@ type lineLengthOptions struct {
 }
 
 func readLineLengthOptions(ctx *lint.RuleContext) lineLengthOptions {
-	maxLength := optionIntAlias(ctx, "max", "line_length", defaultMaxLineLength)
+	maxLength := ctx.OptionInt("max", defaultMaxLineLength)
 	return lineLengthOptions{
 		max:              maxLength,
-		headingMax:       optionIntAlias(ctx, "heading_max", "heading_line_length", maxLength),
-		codeBlockMax:     optionIntAlias(ctx, "code_block_max", "code_block_line_length", maxLength),
-		ignoreCodeBlocks: ignoreOptionAlias(ctx, "ignore_code_blocks", "code_blocks"),
-		ignoreTables:     ignoreOptionAlias(ctx, "ignore_tables", "tables"),
-		ignoreHeadings:   ignoreOptionAlias(ctx, "ignore_headings", "headings"),
+		headingMax:       ctx.OptionInt("heading_max", maxLength),
+		codeBlockMax:     ctx.OptionInt("code_block_max", maxLength),
+		ignoreCodeBlocks: ctx.OptionBool("ignore_code_blocks", false),
+		ignoreTables:     ctx.OptionBool("ignore_tables", false),
+		ignoreHeadings:   ctx.OptionBool("ignore_headings", false),
 		ignoreURLs:       ctx.OptionBool("ignore_urls", false),
 		compatible:       ctx.OptionBool("markdownlint_compatible", true),
 		strict:           ctx.OptionBool("strict", false),
 		stern:            ctx.OptionBool("stern", false),
 	}
-}
-
-// optionIntAlias reads an integer option, falling back to its markdownlint name.
-func optionIntAlias(ctx *lint.RuleContext, name, alias string, defaultValue int) int {
-	if ctx.Option(name, nil) != nil {
-		return ctx.OptionInt(name, defaultValue)
-	}
-	return ctx.OptionInt(alias, defaultValue)
-}
-
-// ignoreOptionAlias reads an ignore_* option, falling back to the inverted
-// markdownlint include option. Both default to including the lines.
-func ignoreOptionAlias(ctx *lint.RuleContext, name, include string) bool {
-	if ctx.Option(name, nil) != nil {
-		return ctx.OptionBool(name, false)
-	}
-	return !ctx.OptionBool(include, true)
 }
 
 // Apply checks that no line exceeds the maximum length.

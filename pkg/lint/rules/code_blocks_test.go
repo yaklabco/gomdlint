@@ -314,8 +314,12 @@ func TestCodeBlockLanguageRule_FixKeepsToAllowedLanguages(t *testing.T) {
 			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
 		{name: "no list allows the detected language", input: bashBlock,
 			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
-		{name: "list without names allows no language", input: bashBlock,
-			options: map[string]any{"allowed_languages": []any{1}}},
+		// A list with an item that is no string has the wrong type, so the
+		// option is ignored, with a warning in a config file, and every
+		// language is allowed. markdownlint would allow none.
+		{name: "list with an item that is no string is ignored", input: bashBlock,
+			options:   map[string]any{"allowed_languages": []any{1}},
+			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},
 		{name: "detected language allowed with language only", input: bashBlock,
 			options:   map[string]any{"allowed_languages": []any{"bash"}, "language_only": true},
 			wantFixed: "```bash\n#!/bin/bash\necho hi\n```\n"},

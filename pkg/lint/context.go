@@ -49,6 +49,18 @@ type RuleContext struct {
 	// codeBlockLines is the cached set of line numbers inside code blocks.
 	// Lazily initialized on first call to IsLineInCodeBlock.
 	codeBlockLines map[int]bool
+
+	// recordOptionRead, when set, receives the key of every option that
+	// the rule reads. See RecordOptionReads.
+	recordOptionRead func(key string)
+}
+
+// RecordOptionReads makes rc call record with the key of every option that
+// the rule reads through it, set or not, through Option or one of the
+// typed accessors that read through it. Tests use it to check that the
+// catalog declares every option a rule reads; linting never sets it.
+func (rc *RuleContext) RecordOptionReads(record func(key string)) {
+	rc.recordOptionRead = record
 }
 
 // NewRuleContext creates a RuleContext for the given file and configuration.
@@ -99,6 +111,9 @@ func (rc *RuleContext) Cancelled() bool {
 
 // Option returns a rule-specific option value, or the default if not set.
 func (rc *RuleContext) Option(key string, defaultValue any) any {
+	if rc.recordOptionRead != nil {
+		rc.recordOptionRead(key)
+	}
 	if rc.RuleConfig == nil || rc.RuleConfig.Options == nil {
 		return defaultValue
 	}

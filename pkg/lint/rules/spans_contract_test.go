@@ -14,6 +14,16 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
+// engineOptions returns options as the engine hands them to the rule with
+// the given ID: under the canonical names that the rule's catalog entry
+// declares, with markdownlint's spellings rewritten and values of the wrong
+// type dropped. Tests that apply a rule directly pass its options through
+// it, so they see what linting sees.
+func engineOptions(ruleID string, options map[string]any) map[string]any {
+	normalized, _, _ := lint.DefaultRegistry.NormalizeOptions(ruleID, options)
+	return normalized
+}
+
 // These tests cover rules whose behaviour depends on the node span contract:
 // full spans include block markers (setext underlines, code fences, list
 // markers) and every block has a position.
@@ -24,7 +34,7 @@ func applyRuleWithOptions(t *testing.T, rule lint.Rule, input string, options ma
 	require.NoError(t, err)
 	cfg := config.NewConfig()
 	cfg.Flavor = config.FlavorGFM
-	ruleCfg := &config.RuleConfig{Options: options}
+	ruleCfg := &config.RuleConfig{Options: engineOptions(rule.ID(), options)}
 	diags, err := rule.Apply(lint.NewRuleContext(context.Background(), file, cfg, ruleCfg))
 	require.NoError(t, err)
 	return diags

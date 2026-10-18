@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -305,6 +307,30 @@ func TestRuleContext_OptionBool(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRuleContext_RecordOptionReads covers the recorder that tests use to
+// check that the catalog declares every option a rule reads: it sees every
+// read, set or not, through Option and the typed accessors alike.
+func TestRuleContext_RecordOptionReads(t *testing.T) {
+	t.Parallel()
+
+	rc := lint.NewRuleContext(context.Background(), nil, nil, &config.RuleConfig{
+		Options: map[string]any{"max": 100, "names": []any{"Go"}},
+	})
+	var reads []string
+	rc.RecordOptionReads(func(key string) { reads = append(reads, key) })
+
+	assert.Equal(t, 100, rc.OptionInt("max", 80))
+	assert.Equal(t, "consistent", rc.OptionString("style", "consistent"))
+	assert.True(t, rc.OptionBool("strict", true))
+	assert.Equal(t, []string{"Go"}, rc.OptionStringSlice("names", nil))
+	assert.Nil(t, rc.Option("front_matter_title", nil))
+
+	assert.Equal(t, []string{"max", "style", "strict", "names", "front_matter_title"}, reads)
+
+	unrecorded := lint.NewRuleContext(context.Background(), nil, nil, nil)
+	assert.Equal(t, 80, unrecorded.OptionInt("max", 80), "a context without a recorder reads as before")
 }
 
 func TestRuleContext_HasRegistry(t *testing.T) {

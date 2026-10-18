@@ -125,6 +125,12 @@ formats change. The first entries under Changed may need action.
   config warnings name the file and line.
 - Shell completion completes rule names, IDs, markdownlint names and tags
   for `--enable`, `--disable` and `--fix-rules`.
+- Every rule option works under markdownlint's name as well as gomdlint's,
+  such as `line_length` for `max` and the inverted `tables` for
+  `ignore_tables`. Config files warn, with the file and line, about options
+  that a rule does not read, with the closest names, and about values or
+  list items of the wrong type, which count as unset. Two names for one
+  option are an error.
 - Warnings for words in markdownlint comments that name no rule or tag, with
   suggestions that use markdownlint's rule names, and for gomdlint's former
   tags `style`, `lists`, `layout`, `metadata`, `gfm` and `tables`. The former

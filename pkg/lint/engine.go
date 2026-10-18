@@ -241,8 +241,9 @@ func (e *Engine) lintFile(
 	var fixes []pendingFix
 
 	// Run each rule.
+	declared := e.Registry.lookups().options
 	for _, rule := range e.Registry.Rules() {
-		rr := resolveRule(rule, cfg)
+		rr := resolveRule(rule, cfg, declared[rule.ID()])
 		ruleStates := states[rule.ID()]
 		if !slices.Contains(ruleStates, true) {
 			continue

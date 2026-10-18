@@ -36,10 +36,12 @@ func Catalog() []lint.RuleMeta {
 	for _, section := range sections {
 		size += len(section.entries)
 	}
+	options := catalogOptions()
 	catalog := make([]lint.RuleMeta, 0, size)
 	for _, section := range sections {
 		for _, entry := range section.entries {
 			entry.Category = section.category
+			entry.Options, entry.OptionsDeclared = options[entry.ID]
 			catalog = append(catalog, entry)
 		}
 	}

@@ -240,6 +240,7 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // as the same word.
 func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) (*config.Config, error) {
 	var settings MarkdownlintSettings
+	lines := make(map[string]int) // key -> the line of the comment that last set it
 	configured := false
 	for idx := range directives {
 		directive := &directives[idx]
@@ -267,6 +268,7 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 				}
 			}
 			settings.Set(setting.Key, setting.Value)
+			lines[setting.Key] = directive.line
 		}
 	}
 	if !configured {
@@ -286,7 +288,7 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 			if IsGomdlintOnlyRule(id) {
 				baseline = false
 			}
-			result.RuleDefaults[id] = config.MarkdownlintDefaultRuleConfig(id, baseline)
+			result.RuleDefaults[id] = registry.MarkdownlintDefaultRuleConfig(id, baseline)
 		}
 	}
 	if result.Rules == nil {
@@ -298,12 +300,36 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 		rules, _ := lookupWord(setting.Key, registry)
 		for _, id := range sortedIDs(rules) {
-			converted := config.MarkdownlintRuleConfig(id, setting.Value)
+			converted, err := configureFileRule(registry, lines[setting.Key], id, setting.Value)
+			if err != nil {
+				return nil, err
+			}
 			converted.AutoFix = result.Rules[id].AutoFix
 			result.Rules[id] = converted
 		}
 	}
 	return result, nil
+}
+
+// configureFileRule converts value, the setting of the rule with the given
+// ID in a markdownlint-configure-file comment on the given line, as a
+// markdownlint configuration file's is converted. Options that the rule
+// does not read, or whose values have the wrong type, change nothing, as
+// in markdownlint, but two spellings of one option are an error, as in a
+// config file.
+func configureFileRule(registry *Registry, line int, id string, value any) (config.RuleConfig, error) {
+	converted, issues := registry.MarkdownlintRuleConfig(id, value)
+	for _, issue := range issues {
+		if issue.Kind != OptionIssueConflict {
+			continue
+		}
+		name := id
+		if rule, ok := registry.GetByID(id); ok {
+			name = rule.Name()
+		}
+		return config.RuleConfig{}, fmt.Errorf("markdownlint-configure-file at line %d: %s", line, issue.Text(name))
+	}
+	return converted, nil
 }
 
 // markdownlintKey returns the key by which markdownlint knows word, a word
@@ -787,7 +813,7 @@ func directiveStates(file *mdast.FileSnapshot, directives []inlineDirective, reg
 	state := make(map[string]bool)
 	states := make(map[string][]bool)
 	for _, rule := range registry.Rules() {
-		state[rule.ID()] = resolveRule(rule, cfg).Enabled
+		state[rule.ID()] = resolveRule(rule, cfg, nil).Enabled
 		states[rule.ID()] = make([]bool, len(file.Lines)+1)
 	}
 	set := func(directive inlineDirective) {

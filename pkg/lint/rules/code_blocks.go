@@ -155,8 +155,10 @@ func restOfLine(file *mdast.FileSnapshot, offset int) (string, bool) {
 
 // allowedLanguages returns the names that allowed_languages permits, or nil
 // when it sets no list and every language is allowed. As in markdownlint, an
-// empty list allows every language, and a list that holds no string allows
-// none.
+// empty list allows every language. A list with an item that is no string
+// has the wrong type, so the registry drops it before the rule runs, and
+// every language is allowed; given such a list directly, the rule allows
+// only its strings.
 func allowedLanguages(ctx *lint.RuleContext) map[string]bool {
 	names, ok := ctx.Option("allowed_languages", nil).([]any)
 	if !ok || len(names) == 0 {

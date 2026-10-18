@@ -108,8 +108,11 @@ func runMigrate(out io.Writer, flags *migrateFlags) error {
 		return withExitCode(ExitConfigError, fmt.Errorf("convert configuration: %w", err))
 	}
 
-	// Report warnings
-	for _, warning := range result.Warnings {
+	// Report warnings, with the line of the source file where one is known.
+	for idx, warning := range result.Warnings {
+		if line := result.WarningLine(idx); line > 0 {
+			warning = fmt.Sprintf("%s:%d: %s", inputPath, line, warning)
+		}
 		logger.Warn(warning)
 	}
 

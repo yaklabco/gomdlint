@@ -320,6 +320,41 @@ func TestRegistry_Meta(t *testing.T) {
 	assert.False(t, ok, "a rule without an entry has no metadata")
 }
 
+// TestRegistry_MetaCopiesOptions checks that the options of an entry from
+// Meta share nothing with the registry's: not their aliases, their allowed
+// values or a list default.
+func TestRegistry_MetaCopiesOptions(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD013", name: "line-length"})
+	reg.Describe(RuleMeta{ID: "MD013", OptionsDeclared: true, Options: []OptionSpec{
+		{
+			Name: "style", Aliases: []OptionAlias{{Name: "old_style"}}, Type: OptionString,
+			Default: "consistent", Values: []string{"consistent", "dash"},
+		},
+		{Name: "names", Type: OptionStringList, Default: []string{"Go"}},
+		{Name: "lines", Type: OptionIntegerOrList, Default: []int{1, 2}},
+	}})
+
+	meta, ok := reg.Meta("MD013")
+	require.True(t, ok)
+	meta.Options[0].Aliases[0].Name = overwritten
+	meta.Options[0].Values[0] = overwritten
+	names, ok := meta.Options[1].Default.([]string)
+	require.True(t, ok)
+	names[0] = overwritten
+	lines, ok := meta.Options[2].Default.([]int)
+	require.True(t, ok)
+	lines[0] = 9
+
+	again, ok := reg.Meta("MD013")
+	require.True(t, ok)
+	assert.Equal(t, "old_style", again.Options[0].Aliases[0].Name)
+	assert.Equal(t, []string{"consistent", "dash"}, again.Options[0].Values)
+	assert.Equal(t, []string{"Go"}, again.Options[1].Default)
+	assert.Equal(t, []int{1, 2}, again.Options[2].Default)
+	assert.True(t, again.OptionsDeclared)
+}
+
 func TestRegistry_RulesByTag(t *testing.T) {
 	reg := describedRegistry()
 

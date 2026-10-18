@@ -1,0 +1,103 @@
+package rules
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
+)
+
+// TestRulesRegisteredAloneReadMarkdownlintSpellings registers built-in
+// rules one by one, without their catalog entries, as a program that picks
+// its own rules does, and lints through the engine: markdownlint's
+// spellings of their options still configure them, as they do through
+// RegisterAll.
+func TestRulesRegisteredAloneReadMarkdownlintSpellings(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(NewMaxLineLengthRule())
+	registry.Register(NewDescriptiveLinkTextRule())
+
+	cfg := config.NewConfig()
+	cfg.Rules = map[string]config.RuleConfig{
+		"MD013": {Options: map[string]any{"line_length": 20}},
+		"MD059": {Options: map[string]any{"prohibited_texts": []any{"details"}}},
+	}
+	input := "# Title\n\nThis line is longer than twenty.\n\n[details](https://example.com/a)\n"
+
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+		context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	require.Empty(t, result.RuleErrors)
+
+	lines := make(map[string][]int)
+	for _, diag := range result.Diagnostics {
+		lines[diag.RuleID] = append(lines[diag.RuleID], diag.StartLine)
+	}
+	assert.Equal(t, []int{3}, lines["MD013"], "line_length sets max, and a line of only a link is exempt")
+	assert.Equal(t, []int{5}, lines["MD059"], "prohibited_texts sets patterns")
+
+	for _, resolved := range lint.ResolveRules(registry, cfg) {
+		switch resolved.Rule.ID() {
+		case "MD013":
+			assert.Equal(t, map[string]any{"max": 20}, resolved.Config.Options)
+		case "MD059":
+			assert.Equal(t, map[string]any{"patterns": []any{"details"}}, resolved.Config.Options)
+		}
+	}
+}
+
+// TestListOptionWithAWrongItemKeepsTheDefault lints with list options that
+// hold an item of the wrong type. The whole option is dropped, as a value
+// of the wrong type is, so each rule uses its default: MD022 asks for one
+// blank line above every heading instead of reading 2.5 as 2, and MD059
+// reports its default texts instead of nothing.
+func TestListOptionWithAWrongItemKeepsTheDefault(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(NewHeadingBlankLinesRule())
+	registry.Register(NewDescriptiveLinkTextRule())
+
+	cfg := config.NewConfig()
+	cfg.Rules = map[string]config.RuleConfig{
+		"MD022": {Options: map[string]any{"lines_above": []any{1, 2.5}}},
+		"MD059": {Options: map[string]any{"patterns": []any{42}}},
+	}
+	input := "# Title\n\nText.\n\n## Section\n\n[here](https://example.com/a)\n"
+
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+		context.Background(), "test.md", []byte(input), cfg)
+	require.NoError(t, err)
+	require.Empty(t, result.RuleErrors)
+
+	lines := make(map[string][]int)
+	for _, diag := range result.Diagnostics {
+		lines[diag.RuleID] = append(lines[diag.RuleID], diag.StartLine)
+	}
+	assert.Empty(t, lines["MD022"], "one blank line above the heading is the default")
+	assert.Equal(t, []int{7}, lines["MD059"], "here is one of the default texts")
+}
+
+// TestBuiltInRulesDeclareTheirOptions checks that every built-in rule
+// declares its options itself, as its catalog entry declares them, so that
+// a registry that holds the rule without the entry still knows them.
+func TestBuiltInRulesDeclareTheirOptions(t *testing.T) {
+	registry := catalogRegistry(t)
+	for _, meta := range Catalog() {
+		rule, ok := registry.GetByID(meta.ID)
+		require.True(t, ok, meta.ID)
+		declarer, ok := rule.(lint.OptionDeclarer)
+		if !assert.True(t, ok, "%s declares its options", meta.ID) {
+			continue
+		}
+		assert.Equal(t, meta.Options, declarer.DeclaredOptions(), meta.ID)
+
+		alone := lint.NewRegistry()
+		alone.Register(rule)
+		_, _, declared := alone.NormalizeOptions(meta.ID, map[string]any{"any": 1})
+		assert.True(t, declared, "%s registered alone has declared options", meta.ID)
+	}
+}

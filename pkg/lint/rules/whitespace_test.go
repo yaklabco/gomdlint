@@ -642,6 +642,13 @@ func TestMultipleBlankLinesRule(t *testing.T) {
 	}
 }
 
+// markdownlintRuleConfig translates value, a rule's setting in a
+// markdownlint configuration, as migration does.
+func markdownlintRuleConfig(ruleID string, value any) config.RuleConfig {
+	converted, _ := lint.DefaultRegistry.MarkdownlintRuleConfig(ruleID, value)
+	return converted
+}
+
 // TestMultipleBlankLinesRule_ConvergesWithFinalNewline checks that the fixes
 // of MD012 and MD047 settle in one or two passes on a file that ends in extra
 // blank lines, whatever the maximum, given natively or as markdownlint's
@@ -652,8 +659,8 @@ func TestMultipleBlankLinesRule_ConvergesWithFinalNewline(t *testing.T) {
 		"max_consecutive 0":        {Options: map[string]any{"max_consecutive": 0}},
 		"max_consecutive 1":        {Options: map[string]any{"max_consecutive": 1}},
 		"max_consecutive -1":       {Options: map[string]any{"max_consecutive": -1}},
-		"markdownlint maximum 0":   config.MarkdownlintRuleConfig("MD012", map[string]any{"maximum": 0}),
-		"markdownlint maximum nil": config.MarkdownlintRuleConfig("MD012", map[string]any{}),
+		"markdownlint maximum 0":   markdownlintRuleConfig("MD012", map[string]any{"maximum": 0}),
+		"markdownlint maximum nil": markdownlintRuleConfig("MD012", map[string]any{}),
 	}
 	for name, ruleCfg := range configs {
 		for _, input := range []string{"Text\n\n", "Text\n\n\n\n", "Text\r\n\r\n\r\n", "Text"} {

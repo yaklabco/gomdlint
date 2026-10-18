@@ -31,7 +31,7 @@ func applyMaxLineLength(t *testing.T, flavor, input string, options map[string]a
 	require.NoError(t, err)
 	var ruleCfg *config.RuleConfig
 	if options != nil {
-		ruleCfg = &config.RuleConfig{Options: options}
+		ruleCfg = &config.RuleConfig{Options: engineOptions("MD013", options)}
 	}
 	diags, err := NewMaxLineLengthRule().Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
 	require.NoError(t, err)
