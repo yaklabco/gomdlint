@@ -474,12 +474,16 @@ the closest suggestions), and for each use of one of gomdlint's former tags
 notice for each key that names no rule, for each option that its rules do
 not read (`NoticeUnknownOption`), for each option written in gomdlint's
 spelling beside markdownlint's (`NoticeOptionConflict`), and for holding no
-object of settings (`NoticeInvalidConfiguration`). Comments are read with
-markdownlint 0.41.1's grammar: the comment's kind must be followed by
-whitespace or `-->`, and words fold case as JavaScript's `toUpperCase`
-does. Notices travel in `FileResult.Notices` and `runner.FileOutcome.Notices`.
-The CLI writes them to stderr, JSON output lists them under each file's
-`notices`, and SARIF output records them as
+object of settings (`NoticeInvalidConfiguration`). A configure-file comment
+without a `-->` of its own runs on to that of a later comment, so the
+engine reads such comments only while their text comes to at most four
+times the file's length and 1 MiB more, and gives each of the rest a notice
+(`NoticeUnreadConfiguration`), so a file lints in time in proportion to its
+length. Comments are read with markdownlint 0.41.1's grammar: the comment's
+kind must be followed by whitespace or `-->`, and words fold case as
+JavaScript's `toUpperCase` does. Notices travel in `FileResult.Notices` and
+`runner.FileOutcome.Notices`. The CLI writes them to stderr, JSON output
+lists them under each file's `notices`, and SARIF output records them as
 `toolConfigurationNotifications` at level warning, which leave
 `executionSuccessful` true.
 

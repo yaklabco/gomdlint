@@ -610,7 +610,9 @@ changes the findings or the exit code. As in markdownlint, the keys apply
 in the order they are written, and the first `default` key, in any case,
 sets every rule's baseline. The configure-file comments of one file act as
 one object. A key that a later comment writes again keeps its first place
-and takes the later value.
+and takes the later value. A comment without a `-->` of its own runs on to
+the `-->` of a later one, as in markdownlint, so it holds the comments
+after it.
 
 ## Markdown Support
 
@@ -727,6 +729,13 @@ Some of its fix checks are also stricter than they need to be.
   `{"default": true}`, so there a comment's `Default` key, written in
   another case, changes nothing. gomdlint applies the comments over its own
   settings, so their keys always apply in the order the comments write them.
+- markdownlint reads every `markdownlint-configure-file` comment in full,
+  so comments without a `-->` of their own, each of which holds every
+  comment after it up to a shared `-->`, take time that grows with the
+  square of their number: about 51 seconds for 8,000. gomdlint reads such
+  comments only while their text comes to at most four times the file's
+  length and 1 MiB more, and ignores the rest, each with a warning. A
+  comment with its own `-->` is always read.
 - gomdlint parses YAML with yaml.v3, which follows libyaml, and reads what
   it parses as js-yaml 5 does. A few constructs parse differently. js-yaml
   parses an empty value with only a tag, such as `[!!str]`, an empty key,

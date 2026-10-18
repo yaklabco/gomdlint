@@ -51,8 +51,10 @@ type JSONFileResult struct {
 // about a word that is one of gomdlint's deprecated tags, which still work
 // but will stop working in a later release. A configure-file comment also
 // gets one for an option that the rules of its setting do not read, for an
-// option that it writes in gomdlint's spelling beside markdownlint's, and
-// for holding no object of settings, which markdownlint ignores.
+// option that it writes in gomdlint's spelling beside markdownlint's, for
+// holding no object of settings, which markdownlint ignores, and for
+// running on through later comments past what gomdlint reads of such
+// comments, which markdownlint reads.
 type JSONNotice struct {
 	// Line is the 1-based line on which the comment starts.
 	Line int `json:"line"`
@@ -61,16 +63,18 @@ type JSONNotice struct {
 	// "deprecated-tag" for a deprecated tag, "unknown-option" for an option
 	// that the rules of a configure-file setting do not read,
 	// "option-conflict" for an option that a configure-file setting writes
-	// in gomdlint's spelling beside markdownlint's, which applies, and
+	// in gomdlint's spelling beside markdownlint's, which applies,
 	// "invalid-configuration" for a configure-file comment that holds no
-	// object of settings.
+	// object of settings, and "unread-configuration" for a configure-file
+	// comment without a "-->" of its own that gomdlint does not read.
 	Kind string `json:"kind"`
 
 	// Directive is the kind of comment, such as "markdownlint-disable".
 	Directive string `json:"directive"`
 
 	// Name is the word, key or option as the comment writes it. The key is
-	// absent for an "invalid-configuration" notice.
+	// absent for an "invalid-configuration" or "unread-configuration"
+	// notice.
 	Name string `json:"name,omitempty"`
 
 	// Suggestions are, for an unknown word, the rules and tags it most

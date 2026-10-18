@@ -3,6 +3,7 @@ package lint_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -378,6 +379,126 @@ func TestEngineConfigureFileCommentsWithoutTheirEndLintInLinearTime(t *testing.T
 	require.NoError(t, err)
 	assert.Len(t, result.Notices, comments, "each comment that markdownlint cannot read gets a notice")
 	assert.Less(t, elapsed, limit, "configure-file comments must take time in proportion to the file")
+}
+
+// TestEngineConfigureFileCommentsThatRunOnLintInLinearTime covers
+// configure-file comments without their end, each of which runs on to the
+// one "-->" at the end of the file, so it holds every later comment. In
+// the first document, YAML reads what each comment holds as one string,
+// which holds no settings. In the second, each comment starts an indented
+// line, and YAML reads what each holds as a mapping with a key for each
+// later line, which names no rule. markdownlint-cli2 reads every such
+// comment in full, in time that grows with the square of their number:
+// about 51 seconds for the first 8,000, where gomdlint took 33, and the
+// comments of the second hold 32 million keys, each of which would get a
+// notice. gomdlint reads such comments up to a budget in proportion to the
+// length of the file, and ignores the rest, each with a notice. That
+// changes no finding here, and leaves every comment of the first document
+// with one notice. The race detector slows everything down several times,
+// so it gets fewer comments and more time.
+func TestEngineConfigureFileCommentsThatRunOnLintInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long document")
+	}
+	comments, limit := 8000, 5*time.Second
+	if raceEnabled {
+		comments, limit = 5000, 30*time.Second
+	}
+	for _, tt := range []struct {
+		name    string
+		line    func(idx int) string
+		notices func(t *testing.T, notices []lint.Notice)
+	}{
+		{
+			name: "string",
+			line: func(int) string { return "<!-- markdownlint-configure-file ignored\n" },
+			notices: func(t *testing.T, notices []lint.Notice) {
+				t.Helper()
+				assert.Len(t, notices, comments)
+			},
+		},
+		{
+			name: "mapping",
+			line: func(idx int) string { return fmt.Sprintf(" <!-- markdownlint-configure-file key_%d: value\n", idx) },
+			notices: func(t *testing.T, notices []lint.Notice) {
+				t.Helper()
+				unread := 0
+				for _, notice := range notices {
+					if notice.Kind == lint.NoticeUnreadConfiguration {
+						unread++
+					}
+				}
+				assert.Positive(t, unread, "the budget leaves comments unread")
+				assert.Less(t, len(notices), 100000, "a notice for each key read, where the comments hold millions")
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var input strings.Builder
+			input.WriteString("# Title\n\n")
+			for idx := range comments {
+				input.WriteString(tt.line(idx))
+			}
+			input.WriteString("-->\n")
+
+			start := time.Now()
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry).LintFile(
+				context.Background(), "doc.md", []byte(input.String()), config.NewConfig())
+			elapsed := time.Since(start)
+
+			require.NoError(t, err)
+			tt.notices(t, result.Notices)
+			assert.Less(t, elapsed, limit, "configure-file comments must take time in proportion to the file")
+		})
+	}
+}
+
+// TestEngineConfigureFileReadsCommentsThatRunOnWithinTheBudget covers a few
+// configure-file comments without their end, which the budget for such
+// comments leaves to read as markdownlint reads them: the first's YAML
+// mapping holds the line of the next comment as a key, and the setting
+// written after it, and the second's YAML is no object.
+func TestEngineConfigureFileReadsCommentsThatRunOnWithinTheBudget(t *testing.T) {
+	input := "<!-- markdownlint-configure-file\n<!-- markdownlint-configure-file b: y\nMD009: false\n-->\n\n# Title\n\ntext \n"
+
+	result := lintDefault(t, input)
+
+	assert.Empty(t, reportedLines(t, input, "MD009"), "markdownlint-cli2 turns MD009 off")
+	require.Len(t, result.Notices, 2)
+	assert.Equal(t, `markdownlint-configure-file: unknown rule "<!-- markdownlint-configure-file b"; it is ignored`,
+		result.Notices[0].Message)
+	assert.Equal(t, lint.NoticeInvalidConfiguration, result.Notices[1].Kind)
+}
+
+// TestEngineConfigureFileIgnoresCommentsThatRunOnPastTheBudget covers
+// configure-file comments without their end that hold more text than
+// gomdlint reads of such comments in one file: four times its length and
+// 1 MiB more. Each of the first eleven runs on to the "-->" of the last,
+// through the JSON comment of 1.25 MiB that the last holds, so gomdlint
+// reads the first four, which YAML reads as no object, and ignores the next
+// seven, each with a notice. The last holds no later comment, so gomdlint
+// reads it, as it reads every comment with a "-->" of its own, and it turns
+// MD009 off, as in markdownlint.
+func TestEngineConfigureFileIgnoresCommentsThatRunOnPastTheBudget(t *testing.T) {
+	input := "# Title\n\ntext \n\n" + strings.Repeat("<!-- markdownlint-configure-file\n", 11) +
+		"<!-- markdownlint-configure-file {\"MD009\": false}\n/*\n" +
+		strings.Repeat(strings.Repeat("x", 63)+"\n", 20480) + "*/\n-->\n"
+
+	result := lintDefault(t, input)
+
+	assert.Empty(t, reportedLines(t, input, "MD009"))
+	var kinds []lint.NoticeKind
+	for _, notice := range result.Notices {
+		kinds = append(kinds, notice.Kind)
+	}
+	want := slices.Repeat([]lint.NoticeKind{lint.NoticeInvalidConfiguration}, 4)
+	want = append(want, slices.Repeat([]lint.NoticeKind{lint.NoticeUnreadConfiguration}, 7)...)
+	require.Equal(t, want, kinds)
+	assert.Equal(t, lint.Notice{
+		Kind: lint.NoticeUnreadConfiguration, Line: 9, Directive: "markdownlint-configure-file",
+		Message: `markdownlint-configure-file: has no "-->" of its own, and the comments like it in this file ` +
+			`hold more text than gomdlint reads; it is ignored`,
+	}, result.Notices[4])
 }
 
 // diagnosticSummary describes each diagnostic by its rule, its position

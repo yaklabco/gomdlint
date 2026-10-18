@@ -158,7 +158,8 @@ formats change. The first entries under Changed may need action.
   of settings, a key that names no rule, an option that its rule does not
   read, and gomdlint's spelling of an option beside markdownlint's each get
   one. JSON output gives them the kinds `invalid-configuration`,
-  `unknown-rule`, `unknown-option` and `option-conflict`.
+  `unknown-rule`, `unknown-option` and `option-conflict`, and
+  `unread-configuration` for a comment that gomdlint does not read.
 - JSON output reports rules that failed, under `summary.ruleErrors` and each
   file's `ruleErrors`.
 - `--format diff` previews the fixes without writing them, and
@@ -365,7 +366,11 @@ formats change. The first entries under Changed may need action.
   object, changes nothing. A key that names no rule configures nothing, and
   the other keys still apply. Of two spellings of one option, markdownlint's
   applies. The comments accept JSON with comments and trailing commas, and
-  YAML, as markdownlint-cli2 does.
+  YAML, as markdownlint-cli2 does. A comment without a `-->` of its own
+  runs on to the `-->` of a later one, as in markdownlint. gomdlint reads
+  such comments while their text comes to at most four times the file's
+  length and 1 MiB more, and ignores the rest with a warning, so a file
+  with thousands of them lints in time in proportion to its length.
 - YAML in markdownlint configs and `markdownlint-configure-file` comments
   reads as js-yaml 5 reads it for markdownlint-cli2, with YAML 1.2's core
   schema. `0b0` is a string, which turns a rule on, where gomdlint read the

@@ -37,6 +37,13 @@ const (
 	// other than an object, such as a list. The comment changes nothing,
 	// as in markdownlint.
 	NoticeInvalidConfiguration NoticeKind = "invalid-configuration"
+
+	// NoticeUnreadConfiguration marks a markdownlint-configure-file comment
+	// that gomdlint does not read: one without a "-->" of its own, which runs
+	// on to that of a later comment, in a file whose comments like it hold
+	// more text than gomdlint reads (see configureFile). markdownlint reads
+	// it, but the comment changes nothing in gomdlint.
+	NoticeUnreadConfiguration NoticeKind = "unread-configuration"
 )
 
 // Notice reports a problem in a file that changes neither its findings nor
@@ -59,7 +66,8 @@ type Notice struct {
 	// the option, as the comment writes it. For an option conflict it is
 	// gomdlint's spelling, which is ignored. It is empty for a
 	// configure-file comment that holds no settings
-	// (NoticeInvalidConfiguration).
+	// (NoticeInvalidConfiguration), or that gomdlint does not read
+	// (NoticeUnreadConfiguration).
 	Name string
 
 	// Suggestions are, for an unknown word, the rules and tags it most

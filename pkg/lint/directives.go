@@ -29,6 +29,11 @@ type inlineDirective struct {
 	// its parameter as it needs (see ReadMarkdownlintConfig).
 	parameter []byte
 
+	// runsOn reports whether the parameter holds the start of a later
+	// comment, so that the comment has no "-->" of its own and runs on to
+	// that of the later one (see configureFile).
+	runsOn bool
+
 	// rules holds the IDs of the rules that the comment names, for an
 	// action that takes rules (see takesRules): every rule when the
 	// parameter has no words.
@@ -171,6 +176,12 @@ func findDirectives(text string) []directiveMatch {
 	return slices.Collect(directiveMatches(text))
 }
 
+// runsOn reports whether the parameter of matches[idx] holds the start of
+// the next comment, so that the two share one "-->".
+func runsOn(matches []directiveMatch, idx int) bool {
+	return idx+1 < len(matches) && matches[idx+1].kindEnd <= matches[idx].close
+}
+
 // HasInlineDirective reports whether text holds a markdownlint comment that
 // turns rules on or off, read as the engine reads comments: one of any kind
 // but configure-file. A rule whose fixes must not rewrite lines that such a
@@ -211,6 +222,7 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 				line: line, offset: offset,
 				action:    match.kind,
 				parameter: content[match.kindEnd:match.close:match.close],
+				runsOn:    runsOn(matches, idx),
 			}
 		}
 		resolver.resolveComments(text, matches, found)
@@ -250,14 +262,34 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // configureFile records the notices on their comments, once for a key that
 // a comment repeats in any spelling that markdownlint reads as the same
 // word.
-func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config) *config.Config {
+//
+// A comment without a "-->" of its own runs on to that of a later comment,
+// as in markdownlint, so its parameter holds the later comments. Reading
+// each of many such comments in full takes time that grows with the square
+// of their number, as it does in markdownlint. So configureFile reads such
+// a comment only while the parameters of those it has read, with its own,
+// come to no more than runOnTextPerByte bytes for each of the file's length
+// bytes, and runOnTextExtra bytes more. It ignores the others, each with a
+// notice (NoticeUnreadConfiguration). Comments with a "-->" of their own
+// are always read: their parameters do not overlap, so they never come to
+// more than the file's length.
+func configureFile(directives []inlineDirective, registry *Registry, cfg *config.Config, length int) *config.Config {
 	var settings MarkdownlintSettings
 	configured := false
 	resolver := &wordResolver{registry: registry} // It remembers the suggestions for unknown keys.
+	// runOnText is how much more text of comments that run on is read.
+	runOnText := runOnTextPerByte*length + runOnTextExtra
 	for idx := range directives {
 		directive := &directives[idx]
 		if directive.action != configureFileAction {
 			continue
+		}
+		if directive.runsOn {
+			if len(directive.parameter) > runOnText {
+				directive.notices = append(directive.notices, unreadNotice(directive))
+				continue
+			}
+			runOnText -= len(directive.parameter)
 		}
 		read, ok := readConfigureFile(directive)
 		if !ok {
@@ -394,6 +426,29 @@ func conflictText(issue OptionIssue, ruleName string) string {
 	}
 	return fmt.Sprintf("%q and %q both set %s option %q; markdownlint reads %q, so %q is ignored",
 		issue.Key, issue.Other, ruleName, issue.Option.Name, markdownlintSpelling, issue.Option.Name)
+}
+
+// The text of configure-file comments that run on that configureFile reads
+// in one file: runOnTextPerByte bytes for each byte of the file, and
+// runOnTextExtra bytes more. That reads every comment of a file with a few
+// such comments, as markdownlint does, and keeps the work for a file with
+// thousands in proportion to its length.
+const (
+	runOnTextPerByte = 4
+	runOnTextExtra   = 1 << 20
+)
+
+// unreadNotice is the notice for directive, a markdownlint-configure-file
+// comment that runs on, which configureFile does not read.
+func unreadNotice(directive *inlineDirective) Notice {
+	kind := directive.kind()
+	return Notice{
+		Kind:      NoticeUnreadConfiguration,
+		Line:      directive.line,
+		Directive: kind,
+		Message: kind + `: has no "-->" of its own, and the comments like it in this file ` +
+			`hold more text than gomdlint reads; it is ignored`,
+	}
 }
 
 // readConfigureFile reads the parameter of directive, a
@@ -797,7 +852,7 @@ func (w *wordResolver) resolveComments(text string, matches []directiveMatch, di
 	)
 	for idx := len(matches) - 1; idx >= 0; idx-- {
 		match := matches[idx]
-		end, shares := match.close, idx+1 < len(matches) && matches[idx+1].kindEnd <= match.close
+		end, shares := match.close, runsOn(matches, idx)
 		if shares {
 			end = matches[idx+1].kindEnd
 		} else {

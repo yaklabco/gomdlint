@@ -225,7 +225,7 @@ func (e *Engine) lintFile(
 
 	// Resolve which rules to run.
 	directives := collectDirectives(snapshot, e.Registry)
-	cfg = configureFile(directives, e.Registry, cfg)
+	cfg = configureFile(directives, e.Registry, cfg, len(content))
 	states := directiveStates(snapshot, directives, e.Registry, cfg)
 
 	result := &FileResult{
