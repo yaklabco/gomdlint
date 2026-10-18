@@ -324,6 +324,7 @@ func TestInlineHTMLRule_MathAndTablesInHTMLBlocks(t *testing.T) {
 			want:  []htmlDiagWant{{1, 1, "div"}, {2, 16, "i"}},
 		},
 		{name: "inline math outside blocks", input: "Text $<b>$ here.\n\n$<img src=\"a.png\">$\n"},
+		{name: "quoted fence in math", input: "$$\n> $$\n\n<b>x</b> <img src=\"a.png\">\n$$\n"},
 		{
 			name:    "table in a block",
 			input:   "<div>\n| a | b |\n| - | - |\n| <span> | <img> |\n</div>\n",

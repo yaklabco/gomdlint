@@ -214,6 +214,19 @@ func TestReversedLinkRule_MathEndsAtALazyLine(t *testing.T) {
 		{name: "fence lazy for the list item", input: "> - a\n> $$\n> (b)[c]\n", want: []position{}},
 		{name: "fence in the list item", input: "> - a\n>   $$\n> (b)[c]\n", want: []position{{3, 3}}},
 		{name: "blockquote in a list item", input: "- > $$\n  > (a)[b]\n  (c)[d]\n", want: []position{{3, 3}}},
+		// A closing fence follows the opening block's own container prefix
+		// and at most three spaces. No container starts inside math, so a
+		// fence after other markers, or after four columns of space, is
+		// math.
+		{name: "quoted fence in top-level math", input: "$$\n> $$\n(a)[b]\n$$\n", want: []position{}},
+		{name: "nested quote fence", input: "> $$\n> > $$\n> (a)[b]\n> $$\n", want: []position{}},
+		{name: "list marker fence in an item", input: "- $$\n  - $$\n  (a)[b]\n  $$\n", want: []position{}},
+		{name: "list marker fence at the top", input: "$$\n- $$\n(a)[b]\n$$\n", want: []position{}},
+		{name: "fence indented four spaces", input: "$$\n    $$\n(a)[b]\n$$\n", want: []position{}},
+		{name: "fence after a tab", input: "$$\n\t$$\n(a)[b]\n$$\n", want: []position{}},
+		{name: "fence indented three spaces", input: "$$\n   $$\n(a)[b]\n", want: []position{{3, 1}}},
+		{name: "quoted fence indented three spaces", input: "> $$\n>    $$\n> (a)[b]\n", want: []position{{3, 3}}},
+		{name: "item fence indented three spaces", input: "- $$\n     $$\n  (a)[b]\n", want: []position{{3, 3}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -511,7 +524,8 @@ func TestImageAltTextRule_Math(t *testing.T) {
 		"<div>\n$<img>$\n</div>\n\n" + // 3-5
 		"<div>\n$$\n<img>\n$$\n</div>\n\n" + // 7-11
 		"$<img src=\"a.png\">$ and $![](a.png)$\n\n" + // 13
-		"![](b.png) outside.\n" // 15
+		"![](b.png) outside.\n\n" + // 15
+		"$$\n> $$\n\n![](c.png) <img src=\"d.png\">\n$$\n" // 17-21: the quoted fence is math
 
 	type position struct{ line, column int }
 	diags := applyRuleWithOptions(t, NewImageAltTextRule(), markdown, nil)

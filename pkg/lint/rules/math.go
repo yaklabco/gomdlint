@@ -74,17 +74,32 @@ func (m *mathRegions) findBlocks(ctx *lint.RuleContext) {
 // the line before the first line that does not continue the container
 // explicitly, since micromark-extension-math allows no lazy line, or the
 // last line of the document.
+//
+// The closing fence follows the container's own prefix and at most three
+// columns of space. No container starts inside math, so a fence after other
+// blockquote or list markers, or after four columns of space, is math. An
+// opening fence further in, as in the content of a footnote definition,
+// which goldmark does not read, lets its closing fence sit as far in.
 func mathBlockEnd(file *mdast.FileSnapshot, container *mdast.Node, opening, fence int) int {
+	openIndent, _, _ := lint.IndentAfterContainers(file, container, opening)
+	maxIndent := openIndent/tabStop*tabStop + maxFenceIndent
 	for next := opening + 1; next <= len(file.Lines); next++ {
 		if container != nil && !lint.ContinuesContainers(file, container, next) {
 			return next - 1
 		}
-		if mathFenceCloses(withoutContainerPrefix(lint.LineText(file, next)), fence) {
+		indent, start, ok := lint.IndentAfterContainers(file, container, next)
+		if ok && indent <= maxIndent && mathFenceCloses(lint.RawLineContent(file, next)[start:], fence) {
 			return next
 		}
 	}
 	return len(file.Lines)
 }
+
+// Columns of space: a tab stop, and the most before a fence.
+const (
+	tabStop        = 4
+	maxFenceIndent = 3
+)
 
 // enclosingContainer returns the blockquote or list item around node, or
 // nil when there is none.
