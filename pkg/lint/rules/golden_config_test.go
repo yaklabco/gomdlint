@@ -41,19 +41,18 @@ type goldenSidecar struct {
 	// by rules through the configuration. Empty keeps the product default.
 	Flavor config.Flavor `yaml:"flavor"`
 
-	// Rules holds rule options keyed by rule ID.
-	Rules map[string]goldenSidecarRule `yaml:"rules"`
-}
-
-// goldenSidecarRule holds the options for one rule.
-type goldenSidecarRule struct {
-	Options map[string]any `yaml:"options"`
+	// Rules holds rule options keyed by rule ID. They decode as a config
+	// file's do, so they may sit under options, directly under the rule ID
+	// as markdownlint writes them, or both. loadGoldenConfig rejects the
+	// other rule settings.
+	Rules map[string]config.RuleConfig `yaml:"rules"`
 }
 
 // loadGoldenConfig builds the configuration for one fixture from its sidecar.
 // Without a sidecar it returns the product defaults from config.NewConfig, so
-// fixtures follow the product's default flavor. Unknown keys, unknown rules
-// and settings the harness cannot honour are errors, not silent no-ops.
+// fixtures follow the product's default flavor. Unknown keys, unknown rules,
+// options that the product would ignore and settings the harness cannot
+// honour are errors, not silent no-ops.
 func loadGoldenConfig(path string) (*config.Config, error) {
 	cfg := config.NewConfig()
 
@@ -80,24 +79,70 @@ func loadGoldenConfig(path string) (*config.Config, error) {
 	}
 
 	for _, key := range slices.Sorted(maps.Keys(sidecar.Rules)) {
-		if _, ok := lint.DefaultRegistry.GetByID(key); !ok {
+		rule, ok := lint.DefaultRegistry.GetByID(key)
+		if !ok {
 			if ruleID, _, found := lint.DefaultRegistry.Resolve(key); found {
 				return nil, fmt.Errorf("sidecar %s: rules.%s: use the rule ID %s, not the name", path, key, ruleID)
 			}
 			return nil, fmt.Errorf("sidecar %s: rules.%s: unknown rule", path, key)
 		}
-		options := sidecar.Rules[key].Options
-		if len(options) == 0 {
+		ruleCfg := sidecar.Rules[key]
+		if setting := firstRuleSetting(ruleCfg); setting != "" {
+			return nil, fmt.Errorf("sidecar %s: rules.%s.%s: a sidecar sets rule options only", path, key, setting)
+		}
+		if len(ruleCfg.Options) == 0 {
 			return nil, fmt.Errorf("sidecar %s: rules.%s sets no options", path, key)
 		}
-		cfg.Rules[key] = config.RuleConfig{Options: options}
+		if err := checkSidecarOptions(rule, ruleCfg.Options); err != nil {
+			return nil, fmt.Errorf("sidecar %s: rules.%s: %w", path, key, err)
+		}
+		cfg.Rules[key] = config.RuleConfig{Options: ruleCfg.Options}
 	}
 
 	return cfg, nil
 }
 
-// decodeGoldenSidecar decodes exactly one YAML document, rejecting unknown keys.
-// Option values decode into the same Go types as in the product's YAML loader.
+// firstRuleSetting returns the key of the first rule setting other than the
+// options that ruleCfg sets, or "" when it sets none. The harness runs a
+// case's rules itself, with fixes on and their own severities, so it cannot
+// honour one.
+func firstRuleSetting(ruleCfg config.RuleConfig) string {
+	switch {
+	case ruleCfg.Enabled != nil:
+		return "enabled"
+	case ruleCfg.Severity != nil:
+		return "severity"
+	case ruleCfg.AutoFix != nil:
+		return "auto_fix"
+	}
+	return ""
+}
+
+// checkSidecarOptions checks options, the options of rule in a sidecar,
+// against the options that the rule's catalog entry declares. It returns
+// the first problem, in order of key, that would make the product ignore
+// part of them or fail to load them: an option that the rule does not
+// read, a value or a list item of the wrong type, or two spellings of one
+// option. A value that the option does not allow is kept, because rules
+// read such a value as markdownlint does, so a scenario may check one.
+func checkSidecarOptions(rule lint.Rule, options map[string]any) error {
+	_, issues, declared := lint.DefaultRegistry.NormalizeOptions(rule.ID(), options)
+	if !declared {
+		return fmt.Errorf("%s declares no options to check them against", rule.ID())
+	}
+	for _, issue := range issues {
+		if issue.Kind != lint.OptionIssueNotAllowed {
+			return errors.New(issue.Text(rule.Name()))
+		}
+	}
+	return nil
+}
+
+// decodeGoldenSidecar decodes exactly one YAML document, rejecting unknown keys
+// outside the rules. The settings of each rule decode as a config file's do,
+// where every key that is no rule setting is an option, so loadGoldenConfig
+// checks them. Option values decode into the same Go types as in the
+// product's YAML loader.
 func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
 	var sidecar goldenSidecar
 

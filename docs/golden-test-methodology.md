@@ -305,8 +305,11 @@ two settings, so it is also a valid gomdlint config file:
 - `flavor` is `commonmark` or `gfm`. The harness parses the input with this
   flavor and passes it to the rules in the configuration, so rules that check
   the flavor, such as the table rules, see it too.
-- `rules.<RULE_ID>.options` holds options for one rule. The engine passes them
-  to the rule as it does options from a config file.
+- `rules.<RULE_ID>` holds options for one rule, in the shapes a config file
+  accepts: under its `options` key, directly under the rule ID as
+  markdownlint writes them, or both. An option may use gomdlint's name or
+  markdownlint's. The engine passes them to the rule as it does options from
+  a config file.
 
 ```yaml
 # testdata/MD043/missing_heading.config.yml
@@ -317,6 +320,17 @@ rules:
         - "# Project"
         - "## Overview"
         - "## Usage"
+```
+
+The same sidecar can drop the `options` level:
+
+```yaml
+rules:
+  MD043:
+    headings:
+      - "# Project"
+      - "## Overview"
+      - "## Usage"
 ```
 
 A scenario that depends on a flavor sets it explicitly, even when it matches the
@@ -333,11 +347,17 @@ findings too.
 The harness fails a scenario rather than ignore part of its sidecar. These
 sidecars are rejected:
 
-- A sidecar with any other key, such as a misspelled `flavour` or a per-rule `severity`.
+- A sidecar with any other key, such as a misspelled `flavour`, or with a rule
+  setting such as `severity`, `enabled` or `auto_fix`.
 - A sidecar with an invalid flavor or an unknown rule, or one that uses a rule
   name such as `proper-names` instead of the rule ID.
 - An empty sidecar, a sidecar with more than one YAML document, or a rule entry
   without options.
+- A rule entry with an option that the rule does not read, such as a
+  misspelled `nmes`, a value or a list item of the wrong type, two spellings
+  of one option, or one option set both under `options` and directly under
+  the rule ID. The harness checks options against the rule's catalog entry,
+  as a config file's warnings do.
 - A sidecar that configures a rule the scenario does not run. A per-rule
   scenario runs only its directory's rule, and a real-world scenario runs the
   default-enabled rules.
@@ -348,10 +368,10 @@ with a `.config.yaml` suffix, a sidecar or golden file without a matching
 `.input.md`, a file in a nested directory, and a file in a directory that is
 neither a rule ID nor `real-world`.
 
-Option names are not checked. A rule reads the options it knows by name and
-ignores the rest, as it does in the product, so a misspelled option name leaves
-the default in place without any error. When you add a sidecar, check that each
-option changes the generated diagnostics or fixed output.
+A string that an option does not allow, such as an unknown `style`, is
+accepted, because rules read such a value as markdownlint does, so a scenario
+can check how a rule treats one. When you add a sidecar, check that each option
+changes the generated diagnostics or fixed output.
 
 ### Fix Application
 
