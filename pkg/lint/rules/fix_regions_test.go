@@ -86,6 +86,18 @@ var regionSnippets = []string{
 	// that a definition follows on its closing line.
 	"- a\n- [g1]: /g1\n  (x (y\n  [g2]: /g2\n- c   \n- d\n\n- e\n- f\n",
 	"- a\n- [g3]: /g3\n  \"multi\n  line\" [g4]: /g4\n  text\n- c   \n- d\n- e\n",
+	// Blocks that follow a closed block with no blank line between them,
+	// where goldmark opens the next block before it closes the last.
+	"Paragraph text   \nAnother short line   \n***\n",
+	"Text before a heading   \n## Heading after text\n",
+	"***\nText right after a break   \n",
+	"## Heading one\nText right after a heading   \n",
+	"<!-- one line comment -->\nText after a comment   \n",
+	"```\nfenced\n```\nText after a fence   \n",
+	"Setext heading\n---\nText right after a setext heading   \n",
+	"    indented code\nText after indented code   \n",
+	"<div>\nhtml six\n</div>\nText after html\n",
+	"[docs]: /closed\n***\n- [d16]: /sixteen\n  text\n- b\n",
 }
 
 // regionEditTexts are the texts random edits insert.
@@ -468,6 +480,203 @@ func TestRegionChecksOnListsThatStartWithDefinitions(t *testing.T) {
 		}
 	}
 	assert.Equal(t, cases, decided, "both region checks decide every case")
+}
+
+// leafRunDocument returns a document of n paragraphs of two lines that end
+// in trailing spaces, each followed, with no blank line, by the line closing.
+func leafRunDocument(n int, closing string) string {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for range n {
+		doc.WriteString("Paragraph text   \nAnother short line   \n" + closing + "\n")
+	}
+	return doc.String()
+}
+
+// trailingSpaceEdits returns, for each line of text that ends in spaces, the
+// edit that removes them, as MD009 fixes them.
+func trailingSpaceEdits(text string) []fix.TextEdit {
+	var edits []fix.TextEdit
+	start := 0
+	for start < len(text) {
+		end := strings.IndexByte(text[start:], '\n')
+		if end < 0 {
+			end = len(text) - start
+		}
+		line := text[start : start+end]
+		if trimmed := strings.TrimRight(line, " "); len(trimmed) < len(line) {
+			edits = append(edits, fix.TextEdit{StartOffset: start + len(trimmed), EndOffset: start + len(line)})
+		}
+		start += end + 1
+	}
+	return edits
+}
+
+// TestRegionParsesGrowWithTheDocument checks that region checks parse text
+// that grows with the document, not with its square, when the document is
+// many small blocks, each closed by a thematic break, an ATX heading, a
+// one-line HTML block or a fence with no blank line before the next.
+// goldmark opens each paragraph while the block before it is still open,
+// which made the document one group, so every check parsed it all. Each fix
+// is checked on its own, as fixes that share a block are; four times the
+// paragraphs must take about four times the bytes, not sixteen.
+func TestRegionParsesGrowWithTheDocument(t *testing.T) {
+	const small, factor = 50, 4
+	for _, closing := range []string{"***", "## Heading", "<!-- comment -->", "```\ncode\n```"} {
+		t.Run(closing, func(t *testing.T) {
+			parsed := func(n int) int {
+				input := leafRunDocument(n, closing)
+				edits := trailingSpaceEdits(input)
+				require.Len(t, edits, 2*n)
+				total := 0
+				for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+					snapshot := parseForCheckWith(t, flavor, input)
+					check := newFixCheck(snapshot, flavor)
+					cfg := config.NewConfig()
+					cfg.Flavor = flavor
+					verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
+					outline := verifier.regions()
+					require.NotNil(t, outline)
+					for _, edit := range edits {
+						decided, _ := check.regionsUnchanged([]fix.TextEdit{edit})
+						require.True(t, decided, "render signature, edit %+v", edit)
+						decided, _ = outline.checkEdits([]fix.TextEdit{edit})
+						require.True(t, decided, "outline, edit %+v", edit)
+					}
+					for _, model := range check.models {
+						require.NotNil(t, model)
+						total += model.parsed
+					}
+					total += outline.parsed
+				}
+				return total
+			}
+			short, long := parsed(small), parsed(factor*small)
+			ratio := float64(long) / float64(short)
+			t.Logf("%d bytes parsed for %d paragraphs, %d for %d, ratio %.1f", short, small, long, factor*small, ratio)
+			assert.Less(t, ratio, 1.5*factor, "region parses grow faster than the document")
+		})
+	}
+}
+
+// mixedLeafDocument returns a document of n paragraphs, each followed, with
+// no blank line, by a thematic break, an ATX heading, a one-line HTML comment
+// or a fenced code block in turn.
+func mixedLeafDocument(n int) string {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range n {
+		fmt.Fprintf(&doc, "Paragraph %d text   \nAnother short line   \n", idx)
+		switch idx % 4 {
+		case 0:
+			doc.WriteString("***\n")
+		case 1:
+			fmt.Fprintf(&doc, "## Heading %d\n", idx)
+		case 2:
+			fmt.Fprintf(&doc, "<!-- comment %d -->\n", idx)
+		default:
+			fmt.Fprintf(&doc, "```\ncode %d\n```\n", idx)
+		}
+	}
+	return doc.String()
+}
+
+// TestRegionChecksAfterClosedBlocks checks region checks where groups start
+// after a thematic break, an ATX heading or a one-line HTML block with no
+// blank line before the next block, against the whole-document checks: edits
+// that keep those blocks, and edits that break them, so that a paragraph runs
+// on into the next, an HTML block or a fence runs to the end, or a thematic
+// break becomes a setext underline, where a region must grow.
+func TestRegionChecksAfterClosedBlocks(t *testing.T) {
+	doc := mixedLeafDocument(12)
+	edits := []struct {
+		name     string
+		old, new string
+	}{
+		{name: "trailing spaces after a break", old: "Paragraph 5 text   ", new: "Paragraph 5 text"},
+		{name: "trailing spaces after a heading", old: "Paragraph 6 text   ", new: "Paragraph 6 text"},
+		{name: "trailing spaces after a comment", old: "Paragraph 7 text   ", new: "Paragraph 7 text"},
+		{name: "trailing spaces after a fence", old: "Paragraph 8 text   ", new: "Paragraph 8 text"},
+		{name: "break removed", old: "line   \n***\nParagraph 5", new: "line   \nParagraph 5"},
+		{name: "break broken", old: "***\nParagraph 5", new: "**\nParagraph 5"},
+		{name: "break made a setext underline", old: "***\nParagraph 5", new: "---\nParagraph 5"},
+		{name: "blank line after a break", old: "***\nParagraph 5", new: "***\n\nParagraph 5"},
+		{name: "text after a break", old: "***\nParagraph 5", new: "*** x\nParagraph 5"},
+		{name: "heading broken", old: "## Heading 5\n", new: "##Heading 5\n"},
+		{name: "heading level", old: "## Heading 5\n", new: "### Heading 5\n"},
+		{name: "heading removed", old: "## Heading 5\n", new: ""},
+		{name: "heading made a setext underline", old: "## Heading 5\n", new: "===\n"},
+		{name: "comment left open", old: "<!-- comment 6 -->", new: "<!-- comment 6"},
+		{name: "comment closed later", old: "<!-- comment 6 -->\n", new: "<!-- comment 6\n-->\n"},
+		{name: "fence left open", old: "```\ncode 7\n```\n", new: "```\ncode 7\n"},
+		{name: "paragraph joined to a break", old: "***\nParagraph 9", new: "***\n    Paragraph 9"},
+	}
+	cases, decided := 0, 0
+	for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+		snapshot := parseForCheckWith(t, flavor, doc)
+		check := newFixCheck(snapshot, flavor)
+		cfg := config.NewConfig()
+		cfg.Flavor = flavor
+		verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
+		model := verifier.regions()
+		require.NotNil(t, model)
+		for _, tt := range edits {
+			cases++
+			t.Run(string(flavor)+"/"+tt.name, func(t *testing.T) {
+				change := []fix.TextEdit{replaceOnce(t, doc, tt.old, tt.new)}
+				want := check.unchanged(fix.ApplyEdits(snapshot.Content, change))
+				ok, got := check.regionsUnchanged(change)
+				if ok {
+					assert.Equal(t, want, got, "render signature")
+				}
+				outlineOK, outlineGot := model.checkEdits(change)
+				if outlineOK {
+					assert.Equal(t, verifier.acceptsWhole(change), outlineGot, "outline")
+				}
+				if ok && outlineOK {
+					decided++
+				}
+			})
+		}
+	}
+	assert.Equal(t, cases, decided, "both region checks decide every case")
+}
+
+// TestGroupsStartAfterClosedBlocks checks where docLayout's groups start
+// when blocks follow one another with no blank line: after a top-level
+// thematic break, ATX heading or one-line HTML block, and after a closed
+// fence, but not after a setext heading, an indented code block, an HTML
+// block that runs on, or a closed block inside a container.
+func TestGroupsStartAfterClosedBlocks(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		starts []string
+	}{
+		{"thematic break", "a\n***\nb\n", []string{"a", "b"}},
+		{"ATX heading", "# H\nb\n", []string{"# H", "b"}},
+		{"one-line HTML block", "<!-- c -->\nb\n", []string{"<!-- c -->", "b"}},
+		{"closed fence", "```\nx\n```\nb\n", []string{"```", "b"}},
+		{"heading after a paragraph", "a\n# H\nb\n", []string{"a", "b"}},
+		{"break after a list", "- a\n***\nb\n", []string{"- a", "b"}},
+		{"setext heading", "H\n---\nb\n", []string{"H"}},
+		{"indented code", "    x\nb\n", []string{"    x"}},
+		{"HTML block that runs on", "<div>\nx\n</div>\nb\n", []string{"<div>"}},
+		{"heading in a quote", "> # H\nb\n", []string{"> # H"}},
+	}
+	gfm, _ := recordingInstances()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			layout := newDocLayout(gfm, []byte(tt.input))
+			require.NotNil(t, layout)
+			var starts []string
+			for _, offset := range layout.bounds[:len(layout.bounds)-1] {
+				line, _, _ := strings.Cut(tt.input[offset:], "\n")
+				starts = append(starts, line)
+			}
+			assert.Equal(t, tt.starts, starts)
+		})
+	}
 }
 
 // TestFirstLineKeepsOnALongLine checks that clearing edits on the first line
