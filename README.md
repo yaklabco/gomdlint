@@ -433,10 +433,36 @@ tags for the three flags.
 
 ### Rule Options
 
-A rule's options go under its `options` key. Every option that markdownlint
-documents works under markdownlint's name, so markdownlint's documentation
-of a rule's parameters holds for gomdlint too. Nine options have a gomdlint
-name that differs, and gomdlint accepts both spellings:
+A rule's options go under its `options` key:
+
+```yaml
+rules:
+  line-length:
+    options:
+      max: 100
+      ignore_tables: true
+```
+
+They can also go directly under the rule key, as markdownlint writes them.
+This example sets the same options under markdownlint's names:
+
+```yaml
+rules:
+  line-length:
+    line_length: 100
+    tables: false
+```
+
+Under a rule key, `enabled`, `severity`, `auto_fix` and `options` are the
+rule's settings, and every other key is an option. A rule can mix settings,
+options under the rule key and options under `options`, and all of them
+apply. Setting one option in both places is an error. `init` and `migrate`
+write options under `options`.
+
+Every option that markdownlint documents works under markdownlint's name, so
+markdownlint's documentation of a rule's parameters holds for gomdlint too.
+Nine options have a gomdlint name that differs, and gomdlint accepts both
+spellings:
 
 | Rule | gomdlint name | markdownlint name |
 | --- | --- | --- |
@@ -457,7 +483,9 @@ default.
 
 A config file gets a warning, with its path and line, for an option that
 the rule does not read, with the closest names, such as `unknown option
-"stirct" for line-length (did you mean "strict"?)`. It also gets one for a
+"stirct" for line-length (did you mean "strict"?)`. A key under the rule
+that looks like a misspelled setting, such as `severty`, gets a warning that
+suggests the setting instead. A config file also gets a warning for a
 value of the wrong type, which counts as unset, so the option keeps the
 value that an earlier layer gives it, or its default, and for a value
 outside the option's allowed values, such as a `style` that the rule does

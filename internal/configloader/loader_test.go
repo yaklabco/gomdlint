@@ -339,7 +339,7 @@ backups:
   enable: false
 rules:
   MD013:
-    line_length: 120
+    lin_length: 120
     enabled: true
   MD009:
     severity: error
@@ -355,7 +355,7 @@ unknown_section: 1
 		`:2: unknown key "ignor" (did you mean "ignore"?)`,
 		`:4: "format" cannot be set in a config file; use the --format flag or the GOMDLINT_FORMAT environment variable`,
 		`:6: unknown key "backups.enable" (did you mean "backups.enabled"?)`,
-		`:9: unknown key "rules.MD013.line_length"; rule options belong under "rules.MD013.options"`,
+		`:9: unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored`,
 		`:13: unknown key "unknown_section"`,
 	}
 	joined := strings.Join(result.Warnings, "\n")
@@ -647,10 +647,11 @@ func TestLoad_WarnsAboutUnknownKeysInJSON(t *testing.T) {
 		t.Fatalf("unknown keys must not fail loading: %v", err)
 	}
 
+	// line_length is markdownlint's spelling of an option of MD013, so only
+	// the note warns.
 	want := []string{
 		`.gomdlint.json:2: unknown key "flavour" (did you mean "flavor"?)`,
-		`.gomdlint.json:4: unknown key "rules.MD013.line_length"; rule options belong under "rules.MD013.options"`,
-		`.gomdlint.json:4: unknown key "rules.MD013.note"; rule options belong under "rules.MD013.options"`,
+		`.gomdlint.json:4: unknown option "note" for line-length; it is ignored`,
 	}
 	joined := strings.Join(result.Warnings, "\n")
 	for _, fragment := range want {
@@ -781,8 +782,8 @@ func TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases(t *testing.T) {
 			name:    "alias as the settings of a rule",
 			content: "rule_defaults:\n  MD013: &off\n    enabled: false\n    style: x\nrules:\n  MD033: *off\n",
 			want: []string{
-				`.gomdlint.yml:4: unknown key "rule_defaults.MD013.style"; rule options belong under "rule_defaults.MD013.options"`,
-				`.gomdlint.yml:4: unknown key "rules.MD033.style"; rule options belong under "rules.MD033.options" (through the alias at line 6)`,
+				`.gomdlint.yml:4: unknown option "style" for line-length; it is ignored`,
+				`.gomdlint.yml:4: unknown option "style" for no-inline-html; it is ignored (through the alias at line 6)`,
 			},
 		},
 		{
@@ -802,12 +803,13 @@ func TestLoad_WarnsAboutUnknownKeysThroughMergesAndAliases(t *testing.T) {
 		},
 		{
 			// The alias names the mapping that holds it. Decoding reads the
-			// rules mapping as the settings of MD013 and skips its unknown
-			// key, and the key check must end too.
+			// rules mapping as the settings of MD013, whose key MD013 is no
+			// option of the rule, so its value, which contains itself, is
+			// never read, and the key check must end too.
 			name:    "alias to the mapping that holds it",
 			content: "rules: &rules\n  MD013: *rules\n",
 			want: []string{
-				`.gomdlint.yml:2: unknown key "rules.MD013.MD013"; rule options belong under "rules.MD013.options" (through the alias at line 2)`,
+				`.gomdlint.yml:2: unknown option "MD013" for line-length; it is ignored (through the alias at line 2)`,
 			},
 		},
 	}

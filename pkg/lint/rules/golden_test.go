@@ -379,6 +379,43 @@ rules:
 		assert.Equal(t, config.FlavorCommonMark, cfg.Flavor)
 	})
 
+	// A sidecar writes options in the shapes a config file may use:
+	// directly under the rule ID, as markdownlint writes them, under
+	// options, or both, with gomdlint's names or markdownlint's.
+	t.Run("flat rule options", func(t *testing.T) {
+		content := `rules:
+  MD043:
+    headings:
+      - "# Title"
+    options:
+      match_case: true
+  MD013:
+    line_length: 100
+    code_blocks: false
+`
+		cfg, err := loadGoldenConfig(writeSidecar(t, content))
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]any{"headings": []any{"# Title"}, "match_case": true}, cfg.Rules["MD043"].Options)
+		assert.Equal(t, map[string]any{"line_length": 100, "code_blocks": false}, cfg.Rules["MD013"].Options)
+		assert.Len(t, cfg.Rules, 2)
+
+		product, err := config.FromYAML([]byte(content))
+		require.NoError(t, err)
+		for ruleID, ruleCfg := range product.Rules {
+			assert.Equal(t, ruleCfg.Options, cfg.Rules[ruleID].Options, "options of %s", ruleID)
+		}
+	})
+
+	// Rules read a value that an option does not allow as markdownlint
+	// does, so a scenario may check how they treat one.
+	t.Run("value the option does not allow", func(t *testing.T) {
+		cfg, err := loadGoldenConfig(writeSidecar(t, "rules:\n  MD004:\n    style: dashes\n"))
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]any{"style": "dashes"}, cfg.Rules["MD004"].Options)
+	})
+
 	t.Run("errors name the first bad rule in ID order", func(t *testing.T) {
 		path := writeSidecar(t, "rules:\n  MD999:\n    options:\n      a: 1\n  MD998:\n    options:\n      a: 1\n")
 		for range 20 {
@@ -404,6 +441,53 @@ rules:
 		{name: "unknown rule", content: "rules:\n  MD999:\n    options:\n      style: x\n", wantErr: "rules.MD999: unknown rule"},
 		{name: "rule name instead of ID", content: "rules:\n  proper-names:\n    options:\n      names: [GitHub]\n", wantErr: "use the rule ID MD044"},
 		{name: "rule without options", content: "rules:\n  MD009: {}\n", wantErr: "rules.MD009 sets no options"},
+		{name: "rule turned on", content: "rules:\n  MD044:\n    enabled: true\n    names: [GitHub]\n", wantErr: "rules.MD044.enabled"},
+		{name: "rule shorthand", content: "rules:\n  MD044: true\n", wantErr: "rules.MD044.enabled"},
+		{name: "rule auto-fix", content: "rules:\n  MD044:\n    auto_fix: false\n    names: [GitHub]\n", wantErr: "rules.MD044.auto_fix"},
+		{name: "null severity", content: "rules:\n  MD013:\n    max: 100\n    severity: null\n", wantErr: "rules.MD013.severity"},
+		{name: "null enabled", content: "rules:\n  MD013:\n    max: 100\n    enabled:\n", wantErr: "rules.MD013.enabled"},
+		{name: "null auto-fix", content: "rules:\n  MD013:\n    max: 100\n    auto_fix: ~\n", wantErr: "rules.MD013.auto_fix"},
+		{name: "merged severity", content: "rules:\n  MD013:\n    <<: {severity: null}\n    max: 100\n", wantErr: "rules.MD013.severity"},
+		{
+			name:    "unknown option",
+			content: "rules:\n  MD044:\n    options:\n      nmes: [GitHub]\n",
+			wantErr: `rules.MD044: unknown option "nmes" for proper-names (did you mean "names"?)`,
+		},
+		{
+			name:    "unknown flat option",
+			content: "rules:\n  MD044:\n    nmes: [GitHub]\n",
+			wantErr: `rules.MD044: unknown option "nmes" for proper-names (did you mean "names"?)`,
+		},
+		{
+			name:    "option of the wrong type",
+			content: "rules:\n  MD013:\n    line_length: long\n",
+			wantErr: `rules.MD013: line-length option "line_length" must be an integer, not "long"`,
+		},
+		{
+			name:    "list item of the wrong type",
+			content: "rules:\n  MD044:\n    names: [GitHub, 42]\n",
+			wantErr: `rules.MD044: proper-names option "names" item 2 must be a string, not 42`,
+		},
+		{
+			name:    "two spellings of an option",
+			content: "rules:\n  MD013:\n    line_length: 100\n    options:\n      max: 90\n",
+			wantErr: `rules.MD013: "line_length" and "max" both set line-length option "max"`,
+		},
+		{
+			name:    "option set flat and under options",
+			content: "rules:\n  MD013:\n    max: 100\n    options:\n      max: 90\n",
+			wantErr: `"max" and "options.max" both set option "max"`,
+		},
+		{
+			name:    "option set twice through an alias",
+			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
+			wantErr: `line 4: "line_length" and "*opt" both set option "line_length"`,
+		},
+		{
+			name:    "option set twice through an alias under options",
+			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
+			wantErr: `line 5: "options.max" and "options.*opt" both set option "max"`,
+		},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {

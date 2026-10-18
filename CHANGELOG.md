@@ -36,6 +36,16 @@ formats change. The first entries under Changed may need action.
 - A config file whose name ends in `.json` must hold JSON. Older versions of
   `init` and `migrate` could write YAML into such a file. It now fails to
   load, and the error says to rename it to `.yml`.
+- Every key under a rule other than `enabled`, `severity`, `auto_fix` and
+  `options` is one of the rule's options, as in markdownlint. Such keys used
+  to be ignored, with a warning that rule options belong under `options`, so
+  a config file that has them may now report findings it did not. Setting
+  one option both there and under `options` is an error. A key that names no
+  option of the rule is still ignored with a warning, and its value is not
+  read.
+- A key that a YAML alias writes a second time, under a rule or under its
+  `options`, is an error, as a key written twice already was. Loading used
+  to keep the later value without a word.
 - `--color always` colours output that goes to a pipe or a file, and it
   overrides `NO_COLOR`, because the flag asks for colour explicitly.
 - Exit codes tell failures apart: 1 for error findings, 2 for warnings with
@@ -131,6 +141,10 @@ formats change. The first entries under Changed may need action.
   that a rule does not read, with the closest names, and about values or
   list items of the wrong type, which count as unset. Two names for one
   option are an error.
+- Rule options can go directly under the rule key, as markdownlint writes
+  them, such as `line-length: {line_length: 100}`, next to `enabled` and
+  `severity`, in YAML and JSON config files, under `rules` and
+  `rule_defaults`. They merge with the options under `options`.
 - Warnings for words in markdownlint comments that name no rule or tag, with
   suggestions that use markdownlint's rule names, and for gomdlint's former
   tags `style`, `lists`, `layout`, `metadata`, `gfm` and `tables`. The former
