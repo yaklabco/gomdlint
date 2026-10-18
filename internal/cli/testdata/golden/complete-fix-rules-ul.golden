@@ -1,4 +1,4 @@
 ul	Tag: unordered-list-style, list-indent, ul-indent, list-marker-space, blanks-around-lists
-ul-indent	Unordered list indentation
-ul-style	Unordered list style should be consistent
+ul-indent	Outside ordered lists, bullets sit at the margin and indent 2 spaces per level.
+ul-style	Every bullet uses the same marker as the first bullet in the file.
 :4

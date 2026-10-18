@@ -62,6 +62,34 @@ func TestCompleteRulesOffersWhatTheFlagsAccept(t *testing.T) {
 	assert.Len(t, ids, len(registry.Rules()))
 }
 
+// TestCompleteRulesDescribesRulesFromTheCatalog checks that every rule ID,
+// name and alias completes with the rule's one-line catalog description,
+// as gomdlint rules shows it.
+func TestCompleteRulesDescribesRulesFromTheCatalog(t *testing.T) {
+	registry := lint.DefaultRegistry
+
+	descriptions := make(map[string]string) // completed value -> description
+	for _, prefix := range []string{"", "m", "M", "u", "s", "f", "b", "n"} {
+		completions, _ := completeRules(registry)(nil, nil, prefix)
+		for _, completion := range completions {
+			value, description, _ := strings.Cut(completion, "\t")
+			descriptions[value] = description
+		}
+	}
+
+	for _, rule := range registry.Rules() {
+		meta, ok := registry.Meta(rule.ID())
+		require.True(t, ok, "%s has a catalog entry", rule.ID())
+		require.NotEmpty(t, meta.Description, "%s has a description", rule.ID())
+		for _, value := range slices.Concat([]string{rule.ID(), rule.Name()}, meta.Aliases) {
+			if description, offered := descriptions[value]; offered {
+				assert.Equal(t, meta.Description, description, "%s completes with the catalog description", value)
+			}
+		}
+		assert.Contains(t, descriptions, rule.Name(), "%s completes", rule.Name())
+	}
+}
+
 // TestCompleteRulesIgnoresCase covers words typed in another case. Values
 // keep their own spelling; shells apply their own rules for case.
 func TestCompleteRulesIgnoresCase(t *testing.T) {
