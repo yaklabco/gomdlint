@@ -55,14 +55,16 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	}
 
 	var diags []lint.Diagnostic
+	math := findMath(ctx)
 
 	for lineNum := 1; lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip lines in code blocks.
-		if ctx.IsLineInCodeBlock(lineNum) {
+		// Skip lines in code blocks and, as markdownlint does, in math
+		// blocks.
+		if ctx.IsLineInCodeBlock(lineNum) || math.lines[lineNum] {
 			continue
 		}
 
@@ -79,7 +81,7 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 				continue
 			}
 			startOffset, endOffset := lineStart+start, lineStart+end
-			if overlapsCodeSpan(ctx, startOffset, endOffset) {
+			if overlapsCodeSpan(ctx, startOffset, endOffset) || math.overlaps(startOffset, endOffset) {
 				continue
 			}
 

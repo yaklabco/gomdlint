@@ -158,6 +158,34 @@ func TestLinkSpacesRule(t *testing.T) {
 	}
 }
 
+// TestReversedLinkRule_SkipsMath checks MD011 against markdownlint 0.41.1,
+// which parses math with micromark-extension-math: a block fenced by two or
+// more dollar signs, which may hold blank lines and runs to its closing
+// fence, and inline math between equal runs of dollar signs, are skipped.
+func TestReversedLinkRule_SkipsMath(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"Reversed (link)[http://a] outside math.\n\n" + // 3
+		"$$\n(a)[b]\n\n(c)[d]\n$$\n\n" + // 5-9
+		"Inline $(e)[f]$ math and $$(g)[h]$$ display.\n\n" + // 11
+		"Money $5 and (i)[j] then $6 again.\n\n" + // 13
+		"Escaped \\$ (k)[l] dollar and $m$.\n\n" + // 15
+		"Code `$` then (n)[o] and $p$.\n\n" + // 17
+		"$$$\n(q)[r]\n$$\n(s)[t]\n$$$\n\n" + // 19-23
+		"> $$\n> (u)[v]\n> $$\n\n" + // 25-27
+		"- $$\n  (w)[x]\n  $$\n\n" + // 29-31
+		"Text\n$$ meta\n(y)[z]\n$$\n\n" + // 33-36
+		"Unclosed $ (aa)[bb] here.\n\n" + // 38
+		"$$\n(cc)[dd]\n" // 40-41
+
+	diags := applyRuleWithOptions(t, NewReversedLinkRule(), markdown, nil)
+	type position struct{ line, column int }
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{3, 10}, {15, 12}, {17, 15}, {38, 12}}, got)
+}
+
 // TestLinkSpacesRule_ReportsEachSide reports leading and trailing spaces
 // separately at the spaces the fix deletes, like markdownlint.
 func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
