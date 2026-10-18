@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD059",
+    "name": "descriptive-link-text",
+    "line": 3,
+    "column": 45,
+    "message": "Link text 'here' is not descriptive",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD059",
+    "name": "descriptive-link-text",
+    "line": 11,
+    "column": 47,
+    "message": "Link text 'more' is not descriptive",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD059",
+    "name": "descriptive-link-text",
+    "line": 15,
+    "column": 28,
+    "message": "Link text 'link' is not descriptive",
+    "severity": "warning",
+    "fixable": false
+  }
+]

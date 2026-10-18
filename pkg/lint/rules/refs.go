@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -506,8 +507,11 @@ func getDefaultGenericPatterns() []string {
 // come from patterns, which markdownlint calls prohibited_texts: the
 // registry rewrites that spelling to patterns before the rule runs. With
 // the default markdownlint_compatible, link text is compared like
-// markdownlint: punctuation is ignored, and links containing code or HTML
-// are skipped.
+// markdownlint: as written between the brackets, with punctuation and other
+// characters that are not ASCII letters or digits ignored, and a link whose
+// text holds a code span or raw HTML directly, not inside emphasis, is
+// skipped. Autolinks are never checked. A finding points at the link text,
+// one column after its opening bracket, as markdownlint's does.
 func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -535,28 +539,37 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Skip images - they have alt text, not link text - and reference
-		// syntax the parser left as text, which is not a link.
-		if usage.IsImage || usage.Unresolved {
+		// Skip images - they have alt text, not link text - autolinks, whose
+		// text is their address, and reference syntax the parser left as
+		// text, which is not a link.
+		if usage.IsImage || usage.Unresolved || usage.Style == refs.StyleAutolink {
 			continue
 		}
-		if compatible && (len(mdast.FindByKind(usage.Node, mdast.NodeCodeSpan)) > 0 ||
-			len(mdast.FindByKind(usage.Node, mdast.NodeHTMLInline)) > 0) {
+		label, hasLabel := linkLabel(ctx.File, usage.Node)
+		if compatible && hasDirectChild(usage.Node, mdast.NodeCodeSpan, mdast.NodeHTMLInline) {
 			continue
 		}
 
 		// Check if text is generic
 		text := strings.ToLower(strings.TrimSpace(usage.Text))
 		if compatible {
-			text = normalizeMarkdownlintLinkText(text)
+			source := usage.Text
+			if hasLabel {
+				source = string(ctx.File.Content[label.StartOffset:label.EndOffset])
+			}
+			text = normalizeMarkdownlintLinkText(source)
 		}
 		if text == "" {
 			continue
 		}
 
 		if patternSet[text] {
-			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, usage.Position,
-				fmt.Sprintf("Link text '%s' is not descriptive", usage.Text)).
+			pos := usage.Position
+			if hasLabel {
+				pos = rangePosition(ctx.File, label)
+			}
+			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
+				fmt.Sprintf("Link text '%s' is not descriptive", visibleLinkText(usage.Node))).
 				WithSeverity(config.SeverityWarning).
 				WithSuggestion("Use descriptive text that explains the link destination").
 				Build()
@@ -565,6 +578,48 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	return diags, nil
+}
+
+// linkLabel returns the source range of a link's text, between its brackets.
+func linkLabel(file *mdast.FileSnapshot, link *mdast.Node) (mdast.SourceRange, bool) {
+	label := link.ContentRange()
+	full := link.SourceRange()
+	if file == nil || label.EndOffset <= label.StartOffset || label.StartOffset <= full.StartOffset ||
+		label.EndOffset > len(file.Content) {
+		return mdast.SourceRange{}, false
+	}
+	return label, true
+}
+
+// visibleLinkText returns the text a link shows, including the content of
+// its code spans, for messages. A line break counts as a space.
+func visibleLinkText(link *mdast.Node) string {
+	var text strings.Builder
+	var add func(parent *mdast.Node)
+	add = func(parent *mdast.Node) {
+		for child := parent.FirstChild; child != nil; child = child.Next {
+			switch {
+			case (child.Kind == mdast.NodeText || child.Kind == mdast.NodeCodeSpan) && child.Inline != nil:
+				text.Write(child.Inline.Text)
+			case child.Kind == mdast.NodeSoftBreak || child.Kind == mdast.NodeHardBreak:
+				text.WriteByte(' ')
+			default:
+				add(child)
+			}
+		}
+	}
+	add(link)
+	return text.String()
+}
+
+// hasDirectChild reports whether node has a child of one of kinds.
+func hasDirectChild(node *mdast.Node, kinds ...mdast.NodeKind) bool {
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if slices.Contains(kinds, child.Kind) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeMarkdownlintLinkText(text string) string {

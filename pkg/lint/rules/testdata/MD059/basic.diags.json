@@ -3,7 +3,7 @@
     "rule": "MD059",
     "name": "descriptive-link-text",
     "line": 5,
-    "column": 14,
+    "column": 15,
     "message": "Link text 'click here' is not descriptive",
     "severity": "warning",
     "fixable": false
@@ -12,7 +12,7 @@
     "rule": "MD059",
     "name": "descriptive-link-text",
     "line": 7,
-    "column": 6,
+    "column": 7,
     "message": "Link text 'more' is not descriptive",
     "severity": "warning",
     "fixable": false

@@ -801,6 +801,49 @@ func TestDescriptiveLinkTextRule_MarkdownlintDefaults(t *testing.T) {
 	}
 }
 
+// TestDescriptiveLinkTextRule_MarkdownlintPositions checks MD059 against
+// markdownlint 0.41.1 on the same document: the link text is compared as
+// written, a link is skipped only when its text holds code or HTML directly,
+// autolinks are never checked, and a finding points at the first character
+// of the link text, one column after the bracket.
+func TestDescriptiveLinkTextRule_MarkdownlintPositions(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"[*`here`*](x)\n\n" + // 3: code inside emphasis is not direct
+		"[`here`](x)\n\n" + // 5: code directly in the text
+		"[**here**](x)\n\n" + // 7
+		"[here](x)\n\n" + // 9
+		"![here](y) and [more](z)\n\n" + // 11
+		"[here <b>x</b>](x)\n\n" + // 13: HTML directly in the text
+		"[![here](a.png)](x)\n\n" + // 15: the image's source is part of the text
+		"[h&#101;re](x)\n\n" + // 17
+		"> [here](x)\n\n" + // 19
+		"[click\nhere](x)\n\n" + // 21: text over two lines
+		"[here][ref] and [here][] and [here]\n\n" + // 24
+		"[~~here~~](x)\n\n" + // 26
+		"| a | b |\n| - | - |\n| [link](x) | y |\n\n" + // 30
+		"Some <https://example.com> text.\n\n" + // 32
+		"[here\\!](x) and [\\here](x) and [&nbsp;here](x)\n\n" + // 34
+		"[ref]: /u\n[here]: /v\n"
+
+	type position struct{ line, column int }
+	positions := func(options map[string]any) []position {
+		diags := applyRuleWithOptions(t, NewDescriptiveLinkTextRule(), markdown, options)
+		got := make([]position, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, position{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+
+	assert.Equal(t, []position{
+		{3, 2}, {7, 2}, {9, 2}, {11, 17}, {19, 4}, {21, 2}, {24, 2}, {24, 18}, {24, 31},
+		{26, 2}, {30, 4}, {34, 2}, {34, 18},
+	}, positions(nil))
+	assert.Equal(t, []position{
+		{3, 2}, {7, 2}, {9, 2}, {19, 4}, {24, 2}, {24, 18}, {24, 31}, {26, 2}, {34, 2}, {34, 18},
+	}, positions(map[string]any{"prohibited_texts": []any{"https example com", "here"}}))
+}
+
 func TestRuleMetadata(t *testing.T) {
 	tests := []struct {
 		rule         lint.Rule
