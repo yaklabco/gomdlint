@@ -2,6 +2,8 @@ package goldmark
 
 import (
 	"context"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -11,19 +13,27 @@ import (
 
 // TestManyClosingBracketsParseInLinearTime guards against a quadratic scan
 // for the opening bracket of a link: every "]" used to walk all earlier
-// inline nodes, which took over ten seconds for 40,000 closers. It compares
-// the parse time of an input eight times as long with that of a short one,
-// because a fixed bound in seconds fails on a busy CI machine. A linear
-// parse takes about eight times as long on the longer input and a quadratic
-// one about sixty-four times; the bound leaves room for a busy machine.
+// inline nodes, which took over ten seconds for 40,000 closers.
+//
+// A fixed bound in seconds fails on a busy CI machine, so the test compares
+// two measurements of the same amount of input instead: one parse of a long
+// input against a batch of parses of an input an eighth as long. A linear
+// parse takes about as long either way and a quadratic one about eight
+// times as long for the long input. Both measurements last about as long,
+// so they meet the same disturbances; they run in turns, the fastest of
+// each counts, and garbage collection is paused while they run, because
+// marking the long parse's growing tree would otherwise weigh on it alone.
 func TestManyClosingBracketsParseInLinearTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing")
 	}
 	const (
-		small    = 5000
-		factor   = 8
-		maxRatio = 24
+		small  = 5000
+		factor = 8
+		rounds = 5
+		// A linear parse gives a ratio near one and the quadratic scan near
+		// eight; the bound leaves room for a busy machine.
+		maxRatio = 3
 	)
 	inputs := map[string]func(int) string{
 		"code spans and brackets": func(n int) string {
@@ -35,19 +45,26 @@ func TestManyClosingBracketsParseInLinearTime(t *testing.T) {
 	}
 	for name, generate := range inputs {
 		t.Run(name, func(t *testing.T) {
-			// The fastest of a few runs is the least disturbed by other work
-			// on the machine.
-			fastest := func(input string) time.Duration {
-				best := time.Duration(1<<63 - 1)
-				for range 3 {
-					best = min(best, parseDuration(t, input))
+			short, long := generate(small), generate(factor*small)
+			runtime.GC()
+			defer debug.SetGCPercent(debug.SetGCPercent(-1))
+
+			// Warm up both inputs before timing them.
+			parseDuration(t, short)
+			parseDuration(t, long)
+
+			bestBatch, bestLong := time.Duration(1<<63-1), time.Duration(1<<63-1)
+			for range rounds {
+				var batch time.Duration
+				for range factor {
+					batch += parseDuration(t, short)
 				}
-				return best
+				bestBatch = min(bestBatch, batch)
+				bestLong = min(bestLong, parseDuration(t, long))
 			}
-			short := fastest(generate(small))
-			long := fastest(generate(factor * small))
-			ratio := float64(long) / float64(short)
-			t.Logf("%v for %d closers, %v for %d, ratio %.1f", short, small, long, factor*small, ratio)
+			ratio := float64(bestLong) / float64(bestBatch)
+			t.Logf("%d parses of %d closers in %v, one parse of %d in %v, ratio %.2f",
+				factor, small, bestBatch, factor*small, bestLong, ratio)
 			require.Less(t, ratio, float64(maxRatio), "parse time grows faster than the input")
 		})
 	}
