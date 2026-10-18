@@ -354,58 +354,87 @@ func ListItemLoose(item ast.Node, source []byte) bool {
 }
 
 // firstBlockEnd returns the last node of an item's first block, which starts
-// at node. That is node itself unless it is a link reference definition.
-// Then the block is the paragraph the definition started, which goldmark
-// splits into a node for each definition, placed before the rest of the
-// paragraph (text or a setext heading) when any is left. Only the first of
-// those definitions takes the paragraph's blank-line flag; a definition
-// that starts another paragraph follows a blank line, since a paragraph
-// ends only at a blank line or at a block that interrupts it, which would
-// come between them. So the block runs over the definitions that follow
-// without a blank line, and ends with the node after them when that node
+// at node. That is node itself unless node is a link reference definition or
+// a table: goldmark can split the paragraph an item starts with into several
+// nodes. Each link reference definition the paragraph starts with gets a node
+// placed before it; GFM makes a table of its lines from a header row on,
+// placed after it; and a setext underline makes a heading of what text is
+// left, placed after that table, where the paragraph itself goes. The
+// paragraph, the heading and the first definition keep the paragraph's
+// blank-line flag, the flag of the item's first line.
+//
+// So the block runs over the definitions that follow node without a blank
+// line (a definition that starts another paragraph follows one, since a
+// paragraph ends only at a blank line or at a block that interrupts it,
+// which would come between them), then takes the node after them when it
 // starts before the last of them ends or on the line after it: the rest of
-// the paragraph, which keeps the paragraph's flag and whose lines can come
-// between the definitions when goldmark takes a definition from a line
-// after one that the paragraph keeps, or a block that ended the paragraph.
+// the paragraph, whose lines can come between the definitions when goldmark
+// takes a definition from a line after one the paragraph keeps, the table
+// made from it, or a block that ended the paragraph, which follows no blank
+// line either. A table in the block takes the heading after it when the
+// heading starts where the table does or before: the heading made from the
+// same paragraph, whose text precedes the table's rows. Other headings start
+// after the rows.
 func firstBlockEnd(node ast.Node, source []byte) ast.Node {
-	if _, ok := node.(*ast.LinkReferenceDefinition); !ok {
-		return node
-	}
-	for next := node.NextSibling(); next != nil; next = node.NextSibling() {
-		if _, ok := next.(*ast.LinkReferenceDefinition); ok {
-			if next.HasBlankPreviousLines() {
-				break
+	if _, ok := node.(*ast.LinkReferenceDefinition); ok {
+		for next := node.NextSibling(); next != nil; next = node.NextSibling() {
+			if _, ok := next.(*ast.LinkReferenceDefinition); ok {
+				if next.HasBlankPreviousLines() {
+					break
+				}
+				node = next
+				continue
 			}
-			node = next
-			continue
+			if startsInside(node, next) || startsOnNextLine(node, next, source) {
+				node = next
+			}
+			break
 		}
-		if startsInside(node, next) || startsOnNextLine(node, next, source) {
-			node = next
+	}
+	if table, ok := node.(*east.Table); ok {
+		if heading, ok := table.NextSibling().(*ast.Heading); ok {
+			if start, found := blockStart(heading); found && start <= table.Pos() {
+				node = heading
+			}
 		}
-		break
 	}
 	return node
 }
 
-// startsInside reports whether next starts before prev ends, as the rest of
-// a paragraph does when its lines come between the definitions taken from
-// it. Blocks without lines never do.
-func startsInside(prev, next ast.Node) bool {
-	prevLines, nextLines := prev.Lines(), next.Lines()
-	if prevLines.Len() == 0 || nextLines.Len() == 0 {
-		return false
+// blockStart returns where a block starts: its first line, or the position
+// goldmark gives a block without lines, such as a table, which starts where
+// the paragraph it was made from did.
+func blockStart(node ast.Node) (int, bool) {
+	if lines := node.Lines(); lines.Len() > 0 {
+		return lines.At(0).Start, true
 	}
-	return nextLines.At(0).Start < prevLines.At(prevLines.Len()-1).Stop
+	if pos := node.Pos(); pos >= 0 {
+		return pos, true
+	}
+	return 0, false
 }
 
-// startsOnNextLine reports whether the first line of next is the line after
-// the last line of prev. Blocks without lines never are.
-func startsOnNextLine(prev, next ast.Node, source []byte) bool {
-	prevLines, nextLines := prev.Lines(), next.Lines()
-	if prevLines.Len() == 0 || nextLines.Len() == 0 {
+// startsInside reports whether next starts before prev ends, as the rest of
+// a paragraph does when its lines come between the definitions taken from
+// it. A block without lines ends where it starts.
+func startsInside(prev, next ast.Node) bool {
+	prevLines := prev.Lines()
+	start, found := blockStart(next)
+	if prevLines.Len() == 0 || !found {
 		return false
 	}
-	end, start := prevLines.At(prevLines.Len()-1).Stop, nextLines.At(0).Start
+	return start < prevLines.At(prevLines.Len()-1).Stop
+}
+
+// startsOnNextLine reports whether next starts on the line after the last
+// line of prev. Blocks that cannot be placed never do.
+func startsOnNextLine(prev, next ast.Node, source []byte) bool {
+	prevLines := prev.Lines()
+	start, found := blockStart(next)
+	if prevLines.Len() == 0 || !found {
+		return false
+	}
+	end := prevLines.At(prevLines.Len() - 1).Stop
 	if end > start || start > len(source) {
 		return false
 	}

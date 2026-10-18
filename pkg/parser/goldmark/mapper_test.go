@@ -8,6 +8,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
@@ -510,11 +511,13 @@ func TestListItemLoose(t *testing.T) {
 		{"blank line between definition and text", "- [x]: /url\n\n  text\n- b\n", []bool{true, false}},
 		{"definition after a line its paragraph keeps", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, false}},
 		{"same, after a blank line in a later item", "- z\n\n- [a]: /a\n  (x (y\n  [b]: /b\n- c\n", []bool{false, true, false}},
+		{"table and setext heading from the first paragraph", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n- d\n", []bool{false, false}},
+		{"definition, table and setext heading", "Intro\n\n- [x]: /u\n  a\n  b|c\n  -|-\n  ===\n- d\n", []bool{false, false}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			source := []byte(tt.input)
-			doc := goldmark.New().Parser().Parse(text.NewReader(source))
+			doc := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser().Parse(text.NewReader(source))
 			var list *ast.List
 			for node := doc.FirstChild(); node != nil && list == nil; node = node.NextSibling() {
 				if found, ok := node.(*ast.List); ok {

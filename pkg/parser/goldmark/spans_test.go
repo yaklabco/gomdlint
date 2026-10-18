@@ -626,19 +626,24 @@ func TestListTightnessFollowsCommonMark(t *testing.T) {
 		{"setext heading after a line its paragraph keeps", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n  ===\n- c\n", []bool{true}},
 		{"definition after a kept line, then a blank line", "Intro\n\n- [a]: /a\n  (x (y\n  [b]: /b\n\n  more\n- c\n", []bool{false}},
 		{"blank line in a quote between definition and text", "> - [x]: /url\n>\n>   text\n> - b\n", []bool{false}},
+		{"table and setext heading from the first paragraph", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n- d\n", []bool{true}},
+		{"definition, table and setext heading", "Intro\n\n- [x]: /u\n  a\n  b|c\n  -|-\n  ===\n- d\n", []bool{true}},
+		{"table and setext heading, then a blank line", "Intro\n\n- a\n  b|c\n  -|-\n  ===\n\n  more\n- d\n", []bool{false}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			file := parseForSpans(t, FlavorCommonMark, tt.input)
-			lists := mdast.FindByKind(file.Root, mdast.NodeList)
-			tight := make([]bool, 0, len(lists))
-			for _, list := range lists {
-				require.NotNil(t, list.Block)
-				require.NotNil(t, list.Block.List)
-				tight = append(tight, list.Block.List.Tight)
-			}
-			require.Equal(t, tt.tight, tight)
-		})
+		for _, flavor := range []string{FlavorCommonMark, FlavorGFM} {
+			t.Run(tt.name+"/"+flavor, func(t *testing.T) {
+				file := parseForSpans(t, flavor, tt.input)
+				lists := mdast.FindByKind(file.Root, mdast.NodeList)
+				tight := make([]bool, 0, len(lists))
+				for _, list := range lists {
+					require.NotNil(t, list.Block)
+					require.NotNil(t, list.Block.List)
+					tight = append(tight, list.Block.List.Tight)
+				}
+				require.Equal(t, tt.tight, tight)
+			})
+		}
 	}
 }
 
