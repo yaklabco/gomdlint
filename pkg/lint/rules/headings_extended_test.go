@@ -114,7 +114,16 @@ func TestNoMissingSpaceATXRule_MarkdownlintParity(t *testing.T) {
 		{name: "list item continuation", input: "- item\n\n  #Heading\n", wantLines: []int{}},
 		{name: "blockquote", input: "> #Quoted\n", wantLines: []int{}},
 		{name: "keycap emoji", input: "#\uFE0F\u20E3 keycap\n", wantLines: []int{}},
-		{name: "seven hashes are never a heading", input: "#######seven\n", wantLines: []int{}},
+		// markdownlint reports any number of hashes. Seven or more never make
+		// a heading, so a space would only change the text: no fix.
+		{name: "seven hashes", input: "#######seven\n", wantLines: []int{1}},
+		{name: "eight hashes", input: "########eight words\n", wantLines: []int{1}},
+		{name: "seven hashes on a continuation line", input: "Para\n#######tag\n", wantLines: []int{2}},
+		{name: "hashes alone", input: "#######\n", wantLines: []int{}},
+		// Only a space or a tab after the hashes is a space, while the
+		// closing hash may be followed by any JavaScript whitespace.
+		{name: "form feed after the hash", input: "#\fformfeed\n", wantLines: []int{1}, wantFixed: "# \fformfeed\n"},
+		{name: "closing hash before a no-break space", input: "#Foo#\u00A0\n", wantLines: []int{}},
 		{
 			// Reported; the fix would add a heading anchor, which raw HTML
 			// might refer to.

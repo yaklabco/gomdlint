@@ -35,13 +35,16 @@ func NewNoMissingSpaceATXRule() *NoMissingSpaceATXRule {
 	}
 }
 
-// atxHeadingNoSpacePattern matches a line that starts with an ATX opening
-// sequence followed directly by text: #Heading, ##Heading, etc.
-var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#{1,6})[^#\s]`)
+// atxHeadingNoSpacePattern matches a line that starts with hashes followed
+// directly by text other than a space or a tab, as markdownlint's MD018
+// does: #Heading, ##Heading, and also #######Heading, which no space can
+// make a heading.
+var atxHeadingNoSpacePattern = regexp.MustCompile(`^(#+)[^# \t]`)
 
 // closingHashPattern matches a line that ends with a hash and optional
-// whitespace; such lines look like closed headings, which MD020 handles.
-var closingHashPattern = regexp.MustCompile(`#\s*$`)
+// whitespace, as JavaScript's \s reads it; such lines look like closed
+// headings, which MD020 handles.
+var closingHashPattern = regexp.MustCompile(`#[\t\n\v\f\r\p{Zs}\x{2028}\x{2029}\x{FEFF}]*$`)
 
 // keycapHash is the keycap number sign emoji (#, U+FE0F, U+20E3), which
 // starts with a hash but is not a heading.
