@@ -277,6 +277,51 @@ formats change. The first entries under Changed may need action.
   scheme, after escapes and character references are resolved, or with
   `//`. Links to `sms:`, `urn:` or `vscode:` URIs and email autolinks used to
   count as relative.
+- **MD010**: Reports each run of tabs, as markdownlint does, instead of one
+  finding per line. With `ignore_code_languages` set, it skips fences that
+  name no language.
+- **MD011**: Skips math, which markdownlint parses: blocks fenced by `$$`
+  and inline math such as `$(a)[b]$`.
+- **MD012**: Reports each blank line past the maximum, as markdownlint
+  does, and no longer reports the blank lines right after front matter. One
+  pass of fixes still removes a whole run.
+- **MD013**, **MD030**: Read an option set to 0 as its default, as
+  markdownlint does: 80 characters for `line_length`, the line length for
+  headings and code blocks, and 1 space for MD030. MD030 findings point at
+  the list marker.
+- **MD018**: Reports lines that start with seven or more hashes. A space
+  cannot make them headings, so they get no fix.
+- **MD022**: Counts a line of only `>` or an HTML comment as blank, as MD031
+  and MD058 do.
+- **MD022**, **MD025**, **MD041**: Count a link reference definition as
+  content, as markdownlint does. `[a]: /url` before `# H` gets MD041 on its
+  line and MD022 on the heading, and a definition before the first H1 means
+  the document has no title for MD025.
+- **MD024**: Compares headings as written, without their raw HTML, so
+  `## Foo` and `## *Foo*` differ, and reports a repeated empty heading. With
+  `siblings_only`, it compares a heading with the earlier headings of its
+  level since the last heading of a lower level.
+- **MD028**: Reports blank lines between blockquotes that are indented or in
+  a list item, one finding for each line, and no longer takes quote markers
+  in an HTML block for blockquotes.
+- **MD033**, **MD045**: Read the lines of an HTML block as Markdown, as
+  markdownlint does, so a tag in a code span, in a fenced code block or
+  after a backslash is not HTML.
+- **MD045**: Reports a Markdown image only when nothing is written between
+  its brackets, so `![ ](a.png)` passes, as in markdownlint.
+- **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
+  `#TOP` unless `ignore_case` is set.
+- **MD052**: With `shortcut_syntax`, no longer reports GFM footnote calls
+  such as `[^1]` whose footnote the document defines.
+- **MD059**: Compares link text as written and skips only links whose text
+  holds code or HTML directly, so it reports ``[*`here`*](x)``. Findings
+  point at the link text, one column after the bracket, and autolinks are
+  never checked.
+- `[ ]`, `[x]` and `[X]` make a task checkbox only at the start of a
+  paragraph and before whitespace, as in GFM. In a heading, or right before
+  other text, they are text or a link, so **MD039** reports
+  `- ## [ ](/url).` and **MD034** no longer reports the address in
+  `- [x](https://example.com)`.
 - Fixes of two rules no longer combine to corrupt a file. MD014 removing
   prompts while MD048 changed the fences could close a code block early, and
   MD007 moving an item right while MD030 narrowed the item above could nest

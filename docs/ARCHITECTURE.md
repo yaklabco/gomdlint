@@ -274,8 +274,10 @@ link's reference style and its label without container prefixes, and gives
 strikethrough, tables and task checkboxes node kinds of their own. Token
 ranges are derived from the spans. Code, HTML block and front matter tokens
 follow the parse, while other markers are recognized line by line, so rules
-use spans for structure. The `gfm` flavor adds goldmark's GFM extension,
-and `commonmark` adds none.
+use spans for structure. The `gfm` flavor adds goldmark's linkify, table
+and strikethrough extensions and a task list extension of its own, which
+reads a checkbox only at the start of a paragraph and before whitespace, as
+GFM does. `commonmark` adds none.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark
@@ -293,8 +295,11 @@ line measured in CommonMark columns (`ContainerPrefix`), blank-line checks
 that see through `>` markers, and the text that adds a blank line inside a
 blockquote (`BlankLineText`). `pkg/lint/refs` collects reference
 definitions, the references that the parser leaves as text, and heading
-anchors built as GitHub builds them. `pkg/lint/mdscan` scans the HTML
-constructs inside HTML blocks and GFM autolink literals.
+anchors built as GitHub builds them. `pkg/lint/mdscan` matches HTML
+constructs and GFM autolink literals. The HTML rules find the tags of an
+HTML block as markdownlint does, by parsing the block's lines again as
+Markdown without HTML blocks and indented code
+(`pkg/lint/rules/html_block_markdown.go`).
 
 ## Fix Engine
 
