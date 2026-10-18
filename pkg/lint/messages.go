@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // RuleLabel names a rule in a message that someone may quote in a bug
@@ -47,28 +46,16 @@ func deprecatedTagText(tag string, names []string) string {
 		tag, strings.Join(names, ", "))
 }
 
-// IsSingleWord reports whether key is one word: not empty, and free of
-// whitespace. Only such a key can name a built-in rule or tag in a
-// markdownlint configuration file, such as .markdownlint.json:
-// markdownlint looks those keys up whole, ignoring only case, and no
-// built-in identifier or tag holds whitespace. Lookup and RulesByTag ignore
-// surrounding whitespace, so check a key with IsSingleWord before resolving
-// it through them as markdownlint would. markdownlint-configure-file
-// comments resolve their keys through the registry's index of
-// markdownlint keys instead (see lookupWord).
-func IsSingleWord(key string) bool {
-	return key != "" && !strings.ContainsFunc(key, unicode.IsSpace)
-}
-
-// UnknownKeyText describes key, a key of a markdownlint configuration
-// object that names no rule or tag, for an error or a warning. Like
-// UnknownRuleText, it offers the closest rules and tags. A key of several
-// words that each name a rule or tag gets a note instead: such a key names
-// nothing, because markdownlint reads it as one name.
+// UnknownKeyText describes key, a key of a markdownlint configuration file
+// that names no rule or tag (see MarkdownlintConfigRuleIDs), for an error
+// or a warning. Like UnknownRuleText, it offers the closest rules and tags,
+// for the key as markdownlint reads it (see markdownlintKey). A key of
+// several words that each name a rule or tag gets a note instead: such a
+// key names nothing, because markdownlint reads it as one name.
 func (r *Registry) UnknownKeyText(key string) string {
 	words := strings.Fields(key)
 	if len(words) < 2 || !r.allKnown(words) {
-		return UnknownRuleText(key, r.Closest(key))
+		return UnknownRuleText(key, r.Closest(markdownlintKey(key)))
 	}
 	return severalWordsKeyText(key, words)
 }
@@ -85,11 +72,13 @@ func severalWordsKeyText(key string, writeAs []string) string {
 		key, joinChoices(quoted, "and"))
 }
 
-// allKnown reports whether every word is a rule identifier or a tag: an
-// identifier of a registered rule, or any identifier or tag of the catalog.
+// allKnown reports whether every word is, as a key of a markdownlint
+// configuration file, a rule identifier or a tag: an identifier of a
+// registered rule, or any identifier or tag of the catalog (see
+// MarkdownlintConfigRuleIDs).
 func (r *Registry) allKnown(words []string) bool {
 	for _, word := range words {
-		if _, isRule := r.Lookup(word); !isRule && !r.inCatalog(word) {
+		if _, known := r.MarkdownlintConfigRuleIDs(word); !known {
 			return false
 		}
 	}

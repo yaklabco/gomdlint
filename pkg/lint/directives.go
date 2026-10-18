@@ -307,8 +307,9 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 }
 
 // markdownlintKey returns the key by which markdownlint knows word, a word
-// of a markdownlint comment or a key of a markdownlint-configure-file
-// object. markdownlint upper-cases each word and key with JavaScript's
+// of a markdownlint comment or a key of a markdownlint configuration object,
+// in a configuration file or a markdownlint-configure-file comment.
+// markdownlint upper-cases each word and key with JavaScript's
 // toUpperCase before it compares them, so two words mean the same exactly
 // when their upper case is the same. The key is that upper case with its
 // ASCII letters written in lower case, as the registry keeps identifiers.
@@ -328,11 +329,13 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 // only in the case of characters that Go and JavaScript upper-case alike.
 //
 // Everything that compares the words of comments or the keys of
-// configure-file objects goes through this key: their resolution
-// (lookupWord, against the registry's index of every identifier and tag by
-// this key), the default key (IsMarkdownlintDefaultKey), the deduplication
-// of notices (wordSet), the suggestions for unknown words
-// (Registry.markdownlintSuggestions) and the words of remedies
+// markdownlint configuration objects goes through this key: their
+// resolution (lookupWord, and Registry.MarkdownlintConfigRuleIDs for the
+// keys of configuration files such as .markdownlint.json, against the
+// registry's index of every identifier and tag by this key), the default
+// key (IsMarkdownlintDefaultKey), the deduplication of notices (wordSet),
+// the suggestions for unknown words (Registry.markdownlintSuggestions and
+// Registry.UnknownKeyText) and the words of remedies
 // (Registry.markdownlintTerm). Registry.Closest, which ranks the
 // suggestions, lower-cases the key once more with foldKey. That decides no
 // word's meaning; it only lets a word with a Kelvin sign be offered its

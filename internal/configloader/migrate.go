@@ -273,43 +273,22 @@ func stripJSONComments(content []byte) []byte {
 	return result
 }
 
-// processRuleKey processes a single key from the markdownlint config: a rule
-// ID, name or alias, or a markdownlint tag, in any case. Like markdownlint,
-// it reads the key whole, so a key that is empty or holds whitespace names
-// nothing.
+// processRuleKey applies key, one key of the markdownlint config, and its
+// value to the rules that the key names as markdownlint reads it (see
+// lint.Registry.MarkdownlintConfigRuleIDs): a rule ID, name or alias, or a
+// markdownlint tag, which covers markdownlint's rules only, in any spelling
+// whose JavaScript upper case is the same. Each replaces what an earlier
+// key set for the rule. markdownlint ignores a key that names nothing,
+// which gets a warning.
 func processRuleKey(registry *lint.Registry, cfg *config.Config, key string, value any, result *MigrationResult) {
-	if rule, ok := registry.Lookup(key); ok && lint.IsSingleWord(key) {
-		cfg.Rules[rule.ID()] = config.MarkdownlintRuleConfig(rule.ID(), value)
+	ruleIDs, known := registry.MarkdownlintConfigRuleIDs(key)
+	if !known {
+		result.Warnings = append(result.Warnings, registry.UnknownKeyText(key)+"; it is ignored")
 		return
 	}
-
-	if ruleIDs := markdownlintTagRuleIDs(registry, key); len(ruleIDs) > 0 {
-		for _, rid := range ruleIDs {
-			cfg.Rules[rid] = config.MarkdownlintRuleConfig(rid, value)
-		}
-		return
+	for _, id := range ruleIDs {
+		cfg.Rules[id] = config.MarkdownlintRuleConfig(id, value)
 	}
-
-	// markdownlint ignores keys it does not know.
-	result.Warnings = append(result.Warnings, registry.UnknownKeyText(key)+"; it is ignored")
-}
-
-// markdownlintTagRuleIDs returns the IDs of the markdownlint rules that the
-// markdownlint tag covers, in ID order. gomdlint files its own rules under
-// markdownlint's tags too, but in a markdownlint config a tag means only
-// markdownlint's rules, because markdownlint never runs gomdlint's. A tag
-// with surrounding whitespace is no tag there.
-func markdownlintTagRuleIDs(registry *lint.Registry, tag string) []string {
-	if !lint.IsSingleWord(tag) {
-		return nil
-	}
-	var ruleIDs []string
-	for _, rule := range registry.RulesByTag(tag) {
-		if !lint.IsGomdlintOnlyRule(rule.ID()) {
-			ruleIDs = append(ruleIDs, rule.ID())
-		}
-	}
-	return ruleIDs
 }
 
 // GenerateMigrationHeader returns a header comment for migrated configs.

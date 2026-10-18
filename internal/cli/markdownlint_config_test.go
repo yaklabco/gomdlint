@@ -75,6 +75,42 @@ func lintWithMarkdownlintConfig(t *testing.T, mode, name, settings, doc string) 
 	return reportedFiles(t, got.stdout), warnings
 }
 
+// TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem covers keys beyond
+// ASCII in a markdownlint config. markdownlint 0.41.1 compares keys by their
+// JavaScript upper case, so the long s of no-trailing-ſpaces reads as S and
+// the key names no-trailing-spaces (MD009), while the dotted capital I of
+// NO-TRAİLING-SPACES stays as it is, and that key names nothing, though it
+// lower-cases to the rule's name. markdownlint reports trailingSpaceDoc's
+// trailing space with the second config only.
+func TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
+	tests := []struct {
+		name, settings string
+		want           []string
+		warning        string
+	}{
+		{name: "long s", settings: `{"no-trailing-` + "ſ" + `paces": false}`},
+		{
+			name: "dotted capital I", settings: `{"NO-TRA` + "İ" + `LING-SPACES": false}`,
+			want: []string{"MD009"}, warning: `unknown rule "NO-TRA` + "İ" + `LING-SPACES"`,
+		},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint.json", tt.settings, trailingSpaceDoc)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+				if tt.warning == "" {
+					assert.NotContains(t, warnings, "unknown rule")
+				} else {
+					assert.Contains(t, warnings, tt.warning)
+				}
+			})
+		}
+	}
+}
+
 // TestMarkdownlintConfig_AppliesKeysInWrittenOrder covers the order in which
 // a markdownlint config's keys apply, in JSON and in YAML: the order they
 // are written, as in markdownlint 0.41.1, so a later key overrides an
@@ -163,7 +199,7 @@ func TestMigrate_KeepsInheritedSettings(t *testing.T) {
 		"drafts/draft.md": trailingSpaceDoc,
 		// gitignore: false lints a file that .gitignore lists.
 		".gitignore": "ignored.md\n",
-		"ignored.md":  trailingSpaceDoc,
+		"ignored.md": trailingSpaceDoc,
 		// default_ignores: false lints node_modules.
 		"node_modules/dep.md": trailingSpaceDoc,
 		// Under gfm, blanks-around-tables (MD058) reports the table that

@@ -152,10 +152,11 @@ func identityRegistry() *Registry {
 
 // TestKeyIdentityAgrees runs spellings of a rule's name or tag through the
 // places that compare the words of markdownlint comments and the keys of
-// configure-file objects: resolution and the deduplication of notices. They
-// use one key identity, markdownlint's, so they agree on whether each
-// spelling means the same as the one the rule was registered with, ASCII or
-// not.
+// markdownlint configuration objects: the resolution of comment words and
+// configure-file keys, the deduplication of notices, and the resolution of
+// the keys of configuration files such as .markdownlint.json. They use one
+// key identity, markdownlint's, so they agree on whether each spelling means
+// the same as the one the rule was registered with, ASCII or not.
 func TestKeyIdentityAgrees(t *testing.T) {
 	registry := identityRegistry()
 	tests := []struct {
@@ -192,6 +193,17 @@ func TestKeyIdentityAgrees(t *testing.T) {
 			}
 			directive := resolveOne(registry, tt.base+"-x "+tt.spelling+"-x")
 			assert.Len(t, directive.notices, wantNotices, "deduplication of notices")
+
+			// A tag that a rule reports itself names nothing in a
+			// configuration file, so both spellings of one name nothing.
+			baseIDs, baseKnown := registry.MarkdownlintConfigRuleIDs(tt.base)
+			ids, known := registry.MarkdownlintConfigRuleIDs(tt.spelling)
+			if tt.same {
+				assert.Equal(t, baseIDs, ids, "resolution of configuration file keys")
+				assert.Equal(t, baseKnown, known, "resolution of configuration file keys")
+			} else {
+				assert.False(t, known, "resolution of configuration file keys")
+			}
 		})
 	}
 }

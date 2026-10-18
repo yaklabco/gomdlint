@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // TestDecodeMarkdownlintJSON covers the order of a configuration object's
@@ -98,6 +99,46 @@ func TestMarkdownlintSettingsDefault(t *testing.T) {
 
 		assert.Equal(t, tt.found, found, tt.data)
 		assert.Equal(t, tt.want, value, tt.data)
+	}
+}
+
+// TestMarkdownlintConfigRuleIDs covers the keys of a markdownlint
+// configuration file, which markdownlint 0.41.1 looks up whole by their
+// JavaScript upper case: a rule's ID, name or a markdownlint name of it,
+// or a markdownlint tag, which names markdownlint's rules only, since
+// markdownlint never runs gomdlint's own. Former gomdlint tags, keys with
+// whitespace and empty keys name nothing.
+func TestMarkdownlintConfigRuleIDs(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+
+	tests := []struct {
+		key   string
+		ids   []string
+		known bool
+	}{
+		{key: "MD009", ids: []string{"MD009"}, known: true},
+		{key: "No-Trailing-Spaces", ids: []string{"MD009"}, known: true},
+		{key: "ul-style", ids: []string{"MD004"}, known: true},
+		{key: "unordered-list-style", ids: []string{"MD004"}, known: true},
+		{key: "no-trailing-ſpaces", ids: []string{"MD009"}, known: true},
+		{key: "MDL001", ids: []string{"MDL001"}, known: true},
+		{key: "links", ids: []string{"MD011", "MD034", "MD039", "MD042", "MD051", "MD052", "MD053", "MD054", "MD059"}, known: true},
+		{key: "TABLE", ids: []string{"MD055", "MD056", "MD058", "MD060"}, known: true},
+		{key: "NO-TRAİLING-SPACES"},
+		{key: "style"},
+		{key: " MD009"},
+		{key: "MD009 MD010"},
+		{key: ""},
+		{key: "default"},
+	}
+	for _, tt := range tests {
+		ids, known := registry.MarkdownlintConfigRuleIDs(tt.key)
+
+		assert.Equal(t, tt.known, known, tt.key)
+		assert.Equal(t, tt.ids, ids, tt.key)
 	}
 }
 

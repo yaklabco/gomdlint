@@ -728,6 +728,62 @@ func TestConvertMarkdownlintConfig_KeysIgnoreCase(t *testing.T) {
 	assert.Empty(t, result.Warnings)
 }
 
+// TestConvertMarkdownlintConfig_KeysAsMarkdownlintReadsThem covers keys
+// beyond ASCII, which markdownlint 0.41.1 compares by their JavaScript upper
+// case, as gomdlint compares the words of markdownlint comments and the keys
+// of configure-file comments. The long s, the dotless i, the sharp s and
+// the st ligature upper-case to ASCII letters, so each key below that holds
+// one names the rule or tag it spells. The dotted capital I and the Kelvin
+// sign stay as they are, so those keys name nothing, where lower-casing
+// them would read i and k. For each key, markdownlint 0.41.1 turns off
+// exactly the rules listed.
+func TestConvertMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
+	t.Parallel()
+
+	whitespace := []string{"MD009", "MD010", "MD012", "MD027", "MD028", "MD030", "MD037", "MD038", "MD039"}
+	tests := []struct {
+		name, key string
+		disabled  []string
+		warning   string
+	}{
+		{name: "long s", key: "no-trailing-ſpaces", disabled: []string{"MD009"}},
+		{name: "dotless i", key: "no-traıling-spaces", disabled: []string{"MD009"}},
+		{name: "sharp s", key: "no-mißing-space-atx", disabled: []string{"MD018"}},
+		{name: "st ligature", key: "blanks-around-liﬆs", disabled: []string{"MD032"}},
+		{name: "long s in a tag", key: "whiteſpace", disabled: whitespace},
+		{
+			name: "dotted capital I", key: "NO-TRAİLING-SPACES",
+			warning: `unknown rule "NO-TRA` + "İ" + `LING-SPACES" (did you mean "no-trailing-spaces"?); it is ignored`,
+		},
+		{
+			name: "Kelvin sign", key: "no-multiple-blanKs",
+			warning: `unknown rule "no-multiple-blan` + "K" + `s" (did you mean "no-multiple-blank-lines"?); it is ignored`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			parameter, err := json.Marshal(map[string]bool{tt.key: false})
+			require.NoError(t, err)
+			result := convertSettings(t, string(parameter))
+
+			var disabled []string
+			for id, rule := range result.Config.Rules {
+				if rule.Enabled != nil && !*rule.Enabled {
+					disabled = append(disabled, id)
+				}
+			}
+			assert.ElementsMatch(t, tt.disabled, disabled)
+			if tt.warning == "" {
+				assert.Empty(t, result.Warnings)
+			} else {
+				assert.Equal(t, []string{tt.warning}, result.Warnings)
+			}
+		})
+	}
+}
+
 func TestConvertMarkdownlintConfig_GomdlintNames(t *testing.T) {
 	t.Parallel()
 

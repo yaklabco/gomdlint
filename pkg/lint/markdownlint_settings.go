@@ -75,6 +75,38 @@ func IsMarkdownlintDefaultKey(key string) bool {
 	return markdownlintKey(key) == "default"
 }
 
+// MarkdownlintConfigRuleIDs returns the IDs of the registered rules that
+// key, a key of a markdownlint configuration file such as
+// .markdownlint.json, names, in ID order, and whether markdownlint knows
+// the key. markdownlint 0.41.1 looks a key up whole by its JavaScript upper
+// case, so a key names what a word of a markdownlint comment with the same
+// key names (see markdownlintKey): a rule by its ID, its name or a
+// markdownlint name of it, and the rules of a markdownlint tag. In a
+// configuration file a tag means markdownlint's rules only, because
+// markdownlint never runs gomdlint's own, though a key can still name one
+// of those by its ID or name. The tags that rules report themselves, such
+// as gomdlint's former tags, are not markdownlint's, so they name nothing
+// here. markdownlint ignores a key that names nothing, which is not known,
+// unless it is an identifier or tag of the catalog whose rules are not
+// registered.
+func (r *Registry) MarkdownlintConfigRuleIDs(key string) ([]string, bool) {
+	word := r.lookups().words[markdownlintKey(key)]
+	if word == nil || (word.rule == nil && !word.catalog) {
+		return nil, false
+	}
+	var ids []string
+	if word.rule != nil {
+		ids = append(ids, word.rule.ID())
+	}
+	for _, rule := range word.tagged {
+		if !IsGomdlintOnlyRule(rule.ID()) {
+			ids = append(ids, rule.ID())
+		}
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids), true
+}
+
 // ErrNotJSONObject reports JSON that holds a value other than an object
 // where a markdownlint configuration object belongs.
 var ErrNotJSONObject = errors.New("not a JSON object")
