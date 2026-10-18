@@ -154,7 +154,9 @@ formats change. The first entries under Changed may need action.
 - **MD023**: No longer moves a heading at a list item's content column out
   of the list.
 - **MD026**: Decides from the heading's source, so `` ## Run `make.` `` keeps
-  its closing backtick.
+  its closing backtick. It no longer empties a heading that would show
+  nothing without its punctuation, such as `## .`. Such headings are reported
+  without a fix.
 - **MD035**: Edits only the thematic break, so a break no longer moves out
   of its list item, and it withholds a change that would turn a break under
   a paragraph into a setext heading underline.
@@ -212,7 +214,12 @@ formats change. The first entries under Changed may need action.
   blockquotes and list items.
 - **MD040**: No longer guesses a language from words in the block, which
   called `import React from 'react'` Python. It reports an empty fence at
-  its line instead of 0:0.
+  its line instead of 0:0. Its fix no longer inserts a detected language
+  that `allowed_languages` leaves out. `allowed_languages` now matches
+  exactly, as in markdownlint, so case matters. As in GFM, an info string
+  ends at a carriage return or line feed, and splits into language and title
+  at spaces and tabs only. `language_only` no longer hides an
+  `allowed_languages` finding.
 - **MD042**: Reports `[text](#)`.
 - **MD045**: Reports `<img>` elements without alt text.
 - **MD048**: Changes both fences of a block, where it used to change only
@@ -229,6 +236,12 @@ formats change. The first entries under Changed may need action.
   at markdownlint's columns, MD058's fix no longer moves a row out of its
   table, and MDL003's fix no longer strips list indentation until the table
   becomes a paragraph.
+- **MD022**, **MD031**, **MD058**: A fix no longer inserts a blank line
+  before a table inside a tight list item, which made the list loose. Such
+  findings are reported without a fix.
+- **MD058**: No longer adds a blank line before or after a table in a list
+  where the line would separate two items or two blocks of an item. Such
+  tables are reported without a fix.
 - **MDL001**: Counts a destination as absolute when it starts with a URI
   scheme, after escapes and character references are resolved, or with
   `//`. Links to `sms:`, `urn:` or `vscode:` URIs and email autolinks used to
