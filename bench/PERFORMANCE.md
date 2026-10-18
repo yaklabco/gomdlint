@@ -2,6 +2,8 @@
 
 This document provides a rigorous analysis of gomdlint's performance characteristics compared to markdownlint, the de facto standard Markdown linter.
 
+> **Note (2026-10-18):** These numbers come from a development build measured in January 2026, before the changes listed under Unreleased in [CHANGELOG.md](../CHANGELOG.md), which turn every rule on by default and check every fix before it is applied. They have not been re-measured since.
+
 ## Executive Summary
 
 Benchmarks on real-world, open-source repositories demonstrate that gomdlint achieves an **average 507.3x speedup** over markdownlint, with individual repository improvements ranging from 72x to 1100x.
@@ -35,11 +37,11 @@ Benchmarks on real-world, open-source repositories demonstrate that gomdlint ach
 
 Test repositories were selected to represent real-world Markdown usage patterns:
 
-1. **rust-lang/book** (478 files) — Technical documentation with structured content
-2. **DavidAnson/markdownlint** (515 files) — The markdownlint project itself, chosen to eliminate bias
-3. **facebook/react** (1917 files) — Large, actively maintained open-source project
-4. **microsoft/vscode-docs** (744 files) — Professional documentation with varied formatting
-5. **golang/website** (7340 files) — Large-scale documentation site
+1. **rust-lang/book** (478 files), technical documentation with structured content
+2. **DavidAnson/markdownlint** (515 files), the markdownlint project itself, chosen to eliminate bias
+3. **facebook/react** (1917 files), large, actively maintained open-source project
+4. **microsoft/vscode-docs** (744 files), professional documentation with varied formatting
+5. **golang/website** (7340 files), large-scale documentation site
 
 This selection provides:
 - Diversity in file counts (478–7340 files)
@@ -208,47 +210,47 @@ The "estimated issue coverage" reflects that fixable rules address the most comm
 ### Auto-Fixable Rule Categories
 
 **Whitespace (100% fixable)**
-- `no-trailing-spaces` — Remove trailing whitespace
-- `no-hard-tabs` — Convert tabs to spaces
-- `no-multiple-blank-lines` — Collapse consecutive blank lines
-- `single-trailing-newline` — Ensure single newline at EOF
+- `no-trailing-spaces`, remove trailing whitespace
+- `no-hard-tabs`, convert tabs to spaces
+- `no-multiple-blank-lines`, collapse consecutive blank lines
+- `single-trailing-newline`, ensure single newline at EOF
 
 **Heading Formatting (83% fixable)**
-- `heading-style` — Enforce ATX/setext consistency
-- `no-missing-space-atx` — Add space after `#`
-- `no-multiple-space-atx` — Collapse multiple spaces
-- `heading-blank-lines` — Add surrounding blank lines
-- `heading-start-left` — Remove leading whitespace
-- `no-trailing-punctuation` — Remove trailing punctuation
+- `heading-style`, enforce ATX/setext consistency
+- `no-missing-space-atx`, add space after `#`
+- `no-multiple-space-atx`, collapse multiple spaces
+- `heading-blank-lines`, add surrounding blank lines
+- `heading-start-left`, remove leading whitespace
+- `no-trailing-punctuation`, remove trailing punctuation
 
 **List Formatting (100% fixable)**
-- `unordered-list-style` — Consistent bullet markers
-- `list-indent` — Fix indentation levels
-- `ul-indent` — Enforce indentation rules
-- `ol-prefix` — Fix ordered list prefixes
-- `list-marker-space` — Correct spacing after markers
-- `blanks-around-lists` — Add surrounding blank lines
+- `unordered-list-style`, consistent bullet markers
+- `list-indent`, fix indentation levels
+- `ul-indent`, enforce indentation rules
+- `ol-prefix`, fix ordered list prefixes
+- `list-marker-space`, correct spacing after markers
+- `blanks-around-lists`, add surrounding blank lines
 
 **Code Blocks (75% fixable)**
-- `fenced-code-language` — Add detected language identifiers
-- `blanks-around-fences` — Add surrounding blank lines
-- `code-fence-style` — Enforce fence style consistency
-- `no-space-in-code` — Remove internal spaces
+- `fenced-code-language`, add detected language identifiers
+- `blanks-around-fences`, add surrounding blank lines
+- `code-fence-style`, enforce fence style consistency
+- `no-space-in-code`, remove internal spaces
 
 **Links and Emphasis (70% fixable)**
-- `no-reversed-links` — Fix `(text)[url]` → `[text](url)`
-- `no-bare-urls` — Wrap URLs in angle brackets
-- `no-emphasis-as-heading` — Convert to proper headings
-- `no-space-in-emphasis` — Remove internal spaces
-- `no-space-in-links` — Trim link text
-- `emphasis-style` / `strong-style` — Enforce consistency
+- `no-reversed-links`, fix `(text)[url]` → `[text](url)`
+- `no-bare-urls`, wrap URLs in angle brackets
+- `no-emphasis-as-heading`, convert to proper headings
+- `no-space-in-emphasis`, remove internal spaces
+- `no-space-in-links`, trim link text
+- `emphasis-style` / `strong-style`, enforce consistency
 
 **Other Formatting**
-- `hr-style` — Consistent horizontal rules
-- `no-multiple-space-blockquote` — Fix blockquote spacing
-- `proper-names` — Fix capitalization
-- `blanks-around-tables` — Add surrounding blank lines
-- `table-alignment` — Fix delimiter row formatting
+- `hr-style`, consistent horizontal rules
+- `no-multiple-space-blockquote`, fix blockquote spacing
+- `proper-names`, fix capitalization
+- `blanks-around-tables`, add surrounding blank lines
+- `table-alignment`, fix delimiter row formatting
 
 ### Non-Fixable Rules
 
