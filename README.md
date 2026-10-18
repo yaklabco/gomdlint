@@ -215,6 +215,16 @@ Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
 rule IDs, aliases, or tags. Suppressed findings produce no fixes. Comments inside
 code or frontmatter do not change lint settings.
 
+A word in such a comment that names no rule or tag does nothing, as in
+markdownlint. gomdlint warns about it, and names the rules and tags that the
+word most likely means when some are close. gomdlint's former tags `style`,
+`lists`, `layout`, `metadata`, `gfm` and `tables` still work, but markdownlint
+does not know them. Each use gets a warning that names the rules the tag
+covers, and the tags will stop working in a later release. The warnings go to
+stderr in every output format. JSON output also lists them under each file's
+`notices`, and SARIF output as `toolConfigurationNotifications`. They never
+change findings or the exit code, even with `--strict`.
+
 `markdownlint-configure-file` accepts a JSON object of markdownlint settings and
 applies it to the whole file. Invalid JSON and unknown rule keys fail that file.
 Migration does not evaluate JavaScript configuration or resolve `extends`.

@@ -518,7 +518,7 @@ For each rule, the final configuration is computed:
 | `autoFix` | `rule.CanFix()` | `rules.X.auto_fix` | `--fix-rules` filter |
 | `options` | Rule-specific | `rules.X.options.*` | — |
 
-**Rule Identification:** Config files accept a rule's ID (`MD001`), name (`heading-increment`), or markdownlint alias (`ul-style` for MD004) interchangeably, in any case, through `Registry.Lookup`. The `--enable`, `--disable` and `--fix-rules` flags also accept markdownlint tags (`whitespace`), which stand for every rule they cover, and the shell completes all of these for them. A key or flag value that names no rule gets a warning or error that suggests the closest rules.
+**Rule Identification:** Config files accept a rule's ID (`MD001`), name (`heading-increment`), or markdownlint alias (`ul-style` for MD004) interchangeably, in any case, through `Registry.Lookup`. The `--enable`, `--disable` and `--fix-rules` flags also accept markdownlint tags (`whitespace`), which stand for every rule they cover, and the shell completes all of these for them. A key or flag value that names no rule gets a warning or error that suggests the closest rules. Inline markdownlint comments resolve their words the same way, with markdownlint's tags. A word that names no rule or tag, and a former gomdlint tag that still resolves through the rules' own `Tags()`, give the file a `lint.Notice` (`FileResult.Notices`, kept per file in `runner.FileOutcome.Notices`). The CLI writes notices to stderr, JSON lists them per file and SARIF as configuration notifications. They never change findings or exit codes.
 
 ## Design Principles
 
