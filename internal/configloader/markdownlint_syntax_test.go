@@ -284,6 +284,29 @@ func TestConvertMarkdownlintConfig_NumbersBeyondFloat64(t *testing.T) {
 	assert.Equal(t, []string{`line-length option "line_length" must be an integer, not +Inf; it is ignored`}, result.Warnings)
 }
 
+// TestLoad_MarkdownlintJSONCComesFirst covers a directory that holds both
+// .markdownlint.jsonc and .markdownlint.json. markdownlint-cli2 0.23.3 looks
+// for its config files in the order .jsonc, .json, .yaml, .yml, .cjs and
+// .mjs (configurationFiles in markdownlint-cli2.mjs), and uses the first it
+// finds, so it reads the JSONC file and turns line-length (MD013) off.
+// gomdlint used to read the JSON file first.
+func TestLoad_MarkdownlintJSONCComesFirst(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := writeMarkdownlint(t, dir, ".markdownlint.jsonc", `{"MD013": false}`)
+	writeMarkdownlint(t, dir, ".markdownlint.json", `{}`)
+
+	result, err := Load(t.Context(), markdownlintOptions(dir, false, "", nil))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{first}, result.LoadedFrom)
+	rule := result.Config.Rules["MD013"]
+	require.NotNil(t, rule.Enabled)
+	assert.False(t, *rule.Enabled)
+	assert.Equal(t, first, FindMarkdownlintConfig(dir), "migrate looks in the same order")
+}
+
 // TestLoad_YAMLProjectConfigWithByteOrderMark covers gomdlint's own YAML
 // config files, which load with a leading byte order mark, as JSON ones
 // do (see TestLoad_JSONProjectConfig).

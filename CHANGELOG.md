@@ -352,7 +352,9 @@ formats change. The first entries under Changed may need action.
   the last value in the key's first place. A file that holds a list, a
   string, a number or nothing loads as an empty config, with a warning for a
   value. Each of these used to stop lint with a config error, and so did a
-  number too large for a float64, which now reads as Infinity.
+  number too large for a float64, which now reads as Infinity. In a
+  directory with both, `.markdownlint.jsonc` comes before
+  `.markdownlint.json`, as in markdownlint-cli2.
 - A rule's `severity` in a markdownlint config or a
   `markdownlint-configure-file` comment gives warnings for `warning` and
   errors for any other value, as in markdownlint. `info` used to give info

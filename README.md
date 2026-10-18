@@ -538,13 +538,15 @@ fail the run without `--strict`, and it keeps gomdlint's own rules,
 Migration does not evaluate JavaScript configuration or resolve `extends`.
 
 gomdlint reads a markdownlint config file as markdownlint-cli2 0.23 reads
-one that it finds, whatever the file's name. It skips a leading byte order
-mark, reads the file as JSON with comments and trailing commas, and reads
-it as YAML when that fails. So a `.markdownlint.yaml` file that holds JSON
-loads, and a key that the JSON writes twice takes its last value in its
-first place. A file that holds a list, a string, a number or nothing loads
-as an empty config, so every rule keeps markdownlint's defaults. A value
-other than an object gets a warning.
+one that it finds. In a directory with several, it uses the first of
+`.markdownlint.jsonc`, `.markdownlint.json`, `.markdownlint.yaml` and
+`.markdownlint.yml`. Whatever the file's name, gomdlint skips a leading
+byte order mark, reads the file as JSON with comments and trailing commas,
+and reads it as YAML when that fails. So a `.markdownlint.yaml` file that
+holds JSON loads, and a key that the JSON writes twice takes its last value
+in its first place. A file that holds a list, a string, a number or nothing
+loads as an empty config, so every rule keeps markdownlint's defaults. A
+value other than an object gets a warning.
 
 gomdlint applies a markdownlint config as markdownlint 0.41 does. It
 compares keys by their JavaScript upper case, as it does the words of

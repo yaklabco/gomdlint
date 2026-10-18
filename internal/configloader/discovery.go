@@ -43,12 +43,15 @@ var gomdlintConfigFiles = []string{
 	"gomdlint.json",
 }
 
-// markdownlintConfigFiles are the markdownlint config files we detect for migration.
+// markdownlintConfigFiles are the markdownlint config files we detect for
+// migration, in the order in which markdownlint-cli2 0.23.3 looks for them
+// (configurationFiles in markdownlint-cli2.mjs): in a directory that holds
+// several, the first one is used.
 //
 //nolint:gochecknoglobals // Read-only lookup table.
 var markdownlintConfigFiles = []string{
-	".markdownlint.json",
 	".markdownlint.jsonc",
+	".markdownlint.json",
 	".markdownlint.yaml",
 	".markdownlint.yml",
 	".markdownlint.cjs",
