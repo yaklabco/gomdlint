@@ -503,9 +503,11 @@ func getDefaultGenericPatterns() []string {
 }
 
 // Apply checks for generic/non-descriptive link text. The prohibited texts
-// come from prohibited_texts (markdownlint's name) or patterns. With the
-// default markdownlint_compatible, link text is compared like markdownlint:
-// punctuation is ignored, and links containing code or HTML are skipped.
+// come from patterns, which markdownlint calls prohibited_texts: the
+// registry rewrites that spelling to patterns before the rule runs. With
+// the default markdownlint_compatible, link text is compared like
+// markdownlint: punctuation is ignored, and links containing code or HTML
+// are skipped.
 func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -515,9 +517,6 @@ func (r *DescriptiveLinkTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	// Get patterns from config, or use defaults
 	patterns := ctx.OptionStringSlice("patterns", getDefaultGenericPatterns())
-	if ctx.Option("prohibited_texts", nil) != nil {
-		patterns = ctx.OptionStringSlice("prohibited_texts", patterns)
-	}
 	compatible := ctx.OptionBool("markdownlint_compatible", true)
 
 	// Build pattern set (lowercase for case-insensitive matching)

@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"context"
 	"maps"
 	"os"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // optionSpelling is one alias of a rule option: markdownlint's spelling of
@@ -229,6 +231,28 @@ func aliasNames(spec lint.OptionSpec) []string {
 	return names
 }
 
+// optionConfigs returns the option settings under which
+// TestCatalogDeclaresEveryOptionRead runs a rule: none, the declared
+// defaults, the defaults with every boolean flipped, which reaches options
+// that only a boolean turns on, and the rule's options from the sidecar of
+// a golden case, when it has one.
+func optionConfigs(t *testing.T, specs []lint.OptionSpec, sidecar map[string]any) []map[string]any {
+	t.Helper()
+
+	defaults := declaredDefaults(t, specs, nil)
+	flipped := maps.Clone(defaults)
+	for _, spec := range specs {
+		if enabled, ok := spec.Default.(bool); ok {
+			flipped[spec.Name] = !enabled
+		}
+	}
+	configs := []map[string]any{nil, defaults, flipped}
+	if sidecar != nil {
+		configs = append(configs, sidecar)
+	}
+	return configs
+}
+
 // declaredDefaults returns options that set every option of specs to its
 // declared default, in the form a configuration file holds values, with
 // set, canonical options, overriding them. An option without a default is
@@ -261,6 +285,54 @@ func configFileValue(t *testing.T, value any) any {
 	var decoded any
 	require.NoError(t, yaml.Unmarshal(encoded, &decoded))
 	return decoded
+}
+
+// TestCatalogDeclaresEveryOptionRead runs every rule on its golden inputs
+// and on the real-world ones, under the settings of optionConfigs, and
+// records the options it reads. Every option a rule reads must be declared
+// under that canonical name, and every declared option must be read.
+func TestCatalogDeclaresEveryOptionRead(t *testing.T) {
+	baseDir := testdataDir(t)
+	cases := discoverTestCases(t, baseDir)
+
+	for _, meta := range Catalog() {
+		rule, ok := lint.DefaultRegistry.GetByID(meta.ID)
+		require.True(t, ok, meta.ID)
+
+		declared := make(map[string]bool, len(meta.Options))
+		for _, spec := range meta.Options {
+			declared[spec.Name] = true
+		}
+		read := make(map[string]bool)
+
+		for _, tc := range cases {
+			if tc.RuleID != meta.ID && !tc.IsRealWorld {
+				continue
+			}
+			cfg, err := loadGoldenConfig(tc.ConfigPath)
+			require.NoError(t, err, tc.Name)
+			content, err := os.ReadFile(tc.InputPath)
+			require.NoError(t, err, tc.Name)
+			snapshot, err := goldmark.New(string(cfg.Flavor)).Parse(context.Background(), tc.InputPath, content)
+			require.NoError(t, err, tc.Name)
+
+			for _, options := range optionConfigs(t, meta.Options, cfg.Rules[meta.ID].Options) {
+				normalized, _, _ := lint.DefaultRegistry.NormalizeOptions(meta.ID, options)
+				ruleCtx := lint.NewRuleContext(context.Background(), snapshot, cfg, &config.RuleConfig{Options: normalized})
+				ruleCtx.Registry = lint.DefaultRegistry
+				ruleCtx.RecordOptionReads(func(key string) { read[key] = true })
+				_, err := rule.Apply(ruleCtx)
+				require.NoError(t, err, "%s on %s", meta.ID, tc.Name)
+			}
+		}
+
+		for _, key := range slices.Sorted(maps.Keys(read)) {
+			assert.True(t, declared[key], "%s reads option %q, which its catalog entry does not declare", meta.ID, key)
+		}
+		for _, key := range slices.Sorted(maps.Keys(declared)) {
+			assert.True(t, read[key], "%s declares option %q, which it never read", meta.ID, key)
+		}
+	}
 }
 
 // TestCatalogDefaultsMatchCode runs every golden case twice: as it is, and

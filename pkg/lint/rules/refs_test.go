@@ -37,7 +37,8 @@ func testHelper(t *testing.T, rule lint.Rule, markdown string) []lint.Diagnostic
 	return diags
 }
 
-// testHelperWithOptions parses markdown and runs a rule with custom options.
+// testHelperWithOptions parses markdown and runs a rule with custom options,
+// as the engine hands them to the rule (see engineOptions).
 func testHelperWithOptions(t *testing.T, rule lint.Rule, markdown string, options map[string]interface{}) []lint.Diagnostic {
 	t.Helper()
 
@@ -48,7 +49,7 @@ func testHelperWithOptions(t *testing.T, rule lint.Rule, markdown string, option
 	}
 
 	cfg := &config.Config{}
-	ruleCfg := &config.RuleConfig{Options: options}
+	ruleCfg := &config.RuleConfig{Options: engineOptions(rule.ID(), options)}
 	ruleCtx := lint.NewRuleContext(context.Background(), file, cfg, ruleCfg)
 
 	diags, err := rule.Apply(ruleCtx)
