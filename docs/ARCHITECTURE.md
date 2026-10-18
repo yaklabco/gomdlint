@@ -146,8 +146,9 @@ config is the first of `.gomdlint.yml`, `.gomdlint.yaml`, `gomdlint.yml`,
 `gomdlint.yaml`, `.gomdlint.json` and `gomdlint.json` found in the nearest
 directory that holds one, searching upward to a VCS root or the home
 directory. A `.json` file is parsed as JSON and turned into the YAML node
-tree that the loader decodes, so rule shorthands and warnings for unknown
-keys work the same way in both formats. Each layer's rule keys are
+tree that the loader decodes, so rule shorthands, rule options written
+directly under the rule key, and warnings for unknown keys work the same way
+in both formats. Each layer's rule keys are
 normalized to rule IDs before the layers merge, so a rule configured under
 two keys in one file is an error.
 
