@@ -15,9 +15,10 @@ type catalogSection struct {
 }
 
 // Catalog returns the catalog entry of every built-in rule, in rule ID
-// order: its ID, name, markdownlint aliases, category, markdownlint tags
-// and whether it can fix what it finds. Each catalog_<category>.go file
-// lists the rules of one category.
+// order: its ID, name, markdownlint aliases, category, markdownlint tags,
+// whether it can fix what it finds, and what it checks, why, and what its
+// fix does. Each catalog_<category>.go file lists the rules of one
+// category.
 func Catalog() []lint.RuleMeta {
 	sections := []catalogSection{
 		{lint.CategoryHeadings, headingsCatalog()},
