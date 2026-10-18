@@ -40,12 +40,16 @@ func (d *inlineDirective) kind() string {
 	return "markdownlint-" + d.action
 }
 
+// configureFileAction is the action of a markdownlint-configure-file
+// comment, whose parameter is a JSON object rather than rule names.
+const configureFileAction = "configure-file"
+
 // takesRules reports whether the parameter of a comment with action names
 // rules. markdownlint ignores the parameter of capture and restore, and
 // configure-file takes a JSON object.
 func takesRules(action string) bool {
 	switch action {
-	case "capture", "restore", "configure-file":
+	case "capture", "restore", configureFileAction:
 		return false
 	default:
 		return true
@@ -83,7 +87,7 @@ var directiveStart = regexp.MustCompile(directiveStartPattern())
 // ignores the case of ASCII letters only.
 func directiveStartPattern() string {
 	kinds := []string{
-		"configure-file", "disable-next-line", "disable-line", "disable-file", "enable-file",
+		configureFileAction, "disable-next-line", "disable-line", "disable-file", "enable-file",
 		"disable", "enable", "capture", "restore",
 	}
 	for idx, kind := range kinds {
@@ -171,7 +175,7 @@ func HasInlineDirective(text []byte) bool {
 		return false
 	}
 	for match := range directiveMatches(string(text)) {
-		if match.kind != "configure-file" {
+		if match.kind != configureFileAction {
 			return true
 		}
 	}
@@ -219,7 +223,7 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 	var result *config.Config
 	for idx := range directives {
 		directive := &directives[idx]
-		if directive.action != "configure-file" {
+		if directive.action != configureFileAction {
 			continue
 		}
 		if result == nil {
