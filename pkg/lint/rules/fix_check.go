@@ -1033,52 +1033,12 @@ func (s *signatureWriter) inline(node gmast.Node) {
 		s.inlines(node)
 		s.token(")")
 	case *gmextast.TaskCheckBox:
-		s.token(fmt.Sprintf("\x00task%t%s", node.IsChecked, checkboxForm(node, s.source)))
+		s.token(fmt.Sprintf("\x00task%t", node.IsChecked))
 	default:
 		s.token("\x00" + node.Kind().String() + "(")
 		s.inlines(node)
 		s.token(")")
 	}
-}
-
-// checkboxForm names the forms of a task checkbox that micromark reads and
-// GitHub's cmark-gfm reads as text: a tab or a line ending between the
-// brackets, a line ending right after them, and brackets that are not on
-// the line of their list item's marker, after a blank first line or a link
-// reference definition. A fix that changes one of these forms can add or
-// remove a checkbox on GitHub while micromark reads the same, as replacing
-// the tab of "- [\t] task" does, so the signature keeps the form.
-func checkboxForm(box gmast.Node, source []byte) string {
-	lines := box.Parent().Lines()
-	if lines.Len() == 0 {
-		return ""
-	}
-	open := lines.At(0).Start
-	closing := open + 2
-	var form strings.Builder
-	if open+1 < len(source) {
-		switch source[open+1] {
-		case '\t':
-			form.WriteString("tab")
-		case '\n', '\r':
-			// The "]" starts the paragraph's next line.
-			form.WriteString("eol")
-			if lines.Len() > 1 {
-				closing = lines.At(1).Start
-			}
-		}
-	}
-	if closing+1 < len(source) && (source[closing+1] == '\n' || source[closing+1] == '\r') {
-		form.WriteString("bare")
-	}
-	marker := open
-	for marker > 0 && (source[marker-1] == ' ' || source[marker-1] == '\t') {
-		marker--
-	}
-	if marker == open || marker == 0 || !strings.ContainsRune("-*+.)", rune(source[marker-1])) {
-		form.WriteString("late")
-	}
-	return form.String()
 }
 
 // exactText returns the source text of the inline content of a node, such

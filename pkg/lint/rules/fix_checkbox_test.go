@@ -2,6 +2,8 @@ package rules
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,143 +63,107 @@ func TestFixChecksReadCheckboxesAsTheParser(t *testing.T) {
 	}
 }
 
-// TestCheckboxForm checks the forms of a checkbox that the render signature
-// keeps because micromark reads a checkbox there and GitHub's cmark-gfm
-// reads text. cmark-gfm 0.29.0.gfm.0 reads a checkbox in each document
-// whose form is empty.
-func TestCheckboxForm(t *testing.T) {
+// TestFixKeepsCheckboxes runs --fix with every default rule over a corpus
+// of task list documents: the cases of earlier review rounds, fixes that
+// could make a checkbox, and checkboxes that micromark and GitHub's
+// cmark-gfm read differently. The engine withholds every fix that changes
+// or makes a possible checkbox (lint's checkbox guard), so only fixes away
+// from them apply. micromark is the checkbox count of micromark with
+// micromark-extension-gfm, and cmark that of cmark-gfm 0.29.0.gfm.0; both
+// were counted on the input and on the expected output, and are the same.
+func TestFixKeepsCheckboxes(t *testing.T) {
 	tests := []struct {
-		input string
-		form  string
+		name             string
+		input            string
+		options          map[string]map[string]any
+		want             string // Output of --fix; empty means unchanged.
+		micromark, cmark int
 	}{
-		{"- [ ] task\n", ""},
-		{"- [X] task\n", ""},
-		{"-\t[x] foo\n", ""},
-		{"1.  [x] wide\n", ""},
-		{"10) [ ] ten\n", ""},
-		{"- [x] \n  task\n", ""},
-		{"- [\t] task\n", "tab"},
-		{"- [\n  ] task\n", "eol"},
-		{"- [\r\n  ] task\r\n", "eol"},
-		{"- [x]\n  task\n", "bare"},
-		{"- [\n  ]\n  task\n", "eolbare"},
-		{"-\n  [x] done\n", "late"},
-		{"- [c]: /url\n  [x] done\n", "late"},
-		{"> -\n>   [x] done\n", "late"},
+		{name: "md030 zero, tab four wide", input: "-  [\t] task\n", options: map[string]map[string]any{"MD030": {"ul_single": 0}}, micromark: 0, cmark: 0},
+		{name: "tab one wide", input: "- [\t] task\n", micromark: 1, cmark: 0},
+		{name: "tab four wide", input: "-  [\t] task\n", micromark: 0, cmark: 0},
+		{name: "md007 indent four", input: "- a\n  - [\t] x\n", options: map[string]map[string]any{"MD007": {"indent": 4}}, micromark: 0, cmark: 0},
+		{name: "md030 ordered", input: "1.  [\t] task\n", micromark: 0, cmark: 0},
+		{name: "multiline", input: "- [\n  ] task\n", micromark: 1, cmark: 0},
+		{name: "multiline extra space", input: "- [\n   ] task\n", micromark: 0, cmark: 0},
+		{name: "after definition", input: "-\n  [c]: /url\n  [x] done\n", micromark: 1, cmark: 0},
+		{name: "after definition used", input: "- [c]: /url\n  [x] done [c]\n", micromark: 1, cmark: 0},
+		{name: "trailing spaces", input: "- [ ]   \n  task\n", micromark: 1, cmark: 1},
+		{name: "tab after checkbox", input: "- [x]\ttask\n", micromark: 1, cmark: 1},
+		{name: "md030 plain", input: "-  [x] task\n", micromark: 1, cmark: 1},
+		{name: "one trailing space", input: "- [x] \n  task\n", micromark: 1, cmark: 1},
+		{name: "quoted multiline md027", input: ">  - [\n>    ] task\n", micromark: 1, cmark: 0},
+		{name: "quoted multiline", input: "> - [\n>   ] task\n", micromark: 1, cmark: 0},
+		{name: "ordered tab two wide", input: "1.   [\t] task\n", micromark: 0, cmark: 0},
+		{name: "space after an empty marker", input: "- \n  [x] task\n", micromark: 0, cmark: 0},
+		{name: "space after the brackets", input: "- [x] \n", micromark: 0, cmark: 1},
+		{name: "md039 link text", input: "- [ x](u)\n", micromark: 0, cmark: 0},
+		{name: "md011 reversed link", input: "- (x)[y]\n", micromark: 0, cmark: 0},
+		{name: "md004 marker style", input: "* [x] a\n- [ ] b\n", micromark: 2, cmark: 2},
+		{name: "md029 numbering", input: "1. [x] a\n3. [ ] b\n", options: map[string]map[string]any{"MD029": {"style": "ordered"}}, micromark: 2, cmark: 2},
+		{name: "md007 nested", input: "- a\n    - [x] b\n", micromark: 1, cmark: 1},
+		{name: "md027 quote spacing", input: ">  - [x] a\n", micromark: 1, cmark: 0},
+		{name: "md010 tab after text", input: "- [x] a\tb\n", micromark: 1, cmark: 1},
+		{name: "md009 text after", input: "- [x] task   \n", micromark: 1, cmark: 1},
+		{name: "md032 list after paragraph", input: "Text\n- [x] a\n- [ ] b\nMore\n", want: "Text\n\n- [x] a\n- [ ] b\nMore\n", micromark: 2, cmark: 2},
+		{name: "md012 blank lines in item", input: "- [x] a\n\n\n  b\n", want: "- [x] a\n\n  b\n", micromark: 1, cmark: 1},
+		{name: "md047 final newline", input: "- [x] a", micromark: 1, cmark: 1},
+		{name: "blank first line", input: "-\n  [x] done\n", micromark: 1, cmark: 0},
+		{name: "blank first line, trailing tab", input: "-\t\n  [x] done\n", micromark: 0, cmark: 0},
+		{name: "definitions then checkbox", input: "- [cc]: /url\n  [dd]: /other\n  [x] done\n", micromark: 1, cmark: 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			source := []byte(tt.input)
-			markdown := newFixCheck(&mdast.FileSnapshot{Content: source}, config.FlavorGFM).markdowns[0]
-			boxes := goldmarkCheckboxes(markdown.Parser().Parse(gmtext.NewReader(source)))
-			require.Len(t, boxes, 1)
-			open := boxes[0].Parent().Lines().At(0).Start
-			require.Equal(t, byte('['), source[open], "the paragraph starts with the checkbox")
-			assert.Equal(t, tt.form, checkboxForm(boxes[0], source))
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := fixWithDefaultRules(t, tt.input, tt.options)
+			want := tt.want
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, want, got)
+			assert.Equal(t, checkboxLines(tt.input), checkboxLines(got),
+				"the lines a checkbox could be read from stay as they are")
 		})
 	}
 }
 
-// TestFixKeepsCheckboxes runs --fix with every default rule on documents
-// where a fix could turn text into a task checkbox or a checkbox into text,
-// and checks that the output reads as micromark reads the input. Each
-// comment gives the checkboxes micromark with micromark-extension-gfm reads
-// in the input and in the document the withheld fix would make.
-func TestFixKeepsCheckboxes(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		options map[string]map[string]any
-		want    string
-		ruleIDs []string // Rules whose findings stay without a fix.
-	}{
-		{
-			// MD030 narrowing the space would make the tab one column
-			// wide: 0 checkboxes, then 1. MD010 replacing the tab with a
-			// space would too.
-			name:    "marker space before a tab between brackets",
-			input:   "-  [\t] task\n",
-			options: map[string]map[string]any{"MD030": {"ul_single": 0}},
-			want:    "-  [\t] task\n",
-			ruleIDs: []string{"MD010", "MD030"},
-		},
-		{
-			// MD007 indenting the item moves the tab two columns: 0, then 1.
-			name:    "nested item with a tab between brackets",
-			input:   "- a\n  - [\t] x\n",
-			options: map[string]map[string]any{"MD007": {"indent": 4}},
-			want:    "- a\n  - [\t] x\n",
-			ruleIDs: []string{"MD007", "MD010"},
-		},
-		{
-			// MD030 keeps the tab four columns wide: 0, then 0. MD010
-			// replacing it with a space would make a checkbox: 0, then 1.
-			name:    "ordered item with a tab between brackets",
-			input:   "1.  [\t] task\n",
-			want:    "1. [\t] task\n",
-			ruleIDs: []string{"MD010"},
-		},
-		{
-			// Replacing the tab with a space keeps micromark's checkbox, 1
-			// and 1, but GitHub's cmark-gfm reads "[\t]" as text, so the
-			// fix would add a checkbox there.
-			name:    "tab between brackets",
-			input:   "- [\t] task\n",
-			want:    "- [\t] task\n",
-			ruleIDs: []string{"MD010"},
-		},
-		{
-			// MD027 removing the space moves the bracket off the item's
-			// content column: 1, then 0.
-			name:    "quoted line ending between brackets",
-			input:   ">  - [\n>    ] task\n",
-			want:    ">  - [\n>    ] task\n",
-			ruleIDs: []string{"MD027"},
-		},
-		{
-			// The spaces after the checkbox are a hard line break, which
-			// MD009 keeps at two spaces: 1 checkbox and a break, then the
-			// same.
-			name:  "hard break after a checkbox",
-			input: "- [ ]   \n  task\n",
-			want:  "- [ ]  \n  task\n",
-		},
-		{
-			// cmark-gfm reads "- [x]" with nothing after it on its line as
-			// text, and micromark reads a checkbox, 1 and 1.
-			name:    "one space after a checkbox",
-			input:   "- [x] \n  task\n",
-			want:    "- [x] \n  task\n",
-			ruleIDs: []string{"MD009"},
-		},
-		{
-			// Both read a checkbox before and after: 1, then 1.
-			name:  "tab after a checkbox",
-			input: "- [x]\ttask\n",
-			want:  "- [x] task\n",
-		},
-		{
-			name:  "marker space before a checkbox",
-			input: "-  [x] task\n",
-			want:  "- [x] task\n",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, diags := fixWithDefaultRules(t, tt.input, tt.options)
-			assert.Equal(t, tt.want, got)
-			for _, ruleID := range tt.ruleIDs {
-				var found bool
-				for _, diag := range diags {
-					if diag.RuleID == ruleID {
-						found = true
-						assert.Empty(t, diag.FixEdits, "%s keeps its finding without a fix", ruleID)
-					}
+// TestFixKeepsCheckboxFindings checks that a finding whose fix the checkbox
+// guard withholds is still reported, without a fix: MD009 on the two
+// documents of round 2's review, where removing the space changed
+// micromark's and cmark-gfm's checkboxes.
+func TestFixKeepsCheckboxFindings(t *testing.T) {
+	for _, input := range []string{"- \n  [x] task\n", "- [x] \n"} {
+		t.Run(input, func(t *testing.T) {
+			got, diags := fixWithDefaultRules(t, input, nil)
+			assert.Equal(t, input, got)
+			var found bool
+			for _, diag := range diags {
+				if diag.RuleID == "MD009" {
+					found = true
+					assert.Empty(t, diag.FixEdits, "MD009 keeps its finding without a fix")
 				}
-				assert.True(t, found, "%s reports the finding", ruleID)
 			}
+			assert.True(t, found, "MD009 reports the trailing space")
 		})
 	}
+}
+
+// checkboxLinePattern matches a line whose text, after blockquote markers,
+// list item markers, spaces and tabs, starts with "[", and a list item's
+// marker line that holds nothing else, after which an item's first
+// paragraph starts on the next line.
+var checkboxLinePattern = regexp.MustCompile(
+	`^[ \t>]*(?:(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))*\[|^[ \t>]*(?:(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))+$`)
+
+// checkboxLines returns the lines of text that checkboxLinePattern
+// matches, in order, with their line endings.
+func checkboxLines(text string) []string {
+	var lines []string
+	for _, line := range strings.SplitAfter(text, "\n") {
+		if checkboxLinePattern.MatchString(strings.TrimRight(line, "\r\n")) {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 // goldmarkCheckboxes returns the task checkboxes of a goldmark tree.

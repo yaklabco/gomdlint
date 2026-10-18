@@ -334,6 +334,18 @@ A rule proposes one fix per finding as a set of `fix.TextEdit` byte ranges.
 content, no two edits overlap, and no edit splits a CRLF pair or a UTF-8
 character. An invalid fix is dropped from its finding only.
 
+The engine then withholds every fix that changes or makes a possible task
+list checkbox (`pkg/lint/checkbox_guard.go`), whatever rule offers it, and
+reports its finding without a fix. micromark and GitHub's cmark-gfm read
+checkboxes in different places, so the guard reads no renderer's rules.
+It takes a lexical superset of both: in a list item's first lines up to a
+blank line or the next item, a line whose text starts with `[`, one
+character or a line ending, and `]`. A fix may not change the text from the
+start of the item's marker line through the line holding the `]` (and the
+line after it when nothing follows the `]`), join that marker line to the
+line before, or leave the lines around it with a candidate they did not
+have.
+
 Fixes of different rules can each be safe and still corrupt a file
 together. One rule removing `$` prompts in a code block while another
 changes its fences from tildes to backticks turns the line `` $ ``` `` into
@@ -388,11 +400,8 @@ because the engine may apply any subset of them.
   matter, block kinds and nesting, heading levels with the anchors GitHub
   gives them, list kinds, start numbers and tightness, code and raw HTML
   byte for byte, resolved link destinations and titles, task checkboxes, and
-  inline text with the whitespace that HTML collapses. A checkbox keeps the
-  forms that micromark reads as a checkbox and GitHub's cmark-gfm as text: a
-  tab or a line ending between the brackets, a line ending right after
-  them, and brackets off the line of the item's marker (`checkboxForm`).
-  With the `commonmark` flavor it also parses as GFM. A document whose raw
+  inline text with the whitespace that HTML collapses. With the
+  `commonmark` flavor it also parses as GFM. A document whose raw
   HTML is anything other than whitespace, well-formed comments, and start
   tags of `br`, `wbr`, `hr` and `img` with only the presentational
   attributes that `benignAttribute` allows, each used once (`benignHTML`),

@@ -338,11 +338,13 @@ formats change. The first entries under Changed may need action.
   starts with the `]`. In a heading, or right before other text, they are
   text or a link, so **MD039** reports `- ## [ ](/url).` and **MD034** no
   longer reports the address in `- [x](https://example.com)`.
-- Fix checks read task checkboxes as the rules do, so MD030, MD007 and
-  MD010 no longer turn text with a tab between brackets into a checkbox,
-  and MD009 keeps the hard line break that spaces after a checkbox make. A
-  fix that changes a checkbox that GitHub reads as text, such as one with a
-  tab between its brackets, is withheld.
+- No fix changes or makes a task list checkbox. micromark and GitHub's
+  cmark-gfm read checkboxes in different places, so every fix that touches
+  a list item's text from its marker through a `[`, one character or a line
+  ending, and `]` at the start of its content, or that makes such text, is
+  withheld, and its finding is reported without a fix. MD030, MD007 and
+  MD010 used to turn text such as `-  [\t] task` into a checkbox, and MD009
+  removed checkboxes or the hard line break after one.
 - Fixes of two rules no longer combine to corrupt a file. MD014 removing
   prompts while MD048 changed the fences could close a code block early, and
   MD007 moving an item right while MD030 narrowed the item above could nest
