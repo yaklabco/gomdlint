@@ -286,7 +286,7 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 			if IsGomdlintOnlyRule(id) {
 				baseline = false
 			}
-			result.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, baseline)
+			result.RuleDefaults[id] = config.MarkdownlintDefaultRuleConfig(id, baseline)
 		}
 	}
 	if result.Rules == nil {

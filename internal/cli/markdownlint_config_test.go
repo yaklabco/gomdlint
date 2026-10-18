@@ -111,6 +111,36 @@ func TestMarkdownlintConfig_KeysAsMarkdownlintReadsThem(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintConfig_DefaultKeyInAnyCase covers the default key of a
+// markdownlint config, which markdownlint 0.41.1 reads in any case, taking
+// the first one written. gomdlint used to read only "default", so it warned
+// about an unknown rule "Default" and left the rules on. markdownlint
+// reports trailingSpaceDoc's trailing space with the last config only.
+func TestMarkdownlintConfig_DefaultKeyInAnyCase(t *testing.T) {
+	tests := []struct {
+		name, file, settings string
+		want                 []string
+	}{
+		{name: "JSON", file: ".markdownlint.json", settings: `{"Default": false}`},
+		{name: "YAML", file: ".markdownlint.yaml", settings: "DEFAULT: false\n"},
+		{
+			name: "the first of two", file: ".markdownlint.json",
+			settings: `{"default": true, "Default": false}`, want: []string{"MD009"},
+		},
+	}
+
+	for _, tt := range tests {
+		for _, mode := range markdownlintModes {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				got, warnings := lintWithMarkdownlintConfig(t, mode, tt.file, tt.settings, trailingSpaceDoc)
+
+				assert.Equal(t, map[string][]string{"doc.md": tt.want}, got)
+				assert.NotContains(t, warnings, "unknown rule")
+			})
+		}
+	}
+}
+
 // TestMarkdownlintConfig_AppliesKeysInWrittenOrder covers the order in which
 // a markdownlint config's keys apply, in JSON and in YAML: the order they
 // are written, as in markdownlint 0.41.1, so a later key overrides an

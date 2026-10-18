@@ -431,6 +431,29 @@ func TestEngineConfigureFileDefaultPreservesExplicitRules(t *testing.T) {
 	}
 }
 
+// TestEngineConfigureFileDefaultValue covers the value of a configure-file
+// comment's default key, which markdownlint 0.41.1 reads as JavaScript
+// does: any object turns every rule on, whatever it holds, while 0 and ""
+// turn them off. markdownlint reports the trailing space with the first
+// comment only.
+func TestEngineConfigureFileDefaultValue(t *testing.T) {
+	registry := lint.NewRegistry()
+	registry.Register(rules.NewTrailingWhitespaceRule())
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	for comment, reported := range map[string]bool{
+		`{"default": {"enabled": false}}`: true,
+		`{"default": 0}`:                  false,
+		`{"default": ""}`:                 false,
+	} {
+		input := "<!-- markdownlint-configure-file " + comment + " -->\n\n# Title\n\ntext \n"
+
+		result, err := engine.LintFile(context.Background(), "test.md", []byte(input), config.NewConfig())
+
+		require.NoError(t, err, comment)
+		assert.Equal(t, reported, len(result.Diagnostics) == 1, comment)
+	}
+}
+
 func TestEngineConfigureFileRejectsInvalidConfiguration(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(rules.NewTrailingWhitespaceRule())

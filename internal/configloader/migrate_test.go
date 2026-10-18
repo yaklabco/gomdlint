@@ -1,6 +1,7 @@
 package configloader
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
@@ -657,6 +658,57 @@ func TestConvertMarkdownlintConfig_AppliesKeysInWrittenOrder(t *testing.T) {
 			result := convertFile(t, tt.file, tt.content)
 
 			requireRuleEnabled(t, result, "MD009", tt.md009)
+		})
+	}
+}
+
+// TestConvertMarkdownlintConfig_DefaultKey covers markdownlint's default
+// key. getEffectiveConfig in markdownlint 0.41.1 takes the first key whose
+// upper case is DEFAULT, in any case and wherever it is written, and reads
+// its value as JavaScript does: a truthy value, an object among them,
+// enables every rule, a falsy one such as false, null, 0 or "" disables
+// them, and "warning" makes them warnings. Only the enabled state and the
+// severity come from it, never options. For each config, markdownlint
+// 0.41.1 reports MD009 exactly when enabled is set, at the given severity.
+func TestConvertMarkdownlintConfig_DefaultKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		file, content string
+		enabled       bool
+		severity      string
+	}{
+		{file: ".markdownlint.json", content: `{}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"default": false}`},
+		{file: ".markdownlint.json", content: `{"Default": false}`},
+		{file: ".markdownlint.json", content: `{"DEFAULT": false}`},
+		{file: ".markdownlint.yaml", content: "Default: false\n"},
+		{file: ".markdownlint.json", content: `{"Default": false, "default": true}`},
+		{file: ".markdownlint.json", content: `{"default": true, "Default": false}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"MD013": false, "dEfAuLt": false, "DEFAULT": true}`},
+		{file: ".markdownlint.json", content: `{"default": {"enabled": false, "br_spaces": 5}}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"default": 0}`},
+		{file: ".markdownlint.json", content: `{"default": ""}`},
+		{file: ".markdownlint.json", content: `{"default": null}`},
+		{file: ".markdownlint.json", content: `{"default": "off"}`, enabled: true},
+		{file: ".markdownlint.json", content: `{"Default": "warning"}`, enabled: true, severity: "warning"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.content, func(t *testing.T) {
+			t.Parallel()
+
+			result := convertFile(t, tt.file, tt.content)
+
+			assert.Empty(t, result.Warnings, "a default key is no unknown rule")
+			assert.NotContains(t, result.Config.Rules, "MD009")
+			baseline := result.Config.RuleDefaults["MD009"]
+			require.NotNil(t, baseline.Enabled)
+			assert.Equal(t, tt.enabled, *baseline.Enabled)
+			require.NotNil(t, baseline.Severity)
+			assert.Equal(t, cmp.Or(tt.severity, "error"), *baseline.Severity)
+			assert.Equal(t, map[string]any{"ignore_code_blocks": true, "br_spaces": 2}, baseline.Options,
+				"the default sets no options")
+			assert.False(t, *result.Config.RuleDefaults["MDL001"].Enabled, "markdownlint never runs gomdlint's rules")
 		})
 	}
 }

@@ -31,11 +31,13 @@ type MigrationResult struct {
 }
 
 // ConvertMarkdownlintConfig converts a markdownlint config file to gomdlint
-// format. As in markdownlint 0.41.1, the default key gives every rule its
-// baseline, and the other keys apply in the order they are written, each
-// replacing what an earlier key set for the rules it names (see
-// lint.MarkdownlintSettings). It returns the converted config with any
-// warnings, or an error if the file cannot be read or parsed.
+// format. As in markdownlint 0.41.1, the default key, the first key named
+// default in any case, gives every rule its baseline (see
+// config.MarkdownlintDefaultRuleConfig), and the other keys apply in the
+// order they are written, each replacing what an earlier key set for the
+// rules it names (see lint.MarkdownlintSettings). It returns the converted
+// config with any warnings, or an error if the file cannot be read or
+// parsed.
 func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	result := &MigrationResult{
 		SourcePath: path,
@@ -57,11 +59,9 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	}
 
 	cfg := &config.Config{Rules: make(map[string]config.RuleConfig)}
-	var defaultValue any = true
-	for _, setting := range settings.Settings() {
-		if setting.Key == "default" {
-			defaultValue = setting.Value
-		}
+	defaultValue, found := settings.Default()
+	if !found {
+		defaultValue = true // Without a default key, markdownlint runs every rule.
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
@@ -71,12 +71,15 @@ func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 		if lint.IsGomdlintOnlyRule(id) {
 			value = false // markdownlint does not run gomdlint's own rules.
 		}
-		cfg.RuleDefaults[id] = config.MarkdownlintRuleConfig(id, value)
+		cfg.RuleDefaults[id] = config.MarkdownlintDefaultRuleConfig(id, value)
 	}
 
 	for _, setting := range settings.Settings() {
+		if lint.IsMarkdownlintDefaultKey(setting.Key) {
+			continue // The first default key is the baseline, and later ones do nothing.
+		}
 		switch setting.Key {
-		case "default", "$schema":
+		case "$schema":
 			continue
 		case "extends":
 			if extends, ok := setting.Value.(string); ok {
