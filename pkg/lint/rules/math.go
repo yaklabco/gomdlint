@@ -60,9 +60,10 @@ func findMathWith(ctx *lint.RuleContext, mode mathMode) mathRegions {
 }
 
 // possibleMathLines returns the lines of every math block that a fence at
-// column 0 opens, read without findMath's guards. MD052 reads no footnote
-// definition there. Math only hides definitions, so reading more of it can
-// only make MD052 report more, as main does.
+// column 0, or one indented outside goldmark's containers, opens, read
+// without findMath's guards. MD052 reads no footnote definition there. Math
+// only hides definitions, so reading more of it can only make MD052 report
+// more, as main does.
 func possibleMathLines(ctx *lint.RuleContext) map[int]bool {
 	math := mathRegions{lines: make(map[int]bool)}
 	if ctx.File != nil && ctx.Root != nil && bytes.Contains(ctx.File.Content, []byte("$$")) {
@@ -87,7 +88,9 @@ func possibleMathLines(ctx *lint.RuleContext) map[int]bool {
 // Guarded, findBlocks reads no more math blocks from the first fence where
 // micromark may read the blocks differently (blockScan). Skipping that
 // fence alone would not do: micromark may read it as math, and then read
-// the fence that closes it as one that opens math.
+// the fence that closes it as one that opens math. Unguarded, for MD052's
+// footnote definitions, it reads every such block, and also the top-level
+// math behind a fence indented one to three spaces (indentedTopLevelFence).
 func (m *mathRegions) findBlocks(ctx *lint.RuleContext, mode mathMode) {
 	file := ctx.File
 	if mode.guarded && !linesAsMicromark(file) {
@@ -101,6 +104,9 @@ func (m *mathRegions) findBlocks(ctx *lint.RuleContext, mode mathMode) {
 		}
 		text := lint.LineText(file, line)
 		fence, ok := mathFenceOpening(text)
+		if !ok && !mode.guarded {
+			fence, ok = scan.indentedTopLevelFence(line, text)
+		}
 		if !ok {
 			scan.passLine(line, text)
 			continue
@@ -384,6 +390,26 @@ func mayBeRefused(file *mdast.FileSnapshot, item *mdast.Node) bool {
 	}
 	first := list.SourcePosition().StartLine
 	return first > file.FrontMatterLines+1 && len(bytes.Trim(lint.RawLineContent(file, first-1), " \t>")) > 0
+}
+
+// indentedTopLevelFence returns the length of a math fence that text, a
+// line outside goldmark's containers or lazy in them, holds after one to
+// three spaces, where micromark reads top-level math. Only an unguarded
+// findBlocks, for MD052's footnote definitions, reads such math, where more
+// math only reports more footnote calls.
+func (s *blockScan) indentedTopLevelFence(line int, text []byte) (int, bool) {
+	indent := 0
+	for indent < len(text) && indent < maxFenceIndent && text[indent] == ' ' {
+		indent++
+	}
+	if indent == 0 {
+		return 0, false
+	}
+	fence, ok := mathFenceOpening(text[indent:])
+	if !ok || s.contained(line) {
+		return 0, false
+	}
+	return fence, true
 }
 
 // minDirectiveColons is the fewest colons that open a container directive.

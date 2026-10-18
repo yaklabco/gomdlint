@@ -729,9 +729,13 @@ Some of its fix checks are also stricter than they need to be.
   rest of a document at a fence where micromark may read the lines before
   it differently from goldmark: after an indented `$$` fence, which
   markdownlint may read as math, after an HTML block that goldmark does not
-  read, or inside a `:::` directive. A line that looks like a footnote
-  definition inside math that gomdlint does not read counts as one for
-  MD052.
+  read, or inside a `:::` directive.
+- With `shortcut_syntax`, `reference-links-images` (MD052) counts no
+  footnote definition where micromark may read math, an HTML block or no
+  list item over it. Examples are a definition in an ordered list whose
+  first marker is not `1.` or `1)`, or one after a math fence in its
+  container. There MD052 reports the footnote call, as main does, even
+  where markdownlint reads the definition.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

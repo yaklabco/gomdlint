@@ -1025,27 +1025,93 @@ func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
 			want:     []position{{4, 1}},
 			wantFull: []position{{4, 1}},
 		},
+		// Where micromark may read math, an HTML block or no list item over a
+		// definition, or may have closed the footnote that holds it, the
+		// definition does not count, and MD052 reports what main reports.
+		// markdownlint reports 3:5 alone, as it reads the second call as math
+		// or as no call, but in the item marked 01, which micromark reads as
+		// text, it reports both.
 		{
-			// A known difference: markdownlint reads math in the footnote's
-			// content, which holds no definition, and reports 3:5. gomdlint
-			// reads math only from a fence at column 0, so the line defines
-			// the footnote.
 			name:  "definition in math in a footnote",
 			input: "# T\n\nUse [^n].\n\n[^o]: a\n    $$\n    [^n]: x\n    $$\n",
+			want:  []position{{3, 5}, {7, 5}},
 		},
 		{
-			// A known difference: markdownlint reads math in the list item,
-			// which holds no definition, and reports 3:5.
 			name:  "definition in math in an item after a heading",
 			input: "# T\n\nUse [^n].\n\n## H\n3. $$\n   [^n]: y\n   $$\n\nEnd.\n",
+			want:  []position{{3, 5}, {7, 4}},
 		},
 		{
-			// A known difference: micromark starts no list marked 01 after
-			// text, so markdownlint reads paragraph text and reports 3:5.
-			// gomdlint reads the definition in goldmark's list item.
 			name:  "indented line in an item marked 01",
 			input: "# T\n\nUse [^n].\n\nIntro\n01. $$\n    [^n]: y\n    $$\n\nEnd.\n",
+			want:  []position{{3, 5}, {7, 5}},
 		},
+		{
+			name:  "definition in an item marked 01",
+			input: "# T\n\nUse [^n].\n\nIntro\n01. a\n    [^n]: y\n\nEnd.\n",
+			want:  []position{{3, 5}, {7, 5}},
+		},
+		{
+			name:  "definition after indented math",
+			input: "# T\n\nUse [^n].\n\nIntro\n  $$\n[^n]: y\n  $$\n",
+			want:  []position{{3, 5}, {7, 1}},
+		},
+		{
+			name:  "definition after indented math that starts a block",
+			input: "# T\n\nUse [^n].\n\n  $$\n[^n]: y\n  $$\n",
+			want:  []position{{3, 5}, {6, 1}},
+		},
+		{
+			name:  "definition after math that ends a footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n$$\nx\n$$\n    [^n]: y\n",
+			want:  []position{{3, 5}, {9, 5}},
+		},
+		{
+			name:  "definition after a heading that ends a footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n# H\n    [^n]: y\n",
+			want:  []position{{3, 5}},
+		},
+		{
+			name:  "definition after an HTML block in a footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n\n    <div>\n    [^n]: y\n",
+			want:  []position{{3, 5}},
+		},
+		{
+			// micromark reads a line four columns in as one that continues
+			// both footnotes, so the fence goes on and holds the definition.
+			name:  "definition after a fence in a nested footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n    [^p]: b\n        ```\n    [^n]: y\n",
+			want:  []position{{3, 5}, {8, 5}},
+		},
+		{
+			name:  "definition after HTML on a footnote's first line",
+			input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n    [^n]: y\n",
+			want:  []position{{3, 5}, {6, 5}},
+		},
+		{
+			name:  "definition after HTML on the first line of a footnote with an escaped label",
+			input: "# T\n\nUse [^n].\n\n[^o\\]x]: <div> x\n    [^n]: y\n",
+			want:  []position{{3, 5}, {6, 5}},
+		},
+		{
+			name:  "definition in a list from 01 after indented code and a blank line",
+			input: "# T\n\nUse [^n].\n\n    code\n\n01. a\n    [^n]: y\n",
+			want:  []position{{3, 5}, {8, 5}},
+		},
+		// Definitions that micromark reads still count.
+		{name: "definition in an item marked 1", input: "# T\n\nUse [^n].\n\n1. [^n]: y\n"},
+		{name: "definition in the second item of a list from 1", input: "# T\n\nUse [^n].\n\n1. a\n2. b\n   [^n]: y\n"},
+		{name: "definition after a formula on one line", input: "# T\n\nUse [^n].\n\n- Equation:\n  $$E = mc^2$$\n  [^n]: y\n"},
+		{name: "definition in a sibling of a footnote with HTML", input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n[^p]: b\n    [^n]: y\n"},
+		{
+			// micromark ends the footnote, and the fence in it, at a line at
+			// column 0, where main reports 3:5 and 7:1.
+			name:  "definition after a fence that a footnote's end closes",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n[^n]: y\n",
+		},
+		{name: "definition in a blockquote", input: "# T\n\nUse [^n].\n\n> [^n]: y\n"},
+		{name: "definition in a bullet item", input: "# T\n\nUse [^n].\n\n- [^n]: y\n"},
+		{name: "definition after closed math", input: "# T\n\nUse [^n].\n\n$$\nx\n$$\n\n[^n]: y\n"},
 	}
 
 	positions := func(input string, options map[string]any) []position {

@@ -317,13 +317,18 @@ const maxContainerIndent = 3
 // is not indented as far closes the footnotes it does not reach. Indented
 // code and fenced code in a footnote's content hold no definition, nor do
 // goldmark's code and HTML blocks outside footnotes, or math blocks that a
-// fence at column 0 opens (possibleMathLines).
+// fence outside containers opens, at column 0 or indented
+// (possibleMathLines).
 //
-// Where goldmark's blocks and micromark's differ inside a footnote's
-// content, the scan errs towards reading a definition, so that MD052 never
-// reports a footnote that markdownlint finds: an HTML block in a footnote's
-// content, and a fence after a lazy line, are not read as such, and a
-// footnote closes only after a blank line.
+// Where micromark may not read a definition, the scan counts none
+// (countable): MD052 then resolves the footnote call as goldmark does, as
+// main does, so counting fewer definitions only reports more calls, never
+// fewer. That is where an earlier line of a footnote's content, or of a
+// goldmark container around the definition, may open math or an HTML block
+// over it, or where an ordered list item around it may not be a list item
+// to micromark. A footnote closes after a blank line, at math that a fence
+// outside containers opens, and at a less indented line that starts a block
+// no lazy line continues.
 type footnoteScan struct {
 	ctx          *lint.RuleContext
 	holders      []*mdast.Node
@@ -336,6 +341,16 @@ type footnoteScan struct {
 	depth      int
 	afterBlank bool
 	fence      footnoteFence
+	// doubtIn tells, for each open footnote by depth from 1, whether a line
+	// of its content may open math or an HTML block over what follows.
+	// doubtIn[0] stands for no footnote, and len(doubtIn) is depth+1.
+	doubtIn []bool
+	// blockStarts holds the lines where goldmark starts a block other than
+	// a paragraph, which no lazy line continues.
+	blockStarts map[int]bool
+	// containerMath holds, for each goldmark container, its first line that
+	// opens math after the container's prefix (findContainerMath).
+	containerMath map[*mdast.Node]int
 }
 
 // footnoteFence is a fenced code block in the content of the depth
@@ -350,12 +365,25 @@ type footnoteFence struct {
 // newFootnoteScan builds a scan of the file of ctx.
 func newFootnoteScan(ctx *lint.RuleContext) *footnoteScan {
 	scan := &footnoteScan{
-		ctx:          ctx,
-		holders:      innermostContainers(ctx),
-		htmlLines:    htmlBlockLines(ctx),
-		math:         mathRegions{lines: possibleMathLines(ctx)},
-		indentedCode: make(map[int]bool),
+		ctx:           ctx,
+		holders:       innermostContainers(ctx),
+		htmlLines:     htmlBlockLines(ctx),
+		math:          mathRegions{lines: possibleMathLines(ctx)},
+		indentedCode:  make(map[int]bool),
+		doubtIn:       []bool{false},
+		blockStarts:   make(map[int]bool),
+		containerMath: make(map[*mdast.Node]int),
 	}
+	for _, blocks := range [][]*mdast.Node{
+		ctx.Headings(), ctx.ThematicBreaks(), ctx.CodeBlocks(), ctx.HTMLBlocks(), ctx.ListItems(), ctx.Blockquotes(), ctx.Tables(),
+	} {
+		for _, block := range blocks {
+			if pos := block.SourcePosition(); pos.IsValid() {
+				scan.blockStarts[pos.StartLine] = true
+			}
+		}
+	}
+	scan.findContainerMath()
 	for _, block := range ctx.CodeBlocks() {
 		if !lint.IsFencedCodeBlock(block) {
 			for line := range lint.CodeContentLines([]*mdast.Node{block}) {
@@ -373,6 +401,13 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 		s.afterBlank = true
 		return
 	}
+	if s.math.lines[line] {
+		// Math that a fence outside containers opens holds no definition
+		// and ends every footnote, since math allows no lazy line.
+		s.closeFootnotes(0)
+		s.afterBlank = false
+		return
+	}
 	container := s.holders[line]
 	for container != nil && !lint.ContinuesContainers(file, container, line) {
 		container = enclosingContainer(container)
@@ -381,11 +416,11 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 	if !ok {
 		return
 	}
-	if s.afterBlank && indent < tabStop*s.depth {
-		s.depth = indent / tabStop
+	rest := lint.RawLineContent(file, line)[start:]
+	if indent < tabStop*s.depth && (s.afterBlank || s.blockStarts[line] || breaksParagraph(rest, true)) {
+		s.closeFootnotes(indent / tabStop)
 	}
 	s.afterBlank = false
-	rest := lint.RawLineContent(file, line)[start:]
 	if s.fence.open && s.fence.depth <= s.depth {
 		if indent-tabStop*s.fence.depth <= maxFenceIndent && s.fence.closedBy(rest) {
 			s.fence.open = false
@@ -399,15 +434,121 @@ func (s *footnoteScan) visit(line int, labels map[string]bool) {
 			return
 		}
 	}
+	s.noteDoubt(indent, rest)
 	if s.excluded(line) {
 		return
 	}
 	label, ok := footnoteDefinitionLabel(rest)
-	if !ok || indent > maxContainerIndent+tabStop*s.depth {
+	if !ok || indent > maxContainerIndent+tabStop*s.depth || !s.countable(line, indent, container) {
 		return
 	}
 	labels[refs.NormalizeLabel("^"+label)] = true
-	s.depth = indent/tabStop + 1
+	s.closeFootnotes(indent / tabStop)
+	s.depth++
+	s.doubtIn = append(s.doubtIn, opensDoubt(bytes.TrimLeft(rest[len("[^")+len(label)+len("]:"):], " \t")))
+}
+
+// closeFootnotes closes the open footnotes past depth.
+//
+// micromark reads a line indented exactly four columns for each open
+// footnote as one that continues all of them, so a fence or doubt in a
+// footnote that the scan closes may go on in the one it leaves open: that
+// one takes over the doubt.
+func (s *footnoteScan) closeFootnotes(depth int) {
+	held := s.fence.open && s.fence.depth > depth
+	for _, doubt := range s.doubtIn[depth+1:] {
+		held = held || doubt
+	}
+	s.depth = depth
+	s.doubtIn = s.doubtIn[:depth+1]
+	if held && depth > 0 {
+		s.doubtIn[depth] = true
+	}
+}
+
+// noteDoubt marks the open footnotes whose content holds a line, indent
+// columns in and rest after its indentation, that may open math or an HTML
+// block over the lines after it.
+func (s *footnoteScan) noteDoubt(indent int, rest []byte) {
+	if s.depth == 0 || !opensDoubt(rest) {
+		return
+	}
+	for level := 1; level <= min(s.depth, indent/tabStop); level++ {
+		s.doubtIn[level] = true
+	}
+}
+
+// opensDoubt reports whether text, a line after its indentation, may open
+// math or an HTML block in micromark.
+func opensDoubt(text []byte) bool {
+	if _, fence := mathFenceOpening(text); fence {
+		return true
+	}
+	kind, _ := htmlBlockStart(text)
+	return kind != htmlNone
+}
+
+// countable reports whether a footnote definition on line, indent columns
+// past the prefixes of container and the containers around it, may count.
+// It does not when a footnote whose content holds it has a line before it
+// that may open math or an HTML block (noteDoubt); when a goldmark
+// container around it has a line before it that opens math after the
+// container's prefix (findContainerMath); or when a list item around it is
+// in an ordered list that micromark may not read (orderedListNotFromOne).
+func (s *footnoteScan) countable(line, indent int, container *mdast.Node) bool {
+	for level := 1; level <= min(s.depth, indent/tabStop); level++ {
+		if s.doubtIn[level] {
+			return false
+		}
+	}
+	for node := container; node != nil; node = enclosingContainer(node) {
+		if node.Kind == mdast.NodeListItem && orderedListNotFromOne(s.ctx.File.Content, node) {
+			return false
+		}
+		if first := s.containerMath[node]; first > 0 && first < line {
+			return false
+		}
+	}
+	return true
+}
+
+// findContainerMath records, for each goldmark container, its first line
+// whose text after the container's prefix and at most three spaces opens
+// math, in one pass over the lines that hold "$$". A line belongs to the
+// innermost container it continues explicitly.
+func (s *footnoteScan) findContainerMath() {
+	file := s.ctx.File
+	for line := file.FrontMatterLines + 1; line <= len(file.Lines); line++ {
+		raw := lint.RawLineContent(file, line)
+		if !bytes.Contains(raw, []byte("$$")) {
+			continue
+		}
+		container := s.holders[line]
+		for container != nil && !lint.ContinuesContainers(file, container, line) {
+			container = enclosingContainer(container)
+		}
+		if container == nil || s.containerMath[container] > 0 {
+			continue
+		}
+		indent, start, ok := lint.IndentAfterContainers(file, container, line)
+		if _, fence := mathFenceOpening(raw[start:]); ok && fence && indent <= maxFenceIndent {
+			s.containerMath[container] = line
+		}
+	}
+}
+
+// orderedListNotFromOne reports whether list item, read from content,
+// belongs to an ordered list whose first marker is not "1." or "1)", the
+// single digit 1. micromark may not start such a list after paragraph text
+// or indented code, and starts every list whose first marker is. An item's
+// span starts at its marker.
+func orderedListNotFromOne(content []byte, item *mdast.Node) bool {
+	list := item.Parent
+	if list == nil || list.Block == nil || list.Block.List == nil || !list.Block.List.Ordered || list.FirstChild == nil {
+		return false
+	}
+	at := list.FirstChild.SourceRange().StartOffset
+	return at < 0 || at+1 >= len(content) || content[at] != '1' || (content[at+1] != '.' && content[at+1] != ')')
 }
 
 // excluded reports whether a line is in goldmark's code or HTML blocks, or

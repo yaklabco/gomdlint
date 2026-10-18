@@ -331,7 +331,10 @@ formats change. The first entries under Changed may need action.
   counts only where a container could start, after at most three spaces
   past the prefixes of its line's containers, or four more for each
   footnote definition whose content holds it, and not in code, HTML or
-  math. In `[text][^1]`, `[text]` is a shortcut reference even when
+  math. Where micromark may read math, an HTML block or no list item over a
+  definition, as in an ordered list whose first marker is not `1.` or after
+  a math fence in its container, the definition does not count, and the
+  call is reported. In `[text][^1]`, `[text]` is a shortcut reference even when
   `[^1]: /url` also reads as a link reference definition. References in
   math are skipped.
 - **MD059**: Compares link text as written and skips only links whose text
