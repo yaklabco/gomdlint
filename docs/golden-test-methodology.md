@@ -618,8 +618,11 @@ the MD034 email edge cases and bug reproduction tests).
 Later work replaced all three workarounds. The parser now records an exact span
 for every node, markers included, so MD035 reads the parsed thematic breaks and
 MD049 and MD050 read the emphasis delimiters from the node spans, with fixes of
-their own. MD034 reports exactly the GFM autolink literals that a port of
-micromark's grammar finds.
+their own. MD034 reports the GFM autolink literals that a port of
+micromark's grammar finds in each block. Where goldmark reads a table that
+micromark reads as a paragraph, MD034 reads the table's cells, so its
+findings there differ from markdownlint's. The README lists those cases
+under Known Limitations.
 
 ### Process Flow
 
@@ -686,17 +689,23 @@ golden files cannot show:
   `TestOutlineRegionsDecideAsWholeDocument` and
   `TestOutlineAnchorsDecideAsWholeDocument` compare the two decisions on
   generated documents and edits. `TestNoBareURLsRule_FixesAgreeWithTheParser`
-  checks that every MD034 fix leaves the links that GitHub's parser and goldmark
-  find unchanged.
+  checks every MD034 fix against goldmark and against a model of cmark-gfm's
+  autolink extension, the parser GitHub renders with, which the tests keep in
+  `cmark_autolink_model_test.go`. The model is the tests' own, not cmark-gfm
+  itself. The links that goldmark and the model find must not change.
 - **Timing guards.** Linting must take time that grows linearly with the
   document. `TestLintTimeWithManyFixes` bounds the time to lint long documents
-  with thousands of fixable findings, and `TestLintTimeGrowsLinearly` checks
-  that a document eight times as long takes about eight times as long.
-  `TestRulesOnLargeDocument` and the other large-document tests in
+  with thousands of fixable findings. `TestLintTimeGrowsLinearly` lints each
+  of six generated document shapes at one size and at eight times that size,
+  takes the fastest of three runs at each, and requires the larger document
+  to take less than 24 times as long. A linear check takes about 8 times as
+  long, and a check that parsed the whole document for every fix about 64
+  times. `TestRulesOnLargeDocument` and the other large-document tests in
   `pkg/lint/rules/largedoc_test.go` give single rules a generous limit that a
   quadratic loop would exceed, and
   `TestTextReporter_SourceContextScalesWithTheOutput` does the same for text
-  output. Timing guards skip under `-short`.
+  output. Timing guards skip under `-short`, and `TestLintTimeGrowsLinearly`
+  also skips under the race detector.
 - **markdownlint parity.** `TestCatalogFollowsMarkdownlint` compares every
   rule's names and tags with markdownlint's table, and the directive grammar
   tests take their expected findings from markdownlint 0.41.1.
@@ -704,10 +713,19 @@ golden files cannot show:
 ## Current Coverage
 
 588 golden tests from 294 inputs: 289 per-rule scenarios across all 55 rules and
-5 real-world documents, each with a round trip, and 15 sidecar configs. Every
-rule has at least `basic` and `clean` cases. Fixable rules have edge-case
-coverage for frontmatter, code block immunity, unicode, and batch fix scenarios.
-Non-fixable rules have frontmatter and (where applicable) code block immunity cases.
+5 real-world documents, each with a round trip, and 15 sidecar configs.
+
+Coverage varies by rule. Every rule except MD040 and MD047 has a `basic`
+case, and those two have other cases that report findings. Every rule except
+MD054 has a case with findings: MD054 reports nothing until an option
+disallows a style, and none of its cases has a sidecar that sets one. Every
+rule except MD003 and MD013 has a case without findings. The edge-case
+categories are spread unevenly: 44 rules have a `frontmatter` case, 24 a
+`multiple` case, 13 a `code_block_immunity` case, 12 a `nested` case, 12 a
+`containers` case, 3 an `adjacent` case, and only 5 a `unicode` case (MD009,
+MD013, MD026, MD037 and MD038). Nine fixable rules have no `frontmatter`
+case (MD020, MD021, MD035, MD044, MD047, MD049, MD050, MD058 and MDL003),
+and MD050 has only `basic` and `clean`.
 
 ```bash
 # Run all golden tests
