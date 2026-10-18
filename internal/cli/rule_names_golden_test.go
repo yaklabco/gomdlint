@@ -93,6 +93,13 @@ func TestRuleNameMessagesGolden(t *testing.T) {
 			},
 			args: []string{"lint", "--color", "never", "--no-context", "configured.md"},
 		},
+		{
+			// A typo in a markdownlint comment silences nothing, and a
+			// former gomdlint tag still works. Both get a warning.
+			name:  "lint-directive-notices",
+			files: map[string]string{"notices.md": noticeDoc},
+			args:  []string{"lint", "--color", "never", "--no-context", "notices.md"},
+		},
 	}
 
 	for _, tt := range tests {

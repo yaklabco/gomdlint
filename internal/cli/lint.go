@@ -296,6 +296,9 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	if _, err := rep.Report(ctx, result); err != nil {
 		return withExitCode(ExitIOError, fmt.Errorf("report results: %w", err))
 	}
+	for _, warning := range noticeWarnings(result, workDir) {
+		logger.Warn(warning)
+	}
 	for _, warning := range skipWarnings(result) {
 		logger.Warn(warning)
 	}
@@ -356,6 +359,25 @@ func applyExplicitFlags(cmd *cobra.Command, flags *lintFlags, flagCfg, finalCfg 
 	if changed("no-default-ignores") {
 		finalCfg.DefaultIgnores = config.Bool(!flags.noDefaultIgnores)
 	}
+}
+
+// noticeWarnings describes the notices of each file, such as a markdownlint
+// comment that names no rule, at the file and line of the comment. They go
+// to stderr, so every output format shows them. Notices change neither the
+// findings nor the exit code.
+func noticeWarnings(result *runner.Result, workDir string) []string {
+	var warnings []string
+	for idx := range result.Files {
+		file := &result.Files[idx]
+		if len(file.Notices) == 0 {
+			continue
+		}
+		path := display.Path(file.Path, workDir)
+		for _, notice := range file.Notices {
+			warnings = append(warnings, fmt.Sprintf("%s:%d: %s", path, notice.Line, notice.Message))
+		}
+	}
+	return warnings
 }
 
 // skipWarnings describes the files whose fixes the pipeline did not write,
