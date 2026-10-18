@@ -439,6 +439,49 @@ func TestRegistryNormalizeOptions(t *testing.T) {
 	}
 }
 
+// TestRegistryNormalizeOptions_IssuesShareNothing checks that the option
+// in an issue is a copy: changing its aliases, allowed values or list
+// default leaves the registry's declaration alone.
+func TestRegistryNormalizeOptions_IssuesShareNothing(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	registry.Register(&optionRule{id: "MD044", name: "proper-names"})
+	registry.Describe(lint.RuleMeta{ID: "MD044", Name: "proper-names", OptionsDeclared: true, Options: []lint.OptionSpec{
+		{
+			Name: "style", Aliases: []lint.OptionAlias{{Name: "old_style"}}, Type: lint.OptionString,
+			Default: "consistent", Values: []string{"consistent", "dash"},
+		},
+		{Name: "names", Type: lint.OptionStringList, Default: []string{"Go"}},
+	}})
+	options := map[string]any{"old_style": "zigzag", "names": "Go"}
+
+	_, issues, declared := registry.NormalizeOptions("MD044", options)
+	require.True(t, declared)
+	require.Len(t, issues, 2)
+	for _, issue := range issues {
+		if len(issue.Option.Aliases) > 0 {
+			issue.Option.Aliases[0].Name = "changed"
+		}
+		if len(issue.Option.Values) > 0 {
+			issue.Option.Values[0] = "changed"
+		}
+		if names, ok := issue.Option.Default.([]string); ok {
+			names[0] = "changed"
+		}
+	}
+
+	meta, ok := registry.Meta("MD044")
+	require.True(t, ok)
+	assert.Equal(t, "old_style", meta.Options[0].Aliases[0].Name)
+	assert.Equal(t, []string{"consistent", "dash"}, meta.Options[0].Values)
+	assert.Equal(t, []string{"Go"}, meta.Options[1].Default)
+
+	_, again, _ := registry.NormalizeOptions("MD044", options)
+	assert.Equal(t, issues[0].Key, again[0].Key)
+	assert.Equal(t, []string{"consistent", "dash"}, again[1].Option.Values, "a later issue sees the declaration as it was")
+}
+
 func TestRegistryNormalizeOptions_UndeclaredEntry(t *testing.T) {
 	t.Parallel()
 

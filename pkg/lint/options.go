@@ -441,6 +441,11 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 		values[index] = value
 	}
 	slices.SortStableFunc(issues, func(left, right OptionIssue) int { return cmp.Compare(left.Key, right.Key) })
+	// The specs belong to the caller, such as a registry, so an issue gets
+	// its own copy of its option.
+	for idx := range issues {
+		issues[idx].Option = issues[idx].Option.clone()
+	}
 
 	if !changed {
 		return options, issues

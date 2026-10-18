@@ -90,9 +90,7 @@ func (meta RuleMeta) clone() RuleMeta {
 	meta.Tags = slices.Clone(meta.Tags)
 	meta.Options = slices.Clone(meta.Options)
 	for idx := range meta.Options {
-		meta.Options[idx].Aliases = slices.Clone(meta.Options[idx].Aliases)
-		meta.Options[idx].Values = slices.Clone(meta.Options[idx].Values)
-		meta.Options[idx].Default = cloneOptionValue(meta.Options[idx].Default)
+		meta.Options[idx] = meta.Options[idx].clone()
 	}
 	return meta
 }
@@ -149,6 +147,15 @@ type OptionAlias struct {
 // shares with markdownlint their markdownlint IDs, such as MD009.
 func IsGomdlintOnlyRule(id string) bool {
 	return strings.HasPrefix(id, "MDL")
+}
+
+// clone returns a copy of spec that shares no slice with it: not its
+// aliases, its allowed values or a list default.
+func (spec OptionSpec) clone() OptionSpec {
+	spec.Aliases = slices.Clone(spec.Aliases)
+	spec.Values = slices.Clone(spec.Values)
+	spec.Default = cloneOptionValue(spec.Default)
+	return spec
 }
 
 // cloneOptionValue returns a copy of value, an option's value, that shares
