@@ -144,32 +144,44 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 
 	var footnotes map[string]bool
 	var diags []lint.Diagnostic
+	math := &lazyMath{ctx: ctx}
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		if !usage.Unresolved || usage.Label == "" {
+		if usage.Label == "" {
 			continue
 		}
 
 		label, normalized, style := usage.Label, usage.NormalizedLabel, usage.Style
-		// A defined label can still stay text, for example when the link
-		// text contains another link, so only labels with no definition
-		// are reported.
-		defined := usage.ResolvedDefinition != nil
+		// A footnote definition is no link reference definition, so a
+		// footnote label calls the footnote even where goldmark resolved it
+		// as a link to a definition such as "[^n]: /url".
+		footnote := false
 		if strings.HasPrefix(label, "^") {
 			if footnotes == nil {
 				footnotes = gfmFootnoteLabels(ctx)
 			}
-			if footnotes[normalized] {
-				if style != refs.StyleFull || !validShortcutLabel(usage.Text) {
-					continue
-				}
-				label, normalized, style = usage.Text, refs.NormalizeLabel(usage.Text), refs.StyleShortcut
-				defined = refCtx.Definitions[normalized] != nil
+			footnote = footnotes[normalized]
+		}
+		if !usage.Unresolved && !footnote {
+			continue
+		}
+
+		// A defined label can still stay text, for example when the link
+		// text contains another link, so only labels with no definition
+		// are reported.
+		defined := usage.ResolvedDefinition != nil
+		if footnote {
+			if style != refs.StyleFull || !validShortcutLabel(usage.Text) {
+				continue
 			}
+			label, normalized, style = usage.Text, refs.NormalizeLabel(usage.Text), refs.StyleShortcut
+			defined = refCtx.Definitions[normalized] != nil
+		}
+		if usageInMath(ctx.File, math, usage) {
+			continue
 		}
 
 		// Skip shortcut unless configured to check
@@ -197,6 +209,14 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	return diags, nil
 }
 
+// usageInMath reports whether a reference starts in math, which
+// markdownlint parses and goldmark does not: on a line of a math block or
+// in inline math.
+func usageInMath(file *mdast.FileSnapshot, math *lazyMath, usage *refs.ReferenceUsage) bool {
+	start, ok := file.Offset(usage.Position.StartLine, usage.Position.StartColumn)
+	return ok && math.holds(usage.Position.StartLine, start, start+1)
+}
+
 // validShortcutLabel reports whether link text can be the label of a
 // shortcut reference: it holds a character other than whitespace and no
 // unescaped bracket.
@@ -216,20 +236,54 @@ func validShortcutLabel(text string) bool {
 }
 
 // gfmFootnoteLabels returns the normalized labels, each with its "^", of
-// the footnote definitions GFM reads in the file: lines outside code and
-// HTML blocks that start with "[^label]:" after their container prefix.
+// the footnote definitions GFM reads in the file: lines outside code, HTML
+// and math blocks that start with "[^label]:" where a container can start
+// (see footnoteDefinitionAt).
 func gfmFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 	labels := make(map[string]bool)
-	htmlLines := htmlBlockLines(ctx)
+	var htmlLines map[int]bool
+	var math mathRegions
+	var holders []*mdast.Node
 	for line := ctx.File.FrontMatterLines + 1; line <= len(ctx.File.Lines); line++ {
-		if ctx.IsLineInCodeBlock(line) || htmlLines[line] {
+		if _, ok := footnoteDefinitionLabel(withoutContainerPrefix(lint.LineText(ctx.File, line))); !ok ||
+			ctx.IsLineInCodeBlock(line) {
 			continue
 		}
-		if label, ok := footnoteDefinitionLabel(withoutContainerPrefix(lint.LineText(ctx.File, line))); ok {
+		if holders == nil {
+			htmlLines, math, holders = htmlBlockLines(ctx), findMath(ctx), innermostContainers(ctx)
+		}
+		if htmlLines[line] || math.lines[line] {
+			continue
+		}
+		if label, ok := footnoteDefinitionAt(ctx.File, holders[line], line); ok {
 			labels[refs.NormalizeLabel("^"+label)] = true
 		}
 	}
 	return labels
+}
+
+// maxContainerIndent is the most columns of space before the marker that
+// starts a container, such as a blockquote or a footnote definition.
+const maxContainerIndent = 3
+
+// footnoteDefinitionAt returns the label of the footnote definition that
+// starts a line, as micromark-extension-gfm-footnote reads one: a footnote
+// definition is a container, so it starts after the prefixes of the
+// containers the line continues explicitly, then at most three columns of
+// space, with "[^label]:". holder is the innermost blockquote or list item
+// whose span holds the line, and a lazy line is outside the containers it
+// does not continue. Four columns of space make indented code or the rest
+// of a paragraph.
+func footnoteDefinitionAt(file *mdast.FileSnapshot, holder *mdast.Node, line int) (string, bool) {
+	container := holder
+	for container != nil && !lint.ContinuesContainers(file, container, line) {
+		container = enclosingContainer(container)
+	}
+	indent, start, ok := lint.IndentAfterContainers(file, container, line)
+	if !ok || indent > maxContainerIndent {
+		return "", false
+	}
+	return footnoteDefinitionLabel(lint.RawLineContent(file, line)[start:])
 }
 
 // withoutContainerPrefix returns text after the blockquote markers, list

@@ -941,6 +941,48 @@ func TestReferenceLinkImagesRule_Footnotes(t *testing.T) {
 			input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n",
 			want:  []position{{3, 5}},
 		},
+		// A definition starts after the prefixes of the containers its line
+		// continues and at most three columns of space, as a container does.
+		{
+			name:  "paragraph line indented four columns",
+			input: "# T\n\nUse [^n].\n\ntext\n    [^n]: note text\n",
+			want:  []position{{3, 5}, {6, 5}},
+		},
+		{name: "definition in indented code", input: "# T\n\nUse [^n].\n\n    [^n]: indented code\n", want: []position{{3, 5}}},
+		{name: "definition in math", input: "# T\n\nUse [^n].\n\n$$\n[^n]: in math\n$$\n", want: []position{{3, 5}}},
+		{
+			name:  "definition in indented code in a list item",
+			input: "# T\n\nUse [^n].\n\n- item\n\n      [^n]: indented in item\n",
+			want:  []position{{3, 5}},
+		},
+		{name: "definition that interrupts a list item's paragraph", input: "# T\n\nUse [^n].\n\n- item\n   [^n]: in item\n"},
+		{name: "definition on a lazy line", input: "# T\n\nUse [^n].\n\n> quote\n[^n]: lazy\n"},
+		{name: "definition in a quoted list item", input: "# T\n\nUse [^n].\n\n> - a\n>     [^n]: x\n"},
+		{
+			name:  "quoted list item line indented four columns",
+			input: "# T\n\nUse [^n].\n\n> - a\n>       [^n]: x\n",
+			want:  []position{{3, 5}, {6, 9}},
+		},
+		{name: "tab past a list item's indentation", input: "# T\n\nUse [^n].\n\n- a\n\n\t[^n]: tab\n"},
+		// A footnote definition is no link reference definition, so a
+		// label that names both calls the footnote.
+		{
+			name:  "full reference to a footnote that is also a link definition",
+			input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n",
+			want:  []position{{3, 5}},
+		},
+		{name: "footnote call that is also a link definition", input: "# T\n\nUse [^n] here.\n\n[^n]: /url\n"},
+		{
+			name:  "defined link text before a footnote that is also a link definition",
+			input: "# T\n\nUse [text][^n].\n\n[text]: /a\n[^n]: /url\n",
+		},
+		{
+			// markdownlint reads math, which holds no references.
+			name:     "references in math",
+			input:    "# T\n\nInline $[a][b]$ and $[^n]$ math.\n\n$$\n[c][d] and [e]\n$$\n\n[f][g] outside.\n",
+			want:     []position{{9, 1}},
+			wantFull: []position{{9, 1}},
+		},
 	}
 
 	positions := func(input string, options map[string]any) []position {

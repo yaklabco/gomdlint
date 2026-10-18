@@ -317,7 +317,12 @@ formats change. The first entries under Changed may need action.
 - **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
   `#TOP` unless `ignore_case` is set.
 - **MD052**: With `shortcut_syntax`, no longer reports GFM footnote calls
-  such as `[^1]` whose footnote the document defines.
+  such as `[^1]` whose footnote the document defines. A footnote definition
+  counts only where a container could start, after at most three spaces
+  past the prefixes of its line's containers, and not in code, HTML or
+  math. In `[text][^1]`, `[text]` is a shortcut reference even when
+  `[^1]: /url` also reads as a link reference definition. References in
+  math are skipped.
 - **MD059**: Compares link text as written and skips only links whose text
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
   strikethrough counts as direct, and code or HTML in inline math does not.

@@ -143,6 +143,44 @@ func TestContinuesContainers(t *testing.T) {
 	assert.False(t, lint.ContinuesContainers(file, nil, 1))
 }
 
+// TestIndentAfterContainers checks the space a line holds after the
+// prefixes of its containers, which decides whether a container such as a
+// footnote definition can start there.
+func TestIndentAfterContainers(t *testing.T) {
+	t.Parallel()
+
+	file := parseSource(t, "  top\n>    quoted\n- a\n\n\ttab\n     five\nlazy\n")
+	quote := mdast.FindByKind(file.Root, mdast.NodeBlockquote)[0]
+	item := mdast.FindByKind(file.Root, mdast.NodeListItem)[0]
+
+	tests := []struct {
+		name       string
+		container  *mdast.Node
+		line       int
+		wantIndent int
+		wantText   string
+		wantOK     bool
+	}{
+		{"no container", nil, 1, 2, "top", true},
+		{"after a quote marker and its space", quote, 2, 3, "quoted", true},
+		{"tab partly claimed by the list item", item, 5, 2, "tab", true},
+		{"spaces past the list item's indentation", item, 6, 3, "five", true},
+		{"lazy line", item, 7, 0, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			indent, start, ok := lint.IndentAfterContainers(file, tt.container, tt.line)
+			assert.Equal(t, tt.wantOK, ok)
+			if !ok {
+				return
+			}
+			assert.Equal(t, tt.wantIndent, indent)
+			assert.Equal(t, tt.wantText, string(lint.RawLineContent(file, tt.line)[start:]))
+		})
+	}
+}
+
 func TestIsBlankLineInContainer(t *testing.T) {
 	t.Parallel()
 

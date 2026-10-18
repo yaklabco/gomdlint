@@ -268,11 +268,24 @@ type lazyMath struct {
 
 // overlaps reports whether content[start:end] lies partly in inline math.
 func (l *lazyMath) overlaps(start, end int) bool {
+	return l.regions().overlaps(start, end)
+}
+
+// holds reports whether math holds content[start:end] on a 1-based line:
+// the line belongs to a math block, or the range lies partly in inline
+// math.
+func (l *lazyMath) holds(line, start, end int) bool {
+	math := l.regions()
+	return math.lines[line] || math.overlaps(start, end)
+}
+
+// regions finds the math on first use.
+func (l *lazyMath) regions() *mathRegions {
 	if l.found == nil {
 		found := findMath(l.ctx)
 		l.found = &found
 	}
-	return l.found.overlaps(start, end)
+	return l.found
 }
 
 // overlaps reports whether content[start:end] lies partly in inline math.
