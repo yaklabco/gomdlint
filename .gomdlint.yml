@@ -42,7 +42,20 @@ rules:
     enabled: true
     options:
       max: 80
+      # Prose wraps at 80 columns. Code blocks hold commands, program
+      # output and diagrams, and table rows cannot wrap, so both are exempt.
+      ignore_code_blocks: true
+      ignore_tables: true
+  MD024:
+    options:
+      # CHANGELOG.md repeats Added, Changed and Fixed under every release, as
+      # Keep a Changelog does, so only headings under one parent must differ.
+      siblings_only: true
   MD060:
     enabled: true
     options:
       style: compact
+  # The docs link to other sites and to files in this repository on purpose.
+  # link-destination-style compares every link with the first one, so it
+  # would report each relative link that follows an absolute one.
+  MDL001: false
