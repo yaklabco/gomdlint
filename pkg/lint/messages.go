@@ -38,6 +38,15 @@ func UnknownRuleText(key string, suggestions []Suggestion) string {
 	return text + " (did you mean " + joinChoices(choices, "or") + "?)"
 }
 
+// deprecatedTagText describes tag, a deprecated tag that covers the rules
+// named in names, for a warning: `deprecated tag "style" (write its rules
+// instead: heading-style, unordered-list-style); it will stop working in a
+// later release`.
+func deprecatedTagText(tag string, names []string) string {
+	return fmt.Sprintf("deprecated tag %q (write its rules instead: %s); it will stop working in a later release",
+		tag, strings.Join(names, ", "))
+}
+
 // IsSingleWord reports whether key is one word: not empty, and free of
 // whitespace. Only such a key can name a rule or a tag in a markdownlint
 // configuration object, such as a .markdownlint.json file or a
