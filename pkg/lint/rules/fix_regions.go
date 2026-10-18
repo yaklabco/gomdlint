@@ -125,17 +125,24 @@ const regionSentinel = "x"
 // of a fixCheck, in the same order: GFM, and CommonMark unless the flavor is
 // GFM. They are shared: a parse keeps all its state in its context.
 func regionMarkdowns(flavor config.Flavor) []goldmark.Markdown {
+	gfm, commonMark := recordingInstances()
+	markdowns := []goldmark.Markdown{gfm}
+	if flavor != config.FlavorGFM {
+		markdowns = append(markdowns, commonMark)
+	}
+	return markdowns
+}
+
+// recordingInstances returns the recording goldmark instances for GFM and
+// CommonMark, built on first use.
+func recordingInstances() (goldmark.Markdown, goldmark.Markdown) {
 	recordingOnce.Do(func() {
 		recordingGFM = goldmark.New(goldmark.WithExtensions(gmext.GFM))
 		recordingGFM.Parser().AddOptions(recordingOption{})
 		recordingCommonMark = goldmark.New()
 		recordingCommonMark.Parser().AddOptions(recordingOption{})
 	})
-	markdowns := []goldmark.Markdown{recordingGFM}
-	if flavor != config.FlavorGFM {
-		markdowns = append(markdowns, recordingCommonMark)
-	}
-	return markdowns
+	return recordingGFM, recordingCommonMark
 }
 
 //nolint:gochecknoglobals // goldmark instances built once; each parse keeps its state in its own context.

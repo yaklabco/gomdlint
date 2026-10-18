@@ -204,6 +204,7 @@ func TestOutlineCacheIsBounded(t *testing.T) {
 		}
 	}
 	assert.LessOrEqual(t, cached, model.cacheBudget())
+	assert.Less(t, len(model.outcomes), 300, "the budget stops the cache")
 }
 
 // TestOutlineModelMatchesOutline checks that the outline written in parts is

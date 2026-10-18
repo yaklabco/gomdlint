@@ -3,12 +3,10 @@ package rules
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
 
-	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -100,12 +98,11 @@ type outlineOutcome struct {
 // parser of the given flavor does: GFM, or CommonMark for any other flavor,
 // as gmparser.New takes them.
 func recordingMarkdown(flavor string) goldmark.Markdown {
-	// regionMarkdowns builds the instances on first use.
-	regionMarkdowns(config.FlavorGFM)
+	gfm, commonMark := recordingInstances()
 	if flavor == gmparser.FlavorGFM {
-		return recordingGFM
+		return gfm
 	}
-	return recordingCommonMark
+	return commonMark
 }
 
 // headingSlug returns the slug GitHub derives from a heading's text, and
@@ -135,26 +132,6 @@ func nodeSlugs(nodes []*mdast.Node) []string {
 		})
 	}
 	return slugs
-}
-
-// anchorsFromSlugs returns the anchors GitHub gives headings with the given
-// slugs, numbering repeated slugs as refs.AnchorMap does.
-func anchorsFromSlugs(slugs []string) []string {
-	occurrences := make(map[string]int, len(slugs))
-	anchors := make([]string, 0, len(slugs))
-	for _, original := range slugs {
-		slug := original
-		for {
-			if _, taken := occurrences[slug]; !taken {
-				break
-			}
-			occurrences[original]++
-			slug = original + "-" + strconv.Itoa(occurrences[original])
-		}
-		occurrences[slug] = 0
-		anchors = append(anchors, slug)
-	}
-	return anchors
 }
 
 // outlineItem returns the opening of an outline item, as writeOutlineItem
@@ -504,5 +481,5 @@ func (m *outlineModel) anchorsRebuilt(regions []region, outcomes []*outlineOutco
 		next = to
 	}
 	slugs = append(slugs, m.slugs[next:]...)
-	return strings.Join(anchorsFromSlugs(slugs), "\x00") == m.anchors
+	return strings.Join(recordAnchors(slugs).anchors, "\x00") == m.anchors
 }

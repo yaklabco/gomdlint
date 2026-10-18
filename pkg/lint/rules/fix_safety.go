@@ -355,9 +355,10 @@ type fixVerifier struct {
 	allow    fixAllowance
 	original string
 	parsed   bool // whether the original content parsed
-	// originalFile is the parse of the original content, and model the
-	// outline cut into regions (see outlineModel), built on first use; nil
-	// where region checks cannot be used.
+	// originalFile is the parse of the original content, kept until
+	// regions builds model from it, and model the outline cut into regions
+	// (see outlineModel), built on first use; nil where region checks cannot
+	// be used.
 	originalFile *mdast.FileSnapshot
 	model        *outlineModel
 	modeled      bool
