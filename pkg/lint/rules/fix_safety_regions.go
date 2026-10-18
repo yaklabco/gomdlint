@@ -343,7 +343,7 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 		end -= len(regionSentinel)
 	}
 	verifier := m.verifier
-	m.parsed += 1 + len(text)
+	m.work.parsed += 1 + len(text)
 	snapshot, err := verifier.parser.ParseWithReferences(verifier.ctx, verifier.file.Path,
 		append([]byte{'\n'}, text...), m.refIndex)
 	if err != nil {
@@ -414,17 +414,11 @@ func (m *outlineModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 		}
 	}
 	reps := make([]replacement, 0, len(outcomes))
-	listsSeen := make(map[int]bool)
-	for idx, outcome := range outcomes {
+	for _, outcome := range outcomes {
 		reps = append(reps, replacement{start: outcome.start, end: outcome.end, text: outcome.text})
-		reg := regions[idx]
-		if !reg.isList() || listsSeen[reg.list] {
-			continue
-		}
-		listsSeen[reg.list] = true
-		list := m.listParts[reg.list]
-		tight := m.listTightAfter(reg.list, regions, func(at int) bool { return outcomes[at].loosens })
-		if tight != list.tight {
+	}
+	for index, tight := range m.listsTightAfter(regions, func(at int) bool { return outcomes[at].loosens }) {
+		if list := m.listParts[index]; tight != list.tight {
 			reps = append(reps, replacement{start: list.tokenStart, end: list.tokenEnd, text: list.tokens[tight]})
 		}
 	}

@@ -551,9 +551,9 @@ func TestRegionParsesGrowWithTheDocument(t *testing.T) {
 					}
 					for _, model := range check.models {
 						require.NotNil(t, model)
-						total += model.parsed
+						total += model.work.parsed
 					}
-					total += outline.parsed
+					total += outline.work.parsed
 				}
 				return total
 			}
@@ -585,6 +585,139 @@ func mixedLeafDocument(n int) string {
 		}
 	}
 	return doc.String()
+}
+
+// separateListsDocument returns a document of n lists of six items, each
+// list followed by a paragraph, with three trailing spaces after each list's
+// third item.
+func separateListsDocument(n int) string {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range n {
+		fmt.Fprintf(&doc, "- one %d\n- two\n- three   \n- four\n- five\n- six\n\nParagraph %d.\n\n", idx, idx)
+	}
+	return doc.String()
+}
+
+// breaksBeforeTextDocument returns a document of n thematic breaks, each
+// followed with no blank line by a paragraph and a blank line, and the
+// edits that put a blank line after each break. Each edit changes how the
+// group after its break starts, so its region must grow by that group.
+func breaksBeforeTextDocument(n int) (string, []fix.TextEdit) {
+	var doc strings.Builder
+	var edits []fix.TextEdit
+	doc.WriteString("# Title\n\n")
+	for idx := range n {
+		doc.WriteString("***")
+		edits = append(edits, fix.TextEdit{StartOffset: doc.Len(), EndOffset: doc.Len(), NewText: "\n"})
+		fmt.Fprintf(&doc, "\nText %d\n\n", idx)
+	}
+	return doc.String(), edits
+}
+
+// regionWorkOf checks edits together with both region checks, as a rule's
+// batch of fixes is checked, requiring both to decide, and returns the work
+// their layouts counted.
+func regionWorkOf(t *testing.T, input string, edits []fix.TextEdit) regionWork {
+	t.Helper()
+	var total regionWork
+	for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
+		snapshot := parseForCheckWith(t, flavor, input)
+		check := newFixCheck(snapshot, flavor)
+		decided, _ := check.regionsUnchanged(edits)
+		require.True(t, decided, "render signature")
+		cfg := config.NewConfig()
+		cfg.Flavor = flavor
+		verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), fixAllowance{})
+		outline := verifier.regions()
+		require.NotNil(t, outline)
+		decided, _ = outline.checkEdits(edits)
+		require.True(t, decided, "outline")
+		works := []regionWork{outline.work}
+		for _, model := range check.models {
+			require.NotNil(t, model)
+			works = append(works, model.work)
+		}
+		for _, work := range works {
+			total.parsed += work.parsed
+			total.merged += work.merged
+			total.tightness += work.tightness
+		}
+	}
+	return total
+}
+
+// TestRegionWorkGrowsWithTheDocument checks that combining the regions of
+// one check takes work that grows with the document, not with its square:
+// list tightness over many separate lists, each with one edit, and the
+// merging of regions that grow, one for each edit. Four times the document
+// must take about four times the work, not sixteen.
+func TestRegionWorkGrowsWithTheDocument(t *testing.T) {
+	const small, factor = 50, 4
+	ratio := func(short, long int) float64 { return float64(long) / float64(short) }
+	t.Run("separate lists", func(t *testing.T) {
+		work := func(lists int) regionWork {
+			input := separateListsDocument(lists)
+			edits := trailingSpaceEdits(input)
+			require.Len(t, edits, lists)
+			return regionWorkOf(t, input, edits)
+		}
+		short, long := work(small), work(factor*small)
+		t.Logf("tightness visits %d for %d lists, %d for %d", short.tightness, small, long.tightness, factor*small)
+		assert.Less(t, ratio(short.tightness, long.tightness), 1.5*factor, "tightness work grows faster than the document")
+	})
+	t.Run("growing regions", func(t *testing.T) {
+		work := func(breaks int) regionWork {
+			input, edits := breaksBeforeTextDocument(breaks)
+			return regionWorkOf(t, input, edits)
+		}
+		short, long := work(small), work(factor*small)
+		t.Logf("regions merged %d for %d breaks, %d for %d", short.merged, small, long.merged, factor*small)
+		assert.Less(t, ratio(short.merged, long.merged), 1.5*factor, "merge work grows faster than the document")
+	})
+}
+
+// TestRemergeMatchesMergeRegions checks that merging only the window around
+// a grown region gives the regions, and the first region that changed, that
+// merging all the regions gives, on regions of random edits in random
+// documents with lists.
+func TestRemergeMatchesMergeRegions(t *testing.T) {
+	rng := rand.New(rand.NewPCG(20261018, 23))
+	gfm, _ := recordingInstances()
+	checked := 0
+	for range 2000 {
+		text := randomRegionDocument(rng) + randomRegionDocument(rng)
+		layout := newDocLayout(gfm, []byte(text))
+		if layout == nil || len(layout.source) == 0 {
+			continue
+		}
+		var placed []placedEdit
+		for range 1 + rng.IntN(12) {
+			at := rng.IntN(len(layout.source))
+			placed = append(placed, layout.placeEdit(fix.TextEdit{StartOffset: at, EndOffset: at}))
+		}
+		regions := make([]region, len(placed))
+		for idx, edit := range placed {
+			regions[idx] = layout.regionFor(edit)
+		}
+		regions = layout.mergeRegions(regions)
+		for idx := range regions {
+			grown := layout.grow(regions[idx])
+			if grown == regions[idx] {
+				continue
+			}
+			before := slices.Clone(regions)
+			after := slices.Clone(regions)
+			after[idx] = grown
+			want := layout.mergeRegions(slices.Clone(after))
+			got, first := layout.remerge(after, idx)
+			require.Equal(t, want, got, "document %q, regions %v, grown %d", text, before, idx)
+			require.Equal(t, firstDifference(before, want), first, "document %q, regions %v, grown %d", text, before, idx)
+			checked++
+		}
+	}
+	t.Logf("%d grown regions merged", checked)
+	assert.Positive(t, checked)
 }
 
 // TestRegionChecksAfterClosedBlocks checks region checks where groups start

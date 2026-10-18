@@ -499,9 +499,15 @@ type docLayout struct {
 	// added them, and refIndex the definition each label resolves to.
 	refs     []recordedRef
 	refIndex map[string]goldparser.Reference
-	// parsed counts the bytes that region parses have read, which tests
-	// bound.
-	parsed int
+	// work counts what region checks have done, which tests bound.
+	work regionWork
+}
+
+// regionWork counts the work of region checks: the bytes their parses read,
+// the regions their merges took, and the regions their list tightness
+// checks visited.
+type regionWork struct {
+	parsed, merged, tightness int
 }
 
 // layoutList is a top-level list of the original document.
@@ -882,6 +888,7 @@ func (l *docLayout) meets(one, other region) bool {
 // dropped. Two list regions that fit merge into one that fits, so merging
 // needs one pass.
 func (l *docLayout) mergeRegions(regions []region) []region {
+	l.work.merged += len(regions)
 	var groups, lists []region
 	for _, reg := range regions {
 		switch {
@@ -1007,11 +1014,9 @@ func decomposeRegions[O regionVerdict](
 			if grown == regions[idx] {
 				return nil, nil, false
 			}
-			before := slices.Clone(regions)
 			regions[idx] = grown
-			regions = layout.mergeRegions(regions)
 			// Merging changes no region before the first that differs.
-			idx = firstDifference(before, regions)
+			regions, idx = layout.remerge(regions, idx)
 			outcomes = outcomes[:idx]
 			continue
 		}
@@ -1019,6 +1024,47 @@ func decomposeRegions[O regionVerdict](
 		idx++
 	}
 	return regions, outcomes, true
+}
+
+// remerge merges regions, sorted by span with no two meeting but the one at
+// idx, which grew, as mergeRegions would merge them all, and returns them
+// with the index of the first region that changed. A region can meet another
+// only where their spans overlap or touch, and the spans of regions that do
+// not meet do not overlap, so mergeRegions runs on the window of regions
+// whose spans reach the grown region's, widened while the merged regions
+// reach further; the regions outside it stay. So a check whose regions grow
+// one by one merges each with its neighbours, not with all the regions.
+func (l *docLayout) remerge(regions []region, idx int) ([]region, int) {
+	start, end := l.span(regions[idx])
+	lo, hi := idx, idx+1
+	for lo > 0 {
+		if _, prevEnd := l.span(regions[lo-1]); prevEnd < start {
+			break
+		}
+		lo--
+	}
+	for {
+		for hi < len(regions) {
+			if nextStart, _ := l.span(regions[hi]); nextStart > end {
+				break
+			}
+			hi++
+		}
+		merged := l.mergeRegions(slices.Clone(regions[lo:hi]))
+		reach := end
+		for _, reg := range merged {
+			_, regEnd := l.span(reg)
+			reach = max(reach, regEnd)
+		}
+		if hi < len(regions) {
+			if nextStart, _ := l.span(regions[hi]); nextStart <= reach {
+				end = reach
+				continue
+			}
+		}
+		first := min(idx, lo+firstDifference(regions[lo:hi], merged))
+		return slices.Concat(regions[:lo], merged, regions[hi:]), first
+	}
 }
 
 // firstDifference returns the index of the first region that differs
@@ -1031,22 +1077,33 @@ func firstDifference(a, b []region) int {
 	return idx
 }
 
-// listTightAfter reports whether a list is tight after edits: none of its
-// items outside its list regions makes it loose, and none of its list
-// regions does, as loosens reports for the region at an index of regions.
-func (l *docLayout) listTightAfter(list int, regions []region, loosens func(int) bool) bool {
-	model := l.lists[list]
-	loose := model.loose[len(model.loose)-1]
+// listsTightAfter reports, for each top-level list that a list region of
+// regions edits, whether it is tight after the edits: none of its items
+// outside its list regions makes it loose, and none of its list regions
+// does, as loosens reports for the region at an index of regions. One pass
+// over the regions serves every list.
+func (l *docLayout) listsTightAfter(regions []region, loosens func(int) bool) map[int]bool {
+	type count struct {
+		inside   int
+		loosened bool
+	}
+	counts := make(map[int]count)
 	for idx, reg := range regions {
-		if !reg.isList() || reg.list != list {
+		l.work.tightness++
+		if !reg.isList() {
 			continue
 		}
-		loose -= model.looseIn(reg)
-		if loosens(idx) {
-			return false
-		}
+		c := counts[reg.list]
+		c.inside += l.lists[reg.list].looseIn(reg)
+		c.loosened = c.loosened || loosens(idx)
+		counts[reg.list] = c
 	}
-	return loose == 0
+	tight := make(map[int]bool, len(counts))
+	for list, c := range counts {
+		model := l.lists[list]
+		tight[list] = !c.loosened && model.loose[len(model.loose)-1]-c.inside == 0
+	}
+	return tight
 }
 
 // parseRegion parses a region with its edits, which are in source offsets
@@ -1072,7 +1129,7 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 		}
 		text = append(text, regionSentinel...)
 	}
-	l.parsed += len(text)
+	l.work.parsed += len(text)
 	parsed := parseRecorded(l.markdown, text, l.refIndex)
 	blocks := children(parsed.doc)
 	if !final {
@@ -1101,7 +1158,7 @@ func (l *docLayout) parseListRegion(reg region, edits []fix.TextEdit) regionPars
 	list := l.lists[reg.list]
 	from, to := l.span(reg)
 	text := applyWithin(l.source, from, to, edits)
-	l.parsed += len(text)
+	l.work.parsed += len(text)
 	parsed := parseRecorded(l.markdown, text, l.refIndex)
 	blocks := children(parsed.doc)
 	if len(blocks) != 1 {

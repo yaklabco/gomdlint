@@ -398,18 +398,13 @@ type replacement struct {
 // original's.
 func (m *regionModel) compare(regions []region, outcomes []*regionOutcome) (bool, bool) {
 	reps := make([]replacement, 0, len(outcomes))
-	listsSeen := make(map[int]bool)
-	for idx, outcome := range outcomes {
+	for _, outcome := range outcomes {
 		reps = append(reps, replacement{
 			start: outcome.start, end: outcome.end, text: outcome.text, unknownAfter: !outcome.countsSame,
 		})
-		reg := regions[idx]
-		if !reg.isList() || listsSeen[reg.list] {
-			continue
-		}
-		listsSeen[reg.list] = true
-		sig := m.listSigs[reg.list]
-		if tight := m.tightAfter(reg.list, regions, outcomes); tight != sig.tight {
+	}
+	for list, tight := range m.listsTightAfter(regions, func(idx int) bool { return outcomes[idx].loosens }) {
+		if sig := m.listSigs[list]; tight != sig.tight {
 			reps = append(reps, replacement{
 				start: sig.tokenStart, end: sig.tokenEnd, text: listToken(sig.ordered, sig.start, tight),
 			})
@@ -433,12 +428,6 @@ func decideReplacements(orig string, reps []replacement) (bool, bool) {
 		}
 	}
 	return true, sameAfterReplacements(orig, reps)
-}
-
-// tightAfter reports whether a list is tight after edits, given the
-// outcomes of the regions.
-func (m *regionModel) tightAfter(list int, regions []region, outcomes []*regionOutcome) bool {
-	return m.listTightAfter(list, regions, func(idx int) bool { return outcomes[idx].loosens })
 }
 
 // sameAfterReplacements reports whether orig with the ranges of reps, which

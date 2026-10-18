@@ -166,6 +166,7 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 		{name: "code list", generate: codeListDocument},
 		{name: "heading code", generate: headingCodeDocument},
 		{name: "thematic breaks", generate: func(n int) []byte { return []byte(leafRunDocument(n, "***")) }},
+		{name: "separate lists", generate: func(n int) []byte { return []byte(separateListsDocument(n)) }},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			// The fastest of a few runs is the least disturbed by other work
