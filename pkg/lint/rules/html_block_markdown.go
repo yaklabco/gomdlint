@@ -66,6 +66,8 @@ type blockHTML struct {
 // HTML block: the block's whole lines are parsed as Markdown (see
 // parsedBlockHTML). A line's container prefix is part of what is parsed,
 // as in markdownlint, so a block in a blockquote is read as a blockquote.
+// A block that markdownlint takes for one comment is not parsed and holds
+// no raw HTML (see isHTMLFlowComment).
 func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node) []blockHTML {
 	span := block.SourceRange()
 	if file == nil || span.StartOffset < 0 || span.EndOffset <= span.StartOffset || span.EndOffset > len(file.Content) {
@@ -78,10 +80,30 @@ func htmlBlockInlineHTML(file *mdast.FileSnapshot, block *mdast.Node) []blockHTM
 	}
 	start := file.Lines[firstLine-1].StartOffset
 	source := file.Content[start:file.Lines[lastLine-1].NewlineStart]
+	// markdownlint's token for the block starts after the first line's
+	// container prefix, with any indentation inside the containers.
+	if prefix := len(lint.ContainerPrefix(file, block, firstLine)); prefix <= len(source) && isHTMLFlowComment(source[prefix:]) {
+		return nil
+	}
 	if bytes.IndexByte(source, '|') < 0 {
 		return plainBlockHTML(source, start)
 	}
 	return parsedBlockHTML(file.Path, source, start)
+}
+
+// isHTMLFlowComment reports whether the text of an HTML block is one
+// comment as markdownlint's isHtmlFlowComment reads it: the text starts
+// with "<!--" and ends with "-->", and what lies between does not start
+// with ">" or "->" or end with "-". markdownlint does not parse such a
+// block's lines again for its HTML rules, whatever lies between, so the
+// tag in "<!--\na\n--> <b>x</b> <!-- z -->" is no HTML to them.
+func isHTMLFlowComment(text []byte) bool {
+	const opener, closer = "<!--", "-->"
+	if !bytes.HasPrefix(text, []byte(opener)) || !bytes.HasSuffix(text, []byte(closer)) {
+		return false
+	}
+	inner := text[len(opener):max(len(opener), len(text)-len(closer))]
+	return !bytes.HasPrefix(inner, []byte(">")) && !bytes.HasPrefix(inner, []byte("->")) && !bytes.HasSuffix(inner, []byte("-"))
 }
 
 // parsedBlockHTML returns the raw HTML in the lines of a block, source,
