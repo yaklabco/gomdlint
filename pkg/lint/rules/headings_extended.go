@@ -367,7 +367,9 @@ func NewNoMultipleSpaceClosedATXRule() *NoMultipleSpaceClosedATXRule {
 // Apply checks for multiple spaces inside hashes on closed ATX headings.
 //
 // Like markdownlint, it checks parsed closed ATX headings, including headings
-// in blockquotes and lists.
+// in blockquotes and lists, and reports each side with extra spaces on its
+// own: a finding covers the spaces after the first, and its fix leaves one
+// space on its side.
 func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
@@ -384,41 +386,26 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		if !ok || parts.close.IsEmpty() {
 			continue
 		}
-		openSpaces, closeSpaces := parts.openSpace, parts.closeSpace
-
-		multipleOpenSpaces := openSpaces.Len() > 1
-		multipleCloseSpaces := closeSpaces.Len() > 1
-		if !multipleOpenSpaces && !multipleCloseSpaces {
-			continue
+		sides := []struct {
+			spaces mdast.SourceRange
+			msg    string
+		}{
+			{parts.openSpace, "Multiple spaces after opening hashes on closed ATX style heading"},
+			{parts.closeSpace, "Multiple spaces before closing hashes on closed ATX style heading"},
 		}
-
-		// Build fix: normalize to single space on each side.
-		builder := fix.NewEditBuilder()
-		if multipleOpenSpaces {
-			builder.ReplaceRange(openSpaces.StartOffset, openSpaces.EndOffset, " ")
+		for _, side := range sides {
+			if side.spaces.Len() < 2 {
+				continue
+			}
+			builder := fix.NewEditBuilder()
+			builder.ReplaceRange(side.spaces.StartOffset, side.spaces.EndOffset, " ")
+			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, extraSpaces(side.spaces)), side.msg).
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion("Use a single space inside the hash characters").
+				WithFix(checker.offer(builder, fixIntent{local: true})).
+				Build()
+			diags = append(diags, diag)
 		}
-		if multipleCloseSpaces {
-			builder.ReplaceRange(closeSpaces.StartOffset, closeSpaces.EndOffset, " ")
-		}
-
-		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: parts.open.StartOffset, EndOffset: parts.close.EndOffset})
-
-		var msg string
-		switch {
-		case multipleOpenSpaces && multipleCloseSpaces:
-			msg = "Multiple spaces inside hashes on closed ATX style heading (both sides)"
-		case multipleOpenSpaces:
-			msg = "Multiple spaces after opening hashes on closed ATX style heading"
-		default:
-			msg = "Multiple spaces before closing hashes on closed ATX style heading"
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Use a single space inside the hash characters").
-			WithFix(checker.offer(builder, fixIntent{local: true})).
-			Build()
-		diags = append(diags, diag)
 	}
 
 	return checker.filter(diags), nil
