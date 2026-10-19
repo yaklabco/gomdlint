@@ -1,0 +1,4 @@
+shortcut_disallowed.input.md:8:3 warning Shortcut reference syntax is not allowed (MD054/link-image-style)
+shortcut_disallowed.input.md:8:30 warning Shortcut reference syntax is not allowed (MD054/link-image-style)
+shortcut_disallowed.input.md:13:10 warning Shortcut reference syntax is not allowed (MD054/link-image-style)
+shortcut_disallowed.input.md:16:12 warning Shortcut reference syntax is not allowed (MD054/link-image-style)
