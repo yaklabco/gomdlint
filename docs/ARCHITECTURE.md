@@ -308,10 +308,11 @@ definitions that micromark is certain to read
 (`certainFootnoteLabels` in `pkg/lint/rules/refs.go`): a `[^label]:` line
 at column 0 that goldmark reads at the top level, after a blank line or
 another such definition. Every line before it that may open a block
-holding blank lines must open one that micromark reads as goldmark does,
-so none may open math or a directive, and a code fence or an HTML block of
-kinds 1 to 5 must start at column 0 after a blank line, at the top level
-of goldmark's tree (`sharedBlocks`).
+holding blank lines must open one that micromark reads as goldmark does:
+none may open math, a directive or an HTML block of kinds 1 to 5 that goes
+on past its first line, whose end the two parsers may read on different
+lines, and a code fence must start at column 0 after a blank line, at the
+top level of goldmark's tree (`sharedBlocks`).
 
 ## Fix Engine
 

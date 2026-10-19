@@ -321,10 +321,14 @@ formats change. The first entries under Changed may need action.
   definition. A definition counts only on a `[^1]:` line at column 0, at
   the top level outside code blocks, HTML blocks and front matter, at the
   start of the document, after a blank line or right after another such
-  definition. No line before it may start with `$$` or `:::`, and each
-  code fence or HTML block before it that may hold blank lines must start
-  at column 0 after a blank line, where goldmark reads it at the top level.
-  Calls of other definitions are read as before.
+  definition. No line before it may start with `$$` or `:::`, each code
+  fence before it must start at column 0 after a blank line, where
+  goldmark reads it at the top level, and no HTML block before it that may
+  hold blank lines may go on past its first line. No definition counts
+  where micromark drops a byte order mark that the parser reads as text: a
+  second one at the start of the file, or one that starts the first line
+  after the front matter that holds more than white space. Calls of other
+  definitions are read as before.
 - **MD059**: Compares link text as written and skips only links whose text
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
   strikethrough counts as direct. Findings point at the link text, one

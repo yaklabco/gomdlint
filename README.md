@@ -731,14 +731,17 @@ Some of its fix checks are also stricter than they need to be.
   at column 0, at the top level outside code blocks, HTML blocks and front
   matter, at the start of the document, after a blank line or right after
   another such definition. No line before it may start with `$$` or `:::`,
-  and each code fence or HTML block before it that may hold blank lines,
-  such as a comment, must start at column 0 after a blank line, where
-  goldmark reads it at the top level. A call of any other definition, such
-  as one in a list item, a blockquote or a footnote, is read as goldmark
-  reads it, as a reference, and reported when no link reference definition
-  matches, even where markdownlint reads the footnote definition. No
-  definition counts in a document whose front matter markdownlint may read
-  differently, or whose lines end with a carriage return alone.
+  each code fence before it must start at column 0 after a blank line,
+  where goldmark reads it at the top level, and no HTML block before it
+  that may hold blank lines, such as a comment or a `<pre>` block, may go
+  on past its first line. A call of any other definition, such as one in a
+  list item, a blockquote or a footnote, is read as goldmark reads it, as a
+  reference, and reported when no link reference definition matches, even
+  where markdownlint reads the footnote definition. No definition counts in
+  a document whose front matter markdownlint may read differently, whose
+  lines end with a carriage return alone, or where the text markdownlint
+  gives micromark starts with a byte order mark, as with two at the start
+  of the file or one right after front matter.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

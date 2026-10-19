@@ -966,7 +966,6 @@ func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
 		{name: "definition after a list", input: "# T\n\nUse [^n] and [x][^n].\n\n- item\n\n[^n]: Note text.\n"},
 		{name: "definition after a closed fence in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n\n[^n]: y\n"},
 		{name: "definition after a fenced code block", input: "# T\n\nUse [^n] and [x][^n].\n\n```\n[^n]: in code\n\n```\n\n[^n]: Note text.\n"},
-		{name: "definition after a comment over several lines", input: "# T\n\nUse [^n] and [x][^n].\n\n<!--\n\n[^n]: in a comment\n-->\n\n[^n]: Note text.\n"},
 		{name: "definition after a one-line comment", input: "# T\n\nUse [^n] and [x][^n].\n\n<!-- note -->\n\n[^n]: Note text.\n"},
 		{name: "definition after a div", input: "# T\n\nUse [^n] and [x][^n].\n\n<div>\n<b>x</b>\n</div>\n\n[^n]: Note text.\n"},
 		{name: "definition after one-line CDATA", input: "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[x]]]]>\n\n[^n]: Note text.\n"},
@@ -975,17 +974,25 @@ func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
 		{name: "footnote call after link text", input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n", want: []footnotePosition{{3, 5}}},
 		{name: "full reference to a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n", want: []footnotePosition{{3, 5}}},
 		{name: "footnote call that is also a link definition", input: "# T\n\nUse [^n] here.\n\n[^n]: /url\n"},
+		{name: "byte order mark on a later line", input: "# T\n\nUse [^n] and [x][^n].\n\n\ufeff<!--\n\n[^n]: Note text.\n-->\n"},
+		{name: "definition after a one-line pre block", input: "# T\n\nUse [^n] and [x][^n].\n\n<pre>x</pre>\n\n[^n]: Note text.\n"},
 	})
 }
 
 // TestReferenceLinkImagesRule_FootnotesAroundBlocks checks MD052 on GFM
 // footnote definitions in or after blocks that micromark may read
-// otherwise than goldmark: code, HTML, math, directives, and code fences
-// or HTML blocks that hold blank lines, unless both parsers read them
-// alike. The definitions do not count, and MD052 reports what main
-// reports.
+// otherwise than goldmark: code, HTML, math, directives, code fences that
+// hold blank lines unless both parsers read them alike, and HTML blocks of
+// kinds 1 to 5 that go on past their first line. The definitions do not
+// count, and MD052 reports what main reports.
 func TestReferenceLinkImagesRule_FootnotesAroundBlocks(t *testing.T) {
 	checkFootnoteCases(t, []footnoteCase{
+		{
+			name:     "definition after a comment over several lines",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<!--\n\n[^n]: in a comment\n-->\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {10, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
 		{
 			name:     "fence in a nested footnote",
 			input:    "Use [x][^n].\n\n[^a]: one\n    [^b]: two\n    ```\n    [^n]: three four\n    ```\n",
@@ -1172,6 +1179,18 @@ func TestReferenceLinkImagesRule_FootnotesAroundBlocks(t *testing.T) {
 			want:     []footnotePosition{{3, 9}, {3, 22}, {6, 1}, {6, 12}, {9, 1}},
 			wantFull: []footnotePosition{{3, 9}, {6, 1}, {9, 1}},
 		},
+		{
+			name:     "definition after a script block that goldmark ends at a long s",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<script>\n</\u017fcript>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {8, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a pre block over several lines",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<pre>\nx\n</pre>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
 	})
 }
 
@@ -1234,8 +1253,9 @@ func TestReferenceLinkImagesRule_UncertainFootnotes(t *testing.T) {
 
 // TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions checks
 // MD052 where markdownlint may take other lines than the parser for front
-// matter, or a carriage return alone ends a line. No definition counts
-// there, and MD052 reports what main reports.
+// matter, a carriage return alone ends a line, or the text that
+// markdownlint gives micromark starts with a byte order mark. No
+// definition counts there, and MD052 reports what main reports.
 func TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions(t *testing.T) {
 	checkFootnoteCases(t, []footnoteCase{
 		{
@@ -1262,6 +1282,25 @@ func TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions(t *testing.T
 			want:     []footnotePosition{{1, 10}, {1, 19}, {1, 29}},
 			wantFull: []footnotePosition{{1, 19}},
 		},
+		{name: "two byte order marks", input: "\ufeff\ufeffIntro\n\n[^b]: note text.\n\nUse [^b].\n", want: []footnotePosition{{3, 1}, {5, 5}}},
+		{
+			name:     "byte order mark after front matter",
+			input:    "---\ntitle: x\n---\n\ufeff<!--\n\n[^n]: Note text.\n-->\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{6, 1}, {9, 5}, {9, 14}},
+			wantFull: []footnotePosition{{9, 14}},
+		},
+		{
+			name:     "byte order mark after front matter and a no-break space line",
+			input:    "---\ntitle: x\n---\n\u00a0\n\ufeff<!--\n\n[^n]: Note text.\n-->\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{7, 1}, {10, 5}, {10, 14}},
+			wantFull: []footnotePosition{{10, 14}},
+		},
+		{
+			name:  "byte order mark after front matter before a fence",
+			input: "---\ntitle: x\n---\n\ufeff```\n\n[^n]: Note text.\n```\n\nUse [^n] and [x][^n].\n",
+			want:  []footnotePosition{{6, 1}},
+		},
+		{name: "two byte order marks before a fence", input: "\ufeff\ufeff```\n\n[^b]: note text.\n```\n\nUse [^b] and [x][^b].\n", want: []footnotePosition{{3, 1}}},
 	})
 }
 
@@ -1296,6 +1335,38 @@ func TestMarkdownlintFrontMatterLines(t *testing.T) {
 			got, ok := markdownlintFrontMatterLines(parseForCheck(t, tt.input))
 			assert.Equal(t, tt.wantOK, ok)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestMicromarkDropsByteOrderMark checks where the text that markdownlint
+// gives micromark starts with a byte order mark: after the one markdownlint
+// drops from the file, or after front matter and the white space lines
+// that markdownlint's pattern takes with it.
+func TestMicromarkDropsByteOrderMark(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "no byte order mark", input: "# T\n", want: false},
+		{name: "one byte order mark", input: "\ufeff# T\n", want: false},
+		{name: "two byte order marks", input: "\ufeff\ufeff# T\n", want: true},
+		{name: "byte order mark before front matter", input: "\ufeff---\na: 1\n---\n# T\n", want: false},
+		{name: "byte order mark right after front matter", input: "---\na: 1\n---\n\ufeff<!--\n", want: true},
+		{name: "after a blank line after front matter", input: "---\na: 1\n---\n\n\ufeff<!--\n", want: true},
+		{name: "after a no-break space line after front matter", input: "---\na: 1\n---\n\u00a0\n\ufeff<!--\n", want: true},
+		{name: "after text after front matter", input: "---\na: 1\n---\ntext\n\ufeff<!--\n", want: false},
+		{name: "after a line that holds only a byte order mark", input: "---\na: 1\n---\n\ufeff\n\ufeff<!--\n", want: true},
+		// micromark keeps this one, as the pattern takes the line, but a
+		// line that starts with a byte order mark is left unsure.
+		{name: "line that holds only a byte order mark after front matter", input: "---\na: 1\n---\n\ufeff\n# T\n", want: true},
+		{name: "line separator after front matter", input: "---\na: 1\n---\n\u2028\n# T\n", want: true},
+		{name: "byte order mark on a later line", input: "# T\n\n\ufeff<!--\n", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, micromarkDropsByteOrderMark(parseForCheck(t, tt.input)))
 		})
 	}
 }
@@ -1367,6 +1438,7 @@ func TestOpensRawHTMLBlock(t *testing.T) {
 		{line: "<script>a</b></script>", want: false},
 		{line: "<script></</script>", want: false},
 		{line: "<script>x</script", want: true},
+		{line: "<script></\u017fcript>", want: true},
 		{line: "<pre>x</PRE>", want: false},
 		{line: "<pre>x</pre >", want: true},
 		{line: "<pre>x</prescription>", want: true},

@@ -241,27 +241,30 @@ func validShortcutLabel(text string) bool {
 // no line before it may start, after its indentation and container markers,
 // with "$$" or ":::", where micromark may open math or a directive, and
 // every line before it that may open a block holding blank lines must open
-// one that both parsers read alike (see sharedBlocks.vet).
+// a fenced code block that both parsers read alike (see sharedBlocks.vet).
 //
 // No definition counts where markdownlint may not take the parser's front
-// matter (see markdownlintFrontMatterLines), or where a carriage return
-// that no line feed follows ends a line, as it does for micromark and not
-// for the parser. A definition that does not count leaves its calls read
-// as goldmark reads them, as before MD052 read footnotes.
+// matter (see markdownlintFrontMatterLines), where a carriage return that
+// no line feed follows ends a line, as it does for micromark and not for
+// the parser, or where micromark drops a byte order mark that the parser
+// reads as text (see micromarkDropsByteOrderMark). A definition that does
+// not count leaves its calls read as goldmark reads them, as before MD052
+// read footnotes.
 func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 	file := ctx.File
 	labels := make(map[string]bool)
 	if hasLoneCarriageReturn(file.Content) {
 		return labels
 	}
-	if frontMatter, ok := markdownlintFrontMatterLines(file); !ok || frontMatter != file.FrontMatterLines {
+	if frontMatter, ok := markdownlintFrontMatterLines(file); !ok || frontMatter != file.FrontMatterLines ||
+		micromarkDropsByteOrderMark(file) {
 		return labels
 	}
 	blocks := sharedBlocks{ctx: ctx}
 	var topLevel []bool
 	afterBlank, afterDefinition := true, false
-	// readThrough is the last line of a block that both parsers read alike,
-	// whose lines need no reading.
+	// readThrough is the last line of a fenced code block that both parsers
+	// read alike, whose lines need no reading.
 	readThrough := 0
 	for line := 1; line <= len(file.Lines); line++ {
 		text := lint.RawLineContent(file, line)
@@ -298,68 +301,58 @@ func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 	return labels
 }
 
-// sharedBlocks finds the blocks that micromark reads as goldmark does among
-// those that may hold blank lines: fenced code blocks and HTML blocks of
-// CommonMark's kinds 1 to 5. The top-level blocks of goldmark's tree are
-// read once, when a line first needs them.
+// sharedBlocks finds the fenced code blocks that micromark reads as
+// goldmark does, whose lines need no reading. goldmark's top-level fenced
+// code blocks are read once, when a line first needs them.
 type sharedBlocks struct {
-	ctx         *lint.RuleContext
-	fences, raw map[int]int
+	ctx    *lint.RuleContext
+	fences map[int]int
 }
 
 // vet reads a line, rest after its indentation and container markers,
-// that may open a block holding blank lines. It returns the block's last
-// line when both parsers read the block alike, 0 when the line opens no
-// such block, and false when micromark may read such a block where
-// goldmark does not. Both read alike a block that goldmark reads at the
-// top level from a line that starts at column 0 and is fresh: the first
-// line of the document or a line after a blank one, where no paragraph,
-// container or HTML block of kind 6 or 7 goes on in either parser. Its
-// end is then the same line in both, except for a CDATA section: goldmark
-// ends one at the first line that holds "]]>", and micromark only at a
-// ">" right after a run of "]" of even length (closesCDATA). vet does not
-// compare the two, so a CDATA section that goes on past its first line
-// counts as one that micromark may read otherwise.
+// that may open a block holding blank lines. It returns the last line of a
+// fenced code block that both parsers read alike, 0 when the line opens no
+// such block, and false when micromark may read the lines after it
+// otherwise than goldmark. Both read alike a fenced code block that
+// goldmark reads at the top level from a line that starts at column 0 and
+// is fresh: the first line of the document or a line after a blank one,
+// where no paragraph, container or HTML block of kind 6 or 7 goes on in
+// either parser. Its end is then the same line in both, since both end a
+// fence by the same rules, which read ASCII only. An HTML block of kinds 1
+// to 5 that goes on past its first line is never alike: the parsers may
+// end it on different lines, as goldmark reads "</ſcript>" as an end tag
+// and micromark does not.
 func (b *sharedBlocks) vet(line int, fresh bool, rest []byte) (int, bool) {
-	var starts map[int]int
-	switch {
-	case bytes.HasPrefix(rest, []byte("```")) || bytes.HasPrefix(rest, []byte("~~~")):
-		if b.fences == nil {
-			b.fences = b.topLevelBlocks(b.ctx.CodeBlocks(), lint.IsFencedCodeBlock)
-		}
-		starts = b.fences
-	case opensRawHTMLBlock(rest):
-		if bytes.HasPrefix(rest, []byte(cdataOpening)) {
-			return 0, false
-		}
-		if b.raw == nil {
-			b.raw = b.topLevelBlocks(b.ctx.HTMLBlocks(), func(*mdast.Node) bool { return true })
-		}
-		starts = b.raw
-	default:
+	if opensRawHTMLBlock(rest) {
+		return 0, false
+	}
+	if !bytes.HasPrefix(rest, []byte("```")) && !bytes.HasPrefix(rest, []byte("~~~")) {
 		return 0, true
 	}
-	end, ok := starts[line]
+	if b.fences == nil {
+		b.fences = topLevelFences(b.ctx)
+	}
+	end, ok := b.fences[line]
 	return end, fresh && ok && end > line
 }
 
-// topLevelBlocks maps the first line of each of nodes that is a child of
-// the document and that keep accepts to its last line.
-func (b *sharedBlocks) topLevelBlocks(nodes []*mdast.Node, keep func(*mdast.Node) bool) map[int]int {
-	file := b.ctx.File
-	blocks := make(map[int]int)
-	for _, node := range nodes {
-		span := node.SourceRange()
-		if node.Parent != b.ctx.Root || !keep(node) || span.StartOffset < 0 || span.EndOffset <= span.StartOffset {
+// topLevelFences maps the first line of each fenced code block that is a
+// child of the document to its last line.
+func topLevelFences(ctx *lint.RuleContext) map[int]int {
+	file := ctx.File
+	fences := make(map[int]int)
+	for _, block := range ctx.CodeBlocks() {
+		span := block.SourceRange()
+		if block.Parent != ctx.Root || !lint.IsFencedCodeBlock(block) || span.StartOffset < 0 || span.EndOffset <= span.StartOffset {
 			continue
 		}
 		first, _ := file.LineAt(span.StartOffset)
 		last, _ := file.LineAt(span.EndOffset - 1)
 		if first > 0 {
-			blocks[first] = last
+			fences[first] = last
 		}
 	}
-	return blocks
+	return fences
 }
 
 // cdataOpening starts a CDATA section, an HTML block of kind 5.
@@ -483,6 +476,37 @@ func hasLoneCarriageReturn(content []byte) bool {
 		}
 		content = content[idx+2:]
 	}
+}
+
+// micromarkDropsByteOrderMark reports whether the text that markdownlint
+// gives micromark may start with a byte order mark, which micromark drops
+// and the parser reads as text, so that a fence, a comment or "$$" right
+// after it opens for micromark alone. markdownlint drops one byte order
+// mark from the start of the file, then the front matter together with the
+// lines after it that hold only white space to a JavaScript regular
+// expression, which frontMatterRe's "\s*" takes as well. The front matter
+// must be the parser's (see markdownlintFrontMatterLines). To stay on the
+// safe side, any line from there up to the first line that holds more than
+// white space leaves it unsure when it starts with a byte order mark or
+// holds a line separator, which the pattern reads as a line ending.
+func micromarkDropsByteOrderMark(file *mdast.FileSnapshot) bool {
+	for line := file.FrontMatterLines + 1; line <= len(file.Lines); line++ {
+		text := lint.RawLineContent(file, line)
+		if line == 1 {
+			text = bytes.TrimPrefix(text, []byte(mdast.ByteOrderMark))
+		}
+		switch {
+		case bytes.HasPrefix(text, []byte(mdast.ByteOrderMark)):
+			return true
+		case file.FrontMatterLines == 0:
+			return false
+		case hasLineSeparator(text):
+			return true
+		case !onlyJSWhiteSpace(text):
+			return false
+		}
+	}
+	return false
 }
 
 // markdownlintFrontMatterLines returns the number of lines up to the
