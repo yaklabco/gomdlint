@@ -557,6 +557,43 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 	}
 }
 
+// headingSpacesMarkdown holds headings with missing or extra spaces around
+// their hashes and with trailing punctuation, for the column tests of
+// MD019, MD020, MD021 and MD026, whose expected positions markdownlint
+// 0.41.1 gives for this document.
+const headingSpacesMarkdown = "# Title\n\n" +
+	"##  Two spaces\n\n" + // 3
+	"###   Three spaces\n\n" + // 5
+	"#\t Tab then space\n\n" + // 7
+	"> ##  Quoted\n\n" + // 9
+	"- ###  Listed\n\n" + // 11
+	"## Right#\n\n" + // 13
+	"##Left ##\n\n" + // 15
+	"## Escaped\\##\n\n" + // 17
+	"## Trailing#   \n\n" + // 19
+	"#  Both sides  #\n\n" + // 21
+	"##   Left only ##\n\n" + // 23
+	"## Right only   ##\n\n" + // 25
+	"> ##  Quoted closed  ##\n\n" + // 27
+	"## Spaced .\n\n" + // 29
+	"## Tabbed\t!\n\n" + // 31
+	"## Escaped \\.\n\n" + // 33
+	"## Plain.\n" // 35
+
+// TestNoMultipleSpaceATXRule_MarkdownlintColumns checks that MD019 points
+// at the first extra space after the hashes, as markdownlint 0.41.1 does,
+// and covers the extra spaces only.
+func TestNoMultipleSpaceATXRule_MarkdownlintColumns(t *testing.T) {
+	diags := applyRuleWithOptions(t, NewNoMultipleSpaceATXRule(), headingSpacesMarkdown, nil)
+	assert.Equal(t, [][2]int{{3, 4}, {5, 5}, {7, 3}, {9, 6}, {11, 7}}, diagPositions(diags))
+	if assert.Len(t, diags, 5) {
+		assert.Equal(t, 7, diags[1].EndColumn, "the finding ends after the extra spaces")
+	}
+
+	bom := applyRuleWithOptions(t, NewNoMultipleSpaceATXRule(), "\uFEFF#  Heading\n", nil)
+	assert.Equal(t, [][2]int{{1, 6}}, diagPositions(bom), "a byte order mark keeps its bytes before the column")
+}
+
 func TestNoMissingSpaceATXRule_Metadata(t *testing.T) {
 	rule := NewNoMissingSpaceATXRule()
 

@@ -151,7 +151,8 @@ func NewNoMultipleSpaceATXRule() *NoMultipleSpaceATXRule {
 // Apply checks for multiple spaces after hash on ATX headings.
 //
 // Like markdownlint, it checks parsed open ATX headings, including headings
-// in blockquotes and lists; closed headings are left to MD021.
+// in blockquotes and lists; closed headings are left to MD021. A finding
+// covers the spaces after the first, which the fix removes.
 func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
@@ -174,7 +175,7 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		builder := fix.NewEditBuilder()
 		builder.ReplaceRange(spaces.StartOffset, spaces.EndOffset, " ")
 
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, spaces),
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, extraSpaces(spaces)),
 			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", spaces.Len())).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the hash characters").
@@ -184,6 +185,13 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	}
 
 	return checker.filter(diags), nil
+}
+
+// extraSpaces returns the part of a run of spaces and tabs after its first
+// character, which markdownlint's MD019 and MD021 report: the characters
+// that one space would not need. The run holds one byte per character.
+func extraSpaces(run mdast.SourceRange) mdast.SourceRange {
+	return mdast.SourceRange{StartOffset: min(run.StartOffset+1, run.EndOffset), EndOffset: run.EndOffset}
 }
 
 // rangePosition converts a byte range to a line and column position.
