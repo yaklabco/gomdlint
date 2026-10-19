@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
@@ -260,15 +261,18 @@ func (r *FinalNewlineRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	last := lint.RawLineContent(ctx.File, lastLine)
 	last = last[min(len(last), lint.LineTextOffset(ctx.File, lastLine)):]
 	if !isMarkdownlintBlankLine(last) {
-		// Missing final newline.
+		// Missing final newline. Like markdownlint, the finding points at
+		// the last character, which the newline would follow.
 		builder := fix.NewEditBuilder()
 		builder.Insert(contentLen, "\n")
 
+		end := lint.LineLength(ctx.File, lastLine) + 1
+		_, size := utf8.DecodeLastRune(last)
 		pos := mdast.SourcePosition{
 			StartLine:   lastLine,
-			StartColumn: lint.LineLength(ctx.File, lastLine) + 1,
+			StartColumn: end - size,
 			EndLine:     lastLine,
-			EndColumn:   lint.LineLength(ctx.File, lastLine) + 1,
+			EndColumn:   end,
 		}
 
 		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "File should end with a newline").

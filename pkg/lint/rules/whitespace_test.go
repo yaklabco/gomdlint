@@ -868,6 +868,30 @@ func TestTrailingWhitespaceRule_Metadata(t *testing.T) {
 	assert.Equal(t, config.SeverityWarning, rule.DefaultSeverity())
 }
 
+// TestFinalNewlineRule_MarkdownlintColumn checks that MD047 points at the
+// last character of the file, as markdownlint 0.41.1 does, not past it.
+func TestFinalNewlineRule_MarkdownlintColumn(t *testing.T) {
+	tests := []struct {
+		input string
+		want  [2]int
+	}{
+		{input: "# Title\n\nText.", want: [2]int{3, 5}},
+		{input: "# Title\n\n> Quote.", want: [2]int{3, 8}},
+		{input: "# Title\r\n\r\nText.", want: [2]int{3, 5}},
+		// The column counts bytes, so the last character, which takes
+		// three, starts at byte 4, and a byte order mark comes first.
+		{input: "# Title\n\n\u4f60\u597d", want: [2]int{3, 4}},
+		{input: "\uFEFFText.", want: [2]int{1, 8}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewFinalNewlineRule(), tt.input, nil)
+			require.Len(t, diags, 1)
+			assert.Equal(t, tt.want, [2]int{diags[0].StartLine, diags[0].StartColumn})
+		})
+	}
+}
+
 func TestFinalNewlineRule_Metadata(t *testing.T) {
 	rule := NewFinalNewlineRule()
 
