@@ -346,35 +346,94 @@ func TestLoad_UnknownOptionWrittenTwiceOnlyWarns(t *testing.T) {
 }
 
 // TestLoad_RejectsAKeyWrittenTwiceThroughAnAlias checks two keys in one
-// mapping that read as one name through an alias, directly under the rule
-// key and under options. Decoding would keep the later value silently, so
-// loading fails at the line of the later key.
+// mapping that read as one name through an alias: a rule key under rules
+// or rule_defaults, a rule setting, an option directly under the rule key
+// and an option under options. Decoding would keep one of the values
+// silently, or fail with an error that names a type of gomdlint's, so
+// loading fails instead with the error that the key written out twice
+// gets, YAML's error at the line of the later key.
 func TestLoad_RejectsAKeyWrittenTwiceThroughAnAlias(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct {
-		name, content, want string
+		name, literal, alias, want string
 	}{
 		{
-			name:    "flat",
-			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
-			want:    `line 4: "line_length" and "*opt" both set option "line_length"; keep one of them`,
+			name:    "rule key",
+			literal: "rules:\n  MD013: false\n  MD013: true\n",
+			alias:   "rules:\n  &id MD013: false\n  *id : true\n",
+			want:    `line 3: mapping key "MD013" already defined at line 2`,
+		},
+		{
+			name:    "rule key under rule_defaults",
+			literal: "rule_defaults:\n  MD013:\n    line_length: 100\n  MD013:\n    line_length: 90\n",
+			alias:   "rule_defaults:\n  &id MD013:\n    line_length: 100\n  *id :\n    line_length: 90\n",
+			want:    `line 4: mapping key "MD013" already defined at line 2`,
+		},
+		{
+			name:    "rule key in a merged mapping",
+			literal: "base: &base\n  MD013: false\n  MD013: true\nrules:\n  <<: *base\n",
+			alias:   "base: &base\n  &id MD013: false\n  *id : true\nrules:\n  <<: *base\n",
+			want:    `line 3: mapping key "MD013" already defined at line 2`,
+		},
+		{
+			name:    "setting",
+			literal: "rules:\n  MD013:\n    severity: error\n    severity: warning\n",
+			alias:   "rules:\n  MD013:\n    &set severity: error\n    *set : warning\n",
+			want:    `line 4: mapping key "severity" already defined at line 3`,
+		},
+		{
+			name:    "flat option",
+			literal: "rules:\n  MD013:\n    line_length: 100\n    line_length: 20\n",
+			alias:   "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
+			want:    `line 4: mapping key "line_length" already defined at line 3`,
 		},
 		{
 			name:    "under options",
-			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
-			want:    `line 5: "options.max" and "options.*opt" both set option "max"; keep one of them`,
+			literal: "rules:\n  MD013:\n    options:\n      max: 100\n      max: 20\n",
+			alias:   "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
+			want:    `line 5: mapping key "max" already defined at line 4`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := loadProject(t, tt.content)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), ".gomdlint.yml: parse YAML: ")
-			assert.Contains(t, err.Error(), tt.want)
+			_, literalErr := loadProject(t, tt.literal)
+			_, aliasErr := loadProject(t, tt.alias)
+
+			require.Error(t, literalErr)
+			require.Error(t, aliasErr)
+			// Each project lives in a directory of its own, which the
+			// errors name, so they are compared after the file's name.
+			assert.Equal(t, "parse YAML: yaml: unmarshal errors:\n  "+tt.want, afterConfigFile(t, literalErr))
+			assert.Equal(t, afterConfigFile(t, literalErr), afterConfigFile(t, aliasErr))
 		})
 	}
+}
+
+// TestLoad_RejectsAnAliasKeyOfItsOwnMapping checks a config file in which
+// an alias key names the mapping that holds it. Loading fails with the
+// error for a key that is no scalar, at the alias's line, before anything
+// decodes the file. Decoding used to report that the node contains itself,
+// and an expansion of the key would make a cycle that decoding never
+// leaves.
+func TestLoad_RejectsAnAliasKeyOfItsOwnMapping(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadProject(t, "rules:\n  MD013:\n    options:\n      x: &m {*m : 1}\n")
+
+	require.Error(t, err)
+	assert.Equal(t, "parse YAML: yaml: unmarshal errors:\n  line 4: mapping key must be a scalar", afterConfigFile(t, err))
+}
+
+// afterConfigFile returns the message of err, an error of loading a
+// project's .gomdlint.yml, after the path of the file.
+func afterConfigFile(t *testing.T, err error) string {
+	t.Helper()
+
+	_, after, found := strings.Cut(err.Error(), string(filepath.Separator)+".gomdlint.yml: ")
+	require.True(t, found, "the error names the file: %v", err)
+	return after
 }
 
 // TestLoad_MergedFlatOptionsYieldToWrittenOnes checks YAML's precedence for

@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -219,49 +220,218 @@ func TestRuleConfig_OptionWrittenTwiceThroughAMerge(t *testing.T) {
 	assert.Contains(t, err.Error(), `line 2: "max" and "options.max" both set option "max"; keep one of them`)
 }
 
+// yamlErrors starts the message of a *yaml.TypeError, before its errors.
+const yamlErrors = "yaml: unmarshal errors:\n  "
+
+// repeatedKeyCase is a key written twice in one mapping: literal writes it
+// out twice, and alias writes it the second time, or the first, through an
+// alias, on the same lines, so both must fail with want, YAML's error for
+// a key written twice.
+type repeatedKeyCase struct {
+	name, literal, alias, want string
+}
+
+// repeatedRuleSettingKeys are keys written twice in the settings of a rule
+// or under its options, which decoding a rule's settings rejects.
+var repeatedRuleSettingKeys = []repeatedKeyCase{
+	{
+		name:    "flat option",
+		literal: "rules:\n  MD013:\n    line_length: 100\n    line_length: 20\n",
+		alias:   "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
+		want:    `line 4: mapping key "line_length" already defined at line 3`,
+	},
+	{
+		name:    "alias first",
+		literal: "ignore: [line_length]\nrules:\n  MD013:\n    line_length: 20\n    line_length: 100\n",
+		alias:   "ignore: [&opt line_length]\nrules:\n  MD013:\n    *opt : 20\n    line_length: 100\n",
+		want:    `line 5: mapping key "line_length" already defined at line 4`,
+	},
+	{
+		name:    "option under options",
+		literal: "rules:\n  MD013:\n    options:\n      max: 100\n      max: 20\n",
+		alias:   "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
+		want:    `line 5: mapping key "max" already defined at line 4`,
+	},
+	{
+		name:    "option in a merged mapping",
+		literal: "base: &base\n  max: 100\n  max: 20\nrules:\n  MD013:\n    <<: *base\n",
+		alias:   "base: &base\n  &opt max: 100\n  *opt : 20\nrules:\n  MD013:\n    <<: *base\n",
+		want:    `line 3: mapping key "max" already defined at line 2`,
+	},
+	{
+		name:    "severity",
+		literal: "rules:\n  MD013:\n    severity: error\n    severity: warning\n",
+		alias:   "rules:\n  MD013:\n    &set severity: error\n    *set : warning\n",
+		want:    `line 4: mapping key "severity" already defined at line 3`,
+	},
+	{
+		name:    "enabled",
+		literal: "rules:\n  MD013:\n    enabled: false\n    enabled: true\n",
+		alias:   "rules:\n  MD013:\n    &set enabled: false\n    *set : true\n",
+		want:    `line 4: mapping key "enabled" already defined at line 3`,
+	},
+	{
+		name:    "options",
+		literal: "rules:\n  MD013:\n    options: {max: 1}\n    options: {max: 2}\n",
+		alias:   "rules:\n  MD013:\n    &set options: {max: 1}\n    *set : {max: 2}\n",
+		want:    `line 4: mapping key "options" already defined at line 3`,
+	},
+	{
+		name:    "setting in rule_defaults",
+		literal: "rule_defaults:\n  MD013:\n    auto_fix: false\n    auto_fix: true\n",
+		alias:   "rule_defaults:\n  MD013:\n    &set auto_fix: false\n    *set : true\n",
+		want:    `line 4: mapping key "auto_fix" already defined at line 3`,
+	},
+	{
+		// YAML names every pair of keys that it takes for one.
+		name:    "three times",
+		literal: "rules:\n  MD013:\n    max: 1\n    max: 2\n    max: 3\n",
+		alias:   "rules:\n  MD013:\n    &opt max: 1\n    *opt : 2\n    *opt : 3\n",
+		want: `line 4: mapping key "max" already defined at line 3` + "\n  " +
+			`line 5: mapping key "max" already defined at line 3` + "\n  " +
+			`line 5: mapping key "max" already defined at line 4`,
+	},
+	{
+		// YAML lists the pairs by the earlier key.
+		name:    "two keys in turn",
+		literal: "rules:\n  MD013:\n    max: 1\n    tables: true\n    tables: false\n    max: 2\n",
+		alias:   "rules:\n  MD013:\n    &a max: 1\n    &b tables: true\n    *b : false\n    *a : 2\n",
+		want: `line 6: mapping key "max" already defined at line 3` + "\n  " +
+			`line 5: mapping key "tables" already defined at line 4`,
+	},
+	{
+		// YAML rejects the settings, which write options out twice, before
+		// it reaches the first options mapping.
+		name:    "inside a key written out twice",
+		literal: "rules:\n  MD013:\n    options:\n      max: 1\n      max: 2\n    options:\n      max: 3\n",
+		alias:   "rules:\n  MD013:\n    options:\n      &opt max: 1\n      *opt : 2\n    options:\n      max: 3\n",
+		want:    `line 6: mapping key "options" already defined at line 3`,
+	},
+	{
+		// YAML rejects the settings before it reaches the mapping that
+		// they merge.
+		name:    "settings before the mappings they merge",
+		literal: "base: &base\n  max: 1\n  max: 2\nrules:\n  MD013:\n    <<: *base\n    tables: true\n    tables: false\n",
+		alias:   "base: &base\n  max: 1\n  max: 2\nrules:\n  MD013:\n    <<: *base\n    &t tables: true\n    *t : false\n",
+		want:    `line 8: mapping key "tables" already defined at line 7`,
+	},
+	{
+		// YAML reports a key that repeats under options beside the other
+		// errors of the rule's settings.
+		name:    "beside another error of the rule",
+		literal: "rules:\n  MD013:\n    enabled: maybe\n    options:\n      max: 1\n      max: 2\n",
+		alias:   "rules:\n  MD013:\n    enabled: maybe\n    options:\n      &opt max: 1\n      *opt : 2\n",
+		want: "line 3: cannot unmarshal !!str `maybe` into bool\n  " +
+			`line 6: mapping key "max" already defined at line 5`,
+	},
+	{
+		// YAML reaches the options where the settings write them, before
+		// the settings that follow.
+		name:    "under options before another error of the rule",
+		literal: "rules:\n  MD013:\n    options:\n      max: 1\n      max: 2\n    enabled: maybe\n",
+		alias:   "rules:\n  MD013:\n    options:\n      &opt max: 1\n      *opt : 2\n    enabled: maybe\n",
+		want: `line 5: mapping key "max" already defined at line 4` + "\n  " +
+			"line 6: cannot unmarshal !!str `maybe` into bool",
+	},
+	{
+		// YAML decodes nothing below options that repeat a key.
+		name:    "under options above a value that repeats a key",
+		literal: "rules:\n  MD013:\n    options:\n      max: 1\n      max: 2\n      nested: {x: 1, x: 2}\n",
+		alias:   "rules:\n  MD013:\n    options:\n      &opt max: 1\n      *opt : 2\n      nested: {x: 1, x: 2}\n",
+		want:    `line 5: mapping key "max" already defined at line 4`,
+	},
+	{
+		// YAML decodes the later merged mapping too, and lists its errors.
+		name:    "in a merged mapping before another merged mapping",
+		literal: "a: &a {enabled: true, enabled: false}\nb: &b {enabled: maybe}\nrules:\n  MD013:\n    <<: [*a, *b]\n",
+		alias:   "a: &a {&k enabled: true, *k : false}\nb: &b {enabled: maybe}\nrules:\n  MD013:\n    <<: [*a, *b]\n",
+		want: `line 1: mapping key "enabled" already defined at line 1` + "\n  " +
+			"line 2: cannot unmarshal !!str `maybe` into bool",
+	},
+	{
+		// Two aliases of one anchor name the key, not the anchor.
+		name:    "two aliases of one anchor in a merged mapping",
+		literal: "x: [max]\na: &a {max: 1, max: 2}\nrules:\n  MD013:\n    <<: *a\n",
+		alias:   "x: [&k max]\na: &a {*k : 1, *k : 2}\nrules:\n  MD013:\n    <<: *a\n",
+		want:    `line 2: mapping key "max" already defined at line 2`,
+	},
+	{
+		name:    "beside a key written out twice in a merged mapping",
+		literal: "a: &a {max: 1, max: 2, tables: 1, tables: 2}\nrules:\n  MD013:\n    <<: *a\n",
+		alias:   "a: &a {&k max: 1, *k : 2, tables: 1, tables: 2}\nrules:\n  MD013:\n    <<: *a\n",
+		want: `line 1: mapping key "max" already defined at line 1` + "\n  " +
+			`line 1: mapping key "tables" already defined at line 1`,
+	},
+	{
+		// YAML decodes the options and the other mappings that they merge,
+		// and then the rule's other settings.
+		name: "in a mapping that the options merge",
+		literal: "a: &a {max: 1, max: 2}\nb: &b {tables: true}\nrules:\n  MD013:\n    options:\n" +
+			"      <<: [*a, *b]\n    enabled: maybe\n",
+		alias: "a: &a {&k max: 1, *k : 2}\nb: &b {tables: true}\nrules:\n  MD013:\n    options:\n" +
+			"      <<: [*a, *b]\n    enabled: maybe\n",
+		want: `line 1: mapping key "max" already defined at line 1` + "\n  " +
+			"line 7: cannot unmarshal !!str `maybe` into bool",
+	},
+	{
+		name:    "in an option value",
+		literal: "rules:\n  MD013:\n    options:\n      x: {a: 1, a: 2}\n",
+		alias:   "rules:\n  MD013:\n    options:\n      x: {&k a: 1, *k : 2}\n",
+		want:    `line 4: mapping key "a" already defined at line 4`,
+	},
+	{
+		// YAML reaches a merged mapping after the settings' own keys.
+		name:    "in a merged mapping beside another error",
+		literal: "rules:\n  MD013:\n    <<: {max: 1, max: 2}\n    enabled: maybe\n",
+		alias:   "rules:\n  MD013:\n    <<: {&opt max: 1, *opt : 2}\n    enabled: maybe\n",
+		want: "line 4: cannot unmarshal !!str `maybe` into bool\n  " +
+			`line 3: mapping key "max" already defined at line 3`,
+	},
+}
+
 // TestRuleConfig_RejectsAKeyWrittenTwiceThroughAnAlias covers two keys in
-// one mapping that read as one name, where one of them is an alias of the
-// other. YAML rejects a key written twice, but compares an alias key by its
-// anchor, so decoding would keep the later value silently. Decoding fails
-// instead, at the line of the later key, naming both keys as written, both
-// for keys directly under the rule key and for keys under options.
+// one mapping of a rule's settings that read as one name, where an alias
+// writes one of them. YAML rejects a key written twice, but compares an
+// alias key by its anchor, so decoding would keep one of the values
+// silently, or, for a setting, fail with an error that names a type of
+// gomdlint's. Decoding fails instead with YAML's error for a key written
+// twice, at the line of the later key, the same error as for the key
+// written out twice, for settings, for options directly under the rule key
+// and for options under options, with yaml.Unmarshal and with FromYAML.
 func TestRuleConfig_RejectsAKeyWrittenTwiceThroughAnAlias(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range []struct {
-		name, content, want string
-	}{
-		{
-			name:    "flat",
-			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
-			want:    `line 4: "line_length" and "*opt" both set option "line_length"; keep one of them`,
-		},
-		{
-			name:    "alias first",
-			content: "ignore: [&opt line_length]\nrules:\n  MD013:\n    *opt : 20\n    line_length: 100\n",
-			want:    `line 5: "*opt" and "line_length" both set option "line_length"; keep one of them`,
-		},
-		{
-			name:    "under options",
-			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
-			want:    `line 5: "options.max" and "options.*opt" both set option "max"; keep one of them`,
-		},
-		{
-			name:    "in a merged mapping",
-			content: "base: &base\n  &opt max: 100\n  *opt : 20\nrules:\n  MD013:\n    <<: *base\n",
-			want:    `line 3: "max" and "*opt" both set option "max"; keep one of them`,
-		},
-	} {
+	for _, tt := range repeatedRuleSettingKeys {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var cfg config.Config
-			err := yaml.Unmarshal([]byte(tt.content), &cfg)
+			literalErr := decodeExpanded(t, tt.literal)
+			aliasErr := decodeExpanded(t, tt.alias)
 
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.want)
+			require.Error(t, literalErr)
+			require.Error(t, aliasErr)
+			assert.Equal(t, yamlErrors+tt.want, literalErr.Error())
+			assert.Equal(t, literalErr.Error(), aliasErr.Error())
+
+			_, literalErr = config.FromYAML([]byte(tt.literal))
+			_, aliasErr = config.FromYAML([]byte(tt.alias))
+			require.Error(t, literalErr)
+			require.Error(t, aliasErr)
+			assert.Equal(t, "parse yaml: "+yamlErrors+tt.want, literalErr.Error())
+			assert.Equal(t, literalErr.Error(), aliasErr.Error())
 		})
 	}
+}
+
+// decodeExpanded decodes content into a Config with its alias keys
+// expanded, as the configuration loader decodes a file.
+func decodeExpanded(t *testing.T, content string) error {
+	t.Helper()
+
+	var doc yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte(content), &doc))
+	var cfg config.Config
+	return config.ExpandAliasKeys(&doc).Decode(&cfg)
 }
 
 // TestRuleConfig_ReportsTheErrorsOfEveryRule covers keys written twice in
@@ -280,8 +450,462 @@ func TestRuleConfig_ReportsTheErrorsOfEveryRule(t *testing.T) {
 `))
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `line 4: "line_length" and "*a" both set option "line_length"`)
-	assert.Contains(t, err.Error(), `line 8: "options.br_spaces" and "options.*b" both set option "br_spaces"`)
+	assert.Contains(t, err.Error(), `line 4: mapping key "line_length" already defined at line 3`)
+	assert.Contains(t, err.Error(), `line 8: mapping key "br_spaces" already defined at line 7`)
+}
+
+// repeatedRuleKeys are rule keys written twice under rules or
+// rule_defaults, which FromYAML rejects (see config.ExpandAliasKeys).
+var repeatedRuleKeys = []repeatedKeyCase{
+	{
+		name:    "under rules",
+		literal: "rules:\n  MD013: false\n  MD013: true\n",
+		alias:   "rules:\n  &id MD013: false\n  *id : true\n",
+		want:    `line 3: mapping key "MD013" already defined at line 2`,
+	},
+	{
+		name:    "under rule_defaults",
+		literal: "rule_defaults:\n  MD013: false\n  MD013: true\n",
+		alias:   "rule_defaults:\n  &id MD013: false\n  *id : true\n",
+		want:    `line 3: mapping key "MD013" already defined at line 2`,
+	},
+	{
+		name:    "alias first",
+		literal: "ignore: [MD013]\nrules:\n  MD013: false\n  MD013: true\n",
+		alias:   "ignore: [&id MD013]\nrules:\n  *id : false\n  MD013: true\n",
+		want:    `line 4: mapping key "MD013" already defined at line 3`,
+	},
+	{
+		name:    "two anchors of one name",
+		literal: "ignore: [MD013, MD013]\nrules:\n  MD013: false\n  MD013: true\n",
+		alias:   "ignore: [&a MD013, &b MD013]\nrules:\n  *a : false\n  *b : true\n",
+		want:    `line 4: mapping key "MD013" already defined at line 3`,
+	},
+	{
+		name:    "settings of both kinds",
+		literal: "rules:\n  MD013:\n    enabled: false\n  MD013:\n    severity: error\n",
+		alias:   "rules:\n  &id MD013:\n    enabled: false\n  *id :\n    severity: error\n",
+		want:    `line 4: mapping key "MD013" already defined at line 2`,
+	},
+	{
+		name:    "in a merged mapping",
+		literal: "base: &base\n  MD013: false\n  MD013: true\nrules:\n  <<: *base\n",
+		alias:   "base: &base\n  &id MD013: false\n  *id : true\nrules:\n  <<: *base\n",
+		want:    `line 3: mapping key "MD013" already defined at line 2`,
+	},
+	{
+		name:    "three times",
+		literal: "rules:\n  MD013: false\n  MD013: true\n  MD013: false\n",
+		alias:   "rules:\n  &id MD013: false\n  *id : true\n  *id : false\n",
+		want: `line 3: mapping key "MD013" already defined at line 2` + "\n  " +
+			`line 4: mapping key "MD013" already defined at line 2` + "\n  " +
+			`line 4: mapping key "MD013" already defined at line 3`,
+	},
+	{
+		name:    "three times beside a merge key",
+		literal: "base: &base\n  MD010: false\nrules:\n  <<: *base\n  MD013: false\n  MD013: true\n  MD013: false\n",
+		alias:   "base: &base\n  MD010: false\nrules:\n  <<: *base\n  &id MD013: false\n  *id : true\n  *id : false\n",
+		want: `line 6: mapping key "MD013" already defined at line 5` + "\n  " +
+			`line 7: mapping key "MD013" already defined at line 5` + "\n  " +
+			`line 7: mapping key "MD013" already defined at line 6`,
+	},
+	{
+		// Decoding reaches the sections in the order the file writes them.
+		name:    "rule_defaults before rules",
+		literal: "rule_defaults:\n  MD009: false\n  MD009: true\nrules:\n  MD013: false\n  MD013: true\n",
+		alias:   "rule_defaults:\n  &a MD009: false\n  *a : true\nrules:\n  &b MD013: false\n  *b : true\n",
+		want: `line 3: mapping key "MD009" already defined at line 2` + "\n  " +
+			`line 6: mapping key "MD013" already defined at line 5`,
+	},
+	{
+		// YAML rejects the document, which writes rules out twice, before
+		// it reaches the first rules mapping.
+		name:    "inside rules written out twice",
+		literal: "rules:\n  MD013: false\n  MD013: true\nrules:\n  MD009: false\n",
+		alias:   "rules:\n  &id MD013: false\n  *id : true\nrules:\n  MD009: false\n",
+		want:    `line 4: mapping key "rules" already defined at line 1`,
+	},
+	{
+		// YAML compares keys by their text, so a null key repeats too,
+		// though decoding skips it.
+		name:    "null",
+		literal: "rules:\n  ~: false\n  ~: true\n",
+		alias:   "rules:\n  &n ~: false\n  *n : true\n",
+		want:    `line 3: mapping key "~" already defined at line 2`,
+	},
+	{
+		// YAML names a binary key by its text.
+		name:    "binary",
+		literal: "rules:\n  !!binary TUQwMTM=: false\n  !!binary TUQwMTM=: true\n",
+		alias:   "rules:\n  &b !!binary TUQwMTM= : false\n  *b : true\n",
+		want:    `line 3: mapping key "TUQwMTM=" already defined at line 2`,
+	},
+	{
+		// Decoding merges the sections in the order the merged mapping
+		// writes them.
+		name:    "sections that only a merge key brings in",
+		literal: "base: &base\n  rule_defaults: {MD009: false, MD009: true}\n  rules: {MD013: false, MD013: true}\n<<: *base\n",
+		alias:   "base: &base\n  rule_defaults: {&a MD009: false, *a : true}\n  rules: {&b MD013: false, *b : true}\n<<: *base\n",
+		want: `line 2: mapping key "MD009" already defined at line 2` + "\n  " +
+			`line 3: mapping key "MD013" already defined at line 3`,
+	},
+	{
+		// YAML rejects the rules before it reaches the mapping that they
+		// merge.
+		name:    "rules before the mappings they merge",
+		literal: "base: &base\n  MD009: false\n  MD009: true\nrules:\n  <<: *base\n  MD013: false\n  MD013: true\n",
+		alias:   "base: &base\n  MD009: false\n  MD009: true\nrules:\n  <<: *base\n  &id MD013: false\n  *id : true\n",
+		want:    `line 7: mapping key "MD013" already defined at line 6`,
+	},
+}
+
+// TestFromYAML_RejectsARuleKeyWrittenTwiceThroughAnAlias covers two rule
+// keys under rules or rule_defaults that read as one key, where an alias
+// writes one of them. Decoding the rules into a map would keep one of the
+// values silently, so FromYAML fails with the error that a key written
+// out twice gets.
+func TestFromYAML_RejectsARuleKeyWrittenTwiceThroughAnAlias(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range repeatedRuleKeys {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, literalErr := config.FromYAML([]byte(tt.literal))
+			_, aliasErr := config.FromYAML([]byte(tt.alias))
+
+			require.Error(t, literalErr)
+			require.Error(t, aliasErr)
+			assert.Equal(t, "parse yaml: "+yamlErrors+tt.want, literalErr.Error())
+			assert.Equal(t, literalErr.Error(), aliasErr.Error())
+		})
+	}
+}
+
+// TestFromYAML_RejectsATopLevelKeyRepeatedThroughAnAlias covers top-level
+// keys that an alias repeats: a key that gomdlint does not read, which
+// decoding would skip silently, and rules, which decoding would report as
+// a field set twice. Each gets the error that its literal twin gets, which
+// YAML gives before it reaches the rules, so the rule key that an alias
+// also repeats in the first document goes unreported, as in its twin.
+func TestFromYAML_RejectsATopLevelKeyRepeatedThroughAnAlias(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []repeatedKeyCase{
+		{
+			name:    "a key that gomdlint does not read",
+			literal: "ignore: [note]\nnote: 1\nnote: 2\nrules:\n  MD013: false\n  MD013: true\n",
+			alias:   "ignore: [&k note]\nnote: 1\n*k : 2\nrules:\n  &id MD013: false\n  *id : true\n",
+			want:    `line 3: mapping key "note" already defined at line 2`,
+		},
+		{
+			name:    "rules",
+			literal: "rules:\n  MD013: false\nrules:\n  MD009: false\n",
+			alias:   "&r rules:\n  MD013: false\n*r :\n  MD009: false\n",
+			want:    `line 3: mapping key "rules" already defined at line 1`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, literalErr := config.FromYAML([]byte(tt.literal))
+			_, aliasErr := config.FromYAML([]byte(tt.alias))
+
+			require.Error(t, literalErr)
+			require.Error(t, aliasErr)
+			assert.Equal(t, "parse yaml: "+yamlErrors+tt.want, literalErr.Error())
+			assert.Equal(t, literalErr.Error(), aliasErr.Error())
+		})
+	}
+}
+
+// TestFromYAML_KeepsTheErrorsOfADocumentWithoutAliasKeys covers documents
+// that write no alias key, beside another error: mappings that YAML
+// rejects for a key written out twice, though a merge key or a key of
+// another type keeps them from being mappings of string keys. Such a
+// document is its own literal twin, so the checks leave it to decoding,
+// which reports every error, as it did before the checks. A key that is
+// no scalar is an error before decoding instead (see
+// TestFromYAML_RejectsAKeyThatIsNoScalar).
+func TestFromYAML_KeepsTheErrorsOfADocumentWithoutAliasKeys(t *testing.T) {
+	t.Parallel()
+
+	const ignoreError = "line %d: cannot unmarshal !!str `vendor/**` into []string"
+	for name, tt := range map[string]struct{ content, want string }{
+		"a rule key beside a merge key": {
+			content: "x-shared: &shared\n  MD009: false\nrules:\n  <<: *shared\n" +
+				"  MD013: {line_length: 120}\n  MD013: {line_length: 100}\nignore: vendor/**\n",
+			want: `line 6: mapping key "MD013" already defined at line 5` + "\n  " + fmt.Sprintf(ignoreError, 7),
+		},
+		"a merge key": {
+			content: "rules:\n  <<: {MD010: false}\n  <<: {MD009: false}\nignore: vendor/**\n",
+			want:    `line 3: mapping key "<<" already defined at line 2` + "\n  " + fmt.Sprintf(ignoreError, 4),
+		},
+		"a number and a string": {
+			content: "rules:\n  1: false\n  \"1\": true\nignore: vendor/**\n",
+			want:    `line 3: mapping key "1" already defined at line 2` + "\n  " + fmt.Sprintf(ignoreError, 4),
+		},
+		"a binary option under the rule key": {
+			content: "rules:\n  MD013:\n    max: 1\n    !!binary bWF4: 2\n",
+			want:    `line 4: "max" and "bWF4" both set option "max"; keep one of them`,
+		},
+		"a binary option under options": {
+			content: "rules:\n  MD013:\n    options:\n      max: 1\n      !!binary bWF4: 2\n",
+			want:    `line 5: "options.max" and "options.bWF4" both set option "max"; keep one of them`,
+		},
+		"a binary option in a merged mapping": {
+			content: "base: &b {max: 1, !!binary bWF4: 2}\nrules:\n  MD013:\n    <<: *b\n",
+			want:    `line 1: "max" and "bWF4" both set option "max"; keep one of them`,
+		},
+		"a binary setting": {
+			content: "rules:\n  MD013:\n    enabled: true\n    !!binary ZW5hYmxlZA==: false\n",
+			want:    "line 4: field enabled already set in type config.settings",
+		},
+		"a setting beside a merge key": {
+			content: "rules:\n  MD013:\n    <<: {tables: true}\n    max: 1\n    max: 2\nflavor: [x]\n",
+			want:    `line 5: mapping key "max" already defined at line 4` + "\n  line 6: cannot unmarshal !!seq into config.Flavor",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := config.FromYAML([]byte(tt.content))
+
+			require.Error(t, err)
+			assert.Equal(t, "parse yaml: "+yamlErrors+tt.want, err.Error())
+		})
+	}
+}
+
+// TestFromYAML_LeavesKeysThatYAMLDoesNotCompareToDecoding covers a binary
+// key and a string key that decode to one name. YAML compares keys by
+// their text, so it takes them for two keys. Under rules, decoding keeps
+// the later value, with or without an alias, and under a rule they are an
+// error, both as before.
+func TestFromYAML_LeavesKeysThatYAMLDoesNotCompareToDecoding(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{
+		"rules:\n  MD013: false\n  !!binary TUQwMTM=: true\n",
+		"ignore: [&b !!binary TUQwMTM=]\nrules:\n  MD013: false\n  *b : true\n",
+	} {
+		cfg, err := config.FromYAML([]byte(content))
+		require.NoError(t, err, content)
+		require.NotNil(t, cfg.Rules["MD013"].Enabled, content)
+		assert.True(t, *cfg.Rules["MD013"].Enabled, content)
+	}
+
+	// Under a rule, such keys are an error, as they were before. Read with
+	// its alias keys expanded, the alias key is named as it is written out;
+	// decoded with yaml.Unmarshal alone, it keeps its old name.
+	content := []byte("ignore: [&b !!binary bWF4]\nrules:\n  MD013:\n    max: 1\n    *b : 2\n")
+	_, err := config.FromYAML(content)
+	require.Error(t, err)
+	assert.Equal(t, "parse yaml: "+yamlErrors+`line 5: "max" and "bWF4" both set option "max"; keep one of them`, err.Error())
+	var decoded config.Config
+	err = yaml.Unmarshal(content, &decoded)
+	require.Error(t, err)
+	assert.Equal(t, yamlErrors+`line 5: "max" and "*b" both set option "max"; keep one of them`, err.Error())
+}
+
+// TestFromYAML_RejectsAliasKeysOfCollections covers alias keys that name a
+// collection, among them aliases of a mapping that holds them, which
+// decoding catches only through the alias. ExpandAliasKeys leaves such a
+// key an alias, since expanded it would make a cycle that decoding never
+// leaves, and FromYAML rejects it at the alias's line before anything
+// decodes the document. Decoding used to report that a node contains
+// itself, or the errors of the collection.
+func TestFromYAML_RejectsAliasKeysOfCollections(t *testing.T) {
+	t.Parallel()
+
+	for name, tt := range map[string]struct{ content, line string }{
+		"under options":      {content: "rules:\n  MD013:\n    options:\n      x: &m {*m : 1}\n", line: "line 4"},
+		"under the rule key": {content: "rules:\n  MD013:\n    x: &m {*m : 1}\n", line: "line 3"},
+		"deeper":             {content: "rules:\n  MD013:\n    options:\n      x: &m {k: {*m : 1}}\n", line: "line 4"},
+		// The key is the mapping itself, which the check does not enter.
+		"under rules beside a merge key": {content: "rules:\n  <<: {}\n  ? &m {*m : 1}\n  : false\n", line: "line 3"},
+		"at the top beside a merge key":  {content: "<<: {}\n? &m {*m : 1}\n: x\n", line: "line 2"},
+		"entered through another alias": {
+			content: "t: &t\n  p: &p\n    ? *t\n    : 1\nrules:\n  MD013:\n    options:\n      x: *p\n",
+			line:    "line 3",
+		},
+		"a collection key": {
+			content: "x: &c {a: 1, a: 2}\nrules:\n  MD013:\n    options:\n      ? *c\n      : 1\n",
+			line:    "line 5",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var err error
+			require.NotPanics(t, func() { _, err = config.FromYAML([]byte(tt.content)) })
+			require.Error(t, err)
+			assert.Equal(t, "parse yaml: "+yamlErrors+tt.line+notAScalar, err.Error())
+		})
+	}
+}
+
+// TestFromYAML_LeavesAnAliasOfAMergeKeyAnOrdinaryKey covers an alias key
+// that names a merge key. Decoding reads an alias key as an ordinary key,
+// so ExpandAliasKeys leaves it as an alias, and the document decodes as
+// it did, where the key written out would merge.
+func TestFromYAML_LeavesAnAliasOfAMergeKeyAnOrdinaryKey(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.FromYAML([]byte("x: &m <<\nrules:\n  *m : {MD013: false}\n"))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"MD013": false}, cfg.Rules["<<"].Options)
+
+	cfg, err = config.FromYAML([]byte("x: &m <<\nrules:\n  MD013:\n    options: {*m : {max: 5}}\n"))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"<<": map[string]any{"max": 5}}, cfg.Rules["MD013"].Options)
+}
+
+// TestFromYAML_LeavesAFailingMergeToDecoding covers documents in which an
+// alias makes a key repeat, beside an error that ends decoding: a merge of
+// a node that is no mapping, a mapping that merges itself, and a value
+// that its tag rejects. The document gets that error alone, as its literal
+// twin does. So does a document without aliases whose first error ends
+// decoding before the rules, as before.
+func TestFromYAML_LeavesAFailingMergeToDecoding(t *testing.T) {
+	t.Parallel()
+
+	// fromYAML starts FromYAML's message for a document it cannot parse.
+	const fromYAML = "parse yaml: "
+	for _, tt := range []struct{ literal, alias, want string }{
+		{
+			literal: "a: &a {MD013: false, MD013: true}\nrules:\n  <<: [*a, 5]\n",
+			alias:   "a: &a {&id MD013: false, *id : true}\nrules:\n  <<: [*a, 5]\n",
+			want:    "yaml: map merge requires map or sequence of maps as the value",
+		},
+		{
+			literal: "a: &a {MD013: false, MD013: true}\nrules: &r\n  <<: [*a, *r]\n",
+			alias:   "a: &a {&id MD013: false, *id : true}\nrules: &r\n  <<: [*a, *r]\n",
+			want:    "yaml: anchor 'r' value contains itself",
+		},
+		{
+			literal: "rules:\n  MD013: false\n  MD013: true\n<<: 5\n",
+			alias:   "rules:\n  &id MD013: false\n  *id : true\n<<: 5\n",
+			want:    "yaml: map merge requires map or sequence of maps as the value",
+		},
+		{
+			literal: "a: &a {enabled: true, enabled: false}\nb: &b {enabled: !!int abc}\nrules:\n  MD013:\n    <<: [*a, *b]\n",
+			alias:   "a: &a {&k enabled: true, *k : false}\nb: &b {enabled: !!int abc}\nrules:\n  MD013:\n    <<: [*a, *b]\n",
+			want:    "yaml: cannot decode !!str `abc` as a !!int",
+		},
+		{
+			literal: "a: &a {max: 1, max: 2}\nrules:\n  MD013:\n    options:\n      <<: *a\n      bad: !!int abc\n",
+			alias:   "a: &a {&k max: 1, *k : 2}\nrules:\n  MD013:\n    options:\n      <<: *a\n      bad: !!int abc\n",
+			want:    "yaml: cannot decode !!str `abc` as a !!int",
+		},
+		{
+			literal: "flavor: !!int abc\nrules:\n  <<: {MD013: false}\n  MD013: true\n  MD013: false\n",
+			alias:   "flavor: !!int abc\nrules:\n  <<: {MD013: false}\n  MD013: true\n  MD013: false\n",
+			want:    "yaml: cannot decode !!str `abc` as a !!int",
+		},
+	} {
+		_, literalErr := config.FromYAML([]byte(tt.literal))
+		_, aliasErr := config.FromYAML([]byte(tt.alias))
+
+		require.Error(t, literalErr)
+		require.Error(t, aliasErr)
+		assert.Equal(t, fromYAML+tt.want, literalErr.Error())
+		assert.Equal(t, literalErr.Error(), aliasErr.Error())
+	}
+}
+
+// TestFromYAML_RejectsAKeyRepeatedInAFlatOptionValue covers the value of an
+// option written directly under the rule key, which ReadFlatOptions
+// decodes: a key that an alias repeats in it gets the error that the key
+// written out twice gets.
+func TestFromYAML_RejectsAKeyRepeatedInAFlatOptionValue(t *testing.T) {
+	t.Parallel()
+
+	_, literalErr := config.FromYAML([]byte("rules:\n  MD013:\n    x: {a: 1, a: 2}\n"))
+	_, aliasErr := config.FromYAML([]byte("rules:\n  MD013:\n    x: {&k a: 1, *k : 2}\n"))
+
+	require.Error(t, literalErr)
+	require.Error(t, aliasErr)
+	assert.Equal(t, `parse yaml: rules.MD013: line 3: option "x": `+yamlErrors+`line 3: mapping key "a" already defined at line 3`,
+		literalErr.Error())
+	assert.Equal(t, literalErr.Error(), aliasErr.Error())
+}
+
+// TestFromYAML_MergedRuleKeysYieldToWrittenOnes covers YAML's precedence
+// for merge keys under rules, which a rule key brought in twice follows
+// without an error: a rule key written in the mapping replaces a merged
+// one, as under a rule.
+func TestFromYAML_MergedRuleKeysYieldToWrittenOnes(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.FromYAML([]byte("base: &base\n  MD013: false\n  MD009: false\nrules:\n  <<: *base\n  MD013: true\n"))
+	require.NoError(t, err)
+
+	require.NotNil(t, cfg.Rules["MD013"].Enabled)
+	assert.True(t, *cfg.Rules["MD013"].Enabled)
+	require.NotNil(t, cfg.Rules["MD009"].Enabled)
+	assert.False(t, *cfg.Rules["MD009"].Enabled)
+}
+
+// TestExpandAliasKeys covers decoding a node with its alias keys
+// expanded. A key that an alias repeats gets YAML's error for the key
+// written out twice, beside the document's other errors and in YAML's
+// order, as the literal twin gets them. A document with alias keys that
+// repeat nothing is copied and decodes as the document does, as a map and
+// as a configuration: beside merge keys, merge sequences, shared anchors,
+// an alias of a merge key and a tagged key, and in a node that contains
+// itself, which fails alike. Two aliases of one anchor name, which yaml.v3
+// compares by that name, decode when they name two keys, as the twin does.
+func TestExpandAliasKeys(t *testing.T) {
+	t.Parallel()
+
+	parse := func(content string) *yaml.Node {
+		t.Helper()
+
+		var doc yaml.Node
+		require.NoError(t, yaml.Unmarshal([]byte(content), &doc))
+		return &doc
+	}
+
+	var shape map[string]map[string]any
+	err := config.ExpandAliasKeys(parse("a: {x: 1, x: 2}\nb: {&k y: 1, *k : 2, z: [1]}\n")).Decode(&shape)
+	var typeErr *yaml.TypeError
+	require.ErrorAs(t, err, &typeErr)
+	assert.Equal(t, []string{
+		`line 1: mapping key "x" already defined at line 1`,
+		`line 2: mapping key "y" already defined at line 2`,
+	}, typeErr.Errors)
+
+	copied := "ignore: [&k MD013, &j tables, &n !!str 10, &m <<]\n" +
+		"rules:\n  *k : {line_length: 80, *j : false}\n" +
+		"base: &b {x: 1, *j : 2}\nother: {<<: *b, y: *b}\n" +
+		"seq: {<<: [*b, {z: 3}], w: [*b, *b]}\n" +
+		"keys: {*n : ten, *m : {a: 1}}\n"
+	doc := parse(copied)
+	expanded := config.ExpandAliasKeys(doc)
+	require.NotSame(t, doc, expanded)
+	var decoded, plain map[string]any
+	require.NoError(t, expanded.Decode(&decoded))
+	require.NoError(t, doc.Decode(&plain))
+	assert.Equal(t, plain, decoded)
+	assert.Equal(t, map[string]any{"10": "ten", "<<": map[string]any{"a": 1}}, decoded["keys"],
+		"a tagged key keeps its tag, and an alias of a merge key stays an ordinary key")
+	var decodedCfg, plainCfg config.Config
+	require.NoError(t, expanded.Decode(&decodedCfg))
+	require.NoError(t, doc.Decode(&plainCfg))
+	assert.Equal(t, plainCfg, decodedCfg)
+
+	self := parse("k: &k key\nself: &s {*k : *s}\n")
+	selfExpanded := config.ExpandAliasKeys(self)
+	require.NotSame(t, self, selfExpanded)
+	var fromCopy, fromDoc any
+	docErr := self.Decode(&fromDoc)
+	require.Error(t, docErr)
+	require.EqualError(t, selfExpanded.Decode(&fromCopy), docErr.Error(), "a node that contains itself fails alike")
+
+	var anchors map[string]any
+	require.NoError(t, config.ExpandAliasKeys(parse("x: [&a max]\nm:\n  *a : 1\n  y: [&a tables]\n  *a : true\n")).Decode(&anchors))
+	assert.Equal(t, map[string]any{"max": 1, "y": []any{"tables"}, "tables": true}, anchors["m"])
 }
 
 // TestRuleConfig_MergedKeysYieldToWrittenKeys covers YAML's precedence for
@@ -358,6 +982,43 @@ rule_defaults:
 	assert.ElementsMatch(t, []string{"MD013.line_length", "MD013.metadata", "MD009.br_spaces", "MD009.note"}, asked)
 	assert.Equal(t, map[string]any{"max": 100, "line_length": 90}, cfg.Rules["MD013"].Options)
 	assert.Equal(t, map[string]any{"br_spaces": 3}, cfg.RuleDefaults["MD009"].Options)
+}
+
+// TestReadFlatOptions_ReadsTheDocumentThatCfgWasDecodedFrom covers a caller
+// that decodes a configuration from a parsed document without expanding
+// its alias keys, then reads the flat options from the same document, as
+// ReadFlatOptions describes. A rule key that an alias repeats decodes as
+// yaml.v3 decodes it, to the later value, and the flat options come from
+// that value alone.
+func TestReadFlatOptions_ReadsTheDocumentThatCfgWasDecodedFrom(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name, content string
+		want          map[string]any
+	}{
+		{
+			name:    "other options in each value",
+			content: "rules:\n  &id MD013:\n    line_length: 100\n  *id :\n    tables: false\n",
+			want:    map[string]any{"tables": false},
+		},
+		{
+			name:    "one option in both values",
+			content: "rules:\n  &id MD013:\n    line_length: 100\n  *id :\n    line_length: 90\n",
+			want:    map[string]any{"line_length": 90},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var doc yaml.Node
+			require.NoError(t, yaml.Unmarshal([]byte(tt.content), &doc))
+			var cfg config.Config
+			require.NoError(t, doc.Decode(&cfg))
+			require.NoError(t, config.ReadFlatOptions(&doc, &cfg, func(string, string) bool { return true }))
+			assert.Equal(t, tt.want, cfg.Rules["MD013"].Options)
+		})
+	}
 }
 
 // TestRuleConfig_CloneKeepsEverythingDecoded covers Clone of a decoded

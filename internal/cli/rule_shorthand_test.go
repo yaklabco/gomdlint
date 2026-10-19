@@ -390,9 +390,81 @@ func TestLint_InvalidSeverityShorthand(t *testing.T) {
 	}
 }
 
+// TestLint_RejectsKeysRepeatedThroughAliases covers a gomdlint config in
+// which a YAML alias writes a key of a mapping a second time: a rule key,
+// a rule setting, an option directly under the rule key or an option under
+// options. The run fails as it does for the key written out twice, with
+// the same error.
+func TestLint_RejectsKeysRepeatedThroughAliases(t *testing.T) {
+	tests := []struct {
+		name, literal, alias string
+	}{
+		{
+			name:    "rule key",
+			literal: "rules:\n  line-length: false\n  line-length: true\n",
+			alias:   "rules:\n  &rule line-length: false\n  *rule : true\n",
+		},
+		{
+			name:    "rule setting",
+			literal: "rules:\n  MD013:\n    enabled: false\n    enabled: true\n",
+			alias:   "rules:\n  MD013:\n    &set enabled: false\n    *set : true\n",
+		},
+		{
+			name:    "option under the rule key",
+			literal: "rules:\n  MD013:\n    line_length: 200\n    line_length: 20\n",
+			alias:   "rules:\n  MD013:\n    &opt line_length: 200\n    *opt : 20\n",
+		},
+		{
+			name:    "option under options",
+			literal: "rules:\n  MD013:\n    options:\n      max: 200\n      max: 20\n",
+			alias:   "rules:\n  MD013:\n    options:\n      &opt max: 200\n      *opt : 20\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": tt.literal})
+			literal := transcript(t, execute(t, "lint", "doc.md"), dir)
+
+			dir = inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": tt.alias})
+			alias := transcript(t, execute(t, "lint", "doc.md"), dir)
+
+			assert.Contains(t, literal, "exit code 65\n")
+			assert.Contains(t, literal, "already defined at line")
+			assert.Equal(t, literal, alias)
+		})
+	}
+}
+
+// TestLint_RejectsAKeyThatIsNoScalar runs lint with a project config whose
+// mapping key is a sequence, beside a merge key, as written and through an
+// alias. The command fails with a configuration error that names the file
+// and the key's line. yaml.v3 panicked on such a key, and the command
+// reported an internal error.
+func TestLint_RejectsAKeyThatIsNoScalar(t *testing.T) {
+	tests := []struct{ name, config, line string }{
+		{name: "beside a merge key", config: "rules:\n  <<: {MD001: false}\n  ? [MD013]\n  : false\n", line: "line 3"},
+		{name: "through an alias", config: "x: &a name\n*a : &a [x]\n*a : false\n<<: {}\n", line: "line 3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": tt.config})
+
+			got := execute(t, "lint", "doc.md")
+
+			assert.Equal(t, cli.ExitConfigError, got.code)
+			assert.Contains(t, got.stderr,
+				".gomdlint.yml: parse YAML: yaml: unmarshal errors:\n  "+tt.line+": mapping key must be a scalar\n")
+			assert.NotContains(t, got.stderr, "internal error")
+		})
+	}
+}
+
 // TestRuleShorthandMessagesGolden runs command lines whose gomdlint config
-// sets a rule to a string that is no severity, and compares the transcript
-// of each with testdata/golden/<name>.golden.
+// sets a rule to a string that is no severity, writes a rule key twice
+// through a YAML alias, or writes a sequence as a key, and compares the
+// transcript of each with testdata/golden/<name>.golden.
 func TestRuleShorthandMessagesGolden(t *testing.T) {
 	skipUnlessSlashPaths(t)
 
@@ -401,6 +473,8 @@ func TestRuleShorthandMessagesGolden(t *testing.T) {
 		config string
 	}{
 		{name: "lint-config-severity-shorthand-invalid", config: "rules:\n  line-length: warn\n"},
+		{name: "lint-config-rule-repeated-through-alias", config: "rules:\n  &rule line-length: false\n  *rule : error\n"},
+		{name: "lint-config-key-not-a-scalar", config: "rules:\n  <<: {MD001: false}\n  ? [MD013]\n  : false\n"},
 	}
 
 	for _, tt := range tests {

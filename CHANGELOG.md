@@ -43,9 +43,13 @@ formats change. The first entries under Changed may need action.
   one option both there and under `options` is an error. A key that names no
   option of the rule is still ignored with a warning, and its value is not
   read.
-- A key that a YAML alias writes a second time, under a rule or under its
-  `options`, is an error, as a key written twice already was. Loading used
-  to keep the later value without a word.
+- A key that a YAML alias writes a second time is an error in any part of a
+  gomdlint config file that gomdlint reads, the same one that the key
+  written out twice gets, such as `mapping key "MD013" already defined at
+  line 2`. That includes rule keys under `rules` and `rule_defaults`, the
+  keys under a rule and those under its `options`. Loading used to keep one
+  of the values without a word, or fail with an error that named an
+  internal type.
 - `--color always` colours output that goes to a pipe or a file, and it
   overrides `NO_COLOR`, because the flag asks for colour explicitly.
 - Exit codes tell failures apart: 1 for error findings, 2 for warnings with
@@ -407,6 +411,16 @@ formats change. The first entries under Changed may need action.
   keys, where one of them used to win at random. Unknown config keys, such
   as `flavour`, and flag-only keys such as `rule_format` warn with the file
   and line.
+- A mapping key that is a sequence or a mapping, such as `? [MD013]` in
+  YAML, or an alias of one, is an error that names its line anywhere in a
+  gomdlint config file, `line 3: mapping key must be a scalar`, before
+  gomdlint decodes the file. Beside a merge key, `<<`, or in a mapping that
+  one brings in, such a key could stop gomdlint with an internal error,
+  exit code 70. Elsewhere it failed with an error from the YAML decoder,
+  which named the anchor's line for an alias. In a value that loading
+  never reads, it loaded: with a warning in the value of an unknown key or
+  option, and with none in the value of a null key or in a merged value
+  that another value replaces.
 - A config that gives several rules an invalid severity fails with the error
   for the first of them by rule ID, those under `rules` before those under
   `rule_defaults`. The rule that the error named used to change from run to

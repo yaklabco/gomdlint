@@ -133,6 +133,16 @@ const (
 )
 
 // Config is the root configuration structure for mdlint.
+//
+// Read a configuration file with FromYAML, or expand the alias keys of its
+// parsed document (see ExpandAliasKeys) before decoding it and reading its
+// flat options (see ReadFlatOptions), as the configuration loader does.
+// yaml.Unmarshal alone does not read the options written directly under
+// rule keys. Nor does it give a key that a YAML alias repeats YAML's error
+// for a key written twice: it keeps one of the values of a rule key
+// silently, and reports another such key in other words. Nor does it
+// reject a key that is no scalar (see CheckScalarKeys), on which yaml.v3
+// can panic in a mapping that merges another or is merged.
 type Config struct {
 	// Flavor specifies the Markdown flavor ("commonmark" or "gfm").
 	Flavor Flavor `mapstructure:"flavor" yaml:"flavor"`
