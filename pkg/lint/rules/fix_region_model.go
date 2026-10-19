@@ -233,7 +233,7 @@ func (m *regionModel) evaluate(reg region, edits []placedEdit) *regionOutcome {
 	// The cache keeps what the checks compare, not the parse, and stops
 	// growing at its budget; an outcome left out is found again if needed.
 	outcome.source, outcome.blocks = nil, nil
-	size := key.Len()
+	size := key.Len() + outcome.retained()
 	if !outcome.same {
 		size += len(outcome.text)
 	}
@@ -312,10 +312,9 @@ func (m *regionModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 	if !ok {
 		return false, false
 	}
-	for _, outcome := range outcomes {
-		if !outcome.refsSame {
-			return false, false
-		}
+	// Definitions reach links before them as well as after.
+	if !m.resolvesAsBefore(regions, func(at int) *regionParse { return &outcomes[at].regionParse }) {
+		return false, false
 	}
 	return m.compare(regions, outcomes)
 }
@@ -336,9 +335,9 @@ type replacement struct {
 	unknownAfter bool
 }
 
-// compare decides from the outcomes of regions, which all hold and add the
-// same definitions, whether the signature of the edited document equals the
-// original's.
+// compare decides from the outcomes of regions, which all hold and leave
+// every link resolving as before, whether the signature of the edited
+// document equals the original's.
 func (m *regionModel) compare(regions []region, outcomes []*regionOutcome) (bool, bool) {
 	reps := make([]replacement, 0, len(outcomes))
 	for _, outcome := range outcomes {

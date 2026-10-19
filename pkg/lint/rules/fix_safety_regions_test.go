@@ -211,12 +211,12 @@ func TestOutlineCacheIsBounded(t *testing.T) {
 	}
 	cached := 0
 	for key, outcome := range model.outcomes {
-		cached += len(key)
+		cached += len(key) + outcome.retained()
 		if !outcome.same {
 			cached += len(outcome.text)
 		}
 		for _, slug := range outcome.slugs {
-			cached += len(slug) + slugOverhead
+			cached += len(slug) + stringOverhead
 		}
 	}
 	assert.LessOrEqual(t, cached, model.cacheBudget())

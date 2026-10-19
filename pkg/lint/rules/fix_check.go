@@ -426,6 +426,9 @@ type fixCheck struct {
 	// built.
 	models  []*regionModel
 	modeled bool
+	// wholeParsed counts the bytes that whole-document checks parsed,
+	// which tests bound.
+	wholeParsed int
 }
 
 func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
@@ -527,6 +530,7 @@ func (c *fixCheck) ensureBaseline() {
 // unchanged reports whether changed renders like the original content.
 func (c *fixCheck) unchanged(changed []byte) bool {
 	c.ensureBaseline()
+	c.wholeParsed += len(changed) * len(c.markdowns)
 	candidate, _ := c.signatures(changed)
 	for idx := range candidate {
 		if candidate[idx] != c.baseline[idx] {

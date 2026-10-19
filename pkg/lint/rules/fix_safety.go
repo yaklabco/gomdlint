@@ -361,6 +361,9 @@ type fixVerifier struct {
 	originalFile *mdast.FileSnapshot
 	model        *outlineModel
 	modeled      bool
+	// wholeParsed counts the bytes that whole-document checks parsed,
+	// which tests bound.
+	wholeParsed int
 }
 
 func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier {
@@ -428,7 +431,9 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 // acceptsWhole reports whether the content with edits, prepared, applied has
 // the original document's outline, parsing the whole document.
 func (v *fixVerifier) acceptsWhole(prepared []fix.TextEdit) bool {
-	fixed, err := v.parser.Parse(v.ctx, v.file.Path, fix.ApplyEdits(v.file.Content, prepared))
+	content := fix.ApplyEdits(v.file.Content, prepared)
+	v.wholeParsed += len(content)
+	fixed, err := v.parser.Parse(v.ctx, v.file.Path, content)
 	if err != nil {
 		return false
 	}
