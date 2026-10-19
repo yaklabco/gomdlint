@@ -2137,6 +2137,27 @@ func TestLinkImageRefDefsRule_Footnotes(t *testing.T) {
 	assert.Empty(t, self, "a call in the note's own text is a call")
 }
 
+// TestLinkImageRefDefsRule_MarkdownlintColumns checks that MD053 reports a
+// definition from the start of its line, container prefix included, to the
+// end of the line, as markdownlint 0.41.1 does.
+func TestLinkImageRefDefsRule_MarkdownlintColumns(t *testing.T) {
+	markdown := "# Title\n\nUses [used].\n\n" +
+		"> [quoted]: /q\n\n" + // 5
+		"- [listed]: /l\n\n" + // 7
+		"   [indented]: /i\n\n" + // 9
+		"[used]: /u\n\n" +
+		"[spread]:\n  /s\n  \"Title\"\n" // 13
+	diags := testHelper(t, NewLinkImageRefDefsRule(), markdown)
+	assert.Equal(t, [][2]int{{5, 1}, {7, 1}, {9, 1}, {13, 1}}, diagPositions(diags))
+	if assert.Len(t, diags, 4) {
+		assert.Equal(t, [2]int{5, 15}, [2]int{diags[0].EndLine, diags[0].EndColumn}, "the finding ends with its line")
+		assert.Equal(t, [2]int{13, 10}, [2]int{diags[3].EndLine, diags[3].EndColumn}, "and with its first line")
+	}
+
+	bom := testHelper(t, NewLinkImageRefDefsRule(), "\uFEFF[bom]: /b\n")
+	assert.Equal(t, [][2]int{{1, 4}}, diagPositions(bom), "a byte order mark keeps its bytes before the column")
+}
+
 // TestLinkImageRefDefsRule_FootnoteFixWithheld checks that MD053 deletes no
 // definition whose label starts with "^". GitHub and micromark read it as
 // a footnote, whose note goes on in the indented lines after a blank line,

@@ -865,7 +865,7 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 		default:
 			continue
 		}
-		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position, fmt.Sprintf(msg, displayLabel(def.Label))).
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, definitionPosition(ctx.File, def.Lines[0]), fmt.Sprintf(msg, displayLabel(def.Label))).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion)
 		// A definition whose label starts with "^" may be a footnote
@@ -881,6 +881,18 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 	sortDiagnosticsByPosition(diags)
 
 	return verifyFixes(ctx, diags, fixAllowance{}), nil
+}
+
+// definitionPosition returns where MD053 reports a definition that starts on a
+// 1-based line: the whole line, container prefix included, as markdownlint
+// 0.41.1 reports it. A byte order mark before the line's text is left out.
+func definitionPosition(file *mdast.FileSnapshot, line int) mdast.SourcePosition {
+	return mdast.SourcePosition{
+		StartLine:   line,
+		StartColumn: lint.LineTextOffset(file, line) + 1,
+		EndLine:     line,
+		EndColumn:   lint.LineLength(file, line) + 1,
+	}
 }
 
 // The messages of MD053's findings, which take the label.
@@ -906,9 +918,7 @@ func (r *LinkImageRefDefsRule) unreadFootnotes(
 		if state == footnoteDuplicate {
 			msg, suggestion = duplicateDefinition, "Remove duplicate definition"
 		}
-		line := ctx.File.Lines[def.line-1]
-		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: def.caret - len("["), EndOffset: line.NewlineStart})
-		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, fmt.Sprintf(msg, "^"+def.label)).
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, definitionPosition(ctx.File, def.line), fmt.Sprintf(msg, "^"+def.label)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion).
 			Build())
