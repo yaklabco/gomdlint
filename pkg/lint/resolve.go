@@ -82,7 +82,9 @@ func ruleListed(list []string, rule Rule) bool {
 // nil. With them, the options of rule_defaults and of rules are each
 // rewritten to canonical names (see NormalizeOptions) before rules
 // override rule_defaults option by option, so that the rule reads every
-// option under its canonical name. The configuration is never changed.
+// option under its canonical name. Settings under rules that reset the
+// rule's options (config.RuleConfig.ResetOptions) replace those of
+// rule_defaults instead. The configuration is never changed.
 func resolveRule(rule Rule, cfg *config.Config, declared *optionTable) ResolvedRule {
 	rr := ResolvedRule{
 		Rule:     rule,
@@ -117,10 +119,11 @@ func resolveRule(rule Rule, cfg *config.Config, declared *optionTable) ResolvedR
 		}
 	}
 
-	// Apply rule-specific config.
+	// Apply rule-specific config. Settings that reset the rule's options
+	// leave out those of rule_defaults.
 	if ruleCfg, ok := cfg.Rules[rule.ID()]; ok {
 		ruleCfg.Options = canonicalOptions(declared, ruleCfg.Options)
-		if rr.Config != nil && rr.Config.Options != nil {
+		if rr.Config != nil && rr.Config.Options != nil && !ruleCfg.ResetOptions {
 			options := maps.Clone(rr.Config.Options)
 			maps.Copy(options, ruleCfg.Options)
 			ruleCfg.Options = options

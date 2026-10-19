@@ -58,13 +58,13 @@ formats change. The first entries under Changed may need action.
 - A config file whose name ends in `.json` must hold JSON. Older versions of
   `init` and `migrate` could write YAML into such a file. It now fails to
   load, and the error says to rename it to `.yml`.
-- Every key under a rule other than `enabled`, `severity`, `auto_fix` and
-  `options` is one of the rule's options, as in markdownlint. Such keys used
-  to be ignored, with a warning that rule options belong under `options`, so
-  a config file that has them may now report findings it did not. Setting
-  one option both there and under `options` is an error. A key that names no
-  option of the rule is still ignored with a warning, and its value is not
-  read.
+- Every key under a rule other than `enabled`, `severity`, `auto_fix`,
+  `options` and `reset_options` is one of the rule's options, as in
+  markdownlint. Such keys used to be ignored, with a warning that rule
+  options belong under `options`, so a config file that has them may now
+  report findings it did not. Setting one option both there and under
+  `options` is an error. A key that names no option of the rule is still
+  ignored with a warning, and its value is not read.
 - A key that a YAML alias writes a second time is an error in any part of a
   gomdlint config file that gomdlint reads, the same one that the key
   written out twice gets, such as `mapping key "MD013" already defined at
@@ -134,6 +134,15 @@ formats change. The first entries under Changed may need action.
   applies for a run, match rule names and tags in any case, accept gomdlint's
   rule names, and skip unknown rule IDs with a warning instead of copying
   them.
+- A key of a markdownlint config or a `markdownlint-configure-file` comment
+  that turns a rule on, with `true`, a severity or an object, gives the rule
+  the options that it sets and markdownlint's defaults for the others, as
+  markdownlint does. The options that a user or system config, or
+  `rule_defaults`, gave the rule used to apply, except for the few that
+  gomdlint wrote out. Migration writes the new rule setting
+  `reset_options: true` for such rules, and no longer writes those defaults
+  under `rules`. `true` in a gomdlint config still keeps the options of
+  lower layers.
 - Go API: `lint.LookupRuleID`, `Registry.RegisterAlias`,
   `rules.RegisterLegacyAliases`, `RuleContext.Builder` and
   `analysis.Options.RuleFormat` are removed. `Registry.Lookup` resolves rule
@@ -141,6 +150,11 @@ formats change. The first entries under Changed may need action.
   surrounding whitespace too. The SARIF types in `pkg/reporter` changed shape
   to produce valid SARIF 2.1.0. `PipelineOptions.ReParseAfterFix` is
   deprecated and has no effect, and `pkg/lint` no longer builds for wasip1.
+  `config.RuleConfig` gains the field `ResetOptions`, so unkeyed
+  `RuleConfig` literals no longer compile, and `config.RuleSettingKeys`
+  lists `reset_options`. `config.MarkdownlintRuleConfig` sets
+  `ResetOptions` for a value that turns the rule on, and
+  `Registry.MarkdownlintRuleConfig` then writes no defaults.
 
 ### Added
 

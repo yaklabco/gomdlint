@@ -1088,7 +1088,12 @@ For each rule, the final configuration is computed:
 Migrated configs also write a `rule_defaults` layer, which applies after
 `severity_default` and before `rules`. A migrated config holds nothing but
 `rules` and `rule_defaults`, so the layers below it keep their other
-settings.
+settings. A markdownlint rule key that turns a rule on resets the rule's
+options (`config.RuleConfig.ResetOptions`, written as `reset_options` in a
+migrated config): the merge drops the options of the layers below, and
+resolution leaves out those of `rule_defaults`, so the rule reads the
+options that the key sets and its defaults for the others, as in
+markdownlint. `markdownlint-configure-file` keys reset them the same way.
 
 **Rule Identification:** Config files accept a rule's ID (`MD001`), name
 (`heading-increment`), or markdownlint alias (`ul-style` for MD004)

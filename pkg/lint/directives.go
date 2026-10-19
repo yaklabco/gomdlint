@@ -241,7 +241,10 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // to cfg. Its default key, the first key named default in any case, gives
 // every rule a baseline under RuleDefaults. Its other keys apply in order,
 // each replacing the settings under Rules of the rules it names, so a later
-// key wins over an earlier one for the rules both name.
+// key wins over an earlier one for the rules both name. A key that turns a
+// rule on resets the rule's options (see config.RuleConfig.ResetOptions),
+// so that those under RuleDefaults do not apply either, as markdownlint
+// gives such a rule the options of the key's value and no others.
 //
 // markdownlint spreads the comments over its own configuration object, in
 // which a key that its configuration holds already keeps the

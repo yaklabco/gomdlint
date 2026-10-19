@@ -458,10 +458,10 @@ one-line description. It completes categories and tags for the
 ### Rule Settings
 
 A rule's value is a mapping of its settings, `enabled`, `severity`,
-`auto_fix` and `options`, or one of markdownlint's shorthands. `true` and
-`false` turn the rule on and off. A severity turns the rule on at that
-severity, as in markdownlint: `error` or `warning`, or gomdlint's `info`.
-So `line-length: warning` means
+`auto_fix`, `reset_options` and `options`, or one of markdownlint's
+shorthands. `true` and `false` turn the rule on and off. A severity turns
+the rule on at that severity, as in markdownlint: `error` or `warning`, or
+gomdlint's `info`. So `line-length: warning` means
 `line-length: {enabled: true, severity: warning}`. Any other string is an
 invalid severity, which fails as it does under `severity`.
 
@@ -472,6 +472,15 @@ and `auto_fix` setting that they give the rule. The long form differs:
 `rule_defaults` or a lower layer turns off stays off. Under `rule_defaults`,
 the shorthand is a default like any other there, so a rule that `rules`
 turns off, in any layer, stays off.
+
+Under `rules`, `reset_options: true` drops the options that lower layers
+give the rule under `rules`, and those under `rule_defaults` in every
+layer, so every option that the rule's own settings do not set takes its
+default. Migration writes it for each rule that a markdownlint config turns
+on, since there a rule key gives the rule its own options and no others.
+Under `rule_defaults`, it drops only the options that lower layers give the
+rule under `rule_defaults`. `reset_options: false` is the same as leaving
+the setting out, so it cannot undo the reset of a lower layer.
 
 A key written twice in one mapping is an error in any part of a config
 file that gomdlint reads, such as a rule under `rules`, a setting under a
@@ -508,11 +517,11 @@ rules:
     tables: false
 ```
 
-Under a rule key, `enabled`, `severity`, `auto_fix` and `options` are the
-rule's settings, and every other key is an option. A rule can mix settings,
-options under the rule key and options under `options`, and all of them
-apply. Setting one option in both places is an error. `init` and `migrate`
-write options under `options`.
+Under a rule key, `enabled`, `severity`, `auto_fix`, `reset_options` and
+`options` are the rule's settings, and every other key is an option. A
+rule can mix settings, options under the rule key and options under
+`options`, and all of them apply. Setting one option in both places is an
+error. `init` and `migrate` write options under `options`.
 
 Every option that markdownlint documents works under markdownlint's name, so
 markdownlint's documentation of a rule's parameters holds for gomdlint too.
@@ -589,7 +598,10 @@ writes no other setting, so `ignore`, `flavor`, `backups` and the other
 settings of a user or system config still apply after migration, as they do
 while gomdlint translates the markdownlint config for each run. Options are
 written under gomdlint's names, such as `max` for `line_length`, and an
-option that the rule does not read is left out with a warning. As in
+option that the rule does not read is left out with a warning. A rule that
+the source turns on gets `reset_options: true` (see
+[Rule Settings](#rule-settings)), so that it takes markdownlint's defaults
+for the options that the source does not set. As in
 markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
@@ -630,6 +642,14 @@ default always turns the rules on. A rule's `severity` gives warnings when
 it is `warning` and errors for any other value. So gomdlint's `info` gives
 errors in a markdownlint config, while gomdlint's own config files keep it.
 
+A key that turns a rule on, with `true`, a severity or an object, gives the
+rule the options that it sets and markdownlint's defaults for the others,
+as in markdownlint. So `{"MD013": true}` over a user config that sets
+`line-length` options gives the rule markdownlint's defaults, where `true`
+in a gomdlint config keeps them. A key that turns a rule off, and the
+`default` key, leave the options of a user or system config in place,
+apart from a few that gomdlint has always set to markdownlint's defaults.
+
 ### markdownlint Comments
 
 Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
@@ -666,7 +686,9 @@ one option, markdownlint's applies. Each of these gets a warning on stderr,
 in JSON `notices` and in SARIF `toolConfigurationNotifications`, and none
 changes the findings or the exit code. As in markdownlint, the keys apply
 in the order they are written, and the first `default` key, in any case,
-sets every rule's baseline. The configure-file comments of one file act as
+sets every rule's baseline. A key that turns a rule on gives it the options
+that it sets and markdownlint's defaults for the others, whatever the
+config gives the rule. The configure-file comments of one file act as
 one object. A key that a later comment writes again keeps its first place
 and takes the later value. A comment without a `-->` of its own runs on to
 the `-->` of a later one, as in markdownlint, so it holds the comments

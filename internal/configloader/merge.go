@@ -9,7 +9,9 @@ import (
 // merge combines two configurations, with override taking precedence over base.
 // The merge follows these rules:
 //   - Scalar values: override overwrites base if override is non-zero
-//   - Maps: deep merge, with override's values taking precedence
+//   - Maps: deep merge, with override's values taking precedence, except
+//     that a rule's options that reset those below them replace them (see
+//     config.RuleConfig.ResetOptions)
 //   - Slices: override replaces base entirely if override is non-nil
 //   - Nil/unset values in override do not override values in base
 func merge(base, override *config.Config) *config.Config {
@@ -134,7 +136,9 @@ func mergeRules(base, override map[string]config.RuleConfig) map[string]config.R
 }
 
 // mergeRuleConfig merges individual rule configurations.
-// override's values take precedence over base's values.
+// override's values take precedence over base's values. Settings that
+// reset the rule's options (config.RuleConfig.ResetOptions) replace
+// base's options with their own, and the result keeps the reset.
 func mergeRuleConfig(base, override config.RuleConfig) config.RuleConfig {
 	result := base
 
@@ -148,8 +152,12 @@ func mergeRuleConfig(base, override config.RuleConfig) config.RuleConfig {
 		result.AutoFix = override.AutoFix
 	}
 
-	// Options: deep merge
-	if override.Options != nil {
+	// Options: replaced by settings that reset them, else deep merged.
+	switch {
+	case override.ResetOptions:
+		result.ResetOptions = true
+		result.Options = maps.Clone(override.Options)
+	case override.Options != nil:
 		if result.Options == nil {
 			result.Options = make(map[string]any)
 		} else {

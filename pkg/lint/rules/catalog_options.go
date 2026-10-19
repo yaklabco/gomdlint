@@ -28,8 +28,9 @@ const (
 // keep markdownlint's behaviour. The options that gomdlint's translation of
 // markdownlint settings has always written out, for MD001, MD004, MD009,
 // MD013, MD022, MD025, MD029, MD033, MD046, MD048, MD059 and MD060, are
-// marked MarkdownlintPinned, so that a markdownlint setting still replaces
-// them in a lower configuration layer.
+// marked MarkdownlintPinned, so that a markdownlint setting that resets no
+// options, such as the default key, still replaces them in a lower
+// configuration layer.
 //
 //nolint:funlen,maintidx // One entry per rule: a table, not logic.
 func catalogOptions() map[string][]lint.OptionSpec {
@@ -404,8 +405,9 @@ func catalogOptions() map[string][]lint.OptionSpec {
 	}
 }
 
-// markdownlintPinned marks spec as an option that every markdownlint setting
-// of its rule writes out (see lint.OptionSpec.MarkdownlintPinned).
+// markdownlintPinned marks spec as an option that the markdownlint settings
+// of its rule that reset no options write out (see
+// lint.OptionSpec.MarkdownlintPinned).
 func markdownlintPinned(spec lint.OptionSpec) lint.OptionSpec {
 	spec.MarkdownlintPinned = true
 	return spec

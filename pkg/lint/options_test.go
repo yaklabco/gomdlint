@@ -400,6 +400,19 @@ func optionsRegistry() *lint.Registry {
 	return registry
 }
 
+// pinnedRegistry holds MD033 with options of which two are marked
+// MarkdownlintPinned.
+func pinnedRegistry() *lint.Registry {
+	registry := lint.NewRegistry()
+	registry.Register(&optionRule{id: "MD033", name: "no-inline-html"})
+	registry.Describe(lint.RuleMeta{ID: "MD033", Name: "no-inline-html", OptionsDeclared: true, Options: []lint.OptionSpec{
+		{Name: "allowed_elements", Type: lint.OptionStringList, Default: []string{"br"}, MarkdownlintPinned: true},
+		{Name: "table_allowed_elements", Type: lint.OptionStringList, Default: []string{}},
+		{Name: "levels", Type: lint.OptionIntegerOrList, Default: []int{1, 2}, MarkdownlintPinned: true},
+	}})
+	return registry
+}
+
 // optionRule is a rule that reads nothing and reports nothing.
 type optionRule struct {
 	id, name string
@@ -550,39 +563,36 @@ func TestRegistryMarkdownlintRuleConfig(t *testing.T) {
 }
 
 // TestRegistryMarkdownlintRuleConfigWritesPinnedOptions checks the options
-// that every markdownlint setting of a rule writes out: the defaults of the
-// options that its declaration marks MarkdownlintPinned, whatever the value
-// and under the default key too, with the options that a setting gives
-// over them, each setting with its own copy of the defaults.
+// that a markdownlint setting of a rule that turns the rule off, and the
+// default key with any value, write out: the defaults of the options that
+// the rule's declaration marks MarkdownlintPinned, with the options that a
+// setting gives over them, each setting with its own copy of the defaults.
+// A setting that turns the rule on resets its options instead (see
+// TestRegistryMarkdownlintRuleConfigResetsOptions).
 func TestRegistryMarkdownlintRuleConfigWritesPinnedOptions(t *testing.T) {
 	t.Parallel()
 
-	registry := lint.NewRegistry()
-	registry.Register(&optionRule{id: "MD033", name: "no-inline-html"})
-	registry.Describe(lint.RuleMeta{ID: "MD033", Name: "no-inline-html", OptionsDeclared: true, Options: []lint.OptionSpec{
-		{Name: "allowed_elements", Type: lint.OptionStringList, Default: []string{"br"}, MarkdownlintPinned: true},
-		{Name: "table_allowed_elements", Type: lint.OptionStringList, Default: []string{}},
-		{Name: "levels", Type: lint.OptionIntegerOrList, Default: []int{1, 2}, MarkdownlintPinned: true},
-	}})
+	registry := pinnedRegistry()
 	pinned := map[string]any{"allowed_elements": []string{"br"}, "levels": []int{1, 2}}
 
-	values := []any{true, false, nil, "warning", "", float64(0), map[string]any{}, map[string]any{"enabled": false}}
-	for _, value := range values {
+	for _, value := range []any{false, nil, "", float64(0), map[string]any{"enabled": false}} {
 		cfg, issues := registry.MarkdownlintRuleConfig("MD033", value)
 		assert.Equal(t, pinned, cfg.Options, "%#v", value)
 		assert.Empty(t, issues, "%#v", value)
+	}
+	for _, value := range []any{true, false, nil, "warning", "", float64(0), map[string]any{}, map[string]any{"enabled": false}} {
 		assert.Equal(t, pinned, registry.MarkdownlintDefaultRuleConfig("MD033", value).Options, "default key %#v", value)
 	}
 
 	cfg, issues := registry.MarkdownlintRuleConfig("MD033", map[string]any{
-		"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"},
+		"enabled": false, "allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"},
 	})
 	assert.Equal(t, map[string]any{
 		"allowed_elements": []any{"img"}, "table_allowed_elements": []any{"td"}, "levels": []int{1, 2},
 	}, cfg.Options, "the options of the setting win")
 	assert.Empty(t, issues)
 
-	cfg, _ = registry.MarkdownlintRuleConfig("MD033", true)
+	cfg, _ = registry.MarkdownlintRuleConfig("MD033", false)
 	elements, isList := cfg.Options["allowed_elements"].([]string)
 	require.True(t, isList)
 	elements[0] = "hr"

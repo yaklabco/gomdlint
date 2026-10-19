@@ -86,10 +86,14 @@ type markdownlintTranslator struct {
 // spellings become gomdlint's canonical names, such as max for
 // line_length, and options that the rule does not read, or whose values
 // have the wrong type, are left out with a warning, as markdownlint ignores
-// them. Every setting of some rules also writes out markdownlint's
-// defaults for some of their options (see lint.OptionSpec.MarkdownlintPinned),
-// so that it replaces them in a lower configuration layer, as gomdlint's
-// translation always has. Two spellings of one option are an error.
+// them. A rule key that turns a rule on resets the options that a lower
+// configuration layer, such as a user config, gives the rule (see
+// config.RuleConfig.ResetOptions), as markdownlint gives the rule the
+// options of the key's value and no others. The default key, and a rule
+// key that turns a rule off, write out markdownlint's defaults for some
+// options of some rules instead (see lint.OptionSpec.MarkdownlintPinned),
+// so that they replace those of a lower layer, as gomdlint's translation
+// always has. Two spellings of one option are an error.
 func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	return convertMarkdownlintConfig(path, markdownlintTranslator{
 		rule:        (*lint.Registry).MarkdownlintRuleConfig,

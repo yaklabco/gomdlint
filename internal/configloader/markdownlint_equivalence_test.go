@@ -395,12 +395,35 @@ func effectiveOptions(t *testing.T, cfg *config.Config) map[string]string {
 	return effective
 }
 
+// resetLowerLayer returns lowerLayer without the options of the rules that
+// translated, #42's translation of a markdownlint config, turns on under a
+// rule key. In markdownlint 0.41.1 such a key gives the rule the options of
+// its value and no others, so the translation resets the options that a
+// lower layer gives those rules, which #42's did not.
+func resetLowerLayer(translated *config.Config) *config.Config {
+	lower := lowerLayer()
+	for id, rule := range translated.Rules {
+		if rule.Enabled == nil || !*rule.Enabled {
+			continue
+		}
+		for _, section := range []map[string]config.RuleConfig{lower.Rules, lower.RuleDefaults} {
+			if settings, ok := section[id]; ok {
+				settings.Options = nil
+				section[id] = settings
+			}
+		}
+	}
+	return lower
+}
+
 // TestMarkdownlintTranslationKeepsEffectiveOptions checks that translating
 // rule options through the catalog leaves every rule as #42 left it. For
 // each fixture, #42's translation and the catalog's give the same rules,
 // with the same severities, fixes and option values, and so do the two ways
 // of using a markdownlint config: loading it directly for a run, and
-// loading the gomdlint config that migrate writes from it.
+// loading the gomdlint config that migrate writes from it. Over a lower
+// layer, the rules that a rule key turns on no longer keep the lower
+// layer's options, as in markdownlint.
 func TestMarkdownlintTranslationKeepsEffectiveOptions(t *testing.T) {
 	t.Parallel()
 
@@ -418,7 +441,7 @@ func TestMarkdownlintTranslationKeepsEffectiveOptions(t *testing.T) {
 			require.NoError(t, err)
 			want := effectiveOptions(t, legacy.Config)
 			assert.Equal(t, want, effectiveOptions(t, converted.Config), "the translation")
-			assert.Equal(t, effectiveOptions(t, merge(lowerLayer(), legacy.Config)),
+			assert.Equal(t, effectiveOptions(t, merge(resetLowerLayer(legacy.Config), legacy.Config)),
 				effectiveOptions(t, merge(lowerLayer(), converted.Config)), "the translation over a lower layer")
 
 			direct, err := Load(context.Background(), LoadOptions{
@@ -446,7 +469,9 @@ func TestMarkdownlintTranslationKeepsEffectiveOptions(t *testing.T) {
 // and for the default key, with every kind of value: the same state, the
 // same severity and the same options, including the defaults that #42
 // wrote out for some options of some rules, which replace the options of a
-// lower configuration layer. Options that are nil and options that are
+// lower configuration layer. A rule key that turns the rule on resets its
+// options instead, which replaces every option of a lower layer, so it
+// writes none of those defaults. Options that are nil and options that are
 // empty count as the same: both write options: {} and set nothing.
 func TestMarkdownlintTranslationWritesWhat42Wrote(t *testing.T) {
 	t.Parallel()
@@ -464,7 +489,11 @@ func TestMarkdownlintTranslationWritesWhat42Wrote(t *testing.T) {
 		for _, value := range values {
 			converted, issues := registry.MarkdownlintRuleConfig(id, value)
 			assert.Empty(t, issues, "%s %#v", id, value)
-			assert.Equal(t, settled(legacyMarkdownlintRuleConfig(id, value)), settled(converted), "%s %#v", id, value)
+			want := settled(legacyMarkdownlintRuleConfig(id, value))
+			if *want.Enabled {
+				want.Options, want.ResetOptions = nil, true
+			}
+			assert.Equal(t, want, settled(converted), "%s %#v", id, value)
 			assert.Equal(t, settled(legacyMarkdownlintDefaultRuleConfig(id, value)),
 				settled(registry.MarkdownlintDefaultRuleConfig(id, value)), "%s default %#v", id, value)
 		}

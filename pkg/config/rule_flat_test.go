@@ -167,7 +167,7 @@ func TestRuleConfig_RuleSettingKeys(t *testing.T) {
 		}
 	}
 	assert.ElementsMatch(t, tags, config.RuleSettingKeys())
-	assert.Equal(t, []string{"enabled", "severity", "auto_fix", "options"}, config.RuleSettingKeys())
+	assert.Equal(t, []string{"enabled", "severity", "auto_fix", "reset_options", "options"}, config.RuleSettingKeys())
 
 	keys := config.RuleSettingKeys()
 	keys[0] = "changed"

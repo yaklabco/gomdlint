@@ -191,11 +191,14 @@ type OptionSpec struct {
 	// option of a rule that markdownlint lacks is one.
 	GomdlintOnly bool
 
-	// MarkdownlintPinned reports that every setting of the rule in a
-	// markdownlint configuration sets the option to Default explicitly, so
+	// MarkdownlintPinned reports that a markdownlint configuration sets the
+	// option to Default explicitly in each setting of the rule that resets
+	// no options, the default key and a rule key that turns the rule off, so
 	// that the setting replaces the option of a lower configuration layer.
 	// gomdlint's translation of markdownlint settings has always written
-	// these options out (see Registry.MarkdownlintRuleConfig).
+	// these options out (see Registry.MarkdownlintRuleConfig). A rule key
+	// that turns the rule on resets every option instead (see
+	// config.RuleConfig.ResetOptions).
 	MarkdownlintPinned bool
 
 	// Description says what the option controls, in plain text.

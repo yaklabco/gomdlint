@@ -541,9 +541,9 @@ func TestEngineConfigureFileSuggestsRulesForUnknownKeys(t *testing.T) {
 // TestEngineConfigureFileSettingReplacesRuleDefaults covers a
 // markdownlint-configure-file comment without a default key that names
 // line-length (MD013), by its ID, its name or its tag, over rule_defaults
-// that set its max to 20. As #42 did, the comment writes out markdownlint's
-// defaults for some options of some rules, max among them, so the comment
-// gives MD013 a max of 80, not the baseline's 20.
+// that set its max to 20. The comment turns the rule on, which resets its
+// options, so the comment gives MD013 markdownlint's max of 80, not the
+// baseline's 20 (see also TestEngineConfigureFileResetsOptions).
 func TestEngineConfigureFileSettingReplacesRuleDefaults(t *testing.T) {
 	const (
 		lineLength = "MD013"

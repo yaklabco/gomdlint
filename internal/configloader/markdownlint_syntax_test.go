@@ -281,7 +281,8 @@ func TestConvertMarkdownlintConfig_NumbersBeyondFloat64(t *testing.T) {
 		require.NotNil(t, rule.Enabled, id)
 		assert.True(t, *rule.Enabled, id)
 	}
-	assert.EqualValues(t, 80, result.Config.Rules["MD013"].Options["max"], "markdownlint's default line length")
+	assert.NotContains(t, result.Config.Rules["MD013"].Options, "max", "markdownlint's default line length")
+	assert.True(t, result.Config.Rules["MD013"].ResetOptions)
 	assert.Equal(t, []string{`line-length option "line_length" must be an integer, not +Inf; it is ignored`}, result.Warnings)
 }
 
