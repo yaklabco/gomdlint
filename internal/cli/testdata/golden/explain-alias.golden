@@ -1,0 +1,40 @@
+exit code 0
+-- stdout --
+first-line-heading (MD041), Headings
+On by default, severity warning. Not fixable.
+Your configuration turns it off.
+first-line-h1 is one of markdownlint's names for this rule.
+
+Comments aside, the file starts with a top-level heading or front matter title.
+
+Why: The top-level heading is usually the document's title.
+
+Tags: headings
+
+Options, under rules.first-line-heading.options:
+  level (integer, default 1)
+    Level that the first heading must have.
+  front_matter_title (string|false, default ^\s*"?title"?\s*[:=])
+    Regular expression, matched in any case, for the front matter line that
+    gives the document a title, which counts as the first heading. An empty
+    string or false turns this off.
+  allow_preamble (boolean, default false)
+    Allow content before the first heading.
+
+Fix: There is no automatic fix. Only the author can write the title.
+
+Configure:
+  rules:
+    first-line-heading:
+      options:
+        level: 1
+
+Under rules, first-line-heading: false turns the rule off and
+first-line-heading: error reports its findings as errors. The flag
+--disable first-line-heading turns it off for one run.
+
+Silence one line:
+  <!-- markdownlint-disable-next-line first-line-heading -->
+
+markdownlint: https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md041.md
+-- stderr --

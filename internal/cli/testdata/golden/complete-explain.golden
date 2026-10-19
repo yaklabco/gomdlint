@@ -1,0 +1,11 @@
+line-length	Lines fit in 80 characters, with exemptions such as lone links and definitions.
+line_length	Tag: line-length
+link-destination-style	Links in a file, other than #fragment links, are all relative or all absolute.
+link-fragments	Links to a #fragment point at a heading or anchor in the same file, or at #top.
+link-image-reference-definitions	Every reference definition is used and defined once, except [//] comments.
+link-image-style	Links and images use only the allowed styles. By default, all are allowed.
+links	Tag: no-reversed-links, no-bare-urls, no-space-in-links, no-empty-links, link-fragments, reference-links-images, link-image-reference-definitions, link-image-style, descriptive-link-text, link-destination-style
+list-indent	Items in a list start at the same column. Ordered numbers may right-align.
+list-marker-space	One space, or one tab, separates each list marker from the item's text.
+lists	Category: Lists
+:4

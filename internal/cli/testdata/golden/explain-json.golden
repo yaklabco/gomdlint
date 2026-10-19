@@ -1,0 +1,53 @@
+exit code 0
+-- stdout --
+{
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "MD003",
+      "name": "heading-style",
+      "aliases": [],
+      "markdownlintName": "heading-style",
+      "category": "headings",
+      "tags": [
+        "headings"
+      ],
+      "description": "Headings all use the first heading's style: # Title, # Title #, or underlined.",
+      "rationale": "One heading style makes the source easier to read and to search.",
+      "fix": "The fix converts headings between the # Title and # Title # styles. gomdlint reports an underlined heading, or one that needs an underline, without a fix. gomdlint may report a finding without a fix when the fix would change a line with one character in brackets, such as [x] or [1], or the lines around it up to a blank line, because it could add or remove a task list checkbox.",
+      "fixable": true,
+      "enabled": true,
+      "severity": "warning",
+      "defaultEnabled": true,
+      "defaultSeverity": "warning",
+      "options": [
+        {
+          "name": "style",
+          "aliases": [],
+          "type": "string",
+          "default": "consistent",
+          "values": [
+            "consistent",
+            "atx",
+            "atx_closed",
+            "setext",
+            "setext_with_atx",
+            "setext_with_atx_closed"
+          ],
+          "gomdlintOnly": false,
+          "description": "Heading syntax to require. consistent takes the syntax of the first heading."
+        },
+        {
+          "name": "require_closing_atx",
+          "aliases": [],
+          "type": "boolean",
+          "default": false,
+          "gomdlintOnly": true,
+          "description": "Expect closed headings, such as # Title #, wherever the style expects ATX headings."
+        }
+      ],
+      "markdownlintUrl": "https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md003.md"
+    }
+  ]
+}
+-- stderr --

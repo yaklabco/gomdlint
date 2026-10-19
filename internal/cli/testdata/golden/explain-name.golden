@@ -1,0 +1,67 @@
+exit code 0
+-- stdout --
+line-length (MD013), Whitespace and layout
+On by default, severity warning. Fixable.
+Your configuration turns it off.
+
+Lines fit in 80 characters, with exemptions such as lone links and definitions.
+
+Why: Long lines are hard to work with in some editors. Diffs of short lines are
+also easier to read. The exemptions are reference definitions, lines that hold
+only a link or an image, and lines whose last word, such as a URL, crosses the
+limit. They often cannot be split without breaking a URL.
+
+Tags: line_length
+
+Options, under rules.line-length.options:
+  max (integer, default 80)
+    Most characters allowed on a line. 0 counts as 80, as in markdownlint. Also
+    accepted as line_length.
+  heading_max (integer, defaults to the value of max)
+    Most characters allowed on a heading line. 0 counts as max. Also accepted as
+    heading_line_length.
+  code_block_max (integer, defaults to the value of max)
+    Most characters allowed on a line of a code block. 0 counts as max. Also
+    accepted as code_block_line_length.
+  ignore_code_blocks (boolean, default false)
+    Skip code blocks. Also accepted as code_blocks, with the opposite value.
+  ignore_tables (boolean, default false)
+    Skip tables. Also accepted as tables, with the opposite value.
+  ignore_headings (boolean, default false)
+    Skip headings. Also accepted as headings, with the opposite value.
+  ignore_urls (boolean, default false, gomdlint only)
+    Skip lines that contain a URL.
+  strict (boolean, default false)
+    Report every line over the limit, also one whose only overflow is its last
+    word, and one that holds only a link.
+  stern (boolean, default false)
+    Also report a line whose only overflow is its last word, unless the line has
+    no space to wrap at.
+  markdownlint_compatible (boolean, default true, gomdlint only)
+    Allow what markdownlint allows over the limit: reference definitions, lines
+    that hold only a link, and a last word that starts within the limit. With
+    false, every line over the limit is reported.
+
+Fix: The fix wraps long paragraph lines at spaces. gomdlint reports a line
+without a fix when it is not paragraph text, such as a heading, a table row or
+code, or when no break point is safe. gomdlint may report a finding without a
+fix when the fix would change a line with one character in brackets, such as [x]
+or [1], or the lines around it up to a blank line, because it could add or
+remove a task list checkbox. In a document with raw HTML other than comments and
+plain br, wbr, hr or img tags, gomdlint reports every finding without a fix.
+
+Configure:
+  rules:
+    line-length:
+      options:
+        max: 80
+
+Under rules, line-length: false turns the rule off and line-length: error
+reports its findings as errors. The flag --disable line-length turns it off for
+one run.
+
+Silence one line:
+  <!-- markdownlint-disable-next-line line-length -->
+
+markdownlint: https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md013.md
+-- stderr --

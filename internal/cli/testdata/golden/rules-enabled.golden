@@ -1,0 +1,13 @@
+exit code 0
+-- stdout --
+NAME                       ID     FIX  STATUS   DESCRIPTION
+
+Whitespace and layout
+  hr-style                 MD035  yes  warning  Every horizontal rule is written the same way as the first one, such as ---.
+  no-hard-tabs             MD010  yes  warning  Lines contain no tab characters, including inside code.
+  no-multiple-blank-lines  MD012  yes  warning  Outside code, no two blank lines follow each other, except after front matter.
+  no-trailing-spaces       MD009  yes  error    Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
+  single-trailing-newline  MD047  yes  warning  The file ends with a newline, or a last line of only whitespace, > or comments.
+
+5 of 55 rules, 5 on, 5 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

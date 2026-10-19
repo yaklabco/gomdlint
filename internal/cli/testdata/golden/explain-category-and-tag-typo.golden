@@ -1,0 +1,6 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: unknown rule "blockquots" (did you mean the tag "blockquote" or the category "blockquotes"?)
+Run 'gomdlint rules' to list rules.
+Run 'gomdlint explain --help' for usage.

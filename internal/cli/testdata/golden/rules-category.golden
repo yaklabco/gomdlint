@@ -1,0 +1,15 @@
+exit code 0
+-- stdout --
+NAME                            ID     FIX  STATUS   DESCRIPTION
+
+Emphasis
+  emphasis-style                MD049  yes  warning  All italic text uses one marker, *text* or _text_, except * inside a word.
+  no-space-in-emphasis          MD037  yes  warning  Emphasis markers touch the text they wrap, as in **bold**.
+  strong-style                  MD050  yes  warning  All bold text uses one marker, **text** or __text__, except ** inside a word.
+
+Blockquotes
+  no-blanks-blockquote          MD028  no   warning  No blank line sits between two blockquotes.
+  no-multiple-space-blockquote  MD027  yes  warning  Outside code and list item text, at most one space follows a blockquote's >.
+
+5 of 55 rules, 5 on, 4 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

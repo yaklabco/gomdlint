@@ -1,0 +1,50 @@
+exit code 0
+-- stdout --
+no-trailing-spaces (MD009), Whitespace and layout
+On by default, severity warning. Fixable.
+Your configuration sets its severity to error.
+
+Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
+
+Why: Trailing whitespace in text does not change the output, except where 2 or
+more spaces make a hard line break. In code blocks it is part of the code.
+
+Tags: whitespace
+
+Options, under rules.no-trailing-spaces.options:
+  br_spaces (integer, default 2)
+    Trailing spaces allowed for a hard line break. Values below 2 allow none.
+  list_item_empty_lines (boolean, default false)
+    Allow trailing spaces on empty lines inside list items.
+  strict (boolean, default false)
+    Also report br_spaces where they make no line break, such as at the end of a
+    paragraph.
+  ignore_code_blocks (boolean, default true)
+    Skip the lines of code blocks. Also accepted as code_blocks, with the
+    opposite value.
+
+Fix: The fix deletes the trailing whitespace, or trims a hard line break to
+exactly 2 spaces. gomdlint reports some trailing whitespace without a fix, such
+as whitespace inside a code span, which is code, or a tab where the paragraph
+goes on to the next line, which some renderers read as a hard line break.
+gomdlint may report a finding without a fix when the fix would change a line
+with one character in brackets, such as [x] or [1], or the lines around it up to
+a blank line, because it could add or remove a task list checkbox. In a document
+with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint
+reports every finding without a fix.
+
+Configure:
+  rules:
+    no-trailing-spaces:
+      options:
+        br_spaces: 2
+
+Under rules, no-trailing-spaces: false turns the rule off and
+no-trailing-spaces: error reports its findings as errors. The flag
+--disable no-trailing-spaces turns it off for one run.
+
+Silence one line:
+  <!-- markdownlint-disable-next-line no-trailing-spaces -->
+
+markdownlint: https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md
+-- stderr --

@@ -1,0 +1,10 @@
+# The rules and explain goldens show the rules under this configuration.
+rules:
+  # Off, by name and by ID.
+  line-length: false
+  MD041: false
+  # On, at another severity.
+  no-trailing-spaces: error
+  # unordered-list-style, under markdownlint's name for it.
+  ul-style:
+    severity: info

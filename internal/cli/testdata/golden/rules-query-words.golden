@@ -1,0 +1,9 @@
+exit code 0
+-- stdout --
+NAME                   ID     FIX  STATUS   DESCRIPTION
+
+Headings
+  heading-blank-lines  MD022  yes  warning  Headings have a blank or comment line above and below.
+
+1 of 55 rules, 1 on, 1 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

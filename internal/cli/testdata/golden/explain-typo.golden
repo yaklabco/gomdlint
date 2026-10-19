@@ -1,0 +1,6 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: unknown rule "line-lenght" (did you mean "line-length"?)
+Run 'gomdlint rules' to list rules.
+Run 'gomdlint explain --help' for usage.

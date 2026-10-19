@@ -1,0 +1,60 @@
+exit code 0
+-- stdout --
+{
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "MD028",
+      "name": "no-blanks-blockquote",
+      "aliases": [],
+      "markdownlintName": "no-blanks-blockquote",
+      "category": "blockquotes",
+      "tags": [
+        "blockquote",
+        "whitespace"
+      ],
+      "description": "No blank line sits between two blockquotes.",
+      "rationale": "Parsers disagree about whether a blank line ends a blockquote, so the quotes may render as one or as two.",
+      "fix": "There is no automatic fix. Put > on the blank line to join the quotes, or text between them to keep them apart.",
+      "fixable": false,
+      "enabled": true,
+      "severity": "warning",
+      "defaultEnabled": true,
+      "defaultSeverity": "warning",
+      "options": [],
+      "markdownlintUrl": "https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md028.md"
+    },
+    {
+      "id": "MD027",
+      "name": "no-multiple-space-blockquote",
+      "aliases": [],
+      "markdownlintName": "no-multiple-space-blockquote",
+      "category": "blockquotes",
+      "tags": [
+        "blockquote",
+        "whitespace",
+        "indentation"
+      ],
+      "description": "Outside code and list item text, at most one space follows a blockquote's >.",
+      "rationale": "Extra spaces after > make the quote harder to read. At the start of a block, five spaces after > make an indented code block.",
+      "fix": "The fix deletes the extra spaces. gomdlint reports fence lines and HTML lines inside the quote without a fix. The same goes for some list items, such as one that holds a second paragraph, a code block or a quote. gomdlint may report a finding without a fix when the fix would change a line with one character in brackets, such as [x] or [1], or the lines around it up to a blank line, because it could add or remove a task list checkbox. In a document with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint reports every finding without a fix.",
+      "fixable": true,
+      "enabled": true,
+      "severity": "warning",
+      "defaultEnabled": true,
+      "defaultSeverity": "warning",
+      "options": [
+        {
+          "name": "list_items",
+          "aliases": [],
+          "type": "boolean",
+          "default": true,
+          "gomdlintOnly": false,
+          "description": "Check the space after > in front of list items too."
+        }
+      ],
+      "markdownlintUrl": "https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md027.md"
+    }
+  ]
+}
+-- stderr --

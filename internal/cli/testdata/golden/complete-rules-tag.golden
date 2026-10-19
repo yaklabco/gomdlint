@@ -1,0 +1,4 @@
+blank_lines	Tag: no-multiple-blank-lines, heading-blank-lines, blanks-around-fences, blanks-around-lists, single-trailing-newline
+blockquote	Tag: no-multiple-space-blockquote, no-blanks-blockquote
+bullet	Tag: unordered-list-style, list-indent, ul-indent, blanks-around-lists
+:4

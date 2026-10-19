@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: --category: unknown category "heading" (did you mean "headings"?); categories: headings, lists, layout, code, links, tables, emphasis, blockquotes, html, spelling
+Run 'gomdlint rules --help' for usage.

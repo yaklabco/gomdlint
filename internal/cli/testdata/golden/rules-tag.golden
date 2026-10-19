@@ -1,0 +1,27 @@
+exit code 0
+-- stdout --
+NAME                            ID     FIX  STATUS   DESCRIPTION
+
+Lists
+  list-marker-space             MD030  yes  warning  One space, or one tab, separates each list marker from the item's text.
+
+Whitespace and layout
+  no-hard-tabs                  MD010  yes  warning  Lines contain no tab characters, including inside code.
+  no-multiple-blank-lines       MD012  yes  warning  Outside code, no two blank lines follow each other, except after front matter.
+  no-trailing-spaces            MD009  yes  error    Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
+
+Code
+  no-space-in-code              MD038  yes  warning  Code span text has no spaces around it, except one each side or by a backtick.
+
+Links and images
+  no-space-in-links             MD039  yes  warning  Link text has no spaces just inside its brackets.
+
+Emphasis
+  no-space-in-emphasis          MD037  yes  warning  Emphasis markers touch the text they wrap, as in **bold**.
+
+Blockquotes
+  no-blanks-blockquote          MD028  no   warning  No blank line sits between two blockquotes.
+  no-multiple-space-blockquote  MD027  yes  warning  Outside code and list item text, at most one space follows a blockquote's >.
+
+9 of 55 rules, 9 on, 8 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

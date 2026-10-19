@@ -1,0 +1,13 @@
+exit code 0
+-- stdout --
+blockquotes is a category. It holds these rules:
+
+NAME                            ID     FIX  STATUS   DESCRIPTION
+
+Blockquotes
+  no-blanks-blockquote          MD028  no   warning  No blank line sits between two blockquotes.
+  no-multiple-space-blockquote  MD027  yes  warning  Outside code and list item text, at most one space follows a blockquote's >.
+
+2 of 55 rules, 2 on, 1 fixable. Run 'gomdlint explain <rule>' for details.
+Run 'gomdlint rules --category blockquotes' to list them with more filters.
+-- stderr --

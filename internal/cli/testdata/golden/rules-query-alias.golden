@@ -1,0 +1,9 @@
+exit code 0
+-- stdout --
+NAME                    ID     FIX  STATUS  DESCRIPTION
+
+Lists
+  unordered-list-style  MD004  yes  info    Every bullet uses the same marker as the first bullet in the file.
+
+1 of 55 rules, 1 on, 1 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

@@ -142,6 +142,13 @@ func TestRuleCompletionGolden(t *testing.T) {
 		{name: "complete-fix-rules-ul", args: []string{"__complete", "lint", "--fix-rules", "ul"}},
 		// The last item of a list.
 		{name: "complete-disable-list", args: []string{"__complete", "lint", "--disable", "MD009,no-t"}},
+		// The argument of explain: a rule, a tag or a category, and no
+		// list, so a comma completes nothing.
+		{name: "complete-explain", args: []string{"__complete", "explain", "li"}},
+		{name: "complete-explain-list", args: []string{"__complete", "explain", "MD009,no-t"}},
+		// The filters of rules.
+		{name: "complete-rules-category", args: []string{"__complete", "rules", "--category", ""}},
+		{name: "complete-rules-tag", args: []string{"__complete", "rules", "--tag", "b"}},
 	}
 
 	for _, tt := range tests {

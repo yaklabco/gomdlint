@@ -164,8 +164,10 @@ blockquotes.
 Every rule has an ID and a name. markdownlint's own names for five rules
 also work: `ul-style` (MD004), `no-multiple-blanks` (MD012),
 `blanks-around-headings` (MD022), `single-title` (MD025) and `first-line-h1`
-(MD041). `gomdlint rules` lists every rule with its severity and a one-line
-description of what correct Markdown looks like.
+(MD041). `gomdlint rules` lists every rule by category, with its status and
+a one-line description of what correct Markdown looks like, and
+`gomdlint explain <rule>` describes one rule in full (see
+[Commands](#commands)).
 
 | ID | Name | Category | Fix |
 | --- | --- | --- | --- |
@@ -330,9 +332,10 @@ gomdlint lint --rule-format id file.md       # id: MD009
 gomdlint lint --rule-format combined file.md # combined: MD009/no-trailing-spaces
 ```
 
-To change the default for `gomdlint lint`, set `GOMDLINT_RULE_FORMAT`, for
-example to `id`. The flag wins over the variable. JSON and SARIF output
-always carry both the ID and the name.
+To change the default for `gomdlint lint` and the text listing of
+`gomdlint rules`, set `GOMDLINT_RULE_FORMAT`, for example to `id`. The flag
+wins over the variable. JSON and SARIF output always carry both the ID and
+the name.
 
 ## Configuration
 
@@ -434,7 +437,9 @@ A name that matches no rule gets an error or a warning that suggests the
 closest rules, such as `unknown rule "no-trailling-spaces" (did you mean
 "no-trailing-spaces"?)`. In a config file, the warning names the file and
 line. Shell completion offers rule names, IDs, markdownlint's names and
-tags for the three flags, with each rule's one-line description.
+tags for the three flags and for `gomdlint explain`, with each rule's
+one-line description. It completes categories and tags for the
+`--category` and `--tag` filters of `gomdlint rules`.
 
 ### Rule Settings
 
@@ -700,15 +705,54 @@ the `security-events: write` permission.
 | Command | Description |
 | --- | --- |
 | `gomdlint lint [paths...]` | Lint files and directories |
-| `gomdlint rules` | List all available rules |
+| `gomdlint rules [words...]` | List the rules by category |
+| `gomdlint explain <rule>` | Explain what a rule checks and how to configure it |
 | `gomdlint init` | Generate configuration file |
 | `gomdlint migrate` | Convert markdownlint config |
 | `gomdlint completion <shell>` | Generate a shell completion script |
 | `gomdlint version` | Show version information |
 
-`gomdlint rules` lists each rule's name, default severity, whether it can
-fix, and the one-line description of what correct Markdown looks like, and
-takes `--rule-format` like `lint`.
+`gomdlint rules` lists the rules by category, sorted by name. Each row shows
+a rule's name, ID, whether it can fix what it finds, its status and what it
+checks. The status is `off` or the severity of the rule's findings, under
+the configuration that `gomdlint lint` would load in the current directory
+or from `--config`. `--defaults` shows the built-in settings instead.
+
+Words select the rules that hold each of them in their name, ID,
+markdownlint name, category, tags or description, ignoring case.
+`--category`, `--tag`, `--fixable`, `--enabled` and `--disabled` filter
+further, and a rule must pass every filter. `--rule-format` names rules as
+for `lint`. `--format json` describes every rule with its options and their
+defaults, and `--format markdown` prints a Markdown table for each category.
+
+```bash
+gomdlint rules table                 # Rules that mention tables
+gomdlint rules --tag whitespace      # The rules of a markdownlint tag
+gomdlint rules --disabled            # The rules this project turns off
+gomdlint rules --format json         # Every rule and its options, as JSON
+```
+
+`gomdlint explain` takes a rule's ID, name or markdownlint name, in any
+case. It shows what the rule checks and why, its options with their
+defaults and markdownlint's spellings, what its fix does and which findings
+it reports without a fix, and how to configure the rule and silence it on
+one line. A markdownlint tag, such as `whitespace`, or a category, such as
+`layout`, lists its rules instead. `--format markdown` prints the rule's
+documentation page. `--format json` describes the rule as
+`gomdlint rules --format json` does.
+
+```text
+$ gomdlint explain MD009
+no-trailing-spaces (MD009), Whitespace and layout
+On by default, severity warning. Fixable.
+
+Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
+
+Why: Trailing whitespace in text does not change the output, except where 2 or
+more spaces make a hard line break. In code blocks it is part of the code.
+...
+```
+
 `gomdlint completion` writes a script for bash, zsh, fish or powershell.
 Release archives and the Homebrew formula include the bash, zsh and fish
 completions.

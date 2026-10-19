@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: --category: unknown category "table" (did you mean "tables" or --tag table?); categories: headings, lists, layout, code, links, tables, emphasis, blockquotes, html, spelling
+Run 'gomdlint rules --help' for usage.

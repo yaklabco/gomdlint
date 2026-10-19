@@ -1,0 +1,10 @@
+exit code 0
+-- stdout --
+NAME                 ID     FIX  STATUS   DESCRIPTION
+
+Links and images
+  no-bare-urls       MD034  yes  warning  Outside code and HTML, URLs and email addresses sit in angle brackets or links.
+  no-reversed-links  MD011  yes  warning  Inline links put the text in brackets and the URL in parentheses: [text](url).
+
+2 of 55 rules, 2 on, 2 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

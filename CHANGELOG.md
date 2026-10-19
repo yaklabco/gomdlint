@@ -18,6 +18,13 @@ formats change. The first entries under Changed may need action.
   the ID instead, `--rule-format combined` shows both, and the
   `GOMDLINT_RULE_FORMAT` environment variable sets the default. The summary
   no longer cuts long rule names.
+- `gomdlint rules` lists the rules by category, sorted by name, in a table
+  of each rule's name, ID, fix support, status and description, followed by
+  a count. The status is `off` or the severity of the rule's findings under
+  the configuration that `lint` would load, and `--defaults` shows the
+  built-in settings instead. It used to print log lines in rule ID order,
+  with each rule's default severity. `--format json` is the stable form for
+  scripts.
 - Every rule runs by default, as in markdownlint. `no-inline-html` (MD033),
   `first-line-heading` (MD041), `required-headings` (MD043), `proper-names`
   (MD044), `link-image-style` (MD054), `descriptive-link-text` (MD059),
@@ -141,6 +148,22 @@ formats change. The first entries under Changed may need action.
 - `gomdlint rules`, shell completion and SARIF rule descriptors describe
   each rule from the catalog, saying what correct Markdown looks like, why
   it matters and what the fix does.
+- `gomdlint explain <rule>` describes a rule, named by ID, name or
+  markdownlint name: what it checks and why, its options with their defaults
+  and markdownlint's spellings, what its fix does, how to configure it and
+  silence it, and where markdownlint documents it. A markdownlint tag or a
+  category lists its rules. `--format markdown` prints the rule's
+  documentation page, and `--format json` describes it as `gomdlint rules`
+  does.
+- `gomdlint rules` takes words to look for in each rule's name, ID,
+  markdownlint name, category, tags and description, and the filters
+  `--category`, `--tag`, `--fixable`, `--enabled` and `--disabled`.
+  `--format json` writes an object with a `version` and the `rules`, each
+  with its options and their defaults, and `--format markdown` writes a
+  Markdown table for each category. `GOMDLINT_RULE_FORMAT` sets the default
+  of its `--rule-format`.
+- Shell completion completes the argument of `gomdlint explain`, and the
+  `--category` and `--tag` filters of `gomdlint rules`.
 - `--enable`, `--disable` and `--fix-rules` accept markdownlint tags, such as
   `whitespace`, which stand for every rule they cover.
 - Unknown rule names get suggestions in the rule flags, config files,

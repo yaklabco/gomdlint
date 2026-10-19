@@ -23,7 +23,8 @@ func NewRootCommand(info BuildInfo) *cobra.Command {
 }
 
 // newRootCommand creates the root command, whose lint command checks the
-// rules in registry and whose rules command lists them.
+// rules in registry, whose rules command lists them and whose explain
+// command describes them.
 func newRootCommand(info BuildInfo, registry *lint.Registry) *cobra.Command {
 	var debug bool
 	var configPath string
@@ -65,6 +66,7 @@ and optional backups.`,
 	// Add subcommands.
 	rootCmd.AddCommand(newLintCommand(info, registry))
 	rootCmd.AddCommand(newRulesCommand(registry))
+	rootCmd.AddCommand(newExplainCommand(registry))
 	rootCmd.AddCommand(newInitCommand())
 	rootCmd.AddCommand(newMigrateCommand())
 	rootCmd.AddCommand(newVersionCommand(info))

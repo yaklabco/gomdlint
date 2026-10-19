@@ -1,0 +1,43 @@
+exit code 0
+-- stdout --
+unordered-list-style (MD004), Lists
+On by default, severity warning. Fixable.
+Your configuration sets its severity to info.
+ul-style is markdownlint's name for this rule.
+
+Every bullet uses the same marker as the first bullet in the file.
+
+Why: Mixed markers make the source harder to read. Inside a list, a different
+marker also starts a new list.
+
+Tags: bullet, ul
+
+Options, under rules.unordered-list-style.options:
+  style (string, default consistent)
+    Bullet to require. consistent takes the bullet of the first list, and
+    sublist gives each nesting level a bullet that differs from its parent
+    level's. Values: consistent, asterisk, plus, dash, sublist.
+
+Fix: The fix changes each marker to the expected one. gomdlint reports a list
+without a fix when the new marker would merge it with a list next to it.
+gomdlint may report a finding without a fix when the fix would change a line
+with one character in brackets, such as [x] or [1], or the lines around it up to
+a blank line, because it could add or remove a task list checkbox. In a document
+with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint
+reports every finding without a fix.
+
+Configure:
+  rules:
+    unordered-list-style:
+      options:
+        style: consistent
+
+Under rules, unordered-list-style: false turns the rule off and
+unordered-list-style: error reports its findings as errors. The flag
+--disable unordered-list-style turns it off for one run.
+
+Silence one line:
+  <!-- markdownlint-disable-next-line ul-style -->
+
+markdownlint: https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md004.md
+-- stderr --

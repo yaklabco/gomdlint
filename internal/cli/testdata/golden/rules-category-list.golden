@@ -1,0 +1,12 @@
+exit code 0
+-- stdout --
+NAME              ID     FIX  STATUS   DESCRIPTION
+
+HTML
+  no-inline-html  MD033  no   warning  Documents contain no raw HTML elements other than allowed ones.
+
+Spelling
+  proper-names    MD044  yes  warning  Outside URLs, proper names match the configured capitals, none by default.
+
+2 of 55 rules, 2 on, 1 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --
