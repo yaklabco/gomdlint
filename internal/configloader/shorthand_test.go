@@ -307,3 +307,39 @@ func mergeFiles(t *testing.T, paths ...string) *config.Config {
 	}
 	return cfg
 }
+
+// TestLoad_ReportsInvalidRuleSettingsInKeyOrder covers a config whose
+// shorthands give several rules a severity that does not exist, as a typo
+// such as "warn" for "warning" does. Validation reports the rules in key
+// order, those under rules first, so a load fails with the same error on
+// every run.
+func TestLoad_ReportsInvalidRuleSettingsInKeyOrder(t *testing.T) {
+	t.Parallel()
+
+	const severities = "; must be one of: error, warning, info"
+	content := "rules:\n  MD033: warn\n  MD013: warn\n  MD041: warn\n  MD009: warn\n" +
+		"rule_defaults:\n  MD012: warn\n  MD010: warn\n"
+	for range 20 {
+		_, err := loadProject(t, content)
+		require.Error(t, err)
+		assert.Equal(t, `rules.MD009.severity: invalid severity "warn"`+severities, err.Error())
+	}
+
+	warn := "warn"
+	invalid := config.RuleConfig{Severity: &warn}
+	cfg := &config.Config{
+		Rules:        map[string]config.RuleConfig{"MD033": invalid, "MD013": invalid, "MD041": invalid, "MD009": invalid},
+		RuleDefaults: map[string]config.RuleConfig{"MD012": invalid, "MD010": invalid},
+	}
+	want := []string{
+		"rules.MD009.severity", "rules.MD013.severity", "rules.MD033.severity", "rules.MD041.severity",
+		"rule_defaults.MD010.severity", "rule_defaults.MD012.severity",
+	}
+	for range 20 {
+		var fields []string
+		for _, e := range Validate(cfg).Errors {
+			fields = append(fields, e.Field)
+		}
+		assert.Equal(t, want, fields)
+	}
+}
