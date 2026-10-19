@@ -3,9 +3,12 @@ package lint
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
+	"math/big"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -110,6 +113,61 @@ func (t OptionType) itemTypeText() string {
 		return OptionString.typeText()
 	}
 	return OptionInteger.typeText()
+}
+
+// jsDecimal matches a decimal literal as JavaScript's Number reads one from
+// a string: an optional sign, digits with an optional point, or a point and
+// digits, and an optional exponent. Number reads no underscores and no
+// hexadecimal fractions, which Go's ParseFloat may, so they do not match.
+var jsDecimal = regexp.MustCompile(`^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+
+// jsNonDecimal matches an integer that JavaScript's Number reads from a
+// string in hexadecimal, octal or binary, after 0x, 0o or 0b in either
+// case, without a sign. Its groups hold the digits of each base.
+var jsNonDecimal = regexp.MustCompile(`^0(?:[xX]([0-9a-fA-F]+)|[oO]([0-7]+)|[bB]([01]+))$`)
+
+// jsStringNumber returns the number that JavaScript's Number reads from
+// text, and whether it reads one: after the whitespace that Number trims at
+// either end (see isJSWhitespace), a decimal literal such as -1.5e3, .5 or
+// 7., Infinity with an optional sign, or an integer in hexadecimal, octal
+// or binary, such as 0x1F. Number reads empty text, and nothing but
+// whitespace, as 0, which counts as no number here, and anything else as
+// NaN. A number beyond float64's range is an infinity, and one too small to
+// tell from zero is zero, as in JavaScript.
+func jsStringNumber(text string) (float64, bool) {
+	text = strings.TrimFunc(text, isJSWhitespace)
+	switch text {
+	case "":
+		return 0, false
+	case "Infinity", "+Infinity":
+		return math.Inf(1), true
+	case "-Infinity":
+		return math.Inf(-1), true
+	}
+	if jsDecimal.MatchString(text) {
+		number, err := strconv.ParseFloat(text, 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
+			return 0, false // A decimal literal always parses; this is unreachable.
+		}
+		return number, true
+	}
+	match := jsNonDecimal.FindStringSubmatch(text)
+	if match == nil {
+		return 0, false
+	}
+	for idx, base := range []int{16, 8, 2} {
+		digits := match[idx+1]
+		if digits == "" {
+			continue
+		}
+		integer, ok := new(big.Int).SetString(digits, base)
+		if !ok {
+			return 0, false // The pattern admits only digits of the base; this is unreachable.
+		}
+		number, _ := new(big.Float).SetInt(integer).Float64()
+		return number, true
+	}
+	return 0, false
 }
 
 // isWholeNumber reports whether value is a whole number that rules read as
@@ -385,6 +443,11 @@ type optionTable struct {
 	// name of an option that another key spells, such as max beside
 	// line_length.
 	dropUnknown bool
+
+	// markdownlintValues makes normalize read values as the rules of
+	// markdownlint 0.41.1 read them (see markdownlintValue), in a table of
+	// the spellings of a rule that markdownlint has.
+	markdownlintValues bool
 }
 
 // optionSpelling is a name or alias of the option specs[index].
@@ -432,7 +495,7 @@ func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
 	}
 	table := &optionTable{
 		specs: specs, spellings: make(map[string]optionSpelling, len(specs)),
-		renamed: make(map[string]string), dropUnknown: true,
+		renamed: make(map[string]string), dropUnknown: true, markdownlintValues: true,
 	}
 	for idx, spec := range specs {
 		if spec.GomdlintOnly {
@@ -449,6 +512,27 @@ func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
 		}
 	}
 	return table
+}
+
+// markdownlintValue returns value as the rule that spec, one of the
+// table's options, reads it in markdownlint 0.41.1, and whether that
+// differs from value, for a table that reads values so
+// (optionTable.markdownlintValues). Each rule of markdownlint reads its
+// numeric options with JavaScript's Number, as Number(value || default) or
+// as value === undefined ? default : Number(value), so a numeric string,
+// such as "10" or " 0x0A ", reads as its number (see jsStringNumber). The
+// items of a list stay as they are, as MD022, the one rule whose numeric
+// option takes a list, uses them.
+func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, bool) {
+	text, isText := value.(string)
+	if !t.markdownlintValues || !isText || (spec.Type != OptionInteger && spec.Type != OptionIntegerOrList) {
+		return value, false
+	}
+	number, ok := jsStringNumber(text)
+	if !ok {
+		return value, false
+	}
+	return number, true
 }
 
 // suggest returns the spellings that key, which spells no option of the
@@ -513,6 +597,9 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 			if enabled, ok := value.(bool); ok {
 				value = !enabled
 			}
+		}
+		if read, differs := t.markdownlintValue(spec, value); differs {
+			value, changed = read, true
 		}
 		if !spec.Type.Accepts(value) {
 			issues = append(issues, wrongTypeIssues(key, options[key], spec)...)

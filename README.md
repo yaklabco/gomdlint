@@ -649,6 +649,12 @@ default always turns the rules on. A rule's `severity` gives warnings when
 it is `warning` and errors for any other value. So gomdlint's `info` gives
 errors in a markdownlint config, while gomdlint's own config files keep it.
 
+A numeric option reads a numeric string, such as `"20"`, `"2e1"` or
+`"0x14"`, as the number that JavaScript's `Number` reads from it, as
+markdownlint's rules read their numeric options. The items of a list, such
+as `lines_above: ["2"]`, stay strings, which count as of the wrong type,
+and options of other types read no numbers.
+
 A key that turns a rule on, with `true`, a severity or an object, gives the
 rule the options that it sets and markdownlint's defaults for the others,
 as in markdownlint. So `{"MD013": true}` over a user config that sets
@@ -920,6 +926,17 @@ Some of its fix checks are also stricter than they need to be.
   mark. YAML reads each comment in such a file together with the key after
   it as one key that names nothing, so that setting does not apply there.
   gomdlint skips the mark and reads the file as JSON with comments.
+- Most of markdownlint's rules read the number 0 for an option such as
+  `line_length` or `maximum` as unset, and a numeric string that reads as
+  0, such as `"0"`, as 0 itself. In a markdownlint config, gomdlint reads
+  such a string as the number 0, which those rules read as unset, so
+  `"line_length": "0"`, which turns off markdownlint's length check,
+  applies the default of 80 in gomdlint.
+- markdownlint's rules read options of other types with JavaScript's
+  conversions too, such as `"strict": "false"`, which reads as true, and a
+  number in a list of strings, which reads as its text. gomdlint reads only
+  numeric strings for numeric options this way, and ignores other values of
+  the wrong type with a warning.
 
 ## Development
 

@@ -562,6 +562,11 @@ formats change. The first entries under Changed may need action.
   and `0x10`, are errors, which gomdlint ignored or accepted. A merge key
   (`<<`) is an ordinary key, which names no rule, so the settings it would
   merge no longer apply, as in markdownlint-cli2 0.23.
+- A numeric option in a markdownlint config or a
+  `markdownlint-configure-file` comment reads a numeric string, such as
+  `"line_length": "100"` or `"0x64"`, as its number, as markdownlint's
+  rules do. gomdlint ignored such a value with a warning, and without one
+  in a comment. gomdlint's own config files still take numbers only.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up
   after wide characters and tabs.

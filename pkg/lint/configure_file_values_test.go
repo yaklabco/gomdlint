@@ -67,3 +67,19 @@ func TestEngineConfigureFileNoticesInvalidOptionValues(t *testing.T) {
 		})
 	}
 }
+
+// TestEngineConfigureFileReadsNumericStrings covers a numeric string for a
+// numeric option in a configure-file comment, which markdownlint 0.41.1
+// reads as its number, so markdownlint-cli2 reports the comment's line and
+// the paragraph as longer than 20 characters, without a notice.
+func TestEngineConfigureFileReadsNumericStrings(t *testing.T) {
+	const paragraph = "This paragraph line is long enough to pass twenty.\n"
+	for _, length := range []string{`"20"`, `" 0x14 "`, `"2e1"`} {
+		t.Run(length, func(t *testing.T) {
+			input := "<!-- markdownlint-configure-file {\"MD013\": {\"line_length\": " + length + "}} -->\n\n# Title\n\n" + paragraph
+
+			assert.Equal(t, []int{1, 5}, reportedLines(t, input, "MD013"))
+			assert.Empty(t, lintDefault(t, input).Notices)
+		})
+	}
+}
