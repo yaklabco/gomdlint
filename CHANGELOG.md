@@ -169,6 +169,13 @@ formats change. The first entries under Changed may need action.
 - Config discovery finds `.gomdlint.json` and `gomdlint.json` after the YAML
   names, and `config.json` in the user and system config directories. `init`
   and `migrate` write JSON for an output name that ends in `.json`.
+- markdownlint-cli2 options files, `.markdownlint-cli2.jsonc` and
+  `.markdownlint-cli2.yaml`: gomdlint reads their `config` key as a
+  markdownlint config, applies it for a run and migrates it, with
+  markdownlint-cli2's order of names and its preference for a markdownlint
+  config file in the same directory. Their other keys, such as `globs` and
+  `ignores`, and JavaScript options files, which gomdlint cannot read, get
+  warnings.
 - A warning for each config file that another one in its directory
   shadows, naming both, such as `.gomdlint.json` beside `.gomdlint.yml`,
   which `gomdlint init --format json` can leave behind. gomdlint reads one

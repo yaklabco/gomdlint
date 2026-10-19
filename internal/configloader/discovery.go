@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ConfigPaths represents discovered configuration file paths.
@@ -23,8 +24,18 @@ type ConfigPaths struct {
 	// Explicit is a config path provided via --config flag.
 	Explicit string
 
-	// Markdownlint is a detected markdownlint config file path.
+	// Markdownlint is the file that holds the markdownlint configuration:
+	// a markdownlint config file such as .markdownlint.json, or a
+	// markdownlint-cli2 options file, whose config key holds it, in the
+	// nearest directory that holds either (see MarkdownlintCLI2).
 	Markdownlint string
+
+	// MarkdownlintCLI2 is the markdownlint-cli2 options file, such as
+	// .markdownlint-cli2.jsonc, in the directory of Markdownlint, or the
+	// empty string. markdownlint-cli2 reads both kinds of file in a
+	// directory and lints with the markdownlint config file, so this is
+	// Markdownlint itself only in a directory without one.
+	MarkdownlintCLI2 string
 
 	// Shadowed maps each config file found to the other config files in
 	// its directory, in their order of precedence, which it shadows:
@@ -75,6 +86,23 @@ var markdownlintConfigFiles = []string{
 	".markdownlint.mjs",
 }
 
+// markdownlintCLI2Files are the markdownlint-cli2 options files, whose
+// config key holds a markdownlint configuration, in the order in which
+// markdownlint-cli2 0.23.3 looks for them (optionsFiles in
+// markdownlint-cli2.mjs): in a directory that holds several, the first one
+// is used. markdownlint-cli2 reads both an options file and a markdownlint
+// config file in a directory, and lints with the config file's
+// configuration, so the options file holds the configuration only in a
+// directory without one.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var markdownlintCLI2Files = []string{
+	".markdownlint-cli2.jsonc",
+	".markdownlint-cli2.yaml",
+	".markdownlint-cli2.cjs",
+	".markdownlint-cli2.mjs",
+}
+
 // vcsRootMarkers are directories that indicate a VCS root.
 //
 //nolint:gochecknoglobals // Read-only lookup table.
@@ -86,7 +114,8 @@ var vcsRootMarkers = []string{".git", ".hg", ".svn"}
 //   - User config at $XDG_CONFIG_HOME/gomdlint/config.{yaml,yml,json}
 //   - Project config by searching upward from workDir for one of
 //     gomdlintConfigFiles, such as .gomdlint.yml or .gomdlint.json
-//   - Markdownlint config for migration purposes
+//   - Markdownlint config, by searching upward from workDir for a
+//     markdownlint config file or a markdownlint-cli2 options file
 //
 // Missing files are represented as empty strings (not errors).
 func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
@@ -115,12 +144,20 @@ func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
 	}
 	paths.shadow(paths.Project, shadowed)
 
-	// Find a markdownlint config, searching upward like the project config.
-	paths.Markdownlint, shadowed, err = findUpwardShadowing(ctx, workDir, markdownlintConfigFiles)
+	// Find a markdownlint config, searching upward like the project config,
+	// in the nearest directory that holds a markdownlint config file or a
+	// markdownlint-cli2 options file.
+	var markdownlint markdownlintDir
+	err = walkUpward(ctx, workDir, func(dir string) bool {
+		markdownlint = readMarkdownlintDir(dir)
+		return markdownlint.source() != ""
+	})
 	if err != nil {
 		return nil, err
 	}
-	paths.shadow(paths.Markdownlint, shadowed)
+	paths.Markdownlint, paths.MarkdownlintCLI2 = markdownlint.source(), markdownlint.options
+	paths.shadow(markdownlint.config, markdownlint.configShadowed)
+	paths.shadow(markdownlint.options, markdownlint.optionsShadowed)
 
 	return paths, nil
 }
@@ -205,18 +242,32 @@ func FindProjectConfig(ctx context.Context, startDir string) (string, error) {
 // shadows. It stops after a VCS root or the home directory, and at the
 // filesystem root.
 func findUpwardShadowing(ctx context.Context, startDir string, names []string) (string, []string, error) {
+	var path string
+	var shadowed []string
+	err := walkUpward(ctx, startDir, func(dir string) bool {
+		path, shadowed = firstFileIn(dir, names)
+		return path != ""
+	})
+	return path, shadowed, err
+}
+
+// walkUpward calls found with startDir, an absolute form of it, and then
+// with each of its parent directories in turn, until found reports true.
+// It stops after a VCS root or the home directory, and at the filesystem
+// root.
+func walkUpward(ctx context.Context, startDir string, found func(dir string) bool) error {
 	if startDir == "" {
 		var err error
 		startDir, err = os.Getwd()
 		if err != nil {
-			return "", nil, fmt.Errorf("get working directory: %w", err)
+			return fmt.Errorf("get working directory: %w", err)
 		}
 	}
 
 	// Resolve to absolute path
 	absDir, err := filepath.Abs(startDir)
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve absolute path: %w", err)
+		return fmt.Errorf("resolve absolute path: %w", err)
 	}
 
 	homeDir, homeErr := os.UserHomeDir()
@@ -229,40 +280,83 @@ func findUpwardShadowing(ctx context.Context, startDir string, names []string) (
 	for {
 		select {
 		case <-ctx.Done():
-			return "", nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+			return fmt.Errorf("context cancelled: %w", ctx.Err())
 		default:
 		}
 
 		// Check for config files in current directory
-		if path, shadowed := firstFileIn(currentDir, names); path != "" {
-			return path, shadowed, nil
+		if found(currentDir) {
+			return nil
 		}
 
 		// Check if we've hit a VCS root (optimization: stop here)
 		if isVCSRoot(currentDir) {
-			return "", nil, nil
+			return nil
 		}
 
 		// Check if we've reached home directory boundary
 		if homeDir != "" && currentDir == homeDir {
-			return "", nil, nil
+			return nil
 		}
 
 		// Move to parent directory
 		parentDir := filepath.Dir(currentDir)
 		if parentDir == currentDir {
 			// Reached filesystem root
-			return "", nil, nil
+			return nil
 		}
 		currentDir = parentDir
 	}
 }
 
-// findMarkdownlintConfig looks for a markdownlint config file in the given directory.
-// Returns the path to the first found file, or empty string if none.
+// markdownlintDir is what a directory holds of the markdownlint
+// configuration: its first markdownlint config file and its first
+// markdownlint-cli2 options file, either of which may be empty, with the
+// files of either kind that they shadow there.
+type markdownlintDir struct {
+	config, options                 string
+	configShadowed, optionsShadowed []string
+}
+
+// readMarkdownlintDir returns what dir holds of the markdownlint
+// configuration.
+func readMarkdownlintDir(dir string) markdownlintDir {
+	var found markdownlintDir
+	found.config, found.configShadowed = firstFileIn(dir, markdownlintConfigFiles)
+	found.options, found.optionsShadowed = firstFileIn(dir, markdownlintCLI2Files)
+	return found
+}
+
+// source returns the file that holds the directory's markdownlint
+// configuration: its markdownlint config file, which markdownlint-cli2
+// prefers to the config key of its options file, and otherwise its options
+// file, or the empty string when it holds neither.
+func (d markdownlintDir) source() string {
+	if d.config != "" {
+		return d.config
+	}
+	return d.options
+}
+
+// findMarkdownlintConfig looks for a markdownlint config file in the given
+// directory, or else a markdownlint-cli2 options file, whose config key
+// holds a markdownlint configuration. Returns the path to the first found
+// file, or empty string if none.
 func findMarkdownlintConfig(dir string) string {
-	path, _ := firstFileIn(dir, markdownlintConfigFiles)
-	return path
+	return readMarkdownlintDir(dir).source()
+}
+
+// isMarkdownlintCLI2File reports whether path names a markdownlint-cli2
+// options file, as markdownlint-cli2 tells one: by a name that ends in
+// .markdownlint-cli2 and a supported extension.
+func isMarkdownlintCLI2File(path string) bool {
+	base := filepath.Base(path)
+	for _, name := range markdownlintCLI2Files {
+		if strings.HasSuffix(base, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // FindMarkdownlintConfig is the exported version that searches for markdownlint config.

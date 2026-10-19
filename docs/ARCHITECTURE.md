@@ -1061,7 +1061,11 @@ The system config (`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows)
 and the user config (`$XDG_CONFIG_HOME/gomdlint`) are looked up on their
 own, as `config.yaml`, `config.yml` or `config.json`, and merged under the
 project config. The markdownlint config is searched upward the same way,
-and stands in for the project config only when there is none. `--config`
+and stands in for the project config only when there is none. It is a
+markdownlint config file, or the `config` key of a markdownlint-cli2
+options file in a directory without one (`ConfigPaths.MarkdownlintCLI2`,
+read by `lint.ReadMarkdownlintCLI2Options` with the one parser its name
+selects), and the options file's other keys get warnings. `--config`
 replaces project discovery. A markdownlint config is read as
 markdownlint-cli2 reads one that it finds, whatever its name
 (`lint.ReadMarkdownlintConfig`). The reader tries JSON with comments and

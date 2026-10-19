@@ -66,58 +66,93 @@ var (
 // written twice in a list, rejects the text, as in js-yaml, even when the
 // document holds no object.
 func readMarkdownlintYAML(text []byte) (*MarkdownlintSource, error) {
-	text, err := jsYAMLPrologue(text)
+	doc, converter, err := parseMarkdownlintYAML(text)
 	if err != nil {
 		return nil, err
 	}
-	text = jsYAMLEpilogue(text)
 	source := &MarkdownlintSource{Settings: &MarkdownlintSettings{}, Syntax: MarkdownlintYAML}
+	if doc == nil || len(doc.Content) == 0 {
+		return source, nil // Empty text, nothing but comments, or no node.
+	}
+	source.Settings, source.Positions, source.NotObject, err = converter.object(doc.Content[0])
+	if err != nil {
+		return nil, err
+	}
+	return source, nil
+}
+
+// parseMarkdownlintYAML parses text, as readMarkdownlintYAML reads it, into
+// its document, and returns a converter for the document's nodes. The
+// document is nil when text holds none: when it is empty or holds nothing
+// but comments.
+func parseMarkdownlintYAML(text []byte) (*yaml.Node, *yamlConverter, error) {
+	text, err := jsYAMLPrologue(text)
+	if err != nil {
+		return nil, nil, err
+	}
+	text = jsYAMLEpilogue(text)
 	decoder := yaml.NewDecoder(bytes.NewReader(text))
 	var doc yaml.Node
 	if err := decoder.Decode(&doc); errors.Is(err, io.EOF) {
-		return source, nil // Empty text, or nothing but comments.
+		return nil, nil, nil
 	} else if err != nil {
-		return nil, err //nolint:wrapcheck // The caller says what it read.
+		return nil, nil, err //nolint:wrapcheck // The caller says what it read.
 	}
 	if err := decoder.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
 		if err != nil {
-			return nil, err //nolint:wrapcheck // The caller says what it read.
+			return nil, nil, err //nolint:wrapcheck // The caller says what it read.
 		}
-		return nil, errMoreDocuments
+		return nil, nil, errMoreDocuments
 	}
-	if len(doc.Content) == 0 {
-		return source, nil
-	}
+	return &doc, newYAMLConverter(text), nil
+}
 
-	converter := newYAMLConverter(text)
-	root := doc.Content[0]
-	if root.Kind == yaml.MappingNode {
-		settings, place, err := converter.root(root)
-		if err != nil {
-			return nil, err
-		}
-		source.Settings, source.Positions = settings, place
-		return source, nil
+// object converts node, the root of a document or a value in it, as an
+// object of settings: a mapping becomes settings, with its keys in the
+// order they are written, and the places of its keys, and any other value
+// holds no settings and is described as the value that the node holds in
+// place of an object (see MarkdownlintSource.NotObject), or by nothing
+// for null.
+func (c *yamlConverter) object(node *yaml.Node) (*MarkdownlintSettings, *MarkdownlintPosition, string, error) {
+	if target := yamlAliasTarget(node); target.Kind == yaml.MappingNode {
+		settings, place, err := c.root(target)
+		return settings, place, "", err
 	}
-	value, err := converter.value(root, nil)
+	value, err := c.value(node, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	switch value.value.(type) {
+	return &MarkdownlintSettings{}, nil, notObjectKind(value.value), nil
+}
+
+// yamlAliasTarget returns the node that node, possibly an alias, stands
+// for.
+func yamlAliasTarget(node *yaml.Node) *yaml.Node {
+	for node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	return node
+}
+
+// notObjectKind describes value, a value that a markdownlint configuration
+// holds in place of an object (see MarkdownlintSource.NotObject), or gives
+// nothing for null and an empty object, such as a scalar tagged !!map,
+// which hold no keys.
+func notObjectKind(value any) string {
+	switch value.(type) {
 	case nil, map[string]any:
-		// Null, or a scalar tagged !!map, which holds no keys.
+		return ""
 	case []any:
-		source.NotObject = kindList
+		return kindList
 	case string:
-		source.NotObject = kindString
+		return kindString
 	case float64:
-		source.NotObject = kindNumber
+		return kindNumber
 	case bool:
-		source.NotObject = kindBoolean
+		return kindBoolean
 	default:
-		source.NotObject = kindOther
+		return kindOther
 	}
-	return source, nil
 }
 
 // jsYAMLPrologue returns text with the directives at its start that js-yaml
@@ -379,6 +414,11 @@ type yamlConverter struct {
 	// however many aliases repeat them. An alias inside the node it names
 	// finds no value here yet (see alias).
 	done map[*yaml.Node]yamlValue
+
+	// keepMappings makes done hold the value of every mapping converted,
+	// anchored or not, so that a caller can take the keys of one in order
+	// (see yamlValue.pairs).
+	keepMappings bool
 }
 
 // yamlValue is the value of a node, with the places of its keys or items
@@ -389,6 +429,10 @@ type yamlValue struct {
 	// place holds the places of the keys or items, and is nil for a
 	// scalar.
 	place *MarkdownlintPosition
+
+	// pairs holds, for a mapping, its keys and values in the order they
+	// are written, which value, a map, does not keep.
+	pairs []MarkdownlintSetting
 }
 
 // newYAMLConverter returns a converter for the nodes of a document of text.
@@ -401,20 +445,26 @@ func newYAMLConverter(text []byte) *yamlConverter {
 // the places of its keys.
 func (c *yamlConverter) root(node *yaml.Node) (*MarkdownlintSettings, *MarkdownlintPosition, error) {
 	pairs, place, err := c.mapping(node, nil)
-	c.remember(node, yamlValue{value: pairsValue(pairs), place: place})
+	c.remember(node, yamlValue{value: pairsValue(pairs), place: place, pairs: pairs})
 	if err != nil {
 		return nil, nil, err
 	}
+	return pairsSettings(pairs), place, nil
+}
+
+// pairsSettings returns the pairs of a mapping as settings, in order.
+func pairsSettings(pairs []MarkdownlintSetting) *MarkdownlintSettings {
 	settings := &MarkdownlintSettings{}
 	for _, pair := range pairs {
 		settings.Set(pair.Key, pair.Value)
 	}
-	return settings, place, nil
+	return settings
 }
 
-// remember records value as the value of node, when aliases may name it.
+// remember records value as the value of node, when aliases may name it,
+// or when the converter keeps every mapping and node is one.
 func (c *yamlConverter) remember(node *yaml.Node, value yamlValue) {
-	if node.Anchor != "" {
+	if node.Anchor != "" || (c.keepMappings && node.Kind == yaml.MappingNode) {
 		c.done[node] = value
 	}
 }
@@ -433,7 +483,7 @@ func (c *yamlConverter) value(node, next *yaml.Node) (yamlValue, error) {
 	case yaml.MappingNode:
 		var pairs []MarkdownlintSetting
 		pairs, result.place, err = c.mapping(node, next)
-		result.value = pairsValue(pairs)
+		result.value, result.pairs = pairsValue(pairs), pairs
 	case yaml.SequenceNode:
 		result.value, result.place, err = c.sequence(node, next)
 	default:

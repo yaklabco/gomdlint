@@ -230,6 +230,10 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 		}
 	case paths.Markdownlint != "":
 		result.Warnings = append(result.Warnings, shadowWarnings(paths, paths.Markdownlint)...)
+		if options := paths.MarkdownlintCLI2; options != "" && options != paths.Markdownlint {
+			result.Warnings = append(result.Warnings, shadowWarnings(paths, options)...)
+			result.Warnings = append(result.Warnings, sideOptionsWarnings(options, paths.Markdownlint)...)
+		}
 		translated, err := applyMarkdownlint(paths.Markdownlint, opts, result)
 		if err != nil {
 			return nil, err
@@ -281,6 +285,40 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 
 	result.Config = cfg
 	return result, nil
+}
+
+// sideOptionsWarnings returns the warnings for path, a markdownlint-cli2
+// options file beside configFile, the markdownlint config file of its
+// directory, whose configuration markdownlint-cli2 lints with. gomdlint
+// takes nothing from the options file, so each problem with it is a
+// warning: a file that cannot be read, such as a JavaScript one, each key
+// that configures markdownlint-cli2 itself (see markdownlintCLI2Warnings),
+// and a config key, which configFile shadows.
+func sideOptionsWarnings(path, configFile string) []string {
+	if IsJavaScriptConfig(path) {
+		return []string{path + ": JavaScript, which gomdlint cannot read; its markdownlint-cli2 options are ignored"}
+	}
+	content, err := os.ReadFile(path)
+	var options *lint.MarkdownlintCLI2Options
+	var root *lint.MarkdownlintPosition
+	if err == nil {
+		options, root, err = readMarkdownlintCLI2Options(path, content)
+	}
+	if err != nil {
+		return []string{fmt.Sprintf("%s: cannot read it (%v); it is ignored", path, err)}
+	}
+	var warnings []string
+	if options.Config != nil {
+		warnings = append(warnings, fmt.Sprintf("both %s and the config key of %s exist; using %s", configFile, path, configFile))
+	}
+	for _, warning := range markdownlintCLI2Warnings(options, root) {
+		if warning.line > 0 {
+			warnings = append(warnings, fmt.Sprintf("%s:%d: %s", path, warning.line, warning.message))
+			continue
+		}
+		warnings = append(warnings, path+": "+warning.message)
+	}
+	return warnings
 }
 
 // shadowWarnings returns a warning for each config file that path, a config

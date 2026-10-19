@@ -634,6 +634,42 @@ func TestLint_ConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 		`(did you mean "line_length"?); it is ignored`+"\n", got.stderr)
 }
 
+// TestMarkdownlintConfig_MarkdownlintCLI2OptionsFile covers a project whose
+// markdownlint configuration is the config key of a markdownlint-cli2
+// options file, as markdownlint-cli2 0.23.3 reads it. Its config turns
+// MD009 off, so markdownlint-cli2 reports nothing in doc.md, and its globs
+// configure markdownlint-cli2 itself, which gomdlint does not read and
+// warns about, both when it applies the file for a run and when it
+// migrates it. gomdlint used to ignore such a file.
+func TestMarkdownlintConfig_MarkdownlintCLI2OptionsFile(t *testing.T) {
+	const options = "{\n  \"globs\": [\"*.md\"],\n  \"config\": {\"MD009\": false}\n}\n"
+	for _, mode := range markdownlintModes {
+		t.Run(mode, func(t *testing.T) {
+			reported, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint-cli2.jsonc", options)
+
+			assert.Equal(t, map[string][]string{"doc.md": nil}, reported)
+			assert.Contains(t, warnings,
+				`.markdownlint-cli2.jsonc:2: unsupported markdownlint-cli2 option "globs" (name the files on the command line instead); it is ignored`)
+		})
+	}
+}
+
+// TestMigrate_FindsMarkdownlintCLI2OptionsFile covers migrate without an
+// input file in a directory whose only markdownlint configuration is an
+// options file: migrate finds it and converts its config key.
+func TestMigrate_FindsMarkdownlintCLI2OptionsFile(t *testing.T) {
+	inProject(t, map[string]string{".markdownlint-cli2.yaml": "config:\n  MD013: false\n"})
+
+	got := execute(t, "migrate")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stdout+got.stderr)
+	assert.Contains(t, got.stdout, "found markdownlint config")
+	assert.Contains(t, got.stdout, ".markdownlint-cli2.yaml")
+	written, err := os.ReadFile(".gomdlint.yml")
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "MD013:\n    enabled: false")
+}
+
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config
 // sets and a markdownlint config cannot: its ignore patterns, flavor,
 // gitignore and default_ignores settings and backups. While gomdlint
