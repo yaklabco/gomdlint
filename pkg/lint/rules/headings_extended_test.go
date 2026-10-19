@@ -594,6 +594,19 @@ func TestNoMultipleSpaceATXRule_MarkdownlintColumns(t *testing.T) {
 	assert.Equal(t, [][2]int{{1, 6}}, diagPositions(bom), "a byte order mark keeps its bytes before the column")
 }
 
+// TestNoMissingSpaceClosedATXRule_MarkdownlintColumns checks where MD020
+// points, as markdownlint 0.41.1 does: at the opening hashes when the space
+// after them is missing, and otherwise at the character before the closing
+// hashes, which an escaped hash may be.
+func TestNoMissingSpaceClosedATXRule_MarkdownlintColumns(t *testing.T) {
+	diags := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), headingSpacesMarkdown, nil)
+	assert.Equal(t, [][2]int{{13, 8}, {15, 1}, {17, 12}, {19, 11}}, diagPositions(diags))
+
+	other := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), "\uFEFF# Right#\n\n# Caf\u00e9#\n", nil)
+	assert.Equal(t, [][2]int{{1, 10}, {3, 6}}, diagPositions(other),
+		"a byte order mark keeps its bytes before the column, and the column starts a character")
+}
+
 func TestNoMissingSpaceATXRule_Metadata(t *testing.T) {
 	rule := NewNoMissingSpaceATXRule()
 

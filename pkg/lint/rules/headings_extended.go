@@ -309,10 +309,18 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 			offered = checker.offer(builder, intent.withLocal(true))
 		}
 
+		// Like markdownlint, a finding points at the opening hashes when the
+		// space after them is missing, and otherwise at the character before
+		// the closing hashes.
+		start := 0
+		if !missingOpenSpace {
+			_, size := utf8.DecodeLastRune(lineContent[:loc[2*closedATXClose]])
+			start = loc[2*closedATXClose] - size
+		}
 		closeEnd := bom + len(lineContent) - len(match[closedATXTrail])
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: bom + 1,
+			StartColumn: bom + start + 1,
 			EndLine:     lineNum,
 			EndColumn:   closeEnd + 1,
 		}
