@@ -119,6 +119,36 @@ func quoteTableDocument(rows int) []byte {
 	return []byte(doc.String())
 }
 
+// definitionListDocument returns a document with one loose list of items,
+// each a line with a reference link and, after a blank line, the definition
+// the link uses and a definition that no link uses, a finding that MD053
+// fixes by deleting its line. Every fix shares the list with the others, so
+// each is checked on its own.
+func definitionListDocument(items int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range items {
+		fmt.Fprintf(&doc, "- Item %d links to [page %d].\n\n", idx, idx)
+		fmt.Fprintf(&doc, "  [page %d]: https://example.com/page/%d\n", idx, idx)
+		fmt.Fprintf(&doc, "  [spare %d]: https://example.com/spare/%d\n\n", idx, idx)
+	}
+	return []byte(doc.String())
+}
+
+// definitionQuoteDocument returns a document with one blockquote of
+// paragraphs, each with a reference link and followed by the definition the
+// link uses and a definition that no link uses, which MD053 deletes.
+func definitionQuoteDocument(paragraphs int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range paragraphs {
+		fmt.Fprintf(&doc, "> Paragraph %d links to [page %d].\n>\n", idx, idx)
+		fmt.Fprintf(&doc, "> [page %d]: https://example.com/page/%d\n", idx, idx)
+		fmt.Fprintf(&doc, "> [spare %d]: https://example.com/spare/%d\n>\n", idx, idx)
+	}
+	return []byte(doc.String())
+}
+
 // lintDuration lints content with every default rule through the engine,
 // as the CLI does, and returns how long it took, failing the test when it
 // takes longer than limit.
@@ -237,12 +267,14 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 }
 
 // TestLintTimeGrowsLinearlyInBlocks checks that linting a long list in a
-// blockquote, a blockquote of many paragraphs and a long table takes about
-// as long as linting an eighth of it eight times. Every fix of such a
-// document shares the blockquote or the table with the other fixes, so each
-// fix is checked on its own, and a check that parsed the whole blockquote or
-// table made eight times the document take about eight times as long: 2,000
-// items in a blockquote took 15 seconds to lint, and 8,000 took 200.
+// blockquote, a blockquote of many paragraphs, a long table and a long list
+// or blockquote of link reference definitions takes about as long as
+// linting an eighth of it eight times. Every fix of such a document shares
+// the blockquote, the table or the list with the other fixes, so each fix is
+// checked on its own, and a check that parsed the whole blockquote or table
+// made eight times the document take about eight times as long: 2,000 items
+// in a blockquote took 15 seconds to lint, and 8,000 took 200. A fix that
+// deletes a definition made the check parse the whole document.
 //
 // A bound in seconds fails on a busy machine, so the test compares two
 // measurements of the same amount of input, as
@@ -251,9 +283,10 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 // last about as long, so they meet the same disturbances; they run in turns,
 // the fastest of each counts, and garbage collection is paused while they
 // are timed. Like TestLintTimeGrowsLinearly, it is skipped under the race
-// detector, with which CI runs the tests; TestRegionParsesGrowInBlocks,
-// which counts the bytes the region checks parse instead of timing them,
-// guards the same documents there, and a table in a blockquote too.
+// detector, with which CI runs the tests. There TestRegionParsesGrowInBlocks
+// and TestDefinitionChecksGrowInBlocks, which count the bytes the checks
+// parse instead of timing them, guard the same documents, and
+// TestRegionParsesGrowInBlocks a table in a blockquote too.
 func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 	if testing.Short() || raceEnabled {
 		t.Skip("timing")
@@ -299,6 +332,8 @@ func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 		{name: "list in a blockquote", generate: quoteListDocument},
 		{name: "paragraphs in a blockquote", generate: quoteParagraphsDocument},
 		{name: "table", generate: tableRowsDocument},
+		{name: "definitions in a list", generate: definitionListDocument},
+		{name: "definitions in a blockquote", generate: definitionQuoteDocument},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			short, long := doc.generate(small), doc.generate(factor*small)
@@ -307,7 +342,8 @@ func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 			defer debug.SetMemoryLimit(debug.SetMemoryLimit(memoryLimit))
 
 			// Warm up both documents before timing them. Every line of the
-			// block keeps its fix, so every fix check runs and passes.
+			// block, or every definition no link uses, keeps its fix, so
+			// every fix check runs and passes.
 			_, fixable := lintOnce(t, short)
 			require.GreaterOrEqual(t, fixable, small)
 			_, fixable = lintOnce(t, long)
@@ -335,4 +371,30 @@ func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 			require.Less(t, ratio, float64(maxRatio), "lint time grows faster than the document")
 		})
 	}
+}
+
+// TestOutlineAllocationFollowsTheText checks that writing the outline of a
+// document allocates a few bytes for each byte of the document, not a buffer
+// for each of its text nodes. Every rule that checks its fixes by the
+// outline writes the outline of the whole document at least twice, and
+// rendering each text node through a buffered writer of its own allocated
+// 4 KB for each node, which garbage collection then had to clear.
+func TestOutlineAllocationFollowsTheText(t *testing.T) {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range 500 {
+		fmt.Fprintf(&doc, "Text %d with *emphasis*, `code` and a [link](https://example.com/%d).\n\n", idx, idx)
+	}
+	snapshot := parseForCheck(t, doc.String())
+	// TotalAlloc counts every allocation, collected or not.
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	outline := documentOutline(snapshot, fixAllowance{})
+	runtime.ReadMemStats(&after)
+	require.Contains(t, outline, "emphasis")
+	perByte := float64(after.TotalAlloc-before.TotalAlloc) / float64(len(snapshot.Content))
+	t.Logf("%d bytes, %.1f bytes allocated for each", len(snapshot.Content), perByte)
+	// A paragraph holds five text nodes in about 70 bytes, so a buffer of
+	// 4 KB for each node makes about 300 bytes for each byte.
+	require.Less(t, perByte, 40.0, "the outline allocates more than its text needs")
 }

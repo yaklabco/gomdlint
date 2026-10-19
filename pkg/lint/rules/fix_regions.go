@@ -194,10 +194,16 @@ import (
 // the sentinel's: the paragraph is open before the region's first row, as
 // in the original, and after its last, so the next line continues or
 // interrupts it as in the original, and the table keeps the original's
-// other rows. A table region needs no rows around it, and can hold its
-// table's first and last rows. One that does not hold becomes the region of
-// the table's group, in its blockquote or in the document. CommonMark has
-// no tables: it reads the rows as the lines of one paragraph.
+// other rows. The parse starts a paragraph with the header row, which in
+// the document can continue one, and a header row such as "[`a]: /url`" or
+// "[a|b]: /url" is a link reference definition when it starts a paragraph,
+// though the table takes it in the document. So a region whose parse adds
+// a definition does not hold; goldmark 1.8 places that definition's node
+// before the table, which a one-table parse excludes too. A table region
+// needs no rows around it, and can hold its table's first and last rows.
+// One that does not hold becomes the region of the table's group, in its
+// blockquote or in the document. CommonMark has no tables: it reads the
+// rows as the lines of one paragraph.
 //
 // Signatures. The signature of the document is its front matter and the
 // signatures of its top-level blocks in order; that of a list is a token
@@ -207,26 +213,58 @@ import (
 // region's part replaced by the signature of the region's blocks, items or
 // rows, and the token of a list that changes tightness replaced, provided
 // that: the edits leave the front matter alone (they start after it, see
-// frontMatterLimit); every region adds the same link reference definitions
-// in the same order, so that every link, before or after it, resolves as
-// before (regions are parsed with the original's definitions); and the
-// anchor counts after each region are as before, so that later headings
-// keep their anchors (a region's headings get their anchors from the
-// counts before it, see anchorHistory). Where definitions change, region
-// checks give up and the whole document is parsed, as before. Where anchor
-// counts change, the render signature's checks give up too, unless the
-// signature up to that region already differs; the outline, whose anchors
-// stand together in one item, has the anchors that change worked out
-// instead (see anchorHistory.keeps). sameAfterReplacements compares the
-// replaced signature with the original exactly, without writing it out.
+// frontMatterLimit); every link, before or after a region, resolves as
+// before (see Definitions); and the anchor counts after each region are as
+// before, so that later headings keep their anchors (a region's headings
+// get their anchors from the counts before it, see anchorHistory). Where a
+// link may resolve otherwise, region checks give up and the whole document
+// is parsed, as before. Where anchor counts change, the render signature's
+// checks give up too, unless the signature up to that region already
+// differs; the outline, whose anchors stand together in one item, has the
+// anchors that change worked out instead (see anchorHistory.keeps).
+// sameAfterReplacements compares the replaced signature with the original
+// exactly, without writing it out.
+//
+// Definitions. goldmark adds the link reference definitions of a paragraph
+// when the paragraph closes, so in document order, and keeps the first
+// definition of each label, normalized as util.ToLinkReference makes it. It
+// resolves links once every block has closed: a link asks the parse
+// context's Reference method for its normalized label, and takes from the
+// answer only whether there is a definition, and its destination and title.
+// So the inline parse of a block is a function of its text and of the
+// answers to the lookups it makes: a block whose every lookup gets the
+// answer it got before parses as before, and makes the same lookups. A
+// region's parse answers a lookup with the original's first definition of
+// the label, and without one with the first definition the region adds.
+// When every region adds the definitions it added before, in the same
+// order, the edited document has the original's definitions, and every
+// link resolves as before. Otherwise the edited document has the original's
+// definitions outside the regions whose definitions differ and, in the span
+// of each, those its parse adds. A label changes when its first definition
+// there differs from the original's in its destination or title, or in
+// whether there is one; only a label that such a region defines, or whose
+// definition in the original lies in one, can change (see changedLabels).
+// When no lookup of the original asks for a changed label, the blocks
+// outside the regions parse as before. When no region's parse asks for one
+// either, each region parses as in the edited document: for a label that
+// does not change, the original's first definition is the edited
+// document's, and a label that neither the original nor the edited document
+// defines is defined by no region. A check whose regions change a label
+// that a lookup asks for parses the whole document, as before (see
+// resolvesAsBefore). The lookups of the original are those of its recording
+// parse, anywhere in the document, which ask for no less than those outside
+// the regions; and the document's parser reads inline content with the
+// inline parsers of the recording parses, so it makes the lookups they make.
 //
 // The argument depends on goldmark's parser, not on what the signature
 // compares, so docLayout serves both fix checks that use it: regionModel
 // adds the render signature that fixCheck compares, and outlineModel (see
 // fix_safety_regions.go) the outline that fixVerifier compares.
-// TestRegionChecksDecideAsWholeDocument and
-// TestOutlineRegionsDecideAsWholeDocument check the region decisions against
-// the whole-document checks, and must pass again after a goldmark upgrade.
+// TestRegionChecksDecideAsWholeDocument,
+// TestOutlineRegionsDecideAsWholeDocument and
+// TestDefinitionRegionsDecideAsWholeDocument check the region decisions
+// against the whole-document checks, and must pass again after a goldmark
+// upgrade.
 //
 // Cost. A region is at least a group of the document or of a top-level
 // blockquote, the items of a list around the edited ones, or the rows of a
@@ -240,12 +278,14 @@ import (
 // top level or in a top-level blockquote, still costs a parse of that block
 // per check: a long paragraph, a table under CommonMark, or a list, table or
 // blockquote in a list item or in another blockquote. Beside its parses, a
-// check's work is linear in its regions and edits and in the headings whose
-// anchors change: edits are placed each from the one before it, a region
-// that grows takes in only the regions it meets, one pass gives the
-// tightness of every edited list, a slug's number is found from an index of
-// the numbered keys, and the outline's anchors are taken only where counts
-// differ (see fix_anchors.go).
+// check's work is linear in its regions and edits, in the headings whose
+// anchors change, and in the definitions and lookups of its regions: edits
+// are placed each from the one before it, a region that grows takes in only
+// the regions it meets, one pass gives the tightness of every edited list,
+// a slug's number is found from an index of the numbered keys, the
+// outline's anchors are taken only where counts differ (see
+// fix_anchors.go), and the labels that change are found from an index of
+// the original's definitions by label, built once.
 
 // regionSentinel is the line parsed after a group region to find out whether
 // the region leaves a block open, and after a table region to find out
@@ -299,6 +339,9 @@ type parseRecord struct {
 	// refs holds the link reference definitions in the order the parser
 	// added them, each with the offset of the paragraph it came from.
 	refs []recordedRef
+	// lookups holds the normalized labels that links looked up, in order,
+	// repeats included (see Definitions).
+	lookups []string
 	// paragraph is the offset of the paragraph being transformed, or -1.
 	paragraph int
 	// setext holds the headings that a setext heading parser opened.
@@ -398,8 +441,7 @@ type recordedRef struct {
 
 // sameRef reports whether two definitions resolve links the same way.
 func sameRef(a, b goldparser.Reference) bool {
-	return gmutil.ToLinkReference(a.Label()) == gmutil.ToLinkReference(b.Label()) &&
-		bytes.Equal(a.Destination(), b.Destination()) && bytes.Equal(a.Title(), b.Title())
+	return refLabel(a) == refLabel(b) && bytes.Equal(a.Destination(), b.Destination()) && bytes.Equal(a.Title(), b.Title())
 }
 
 // recordingContext records the link reference definitions a parse adds. Links
@@ -416,11 +458,13 @@ func (c *recordingContext) AddReference(ref goldparser.Reference) {
 	c.Context.AddReference(ref)
 }
 
-// Reference returns the definition a normalized label resolves to. goldmark
-// resolves links only through it.
+// Reference returns the definition a normalized label resolves to, and
+// records that a link looked the label up. goldmark resolves links only
+// through it.
 //
 //nolint:ireturn // goldmark's parser.Context interface fixes this signature.
 func (c *recordingContext) Reference(label string) (goldparser.Reference, bool) {
+	c.rec.lookups = append(c.rec.lookups, label)
 	if ref, found := c.preset[label]; found {
 		return ref, true
 	}
@@ -432,7 +476,7 @@ func (c *recordingContext) Reference(label string) (goldparser.Reference, bool) 
 func referenceIndex(refs []recordedRef) map[string]goldparser.Reference {
 	index := make(map[string]goldparser.Reference, len(refs))
 	for _, ref := range refs {
-		key := gmutil.ToLinkReference(ref.ref.Label())
+		key := refLabel(ref.ref)
 		if _, taken := index[key]; !taken {
 			index[key] = ref.ref
 		}
@@ -683,10 +727,25 @@ type docLayout struct {
 	tableIndex map[gmast.Node]int
 	// refs holds the link reference definitions in the order the parser
 	// added them, and refIndex the definition each label resolves to.
+	// lookups holds the labels that links looked up, each once, and labels,
+	// built on first use, indexes the definitions and the lookups by label
+	// (see Definitions).
 	refs     []recordedRef
 	refIndex map[string]goldparser.Reference
+	lookups  []string
+	labels   *labelIndex
 	// work counts what region checks have done, which tests bound.
 	work regionWork
+}
+
+// labelIndex is what a check whose regions change the definitions needs of
+// the original: the normalized label of each definition of refs, the
+// indexes in refs of the definitions of each label, in order, and the
+// labels that links looked up.
+type labelIndex struct {
+	labels   []string
+	defined  map[string][]int
+	lookedUp map[string]bool
 }
 
 // regionWork counts the work of region checks: the bytes their parses read,
@@ -722,17 +781,7 @@ type layoutList struct {
 // no groups, or the groups or the link reference definitions cannot be
 // placed.
 func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
-	base := 0
-	if bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
-		base = len(mdast.ByteOrderMark)
-	}
-	frontMatter := frontMatterLength(content[base:])
-	source := bytes.Clone(content[base:])
-	for idx := range frontMatter {
-		if source[idx] != '\n' && source[idx] != '\r' {
-			source[idx] = ' '
-		}
-	}
+	source, base, frontMatter := layoutSource(content)
 	parsed := parseRecorded(markdown, source, nil, true)
 	starts := parsed.rec.groups
 	nodes := children(parsed.doc)
@@ -747,6 +796,8 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 			return nil
 		}
 	}
+	slices.Sort(parsed.rec.lookups)
+	lookups := slices.Clone(slices.Compact(parsed.rec.lookups))
 	firstLine := source
 	if end := bytes.IndexByte(source, '\n'); end >= 0 {
 		firstLine = source[:end]
@@ -765,6 +816,7 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		tableIndex:    make(map[gmast.Node]int),
 		refs:          parsed.rec.refs,
 		refIndex:      referenceIndex(parsed.rec.refs),
+		lookups:       lookups,
 	}
 	layout.bounds = append(layout.bounds, 0)
 	layout.afterClosed = append(layout.afterClosed, false)
@@ -789,6 +841,24 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		}
 	}
 	return layout
+}
+
+// layoutSource returns the text the parser reads of content, the content
+// without a byte order mark and with its front matter blanked, and the
+// lengths of the byte order mark and of the front matter.
+func layoutSource(content []byte) ([]byte, int, int) {
+	base := 0
+	if bytes.HasPrefix(content, []byte(mdast.ByteOrderMark)) {
+		base = len(mdast.ByteOrderMark)
+	}
+	frontMatter := frontMatterLength(content[base:])
+	source := bytes.Clone(content[base:])
+	for idx := range frontMatter {
+		if source[idx] != '\n' && source[idx] != '\r' {
+			source[idx] = ' '
+		}
+	}
+	return source, base, frontMatter
 }
 
 // addBlock records a block of the original that region checks may enter: a
@@ -1602,8 +1672,13 @@ type regionParse struct {
 	source []byte
 	blocks []gmast.Node
 	// refsSame reports whether the region adds the link reference
-	// definitions it added before, in the same order.
+	// definitions it added before, in the same order; refs holds those it
+	// adds when it does not, with offsets in the region's text. lookups
+	// holds the labels that its links looked up, each once (see
+	// Definitions).
 	refsSame bool
+	refs     []recordedRef
+	lookups  []string
 	// tight reports whether the list of a list region is tight, as
 	// CommonMark reads it (gmparser.ListTight), which decides for its items
 	// but whether its first follows a blank line.
@@ -1614,6 +1689,51 @@ type regionParse struct {
 // checked on its own.
 func (p regionParse) verdict() (bool, bool) {
 	return p.holds, p.undecided
+}
+
+// What an outcome cache counts for a string or a definition it holds besides
+// their bytes: the header of the string, and the headers of the definition's
+// label, destination and title and of the reference that holds them.
+const (
+	stringOverhead = 16
+	refOverhead    = 96
+)
+
+// retained returns the bytes of its own that a region's parse keeps for the
+// checks of definitions: its definitions, when they differ from the
+// original's, and the labels its links looked up. An outcome cache counts
+// them.
+func (p regionParse) retained() int {
+	size := 0
+	for _, ref := range p.refs {
+		size += len(ref.ref.Label()) + len(ref.ref.Destination()) + len(ref.ref.Title()) + refOverhead
+	}
+	for _, label := range p.lookups {
+		size += len(label) + stringOverhead
+	}
+	return size
+}
+
+// heldParse returns the parse of a region that holds, whose text is source
+// and whose blocks are blocks, from the record of its parse, which it
+// consumes: whether it adds the definitions that the original has between
+// from and to, copies of those it adds when it does not, and the labels its
+// links looked up, each once. The copies share no memory with the parse,
+// which a cached outcome drops, so the cache holds what it counts.
+func (l *docLayout) heldParse(from, to int, source []byte, blocks []gmast.Node, rec *parseRecord) regionParse {
+	parse := regionParse{holds: true, source: source, blocks: blocks, refsSame: l.sameRefs(from, to, rec.refs)}
+	if !parse.refsSame {
+		parse.refs = make([]recordedRef, len(rec.refs))
+		for idx, ref := range rec.refs {
+			parse.refs[idx] = recordedRef{offset: ref.offset, ref: goldparser.NewReference(
+				bytes.Clone(ref.ref.Label()), bytes.Clone(ref.ref.Destination()), bytes.Clone(ref.ref.Title()))}
+		}
+	}
+	if len(rec.lookups) > 0 {
+		slices.Sort(rec.lookups)
+		parse.lookups = slices.Clone(slices.Compact(rec.lookups))
+	}
+	return parse
 }
 
 // regionVerdict is what decomposeRegions needs of the outcome of a region
@@ -1813,7 +1933,7 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 		}
 		blocks = blocks[:counts[0]]
 	}
-	return regionParse{holds: true, source: text, blocks: blocks, refsSame: l.sameRefs(from, to, parsed.rec.refs)}
+	return l.heldParse(from, to, text, blocks, parsed.rec)
 }
 
 // parseQuoteRegion parses a quote region. The quote sentinel line follows it,
@@ -1852,9 +1972,7 @@ func (l *docLayout) parseQuoteRegion(reg region, edits []fix.TextEdit) regionPar
 	if !ok {
 		return regionParse{undecided: true}
 	}
-	return regionParse{
-		holds: true, source: text, blocks: blocks[:counts[0]], refsSame: l.sameRefs(from, to, parsed.rec.refs),
-	}
+	return l.heldParse(from, to, text, blocks[:counts[0]], parsed.rec)
 }
 
 // soleQuote returns the blockquote that is the one block of blocks.
@@ -1902,13 +2020,9 @@ func (l *docLayout) parseListRegion(reg region, edits []fix.TextEdit) regionPars
 		lineStartIn(text, lastOpen) != list.lines[reg.last+1]-from+shift {
 		return regionParse{}
 	}
-	return regionParse{
-		holds:    true,
-		source:   text,
-		blocks:   children(parsedList),
-		refsSame: l.sameRefs(from, to, parsed.rec.refs),
-		tight:    gmparser.ListTight(parsedList, text),
-	}
+	held := l.heldParse(from, to, text, children(parsedList), parsed.rec)
+	held.tight = gmparser.ListTight(parsedList, text)
+	return held
 }
 
 // parseTableRegion parses the body rows of a table region after the lines
@@ -1928,6 +2042,12 @@ func (l *docLayout) parseTableRegion(reg region, edits []fix.TextEdit) regionPar
 	text = append(text, l.sentinel(reg)...)
 	l.work.parsed += len(text)
 	parsed := parseRecorded(l.markdown, text, l.refIndex, false)
+	// The table's paragraph adds no definitions after its header row, so a
+	// definition here is the header row read as the start of a paragraph,
+	// which it need not be in the document (see Table regions).
+	if len(parsed.rec.refs) > 0 {
+		return regionParse{}
+	}
 	blocks := children(parsed.doc)
 	if table.quote >= 0 {
 		quoteNode, ok := soleQuote(blocks)
@@ -1950,9 +2070,7 @@ func (l *docLayout) parseTableRegion(reg region, edits []fix.TextEdit) regionPar
 	if _, isHeader := rows[0].(*gmextast.TableHeader); !isHeader || lineStartIn(text, rows[len(rows)-1].Pos()) != length {
 		return regionParse{}
 	}
-	return regionParse{
-		holds: true, source: text, blocks: rows[1 : len(rows)-1], refsSame: l.sameRefs(from, to, parsed.rec.refs),
-	}
+	return l.heldParse(from, to, text, rows[1:len(rows)-1], parsed.rec)
 }
 
 // applyWithin returns a copy of source[from:to] with edits applied; the
@@ -1972,9 +2090,148 @@ func applyWithin(source []byte, from, to int, edits []fix.TextEdit) []byte {
 // sameRefs reports whether refs are the link reference definitions of the
 // document that come from paragraphs between from and to, in order.
 func (l *docLayout) sameRefs(from, to int, refs []recordedRef) bool {
+	first, last := l.refsBetween(from, to)
+	return slices.EqualFunc(l.refs[first:last], refs, func(a, b recordedRef) bool { return sameRef(a.ref, b.ref) })
+}
+
+// refsBetween returns the indexes in refs of the first definition that comes
+// from a paragraph between from and to and of the first after them.
+func (l *docLayout) refsBetween(from, to int) (int, int) {
 	first := sort.Search(len(l.refs), func(i int) bool { return l.refs[i].offset >= from })
 	last := sort.Search(len(l.refs), func(i int) bool { return l.refs[i].offset >= to })
-	return slices.EqualFunc(l.refs[first:last], refs, func(a, b recordedRef) bool { return sameRef(a.ref, b.ref) })
+	return first, last
+}
+
+// refLabel returns the normalized label of a definition, under which goldmark
+// keeps it and links look it up.
+func refLabel(ref goldparser.Reference) string {
+	return gmutil.ToLinkReference(ref.Label())
+}
+
+// indexByLabel returns the definitions and lookups of the original by
+// label, built on first use.
+func (l *docLayout) indexByLabel() *labelIndex {
+	if l.labels == nil {
+		index := &labelIndex{
+			labels:   make([]string, len(l.refs)),
+			defined:  make(map[string][]int),
+			lookedUp: make(map[string]bool, len(l.lookups)),
+		}
+		for idx, ref := range l.refs {
+			label := refLabel(ref.ref)
+			index.labels[idx] = label
+			index.defined[label] = append(index.defined[label], idx)
+		}
+		for _, label := range l.lookups {
+			index.lookedUp[label] = true
+		}
+		l.labels = index
+	}
+	return l.labels
+}
+
+// definitionChange is a region whose definitions differ from the original's:
+// the source offsets of its span, and the definitions its parse adds, in
+// order.
+type definitionChange struct {
+	from, to int
+	refs     []recordedRef
+}
+
+// resolvesAsBefore reports whether every link of the edited document
+// resolves as in the original, given the regions of a check, which hold and
+// are in document order, and their parses, which parse returns by index: no
+// link looks up a label whose first definition changes, in the original or
+// in the parse of a region (see Definitions).
+func (l *docLayout) resolvesAsBefore(regions []region, parse func(int) *regionParse) bool {
+	var changes []definitionChange
+	for idx, reg := range regions {
+		if held := parse(idx); !held.refsSame {
+			from, to := l.span(reg)
+			changes = append(changes, definitionChange{from: from, to: to, refs: held.refs})
+		}
+	}
+	if len(changes) == 0 {
+		return true
+	}
+	changed := l.changedLabels(changes)
+	if len(changed) == 0 {
+		return true
+	}
+	lookedUp := l.indexByLabel().lookedUp
+	for label := range changed {
+		if lookedUp[label] {
+			return false
+		}
+	}
+	for idx := range regions {
+		for _, label := range parse(idx).lookups {
+			if changed[label] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// changedLabels returns the labels whose first definition in the edited
+// document differs from the original's, in its destination or title or in
+// whether there is one, when the definitions of each change, whose spans are
+// sorted and apart, replace those of the original in its span. Only a label
+// that a change defines, or whose definition in the original lies in one,
+// can change.
+func (l *docLayout) changedLabels(changes []definitionChange) map[string]bool {
+	index := l.indexByLabel()
+	// added holds the first definition each label gets from the changes, and
+	// the change it is in.
+	type addedRef struct {
+		change int
+		ref    goldparser.Reference
+	}
+	added := make(map[string]addedRef)
+	var labels []string
+	for at, change := range changes {
+		first, last := l.refsBetween(change.from, change.to)
+		labels = append(labels, index.labels[first:last]...)
+		for _, ref := range change.refs {
+			label := refLabel(ref.ref)
+			labels = append(labels, label)
+			if _, found := added[label]; !found {
+				added[label] = addedRef{change: at, ref: ref.ref}
+			}
+		}
+	}
+	replaced := func(offset int) bool {
+		at := sort.Search(len(changes), func(i int) bool { return changes[i].to > offset })
+		return at < len(changes) && changes[at].from <= offset
+	}
+	seen := make(map[string]bool, len(labels))
+	changed := make(map[string]bool)
+	for _, label := range labels {
+		if seen[label] {
+			continue
+		}
+		seen[label] = true
+		// The first definition of the label that the original keeps, and
+		// the first that a change adds, whichever comes first.
+		var after goldparser.Reference
+		for _, idx := range index.defined[label] {
+			if kept := l.refs[idx]; !replaced(kept.offset) {
+				after = kept.ref
+				if add, found := added[label]; found && changes[add.change].from < kept.offset {
+					after = add.ref
+				}
+				break
+			}
+		}
+		if add, found := added[label]; found && after == nil {
+			after = add.ref
+		}
+		if before, had := l.refIndex[label]; had != (after != nil) || (had && !sameRef(before, after)) {
+			changed[label] = true
+		}
+	}
+	return changed
 }
 
 // looseIn returns the number of items of the original, among the items of a

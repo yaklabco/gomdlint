@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -362,6 +361,9 @@ type fixVerifier struct {
 	originalFile *mdast.FileSnapshot
 	model        *outlineModel
 	modeled      bool
+	// wholeParsed counts the bytes that whole-document checks parsed,
+	// which tests bound.
+	wholeParsed int
 }
 
 func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier {
@@ -429,7 +431,9 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 // acceptsWhole reports whether the content with edits, prepared, applied has
 // the original document's outline, parsing the whole document.
 func (v *fixVerifier) acceptsWhole(prepared []fix.TextEdit) bool {
-	fixed, err := v.parser.Parse(v.ctx, v.file.Path, fix.ApplyEdits(v.file.Content, prepared))
+	content := fix.ApplyEdits(v.file.Content, prepared)
+	v.wholeParsed += len(content)
+	fixed, err := v.parser.Parse(v.ctx, v.file.Path, content)
 	if err != nil {
 		return false
 	}
@@ -472,23 +476,41 @@ func documentOutline(file *mdast.FileSnapshot, allow fixAllowance) string {
 	return out.String()
 }
 
-// renderedText returns text as goldmark renders a text node: backslash
-// escapes and entity references resolved, and HTML special characters escaped.
+// builderWriter is a util.BufWriter that writes straight to a
+// strings.Builder, so that rendering a text node takes no buffer of its own.
+// It buffers nothing, so it has nothing to flush.
+type builderWriter struct {
+	*strings.Builder
+}
+
+func (builderWriter) Available() int { return 0 }
+
+func (builderWriter) Buffered() int { return 0 }
+
+func (builderWriter) Flush() error { return nil }
+
+// writeRenderedText writes text to out as goldmark renders a text node:
+// backslash escapes and entity references resolved, and HTML special
+// characters escaped.
+func writeRenderedText(out *strings.Builder, text []byte) {
+	gmhtml.DefaultWriter.Write(builderWriter{out}, text)
+}
+
+// renderedText returns text as goldmark renders a text node (see
+// writeRenderedText).
 func renderedText(text []byte) []byte {
-	var buf bytes.Buffer
-	writer := bufio.NewWriter(&buf)
-	gmhtml.DefaultWriter.Write(writer, text)
-	_ = writer.Flush() // A bytes.Buffer never fails to write.
-	return buf.Bytes()
+	var out strings.Builder
+	writeRenderedText(&out, text)
+	return []byte(out.String())
 }
 
 func writeOutline(out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, allow fixAllowance) {
 	switch node.Kind {
 	case mdast.NodeText:
 		if node.Inline != nil {
-			out.Write(renderedText(node.Inline.Text))
+			writeRenderedText(out, node.Inline.Text)
 		} else {
-			out.Write(renderedText(node.Text()))
+			writeRenderedText(out, node.Text())
 		}
 	case mdast.NodeSoftBreak:
 		out.WriteString("\n")

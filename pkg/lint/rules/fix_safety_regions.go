@@ -23,8 +23,9 @@ import (
 // core (see fix_regions.go), the outline after edits is the original's with
 // each region's part outlined anew and the token of each list whose
 // tightness changes replaced, and with the anchors of the headings
-// recomputed, provided the front matter stays and every region adds the
-// definitions it added before. Whether a region holds comes from the
+// recomputed, provided the front matter stays and every link resolves as
+// before (see Definitions in fix_regions.go). Whether a region holds, and
+// the definitions it adds and the labels its links look up, come from the
 // recording parse of docLayout; its outline comes from a parse with the
 // document's parser, of the region after a blank line, with the document's
 // definitions preset. The blank line keeps the region's first line from
@@ -34,10 +35,6 @@ import (
 // paragraphs of a tight list into text blocks, because the parser maps both
 // to paragraphs. When anything cannot be shown, the whole document is
 // parsed, as before.
-
-// slugOverhead is what the cache counts for each slug it holds besides the
-// slug's bytes: the string header.
-const slugOverhead = 16
 
 // outlineModel is the outline of the original document, as fixVerifier
 // compares it, cut into the parts that regions replace.
@@ -438,12 +435,12 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 		m.outline(outcome, reg, from, to)
 	}
 	outcome.source, outcome.blocks = nil, nil
-	size := key.Len()
+	size := key.Len() + outcome.retained()
 	if !outcome.same {
 		size += len(outcome.text)
 	}
 	for _, slug := range outcome.slugs {
-		size += len(slug) + slugOverhead
+		size += len(slug) + stringOverhead
 	}
 	if m.cached+size <= m.cacheBudget() {
 		m.outcomes[key.String()] = outcome
@@ -575,10 +572,8 @@ func (m *outlineModel) checkEdits(edits []fix.TextEdit) (bool, bool) {
 		return false, false
 	}
 	// Definitions reach links before them as well as after.
-	for _, outcome := range outcomes {
-		if !outcome.refsSame {
-			return false, false
-		}
+	if !m.resolvesAsBefore(regions, func(at int) *regionParse { return &outcomes[at].regionParse }) {
+		return false, false
 	}
 	reps := make([]replacement, 0, len(outcomes))
 	for _, outcome := range outcomes {

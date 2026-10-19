@@ -266,9 +266,10 @@ func longQuoteDocument() string {
 // blockquote against the whole-document checks on edits inside a long
 // blockquote: edits that keep its blocks, that join or split its groups,
 // that take a line out of it, make it lazy or nest it, that leave a fence
-// open, that break a closed block or loosen a list in it. Both region
-// checks decide every edit but those that add a definition, and quote and
-// list regions decide some.
+// open, that break a closed block or loosen a list in it, or that add a
+// definition. Both region checks decide every edit but one that adds a
+// definition and a link that looks it up, and quote and list regions decide
+// some.
 func TestRegionChecksInBlockquotes(t *testing.T) {
 	doc := longQuoteDocument()
 	edits := []struct {
@@ -297,6 +298,7 @@ func TestRegionChecksInBlockquotes(t *testing.T) {
 		{"item marker changed", "> - item 5", "> * item 5"},
 		{"heading added", "> Paragraph 1 with", "> # Paragraph 1 with"},
 		{"definition added", "> Paragraph 1 with", "> [x]: /x\n>\n> Paragraph 1 with"},
+		{"definition and its link added", "> Paragraph 1 with", "> [x]: /x\n>\n> Paragraph 1 [x] with"},
 	}
 	for _, flavor := range []config.Flavor{config.FlavorGFM, config.FlavorCommonMark} {
 		checks := newBlockChecks(t, flavor, doc, fixAllowance{})
@@ -309,8 +311,9 @@ func TestRegionChecksInBlockquotes(t *testing.T) {
 				decided++
 			}
 		}
-		// A definition reaches links before the region, so the whole
-		// document decides that edit.
+		// A definition reaches links before the region as well as after, so
+		// the whole document decides an edit whose region looks up a label
+		// it defines; one that no link looks up leaves every link as it was.
 		assert.Equal(t, len(edits)-1, decided, "flavor %s: both region checks decide every edit but one", flavor)
 		kinds := checks.kinds()
 		assert.Positive(t, kinds[quoteRegion], "quote regions decide some edits")

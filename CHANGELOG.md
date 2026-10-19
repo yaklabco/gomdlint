@@ -502,6 +502,16 @@ formats change. The first entries under Changed may need action.
   blockquote, each with trailing spaces, took 200 seconds to lint and now
   takes under a second, and a table of 8,000 such rows went from 160 seconds
   to about one. Findings, fixes and fixed output stay as they were.
+- A fix that changes link reference definitions, such as one that
+  `link-image-reference-definitions` (MD053) offers to remove an unused or
+  duplicate definition, is checked on the part of the document it can
+  affect when no link looks up a label whose definition it changes. Such a
+  fix used to make the check parse the whole document. Writing the outline
+  that the code, link, reference and table rules compare no longer
+  allocates a buffer for each text node. A 1 MB document made of the
+  repository's Markdown took 29 seconds to lint and now takes about 8, and
+  a list of 800 items, each with an unused definition, went from 9 seconds
+  to under one. Findings, fixes and fixed output stay as they were.
 - goldmark moves to v1.8.6, past GO-2026-5320, a flaw in its HTML renderer
   that gomdlint never calls. Releases build with Go 1.26.9, which govulncheck
   finds free of GO-2026-4602, reachable through `filepath.WalkDir` with Go

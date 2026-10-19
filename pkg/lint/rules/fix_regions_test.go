@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1327,15 +1328,21 @@ func TestRegionParsesShareDefinitions(t *testing.T) {
 	assert.Less(t, time.Since(start), time.Second)
 }
 
-// TestRegionOutcomeCacheIsBounded checks that the outcomes a model caches
-// stay within a bound that follows the document, even when every check
-// covers a block the size of the document, as a long blockquote is.
+// TestRegionOutcomeCacheIsBounded checks that the outcomes a model caches,
+// with the labels their links look up, stay within a bound that follows the
+// document, even when every check covers a block the size of the document,
+// as a long blockquote is.
 func TestRegionOutcomeCacheIsBounded(t *testing.T) {
 	var doc strings.Builder
 	doc.WriteString("# Title\n\n")
 	for idx := range 2000 {
-		fmt.Fprintf(&doc, "> quoted line %d\n", idx)
+		if idx%10 == 0 {
+			fmt.Fprintf(&doc, "> quoted line %d, see [docs %d]\n", idx, idx)
+		} else {
+			fmt.Fprintf(&doc, "> quoted line %d,\n", idx)
+		}
 	}
+	doc.WriteString("\n[docs 0]: /docs\n")
 	input := doc.String()
 	check := newFixCheck(parseForCheck(t, input), config.FlavorGFM)
 	check.ensureModels()
@@ -1344,19 +1351,69 @@ func TestRegionOutcomeCacheIsBounded(t *testing.T) {
 	for idx := range 500 {
 		// Each edit changes the text of another line, so no check reuses
 		// another's outcome.
-		at := strings.Index(input, fmt.Sprintf("line %d\n", idx))
+		at := strings.Index(input, fmt.Sprintf("line %d,", idx))
 		decided, unchanged := model.checkEdits([]fix.TextEdit{{StartOffset: at, EndOffset: at + 4, NewText: "LINE"}})
 		require.True(t, decided)
 		require.False(t, unchanged)
 	}
 	cached := 0
 	for key, outcome := range model.outcomes {
-		cached += len(key)
+		require.NotEmpty(t, outcome.lookups, "the outcome keeps the labels its links looked up")
+		cached += len(key) + outcome.retained()
 		if !outcome.same {
 			cached += len(outcome.text)
 		}
 	}
 	assert.LessOrEqual(t, cached, 8*len(model.sig)+1<<20)
+}
+
+// TestRegionOutcomesHoldWhatTheCacheCounts checks, by the live heap, that the
+// outcomes a model caches hold about what the cache counts for them. A
+// region whose links look up one label many times keeps that label once;
+// an outcome that kept a slice of every lookup, repeats included, held a
+// string header for each, which the cache did not count.
+func TestRegionOutcomesHoldWhatTheCacheCounts(t *testing.T) {
+	const lines, checks = 1000, 60
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range lines {
+		fmt.Fprintf(&doc, "> line %d, see [docs], [docs], [docs] and [docs]\n", idx)
+	}
+	doc.WriteString("\n[docs]: /docs\n")
+	input := doc.String()
+	check := newFixCheck(parseForCheck(t, input), config.FlavorGFM)
+	check.ensureModels()
+	model := check.models[0]
+	require.NotNil(t, model)
+	// A space at the end of a line that another line of the paragraph
+	// follows renders nothing, so each outcome keeps its part of the
+	// signature, which the cache shares rather than counts.
+	checkLine := func(idx int) {
+		at := strings.Index(input, fmt.Sprintf("line %d,", idx))
+		end := at + strings.IndexByte(input[at:], '\n')
+		decided, unchanged := model.checkEdits([]fix.TextEdit{{StartOffset: end, EndOffset: end, NewText: " "}})
+		require.True(t, decided)
+		require.True(t, unchanged)
+	}
+	// liveHeap returns the bytes of the objects that a collection keeps.
+	liveHeap := func() int64 {
+		runtime.GC() //nolint:revive // The test reads the heap that a collection leaves.
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		return int64(stats.HeapAlloc)
+	}
+	checkLine(0)
+	before := liveHeap()
+	for idx := 1; idx <= checks; idx++ {
+		checkLine(idx)
+	}
+	grown := liveHeap() - before
+	require.Len(t, model.outcomes, checks+1)
+	t.Logf("%d outcomes cached, %d bytes counted, heap grew by %d bytes", len(model.outcomes), model.cached, grown)
+	// Each region's links look the label up 4,000 times, so an outcome that
+	// kept every lookup held 64 KB, and the outcomes 4 MB.
+	assert.Less(t, grown, int64(1<<20), "cached outcomes hold more than the cache counts")
+	runtime.KeepAlive(model)
 }
 
 // TestRegionModelMatchesSignature checks that the recording parser gives
