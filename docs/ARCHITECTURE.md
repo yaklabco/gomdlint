@@ -1120,8 +1120,10 @@ gets a warning or error that suggests the closest rules. Inline markdownlint
 comments, `markdownlint-configure-file` keys and the keys of markdownlint
 configs resolve their words as markdownlint reads them, upper-cased as
 JavaScript's `toUpperCase` does, with markdownlint's tags. One key per word
-(`markdownlintKey` in `pkg/lint/directives.go`) serves those lookups, the
-default key and the deduplication of notices. The lookup goes through an
+(`markdownlintKey` in `pkg/lint/directives.go`), which writes the
+characters that `toUpperCase` expands, such as U+0149, as it does
+(`jsUpperCases`), serves those lookups, the default key and the
+deduplication of notices. The lookup goes through an
 index of every registered identifier and tag, and every catalog word, by
 that key, so it compares letters beyond ASCII as markdownlint does. The keys
 of a markdownlint configuration object apply in the order they are written,

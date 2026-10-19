@@ -539,6 +539,12 @@ formats change. The first entries under Changed may need action.
   JavaScript upper case, as markdownlint does and as markdownlint comments
   already did. A key with the long s, such as `no-trailing-ſpaces`, names
   MD009, while `NO-TRAİLING-SPACES`, with a dotted capital I, names no rule.
+  The words of markdownlint comments and keys also fold the characters
+  whose upper case is longer than one character, such as `ŉ`, whose upper
+  case is `ʼN`, as JavaScript's `toUpperCase` does, which matters for a
+  custom rule whose name holds one. A suggestion for a markdownlint
+  comment names a custom rule whose name holds whitespace by its ID, and
+  leaves out such a tag, since no word of a comment can hold whitespace.
 - Markdownlint configs load as markdownlint-cli2 0.23 loads them.
   `.markdownlint.json` and `.jsonc` files accept comments and trailing
   commas, and a leading byte order mark is skipped in every format. Each file

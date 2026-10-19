@@ -135,6 +135,15 @@ func NewRegistry() *Registry {
 // Register adds a rule to the registry.
 // If a rule with the same ID already exists, it is replaced, and the name
 // of the replaced rule no longer resolves unless the new rule uses it too.
+//
+// markdownlint 0.41.1 rejects a set of custom rules in which a name equals
+// another name, or a tag equals a name, in upper case (validateRuleList in
+// lib/markdownlint.mjs). The registry accepts such rules. An identifier
+// that two rules claim names the rule of the first claim, IDs claiming
+// before names and names before aliases, and a word of a markdownlint
+// comment that is both a rule's identifier and a tag names that rule and
+// the rules of the tag. The built-in rules share no identifier, and no tag
+// spells one, which a catalog test checks.
 func (r *Registry) Register(rule Rule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -483,20 +483,21 @@ func readConfigureFile(directive *inlineDirective) (*MarkdownlintSource, bool) {
 // toUpperCase before it compares them, so two words mean the same exactly
 // when their upper case is the same. The key is that upper case with its
 // ASCII letters written in lower case, as the registry keeps identifiers.
-// Beyond ASCII, toUpperCase turns ten characters into ASCII letters (see
-// asciiUpperCase) and leaves others, such as the Kelvin sign and the dotted
-// capital I, as they are, where strings.ToLower, which the registry's
-// foldKey uses, turns them into k and i. The key writes every other
-// character in its simple upper case, as toUpperCase does, except for the
-// few characters whose full upper case is longer than one character and not
-// ASCII, such as U+0149, which toUpperCase expands. Go's Unicode tables can
-// also lag the JavaScript engine's, so a character that only a newer
-// version of Unicode gives an upper case, such as U+0264, keeps its own. In
-// both cases two spellings can have different keys where markdownlint reads
-// one word. Such a character is beyond ASCII, so this matters only for a
-// custom rule whose name or tag holds one: a word written as the rule
-// writes it still names the rule, as does any spelling that differs from it
-// only in the case of characters that Go and JavaScript upper-case alike.
+// Beyond ASCII, toUpperCase turns ten characters into ASCII letters, such
+// as the sharp s and the long s, and leaves others, such as the Kelvin sign
+// and the dotted capital I, as they are, where strings.ToLower, which the
+// registry's foldKey uses, turns them into k and i. It turns the
+// characters of Unicode's SpecialCasing.txt into more than one character,
+// such as U+0149 into U+02BC and N. The key writes those characters as
+// toUpperCase does (see jsUpperCases), and every other character in its
+// simple upper case, as toUpperCase does too. Go's Unicode tables can lag
+// the JavaScript engine's, so a character that only a newer version of
+// Unicode gives an upper case, such as U+0264, keeps its own, and two
+// spellings can have different keys where markdownlint reads one word.
+// Such a character is beyond ASCII, so this matters only for a custom rule
+// whose name or tag holds one: a word written as the rule writes it still
+// names the rule, as does any spelling that differs from it only in the
+// case of characters that Go and JavaScript upper-case alike.
 //
 // Everything that compares the words of comments or the keys of
 // markdownlint configuration objects goes through this key: their
@@ -518,12 +519,12 @@ func markdownlintKey(word string) string {
 
 	var key strings.Builder
 	for _, char := range word {
-		letters, special := asciiUpperCase(char)
+		upper, special := jsUpperCase(char)
 		switch {
 		case char < utf8.RuneSelf:
 			key.WriteRune(unicode.ToLower(char))
 		case special:
-			key.WriteString(letters)
+			key.WriteString(upper)
 		default:
 			key.WriteRune(unicode.ToUpper(char))
 		}
@@ -571,33 +572,132 @@ func lookupWord(word string, registry *Registry) ([]Rule, wordMeaning) {
 	return directiveRules(markdownlintKey(word), registry)
 }
 
-// asciiUpperCase returns, in lower case, the ASCII letters that JavaScript's
-// toUpperCase turns char into, for the ten characters beyond ASCII that it
-// turns into nothing but ASCII letters: the sharp s, the dotless i, the long
-// s and the Latin ligatures U+FB00 to U+FB06.
-func asciiUpperCase(char rune) (string, bool) {
-	switch char {
-	case '\u00df':
-		return "ss", true
-	case '\u0131':
-		return "i", true
-	case '\u017f':
-		return "s", true
-	case '\ufb00':
-		return "ff", true
-	case '\ufb01':
-		return "fi", true
-	case '\ufb02':
-		return "fl", true
-	case '\ufb03':
-		return "ffi", true
-	case '\ufb04':
-		return "ffl", true
-	case '\ufb05', '\ufb06':
-		return "st", true
-	default:
-		return "", false
-	}
+// jsUpperCases maps each character beyond ASCII whose upper case under
+// JavaScript's toUpperCase markdownlintKey cannot write as unicode.ToUpper
+// gives it to that upper case, with its ASCII letters in lower case, as
+// markdownlintKey writes keys. These are the characters that toUpperCase
+// turns into more than one character, the unconditional mappings of
+// Unicode's SpecialCasing.txt, such as the sharp s, whose upper case is
+// SS, and U+0149, whose upper case is U+02BC and N, and the dotless i and
+// the long s, whose upper cases are the ASCII letters I and S. The table
+// is Node 22's toUpperCase (ICU 78, Unicode 17) of every code point whose
+// upper case is longer than one code point, which SpecialCasing.txt has
+// kept the same since Unicode 4.1, and the two others.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var jsUpperCases = map[rune]string{
+	'\u00df': "ss",
+	'\u0131': "i",
+	'\u0149': "\u02bcn",
+	'\u017f': "s",
+	'\u01f0': "j\u030c",
+	'\u0390': "\u0399\u0308\u0301",
+	'\u03b0': "\u03a5\u0308\u0301",
+	'\u0587': "\u0535\u0552",
+	'\u1e96': "h\u0331",
+	'\u1e97': "t\u0308",
+	'\u1e98': "w\u030a",
+	'\u1e99': "y\u030a",
+	'\u1e9a': "a\u02be",
+	'\u1f50': "\u03a5\u0313",
+	'\u1f52': "\u03a5\u0313\u0300",
+	'\u1f54': "\u03a5\u0313\u0301",
+	'\u1f56': "\u03a5\u0313\u0342",
+	'\u1f80': "\u1f08\u0399",
+	'\u1f81': "\u1f09\u0399",
+	'\u1f82': "\u1f0a\u0399",
+	'\u1f83': "\u1f0b\u0399",
+	'\u1f84': "\u1f0c\u0399",
+	'\u1f85': "\u1f0d\u0399",
+	'\u1f86': "\u1f0e\u0399",
+	'\u1f87': "\u1f0f\u0399",
+	'\u1f88': "\u1f08\u0399",
+	'\u1f89': "\u1f09\u0399",
+	'\u1f8a': "\u1f0a\u0399",
+	'\u1f8b': "\u1f0b\u0399",
+	'\u1f8c': "\u1f0c\u0399",
+	'\u1f8d': "\u1f0d\u0399",
+	'\u1f8e': "\u1f0e\u0399",
+	'\u1f8f': "\u1f0f\u0399",
+	'\u1f90': "\u1f28\u0399",
+	'\u1f91': "\u1f29\u0399",
+	'\u1f92': "\u1f2a\u0399",
+	'\u1f93': "\u1f2b\u0399",
+	'\u1f94': "\u1f2c\u0399",
+	'\u1f95': "\u1f2d\u0399",
+	'\u1f96': "\u1f2e\u0399",
+	'\u1f97': "\u1f2f\u0399",
+	'\u1f98': "\u1f28\u0399",
+	'\u1f99': "\u1f29\u0399",
+	'\u1f9a': "\u1f2a\u0399",
+	'\u1f9b': "\u1f2b\u0399",
+	'\u1f9c': "\u1f2c\u0399",
+	'\u1f9d': "\u1f2d\u0399",
+	'\u1f9e': "\u1f2e\u0399",
+	'\u1f9f': "\u1f2f\u0399",
+	'\u1fa0': "\u1f68\u0399",
+	'\u1fa1': "\u1f69\u0399",
+	'\u1fa2': "\u1f6a\u0399",
+	'\u1fa3': "\u1f6b\u0399",
+	'\u1fa4': "\u1f6c\u0399",
+	'\u1fa5': "\u1f6d\u0399",
+	'\u1fa6': "\u1f6e\u0399",
+	'\u1fa7': "\u1f6f\u0399",
+	'\u1fa8': "\u1f68\u0399",
+	'\u1fa9': "\u1f69\u0399",
+	'\u1faa': "\u1f6a\u0399",
+	'\u1fab': "\u1f6b\u0399",
+	'\u1fac': "\u1f6c\u0399",
+	'\u1fad': "\u1f6d\u0399",
+	'\u1fae': "\u1f6e\u0399",
+	'\u1faf': "\u1f6f\u0399",
+	'\u1fb2': "\u1fba\u0399",
+	'\u1fb3': "\u0391\u0399",
+	'\u1fb4': "\u0386\u0399",
+	'\u1fb6': "\u0391\u0342",
+	'\u1fb7': "\u0391\u0342\u0399",
+	'\u1fbc': "\u0391\u0399",
+	'\u1fc2': "\u1fca\u0399",
+	'\u1fc3': "\u0397\u0399",
+	'\u1fc4': "\u0389\u0399",
+	'\u1fc6': "\u0397\u0342",
+	'\u1fc7': "\u0397\u0342\u0399",
+	'\u1fcc': "\u0397\u0399",
+	'\u1fd2': "\u0399\u0308\u0300",
+	'\u1fd3': "\u0399\u0308\u0301",
+	'\u1fd6': "\u0399\u0342",
+	'\u1fd7': "\u0399\u0308\u0342",
+	'\u1fe2': "\u03a5\u0308\u0300",
+	'\u1fe3': "\u03a5\u0308\u0301",
+	'\u1fe4': "\u03a1\u0313",
+	'\u1fe6': "\u03a5\u0342",
+	'\u1fe7': "\u03a5\u0308\u0342",
+	'\u1ff2': "\u1ffa\u0399",
+	'\u1ff3': "\u03a9\u0399",
+	'\u1ff4': "\u038f\u0399",
+	'\u1ff6': "\u03a9\u0342",
+	'\u1ff7': "\u03a9\u0342\u0399",
+	'\u1ffc': "\u03a9\u0399",
+	'\ufb00': "ff",
+	'\ufb01': "fi",
+	'\ufb02': "fl",
+	'\ufb03': "ffi",
+	'\ufb04': "ffl",
+	'\ufb05': "st",
+	'\ufb06': "st",
+	'\ufb13': "\u0544\u0546",
+	'\ufb14': "\u0544\u0535",
+	'\ufb15': "\u0544\u053b",
+	'\ufb16': "\u054e\u0546",
+	'\ufb17': "\u0544\u053d",
+}
+
+// jsUpperCase returns, with its ASCII letters in lower case, the upper case
+// that JavaScript's toUpperCase gives char, a character beyond ASCII, when
+// it is one of jsUpperCases, and reports whether it is.
+func jsUpperCase(char rune) (string, bool) {
+	upper, ok := jsUpperCases[char]
+	return upper, ok
 }
 
 // wordMeaning says how a word of a markdownlint comment names rules.
@@ -691,10 +791,12 @@ func (r *Registry) markdownlintTerm(word string) string {
 // use for the registered rule with the given ID and name: the name that
 // markdownlint lists first for that ID (RuleMeta.MarkdownlintName), or else
 // its name as markdownlintTerm writes it, without surrounding whitespace,
-// which no comment word can hold, or its ID when it has no name.
-// Both ways give the same name for a built-in rule, whose name is its
-// catalog entry's. The ID comes first for a library's rule registered under
-// a built-in ID with a name of its own, which markdownlint does not know.
+// or its ID when it has no name or one that holds whitespace between its
+// words. markdownlint splits a comment's words at whitespace, so no comment
+// word can hold any. Both ways give the same name for a built-in rule,
+// whose name is its catalog entry's. The ID comes first for a library's
+// rule registered under a built-in ID with a name of its own, which
+// markdownlint does not know.
 func (r *Registry) markdownlintRuleName(id, name string) string {
 	r.mu.RLock()
 	term := r.meta[id].MarkdownlintName
@@ -702,7 +804,11 @@ func (r *Registry) markdownlintRuleName(id, name string) string {
 	if term != "" {
 		return term
 	}
-	return cmp.Or(r.markdownlintTerm(strings.TrimSpace(name)), id)
+	name = strings.TrimFunc(name, isJSWhitespace)
+	if name == "" || strings.ContainsFunc(name, isJSWhitespace) {
+		return id
+	}
+	return r.markdownlintTerm(name)
 }
 
 // markdownlintName is markdownlintRuleName for rule.
@@ -879,7 +985,7 @@ func (w *wordResolver) notices(directive *inlineDirective, segment []resolvedWor
 			notices = append(notices, deprecatedTagNotice(w.registry, directive, word.word, word.rules))
 			return
 		}
-		notices = append(notices, unknownRuleNotice(directive, word.word, w.suggestions(word.word)))
+		notices = append(notices, unknownRuleNotice(directive, word.word, commentWords(w.suggestions(word.word))))
 	}
 	for _, word := range segment {
 		add(word)
@@ -890,6 +996,27 @@ func (w *wordResolver) notices(directive *inlineDirective, segment []resolvedWor
 		}
 	}
 	return notices
+}
+
+// commentWords returns the suggestions that a word of a markdownlint
+// comment can write: those without whitespace, which markdownlint splits
+// the words of a comment at. Rules are named without any (see
+// Registry.markdownlintRuleName), so only a tag with whitespace, which a
+// configure-file key can still name, is left out. It returns suggestions
+// itself when it leaves out none.
+func commentWords(suggestions []Suggestion) []Suggestion {
+	if !slices.ContainsFunc(suggestions, func(suggestion Suggestion) bool {
+		return strings.ContainsFunc(suggestion.Name, isJSWhitespace)
+	}) {
+		return suggestions
+	}
+	var words []Suggestion
+	for _, suggestion := range suggestions {
+		if !strings.ContainsFunc(suggestion.Name, isJSWhitespace) {
+			words = append(words, suggestion)
+		}
+	}
+	return words
 }
 
 // suggestions returns the rules and tags that word, an unknown word, most
