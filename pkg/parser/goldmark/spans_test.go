@@ -695,18 +695,20 @@ func TestTaskCheckboxNodes(t *testing.T) {
 	}
 }
 
-// TestTaskMarkerAfterDefinitionIsACheckbox checks that a task marker on the
-// line after a link reference definition that starts an item is a checkbox,
-// as micromark reads it: the definition comes off the start of the item's
-// first paragraph, which then starts with the marker. GitHub's cmark-gfm
-// reads text there.
-func TestTaskMarkerAfterDefinitionIsACheckbox(t *testing.T) {
+// TestTaskMarkerAfterDefinitionIsText checks that a task marker on the line
+// after a link reference definition that starts an item is text, as
+// goldmark's own task list extension and GitHub's cmark-gfm read it, and as
+// markdownlint, which reads no checkboxes, reads a reference there. The
+// definition comes off the start of the item's first paragraph, which is
+// then not the item's first child. micromark's renderer reads a checkbox.
+func TestTaskMarkerAfterDefinitionIsText(t *testing.T) {
 	file := parseForSpans(t, FlavorGFM, "- [c]: /url\n  [x] done\n- [ ] b\n")
 	boxes := mdast.FindByKind(file.Root, mdast.NodeTaskCheckbox)
-	require.Len(t, boxes, 2)
-	require.Equal(t, "[x]", string(boxes[0].Text()))
-	require.Equal(t, "[ ]", string(boxes[1].Text()))
-	require.Equal(t, "[x] done", string(nthNode(file.Root, mdast.NodeParagraph, 0).Text()))
+	require.Len(t, boxes, 1)
+	require.Equal(t, "[ ]", string(boxes[0].Text()))
+	first := nthNode(file.Root, mdast.NodeParagraph, 0)
+	require.Equal(t, "[x] done", string(first.Text()))
+	require.Empty(t, mdast.FindByKind(first, mdast.NodeTaskCheckbox))
 }
 
 func TestStrikethroughNode(t *testing.T) {

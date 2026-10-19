@@ -276,9 +276,11 @@ ranges are derived from the spans. Code, HTML block and front matter tokens
 follow the parse, while other markers are recognized line by line, so rules
 use spans for structure. The `gfm` flavor adds goldmark's linkify, table
 and strikethrough extensions and a task list extension of its own, which
-reads a checkbox where micromark does (`GFMExtensions`). Every goldmark
-instance that a fix check builds for GFM uses the same extensions, so the
-checks and the rules read the same checkboxes. `commonmark` adds none.
+reads a checkbox where micromark does (`GFMExtensions`), except after link
+reference definitions that start a list item, where it reads none, as
+goldmark does. Every goldmark instance that a fix check builds for GFM uses
+the same extensions, so the checks and the rules read the same checkboxes.
+`commonmark` adds none.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark

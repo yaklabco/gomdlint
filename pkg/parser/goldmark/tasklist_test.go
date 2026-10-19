@@ -70,13 +70,16 @@ func TestTaskCheckboxOnlyStartsAParagraph(t *testing.T) {
 		{name: "tab after the brackets", input: "- [ ]\ttask\n", boxes: []string{"[ ]"}},
 		{name: "blank first line", input: "-\n  [x] done\n", boxes: []string{"[x]"}},
 		{name: "code before the brackets", input: "- `x` [x] a\n"},
-		// Definitions that start the paragraph leave it the item's first
-		// content, as in micromark, unless a blank line comes between.
-		{name: "after a definition", input: "- [c]: /url\n  [x] done\n", boxes: []string{"[x]"}},
-		{name: "unchecked after a definition", input: "- [c]: /url\n  [ ] done\n", boxes: []string{"[ ]"}},
-		{name: "after two definitions", input: "- [c]: /url\n  [d]: /other\n  [x] done\n", boxes: []string{"[x]"}},
+		// After link reference definitions, which goldmark makes the item's
+		// first children, no checkbox is read, as goldmark's own parser
+		// reads none. markdownlint reads no checkboxes and reads "[x]" there
+		// as a reference.
+		{name: "after a definition", input: "- [c]: /url\n  [x] done\n"},
+		{name: "unchecked after a definition", input: "- [c]: /url\n  [ ] done\n"},
+		{name: "after two definitions", input: "- [c]: /url\n  [d]: /other\n  [x] done\n"},
 		{name: "after a definition and a blank line", input: "- [c]: /url\n\n  [x] done\n"},
-		{name: "after a blank first line and a definition", input: "-\n  [c]: /url\n  [x] done\n", boxes: []string{"[x]"}},
+		{name: "after a blank first line and a definition", input: "-\n  [c]: /url\n  [x] done\n"},
+		{name: "defined label after a definition", input: "- [c]: /url\n  [x] done\n\n[x]: /x\n", links: 1},
 	}
 
 	for _, tt := range tests {

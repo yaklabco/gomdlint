@@ -1284,6 +1284,7 @@ func TestReferenceLinkImagesRule_FootnoteLabels(t *testing.T) {
 			want:     []footnotePosition{{1, 5}},
 			wantFull: []footnotePosition{{1, 5}},
 		},
+		{name: "form feed as the text before a footnote call", input: "Use [\f][^n].\n\n[^n]: Note text.\n"},
 	})
 }
 
@@ -1474,6 +1475,132 @@ func TestHasLoneCarriageReturn(t *testing.T) {
 	assert.True(t, hasLoneCarriageReturn([]byte("a\r\r\n")))
 }
 
+// TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes checks MD052 where
+// the parser's task checkboxes decide what is a reference. markdownlint
+// never reports a label of nothing but ASCII white space, such as a form
+// feed, so MD052 does not either: not "[\f][]" in a list item, where the
+// parser reads no checkbox from it, nor elsewhere. After link reference
+// definitions the parser reads no checkbox, so "[x]" there is a shortcut
+// reference, which markdownlint and main report when "x" is not ignored.
+func TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes(t *testing.T) {
+	type position struct{ line, column int }
+	shortcut := map[string]any{"shortcut_syntax": true}
+	xNotIgnored := map[string]any{"shortcut_syntax": true, "ignored_labels": []string{"skip"}}
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		want    []position
+	}{
+		{name: "checkbox after a definition", input: "- [c]: /url\n  [x] done\n", options: xNotIgnored, want: []position{{2, 3}}},
+		{name: "checkbox after two definitions", input: "- [c]: /url\n  [d]: /other\n  [x] done\n", options: xNotIgnored, want: []position{{3, 3}}},
+		{
+			name:    "checkbox after a blank first line and a definition",
+			input:   "-\n  [c]: /url\n  [x] done\n",
+			options: xNotIgnored,
+			want:    []position{{3, 3}},
+		},
+		// The parser reads a checkbox here, as main does, so "[x]" is no
+		// reference. markdownlint, which reads no checkboxes, reports 1:3.
+		{name: "checkbox", input: "- [x] done\n", options: xNotIgnored},
+		{name: "form feed before an empty pair in a list item", input: "- [\f][] done\n"},
+		{name: "form feed before an empty pair in a list item with shortcut_syntax", input: "- [\f][] done\n", options: shortcut},
+		{name: "form feed before an empty pair", input: "Use [\f][] done\n"},
+		{name: "form feed in a list item", input: "- [\f] done\n", options: shortcut},
+		{name: "vertical tab before an empty pair", input: "Use [\v][] done.\n"},
+		{name: "form feeds and spaces before an empty pair", input: "Use [ \f \f ][] done.\n"},
+		{name: "form feed as a full reference's label", input: "Use [text][\f] done.\n", options: shortcut},
+		{name: "form feed as an image's label", input: "Use ![alt][\f] done.\n"},
+		// White space outside ASCII is a label, as on main, although
+		// markdownlint trims it and reports nothing.
+		{name: "no-break space before an empty pair", input: "Use [\xc2\xa0][] done.\n", want: []position{{1, 5}}},
+		{name: "letter before an empty pair", input: "Use [y][] done.\n", want: []position{{1, 5}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewReferenceLinkImagesRule(), tt.input, tt.options)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestRulesReadNoCheckboxAfterDefinitions checks the link rules on "[x]"
+// after link reference definitions that start a list item. The parser reads
+// no checkbox there, as goldmark and GitHub's cmark-gfm read none, so "[x]"
+// is a reference: it uses the definition of "x", which MD053 then keeps,
+// and its link is empty for MD042 and a shortcut for MD054, as markdownlint
+// and main report.
+func TestRulesReadNoCheckboxAfterDefinitions(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name    string
+		rule    lint.Rule
+		input   string
+		options map[string]any
+		want    []position
+	}{
+		{name: "MD053 definition of a spaced label", rule: NewLinkImageRefDefsRule(), input: "- [c]: /url\n  [x] done [c]\n\n[ x ]: /x\n"},
+		{name: "MD053 definition", rule: NewLinkImageRefDefsRule(), input: "- [c]: /url\n  [x] done [c]\n\n[x]: /x\n"},
+		{name: "MD042 empty fragment", rule: NewEmptyLinkRule(), input: "- [c]: /url\n  [x] done\n\n[x]: #\n", want: []position{{2, 3}}},
+		{
+			name:    "MD054 shortcut",
+			rule:    NewLinkImageStyleRule(),
+			input:   "- [c]: /url\n  [x] done [c]\n\n[x]: /x\n",
+			options: map[string]any{"shortcut": false},
+			want:    []position{{2, 3}, {2, 12}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, tt.rule, tt.input, tt.options)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestBlankLabel checks which labels MD052 never reports: those of nothing
+// but ASCII white space, which a no-break space is not.
+func TestBlankLabel(t *testing.T) {
+	tests := []struct {
+		label string
+		want  bool
+	}{
+		{label: "", want: true},
+		{label: " ", want: true},
+		{label: "\t", want: true},
+		{label: "\n", want: true},
+		{label: "\r", want: true},
+		{label: "\v", want: true},
+		{label: "\f", want: true},
+		{label: " \f \v\t", want: true},
+		{label: "x", want: false},
+		{label: " x ", want: false},
+		{label: "\xc2\xa0", want: false},
+		{label: "^", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%q", tt.label), func(t *testing.T) {
+			assert.Equal(t, tt.want, blankLabel(tt.label))
+		})
+	}
+}
+
 // TestIgnoresShortcut checks when markdownlint certainly ignores the
 // shortcut reference before a footnote call: only for a label of ASCII
 // letters, digits and spaces, compared as normalizeReference gives it with
@@ -1495,6 +1622,8 @@ func TestIgnoresShortcut(t *testing.T) {
 		{name: "blank", text: " ", ignored: []string{"x"}, want: true},
 		{name: "tab", text: "\t", ignored: nil, want: true},
 		{name: "empty", text: "", ignored: nil, want: true},
+		{name: "form feed", text: "\f", ignored: nil, want: true},
+		{name: "vertical tab and space", text: "\v ", ignored: []string{"x"}, want: true},
 		{name: "no-break space", text: "\u00a0", ignored: nil, want: false},
 		{name: "label not ignored", text: "y", ignored: []string{"x"}, want: false},
 	}

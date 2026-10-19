@@ -123,7 +123,8 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 // Apply reports full and collapsed references, and shortcut references when
 // shortcut_syntax is set, whose label matches no definition. The parser turns
 // every reference with a defined label into a link or image, so only the
-// reference syntax it left as text can be undefined.
+// reference syntax it left as text can be undefined. A reference whose label
+// is nothing but white space is never reported (see blankLabel).
 //
 // Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
 // "[^label]" calls a footnote that the document defines with a line that
@@ -155,7 +156,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		if usage.Label == "" {
+		if blankLabel(usage.Label) {
 			continue
 		}
 
@@ -185,6 +186,15 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	return diags, nil
+}
+
+// blankLabel reports whether label holds nothing but ASCII white space:
+// spaces, tabs, line endings, vertical tabs and form feeds. markdownlint
+// records an undefined reference only when its text, trimmed as JavaScript
+// trims it, is not empty, so it never reports such a label, although
+// micromark and goldmark read a label of form feeds or vertical tabs.
+func blankLabel(label string) bool {
+	return strings.Trim(label, " \t\n\v\f\r") == ""
 }
 
 // undefinedLabel builds the finding for usage, a reference whose label
@@ -259,12 +269,16 @@ func shortcutSource(file *mdast.FileSnapshot, usage *refs.ReferenceUsage) (strin
 
 // ignoresShortcut reports whether markdownlint certainly ignores a shortcut
 // reference whose source between its brackets is text. It records no
-// reference for blank text, and ignores a label that, lowercased with its
-// white space collapsed by normalizeReference, equals one of ignored_labels
-// as written. That is certain only for text of nothing but ASCII letters,
-// digits, spaces and tabs, which markdownlint reads as written, with no
-// markup, and which Go and JavaScript lowercase alike.
+// reference for blank text (see blankLabel), and ignores a label that,
+// lowercased with its white space collapsed by normalizeReference, equals
+// one of ignored_labels as written. That is certain only for text of
+// nothing but ASCII letters, digits, spaces and tabs, which markdownlint
+// reads as written, with no markup, and which Go and JavaScript lowercase
+// alike.
 func ignoresShortcut(text string, ignoredLabels []string) bool {
+	if blankLabel(text) {
+		return true
+	}
 	for idx := range len(text) {
 		if char := text[idx]; char != ' ' && char != '\t' && !isASCIILetter(char) && !isASCIIDigit(char) {
 			return false

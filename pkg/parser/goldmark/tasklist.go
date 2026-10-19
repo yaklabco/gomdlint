@@ -38,9 +38,10 @@ const (
 // gfmTaskList is a task list extension that reads a checkbox where
 // micromark-extension-gfm-task-list-item does, which goldmark's own task
 // list extension does not: goldmark also reads one at the start of a
-// heading, before other text as in "[x]foo", with a form feed or a tab of
-// any width inside, and never over a line ending or after link reference
-// definitions.
+// heading, before other text as in "[x]foo", and with a form feed or a tab
+// of any width inside, and never over a line ending. Like goldmark, and
+// unlike micromark, it reads none after link reference definitions, where
+// markdownlint, which reads no checkboxes, reads "[x]" as a reference.
 type gfmTaskList struct{}
 
 // Extend registers the checkbox parser and goldmark's checkbox renderer
@@ -54,11 +55,12 @@ func (gfmTaskList) Extend(md goldmark.Markdown) {
 	))
 }
 
-// gfmCheckBoxParser reads a task checkbox at the start of a list item's
-// first content. A checkbox is "[", then a space, an "x", an "X", a tab one
-// column wide or a line ending, then "]", then a space, a tab or a line
-// ending and more of the paragraph. A line ending inside the brackets
-// counts only when the paragraph's next line starts with the "]".
+// gfmCheckBoxParser reads a task checkbox at the start of the paragraph
+// that is a list item's first child. A checkbox is "[", then a space, an
+// "x", an "X", a tab one column wide or a line ending, then "]", then a
+// space, a tab or a line ending and more of the paragraph. A line ending
+// inside the brackets counts only when the paragraph's next line starts
+// with the "]".
 type gfmCheckBoxParser struct{}
 
 // Trigger returns the byte that can start a checkbox.
@@ -69,10 +71,11 @@ func (gfmCheckBoxParser) Trigger() []byte {
 // tabWidth is the number of columns between tab stops, as in CommonMark.
 const tabWidth = 4
 
-// Parse reads a checkbox at the start of a list item's first content, or
-// returns nil so that the other inline parsers read the brackets.
+// Parse reads a checkbox at the start of the paragraph that is a list
+// item's first child, or returns nil so that the other inline parsers read
+// the brackets.
 func (gfmCheckBoxParser) Parse(parent ast.Node, block text.Reader, _ parser.Context) ast.Node {
-	if parent.HasChildren() || !firstContentOfListItem(parent, block.Source()) {
+	if parent.HasChildren() || !opensListItem(parent) {
 		return nil
 	}
 	checked, length, ok := readCheckBox(parent, block)
@@ -83,10 +86,12 @@ func (gfmCheckBoxParser) Parse(parent ast.Node, block text.Reader, _ parser.Cont
 	return east.NewTaskCheckBox(checked)
 }
 
-// firstContentOfListItem reports whether a block is the paragraph that is a
-// list item's first content: its first child, or the rest of the paragraph
-// whose link reference definitions goldmark made the item's first children.
-func firstContentOfListItem(node ast.Node, source []byte) bool {
+// opensListItem reports whether a block is a paragraph that is a list
+// item's first child. goldmark's own task list extension wants the first
+// child too, so a paragraph after link reference definitions, which
+// goldmark makes the item's first children, is not one, but it takes any
+// block, such as a heading. micromark reads a checkbox only in a paragraph.
+func opensListItem(node ast.Node) bool {
 	switch node.(type) {
 	case *ast.Paragraph, *ast.TextBlock:
 	default:
@@ -95,23 +100,7 @@ func firstContentOfListItem(node ast.Node, source []byte) bool {
 	if _, ok := node.Parent().(*ast.ListItem); !ok {
 		return false
 	}
-	previous := node.PreviousSibling()
-	if previous == nil {
-		return true
-	}
-	for sibling := previous; sibling != nil; sibling = sibling.PreviousSibling() {
-		if _, ok := sibling.(*ast.LinkReferenceDefinition); !ok {
-			return false
-		}
-	}
-	// The definitions came off the start of this paragraph when nothing but
-	// a line ending lies between the last of them and the paragraph.
-	defLines, lines := previous.Lines(), node.Lines()
-	if defLines.Len() == 0 || lines.Len() == 0 {
-		return false
-	}
-	end, start := defLines.At(defLines.Len()-1).Stop, lines.At(0).Start
-	return end <= start && bytes.Count(source[end:start], []byte{'\n'}) == 1
+	return node.PreviousSibling() == nil
 }
 
 // readCheckBox reads a checkbox at the reader's position, which holds "[",
