@@ -1,6 +1,6 @@
 line-length	Lines fit in 80 characters, with exemptions such as lone links and definitions.
 line_length	Tag: line-length
-link-destination-style	Links in a file, other than #fragment links, are all relative or all absolute.
+link-destination-style	Relative links and local file: URLs are not mixed in one document.
 link-fragments	Links to a #fragment point at a heading or anchor in the same file, or at #top.
 link-image-reference-definitions	Every reference definition is used and defined once, except [//] comments.
 link-image-style	Links and images use only the allowed styles. By default, all are allowed.

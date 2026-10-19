@@ -394,7 +394,8 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			Name: "style", Type: lint.OptionString, Default: string(LinkDestConsistent), GomdlintOnly: true,
 			Values: []string{"consistent", "relative", "absolute"},
 			Description: "Kind of link destination to require: relative paths or absolute URLs. " +
-				"consistent takes the kind of the first link.",
+				"Only relative links and file: URLs that name no other host count. " +
+				"consistent takes the kind of the first link that counts.",
 		}},
 		"MDL003": {{
 			Name: "min_dashes", Type: lint.OptionInteger, Default: defaultMinDashes, GomdlintOnly: true,

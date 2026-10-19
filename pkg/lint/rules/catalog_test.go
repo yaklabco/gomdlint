@@ -493,12 +493,21 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	{id: "MD038", name: "allowed padding", phrase: "except one each side or by a backtick", input: "# Title\n\nUse `` `foo`` and `   ` and ` code ` here.\n"},
 	{id: "MD038", name: "one-sided space", phrase: "deletes the extra spaces", input: "# Title\n\nUse ` code` here.\n", want: []catalogFinding{{3, true}}},
 
-	// MDL001 ignores fragment links.
-	{id: "MDL001", name: "fragment link", phrase: "other than #fragment links", input: "# Title\n\nSee [a](docs/a.md) and [top](#title).\n"},
+	// MDL001 compares only links that could take either form: relative
+	// links, and file: URLs that name no other host.
 	{
-		id: "MDL001", name: "mixed kinds", phrase: "all relative or all absolute", want: []catalogFinding{{3, false}},
-		input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n",
+		id: "MDL001", name: "mixed kinds", phrase: "are not mixed", want: []catalogFinding{{3, false}},
+		input: "# Title\n\nSee [a](docs/a.md) and [b](file:///home/user/b.md).\n",
 	},
+	{
+		id: "MDL001", name: "file URL", phrase: "file: URLs that name no other host", want: []catalogFinding{{3, false}},
+		input: "# Title\n\nSee [b](file://localhost/home/user/b.md) and [a](docs/a.md).\n",
+	},
+	{id: "MDL001", name: "file URL on another host", phrase: "name no other host", input: "# Title\n\nSee [a](docs/a.md) and [b](file://server/share/b.md).\n"},
+	{id: "MDL001", name: "link to another host", phrase: "link to another host", input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n"},
+	{id: "MDL001", name: "mailto link", phrase: "mailto:", input: "# Title\n\nSee [a](docs/a.md) and [mail us](mailto:team@example.com).\n"},
+	{id: "MDL001", name: "autolink", phrase: "autolinks", input: "# Title\n\nSee [a](docs/a.md) and <file:///home/user/b.md>.\n"},
+	{id: "MDL001", name: "fragment link", phrase: "a #fragment", input: "# Title\n\nSee [b](file:///home/user/b.md) and [top](#title).\n"},
 
 	// MD049 and MD050 allow asterisks inside a word, which underscores
 	// cannot replace, and hold back fixes in reference labels.

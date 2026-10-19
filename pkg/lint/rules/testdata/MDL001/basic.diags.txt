@@ -1,1 +1,1 @@
-basic.input.md:5:5 warning Link uses absolute URL, but relative URLs are expected (MDL001/link-destination-style)
+basic.input.md:7:5 warning Link uses absolute URL, but relative URLs are expected (MDL001/link-destination-style)

@@ -27,24 +27,6 @@
     "fixable": false
   },
   {
-    "rule": "MDL001",
-    "name": "link-destination-style",
-    "line": 225,
-    "column": 5,
-    "message": "Link uses relative URL, but absolute URLs are expected",
-    "severity": "warning",
-    "fixable": false
-  },
-  {
-    "rule": "MDL001",
-    "name": "link-destination-style",
-    "line": 227,
-    "column": 5,
-    "message": "Link uses relative URL, but absolute URLs are expected",
-    "severity": "warning",
-    "fixable": false
-  },
-  {
     "rule": "MD013",
     "name": "line-length",
     "line": 227,
@@ -52,14 +34,5 @@
     "message": "Line length 88 exceeds maximum 80",
     "severity": "warning",
     "fixable": true
-  },
-  {
-    "rule": "MDL001",
-    "name": "link-destination-style",
-    "line": 235,
-    "column": 19,
-    "message": "Link uses relative URL, but absolute URLs are expected",
-    "severity": "warning",
-    "fixable": false
   }
 ]

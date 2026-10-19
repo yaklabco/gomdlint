@@ -487,11 +487,18 @@ const (
 	LinkDestRelative LinkDestStyle = "relative"
 	// LinkDestAbsolute requires absolute URLs.
 	LinkDestAbsolute LinkDestStyle = "absolute"
-	// LinkDestConsistent uses whatever style is first encountered.
+	// LinkDestConsistent uses the style of the first link that could be
+	// written either way.
 	LinkDestConsistent LinkDestStyle = "consistent"
 )
 
-// Apply checks link destination style consistency.
+// Apply checks the links that could be written either way, as a relative
+// link or as an absolute URL: each must use the style that the style option
+// names or, with "consistent", the style of the first of them. A link that
+// can take only one form is never reported and sets no style (see
+// destinationKind). An autolink is one: it shows its URI as its text, so it
+// cannot hold a relative link. That covers email autolinks, which the parser
+// gives without their mailto: scheme, and GFM autolink literals.
 func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -500,7 +507,7 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 	configStyle := LinkDestStyle(ctx.OptionString("style", string(LinkDestConsistent)))
 	effectiveStyle := configStyle
 	if configStyle == LinkDestConsistent {
-		effectiveStyle = "" // Will be set from first link.
+		effectiveStyle = "" // Set from the first link that counts.
 	}
 
 	links := ctx.Links()
@@ -510,25 +517,12 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-
-		dest := resolvedDestination(link)
-		if dest == "" {
+		if isAutolinkNode(link) {
 			continue
 		}
-
-		// Skip fragment-only links (#anchor).
-		if strings.HasPrefix(dest, "#") {
+		detectedStyle, counts := destinationKind(resolvedDestination(link))
+		if !counts {
 			continue
-		}
-
-		// An autolink is always absolute: CommonMark autolinks need a scheme,
-		// and email autolinks, which the parser gives without one, render
-		// as mailto: links. Other links are classified by their destination,
-		// so an autolink and an inline link to the same URI agree.
-		isAbsolute := isAutolinkNode(link) || isAbsoluteDestination(dest)
-		detectedStyle := LinkDestRelative
-		if isAbsolute {
-			detectedStyle = LinkDestAbsolute
 		}
 
 		// Set consistent style from first link.
@@ -562,7 +556,7 @@ func (r *LinkDestinationStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 // followed by 1 to 31 letters, digits, "+", "." or "-".
 var uriSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]{1,31}:`)
 
-// isAbsoluteDestination reports whether MDL001 counts a link destination as
+// isAbsoluteDestination reports whether MDL001 reads a link destination as
 // absolute. A destination is absolute when it starts with a URI scheme, such
 // as https:, mailto:, sms: or urn:, or when it starts with "//", a
 // network-path reference that names its own host and keeps the page's
@@ -573,6 +567,65 @@ var uriSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]{1,31}:`)
 // written with http:// reads the same way.
 func isAbsoluteDestination(dest string) bool {
 	return strings.HasPrefix(dest, "//") || uriSchemePattern.MatchString(dest)
+}
+
+// destinationKind returns the kind of the link destination dest, as the
+// renderer reads it, and whether MDL001 compares the link: whether the
+// destination could be written in the other kind. The kind is empty for a
+// link that does not count.
+//
+// A relative link names a place on the document's own site, which an
+// absolute URL could name too, so it counts, as an absolute path such as
+// /docs/a.md does. An absolute URL could be relative only when it names a
+// place on the same site. gomdlint cannot tell a URL of the document's own
+// site from one of another host, so it takes every host but the local
+// machine for another one, and a link to another host has no relative form.
+// The only absolute URLs that count are file: URLs that name no other host
+// (see isLocalFileURL): they name local files, which a relative link can
+// name too. A URI with another scheme and no host, such as mailto: or urn:,
+// names nothing that a relative link could. An empty destination and a link
+// to a fragment of the document never count.
+func destinationKind(dest string) (LinkDestStyle, bool) {
+	switch {
+	case dest == "" || strings.HasPrefix(dest, "#"):
+		return "", false
+	case !isAbsoluteDestination(dest):
+		return LinkDestRelative, true
+	case isLocalFileURL(dest):
+		return LinkDestAbsolute, true
+	default:
+		return "", false
+	}
+}
+
+// fileScheme is the scheme of file URLs, which matches in any case.
+const fileScheme = "file:"
+
+// isLocalFileURL reports whether dest is a file URL that names no other
+// host: one without an authority, as in file:/home/a.md, or whose host is
+// empty, as in file:///home/a.md, or localhost, which RFC 8089 reads as the
+// local machine. Any other authority counts as another host: the server of
+// file://server/share/a.md, or the drive letter of file://C:/a.md, which
+// RFC 3986 reads as a host. So does an authority with a port or userinfo,
+// which RFC 8089 does not allow, and an empty host followed by a second
+// "//", as in file:////server/share/a.md, which RFC 8089 (Appendix E.3.2)
+// reads as a UNC path that names the server after it.
+func isLocalFileURL(dest string) bool {
+	if len(dest) < len(fileScheme) || !strings.EqualFold(dest[:len(fileScheme)], fileScheme) {
+		return false
+	}
+	rest, hasAuthority := strings.CutPrefix(dest[len(fileScheme):], "//")
+	if !hasAuthority {
+		return true
+	}
+	authority, path := rest, ""
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		authority, path = rest[:end], rest[end:]
+	}
+	if authority == "" {
+		return !strings.HasPrefix(path, "//")
+	}
+	return strings.EqualFold(authority, "localhost")
 }
 
 // resolvedDestination returns a link's destination as the renderer reads

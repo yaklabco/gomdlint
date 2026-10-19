@@ -46,7 +46,3 @@ rules:
     enabled: true
     options:
       style: compact
-  # The docs link to other sites and to files in this repository on purpose.
-  # link-destination-style compares every link with the first one, so it
-  # would report each relative link that follows an absolute one.
-  MDL001: false

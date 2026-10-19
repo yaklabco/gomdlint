@@ -152,9 +152,12 @@ the same case.
 empty links, missing image alt text, broken link fragments, undefined and
 unused reference definitions, inconsistent link and image style, and
 non-descriptive link text such as "click here". gomdlint's own
-`link-destination-style` (MDL001) keeps link destinations consistently
-relative or absolute. Reversed links, spaces in link text, unused
-definitions and bare URLs auto-fix.
+`link-destination-style` (MDL001) keeps relative links and local `file:`
+URLs from being mixed. It never reports a link to another host, which
+cannot be relative. gomdlint cannot tell an absolute URL of the document's
+own site from one of another host, so it never reports those either.
+Reversed links, spaces in link text, unused definitions and bare URLs
+auto-fix.
 
 **Tables** (GFM) - Validate table structure including consistent column
 counts, pipe style, column spacing and surrounding blank lines. gomdlint's

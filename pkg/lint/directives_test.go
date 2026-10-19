@@ -289,7 +289,7 @@ func TestEngineDirectiveTagsFollowMarkdownlint(t *testing.T) {
 		extraBlank   = "Text.\n\n\nMore.\n"
 		bareFence    = "```\ncode\n```\n"
 		shortTable   = "| A | B |\n| - | - |\n| 1 | 2 |\n"
-		mixedLinks   = "[a](https://example.com/a) and [b](docs/b.md)\n"
+		mixedLinks   = "[a](docs/a.md) and [b](file:///home/user/b.md)\n"
 	)
 	tests := []struct {
 		tag, ruleID, body string

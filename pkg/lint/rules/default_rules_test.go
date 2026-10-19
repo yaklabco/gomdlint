@@ -96,9 +96,11 @@ func TestFormerlyOptInRulesReportWithoutConfig(t *testing.T) {
 			lines: []int{4, 4, 5},
 		},
 		{
+			// A link to another host sets no style, so the relative link
+			// to the guide does, and the file: URL breaks it.
 			id:    "MDL001",
-			input: "# Title\n\nSee [the site](https://example.com) and [the guide](docs/guide.md).\n",
-			lines: []int{3},
+			input: "# Title\n\nSee [the site](https://example.com) and [the guide](docs/guide.md).\n\nOr [the copy](file:///tmp/guide.md).\n",
+			lines: []int{5},
 		},
 	}
 

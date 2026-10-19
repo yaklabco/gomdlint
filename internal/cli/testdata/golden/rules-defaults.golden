@@ -44,7 +44,7 @@ Code
 
 Links and images
   descriptive-link-text             MD059   no   warning  Link text describes its target instead of saying "click here" or "more".
-  link-destination-style            MDL001  no   warning  Links in a file, other than #fragment links, are all relative or all absolute.
+  link-destination-style            MDL001  no   warning  Relative links and local file: URLs are not mixed in one document.
   link-fragments                    MD051   no   warning  Links to a #fragment point at a heading or anchor in the same file, or at #top.
   link-image-reference-definitions  MD053   yes  warning  Every reference definition is used and defined once, except [//] comments.
   link-image-style                  MD054   no   warning  Links and images use only the allowed styles. By default, all are allowed.

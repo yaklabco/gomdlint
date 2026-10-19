@@ -37,6 +37,15 @@ formats change. The first entries under Changed may need action.
   with `--disable no-inline-html`.
 - `blanks-around-tables` (MD058) reports warnings, like every other rule.
   It used to report info, which never fails a run, even with `--strict`.
+- `link-destination-style` (MDL001) compares only the links that could take
+  either form. A link to another host, such as `https://example.com`,
+  cannot be relative, so it no longer sets the `consistent` style or gets
+  reported, and neither do autolinks and URIs such as `mailto:`. gomdlint
+  cannot tell a URL of the document's own site from one of another host, so
+  the only absolute links that count are `file:` URLs that name no other
+  host, and only those break the `relative` style. A README whose first
+  link pointed at another site used to get a finding for each of its
+  relative links.
 - Rule options default to markdownlint 0.41's values: consistent styles for
   MD003, MD004, MD035, MD046, MD048, MD049 and MD050, `one_or_ordered` for
   MD029, `br_spaces: 2` for MD009, 80 characters for MD013, and no allowed
@@ -315,10 +324,10 @@ formats change. The first entries under Changed may need action.
 - **MD058**: No longer adds a blank line before or after a table in a list
   where the line would separate two items or two blocks of an item. Such
   tables are reported without a fix.
-- **MDL001**: Counts a destination as absolute when it starts with a URI
+- **MDL001**: Reads a destination as absolute when it starts with a URI
   scheme, after escapes and character references are resolved, or with
   `//`. Links to `sms:`, `urn:` or `vscode:` URIs and email autolinks used to
-  count as relative.
+  read as relative.
 - **MD010**: Reports each run of tabs, as markdownlint does, instead of one
   finding per line. With `ignore_code_languages` set, it skips fences that
   name no language.
