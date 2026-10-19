@@ -946,7 +946,8 @@ func checkFootnoteCases(t *testing.T, tests []footnoteCase) {
 // footnotes whose definition micromark is certain to read (see
 // certainFootnoteLabels), where it reports what markdownlint 0.41.1
 // reports: "[^label]" calls the footnote, and in "[text][^label]" the
-// second pair calls it, so the first is a shortcut reference. Two
+// second pair calls it, so the first is a shortcut reference, and the
+// pair is reported with shortcut_syntax where main reports it. Two
 // definitions in a row count, as micromark reads each, and so does a
 // definition right after front matter, at the start of micromark's
 // document.
@@ -972,7 +973,6 @@ func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
 		{name: "undefined footnotes", input: "# T\n\nMore [^missing] and [^] and [^ x] text.\n", want: []footnotePosition{{3, 6}, {3, 21}, {3, 29}}},
 		{name: "label with a space is no footnote", input: "# T\n\nUse [^a b].\n\n[^a b]: Not a footnote.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
 		{name: "footnote call after link text", input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n", want: []footnotePosition{{3, 5}}},
-		{name: "full reference to a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n", want: []footnotePosition{{3, 5}}},
 		{name: "footnote call that is also a link definition", input: "# T\n\nUse [^n] here.\n\n[^n]: /url\n"},
 		{name: "byte order mark on a later line", input: "# T\n\nUse [^n] and [x][^n].\n\n\ufeff<!--\n\n[^n]: Note text.\n-->\n"},
 		{name: "definition after a one-line pre block", input: "# T\n\nUse [^n] and [x][^n].\n\n<pre>x</pre>\n\n[^n]: Note text.\n"},
@@ -1194,6 +1194,39 @@ func TestReferenceLinkImagesRule_FootnotesAroundBlocks(t *testing.T) {
 	})
 }
 
+// TestReferenceLinkImagesRule_FootnoteLabels checks how MD052 matches the
+// labels it reads for GFM footnotes. A call matches a certain definition
+// only by labelKey, the same bytes or the same ASCII letters in any case,
+// so a call that markdownlint keeps apart from a definition never matches
+// it, and other calls get main's result. "[text][^label]" is reported
+// with shortcut_syntax exactly where main reports it, unless markdownlint
+// certainly ignores "text".
+func TestReferenceLinkImagesRule_FootnoteLabels(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{name: "full reference to a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n"},
+		{name: "footnote call with a long s", input: "Use [^\u017f].\n\n[^s]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "shortcut before a footnote call with a sharp s", input: "Use [\u00df][^n].\n\n[^n]: Note text.\n\n[ss]: /a\n", want: []footnotePosition{{1, 5}}},
+		{name: "footnote call with an accented capital", input: "Use [^\u00c9].\n\n[^\u00e9]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "footnote call in another ASCII case", input: "Use [^Note].\n\n[^note]: Note text.\n"},
+		{
+			name:  "shortcut before a footnote call with a definition in math",
+			input: "Use [text][^n].\n\n[^n]: Note text.\n\n$$\n\n[text]: /a\n",
+			want:  []footnotePosition{{1, 5}},
+		},
+		{name: "shortcut before a footnote call with a defined label", input: "Use [text][^n].\n\n[^n]: Note text.\n\n[text]: /a\n", want: []footnotePosition{{1, 5}}},
+		{name: "shortcut before a footnote call that markdownlint ignores", input: "Use [X][^n].\n\n[^n]: Note text.\n"},
+		{name: "image as the text before a footnote call", input: "Use [![badge](/b.svg)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "link in the text before a footnote call", input: "Use [x [b](/c)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "image after an ignored label before a footnote call", input: "Use [x![i](/a)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "next line control as the text before a footnote call", input: "Use [\u0085][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "image shortcut before a footnote call", input: "Use ![alt][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "ignored image shortcut before a footnote call", input: "Use ![x][^n].\n\n[^n]: Note text.\n"},
+		{name: "blank text before a footnote call", input: "Use [ ][^n].\n\n[^n]: Note text.\n"},
+		{name: "empty text before a footnote call", input: "Use [][^n].\n\n[^n]: Note text.\n"},
+		{name: "blank text before a footnote call in a list item", input: "- [ ][^n] note\n\n[^n]: Note text.\n"},
+	})
+}
+
 // TestReferenceLinkImagesRule_UncertainFootnotes checks MD052 on GFM
 // footnote definitions that micromark is not certain to read where they
 // stand: in a container or a footnote, indented, or after a line that is
@@ -1379,6 +1412,65 @@ func TestHasLoneCarriageReturn(t *testing.T) {
 	assert.True(t, hasLoneCarriageReturn([]byte("a\rb\n")))
 	assert.True(t, hasLoneCarriageReturn([]byte("a\r\nb\r")))
 	assert.True(t, hasLoneCarriageReturn([]byte("a\r\r\n")))
+}
+
+// TestIgnoresShortcut checks when markdownlint certainly ignores the
+// shortcut reference before a footnote call: only for a label of ASCII
+// letters, digits and spaces, compared as normalizeReference gives it with
+// ignored_labels as written.
+func TestIgnoresShortcut(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		ignored []string
+		want    bool
+	}{
+		{name: "default label", text: "x", ignored: []string{"x"}, want: true},
+		{name: "label in upper case", text: "X", ignored: []string{"x"}, want: true},
+		{name: "ignored label in upper case", text: "x", ignored: []string{"X"}, want: false},
+		{name: "white space collapsed", text: " x  y ", ignored: []string{"x y"}, want: true},
+		{name: "emphasis", text: "*x*", ignored: []string{"*x*"}, want: false},
+		{name: "escape", text: "a\\*b", ignored: []string{"a\\*b"}, want: false},
+		{name: "letter outside ASCII", text: "é", ignored: []string{"é"}, want: false},
+		{name: "blank", text: " ", ignored: []string{"x"}, want: true},
+		{name: "tab", text: "\t", ignored: nil, want: true},
+		{name: "empty", text: "", ignored: nil, want: true},
+		{name: "no-break space", text: "\u00a0", ignored: nil, want: false},
+		{name: "label not ignored", text: "y", ignored: []string{"x"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ignoresShortcut(tt.text, tt.ignored))
+		})
+	}
+}
+
+// TestLabelKey checks the keys under which MD052 matches footnote labels:
+// white space collapsed and trimmed as markdownlint's normalizeReference
+// does, lowercase only for a label that is all ASCII, and every other byte
+// kept, so labels with a character outside ASCII match only when they are
+// the same bytes.
+func TestLabelKey(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+		want  string
+	}{
+		{name: "ASCII letters in any case", label: "^Note", want: "^note"},
+		{name: "white space collapsed and trimmed", label: " a \t\n b ", want: "a b"},
+		{name: "JavaScript white space", label: "a\u00a0\u2028\ufeffb\u3000", want: "a b"},
+		{name: "accented capital kept", label: "^É", want: "^É"},
+		{name: "long s kept", label: "^\u017f", want: "^\u017f"},
+		{name: "sharp s kept", label: "ß", want: "ß"},
+		{name: "ASCII next to a letter outside ASCII kept", label: "^Aé", want: "^Aé"},
+		{name: "invalid bytes kept", label: "a\xffb", want: "a\xffb"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, labelKey(tt.label))
+		})
+	}
+	assert.NotEqual(t, labelKey("\xfe"), labelKey("\xff"), "invalid bytes stay apart")
 }
 
 // TestFootnoteDefinitionLabel checks the labels that micromark reads in a

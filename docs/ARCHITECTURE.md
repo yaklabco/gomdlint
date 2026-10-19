@@ -312,7 +312,10 @@ holding blank lines must open one that micromark reads as goldmark does:
 none may open math, a directive or an HTML block of kinds 1 to 5 that goes
 on past its first line, whose end the two parsers may read on different
 lines, and a code fence must start at column 0 after a blank line, at the
-top level of goldmark's tree (`sharedBlocks`).
+top level of goldmark's tree (`sharedBlocks`). A call matches a definition
+only when their labels are the same bytes, or the same ASCII letters in any
+case, after white space is collapsed (`labelKey`), never by Unicode case
+folding, on which goldmark and markdownlint disagree.
 
 ## Fix Engine
 

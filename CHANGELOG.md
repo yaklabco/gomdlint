@@ -315,20 +315,22 @@ formats change. The first entries under Changed may need action.
   `#TOP` unless `ignore_case` is set.
 - **MD052**: Reads GFM footnotes as markdownlint does where micromark is
   certain to read the definition. A call such as `[^1]` is then no
-  reference, so `shortcut_syntax` no longer reports it, and in
-  `[text][^1]` the `[text]` is a shortcut reference, reported only with
-  `shortcut_syntax`, even when `[^1]: /url` also reads as a link reference
-  definition. A definition counts only on a `[^1]:` line at column 0, at
-  the top level outside code blocks, HTML blocks and front matter, at the
-  start of the document, after a blank line or right after another such
+  reference, so `shortcut_syntax` no longer reports it, and in `[text][^1]`
+  the `[text]` is a shortcut reference, so `[text][^1]` is reported only
+  with `shortcut_syntax`, and there only where main reports it. A call
+  matches a definition when their labels are the same bytes, or the same
+  ASCII letters in any case, after white space is collapsed, so `[^ſ]` no
+  longer calls `[^s]:`. A definition counts only on a `[^1]:` line at column
+  0, at the top level outside code blocks, HTML blocks and front matter, at
+  the start of the document, after a blank line or right after another such
   definition. No line before it may start with `$$` or `:::`, each code
-  fence before it must start at column 0 after a blank line, where
-  goldmark reads it at the top level, and no HTML block before it that may
-  hold blank lines may go on past its first line. No definition counts
-  where micromark drops a byte order mark that the parser reads as text: a
-  second one at the start of the file, or one that starts the first line
-  after the front matter that holds more than white space. Calls of other
-  definitions are read as before.
+  fence before it must start at column 0 after a blank line, where goldmark
+  reads it at the top level, and no HTML block before it that may hold blank
+  lines may go on past its first line. No definition counts where micromark
+  drops a byte order mark that the parser reads as text: a second one at the
+  start of the file, or one that starts the first line after the front
+  matter that holds more than white space. Calls of other definitions are
+  read as before.
 - **MD059**: Compares link text as written and skips only links whose text
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
   strikethrough counts as direct. Findings point at the link text, one

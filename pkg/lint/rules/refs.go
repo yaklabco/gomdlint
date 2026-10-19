@@ -127,11 +127,10 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 //
 // Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
 // "[^label]" calls a footnote that the document defines with a line that
-// starts "[^label]:", so it is no undefined reference. In "[text][^label]"
-// the second pair calls the footnote, so the first is a shortcut reference.
-// Only the definitions that micromark is certain to read count (see
-// certainFootnoteLabels). A call of any other label is read as goldmark
-// reads it.
+// starts "[^label]:", so it is no undefined reference. Only the definitions
+// that micromark is certain to read count (see certainFootnoteLabels), and
+// a call matches a definition only by labelKey. A call of any other label
+// is read as goldmark reads it.
 func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -158,83 +157,152 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 			continue
 		}
 
-		label, normalized, style := usage.Label, usage.NormalizedLabel, usage.Style
 		// A footnote definition is no link reference definition, so a
 		// footnote label calls the footnote even where goldmark resolved it
 		// as a link to a definition such as "[^n]: /url".
-		footnote := false
-		if strings.HasPrefix(label, "^") {
+		if strings.HasPrefix(usage.Label, "^") {
 			if footnotes == nil {
 				footnotes = certainFootnoteLabels(ctx)
 			}
-			footnote = footnotes[normalized]
-		}
-		if !usage.Unresolved && !footnote {
-			continue
+			if footnotes[labelKey(usage.Label)] {
+				if footnoteShortcut(ctx.File, usage, includeShortcut, ignoredSet, ignoredLabels) {
+					diags = append(diags, r.undefinedLabel(ctx, usage))
+				}
+				continue
+			}
 		}
 
 		// A defined label can still stay text, for example when the link
-		// text contains another link, so only labels with no definition
-		// are reported.
-		defined := usage.ResolvedDefinition != nil
-		if footnote {
-			if style != refs.StyleFull || !validShortcutLabel(usage.Text) {
-				continue
-			}
-			label, normalized, style = usage.Text, refs.NormalizeLabel(usage.Text), refs.StyleShortcut
-			defined = refCtx.Definitions[normalized] != nil
-		}
-
-		// Skip shortcut unless configured to check
-		if style == refs.StyleShortcut && !includeShortcut {
+		// text contains another link, so only labels with no definition are
+		// reported.
+		if !usage.Unresolved || usage.ResolvedDefinition != nil || ignoredSet[usage.NormalizedLabel] ||
+			(usage.Style == refs.StyleShortcut && !includeShortcut) {
 			continue
 		}
-
-		// Skip ignored labels
-		if ignoredSet[normalized] || defined {
-			continue
-		}
-
-		kind := "link"
-		if usage.IsImage {
-			kind = "image"
-		}
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, usage.Position,
-			fmt.Sprintf("Reference %s uses undefined label [%s]", kind, displayLabel(label))).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Define the reference or use inline syntax").
-			Build()
-		diags = append(diags, diag)
+		diags = append(diags, r.undefinedLabel(ctx, usage))
 	}
 
 	return diags, nil
 }
 
-// validShortcutLabel reports whether link text can be the label of a
-// shortcut reference: it holds a character other than whitespace and no
-// unescaped bracket.
-func validShortcutLabel(text string) bool {
-	if strings.TrimSpace(text) == "" {
+// undefinedLabel builds the finding for usage, a reference whose label
+// matches no definition.
+func (r *ReferenceLinkImagesRule) undefinedLabel(ctx *lint.RuleContext, usage *refs.ReferenceUsage) lint.Diagnostic {
+	kind := "link"
+	if usage.IsImage {
+		kind = "image"
+	}
+	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, usage.Position,
+		fmt.Sprintf("Reference %s uses undefined label [%s]", kind, displayLabel(usage.Label))).
+		WithSeverity(config.SeverityWarning).
+		WithSuggestion("Define the reference or use inline syntax").
+		Build()
+}
+
+// footnoteShortcut reports whether MD052 reports usage, which uses a
+// footnote that micromark reads. A footnote call is no reference. In
+// "[text][^label]" the second pair calls the footnote, so the first is a
+// shortcut reference, which markdownlint reports with shortcut_syntax unless
+// it finds "text" defined or ignored. Neither goldmark's definitions nor
+// its link text tell for certain what micromark reads there, so MD052
+// reports the full reference with shortcut_syntax exactly where main does,
+// except where markdownlint certainly ignores "text" (see ignoresShortcut).
+func footnoteShortcut(
+	file *mdast.FileSnapshot, usage *refs.ReferenceUsage, includeShortcut bool, ignoredSet map[string]bool, ignoredLabels []string,
+) bool {
+	if usage.Style != refs.StyleFull || !includeShortcut {
 		return false
 	}
-	for idx := 0; idx < len(text); idx++ {
-		switch text[idx] {
-		case '\\':
-			idx++
-		case '[', ']':
+	if !usage.Unresolved || usage.ResolvedDefinition != nil || ignoredSet[usage.NormalizedLabel] {
+		return false
+	}
+	text, ok := shortcutSource(file, usage)
+	return !ok || !ignoresShortcut(text, ignoredLabels)
+}
+
+// shortcutSource returns the source between the brackets of text in a full
+// reference "[text][label]" or "![text][label]", and false when the
+// reference's span does not hold it that way.
+func shortcutSource(file *mdast.FileSnapshot, usage *refs.ReferenceUsage) (string, bool) {
+	start, okStart := file.Offset(usage.Position.StartLine, usage.Position.StartColumn)
+	end, okEnd := file.Offset(usage.Position.EndLine, usage.Position.EndColumn)
+	if usage.IsImage {
+		start++
+	}
+	suffix := "][" + usage.Label + "]"
+	if !okStart || !okEnd || end > len(file.Content) || start+1+len(suffix) > end || file.Content[start] != '[' ||
+		!bytes.HasSuffix(file.Content[:end], []byte(suffix)) {
+		return "", false
+	}
+	return string(file.Content[start+1 : end-len(suffix)]), true
+}
+
+// ignoresShortcut reports whether markdownlint certainly ignores a shortcut
+// reference whose source between its brackets is text. It records no
+// reference for blank text, and ignores a label that, lowercased with its
+// white space collapsed by normalizeReference, equals one of ignored_labels
+// as written. That is certain only for text of nothing but ASCII letters,
+// digits, spaces and tabs, which markdownlint reads as written, with no
+// markup, and which Go and JavaScript lowercase alike.
+func ignoresShortcut(text string, ignoredLabels []string) bool {
+	for idx := range len(text) {
+		if char := text[idx]; char != ' ' && char != '\t' && !isASCIILetter(char) && !isASCIIDigit(char) {
+			return false
+		}
+	}
+	key := labelKey(text)
+	return key == "" || slices.Contains(ignoredLabels, key)
+}
+
+// labelKey returns the key under which MD052 matches a footnote call with a
+// footnote definition: the label with each run of white space, as a
+// JavaScript regular expression's \s reads it, made one space and trimmed
+// at both ends, as markdownlint's normalizeReference does, and lowercased
+// only when it is all ASCII. markdownlint lowercases other labels, goldmark
+// folds their case, and the two disagree on some ("ſ" and "s", "ß" and
+// "ss"), so two labels that hold a character outside ASCII match only when
+// their bytes are the same: MD052 then never matches labels that
+// markdownlint keeps apart.
+func labelKey(label string) string {
+	var key strings.Builder
+	space := false
+	for idx := 0; idx < len(label); {
+		char, width := utf8.DecodeRuneInString(label[idx:])
+		if isJSSpace(char) {
+			space = key.Len() > 0
+		} else {
+			if space {
+				key.WriteByte(' ')
+				space = false
+			}
+			key.WriteString(label[idx : idx+width])
+		}
+		idx += width
+	}
+	if isASCII(key.String()) {
+		return strings.ToLower(key.String())
+	}
+	return key.String()
+}
+
+// isASCII reports whether text holds nothing but ASCII characters.
+func isASCII(text string) bool {
+	for idx := range len(text) {
+		if text[idx] >= utf8.RuneSelf {
 			return false
 		}
 	}
 	return true
 }
 
-// certainFootnoteLabels returns the normalized labels, each with its "^",
-// of the GFM footnote definitions that micromark is certain to read, which
-// goldmark does not parse. A definition counts on a line that starts with
-// "[^label]:" at column 0 at the start of the document, right after a blank
-// line or right after another definition that counts, since micromark reads
-// two definitions in a row as two. goldmark must read the line at the top
-// level of the document: outside its front matter, code blocks and HTML
+// certainFootnoteLabels returns the labels, each with its "^" and as
+// labelKey gives them, of the GFM footnote definitions that micromark is
+// certain to read, which goldmark does not parse. A definition counts on a
+// line that starts with "[^label]:" at column 0 at the start of the
+// document, right after a blank line or right after another definition that
+// counts, since micromark reads two definitions in a row as two. goldmark
+// must read the line at the top level of the document: outside its front
+// matter, code blocks and HTML
 // blocks, and in no blockquote or list item.
 //
 // So that micromark reads the lines before the definition as goldmark does,
@@ -294,7 +362,7 @@ func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 			counts = topLevel[line]
 		}
 		if counts {
-			labels[refs.NormalizeLabel("^"+label)] = true
+			labels[labelKey("^"+label)] = true
 		}
 		afterBlank, afterDefinition = len(bytes.Trim(text, " \t")) == 0, counts
 	}
@@ -562,18 +630,37 @@ func hasLineSeparator(text []byte) bool {
 
 // onlyJSWhiteSpace reports whether text holds nothing but the white space,
 // other than line endings, that a JavaScript regular expression's \s
-// matches: tab, vertical tab, form feed, U+FEFF and the space separators.
+// matches (see isJSWhiteSpace).
 func onlyJSWhiteSpace(text []byte) bool {
 	for _, char := range string(text) {
-		switch {
-		case char == '\t', char == '\v', char == '\f', char == '\ufeff':
-		case unicode.Is(unicode.Zs, char):
-		default:
+		if !isJSWhiteSpace(char) {
 			return false
 		}
 	}
 	return true
 }
+
+// isJSWhiteSpace reports whether char is white space, other than a line
+// ending, to a JavaScript regular expression's \s: tab, vertical tab, form
+// feed, U+FEFF or a space separator.
+func isJSWhiteSpace(char rune) bool {
+	return char == '\t' || char == '\v' || char == '\f' || char == byteOrderMarkRune || unicode.Is(unicode.Zs, char)
+}
+
+// isJSSpace reports whether a JavaScript regular expression's \s matches
+// char: white space (see isJSWhiteSpace) or a line ending, which is a line
+// feed, a carriage return, U+2028 or U+2029.
+func isJSSpace(char rune) bool {
+	return char == '\n' || char == '\r' || char == lineSeparatorRune || char == paragraphSeparatorRune || isJSWhiteSpace(char)
+}
+
+// The runes of the byte order mark and of the two separators that a
+// JavaScript regular expression reads as line endings.
+const (
+	byteOrderMarkRune      = 0xFEFF
+	lineSeparatorRune      = 0x2028
+	paragraphSeparatorRune = 0x2029
+)
 
 // withoutContainerPrefix returns text after the blockquote markers, list
 // item markers and indentation that start it.
