@@ -336,3 +336,29 @@ func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 		})
 	}
 }
+
+// TestOutlineAllocationFollowsTheText checks that writing the outline of a
+// document allocates a few bytes for each byte of the document, not a buffer
+// for each of its text nodes. Every rule that checks its fixes by the
+// outline writes the outline of the whole document at least twice, and
+// rendering each text node through a buffered writer of its own allocated
+// 4 KB for each node, which garbage collection then had to clear.
+func TestOutlineAllocationFollowsTheText(t *testing.T) {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range 500 {
+		fmt.Fprintf(&doc, "Text %d with *emphasis*, `code` and a [link](https://example.com/%d).\n\n", idx, idx)
+	}
+	snapshot := parseForCheck(t, doc.String())
+	// TotalAlloc counts every allocation, collected or not.
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	outline := documentOutline(snapshot, fixAllowance{})
+	runtime.ReadMemStats(&after)
+	require.Contains(t, outline, "emphasis")
+	perByte := float64(after.TotalAlloc-before.TotalAlloc) / float64(len(snapshot.Content))
+	t.Logf("%d bytes, %.1f bytes allocated for each", len(snapshot.Content), perByte)
+	// A paragraph holds five text nodes in about 70 bytes, so a buffer of
+	// 4 KB for each node makes about 300 bytes for each byte.
+	require.Less(t, perByte, 40.0, "the outline allocates more than its text needs")
+}
