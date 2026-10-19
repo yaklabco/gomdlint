@@ -12,7 +12,8 @@ import (
 
 // TestRuleConfig_BooleanShorthand covers markdownlint's shorthand for rule
 // settings: true enables a rule and false disables it, under any rule key,
-// in YAML and in JSON, which config files may also use.
+// in YAML and in JSON, which config files may also use. A string is the
+// other shorthand, a severity (see TestRuleConfig_SeverityShorthand).
 func TestRuleConfig_BooleanShorthand(t *testing.T) {
 	t.Parallel()
 
@@ -91,12 +92,16 @@ func TestRuleConfig_MappingStillDecodes(t *testing.T) {
 }
 
 // TestRuleConfig_RejectsOtherValues covers rule values that are neither a
-// boolean nor a mapping. A YAML 1.1 boolean such as "yes" is a string to
-// markdownlint, so it is rejected too.
+// boolean, a string nor a mapping, such as a number or a list. A string is
+// a severity (see TestRuleConfig_SeverityShorthand). A scalar that YAML
+// reads as another type, such as one with a binary or a custom tag, is no
+// string here, though the severity setting would read its text.
 func TestRuleConfig_RejectsOtherValues(t *testing.T) {
 	t.Parallel()
 
-	for _, value := range []string{"maybe", "80", "warning", "yes", "[a, b]", `"false"`} {
+	for _, value := range []string{
+		"80", "1.5", "2001-12-14", "[a, b]", "[warning]", "!!binary d2FybmluZw==", "!custom warning",
+	} {
 		t.Run(value, func(t *testing.T) {
 			t.Parallel()
 
@@ -104,9 +109,134 @@ func TestRuleConfig_RejectsOtherValues(t *testing.T) {
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "line 2")
-			assert.Contains(t, err.Error(), "true, false or a mapping")
+			assert.Contains(t, err.Error(), "true, false, a severity (error, warning or info) or a mapping")
 		})
 	}
+}
+
+// TestRuleConfig_SeverityShorthand covers markdownlint's shorthand of a
+// severity as a rule's value, error or warning, and gomdlint's own info,
+// under any rule key, in YAML and in JSON, under rules and rule_defaults.
+// It sets the severity alone, so it decodes exactly as the mapping that
+// sets only the severity does.
+func TestRuleConfig_SeverityShorthand(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		shorthand string
+		mapping   string
+		section   func(*config.Config) map[string]config.RuleConfig
+		key       string
+		severity  string
+	}{
+		{
+			name:      "ID error",
+			shorthand: "rules:\n  MD013: error\n",
+			mapping:   "rules:\n  MD013:\n    severity: error\n",
+			section:   rulesSection, key: "MD013", severity: "error",
+		},
+		{
+			name:      "name warning",
+			shorthand: "rules:\n  line-length: warning\n",
+			mapping:   "rules:\n  line-length:\n    severity: warning\n",
+			section:   rulesSection, key: "line-length", severity: "warning",
+		},
+		{
+			name:      "markdownlint name info",
+			shorthand: "rules:\n  ul-style: info\n",
+			mapping:   "rules:\n  ul-style:\n    severity: info\n",
+			section:   rulesSection, key: "ul-style", severity: "info",
+		},
+		{
+			name:      "quoted",
+			shorthand: "rules:\n  MD013: 'warning'\n",
+			mapping:   "rules:\n  MD013:\n    severity: 'warning'\n",
+			section:   rulesSection, key: "MD013", severity: "warning",
+		},
+		{
+			name:      "JSON",
+			shorthand: `{"rules": {"line-length": "error"}}`,
+			mapping:   `{"rules": {"line-length": {"severity": "error"}}}`,
+			section:   rulesSection, key: "line-length", severity: "error",
+		},
+		{
+			name:      "rule_defaults",
+			shorthand: "rule_defaults:\n  MD009: info\n",
+			mapping:   "rule_defaults:\n  MD009:\n    severity: info\n",
+			section:   ruleDefaultsSection, key: "MD009", severity: "info",
+		},
+		{
+			name:      "through an alias",
+			shorthand: "ignore: [&level warning]\nrules:\n  MD013: *level\n",
+			mapping:   "ignore: [&level warning]\nrules:\n  MD013:\n    severity: *level\n",
+			section:   rulesSection, key: "MD013", severity: "warning",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := config.FromYAML([]byte(tt.shorthand))
+			require.NoError(t, err)
+
+			require.Contains(t, tt.section(cfg), tt.key)
+			rule := tt.section(cfg)[tt.key]
+			require.NotNil(t, rule.Severity)
+			assert.Equal(t, tt.severity, *rule.Severity)
+			assert.Nil(t, rule.Enabled, "the shorthand leaves enabled alone")
+			assert.Nil(t, rule.AutoFix, "the shorthand leaves auto-fix alone")
+			assert.Nil(t, rule.Options, "the shorthand leaves the options alone")
+
+			mapping, err := config.FromYAML([]byte(tt.mapping))
+			require.NoError(t, err)
+			assert.Equal(t, mapping, cfg, "the shorthand reads as the severity setting alone")
+
+			var decoded config.Config
+			require.NoError(t, yaml.Unmarshal([]byte(tt.shorthand), &decoded))
+			assert.Equal(t, rule, tt.section(&decoded)[tt.key], "yaml.Unmarshal reads the shorthand too")
+		})
+	}
+}
+
+// TestRuleConfig_SeverityShorthandReadsLikeTheSetting covers a string that
+// is no severity gomdlint knows. It decodes as the severity setting that
+// holds it does, and loading rejects both alike when it validates the
+// configuration (see the configuration loader's tests), so decoding
+// accepts any string here, as it does under severity.
+func TestRuleConfig_SeverityShorthandReadsLikeTheSetting(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"bogus", "Warning", "off", "yes", `"false"`, "''"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+
+			shorthand, err := config.FromYAML([]byte("rules:\n  MD013: " + value + "\n"))
+			require.NoError(t, err)
+			mapping, err := config.FromYAML([]byte("rules:\n  MD013:\n    severity: " + value + "\n"))
+			require.NoError(t, err)
+
+			assert.Equal(t, mapping, shorthand)
+			require.NotNil(t, shorthand.Rules["MD013"].Severity)
+		})
+	}
+}
+
+// TestRuleConfig_SeverityShorthandSurvivesClone covers the YAML round trip
+// that Config.Clone uses, which must keep the severity that the shorthand
+// sets.
+func TestRuleConfig_SeverityShorthandSurvivesClone(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.FromYAML([]byte("rules:\n  MD013: info\n"))
+	require.NoError(t, err)
+
+	clone := cfg.Clone()
+
+	assert.Equal(t, settled(cfg.Rules), settled(clone.Rules))
+	require.NotNil(t, clone.Rules["MD013"].Severity)
+	assert.Equal(t, "info", *clone.Rules["MD013"].Severity)
 }
 
 // TestRuleConfig_ShorthandSurvivesClone covers the YAML round trip that

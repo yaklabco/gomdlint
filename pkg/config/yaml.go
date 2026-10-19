@@ -116,10 +116,15 @@ func withHeader(header string, yamlBytes []byte) []byte {
 }
 
 // UnmarshalYAML decodes the settings of one rule: a mapping of the settings
-// that RuleSettingKeys names, or markdownlint's shorthand of a bare
-// boolean, which enables (true) or disables (false) the rule and leaves its
-// other settings alone. Strings such as "yes" are not booleans here, as in
-// markdownlint.
+// that RuleSettingKeys names, or one of markdownlint's shorthands. A bare
+// boolean enables (true) or disables (false) the rule, and a bare string,
+// a scalar that YAML reads as a string, is the rule's severity, as
+// markdownlint reads "error" and "warning". Each shorthand sets its one
+// setting and leaves the others alone, so "MD013: warning" decodes as
+// "MD013: {severity: warning}" does. Like the severity setting, the
+// shorthand takes any string, and validation rejects a string that names
+// no severity. Strings such as "yes" are not booleans here, as in
+// markdownlint, so they are severities that validation rejects.
 //
 // A mapping may also write options directly under the rule key, the flat
 // shape that markdownlint uses. Only the options that the rule declares
@@ -134,7 +139,7 @@ func withHeader(header string, yamlBytes []byte) []byte {
 // options: YAML rejects a key written twice, but compares an alias key by
 // its anchor, so decoding would keep the later value silently.
 //
-// YAML is a superset of JSON, so JSON config files get the shorthand and
+// YAML is a superset of JSON, so JSON config files get the shorthands and
 // the flat shape too.
 func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 	switch {
@@ -144,6 +149,11 @@ func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 			return fmt.Errorf("decode rule shorthand: %w", err)
 		}
 		*rc = RuleConfig{Enabled: &enabled}
+		return nil
+	case value.Kind == yaml.ScalarNode && value.ShortTag() == "!!str":
+		// A string decodes as its text, as the severity setting reads it.
+		severity := value.Value
+		*rc = RuleConfig{Severity: &severity}
 		return nil
 	case value.Kind == yaml.MappingNode:
 		// The settings type without this method decodes the mapping as
@@ -160,7 +170,8 @@ func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	default:
 		return &yaml.TypeError{Errors: []string{fmt.Sprintf(
-			"line %d: rule settings must be true, false or a mapping, not %s", value.Line, describeNode(value))}}
+			"line %d: rule settings must be true, false, a severity (error, warning or info) or a mapping, not %s",
+			value.Line, describeNode(value))}}
 	}
 }
 

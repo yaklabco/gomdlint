@@ -380,6 +380,9 @@ rules:
   # A bare true or false turns a rule on or off, as in markdownlint
   no-inline-html: false
 
+  # A bare severity sets the rule's severity, as in markdownlint
+  no-hard-tabs: error
+
 ignore:
   - "vendor/**"
   - "node_modules/**"
@@ -430,6 +433,20 @@ closest rules, such as `unknown rule "no-trailling-spaces" (did you mean
 "no-trailing-spaces"?)`. In a config file, the warning names the file and
 line. Shell completion offers rule names, IDs, markdownlint's names and
 tags for the three flags.
+
+### Rule Settings
+
+A rule's value is a mapping of its settings, `enabled`, `severity`,
+`auto_fix` and `options`, or one of markdownlint's shorthands. `true` and
+`false` turn the rule on and off. A severity sets the rule's severity:
+`error` or `warning`, as in markdownlint, or gomdlint's `info`. So
+`line-length: warning` means `line-length: {severity: warning}`. Any other
+string is an invalid severity, which fails as it does under `severity`.
+
+The severity shorthand sets the severity and nothing else. The rule keeps
+the options, `auto_fix` setting and on or off state that `rule_defaults` or
+a lower layer gives it. So, unlike in markdownlint, `line-length: warning`
+does not turn `line-length` back on when a user config turns it off.
 
 ### Rule Options
 

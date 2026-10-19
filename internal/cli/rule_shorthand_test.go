@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -94,6 +95,214 @@ func TestLint_RuleBooleanShorthand(t *testing.T) {
 		require.Empty(t, got.stderr)
 		assert.Equal(t, map[string]bool{"MD009": true, "MD013": true}, reportedRules(t, got.stdout))
 	})
+}
+
+// severityDoc has findings for line-length (MD013), no-inline-html (MD033),
+// no-trailing-spaces (MD009) and, on lines 7 and 8,
+// no-multiple-blank-lines (MD012), which all report warnings by default.
+const severityDoc = shorthandDoc + "\n\n\nText after blank lines.\n"
+
+// layeredDoc has two lines longer than line-length's default of 80
+// characters: line 3, of 99 characters, and line 5, of 134.
+var layeredDoc = "# Title\n\n" + strings.Repeat("word ", 19) + "word\n\n" + strings.Repeat("word ", 26) + "word\n"
+
+// finding is a finding of a JSON report: its rule, line and severity.
+type finding struct {
+	rule     string
+	line     int
+	severity string
+}
+
+// reportedFindings returns the findings that a JSON report lists.
+func reportedFindings(t *testing.T, report string) []finding {
+	t.Helper()
+
+	var parsed struct {
+		Files []struct {
+			Diagnostics []struct {
+				RuleID    string `json:"ruleId"`
+				StartLine int    `json:"startLine"`
+				Severity  string `json:"severity"`
+			} `json:"diagnostics"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(report), &parsed), report)
+
+	var findings []finding
+	for _, file := range parsed.Files {
+		for _, diag := range file.Diagnostics {
+			findings = append(findings, finding{rule: diag.RuleID, line: diag.StartLine, severity: diag.Severity})
+		}
+	}
+	return findings
+}
+
+// ruleSeverities returns the severity of each rule's findings in a JSON
+// report, by rule ID.
+func ruleSeverities(t *testing.T, report string) map[string]string {
+	t.Helper()
+
+	severities := make(map[string]string)
+	for _, found := range reportedFindings(t, report) {
+		if previous, seen := severities[found.rule]; seen {
+			require.Equal(t, previous, found.severity, "every finding of %s has one severity", found.rule)
+		}
+		severities[found.rule] = found.severity
+	}
+	return severities
+}
+
+// TestLint_RuleSeverityShorthand covers rules set to a severity in a
+// gomdlint config, as markdownlint allows with error and warning, and with
+// gomdlint's info: the rule's findings take the severity, whichever key
+// names the rule, in YAML and in JSON, under rules and under
+// rule_defaults. Error findings fail the run; info and warnings do not.
+func TestLint_RuleSeverityShorthand(t *testing.T) {
+	tests := []struct {
+		name   string
+		file   string
+		config string
+		want   map[string]string
+		code   int
+	}{
+		{
+			name: "YAML by name", file: ".gomdlint.yml",
+			config: "rules:\n  line-length: error\n  no-inline-html: info\n",
+			want:   map[string]string{"MD009": "warning", "MD012": "warning", "MD013": "error", "MD033": "info"},
+			code:   cli.ExitLintErrors,
+		},
+		{
+			name: "YAML by ID and markdownlint name", file: ".gomdlint.yml",
+			config: "rules:\n  MD009: info\n  no-multiple-blanks: info\n  MD013: info\n  MD033: warning\n",
+			want:   map[string]string{"MD009": "info", "MD012": "info", "MD013": "info", "MD033": "warning"},
+			code:   cli.ExitSuccess,
+		},
+		{
+			name: "JSON", file: "gomdlint.json",
+			config: `{"rules": {"no-trailing-spaces": "error", "MD033": "info"}}`,
+			want:   map[string]string{"MD009": "error", "MD012": "warning", "MD013": "warning", "MD033": "info"},
+			code:   cli.ExitLintErrors,
+		},
+		{
+			name: "rule_defaults", file: ".gomdlint.yml",
+			config: "rule_defaults:\n  no-multiple-blank-lines: error\n",
+			want:   map[string]string{"MD009": "warning", "MD012": "error", "MD013": "warning", "MD033": "warning"},
+			code:   cli.ExitLintErrors,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": severityDoc, tt.file: tt.config})
+
+			got := execute(t, "lint", "--config", tt.file, "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, tt.code, got.code)
+			assert.Equal(t, tt.want, ruleSeverities(t, got.stdout))
+		})
+	}
+
+	t.Run("without the config every rule reports warnings", func(t *testing.T) {
+		inProject(t, map[string]string{"doc.md": severityDoc})
+
+		got := execute(t, "lint", "--format", "json", "doc.md")
+
+		assert.Equal(t, cli.ExitSuccess, got.code)
+		assert.Equal(t, map[string]string{"MD009": "warning", "MD012": "warning", "MD013": "warning", "MD033": "warning"},
+			ruleSeverities(t, got.stdout))
+	})
+}
+
+// TestLint_RuleSeverityShorthandKeepsLowerLayerOptions covers a project
+// config that gives line-length a severity, over a user config, or the
+// project config's own rule_defaults, that sets its line length to 120.
+// The shorthand sets the severity alone, as "severity: error" does, so the
+// line length still applies: of layeredDoc's two long lines, only the
+// longer one is reported, as an error.
+func TestLint_RuleSeverityShorthandKeepsLowerLayerOptions(t *testing.T) {
+	const lineLength = "line-length:\n    line_length: 120\n"
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name: "user config",
+			files: map[string]string{
+				".xdg/gomdlint/config.yaml": "rules:\n  " + lineLength,
+				".gomdlint.yml":             "rules:\n  line-length: error\n",
+			},
+		},
+		{
+			name:  "rule_defaults",
+			files: map[string]string{".gomdlint.yml": "rule_defaults:\n  " + lineLength + "rules:\n  line-length: error\n"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := map[string]string{"doc.md": layeredDoc}
+			maps.Copy(files, tt.files)
+			inProject(t, files)
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, cli.ExitLintErrors, got.code)
+			assert.Equal(t, []finding{{rule: "MD013", line: 5, severity: "error"}}, reportedFindings(t, got.stdout))
+
+			// The same files with the severity written out lint alike.
+			project := strings.Replace(tt.files[".gomdlint.yml"], "line-length: error", "line-length:\n    severity: error", 1)
+			require.NoError(t, os.WriteFile(".gomdlint.yml", []byte(project), 0o644))
+			written := execute(t, "lint", "--format", "json", "doc.md")
+			assert.Equal(t, got, written)
+		})
+	}
+}
+
+// TestLint_InvalidSeverityShorthand covers a rule set to a string that is
+// no severity. The run fails as it does for the same string under
+// severity, with the same error, which names the rule and lists the
+// severities.
+func TestLint_InvalidSeverityShorthand(t *testing.T) {
+	for _, value := range []string{"bogus", "Warning", "off"} {
+		t.Run(value, func(t *testing.T) {
+			inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": "rules:\n  line-length: " + value + "\n"})
+			shorthand := execute(t, "lint", "doc.md")
+
+			inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": "rules:\n  line-length:\n    severity: " + value + "\n"})
+			setting := execute(t, "lint", "doc.md")
+
+			assert.Equal(t, cli.ExitConfigError, setting.code)
+			assert.Equal(t, "Error: load configuration: rules.MD013.severity: invalid severity \""+value+
+				"\"; must be one of: error, warning, info\n", setting.stderr)
+			assert.Equal(t, setting, shorthand)
+		})
+	}
+}
+
+// TestRuleShorthandMessagesGolden runs command lines whose gomdlint config
+// sets a rule to a string that is no severity, and compares the transcript
+// of each with testdata/golden/<name>.golden.
+func TestRuleShorthandMessagesGolden(t *testing.T) {
+	skipUnlessSlashPaths(t)
+
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "lint-config-severity-shorthand-invalid", config: "rules:\n  line-length: warn\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": tt.config})
+
+			got := execute(t, "lint", "doc.md")
+
+			assertGolden(t, testdataPath("golden", tt.name+".golden"), transcript(t, got, dir))
+		})
+	}
 }
 
 // TestLint_RuleShorthandAgreesWithMigration covers the same shorthand in a

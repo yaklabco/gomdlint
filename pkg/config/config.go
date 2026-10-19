@@ -16,6 +16,10 @@ const (
 // RuleConfig holds the settings of one rule: whether it runs, its severity,
 // whether --fix applies its fixes, and its options.
 //
+// A configuration file may give a rule markdownlint's shorthand instead of
+// a mapping: true or false, which sets enabled, or a string, which sets
+// the severity (see UnmarshalYAML).
+//
 // A configuration file may write the options under the options key, the
 // shape that gomdlint writes, or directly under the rule key, the flat
 // shape that markdownlint uses, or both. Only the options that a rule

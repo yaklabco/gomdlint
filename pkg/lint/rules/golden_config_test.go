@@ -112,7 +112,7 @@ func loadGoldenConfig(path string) (*config.Config, error) {
 // with fixes on and their own severities, so it cannot honour one, and a
 // setting that is null is written all the same. Keys count as decoding
 // takes them, after merge keys. A bare true or false is markdownlint's
-// shorthand for enabled.
+// shorthand for enabled, and a bare string its shorthand for severity.
 func writtenRuleSettings(doc *yaml.Node) (map[string]string, error) {
 	var shape struct {
 		Rules map[string]yaml.Node `yaml:"rules"`
@@ -129,8 +129,11 @@ func writtenRuleSettings(doc *yaml.Node) (map[string]string, error) {
 		}
 		switch target.Kind {
 		case yaml.ScalarNode:
-			if target.ShortTag() == "!!bool" {
+			switch target.ShortTag() {
+			case "!!bool":
 				settings[key] = "enabled"
+			case "!!str":
+				settings[key] = "severity"
 			}
 		case yaml.MappingNode:
 			var written map[string]yaml.Node
