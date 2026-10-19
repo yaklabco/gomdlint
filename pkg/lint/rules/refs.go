@@ -38,12 +38,29 @@ func NewLinkFragmentsRule() *LinkFragmentsRule {
 }
 
 // Apply checks that link fragments reference valid document anchors.
+//
+// Headings, custom heading anchors and HTML tags name anchors. Like
+// markdownlint, MD051 reads the tags of an HTML block from its lines parsed
+// again as Markdown, as MD033 does (see htmlBlockInlineHTML), so a tag on
+// any line of the block counts and a tag in a code span does not. A tag
+// names the value of its first id attribute, or an "a" tag without one the
+// value of its first name attribute (see refs.HTMLAnchor).
 func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.Root == nil || ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil || !hasFragmentLink(ctx) {
 		return nil, nil
 	}
 
-	refCtx := ctx.RefContext()
+	refCtx := refs.CollectWithOptions(ctx.Root, ctx.File, refs.Options{
+		Prefix: func(node *mdast.Node, line int) int { return len(lint.ContainerPrefix(ctx.File, node, line)) },
+		HTMLBlockTags: func(block *mdast.Node) []mdast.SourceRange {
+			tags := htmlBlockInlineHTML(ctx.File, block)
+			ranges := make([]mdast.SourceRange, len(tags))
+			for idx, tag := range tags {
+				ranges[idx] = tag.span
+			}
+			return ranges
+		},
+	})
 	ignoreCase := ctx.OptionBool("ignore_case", false)
 	ignoredPatternStr := ctx.OptionString("ignored_pattern", "")
 
@@ -100,6 +117,20 @@ func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 	}
 
 	return diags, nil
+}
+
+// hasFragmentLink reports whether a link or image in the document has a
+// destination that starts with "#", the only kind MD051 checks, so that a
+// document without one is not read for anchors.
+func hasFragmentLink(ctx *lint.RuleContext) bool {
+	for _, nodes := range [][]*mdast.Node{ctx.Links(), ctx.Images()} {
+		for _, node := range nodes {
+			if strings.HasPrefix(lint.LinkDestination(node), "#") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ReferenceLinkImagesRule validates that reference labels are defined (MD052).

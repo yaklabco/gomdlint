@@ -733,6 +733,43 @@ func TestLinkFragmentsRule_CustomAnchorsAndTop(t *testing.T) {
 	assert.Equal(t, []position{{18, 34}, {18, 46}, {19, 1}}, positions(map[string]any{"ignore_case": true}))
 }
 
+// TestLinkFragmentsRule_HTMLAnchors checks MD051 against markdownlint
+// 0.41.1, which reads the tags of an HTML block from its lines parsed again
+// as Markdown, as MD033 does, so a tag on any line of the block names an
+// anchor and one in a code span names none. It leaves a block that starts
+// with "<!--" and ends with "-->" unparsed, as a comment. An opening tag
+// names the value of its first id attribute, quoted or not, or an "a" tag
+// without one the value of its first name attribute.
+func TestLinkFragmentsRule_HTMLAnchors(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"<div>\n<a name=\"later\"></a>\n</div>\n\n" + // 3
+		"<div id=\"first\">\n<span ID=\"second\">text</span>\n</div>\n\n" + // 7
+		"Text <a\nid=\"spread\">over two lines</a>.\n\n" + // 11
+		"<div name=\"div-name\"></div>\n\n" + // 14: name counts only on an a tag
+		"<div>\n`<a id=\"in-code\"></a>`\n</div>\n\n" + // 16
+		"<a name=\"name-first\" id=\"id-second\"></a>\n\n" + // 20: the id wins
+		"<a data-id=\"data\"></a> <a id=unquoted></a> <A NAME='upper'></A>\n\n" + // 22
+		"<a id=\"\" name=\"after-empty\"></a>\n\n" + // 24: an empty id still wins
+		"> <div>\n> <a id=\"quoted\"></a>\n> </div>\n\n" + // 26
+		"- <div>\n  <a id=\"listed\"></a>\n  </div>\n\n" + // 30
+		"<!--\n<a id=\"in-comment\"></a>\n-->\n\n" + // 34
+		"[a](#later) [b](#first) [c](#second) [d](#spread) [e](#div-name)\n" + // 38
+		"[f](#in-code) [g](#name-first) [h](#id-second) [i](#data)\n" + // 39
+		"[j](#unquoted) [k](#upper) [l](#after-empty) [m](#quoted)\n" + // 40
+		"[n](#listed) [o](#in-comment)\n\n" + // 41
+		"<!--\na\n--> <a id=\"comment-end\"></a> <!-- z -->\n\n" + // 43: one comment to markdownlint
+		"  <!--\na\n--> <a id=\"indented-comment\"></a> <!-- z -->\n\n" + // 47: the indentation starts its text
+		"[p](#comment-end) [q](#indented-comment)\n" // 51
+
+	type position struct{ line, column int }
+	diags := applyRuleWithOptions(t, NewLinkFragmentsRule(), markdown, nil)
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{38, 51}, {39, 1}, {39, 15}, {39, 48}, {40, 28}, {41, 14}, {51, 1}}, got)
+}
+
 func TestDescriptiveLinkTextRule(t *testing.T) {
 	rule := NewDescriptiveLinkTextRule()
 

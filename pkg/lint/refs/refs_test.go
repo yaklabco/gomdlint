@@ -1,6 +1,7 @@
 package refs
 
 import (
+	"bytes"
 	"context"
 	"strconv"
 	"testing"
@@ -716,5 +717,89 @@ func TestBlankLabel(t *testing.T) {
 				t.Errorf("BlankLabel(%q) = %v, want %v", tt.label, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestHTMLAnchor checks the anchor that an HTML tag names, as markdownlint
+// 0.41.1 reads it in MD051: an opening tag names the value of its first id
+// attribute, in any case and quoted or not, and an "a" tag without one the
+// value of its first name attribute. Closing tags, comments and
+// declarations name none, and neither does an empty value.
+func TestHTMLAnchor(t *testing.T) {
+	tests := []struct {
+		tag    string
+		id     string
+		source AnchorSource
+		ok     bool
+	}{
+		{tag: `<a id="x">`, id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: `<div ID='x'>`, id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: `<span id=x>`, id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: "<a\nid=\"x\">", id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: "<a\n> id=\"x\">", id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: "<a\vid=\"x\">", id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: "<a\u00a0id=\"x\">", id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: `<a id = "x y">`, id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: `<a name="x">`, id: "x", source: AnchorFromHTMLName, ok: true},
+		{tag: `<A NAME='x'>`, id: "x", source: AnchorFromHTMLName, ok: true},
+		{tag: `<a name="x" id="y">`, id: "y", source: AnchorFromHTMLID, ok: true},
+		{tag: `<a id="" name="x">`},
+		{tag: `<div name="x">`},
+		{tag: `<a data-id="x">`},
+		{tag: `<a/id="x">`},
+		{tag: `</a id="x">`},
+		{tag: `<!-- id="x" -->`},
+		{tag: `<!DOCTYPE html id="x">`},
+		{tag: `<a href="#x">`},
+		{tag: `<abbr name="x">`},
+		{tag: `<![CDATA[ id="x" ]]>`},
+		// markdownlint reads a processing instruction's text and a quoted
+		// value as it reads attributes.
+		{tag: `<?php id="x" ?>`, id: "x", source: AnchorFromHTMLID, ok: true},
+		{tag: `<a title="foo id=bar">`, id: "bar", source: AnchorFromHTMLID, ok: true},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.tag), func(t *testing.T) {
+			id, source, ok := HTMLAnchor([]byte(tt.tag))
+			if id != tt.id || source != tt.source || ok != tt.ok {
+				t.Errorf("HTMLAnchor(%q) = %q, %v, %v; want %q, %v, %v", tt.tag, id, source, ok, tt.id, tt.source, tt.ok)
+			}
+		})
+	}
+}
+
+// TestCollect_HTMLBlockAnchors checks that every line of an HTML block can
+// name an anchor. Without a reader for HTML blocks, the collector reads
+// every HTML construct in a block's source; with one, only the ranges it
+// gives. Inline HTML is read whole, over all of its lines.
+func TestCollect_HTMLBlockAnchors(t *testing.T) {
+	content := []byte("# Title\n\n<div>\n<a name=\"later\"></a>\n`<a id=\"code\">`\n</div>\n\n" +
+		"Text <a\nid=\"spread\">x</a>.\n")
+	file, err := goldmark.New("gfm").Parse(context.Background(), "test.md", content)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	lexical := Collect(file.Root, file)
+	for _, id := range []string{"later", "code", "spread"} {
+		if !lexical.Anchors.Has(id) {
+			t.Errorf("Collect: anchor %q not found", id)
+		}
+	}
+
+	later := bytes.Index(content, []byte("<a name"))
+	tag := mdast.SourceRange{StartOffset: later, EndOffset: later + len(`<a name="later">`)}
+	hooked := CollectWithOptions(file.Root, file, Options{
+		HTMLBlockTags: func(*mdast.Node) []mdast.SourceRange { return []mdast.SourceRange{tag} },
+	})
+	if !hooked.Anchors.Has("later") || !hooked.Anchors.Has("spread") {
+		t.Error("CollectWithOptions: anchors later and spread not found")
+	}
+	if hooked.Anchors.Has("code") {
+		t.Error("CollectWithOptions: anchor code found outside the ranges HTMLBlockTags gives")
+	}
+	anchor := hooked.Anchors.Lookup("later")
+	if anchor == nil || anchor.Source != AnchorFromHTMLName || anchor.Position.StartLine != 4 || anchor.Position.StartColumn != 1 {
+		t.Errorf("anchor later = %+v, want an HTML name anchor at 4:1", anchor)
 	}
 }

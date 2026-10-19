@@ -855,6 +855,14 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\nSee [text ][label] here.\n\n[label]: /destination\n", want: []catalogFinding{{3, true}},
 	},
 	{id: "MD051", name: "link to #top", phrase: "or at #top", input: "# Title\n\n[b](#top)\n"},
+	{
+		id: "MD051", name: "id on a later line of an HTML block", phrase: "an element's id attribute",
+		input: "# Title\n\n<div>\n<span id=\"x\">y</span>\n</div>\n\n[b](#x)\n",
+	},
+	{
+		id: "MD051", name: "name attributes", phrase: "or the name attribute of an a element",
+		input: "# Title\n\n<a name=\"x\"></a> <div name=\"y\"></div>\n\n[b](#x) [c](#y)\n", want: []catalogFinding{{5, false}},
+	},
 }
 
 // TestCatalogTextsHoldForTheRules lints, with the built-in rules and their

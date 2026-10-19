@@ -3,10 +3,10 @@ package refs
 import (
 	"bytes"
 	"regexp"
-	"strings"
 
 	"github.com/yuin/goldmark/util"
 
+	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -26,14 +26,37 @@ func Collect(root *mdast.Node, file *mdast.FileSnapshot) *Context {
 // (which may be nil) to leave the container prefix of each continuation
 // line out of labels read from the source.
 func CollectWithPrefix(root *mdast.Node, file *mdast.FileSnapshot, prefix LinePrefix) *Context {
+	return CollectWithOptions(root, file, Options{Prefix: prefix})
+}
+
+// Options configure CollectWithOptions.
+type Options struct {
+	// Prefix, which may be nil, gives the container prefix of each
+	// continuation line, which labels read from the source leave out.
+	Prefix LinePrefix
+
+	// HTMLBlockTags, which may be nil, gives the tags of an HTML block as
+	// ranges of the file's content, each of which may name an anchor (see
+	// HTMLAnchor). markdownlint finds them by parsing the block's lines
+	// again as Markdown, so that a tag in a code span is code. Without it,
+	// every HTML construct in the block's source counts.
+	HTMLBlockTags func(block *mdast.Node) []mdast.SourceRange
+}
+
+// CollectWithOptions builds a reference Context like Collect, leaving the
+// container prefixes that options.Prefix gives out of labels read from the
+// source, and reading the tags of HTML blocks that options.HTMLBlockTags
+// gives for anchors.
+func CollectWithOptions(root *mdast.Node, file *mdast.FileSnapshot, options Options) *Context {
 	if root == nil || file == nil {
 		return NewContext(file)
 	}
 
 	coll := &collector{
-		ctx:    NewContext(file),
-		root:   root,
-		prefix: prefix,
+		ctx:           NewContext(file),
+		root:          root,
+		prefix:        options.Prefix,
+		htmlBlockTags: options.HTMLBlockTags,
 	}
 	coll.collect(root)
 	coll.collectUnresolvedReferences()
@@ -45,9 +68,10 @@ func CollectWithPrefix(root *mdast.Node, file *mdast.FileSnapshot, prefix LinePr
 
 // collector builds a Context by walking the AST and source.
 type collector struct {
-	ctx    *Context
-	root   *mdast.Node
-	prefix LinePrefix
+	ctx           *Context
+	root          *mdast.Node
+	prefix        LinePrefix
+	htmlBlockTags func(block *mdast.Node) []mdast.SourceRange
 }
 
 // collect walks the AST to collect anchors and usages.
@@ -240,56 +264,57 @@ func detectLinkStyle(node *mdast.Node) (ReferenceStyle, string) {
 	return StyleInline, ""
 }
 
-// collectHTMLAnchors extracts id and name attributes from HTML.
+// collectHTMLAnchors adds the anchors that the tags of an HTML node name
+// (see HTMLAnchor): inline HTML is one tag, read over all of its lines, and
+// an HTML block holds the tags that blockTags finds on any of its lines.
 func (c *collector) collectHTMLAnchors(node *mdast.Node) {
-	// Get HTML content from source position
-	pos := node.SourcePosition()
-	if !pos.IsValid() || c.ctx.File == nil {
+	if c.ctx.File == nil {
 		return
 	}
-
-	// Get the content span
-	content := c.getNodeContent(node)
-	if len(content) == 0 {
+	if node.Kind == mdast.NodeHTMLInline {
+		c.addHTMLAnchor(node.SourceRange())
 		return
 	}
-
-	// Extract id attributes: id="value" or id='value'
-	c.extractHTMLAttribute(content, "id", AnchorFromHTMLID, pos)
-
-	// Extract name attributes from anchors: name="value"
-	c.extractHTMLAttribute(content, "name", AnchorFromHTMLName, pos)
+	for _, tag := range c.blockTags(node) {
+		c.addHTMLAnchor(tag)
+	}
 }
 
-// getNodeContent returns the source content for a node.
-func (c *collector) getNodeContent(node *mdast.Node) []byte {
-	pos := node.SourcePosition()
-	if !pos.IsValid() || pos.StartLine < 1 || pos.StartLine > len(c.ctx.File.Lines) {
-		return nil
+// blockTags returns the ranges of the tags in an HTML block: those that
+// the HTMLBlockTags option gives, or without it every HTML construct in the
+// block's source.
+func (c *collector) blockTags(block *mdast.Node) []mdast.SourceRange {
+	if c.htmlBlockTags != nil {
+		return c.htmlBlockTags(block)
 	}
-
-	// For simplicity, get the line content
-	lineInfo := c.ctx.File.Lines[pos.StartLine-1]
-	return c.ctx.File.Content[lineInfo.StartOffset:lineInfo.NewlineStart]
+	span := block.SourceRange()
+	constructs := mdscan.ScanHTML(c.ctx.File.Content, span.StartOffset, span.EndOffset)
+	tags := make([]mdast.SourceRange, len(constructs))
+	for idx, construct := range constructs {
+		tags[idx] = mdast.SourceRange{StartOffset: construct.Start, EndOffset: construct.End}
+	}
+	return tags
 }
 
-// htmlAttrPattern matches HTML attributes like id="value" or id='value'.
-var htmlAttrPattern = regexp.MustCompile(`(?i)\b(id|name)\s*=\s*["']([^"']+)["']`)
-
-// extractHTMLAttribute finds and adds anchors from HTML attributes.
-func (c *collector) extractHTMLAttribute(content []byte, attr string, source AnchorSource, pos mdast.SourcePosition) {
-	matches := htmlAttrPattern.FindAllSubmatch(content, -1)
-	for _, match := range matches {
-		if len(match) >= 3 && strings.EqualFold(string(match[1]), attr) {
-			id := string(match[2])
-			anchor := &Anchor{
-				ID:       id,
-				Source:   source,
-				Position: pos,
-			}
-			c.ctx.Anchors.Add(anchor)
-		}
+// addHTMLAnchor adds the anchor that the tag at rng names, if any.
+func (c *collector) addHTMLAnchor(rng mdast.SourceRange) {
+	file := c.ctx.File
+	if rng.StartOffset < 0 || rng.EndOffset > len(file.Content) || rng.EndOffset <= rng.StartOffset {
+		return
 	}
+	id, source, ok := HTMLAnchor(file.Content[rng.StartOffset:rng.EndOffset])
+	if !ok {
+		return
+	}
+	startLine, startColumn := file.LineAt(rng.StartOffset)
+	endLine, endColumn := file.LineAt(rng.EndOffset)
+	c.ctx.Anchors.Add(&Anchor{
+		ID:     id,
+		Source: source,
+		Position: mdast.SourcePosition{
+			StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn,
+		},
+	})
 }
 
 // resolveReferences links usages to their definitions and updates usage counts.

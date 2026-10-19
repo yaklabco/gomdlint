@@ -43,7 +43,8 @@ func linksCatalog() []lint.RuleMeta {
 			ID: "MD051", Name: "link-fragments", Tags: []string{"links"},
 			Description: "Links to a #fragment point at a heading or anchor in the same file, or at #top.",
 			Rationale: "A heading's anchor changes when the heading is renamed or removed, " +
-				"and a link to the old anchor goes nowhere. Links to GitHub line numbers, such as #L20, pass too.",
+				"and a link to the old anchor goes nowhere. In HTML, an element's id attribute, " +
+				"or the name attribute of an a element, makes an anchor. Links to GitHub line numbers, such as #L20, pass too.",
 			Fix: "There is no automatic fix. Only the author knows the intended target.",
 		},
 		{
