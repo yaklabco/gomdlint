@@ -879,6 +879,36 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 	}
 }
 
+// TestBlanksAroundListsRule_MarkdownlintLines checks MD032 against
+// markdownlint 0.41.1, which reports a missing blank line after a list on
+// the list's last line, a lazy continuation line or a closing fence
+// included, and a missing blank line before a list even when another list
+// ends right above it. The two findings at such a boundary insert the
+// same blank line, which the engine inserts once.
+func TestBlanksAroundListsRule_MarkdownlintLines(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"- a\n* b\n\n" + // 3, 4
+		"Text.\n\n" +
+		"- item\nlazy line\n1. one\n\n" + // 8 to 10
+		"Para.\n\n" +
+		"- last\n  more\n\n  ```text\n  code\n  ```\nAfter code.\n\n" + // 14 to 20
+		"> - quoted\n> * other\n" // 22, 23
+
+	diags := applyRuleWithOptions(t, NewBlanksAroundListsRule(), markdown, nil)
+	assert.Equal(t, []string{
+		"3: Missing blank line after list",
+		"4: Missing blank line before list",
+		"9: Missing blank line after list",
+		"10: Missing blank line before list",
+		"19: Missing blank line after list",
+		"22: Missing blank line after list",
+		"23: Missing blank line before list",
+	}, diagnosticLines(diags))
+
+	fixed, _ := fixWithEngine(t, "# Title\n\n- a\n* b\n\n> - quoted\n> * other\n", NewBlanksAroundListsRule())
+	assert.Equal(t, "# Title\n\n- a\n\n* b\n\n> - quoted\n>\n> * other\n", fixed)
+}
+
 func TestBlanksAroundListsRule_Fix(t *testing.T) {
 	tests := []struct {
 		name      string

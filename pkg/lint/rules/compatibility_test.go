@@ -173,14 +173,15 @@ func TestListBlankLineFixFollowsContinuation(t *testing.T) {
 	require.Equal(t, "- item\n  continuation\n\n# Heading\n", string(fix.ApplyEdits([]byte(input), diags[0].FixEdits)))
 }
 
+// TestAdjacentListFixInsertsOneBlank checks the boundary between two lists:
+// like markdownlint, MD032 reports the blank line missing after the first
+// list and the one missing before the second, and the engine inserts their
+// one blank line once.
 func TestAdjacentListFixInsertsOneBlank(t *testing.T) {
 	input := "- first\n1. second\n"
 	diags := applyCompatibilityRule(t, NewBlanksAroundListsRule(), input)
-	var edits []fix.TextEdit
-	for _, diag := range diags {
-		edits = append(edits, diag.FixEdits...)
-	}
-	prepared, err := fix.PrepareEdits(edits, len(input))
-	require.NoError(t, err)
-	require.Equal(t, "- first\n\n1. second\n", string(fix.ApplyEdits([]byte(input), prepared)))
+	require.Equal(t, []string{"1: Missing blank line after list", "2: Missing blank line before list"}, diagnosticLines(diags))
+	fixed, passes := fixWithEngine(t, input, NewBlanksAroundListsRule())
+	require.Equal(t, "- first\n\n1. second\n", fixed)
+	require.Equal(t, 1, passes)
 }
