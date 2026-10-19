@@ -616,8 +616,13 @@ func TestNoTrailingPunctuationRule_MarkdownlintColumns(t *testing.T) {
 	diags := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), headingSpacesMarkdown, nil)
 	assert.Equal(t, [][2]int{{29, 10}, {31, 10}, {33, 13}, {35, 9}}, diagPositions(diags))
 
-	other := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), "# Title\n\n## No-break space\u00a0.\n", nil)
-	assert.Equal(t, [][2]int{{3, 18}}, diagPositions(other), "a no-break space is white space to markdownlint")
+	// The fix deletes the white space that the finding covers, as
+	// markdownlint's does, a no-break space, a line separator or an
+	// ideographic space among it.
+	const spaces = "# Title\n\n## No-break space\u00a0.\n\n## Line\u2028.\n\n## Ideo\u3000!\n"
+	other := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), spaces, nil)
+	assert.Equal(t, [][2]int{{3, 18}, {5, 8}, {7, 8}}, diagPositions(other))
+	assert.Equal(t, "# Title\n\n## No-break space\n\n## Line\n\n## Ideo\n", applyAllEdits(t, spaces, other))
 
 	// The space after the opening hashes is no heading text, so a heading
 	// of punctuation only is reported at the punctuation.

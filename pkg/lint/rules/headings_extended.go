@@ -761,9 +761,10 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 
 // spaceBefore returns the start of the white space that ends right at
 // offset, on its line and from textStart on, or offset when none does.
-// White space is what a JavaScript regular expression's \s matches, as in
-// markdownlint's MD026 pattern, which reports it with the punctuation
-// after it in the heading's text, from textStart.
+// White space is what a JavaScript regular expression's \s matches, the
+// line and paragraph separators included, as in markdownlint's MD026
+// pattern, which takes it with the punctuation after it in the heading's
+// text, from textStart.
 func spaceBefore(file *mdast.FileSnapshot, textStart, offset int) int {
 	line := lineOf(file, offset)
 	if line == nil {
@@ -773,7 +774,7 @@ func spaceBefore(file *mdast.FileSnapshot, textStart, offset int) int {
 	start := offset
 	for start > low {
 		char, size := utf8.DecodeLastRune(file.Content[low:start])
-		if !isJSWhiteSpace(char) {
+		if !isJSSpace(char) {
 			break
 		}
 		start -= size
@@ -782,7 +783,8 @@ func spaceBefore(file *mdast.FileSnapshot, textStart, offset int) int {
 }
 
 // trailingPunctuationFix deletes the punctuation starting at start, with the
-// backslash that escapes it and the whitespace before them on the same line.
+// backslash that escapes it and the white space before them on the same
+// line (see spaceBefore).
 // It returns nil unless the fix changes nothing but the heading's text, and
 // that only by the deleted characters: removing the punctuation must not
 // leave the heading showing nothing (see headingShowsContent), leave a
@@ -806,9 +808,7 @@ func trailingPunctuationFix(
 	if isASCIIPunctuation(file.Content[start]) && escapedAt(file.Content, lineStart, start) {
 		deleteStart--
 	}
-	for deleteStart > lineStart && (file.Content[deleteStart-1] == ' ' || file.Content[deleteStart-1] == '\t') {
-		deleteStart--
-	}
+	deleteStart = spaceBefore(file, content.StartOffset, deleteStart)
 	if !headingShowsContent(file, heading, deleteStart) {
 		return nil
 	}
