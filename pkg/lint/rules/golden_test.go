@@ -443,6 +443,12 @@ rules:
 		{name: "rule without options", content: "rules:\n  MD009: {}\n", wantErr: "rules.MD009 sets no options"},
 		{name: "rule turned on", content: "rules:\n  MD044:\n    enabled: true\n    names: [GitHub]\n", wantErr: "rules.MD044.enabled"},
 		{name: "rule shorthand", content: "rules:\n  MD044: true\n", wantErr: "rules.MD044.enabled"},
+		{name: "rule severity shorthand", content: "rules:\n  MD044: warning\n", wantErr: "rules.MD044.severity"},
+		{
+			name:    "rule severity shorthand through an alias",
+			content: "flavor: &level gfm\nrules:\n  MD044: *level\n",
+			wantErr: "rules.MD044.severity",
+		},
 		{name: "rule auto-fix", content: "rules:\n  MD044:\n    auto_fix: false\n    names: [GitHub]\n", wantErr: "rules.MD044.auto_fix"},
 		{name: "null severity", content: "rules:\n  MD013:\n    max: 100\n    severity: null\n", wantErr: "rules.MD013.severity"},
 		{name: "null enabled", content: "rules:\n  MD013:\n    max: 100\n    enabled:\n", wantErr: "rules.MD013.enabled"},

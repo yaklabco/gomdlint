@@ -997,8 +997,8 @@ For each rule, the final configuration is computed:
 
 | Property | Default | Config File | CLI Override |
 | --- | --- | --- | --- |
-| `enabled` | `rule.DefaultEnabled()`, true for every rule | `rules.X.enabled`, or `rules.X: false` | `--enable/--disable` |
-| `severity` | `rule.DefaultSeverity()` | `severity_default`, then `rules.X.severity` | none (`--strict` changes the exit code) |
+| `enabled` | `rule.DefaultEnabled()`, true for every rule | `rules.X.enabled`, `rules.X: false`, or `rules.X: <severity>`, which turns it on | `--enable/--disable` |
+| `severity` | `rule.DefaultSeverity()` | `severity_default`, then `rules.X.severity` or `rules.X: <severity>` | none (`--strict` changes the exit code) |
 | `autoFix` | `rule.CanFix()` | `rules.X.auto_fix` | `--fix-rules` filter |
 | `options` | Rule-specific | `rules.X.options.*` | none |
 

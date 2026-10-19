@@ -1,0 +1,4 @@
+exit code 65
+-- stdout --
+-- stderr --
+Error: load configuration: rules.MD013.severity: invalid severity "warn"; must be one of: error, warning, info

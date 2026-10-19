@@ -123,6 +123,13 @@ formats change. The first entries under Changed may need action.
   and `migrate` write JSON for an output name that ends in `.json`.
 - A bare `true` or `false` turns a rule on or off, as in markdownlint, such
   as `line-length: false` in YAML or `"MD013": false` in JSON.
+- A bare severity turns a rule on at that severity, as in markdownlint, such
+  as `line-length: warning` in YAML or `"MD013": "error"` in JSON. It means
+  `line-length: {enabled: true, severity: warning}`, so under `rules` it
+  turns on a rule that `rule_defaults` or a lower layer turns off, and it
+  keeps the options and `auto_fix` setting that they give the rule. `error`,
+  `warning` and gomdlint's `info` work, and another string fails as an
+  invalid severity.
 - A catalog describes every rule: its ID, its name, the markdownlint names
   that differ from it, its category and its markdownlint tags. A rule can be
   named by ID, name or markdownlint name, in any case, in config files, in
@@ -400,6 +407,10 @@ formats change. The first entries under Changed may need action.
   keys, where one of them used to win at random. Unknown config keys, such
   as `flavour`, and flag-only keys such as `rule_format` warn with the file
   and line.
+- A config that gives several rules an invalid severity fails with the error
+  for the first of them by rule ID, those under `rules` before those under
+  `rule_defaults`. The rule that the error named used to change from run to
+  run.
 - `gomdlint migrate`, and the offer to save a translated markdownlint
   config, write only `rules` and `rule_defaults`. They used to write
   `flavor`, `ignore: []`, `gitignore`, `default_ignores` and `backups` too,
