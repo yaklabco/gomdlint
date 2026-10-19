@@ -31,6 +31,24 @@ func TestDefaultRuleSet(t *testing.T) {
 	assert.Equal(t, lint.DefaultRegistry.IDs(), resolved, "the rules that run without configuration")
 }
 
+// TestDefaultSeverities checks that every registered rule reports warnings
+// without configuration. markdownlint reports every finding as an error,
+// and gomdlint reports every one as a warning, which fails a run with
+// --strict. An info finding never fails a run, so no rule defaults to it.
+func TestDefaultSeverities(t *testing.T) {
+	notWarning := make(map[string]config.Severity)
+	for _, rule := range lint.DefaultRegistry.Rules() {
+		if severity := rule.DefaultSeverity(); severity != config.SeverityWarning {
+			notWarning[rule.ID()] = severity
+		}
+	}
+	assert.Empty(t, notWarning, "rules whose default severity is not warning")
+
+	for _, rr := range lint.ResolveRules(lint.DefaultRegistry, config.NewConfig()) {
+		assert.Equal(t, config.SeverityWarning, rr.Severity, "%s without configuration", rr.Rule.ID())
+	}
+}
+
 // lintWithDefaultRules lints input the way the CLI does: with the default
 // registry, the parser for cfg's flavor and the engine, which resolves the
 // rules from cfg.

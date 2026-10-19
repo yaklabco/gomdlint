@@ -1,1 +1,1 @@
-basic.input.md:4:1 info Missing blank line before table (MD058/blanks-around-tables) [fixable]
+basic.input.md:4:1 warning Missing blank line before table (MD058/blanks-around-tables) [fixable]

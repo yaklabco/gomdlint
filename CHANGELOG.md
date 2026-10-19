@@ -35,6 +35,8 @@ formats change. The first entries under Changed may need action.
   names, and those options alone now turn them on. Turn any rule off by name
   or ID, with `no-inline-html: false` or `MD033: false` under `rules`, or
   with `--disable no-inline-html`.
+- `blanks-around-tables` (MD058) reports warnings, like every other rule.
+  It used to report info, which never fails a run, even with `--strict`.
 - Rule options default to markdownlint 0.41's values: consistent styles for
   MD003, MD004, MD035, MD046, MD048, MD049 and MD050, `one_or_ordered` for
   MD029, `br_spaces: 2` for MD009, 80 characters for MD013, and no allowed

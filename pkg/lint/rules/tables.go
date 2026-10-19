@@ -397,11 +397,6 @@ func (r *TableBlankLinesRule) DefaultEnabled() bool {
 	return true
 }
 
-// DefaultSeverity returns info level for this rule.
-func (r *TableBlankLinesRule) DefaultSeverity() config.Severity {
-	return config.SeverityInfo
-}
-
 // Apply checks the lines before and after each table. Like markdownlint, a
 // line holding only blockquote markers, whitespace, or HTML comments is
 // blank, and the fix inserts a blank line that keeps the enclosing
@@ -478,7 +473,7 @@ func (r *TableBlankLinesRule) blankLineDiagnostic(
 ) lint.Diagnostic {
 	diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, tablePosition(ctx.File, offset),
 		"Missing blank line "+side+" table").
-		WithSeverity(config.SeverityInfo).
+		WithSeverity(config.SeverityWarning).
 		WithSuggestion("Add a blank line " + side + " the table")
 	if builder != nil {
 		diagBuilder = diagBuilder.WithFix(builder)

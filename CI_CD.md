@@ -37,9 +37,8 @@ The `test` job runs these steps in order:
 5. `go run ./cmd/gomdlint lint --strict` lints `README.md`, `CHANGELOG.md`,
    `CI_CD.md`, `docs`, `CLAUDE.md` and `AGENTS.md` with the repository's
    `.gomdlint.yml`. With `--strict`, a warning or an error fails the job,
-   while an info finding does not. blanks-around-tables (MD058) is the only
-   rule whose default severity is info, and `.gomdlint.yml` raises it to a
-   warning, so every finding in these files fails the job.
+   while an info finding does not. Every rule reports warnings by default,
+   so every finding in these files fails the job.
 6. `go test -race` runs every test with the race detector and writes
    `coverage.out`.
 7. `go mod tidy` runs, and the step fails if `go.mod` or `go.sum` changes.

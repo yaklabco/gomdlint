@@ -425,8 +425,7 @@ consistent style, `ol-prefix` (MD029) accepts `one_or_ordered` numbering,
 (MD013) allows 80 characters. Where a rule has an option that markdownlint
 lacks, its default keeps markdownlint's behaviour.
 
-Every rule reports warnings, except `blanks-around-tables` (MD058), which
-reports info. Warnings fail a run only with `--strict`. Set
+Every rule reports warnings. Warnings fail a run only with `--strict`. Set
 `severity_default: error`, or a rule's `severity`, to fail on findings
 without it.
 
