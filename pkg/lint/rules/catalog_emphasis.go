@@ -10,7 +10,7 @@ func emphasisCatalog() []lint.RuleMeta {
 			Description: "Emphasis markers touch the text they wrap, as in **bold**.",
 			Rationale:   "With a space inside, the markers do not make emphasis and show as literal * or _ characters.",
 			Fix: "The fix deletes the spaces inside the markers. gomdlint reports a pair without a fix " +
-				"when the markers may be meant literally, such as single asterisks with spaces on both sides.",
+				"when the markers may be meant literally, such as single asterisks with spaces on both sides. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD049", Name: "emphasis-style", Tags: []string{"emphasis"}, Fixable: true,
@@ -19,7 +19,7 @@ func emphasisCatalog() []lint.RuleMeta {
 				"Underscores do not mark emphasis inside a word, so * stays allowed there.",
 			Fix: "The fix swaps the markers. gomdlint reports italic text without a fix " +
 				"when the new marker could pair with characters around it, as in *snake_case*. " +
-				"It does the same inside square brackets that are, or could become, the label of a reference link.",
+				"It does the same inside square brackets that are, or could become, the label of a reference link. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD050", Name: "strong-style", Tags: []string{"emphasis"}, Fixable: true,
@@ -28,7 +28,7 @@ func emphasisCatalog() []lint.RuleMeta {
 				"Underscores do not mark emphasis inside a word, so ** stays allowed there.",
 			Fix: "The fix swaps the markers. gomdlint reports bold text without a fix " +
 				"when the new marker could pair with characters around it, as in **snake_case**. " +
-				"It does the same inside square brackets that are, or could become, the label of a reference link.",
+				"It does the same inside square brackets that are, or could become, the label of a reference link. " + noFixNearCheckbox,
 		},
 	}
 }

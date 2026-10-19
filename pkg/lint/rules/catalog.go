@@ -14,6 +14,19 @@ import (
 const noFixWithRawHTML = "In a document with raw HTML other than comments and plain br, wbr, hr or img tags, " +
 	"gomdlint reports every finding without a fix."
 
+// noFixNearCheckbox is in the fix text of every fixing rule, after the
+// rule's own text and before noFixWithRawHTML. The engine's checkbox guard
+// (pkg/lint/checkbox_guard.go and checkbox_plain.go) withholds, whatever
+// rule offers it, fixes that change or make a line holding "[", one
+// character and "]", or that change lines around one, at most through the
+// blank line or the edge of the file on each side. Which of those lines it
+// guards, and which fixes it still lets through on plain task items such
+// as "- [ ] todo", depend on the item and its list, so the text says only
+// that a fix may be withheld and promises no fix.
+const noFixNearCheckbox = "gomdlint may report a finding without a fix when the fix would change a line with " +
+	"one character in brackets, such as [x] or [1], or the lines around it up to a blank line, " +
+	"because it could add or remove a task list checkbox."
+
 // catalogSection is the part of the catalog that one catalog_<category>.go
 // file lists.
 type catalogSection struct {

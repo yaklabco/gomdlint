@@ -24,7 +24,7 @@ func tablesCatalog() []lint.RuleMeta {
 			Rationale:   "Some parsers misread a table that has no blank lines around it.",
 			Fix: "The fix inserts the missing blank line, keeping any blockquote markers. " +
 				"gomdlint reports a table inside a list without a fix when the blank line would fall between two items " +
-				"or two blocks of one item.",
+				"or two blocks of one item. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD060", Name: "table-column-style", Tags: []string{"table"},
@@ -36,7 +36,7 @@ func tablesCatalog() []lint.RuleMeta {
 			ID: "MDL003", Name: "table-alignment", Tags: []string{"table"}, Fixable: true,
 			Description: "Each cell of a table's delimiter row has at least 3 dashes.",
 			Rationale:   "GFM accepts a single dash, but 3 dashes make the row under the header easy to see in the source.",
-			Fix:         "The fix lengthens each short run of dashes to the minimum and keeps any colons.",
+			Fix:         "The fix lengthens each short run of dashes to the minimum and keeps any colons. " + noFixNearCheckbox,
 		},
 	}
 }

@@ -10,7 +10,7 @@ func linksCatalog() []lint.RuleMeta {
 			ID: "MD011", Name: "no-reversed-links", Tags: []string{"links"}, Fixable: true,
 			Description: "Inline links put the text in brackets and the URL in parentheses: [text](url).",
 			Rationale:   "The reversed form (text)[url] is not a link, so its brackets and parentheses show as text.",
-			Fix:         "The fix swaps the two parts into the [text](url) form.",
+			Fix:         "The fix swaps the two parts into the [text](url) form. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD034", Name: "no-bare-urls", Tags: []string{"links", "url"}, Fixable: true,
@@ -18,13 +18,13 @@ func linksCatalog() []lint.RuleMeta {
 			Rationale:   "Some Markdown parsers do not turn a bare URL or email address into a link.",
 			Fix: "The fix wraps the URL in angle brackets. gomdlint reports a URL without a fix " +
 				"when parsers may disagree about where it ends, such as in a table, inside emphasis or with an & in it. " +
-				"It also reports a www. address without a fix, because angle brackets do not make it a link.",
+				"It also reports a www. address without a fix, because angle brackets do not make it a link. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD039", Name: "no-space-in-links", Tags: []string{"whitespace", "links"}, Fixable: true,
 			Description: "Link text has no spaces just inside its brackets.",
 			Rationale:   "The spaces end up inside the rendered link, where they serve no purpose.",
-			Fix:         "The fix deletes the spaces.",
+			Fix:         "The fix deletes the spaces. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD042", Name: "no-empty-links", Tags: []string{"links"},
@@ -61,7 +61,7 @@ func linksCatalog() []lint.RuleMeta {
 				"Only the first of duplicate definitions takes effect, so the others change nothing. " +
 				"A definition labeled //, as in [//]: # (note), is a common way to write a comment, so it is ignored.",
 			Fix: "The fix deletes the unused or duplicate definition. " +
-				"gomdlint reports a definition without a fix when other text follows it on the next line.",
+				"gomdlint reports a definition without a fix when other text follows it on the next line. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD054", Name: "link-image-style", Tags: []string{"images", "links"},

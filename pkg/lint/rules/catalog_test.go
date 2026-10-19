@@ -251,9 +251,10 @@ func assertPlainProse(t *testing.T, field, text string) {
 // with no automatic fix. A fixing rule describes its fix instead, and names
 // the findings a user can expect it to report without a fix, leaving out
 // rare edge cases. Every fix also passes shared checks that parse the fixed
-// document. The texts name those checks where they hold back whole classes
-// of fixes: the heading-anchor check for MD018, MD020, MD026 and MD036, and
-// the raw HTML check of keepSafeFixes for every rule that uses it.
+// document, and the engine's checkbox guard. The texts name those checks
+// where they hold back whole classes of fixes: the heading-anchor check for
+// MD018, MD020, MD026 and MD036, the raw HTML check of keepSafeFixes for
+// every rule that uses it, and the checkbox guard for every fixing rule.
 func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 	// rawHTMLChecked lists the rules whose fixes keepSafeFixes checks, so
 	// that raw HTML it cannot model anywhere in a document holds back all of
@@ -264,18 +265,19 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 	}
 
 	// partialFixes lists the fixing rules that report findings a user can
-	// expect to meet without a fix. The rules in rawHTMLChecked are among
-	// them, and the comments give each rule's other reasons.
+	// expect to meet without a fix, other than those the checkbox guard may
+	// hold back. The rules in rawHTMLChecked are among them, and the
+	// comments give each rule's other reasons.
 	partialFixes := map[string]bool{
 		"MD003": true, // Underlined headings are never converted.
 		"MD004": true, // A marker change that would merge two lists.
 		"MD005": true, // Bullet items, and items with more than one paragraph.
 		"MD007": true, // Items with more than one paragraph.
-		"MD009": true, // Raw HTML only.
+		"MD009": true, // Whitespace in a code span, whitespace other than one space before a soft line break, a hard break when br_spaces is below 2, and raw HTML.
 		"MD010": true, // Tabs inside code are reported and never replaced.
 		"MD012": true, // Raw HTML only.
 		"MD013": true, // Only some long lines can be wrapped safely.
-		"MD018": true, // A new heading may break links to heading anchors.
+		"MD018": true, // A new heading may break links to heading anchors, and a space cannot make seven or more # marks a heading.
 		"MD020": true, // A changed heading may break links to heading anchors.
 		"MD022": true, // A blank line that would loosen a tight list.
 		"MD026": true, // A heading left showing nothing, or changed where links may point at anchors.
@@ -313,6 +315,16 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		assert.Equal(t, rawHTMLChecked[meta.ID], strings.HasSuffix(meta.Fix, " "+noFixWithRawHTML),
 			"%s: the fix text ends with the raw HTML sentence exactly when keepSafeFixes checks the rule's fixes: %q", meta.ID, meta.Fix)
 
+		// The checkbox guard may hold back a fix of any rule, so the
+		// checkbox sentence appears once in every fixing rule's fix text,
+		// and in no other.
+		want := 0
+		if meta.Fixable {
+			want = 1
+		}
+		assert.Equal(t, want, strings.Count(meta.Fix, noFixNearCheckbox),
+			"%s: the fix text holds the checkbox sentence exactly when the rule fixes: %q", meta.ID, meta.Fix)
+
 		if !meta.Fixable {
 			assert.True(t, strings.HasPrefix(meta.Fix, noAutomaticFix),
 				"%s: a rule without a fix says that it only reports: %q", meta.ID, meta.Fix)
@@ -320,12 +332,27 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		}
 
 		assert.True(t, strings.HasPrefix(meta.Fix, fixOpening), "%s: a fixing rule describes its fix: %q", meta.ID, meta.Fix)
+
+		// The checkbox sentence follows the rule's own text, and only the
+		// raw HTML sentence comes after it.
+		end := ""
+		if rawHTMLChecked[meta.ID] {
+			end = " " + noFixWithRawHTML
+		}
+		if !assert.True(t, strings.HasSuffix(meta.Fix, " "+noFixNearCheckbox+end),
+			"%s: the checkbox sentence ends the fix text, before any raw HTML sentence: %q", meta.ID, meta.Fix) {
+			continue
+		}
+
+		// The rule's own text is the fix text without the checkbox
+		// sentence, which every fixing rule shares.
+		own := strings.TrimSuffix(meta.Fix, " "+noFixNearCheckbox+end) + end
 		if partialFixes[meta.ID] {
-			assert.Contains(t, meta.Fix, reportsWithoutFix,
+			assert.Contains(t, own, reportsWithoutFix,
 				"%s: the fix text says which findings get no fix: %q", meta.ID, meta.Fix)
 		} else {
-			assert.NotContains(t, meta.Fix, reportsWithoutFix,
-				"%s: a rule missing from partialFixes fixes every finding it can: %q", meta.ID, meta.Fix)
+			assert.NotContains(t, own, reportsWithoutFix,
+				"%s: a rule missing from partialFixes fixes every finding it can, outside the checkbox guard: %q", meta.ID, meta.Fix)
 		}
 	}
 }
@@ -378,11 +405,16 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		id: "MD009", name: "HTML block elsewhere", phrase: noFixWithRawHTML, want: []catalogFinding{{3, false}},
 		input: "# Title\n\nText \n\n<details>\n<summary>More</summary>\n</details>\n",
 	},
+	// MD012 reports each blank line past the maximum, one by default, as
+	// markdownlint does.
 	{
-		id: "MD012", name: "inline HTML elsewhere", phrase: noFixWithRawHTML, want: []catalogFinding{{3, false}},
+		id: "MD012", name: "inline HTML elsewhere", phrase: noFixWithRawHTML, want: []catalogFinding{{3, false}, {4, false}},
 		input: "# Title\n\n\n\nPress <kbd>Ctrl</kbd>.\n",
 	},
-	{id: "MD012", name: "no HTML", phrase: "deletes the extra blank lines", input: "# Title\n\n\n\nPress Ctrl.\n", want: []catalogFinding{{3, true}}},
+	{
+		id: "MD012", name: "no HTML", phrase: "deletes the extra blank lines", want: []catalogFinding{{3, true}, {4, true}},
+		input: "# Title\n\n\n\nPress Ctrl.\n",
+	},
 	{
 		id: "MD047", name: "HTML block", phrase: noFixWithRawHTML, want: []catalogFinding{{5, false}},
 		input: "# Title\n\n<details>\n<summary>More</summary>\n</details>",
@@ -567,6 +599,82 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	// MD026 keeps a heading that would show nothing.
 	{id: "MD026", name: "punctuation only", phrase: "leave it showing nothing", input: "# Title\n\n## ...\n", want: []catalogFinding{{3, false}}},
 	{id: "MD026", name: "text and punctuation", phrase: "deletes the trailing punctuation", input: "# Title\n\n## Done.\n", want: []catalogFinding{{3, true}}},
+
+	// MD018 reports seven or more # marks, which a space cannot make a
+	// heading, without a fix.
+	{id: "MD018", name: "seven marks", phrase: "seven or more # marks", input: "# Title\n\n#######seven\n", want: []catalogFinding{{3, false}}},
+	{id: "MD018", name: "six marks", phrase: "inserts a space after the # marks", input: "# Title\n\n######six\n", want: []catalogFinding{{3, true}}},
+
+	// The checkbox guard may hold back a fix that changes a line with one
+	// character in brackets, or the lines around it up to a blank line.
+	{
+		id: "MD009", name: "trailing space three lines below [1]", phrase: "the lines around it up to a blank line",
+		input: "# Title\n\nSee note [1] here.\nline two\nline three\nline four \n", want: []catalogFinding{{6, false}},
+	},
+	{
+		id: "MDL003", name: "table with [x]", phrase: "one character in brackets, such as [x] or [1]",
+		input: "# Title\n\n| a | b |\n| - | --- |\n| [x] | y |\n", want: []catalogFinding{{4, false}},
+	},
+	{
+		id: "MD034", name: "bare URL in a task item", phrase: "could add or remove a task list checkbox",
+		input: "# Title\n\n- [ ] Read https://example.com today.\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD010", name: "tab in a task item's text", phrase: "one character in brackets, such as [x] or [1]",
+		input: "# Title\n\n- [ ] do\tthis\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD010", name: "tab after a checkbox", phrase: "one character in brackets, such as [x] or [1]",
+		input: "# Title\n\n- [ ]\tthis\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD034", name: "bare URL on the line after a task item", phrase: "the lines around it up to a blank line",
+		input: "# Title\n\n- [ ] todo\n  see https://example.com today\n", want: []catalogFinding{{4, false}},
+	},
+	{
+		id: "MD022", name: "heading below a task item", phrase: "the lines around it up to a blank line",
+		input: "# Title\n\n- [ ] todo\n## Next\n\nText.\n", want: []catalogFinding{{4, false}},
+	},
+	{
+		id: "MD013", name: "long line directly above a task item", phrase: "the lines around it up to a blank line",
+		input: "# Title\n\n" + catalogLongLine + "\n- [ ] todo\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD032", name: "blank line below a task list", phrase: "the lines around it up to a blank line",
+		input: "# Title\n\n- [ ] todo\n---\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD022", name: "heading above a quoted task list", phrase: "the lines around it up to a blank line",
+		input: "# Title\n> - [ ] todo\n", want: []catalogFinding{{1, false}},
+	},
+	{
+		id: "MD032", name: "heading above a quoted task list", phrase: "the lines around it up to a blank line",
+		input: "# Title\n> - [ ] todo\n", want: []catalogFinding{{2, false}},
+	},
+	{
+		id: "MD022", name: "heading above a task list that starts at 3", phrase: "the lines around it up to a blank line",
+		input: "# Title\n3. [ ] todo\n", want: []catalogFinding{{1, false}},
+	},
+	{
+		id: "MD032", name: "heading above a task list that starts at 3", phrase: "the lines around it up to a blank line",
+		input: "# Title\n3. [ ] todo\n", want: []catalogFinding{{2, false}},
+	},
+
+	// MD009 reports some trailing whitespace without a fix of its own
+	// accord: whitespace in a code span is code, and before the next line
+	// of a paragraph some renderers read a tab as a hard line break.
+	{
+		id: "MD009", name: "trailing space in a code span", phrase: "whitespace inside a code span",
+		input: "# Title\n\nUse `a \nb` here.\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD009", name: "trailing tab before the paragraph's next line", phrase: "a tab where the paragraph goes on to the next line",
+		input: "# Title\n\nText\t\nnext\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD009", name: "trailing space before the paragraph's next line", phrase: "deletes the trailing whitespace",
+		input: "# Title\n\nText \nnext\n", want: []catalogFinding{{3, true}},
+	},
 }
 
 // TestCatalogTextsHoldForTheRules lints, with the built-in rules and their
