@@ -190,12 +190,13 @@ func TestOutlineRegionsDecideAsWholeDocument(t *testing.T) {
 // with the slugs of their headings, stay within a bound that follows the
 // document, even when every check covers a block the size of the document
 // and changes the slugs of its headings, as fixes of padded code spans in
-// the headings of a long blockquote do.
+// the headings of a long blockquote in another do: quote regions split only
+// a top-level blockquote, whose one block the inner blockquote is.
 func TestOutlineCacheIsBounded(t *testing.T) {
 	var doc strings.Builder
 	doc.WriteString("# Title\n\n")
 	for idx := range 600 {
-		fmt.Fprintf(&doc, "> ## Section %d ` code`\n>\n", idx)
+		fmt.Fprintf(&doc, "> > ## Section %d ` code`\n> >\n", idx)
 	}
 	input := doc.String()
 	cfg := config.NewConfig()

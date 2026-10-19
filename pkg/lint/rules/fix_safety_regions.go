@@ -44,13 +44,15 @@ const slugOverhead = 16
 type outlineModel struct {
 	*docLayout
 	verifier *fixVerifier
-	// body is the outline up to the anchors item. groupOut and groupHead
-	// hold, for each group and for the end, where its blocks start in body
-	// and the index of its first heading with an anchor.
-	body      string
-	groupOut  []int
-	groupHead []int
-	listParts []listOutline
+	// body is the outline up to the anchors item. groups holds where the
+	// blocks of each group start in body, counting the headings with an
+	// anchor. listParts, quoteParts and tableParts hold where the parts of
+	// each list, blockquote and table of the layout are.
+	body       string
+	groups     regionParts
+	listParts  []listOutline
+	quoteParts []regionParts
+	tableParts []regionParts
 	// slugs holds the slug of each heading with an anchor, in order, history
 	// the anchors GitHub gives them with every count it keeps (see
 	// recordAnchors), and anchors the text of the anchors item: the anchors
@@ -64,17 +66,23 @@ type outlineModel struct {
 	cached   int
 }
 
-// listOutline is where the outline of a top-level list has its parts.
+// listOutline is where the outline of a list that the layout knows has its
+// parts.
 type listOutline struct {
 	tight bool
 	// tokenStart and tokenEnd bound the item that opens the list, and
-	// tokens holds that item for a tight list and for a loose one.
+	// tokens holds that item for a tight list and for a loose one. items
+	// holds where the outline of each item starts.
 	tokenStart, tokenEnd int
 	tokens               map[bool]string
-	// itemOut and itemHead hold, for each item and for the end, where its
-	// outline starts and the index of its first heading with an anchor.
-	itemOut  []int
-	itemHead []int
+	items                regionParts
+}
+
+// outlinePlaces finds the lists, blockquotes and tables of the layout by the
+// line where their outlines start: a list's first marker line, a
+// blockquote's first line and a table's header line.
+type outlinePlaces struct {
+	lists, quotes, tables map[int]int
 }
 
 // outlineOutcome is what parsing a region with its edits found.
@@ -164,39 +172,40 @@ func listTokens(file *mdast.FileSnapshot, list *mdast.Node, allow fixAllowance) 
 // buildOutlineModel cuts the outline of original, the verifier's parse of
 // the document, into the parts that regions replace. It returns nil when
 // region checks cannot be used: when the layout cannot be built, a top-level
-// block of the parse cannot be placed in a group, a list's items are not
-// those the layout found, or the outline written in parts is not the
-// verifier's.
+// block of the parse cannot be placed in a group, or the outline written in
+// parts is not the verifier's. A list, blockquote or table whose parts are
+// not the layout's takes no regions of its own: its regions become those of
+// its container.
 func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *outlineModel {
 	layout := newDocLayout(recordingMarkdown(verifier.parser.Flavor()), verifier.file.Content)
 	if layout == nil {
 		return nil
 	}
 	model := &outlineModel{
-		docLayout: layout,
-		verifier:  verifier,
-		listParts: make([]listOutline, len(layout.lists)),
-		outcomes:  make(map[string]*outlineOutcome),
+		docLayout:  layout,
+		verifier:   verifier,
+		listParts:  make([]listOutline, len(layout.lists)),
+		quoteParts: make([]regionParts, len(layout.quotes)),
+		tableParts: make([]regionParts, len(layout.tables)),
+		outcomes:   make(map[string]*outlineOutcome),
 	}
-	groups := make([][]*mdast.Node, len(layout.bounds)-1)
-	listAt := make(map[int]int, len(layout.lists))
+	places := outlinePlaces{
+		lists:  make(map[int]int, len(layout.lists)),
+		quotes: make(map[int]int, len(layout.quotes)),
+		tables: make(map[int]int, len(layout.tables)),
+	}
 	for idx, list := range layout.lists {
-		listAt[list.lines[0]] = idx
+		places.lists[list.lines[0]] = idx
 	}
-	lastGroup := 0
-	for child := original.Root.FirstChild; child != nil; child = child.Next {
-		// A block without a span of its own cannot be placed in a group.
-		rng := child.SourceRange()
-		offset := rng.StartOffset - layout.base
-		if rng.IsEmpty() || offset < 0 || offset > len(layout.source) {
-			return nil
-		}
-		group := layout.groupOf(lineStartIn(layout.source, offset))
-		if group < lastGroup {
-			return nil
-		}
-		lastGroup = group
-		groups[group] = append(groups[group], child)
+	for idx, quote := range layout.quotes {
+		places.quotes[quote.line] = idx
+	}
+	for idx, table := range layout.tables {
+		places.tables[table.head] = idx
+	}
+	groups, ok := model.placeBlocks(original.Root, len(layout.bounds)-1, layout.groupOf)
+	if !ok {
+		return nil
 	}
 
 	var out strings.Builder
@@ -207,21 +216,27 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	writeOutlineItem(&out, "frontmatter", frontMatter)
 	writeOutlineItem(&out, original.Root.Kind.String(), blockOutlineAttrs(original, original.Root, verifier.allow))
 	for _, nodes := range groups {
-		model.groupOut = append(model.groupOut, out.Len())
-		model.groupHead = append(model.groupHead, len(model.slugs))
+		model.groups.add(out.Len(), len(model.slugs))
 		for _, node := range nodes {
-			if !model.writeTopLevel(&out, original, node, listAt) {
-				return nil
-			}
+			model.writeBlock(&out, original, node, places, true)
 		}
 	}
-	model.groupOut = append(model.groupOut, out.Len())
-	model.groupHead = append(model.groupHead, len(model.slugs))
+	model.groups.add(out.Len(), len(model.slugs))
 	out.WriteString(outlineClose)
-	// Every list that list regions may split needs its parts.
+	// A list, blockquote or table without parts takes no regions of its own.
 	for idx, list := range layout.lists {
-		if list.regions && model.listParts[idx].itemOut == nil {
-			return nil
+		if list.regions && model.listParts[idx].items.starts == nil {
+			list.regions = false
+		}
+	}
+	for idx, quote := range layout.quotes {
+		if model.quoteParts[idx].starts == nil {
+			quote.regions = false
+		}
+	}
+	for idx, table := range layout.tables {
+		if model.tableParts[idx].starts == nil {
+			table.regions = false
 		}
 	}
 	model.body = out.String()
@@ -233,61 +248,165 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	return model
 }
 
-// writeTopLevel writes the outline of a top-level block of the original and
-// records the slugs of its headings, and where the parts of a list that the
-// layout knows are. ok is false when such a list's items are not the
-// layout's.
-func (m *outlineModel) writeTopLevel(
-	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, listAt map[int]int,
-) bool {
-	index, known := -1, false
-	if node.Kind == mdast.NodeList {
-		index, known = listAt[lineStartIn(m.source, node.SourceRange().StartOffset-m.base)]
+// placeBlocks returns the blocks of parent in the groups that groupOf finds
+// for their first lines, of which there are count. ok is false when a block
+// has no span of its own, which cannot be placed in a group, or the groups
+// of the blocks are not in order.
+func (m *outlineModel) placeBlocks(parent *mdast.Node, count int, groupOf func(int) int) ([][]*mdast.Node, bool) {
+	groups := make([][]*mdast.Node, count)
+	lastGroup := 0
+	for child := parent.FirstChild; child != nil; child = child.Next {
+		rng := child.SourceRange()
+		offset := rng.StartOffset - m.base
+		if rng.IsEmpty() || offset < 0 || offset > len(m.source) {
+			return nil, false
+		}
+		group := groupOf(lineStartIn(m.source, offset))
+		if group < lastGroup || group >= count {
+			return nil, false
+		}
+		lastGroup = group
+		groups[group] = append(groups[group], child)
 	}
-	// Only a list that list regions may split needs its parts.
-	if !known || !m.lists[index].regions {
-		writeOutline(out, file, node, m.verifier.allow)
-		m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{node})...)
-		return true
+	return groups, true
+}
+
+// writeBlock writes the outline of a top-level block of the original, with
+// top, or of a block of a top-level blockquote, and records the slugs of its
+// headings, and where the parts of a list, blockquote or table that the
+// layout knows are. A list, blockquote or table whose parts are not the
+// layout's is written without them.
+func (m *outlineModel) writeBlock(
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, places outlinePlaces, top bool,
+) {
+	line := lineStartIn(m.source, node.SourceRange().StartOffset-m.base)
+	switch node.Kind {
+	case mdast.NodeList:
+		// Only a list that list regions may split needs its parts.
+		if index, known := places.lists[line]; known && m.lists[index].regions && m.writeList(out, file, node, index) {
+			return
+		}
+	case mdast.NodeBlockquote:
+		// A blockquote in a top-level one can start on the same line.
+		if index, known := places.quotes[line]; known && top && m.writeQuote(out, file, node, index, places) {
+			return
+		}
+	case mdast.NodeTable:
+		if index, known := places.tables[line]; known && m.writeTable(out, file, node, index) {
+			return
+		}
 	}
+	writeOutline(out, file, node, m.verifier.allow)
+	m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{node})...)
+}
+
+// writeList writes the outline of a list that list regions may split, with
+// its parts. It writes nothing and returns false when the list's items are
+// not the layout's.
+func (m *outlineModel) writeList(out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int) bool {
 	layoutList := m.lists[index]
 	tokens, ok := listTokens(file, node, m.verifier.allow)
 	if !ok {
 		return false
 	}
-	list := listOutline{tight: node.Block.List.Tight, tokens: tokens, tokenStart: out.Len()}
-	out.WriteString(tokens[list.tight])
-	list.tokenEnd = out.Len()
 	item := 0
 	for child := node.FirstChild; child != nil; child = child.Next {
 		if item >= len(layoutList.lines) ||
 			lineStartIn(m.source, child.SourceRange().StartOffset-m.base) != layoutList.lines[item] {
 			return false
 		}
-		list.itemOut = append(list.itemOut, out.Len())
-		list.itemHead = append(list.itemHead, len(m.slugs))
-		writeOutline(out, file, child, m.verifier.allow)
-		m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{child})...)
 		item++
 	}
 	if item != len(layoutList.lines) {
 		return false
 	}
-	list.itemOut = append(list.itemOut, out.Len())
-	list.itemHead = append(list.itemHead, len(m.slugs))
+	list := listOutline{tight: node.Block.List.Tight, tokens: tokens, tokenStart: out.Len()}
+	out.WriteString(tokens[list.tight])
+	list.tokenEnd = out.Len()
+	for child := node.FirstChild; child != nil; child = child.Next {
+		list.items.add(out.Len(), len(m.slugs))
+		writeOutline(out, file, child, m.verifier.allow)
+		m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{child})...)
+	}
+	list.items.add(out.Len(), len(m.slugs))
 	out.WriteString(outlineClose)
 	m.listParts[index] = list
+	return true
+}
+
+// writeQuote writes the outline of a top-level blockquote, as writeOutline
+// does, with its parts and those of the lists and tables in it. It writes
+// nothing and returns false when the blockquote's blocks cannot be placed
+// in its groups.
+func (m *outlineModel) writeQuote(
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int, places outlinePlaces,
+) bool {
+	quote := m.quotes[index]
+	groups, ok := m.placeBlocks(node, len(quote.bounds), quote.groupOf)
+	if !ok {
+		return false
+	}
+	var parts regionParts
+	writeOutlineItem(out, node.Kind.String(), blockOutlineAttrs(file, node, m.verifier.allow))
+	for _, nodes := range groups {
+		parts.add(out.Len(), len(m.slugs))
+		for _, child := range nodes {
+			m.writeBlock(out, file, child, places, false)
+		}
+	}
+	parts.add(out.Len(), len(m.slugs))
+	out.WriteString(outlineClose)
+	m.quoteParts[index] = parts
+	return true
+}
+
+// writeTable writes the outline of a table, as writeOutline does, with its
+// parts. It writes nothing and returns false when the table's rows are not
+// the layout's.
+func (m *outlineModel) writeTable(out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int) bool {
+	table := m.tables[index]
+	row := 0
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if isHeaderRow(child) {
+			continue
+		}
+		if row >= len(table.rows)-1 ||
+			lineStartIn(m.source, child.SourceRange().StartOffset-m.base) != table.rows[row] {
+			return false
+		}
+		row++
+	}
+	if row != len(table.rows)-1 {
+		return false
+	}
+	// A table holds no headings.
+	var parts regionParts
+	writeOutlineItem(out, node.Kind.String(), blockOutlineAttrs(file, node, m.verifier.allow))
+	for child := node.FirstChild; child != nil; child = child.Next {
+		if !isHeaderRow(child) {
+			parts.add(out.Len(), len(m.slugs))
+		}
+		writeOutline(out, file, child, m.verifier.allow)
+	}
+	parts.add(out.Len(), len(m.slugs))
+	out.WriteString(outlineClose)
+	m.tableParts[index] = parts
 	return true
 }
 
 // outSpan returns where a region's part of body starts and ends, and the
 // indexes of its first heading with an anchor and of the first after it.
 func (m *outlineModel) outSpan(reg region) (int, int, int, int) {
-	if reg.isList() {
-		list := m.listParts[reg.list]
-		return list.itemOut[reg.first-1], list.itemOut[reg.last+2], list.itemHead[reg.first-1], list.itemHead[reg.last+2]
+	switch reg.kind {
+	case quoteRegion:
+		return m.quoteParts[reg.at].partOf(reg)
+	case listRegion:
+		return m.listParts[reg.at].items.partOf(reg)
+	case tableRegion:
+		return m.tableParts[reg.at].partOf(reg)
+	default:
+		return m.groups.partOf(reg)
 	}
-	return m.groupOut[reg.first], m.groupOut[reg.last+1], m.groupHead[reg.first], m.groupHead[reg.last+1]
 }
 
 // cacheBudget returns how many bytes of their own the cached outcomes may
@@ -300,7 +419,7 @@ func (m *outlineModel) cacheBudget() int {
 // returns the cached outcome.
 func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome {
 	var key strings.Builder
-	fmt.Fprintf(&key, "%d:%d:%d|", reg.list, reg.first, reg.last)
+	regionKey(&key, reg)
 	plain := make([]fix.TextEdit, len(edits))
 	for idx, edit := range edits {
 		plain[idx] = edit.edit
@@ -314,7 +433,7 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 	outcome.start, outcome.end = start, end
 	if outcome.holds && !outcome.undecided {
 		if reg.isList() {
-			outcome.loosens = m.docLayout.lists[reg.list].loosens(reg, outcome.tight)
+			outcome.loosens = m.docLayout.lists[reg.at].loosens(reg, outcome.tight)
 		}
 		m.outline(outcome, reg, from, to)
 	}
@@ -334,14 +453,14 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 }
 
 // outline parses a region that holds with the document's parser, writes the
-// outline of its blocks, or items, and finds whether the slugs of their
-// headings are those of headings [from, to) of the original.
+// outline of its blocks, the blocks of its blockquote, its items or its body
+// rows, and finds whether the slugs of their headings are those of headings
+// [from, to) of the original.
 func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int) {
 	text := outcome.source
-	end := len(text)
-	if !reg.isList() && reg.last != len(m.bounds)-2 {
-		end -= len(regionSentinel)
-	}
+	// The blank line before the region shifts its offsets by one, and the
+	// region's blocks start before the sentinel.
+	end := 1 + len(text) - len(m.sentinel(reg))
 	verifier := m.verifier
 	m.work.parsed += 1 + len(text)
 	snapshot, err := verifier.parser.ParseWithReferences(verifier.ctx, verifier.file.Path,
@@ -350,30 +469,10 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 		outcome.undecided = true
 		return
 	}
-	// The blank line before the region shifts its offsets by one. A block
-	// without a span of its own cannot be placed before or after the
-	// sentinel.
-	var nodes []*mdast.Node
-	for child := snapshot.Root.FirstChild; child != nil; child = child.Next {
-		rng := child.SourceRange()
-		if rng.IsEmpty() {
-			outcome.undecided = true
-			return
-		}
-		if rng.StartOffset < 1+end {
-			nodes = append(nodes, child)
-		}
-	}
-	if reg.isList() {
-		if len(nodes) != 1 || nodes[0].Kind != mdast.NodeList {
-			outcome.undecided = true
-			return
-		}
-		var items []*mdast.Node
-		for item := nodes[0].FirstChild; item != nil; item = item.Next {
-			items = append(items, item)
-		}
-		nodes = items
+	nodes, ok := m.regionNodes(reg, snapshot.Root, end)
+	if !ok {
+		outcome.undecided = true
+		return
 	}
 	var out strings.Builder
 	for _, node := range nodes {
@@ -390,6 +489,74 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 	if !outcome.slugsSame {
 		outcome.slugs = slugs
 	}
+}
+
+// regionNodes returns the nodes of the parse of a region, from its root, whose
+// outlines make up the region's part, for a parse whose region's blocks
+// start before end: the top-level blocks, the blocks of the one blockquote
+// of a quote region, the items of the one list of a list region, or the
+// body rows of the one table of a table region, in one blockquote for a list
+// or table in a blockquote. ok is false when the parse is not of that shape,
+// or a block has no span of its own.
+func (m *outlineModel) regionNodes(reg region, root *mdast.Node, end int) ([]*mdast.Node, bool) {
+	nodes, ok := blocksBefore(root, end)
+	inQuote := reg.kind == quoteRegion ||
+		(reg.kind == listRegion && m.lists[reg.at].quote >= 0) ||
+		(reg.kind == tableRegion && m.tables[reg.at].quote >= 0)
+	if ok && inQuote {
+		if len(nodes) != 1 || nodes[0].Kind != mdast.NodeBlockquote {
+			return nil, false
+		}
+		nodes, ok = blocksBefore(nodes[0], end)
+	}
+	if !ok {
+		return nil, false
+	}
+	switch reg.kind {
+	case listRegion:
+		if len(nodes) != 1 || nodes[0].Kind != mdast.NodeList {
+			return nil, false
+		}
+		var items []*mdast.Node
+		for item := nodes[0].FirstChild; item != nil; item = item.Next {
+			items = append(items, item)
+		}
+		return items, true
+	case tableRegion:
+		if len(nodes) != 1 || nodes[0].Kind != mdast.NodeTable {
+			return nil, false
+		}
+		// The rows before the sentinel's, but the header.
+		rows, found := blocksBefore(nodes[0], end)
+		if !found || len(rows) == 0 || !isHeaderRow(rows[0]) {
+			return nil, false
+		}
+		return rows[1:], true
+	default:
+		return nodes, true
+	}
+}
+
+// isHeaderRow reports whether a node is the header row of a table.
+func isHeaderRow(row *mdast.Node) bool {
+	return row.Kind == mdast.NodeTableRow && row.Block != nil && row.Block.Table != nil && row.Block.Table.Header
+}
+
+// blocksBefore returns the blocks of parent that start before end. ok is
+// false when one of them has no span of its own, which cannot be placed
+// before or after the sentinel.
+func blocksBefore(parent *mdast.Node, end int) ([]*mdast.Node, bool) {
+	var nodes []*mdast.Node
+	for child := parent.FirstChild; child != nil; child = child.Next {
+		rng := child.SourceRange()
+		if rng.IsEmpty() {
+			return nil, false
+		}
+		if rng.StartOffset < end {
+			nodes = append(nodes, child)
+		}
+	}
+	return nodes, true
 }
 
 // checkEdits reports whether applying edits, prepared and in content

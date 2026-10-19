@@ -3,6 +3,8 @@ package rules
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +68,53 @@ func headingCodeDocument(sections int) []byte {
 	doc.WriteString("# Title\n\n")
 	for idx := range sections {
 		fmt.Fprintf(&doc, "## Section %d ` code`\n\nText of section %d.\n\n", idx, idx)
+	}
+	return []byte(doc.String())
+}
+
+// quoteListDocument returns a document with one list of items in a
+// blockquote, each item a line that ends in trailing spaces, a finding that
+// MD009 fixes. Every fix shares the blockquote with the others, so each is
+// checked on its own.
+func quoteListDocument(items int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range items {
+		fmt.Fprintf(&doc, "> - Item %d has trailing spaces at the end of this line.   \n", idx)
+	}
+	return []byte(doc.String())
+}
+
+// quoteParagraphsDocument returns a document with one blockquote of
+// paragraphs, each a line that ends in trailing spaces, followed by a line
+// that holds only the blockquote marker.
+func quoteParagraphsDocument(paragraphs int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range paragraphs {
+		fmt.Fprintf(&doc, "> Paragraph %d has trailing spaces at the end of this line.   \n>\n", idx)
+	}
+	return []byte(doc.String())
+}
+
+// tableRowsDocument returns a document with one table whose body rows end in
+// trailing spaces.
+func tableRowsDocument(rows int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n| Name | Value |\n| ---- | ----- |\n")
+	for idx := range rows {
+		fmt.Fprintf(&doc, "| Row %d | Value %d |   \n", idx, idx)
+	}
+	return []byte(doc.String())
+}
+
+// quoteTableDocument returns a document with one table in a blockquote whose
+// body rows end in trailing spaces.
+func quoteTableDocument(rows int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n> | Name | Value |\n> | ---- | ----- |\n")
+	for idx := range rows {
+		fmt.Fprintf(&doc, "> | Row %d | Value %d |   \n", idx, idx)
 	}
 	return []byte(doc.String())
 }
@@ -182,6 +231,107 @@ func TestLintTimeGrowsLinearly(t *testing.T) {
 			long := fastest(doc.generate(factor * small))
 			ratio := float64(long) / float64(short)
 			t.Logf("%s: %v for %d, %v for %d, ratio %.1f", doc.name, short, small, long, factor*small, ratio)
+			require.Less(t, ratio, float64(maxRatio), "lint time grows faster than the document")
+		})
+	}
+}
+
+// TestLintTimeGrowsLinearlyInBlocks checks that linting a long list in a
+// blockquote, a blockquote of many paragraphs and a long table takes about
+// as long as linting an eighth of it eight times. Every fix of such a
+// document shares the blockquote or the table with the other fixes, so each
+// fix is checked on its own, and a check that parsed the whole blockquote or
+// table made eight times the document take about eight times as long: 2,000
+// items in a blockquote took 15 seconds to lint, and 8,000 took 200.
+//
+// A bound in seconds fails on a busy machine, so the test compares two
+// measurements of the same amount of input, as
+// TestManyClosingBracketsParseInLinearTime does: one lint of the long
+// document against a batch of lints of a document an eighth as long. Both
+// last about as long, so they meet the same disturbances; they run in turns,
+// the fastest of each counts, and garbage collection is paused while they
+// are timed. Like TestLintTimeGrowsLinearly, it is skipped under the race
+// detector, with which CI runs the tests; TestRegionParsesGrowInBlocks,
+// which counts the bytes the region checks parse instead of timing them,
+// guards the same documents there, and a table in a blockquote too.
+func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
+	if testing.Short() || raceEnabled {
+		t.Skip("timing")
+	}
+	const (
+		small  = 100
+		factor = 8
+		rounds = 3
+		// A linear check gives a ratio near one, and a check that parses the
+		// whole block for each fix a ratio near eight; the bound leaves room
+		// for a busy machine.
+		maxRatio = 3
+		// The paused collector runs past this heap, so that a check that
+		// parses the whole block for each fix fails without taking the
+		// machine's memory.
+		memoryLimit = 1 << 30
+	)
+	registry := lint.NewRegistry()
+	RegisterAll(registry)
+	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+	cfg := config.NewConfig()
+	// lintOnce lints content and returns how long it took and how many of
+	// its findings keep a fix.
+	lintOnce := func(t *testing.T, content []byte) (time.Duration, int) {
+		t.Helper()
+		start := time.Now()
+		result, err := engine.LintFile(context.Background(), "doc.md", content, cfg)
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		require.Empty(t, result.RuleErrors)
+		fixable := 0
+		for _, diag := range result.Diagnostics {
+			if diag.HasFix() {
+				fixable++
+			}
+		}
+		return elapsed, fixable
+	}
+	for _, doc := range []struct {
+		name     string
+		generate func(int) []byte
+	}{
+		{name: "list in a blockquote", generate: quoteListDocument},
+		{name: "paragraphs in a blockquote", generate: quoteParagraphsDocument},
+		{name: "table", generate: tableRowsDocument},
+	} {
+		t.Run(doc.name, func(t *testing.T) {
+			short, long := doc.generate(small), doc.generate(factor*small)
+			runtime.GC()
+			defer debug.SetGCPercent(debug.SetGCPercent(-1))
+			defer debug.SetMemoryLimit(debug.SetMemoryLimit(memoryLimit))
+
+			// Warm up both documents before timing them. Every line of the
+			// block keeps its fix, so every fix check runs and passes.
+			_, fixable := lintOnce(t, short)
+			require.GreaterOrEqual(t, fixable, small)
+			_, fixable = lintOnce(t, long)
+			require.GreaterOrEqual(t, fixable, factor*small)
+
+			// Collecting before each measurement, outside the timers, keeps
+			// the paused collector from letting the heap grow for the whole
+			// test.
+			bestBatch, bestLong := time.Duration(1<<63-1), time.Duration(1<<63-1)
+			for range rounds {
+				runtime.GC()
+				var batch time.Duration
+				for range factor {
+					elapsed, _ := lintOnce(t, short)
+					batch += elapsed
+				}
+				bestBatch = min(bestBatch, batch)
+				runtime.GC()
+				elapsed, _ := lintOnce(t, long)
+				bestLong = min(bestLong, elapsed)
+			}
+			ratio := float64(bestLong) / float64(bestBatch)
+			t.Logf("%d lints of %d in %v, one lint of %d in %v, ratio %.2f",
+				factor, small, bestBatch, factor*small, bestLong, ratio)
 			require.Less(t, ratio, float64(maxRatio), "lint time grows faster than the document")
 		})
 	}
