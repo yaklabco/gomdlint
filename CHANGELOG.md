@@ -314,12 +314,9 @@ formats change. The first entries under Changed may need action.
 - **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
   `#TOP` unless `ignore_case` is set.
 - **MD052**: No longer reports a reference whose label is nothing but ASCII
-  white space, such as a form feed, nor a full reference whose text is, such
-  as `[ ][label]`, as markdownlint records no reference for either. At the
-  start of a heading that starts a list item, where goldmark read a task
-  checkbox, it reads the brackets after the checkbox as references of their
-  own, as before. Reads GFM footnotes as markdownlint does where micromark
-  is certain to read the definition. A call such as `[^1]` is then no
+  white space, such as a form feed, for which markdownlint records no
+  reference. Reads GFM footnotes as markdownlint does where micromark is
+  certain to read the definition. A call such as `[^1]` is then no
   reference, so `shortcut_syntax` no longer reports it, and in `[text][^1]`
   the `[text]` is a shortcut reference, so `[text][^1]` is reported only
   with `shortcut_syntax`, and there only where main reports it. Only a link
@@ -343,10 +340,6 @@ formats change. The first entries under Changed may need action.
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
   strikethrough counts as direct. Findings point at the link text, one
   column after the bracket, and autolinks are never checked.
-- A heading that starts a list item holds no task checkbox, where goldmark
-  read one, so **MD039** reports `- ## [ ](/url).`, as markdownlint does.
-  Everywhere else the parser reads the task checkboxes goldmark reads, as
-  before.
 - No fix changes or makes a task list checkbox. micromark and GitHub's
   cmark-gfm read checkboxes in different places, so any line that holds a
   `[`, one character or a line ending, and `]`, wherever on the line, keeps

@@ -124,9 +124,7 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 // shortcut_syntax is set, whose label matches no definition. The parser turns
 // every reference with a defined label into a link or image, so only the
 // reference syntax it left as text can be undefined. A reference whose label
-// is nothing but white space is never reported (see refs.BlankLabel), and
-// the scanner of that syntax records no full reference whose text is
-// nothing but white space.
+// is nothing but white space is never reported (see refs.BlankLabel).
 //
 // Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
 // "[^label]" calls a footnote that the document defines with a line that

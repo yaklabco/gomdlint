@@ -19,10 +19,10 @@ import (
 	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
-// checkboxDocuments are documents whose task checkboxes micromark reads
-// differently from goldmark's own task list extension, with the number of
-// checkboxes the parser reads in each: the number goldmark's extension
-// reads, except in a heading, where the parser reads none.
+// checkboxDocuments are documents at the edges of where micromark,
+// cmark-gfm and goldmark read task checkboxes, with the number of
+// checkboxes the parser reads in each, which is the number goldmark's own
+// task list extension reads.
 var checkboxDocuments = []struct {
 	input string
 	boxes int
@@ -33,7 +33,7 @@ var checkboxDocuments = []struct {
 	{"> - [\t] task\n", 1},
 	{"- [\f] done\n", 1},
 	{"- [x]foo\n", 1},
-	{"- ## [ ](/url).\n", 0},
+	{"- ## [ ](/url).\n", 1},
 	{"- [\n  ] task\n", 0},
 	{"- [\n   ] task\n", 0},
 	{"> - [\n> ] task\n", 0},
@@ -236,10 +236,10 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 }
 
 // TestParserReadsCheckboxesAsGoldmark checks that the parser reads the task
-// checkboxes that goldmark's own GFM extension, which main used, reads, at
-// the same offsets and checked alike, in every document of the checkbox
-// corpus and in its expected outputs, except in a heading, where the parser
-// reads none, so that the link in "- ## [ ](/url)." stays a link.
+// checkboxes that goldmark's own GFM extension reads, at the same offsets
+// and checked alike, in every document of the checkbox corpus and in its
+// expected outputs. The parser builds on that extension, so this pins its
+// configuration and the mapping of checkbox nodes.
 func TestParserReadsCheckboxesAsGoldmark(t *testing.T) {
 	type place struct {
 		offset  int
@@ -261,9 +261,7 @@ func TestParserReadsCheckboxesAsGoldmark(t *testing.T) {
 			source := []byte(input)
 			want := []place{}
 			for _, box := range goldmarkCheckboxes(reference.Parser().Parse(gmtext.NewReader(source))) {
-				if _, heading := box.Parent().(*gmast.Heading); !heading {
-					want = append(want, place{offset: box.Parent().Lines().At(0).Start, checked: box.IsChecked})
-				}
+				want = append(want, place{offset: box.Parent().Lines().At(0).Start, checked: box.IsChecked})
 			}
 			file, err := gmparser.New(gmparser.FlavorGFM).Parse(context.Background(), "test.md", source)
 			require.NoError(t, err)

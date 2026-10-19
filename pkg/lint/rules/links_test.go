@@ -183,20 +183,19 @@ func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
 	}
 }
 
-// TestLinkSpacesRule_LinksInTaskListItems checks that MD039 sees the links
-// GFM reads at the start of a heading in a list item, where goldmark alone
-// would read a task checkbox. markdownlint 0.41.1 reports each side of the
-// whitespace at the same column. Right before "(" the parser reads a
-// checkbox, as goldmark and main do, so MD039 sees no link there, where
-// markdownlint reports one.
-func TestLinkSpacesRule_LinksInTaskListItems(t *testing.T) {
+// TestLinkSpacesRule_LinksAfterTaskCheckboxes checks MD039 where a list
+// item starts with brackets. The parser reads them as a task checkbox as
+// goldmark does, at the start of the item's first block, a heading
+// included, so "[ ](/url)" there is no link, as on main, though markdownlint,
+// which reads no checkboxes, reports it. A link after a checkbox is checked.
+func TestLinkSpacesRule_LinksAfterTaskCheckboxes(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
 		wantColumns []int
 	}{
-		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{7, 7}},
-		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{9, 9}},
+		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{}},
+		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{}},
 		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{}},
 		{name: "checkbox before parenthesized text", input: "- [ ] (https://example.org)\n", wantColumns: []int{}},
 		{name: "checkbox before a link", input: "- [ ] [ text ](/url)\n", wantColumns: []int{8, 13}},
