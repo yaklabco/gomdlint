@@ -360,7 +360,8 @@ user, and system directories, merging configurations hierarchically.
 For the project config, gomdlint looks in the current directory and then in
 each parent directory, up to the repository root or your home directory. It
 uses the first directory that holds one of these files. In that directory it
-reads the first name in this list and ignores the others:
+reads the first name in this list and ignores the others, each with a
+warning that names the file it reads:
 
 1. `.gomdlint.yml`
 2. `.gomdlint.yaml`
@@ -376,7 +377,8 @@ reads the first name in this list and ignores the others:
 The user config is `config.yaml`, `config.yml` or `config.json`, in that
 order of preference, in `$XDG_CONFIG_HOME/gomdlint` (by default
 `~/.config/gomdlint`). The system config uses the same names in
-`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows.
+`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows. A file that
+another name there shadows gets a warning too.
 
 ```yaml
 # .gomdlint.yaml
@@ -617,13 +619,13 @@ Migration does not evaluate JavaScript configuration or resolve `extends`.
 gomdlint reads a markdownlint config file as markdownlint-cli2 0.23 reads
 one that it finds. In a directory with several, it uses the first of
 `.markdownlint.jsonc`, `.markdownlint.json`, `.markdownlint.yaml` and
-`.markdownlint.yml`. Whatever the file's name, gomdlint skips a leading
-byte order mark, reads the file as JSON with comments and trailing commas,
-and reads it as YAML when that fails. So a `.markdownlint.yaml` file that
-holds JSON loads, and a key that the JSON writes twice takes its last value
-in its first place. A file that holds a list, a string, a number or nothing
-loads as an empty config, so every rule keeps markdownlint's defaults. A
-value other than an object gets a warning.
+`.markdownlint.yml`, and warns about the others. Whatever the file's name,
+gomdlint skips a leading byte order mark, reads the file as JSON with
+comments and trailing commas, and reads it as YAML when that fails. So a
+`.markdownlint.yaml` file that holds JSON loads, and a key that the JSON
+writes twice takes its last value in its first place. A file that holds a
+list, a string, a number or nothing loads as an empty config, so every rule
+keeps markdownlint's defaults. A value other than an object gets a warning.
 
 YAML reads as js-yaml 5 reads it for markdownlint-cli2, with the core
 schema of YAML 1.2. So `yes`, `off` and `0b1` are strings, which turn a

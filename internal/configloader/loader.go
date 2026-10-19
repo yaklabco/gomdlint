@@ -197,6 +197,7 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 			result.IgnoreBaseDir = ignoreBase
 		}
 		result.LoadedFrom = append(result.LoadedFrom, path)
+		result.Warnings = append(result.Warnings, shadowWarnings(paths, path)...)
 		result.Warnings = append(result.Warnings, warnings...)
 		return nil
 	}
@@ -228,6 +229,7 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 				fmt.Sprintf("both %s and %s exist; using %s", paths.Project, paths.Markdownlint, paths.Project))
 		}
 	case paths.Markdownlint != "":
+		result.Warnings = append(result.Warnings, shadowWarnings(paths, paths.Markdownlint)...)
 		translated, err := applyMarkdownlint(paths.Markdownlint, opts, result)
 		if err != nil {
 			return nil, err
@@ -279,6 +281,19 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 
 	result.Config = cfg
 	return result, nil
+}
+
+// shadowWarnings returns a warning for each config file that path, a config
+// file that gomdlint reads, shadows in its directory (see
+// ConfigPaths.Shadowed), naming both files, in the manner of the warning
+// for a project config beside a markdownlint config.
+func shadowWarnings(paths *ConfigPaths, path string) []string {
+	ignored := paths.Shadowed[path]
+	warnings := make([]string, 0, len(ignored))
+	for _, other := range ignored {
+		warnings = append(warnings, fmt.Sprintf("both %s and %s exist; using %s", path, other, path))
+	}
+	return warnings
 }
 
 // loadConfigFile loads a configuration from a file: JSON if its name ends

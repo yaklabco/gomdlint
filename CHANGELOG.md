@@ -169,6 +169,13 @@ formats change. The first entries under Changed may need action.
 - Config discovery finds `.gomdlint.json` and `gomdlint.json` after the YAML
   names, and `config.json` in the user and system config directories. `init`
   and `migrate` write JSON for an output name that ends in `.json`.
+- A warning for each config file that another one in its directory
+  shadows, naming both, such as `.gomdlint.json` beside `.gomdlint.yml`,
+  which `gomdlint init --format json` can leave behind. gomdlint reads one
+  config file of each kind per directory, YAML names before JSON ones and
+  `.yml` before `.yaml`, and used to ignore the others without a word. It
+  warns only about the files it reads, so a markdownlint config beside a
+  gomdlint config gets the one warning that names both.
 - A bare `true` or `false` turns a rule on or off, as in markdownlint, such
   as `line-length: false` in YAML or `"MD013": false` in JSON.
 - A bare severity turns a rule on at that severity, as in markdownlint, such
