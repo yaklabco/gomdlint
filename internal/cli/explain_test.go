@@ -84,27 +84,62 @@ func TestExplainMarkdownDoesNotReadTheConfiguration(t *testing.T) {
 }
 
 // TestRuleFormatVariableOnlyForTextListings covers an invalid
-// GOMDLINT_RULE_FORMAT under --defaults, which reads no configuration: only
-// a text listing, which names rules as the variable says, fails on it.
+// GOMDLINT_RULE_FORMAT, with the configuration and under --defaults, which
+// reads none: only a text listing, which names rules as the variable says,
+// fails on it, as lint does in every format. A rule's page, JSON and
+// Markdown name no rules in the rule format, so they ignore the variable.
 func TestRuleFormatVariableOnlyForTextListings(t *testing.T) {
 	inProject(t, nil)
 	t.Setenv("GOMDLINT_RULE_FORMAT", "ids")
 
-	for _, args := range [][]string{
-		{"explain", "--defaults", "MD009"},
-		{"explain", "--defaults", "--format", "json", "MD009"},
-		{"explain", "--defaults", "--format", "markdown", "whitespace"},
-		{"rules", "--defaults", "--format", "json"},
-		{"rules", "--defaults", "--format", "markdown"},
-	} {
-		got := execute(t, args...)
-		assert.Equal(t, cli.ExitSuccess, got.code, "%v: %s", args, got.stderr)
+	for _, mode := range [][]string{nil, {"--defaults"}} {
+		for _, args := range [][]string{
+			{"explain", "MD009"},
+			{"explain", "--format", "json", "MD009"},
+			{"explain", "--format", "json", "whitespace"},
+			{"explain", "--format", "json", "layout"},
+			{"explain", "--format", "markdown", "whitespace"},
+			{"rules", "--format", "json"},
+			{"rules", "--format", "json", "--rule-format", "id"},
+			{"rules", "--format", "markdown"},
+		} {
+			args = append(args, mode...)
+			got := execute(t, args...)
+			assert.Equal(t, cli.ExitSuccess, got.code, "%v: %s", args, got.stderr)
+			assert.NotEmpty(t, got.stdout, "%v", args)
+		}
+
+		for _, args := range [][]string{{"explain", "whitespace"}, {"rules"}} {
+			args = append(args, mode...)
+			got := execute(t, args...)
+			assert.Equal(t, cli.ExitConfigError, got.code, "%v", args)
+			assert.Contains(t, got.stderr, `invalid rule format "ids"; must be one of: name, id, combined`, "%v", args)
+			assert.Empty(t, got.stdout, "%v", args)
+		}
 	}
 
-	for _, args := range [][]string{{"explain", "--defaults", "whitespace"}, {"rules", "--defaults"}} {
+	// lint keeps failing on the variable, whatever its format.
+	got := execute(t, "lint", "--format", "json")
+	assert.Equal(t, cli.ExitConfigError, got.code)
+	assert.Contains(t, got.stderr, `invalid rule format "ids"`)
+}
+
+// TestExplainListingNamesRulesAsTheVariableSays covers a valid
+// GOMDLINT_RULE_FORMAT in the text listing that explain prints for a tag,
+// with the configuration and under --defaults: the listing puts IDs first,
+// as rules does.
+func TestExplainListingNamesRulesAsTheVariableSays(t *testing.T) {
+	inProject(t, nil)
+	t.Setenv("GOMDLINT_RULE_FORMAT", "id")
+
+	for _, mode := range [][]string{nil, {"--defaults"}} {
+		args := append([]string{"explain", "--color", "never", "whitespace"}, mode...)
+
 		got := execute(t, args...)
-		assert.Equal(t, cli.ExitConfigError, got.code, "%v", args)
-		assert.Contains(t, got.stderr, `invalid rule format "ids"`, "%v", args)
+
+		require.Equal(t, cli.ExitSuccess, got.code, "%v: %s", args, got.stderr)
+		assert.Contains(t, got.stdout, "\n\nID ", "%v: the header puts the ID first", args)
+		assert.Contains(t, got.stdout, "\n  MD009  no-trailing-spaces ", "%v", args)
 	}
 }
 

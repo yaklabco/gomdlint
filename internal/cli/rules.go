@@ -119,18 +119,20 @@ func runRules(cmd *cobra.Command, args []string, flags *rulesFlags, registry *li
 		return err
 	}
 
+	// Only the text listing names rules in a rule format.
+	textListing := flags.format == docsFormatText
 	var cfg *config.Config // nil for the built-in settings
 	if !flags.defaults {
-		var cliCfg config.Config
+		var flag string
 		if cmd.Flags().Changed("rule-format") {
-			cliCfg.RuleFormat = config.RuleFormat(flags.ruleFormat)
+			flag = flags.ruleFormat
 		}
-		if cfg, err = loadRuleSettings(cmd, &cliCfg); err != nil {
+		if cfg, err = loadRuleSettings(cmd, listingSettings(flag, textListing)); err != nil {
 			return err
 		}
 	}
 	opts := ruledocs.ListOptions{}
-	if flags.format == docsFormatText {
+	if textListing {
 		if opts.RuleFormat, err = listingRuleFormat(cmd, flags.ruleFormat, cfg); err != nil {
 			return err
 		}
@@ -313,8 +315,9 @@ func closestWords(words []string, value string) []string {
 // loadRuleSettings returns the configuration whose rule settings the rules
 // and explain commands show: the one that lint would load from the working
 // directory, or from the file that --config names, with the environment
-// and cliCfg, the settings of the command's flags, on top. Its notices and
-// warnings go to the command's log, as for lint.
+// and cliCfg, the settings to apply last, as lint applies its flags (see
+// listingSettings), on top. Its notices and warnings go to the command's
+// log, as for lint.
 func loadRuleSettings(cmd *cobra.Command, cliCfg *config.Config) (*config.Config, error) {
 	ctx := cmd.Context()
 
@@ -349,13 +352,27 @@ func loadRuleSettings(cmd *cobra.Command, cliCfg *config.Config) (*config.Config
 	return loadResult.Config, nil
 }
 
+// listingSettings returns the settings that the rules and explain commands
+// apply last when they load the configuration, as lint applies its flags.
+// Output that names rules in a rule format, which usesRuleFormat reports,
+// gets flag, the value of --rule-format, or "" when it is not given, which
+// leaves GOMDLINT_RULE_FORMAT to apply, and to fail the load when it is
+// invalid, as for lint. Other output gets the name format, so that the
+// variable, which it ignores, cannot fail it.
+func listingSettings(flag string, usesRuleFormat bool) *config.Config {
+	if !usesRuleFormat {
+		return &config.Config{RuleFormat: config.RuleFormatName}
+	}
+	return &config.Config{RuleFormat: config.RuleFormat(flag)}
+}
+
 // listingRuleFormat returns how a text listing names rules: as
 // --rule-format says when it is given, else as GOMDLINT_RULE_FORMAT says,
-// else by name. cfg is the loaded configuration, which holds the
-// variable's setting, already checked, or nil when none was loaded, under
-// --defaults, which leaves the variable to be read here. As for lint, an
-// invalid value of the variable is a configuration error, unless the flag
-// is given.
+// else by name. cfg is the configuration loaded for the text listing,
+// which holds the variable's setting, already checked (see
+// listingSettings), or nil when none was loaded, under --defaults, which
+// leaves the variable to be read here. As for lint, an invalid value of the
+// variable is a configuration error, unless the flag is given.
 func listingRuleFormat(cmd *cobra.Command, flag string, cfg *config.Config) (config.RuleFormat, error) {
 	if cmd.Flags().Changed("rule-format") {
 		return config.RuleFormat(flag), nil

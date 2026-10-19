@@ -334,10 +334,10 @@ gomdlint lint --rule-format id file.md       # id: MD009
 gomdlint lint --rule-format combined file.md # combined: MD009/no-trailing-spaces
 ```
 
-To change the default for `gomdlint lint` and the text listing of
-`gomdlint rules`, set `GOMDLINT_RULE_FORMAT`, for example to `id`. The flag
-wins over the variable. JSON and SARIF output always carry both the ID and
-the name.
+To change the default for `gomdlint lint` and for the text listings of
+`gomdlint rules` and `gomdlint explain`, set `GOMDLINT_RULE_FORMAT`, for
+example to `id`. The flag wins over the variable. JSON and SARIF output
+always carry both the ID and the name.
 
 ## Configuration
 

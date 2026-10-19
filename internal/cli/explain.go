@@ -89,10 +89,12 @@ func runExplain(cmd *cobra.Command, arg string, flags *explainFlags, registry *l
 	}
 
 	// Markdown output does not depend on the rules' states, so it reads no
-	// configuration.
+	// configuration. Only the text listing of a tag or a category names
+	// rules in a rule format.
 	var cfg *config.Config // nil for the built-in settings
 	if !flags.defaults && flags.format != docsFormatMarkdown {
-		if cfg, err = loadRuleSettings(cmd, nil); err != nil {
+		usesRuleFormat := flags.format == docsFormatText && topic.rule == nil
+		if cfg, err = loadRuleSettings(cmd, listingSettings("", usesRuleFormat)); err != nil {
 			return err
 		}
 	}
@@ -120,9 +122,11 @@ func runExplain(cmd *cobra.Command, arg string, flags *explainFlags, registry *l
 
 // explainGroup lists the rules of topic, a tag or a category, in format.
 // The text listing names the rules command that lists them too, and names
-// rules as GOMDLINT_RULE_FORMAT says, which cfg, the loaded configuration,
-// holds unless it is nil. When topic is both a tag and a category, it
-// lists the rules of the tag.
+// rules as GOMDLINT_RULE_FORMAT says. cfg is the loaded configuration, or
+// nil under --defaults. For a text listing, it must be loaded with
+// listingSettings reporting that the output uses the rule format, so that
+// it holds the variable's setting. When topic is both a tag and a category,
+// it lists the rules of the tag.
 func explainGroup(cmd *cobra.Command, topic explainTopic, format string, entries []ruledocs.Entry, cfg *config.Config) error {
 	filter := ruledocs.Filter{Categories: []lint.Category{topic.category}}
 	title := "Rules in the category " + string(topic.category)
