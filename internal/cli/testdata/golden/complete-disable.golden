@@ -2,9 +2,9 @@ accessibility	Tag: no-alt-text, descriptive-link-text
 atx	Tag: no-missing-space-atx, no-multiple-space-atx
 atx_closed	Tag: no-missing-space-closed-atx, no-multiple-space-closed-atx
 blank_lines	Tag: no-multiple-blank-lines, heading-blank-lines, blanks-around-fences, blanks-around-lists, single-trailing-newline
-blanks-around-fences	Fenced code blocks have a blank line above and below.
-blanks-around-lists	Lists have a blank line above and below.
-blanks-around-tables	Tables have a blank line above and below.
+blanks-around-fences	Fenced code blocks have a blank or comment line above and below.
+blanks-around-lists	Lists outside other lists have a blank or comment line above and below.
+blanks-around-tables	Tables have a blank or comment line above and below.
 blockquote	Tag: no-multiple-space-blockquote, no-blanks-blockquote
 bullet	Tag: unordered-list-style, list-indent, ul-indent, blanks-around-lists
 code	Tag: commands-show-output, blanks-around-fences, no-space-in-code, fenced-code-language, code-block-style, code-fence-style
@@ -15,15 +15,15 @@ descriptive-link-text	Link text describes its target instead of saying "click he
 emphasis	Tag: no-emphasis-as-heading, no-space-in-emphasis, emphasis-style, strong-style
 emphasis-style	All italic text uses one marker, *text* or _text_, except * inside a word.
 fenced-code-language	Fenced code blocks name their language after the opening fence.
-first-line-heading	The file starts with a top-level heading or a front matter title.
+first-line-heading	Comments aside, the file starts with a top-level heading or front matter title.
 hard_tab	Tag: no-hard-tabs
-heading-blank-lines	Headings have a blank line above and below.
-heading-increment	Each heading is at most one level deeper than the heading before it.
-heading-start-left	Headings start at the beginning of the line, with no indentation.
+heading-blank-lines	Headings have a blank or comment line above and below.
+heading-increment	Each heading is at most one level deeper than the heading or title before it.
+heading-start-left	Headings start at the beginning of their line, list item or blockquote.
 heading-style	Headings all use the first heading's style: # Title, # Title #, or underlined.
 headings	Tag: heading-increment, heading-style, no-missing-space-atx, no-multiple-space-atx, no-missing-space-closed-atx, no-multiple-space-closed-atx, heading-blank-lines, heading-start-left, no-duplicate-heading, single-h1, no-trailing-punctuation, no-emphasis-as-heading, first-line-heading, required-headings
 hr	Tag: hr-style
-hr-style	Every horizontal rule uses the same characters as the first one, such as ---.
+hr-style	Every horizontal rule is written the same way as the first one, such as ---.
 html	Tag: no-inline-html
 images	Tag: no-alt-text, reference-links-images, link-image-reference-definitions, link-image-style
 indentation	Tag: list-indent, ul-indent, no-multiple-space-blockquote
@@ -31,39 +31,39 @@ language	Tag: fenced-code-language
 line-length	Lines fit in 80 characters, with exemptions such as lone links and definitions.
 line_length	Tag: line-length
 link-destination-style	Links in a file, other than #fragment links, are all relative or all absolute.
-link-fragments	Links to a #fragment point at a heading or anchor in the same file.
+link-fragments	Links to a #fragment point at a heading or anchor in the same file, or at #top.
 link-image-reference-definitions	Every reference definition is used and defined once, except [//] comments.
 link-image-style	Links and images use only the allowed styles. By default, all are allowed.
 links	Tag: no-reversed-links, no-bare-urls, no-space-in-links, no-empty-links, link-fragments, reference-links-images, link-image-reference-definitions, link-image-style, descriptive-link-text, link-destination-style
 list-indent	Items in a list start at the same column. Ordered numbers may right-align.
-list-marker-space	One space separates each list marker from the item's text.
+list-marker-space	One space, or one tab, separates each list marker from the item's text.
 no-alt-text	Markdown images have alt text, and HTML images have alt or aria-hidden="true".
-no-bare-urls	URLs and email addresses sit inside angle brackets or a link.
+no-bare-urls	Outside code and HTML, URLs and email addresses sit in angle brackets or links.
 no-blanks-blockquote	No blank line sits between two blockquotes.
 no-duplicate-heading	No two headings have exactly the same text.
-no-emphasis-as-heading	A line of only bold or italic text does not stand in for a heading.
+no-emphasis-as-heading	Outside lists and blockquotes, a bold or italic line is not a stand-in heading.
 no-empty-links	Inline links have a destination, and no link points at just #.
 no-hard-tabs	Lines contain no tab characters, including inside code.
 no-inline-html	Documents contain no raw HTML elements other than allowed ones.
-no-missing-space-atx	A space follows the # marks that open a heading.
-no-missing-space-closed-atx	A closed heading has a space inside each run of #, as in # Title #.
-no-multiple-blank-lines	Outside code, no two blank lines follow each other.
+no-missing-space-atx	A space follows the # marks that open a heading at the start of a line.
+no-missing-space-closed-atx	A closed heading at the start of a line has a space inside each run of #.
+no-multiple-blank-lines	Outside code, no two blank lines follow each other, except after front matter.
 no-multiple-space-atx	Only one space follows the # marks that open a heading.
-no-multiple-space-blockquote	At most one space follows the > of a blockquote.
+no-multiple-space-blockquote	Outside code and list item text, at most one space follows a blockquote's >.
 no-multiple-space-closed-atx	A closed heading has only one space inside each run of #.
 no-reversed-links	Inline links put the text in brackets and the URL in parentheses: [text](url).
 no-space-in-code	Code span text has no spaces around it, except one each side or by a backtick.
 no-space-in-emphasis	Emphasis markers touch the text they wrap, as in **bold**.
 no-space-in-links	Link text has no spaces just inside its brackets.
 no-trailing-punctuation	Headings do not end with a period, comma, semicolon, colon or exclamation mark.
-no-trailing-spaces	Outside code blocks, no line ends in spaces or tabs, except 2 for a line break.
+no-trailing-spaces	Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
 ol	Tag: ol-prefix, list-marker-space, blanks-around-lists
-ol-prefix	Ordered list items are all numbered 1, or count up by one from 0 or 1.
-proper-names	Proper names match the capitals in the configured list, empty by default.
+ol-prefix	Ordered list items are numbered 1, 1, 1, or 1, 2, 3, or 0, 1, 2, and so on.
+proper-names	Outside URLs, proper names match the configured capitals, none by default.
 reference-links-images	Labels in [text][label] and [label][] references are defined, except x.
 required-headings	Headings follow the configured outline in order. No outline is set by default.
 single-h1	A document that starts with a title has no other top-level heading.
-single-trailing-newline	The file ends with a newline, or a last line of only spaces, > or comments.
+single-trailing-newline	The file ends with a newline, or a last line of only whitespace, > or comments.
 spaces	Tag: no-missing-space-atx, no-multiple-space-atx, no-missing-space-closed-atx, no-multiple-space-closed-atx, heading-start-left
 spelling	Tag: proper-names
 strong-style	All bold text uses one marker, **text** or __text__, except ** inside a word.

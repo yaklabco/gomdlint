@@ -271,11 +271,11 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 	partialFixes := map[string]bool{
 		"MD003": true, // Underlined headings are never converted.
 		"MD004": true, // A marker change that would merge two lists.
-		"MD005": true, // Bullet items, and items with more than one paragraph.
-		"MD007": true, // Items with more than one paragraph.
+		"MD005": true, // Bullet items, and items that hold more than a paragraph and nested lists.
+		"MD007": true, // Items that hold more than a paragraph and nested lists.
 		"MD009": true, // Whitespace in a code span, whitespace other than one space before a soft line break, a hard break when br_spaces is below 2, and raw HTML.
-		"MD010": true, // Tabs inside code are reported and never replaced.
-		"MD012": true, // Raw HTML only.
+		"MD010": true, // Tabs inside code are never replaced, and some others, such as in a heading.
+		"MD012": true, // Blank lines inside an HTML comment, and raw HTML.
 		"MD013": true, // Only some long lines can be wrapped safely.
 		"MD018": true, // A new heading may break links to heading anchors, and a space cannot make seven or more # marks a heading.
 		"MD020": true, // A changed heading may break links to heading anchors.
@@ -283,13 +283,14 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		"MD026": true, // A heading left showing nothing, or changed where links may point at anchors.
 		"MD027": true, // Fence and HTML lines, and items with more than one paragraph.
 		"MD029": true, // A list that starts at a wrong number is not renumbered.
-		"MD030": true, // Items with more than one paragraph.
-		"MD031": true, // A blank line that would loosen a tight list.
+		"MD030": true, // Items that hold more than a paragraph and nested lists.
+		"MD031": true, // A blank line that would loosen a tight list, or follow a fence that is never closed.
 		"MD032": true, // Raw HTML only.
 		"MD034": true, // Only some bare URLs can be wrapped safely.
-		"MD035": true, // A dash rule under a paragraph would make a heading.
+		"MD035": true, // A dash rule under a paragraph would make a heading, and some rules in list items.
 		"MD036": true, // Only some emphasized lines can become headings.
-		"MD037": true, // Markers that may be meant literally.
+		"MD037": true, // Markers that may be meant literally, and markers inside square brackets.
+		"MD039": true, // Full reference links.
 		"MD040": true, // Only a language the code proves, and allowed_languages permits, is inserted.
 		"MD044": true, // Names inside raw HTML.
 		"MD047": true, // Raw HTML only.
@@ -424,9 +425,9 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	// MD047 asks for a last line that counts as blank, not for a final
 	// newline byte.
 	{id: "MD047", name: "last line of text", phrase: "ends with a newline", input: "# Title\n\nText.", want: []catalogFinding{{3, true}}},
-	{id: "MD047", name: "last line of spaces", phrase: "a last line of only spaces", input: "# Title\n\nText.\n "},
+	{id: "MD047", name: "last line of spaces", phrase: "a last line of only whitespace", input: "# Title\n\nText.\n "},
 	{id: "MD047", name: "last line holding a comment", phrase: "or comments", input: "# Title\n\nText.\n<!-- end -->"},
-	{id: "MD047", name: "last line holding a quote marker", phrase: "only spaces, > or comments", input: "# Title\n\n> Quote.\n>"},
+	{id: "MD047", name: "last line holding a quote marker", phrase: "only whitespace, > or comments", input: "# Title\n\n> Quote.\n>"},
 
 	// MD011 checks inline links.
 	{
@@ -482,11 +483,11 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\nSee [x].\n\n[x]: https://example.com/page \"" + catalogLongLine + "\"\n",
 	},
 	{
-		id: "MD013", name: "long last word", phrase: "only overflow is the last word",
+		id: "MD013", name: "long last word", phrase: "crosses the limit",
 		input: "# Title\n\n" + catalogShortLine + " https://example.com/a-path-that-runs-past-the-limit\n",
 	},
 	{id: "MD013", name: "paragraph line", phrase: "wraps long paragraph lines", input: "# Title\n\n" + catalogLongLine + "\n", want: []catalogFinding{{3, true}}},
-	{id: "MD013", name: "heading", phrase: "when it is a heading", input: "# Title\n\n## " + catalogLongLine + "\n", want: []catalogFinding{{3, false}}},
+	{id: "MD013", name: "heading", phrase: "such as a heading", input: "# Title\n\n## " + catalogLongLine + "\n", want: []catalogFinding{{3, false}}},
 
 	// MD038 allows one space on each side and a space beside a backtick.
 	{id: "MD038", name: "allowed padding", phrase: "except one each side or by a backtick", input: "# Title\n\nUse `` `foo`` and `   ` and ` code ` here.\n"},
@@ -514,11 +515,11 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 
 	// Other findings that fix texts name as reported without a fix.
 	{
-		id: "MD027", name: "quoted item with a second paragraph", phrase: "a list item that holds a second paragraph",
+		id: "MD027", name: "quoted item with a second paragraph", phrase: "one that holds a second paragraph",
 		input: "# Title\n\n>   - item\n>\n>     second paragraph\n", want: []catalogFinding{{3, false}},
 	},
 	{
-		id: "MD053", name: "text after the definition", phrase: "other text follows it on the next line",
+		id: "MD053", name: "text after the definition", phrase: "other text follows on the next line",
 		input: "# Title\n\n[unused]: /target\nParagraph.\n", want: []catalogFinding{{3, false}},
 	},
 	{
@@ -558,7 +559,7 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\n- # Heading\n  text\n\n- item\n", want: []catalogFinding{{3, true}},
 	},
 	{
-		id: "MD031", name: "fence in a tight list", phrase: "a fence in a tight list without a fix",
+		id: "MD031", name: "fence in a tight list", phrase: "a fence in a tight list",
 		input: "# Title\n\n1. Run:\n   ```sh\n   make\n   ```\n2. Next\n", want: []catalogFinding{{4, false}, {6, false}},
 	},
 	{
@@ -599,6 +600,42 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	// MD026 keeps a heading that would show nothing.
 	{id: "MD026", name: "punctuation only", phrase: "leave it showing nothing", input: "# Title\n\n## ...\n", want: []catalogFinding{{3, false}}},
 	{id: "MD026", name: "text and punctuation", phrase: "deletes the trailing punctuation", input: "# Title\n\n## Done.\n", want: []catalogFinding{{3, true}}},
+
+	// MD022 and MD031 add the blank line above a tight list, which does not
+	// loosen it.
+	{
+		id: "MD022", name: "heading that starts a tight list", phrase: "when the blank line would make the list loose",
+		input: "# Title\n\nText.\n- # Heading\n- next\n", want: []catalogFinding{{4, true}, {4, false}},
+	},
+	{
+		id: "MD031", name: "fence that starts a tight list", phrase: "when the blank line would make the list loose",
+		input: "# Title\n\nText.\n- ```sh\n  make\n  ```\n- next\n", want: []catalogFinding{{4, true}, {6, false}},
+	},
+
+	// MD023 measures a heading's indentation from its list item or
+	// blockquote.
+	{
+		id: "MD023", name: "heading at the start of its list item", phrase: "beginning of their line, list item or blockquote",
+		input: "# Title\n\n- item\n  # Heading\n",
+	},
+	{
+		id: "MD023", name: "heading indented past its list item", phrase: "deletes the extra indentation",
+		input: "# Title\n\n- item\n   # Heading\n", want: []catalogFinding{{4, true}},
+	},
+
+	// MD027 leaves alone the indentation of code and of list item text in a
+	// blockquote.
+	{id: "MD027", name: "indented code in a blockquote", phrase: "Outside code and list item text", input: "# Title\n\n>     code\n"},
+	{
+		id: "MD027", name: "second paragraph of a quoted list item", phrase: "Outside code and list item text",
+		input: "# Title\n\n> - item\n>\n>   second paragraph\n",
+	},
+
+	// MD032 checks lists that are not inside another list.
+	{
+		id: "MD032", name: "nested list", phrase: "Lists outside other lists",
+		input: "# Title\n\n- Parent\n  - Child\n  - Child two\n- Next\n",
+	},
 
 	// MD018 reports seven or more # marks, which a space cannot make a
 	// heading, without a fix.
@@ -675,6 +712,137 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		id: "MD009", name: "trailing space before the paragraph's next line", phrase: "deletes the trailing whitespace",
 		input: "# Title\n\nText \nnext\n", want: []catalogFinding{{3, true}},
 	},
+
+	// Each row below pins an exemption that a description qualifies, or a
+	// finding that a fix text says may get no fix.
+	{
+		id: "MD001", name: "front matter title before the first heading", phrase: "the heading or title before it",
+		input: "---\ntitle: X\n---\n\n### H3\n", want: []catalogFinding{{5, false}},
+	},
+	{
+		id: "MD018", name: "hashes inside containers", phrase: "open a heading at the start of a line",
+		input: "# Title\n\n> #Heading\n\n- #Heading\n",
+	},
+	{id: "MD020", name: "closed heading in a blockquote", phrase: "A closed heading at the start of a line", input: "# Title\n\n> ## Sub#\n"},
+	{
+		id: "MD022", name: "comment lines around a heading", phrase: "a blank or comment line above and below",
+		input: "# Title\n\nText\n<!-- c -->\n## H\n<!-- d -->\nMore\n",
+	},
+	{
+		id: "MD022", name: "heading right after front matter", phrase: "a heading right after front matter needs none above it",
+		input: "---\ntitle: x\n---\n# Title\n\nText\n",
+	},
+	{
+		id: "MD036", name: "bold lines in a blockquote and a list item", phrase: "Outside lists and blockquotes",
+		input: "# Title\n\n> **Quote bold**\n>\n> Text\n\n- **List bold**\n\n  Text\n",
+	},
+	{id: "MD041", name: "comment before the title", phrase: "Comments aside", input: "<!-- markdownlint-disable MD013 -->\n\n# Title\n"},
+	{
+		id: "MD005", name: "code span in an item", phrase: "a second paragraph, a code block or a quote",
+		input: "# Title\n\n1. a\n 2. `b`\n", want: []catalogFinding{{4, true}},
+	},
+	{
+		id: "MD007", name: "code block in an item", phrase: "a second paragraph, a code block or a quote",
+		input: "# Title\n\n- a\n    - b\n\n      ```sh\n      x\n      ```\n", want: []catalogFinding{{4, false}},
+	},
+	{
+		id: "MD007", name: "code span in an item", phrase: "a second paragraph, a code block or a quote",
+		input: "# Title\n\n- a\n    - `b`\n", want: []catalogFinding{{4, true}},
+	},
+	{id: "MD029", name: "list counting up from 0", phrase: "or 0, 1, 2, and so on", input: "# Title\n\n0. a\n1. b\n2. c\n"},
+	{
+		id: "MD029", name: "single item numbered 0", phrase: "would change its first number",
+		input: "# Title\n\n0. a\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD029", name: "list counting up from 3", phrase: "would change its first number",
+		input: "# Title\n\n3. a\n4. b\n", want: []catalogFinding{{3, false}, {4, false}},
+	},
+	{id: "MD030", name: "tab after a marker", phrase: "One space, or one tab,", input: "# Title\n\n-\ta\n"},
+	{
+		id: "MD032", name: "comment line above a list", phrase: "a blank or comment line above and below",
+		input: "# Title\n\n<!-- markdownlint-disable-next-line MD004 -->\n- a\n",
+	},
+	{
+		id: "MD037", name: "markers inside square brackets", phrase: "It does the same inside square brackets",
+		input: "# Title\n\nNote [a ** b ** c] here.\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD044", name: "name in a URL", phrase: "Outside URLs", options: map[string]any{"names": []any{"GitHub"}},
+		input: "# Title\n\nSee https://github.com/x and [repo](https://github.com/z) and github.\n", want: []catalogFinding{{3, true}},
+	},
+	{
+		id: "MD009", name: "two trailing whitespace characters anywhere", phrase: "or in exactly 2 of them",
+		input: "# T  \n\nfoo\t\t\nbar\n",
+	},
+	{
+		id: "MD010", name: "tab in a heading", phrase: "reports some tabs without a fix",
+		input: "# Title\n\n# a\tb\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD012", name: "blank lines after front matter", phrase: "right after front matter are not checked",
+		input: "---\ntitle: x\n---\n\n\n\n## T\n",
+	},
+	{
+		id: "MD012", name: "blank lines in an HTML comment", phrase: "blank lines inside an HTML comment without a fix",
+		input: "# Title\n\n<!--\n\n\n-->\n\nfoo\n", want: []catalogFinding{{5, false}},
+	},
+	{
+		id: "MD013", name: "long HTML comment", phrase: "when it is not paragraph text",
+		input: "# Title\n\n<!-- " + catalogLongLine + " -->\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD035", name: "longer rule of the same character", phrase: "written the same way as the first one",
+		input: "# Title\n\n---\n\ntext\n\n-----\n", want: []catalogFinding{{7, true}},
+	},
+	{
+		id: "MD035", name: "rule in a list item", phrase: "reports some horizontal rules without a fix",
+		input: "# Title\n\n---\n\n- * * *\n", want: []catalogFinding{{5, false}},
+	},
+	{
+		id: "MD035", name: "indented rule", phrase: "Indentation and trailing spaces do not count",
+		input: "# Title\n\n---\n\ntext\n\n  ---\n",
+	},
+	{
+		id: "MD007", name: "heading in an item", phrase: "reports some items without a fix",
+		input: "# Title\n\n- a\n   - ## b\n", want: []catalogFinding{{4, false}},
+	},
+	{
+		id: "MD044", name: "names in an email address and a fence info string", phrase: "email addresses and fence info strings",
+		options: map[string]any{"names": []any{"JavaScript", "GitHub"}},
+		input:   "# Title\n\nMail me@github.com now.\n\n```javascript\nx\n```\n\nUse javascript.\n", want: []catalogFinding{{9, true}},
+	},
+	{id: "MD051", name: "link to a GitHub line number", phrase: "such as #L20", input: "# Title\n\n[b](#L20)\n"},
+	{id: "MD047", name: "last line of a tab", phrase: "a last line of only whitespace", input: "# Title\n\nText.\n\t"},
+	{
+		id: "MD031", name: "comment lines around a fence", phrase: "a blank or comment line above and below",
+		input: "# Title\n\n<!-- prettier-ignore -->\n```text\nx\n```\n<!-- end -->\n",
+	},
+	{
+		id: "MD031", name: "fence that is never closed", phrase: "reports some fences without a fix",
+		input: "# Title\n\n> ```\n> x\ntext\n", want: []catalogFinding{{4, false}},
+	},
+	{
+		id: "MD058", name: "comment lines around a table", phrase: "a blank or comment line above and below",
+		input: "# Title\n\n<!-- c -->\n| a | b |\n| - | - |\n<!-- d -->\n\nEnd.\n",
+	},
+	{
+		id: "MD034", name: "URLs in code and HTML", phrase: "Outside code and HTML",
+		input: "# Title\n\nCode: `https://example.com/d`\n\n```sh\ncurl https://example.com/e\n```\n\n<p>https://example.com/f</p>\n",
+	},
+	{
+		id: "MD034", name: "URL right after an emphasis marker", phrase: "right after an emphasis marker",
+		input: "# Title\n\nSee *https://example.com/c more* here.\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD034", name: "URL later inside emphasis", phrase: "right after an emphasis marker",
+		input: "# Title\n\nSee *docs at https://example.com/a now* here.\n", want: []catalogFinding{{3, true}},
+	},
+	{
+		id: "MD039", name: "full reference link", phrase: "reports some links without a fix",
+		input: "# Title\n\nSee [ref ][r] here.\n\n[r]: https://example.com/r\n", want: []catalogFinding{{3, false}},
+	},
+	{id: "MD051", name: "link to #top", phrase: "or at #top", input: "# Title\n\n[b](#top)\n"},
 }
 
 // TestCatalogTextsHoldForTheRules lints, with the built-in rules and their

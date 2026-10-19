@@ -7,7 +7,7 @@ func headingsCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD001", Name: "heading-increment", Tags: []string{"headings"},
-			Description: "Each heading is at most one level deeper than the heading before it.",
+			Description: "Each heading is at most one level deeper than the heading or title before it.",
 			Rationale: "Headings form the outline of a document. A skipped level confuses readers, " +
 				"especially people who use a screen reader to move between headings.",
 			Fix: "There is no automatic fix. Only the author knows which level was meant.",
@@ -21,7 +21,7 @@ func headingsCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD018", Name: "no-missing-space-atx", Tags: []string{"headings", "atx", "spaces"}, Fixable: true,
-			Description: "A space follows the # marks that open a heading.",
+			Description: "A space follows the # marks that open a heading at the start of a line.",
 			Rationale:   "Without the space, a line such as #Heading renders as a paragraph.",
 			Fix: "The fix inserts a space after the # marks. gomdlint reports the line without a fix " +
 				"when the document may link to heading anchors, because a new heading adds an anchor. " +
@@ -36,7 +36,7 @@ func headingsCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD020", Name: "no-missing-space-closed-atx", Tags: []string{"headings", "atx_closed", "spaces"}, Fixable: true,
-			Description: "A closed heading has a space inside each run of #, as in # Title #.",
+			Description: "A closed heading at the start of a line has a space inside each run of #.",
 			Rationale:   "Without the spaces, the closing # marks show as heading text, or the line is not a heading at all.",
 			Fix: "The fix inserts the missing spaces. gomdlint reports the line without a fix " +
 				"when the document may link to heading anchors, because the fix may add or change an anchor. " + noFixNearCheckbox,
@@ -50,17 +50,18 @@ func headingsCatalog() []lint.RuleMeta {
 		{
 			ID: "MD022", Name: "heading-blank-lines", Aliases: []string{"blanks-around-headings"}, MarkdownlintName: "blanks-around-headings",
 			Tags: []string{"headings", "blank_lines"}, Fixable: true,
-			Description: "Headings have a blank line above and below.",
+			Description: "Headings have a blank or comment line above and below.",
 			Rationale: "Blank lines set headings apart in the source. " +
-				"Some parsers, such as kramdown, read a heading with no blank line before it as plain text.",
+				"Some parsers, such as kramdown, read a heading with no blank line before it as plain text. " +
+				"As in markdownlint, a heading right after front matter needs none above it.",
 			Fix: "The fix inserts the missing blank lines, keeping any blockquote markers. " +
-				"gomdlint reports a heading in a tight list without a fix, because a blank line would make the list loose. " + noFixNearCheckbox,
+				"gomdlint reports a heading in a tight list without a fix when the blank line would make the list loose. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD023", Name: "heading-start-left", Tags: []string{"headings", "spaces"}, Fixable: true,
-			Description: "Headings start at the beginning of the line, with no indentation.",
+			Description: "Headings start at the beginning of their line, list item or blockquote.",
 			Rationale:   "Some parsers do not recognize an indented heading and show it as plain text.",
-			Fix:         "The fix deletes the indentation. " + noFixNearCheckbox,
+			Fix:         "The fix deletes the extra indentation. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD024", Name: "no-duplicate-heading", Tags: []string{"headings"},
@@ -86,7 +87,7 @@ func headingsCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD036", Name: "no-emphasis-as-heading", Tags: []string{"headings", "emphasis"}, Fixable: true,
-			Description: "A line of only bold or italic text does not stand in for a heading.",
+			Description: "Outside lists and blockquotes, a bold or italic line is not a stand-in heading.",
 			Rationale: "Tools read a document's structure from its headings, " +
 				"so they miss a section that starts with emphasized text instead.",
 			Fix: "The fix turns a bold line into a heading one level deeper than the heading above it, " +
@@ -96,7 +97,7 @@ func headingsCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD041", Name: "first-line-heading", Aliases: []string{"first-line-h1"}, Tags: []string{"headings"},
-			Description: "The file starts with a top-level heading or a front matter title.",
+			Description: "Comments aside, the file starts with a top-level heading or front matter title.",
 			Rationale:   "The top-level heading is usually the document's title.",
 			Fix:         "There is no automatic fix. Only the author can write the title.",
 		},

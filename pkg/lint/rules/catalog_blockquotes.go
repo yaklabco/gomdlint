@@ -7,11 +7,11 @@ func blockquotesCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD027", Name: "no-multiple-space-blockquote", Tags: []string{"blockquote", "whitespace", "indentation"}, Fixable: true,
-			Description: "At most one space follows the > of a blockquote.",
+			Description: "Outside code and list item text, at most one space follows a blockquote's >.",
 			Rationale: "Extra spaces after > make the quote harder to read. " +
 				"At the start of a block, five spaces after > make an indented code block.",
 			Fix: "The fix deletes the extra spaces. gomdlint reports fence lines and HTML lines inside the quote without a fix. " +
-				"The same goes for a list item that holds a second paragraph, code or a quote. " + noFixNearCheckbox + " " + noFixWithRawHTML,
+				"The same goes for some list items, such as one that holds a second paragraph, a code block or a quote. " + noFixNearCheckbox + " " + noFixWithRawHTML,
 		},
 		{
 			ID: "MD028", Name: "no-blanks-blockquote", Tags: []string{"blockquote", "whitespace"},

@@ -14,17 +14,17 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD034", Name: "no-bare-urls", Tags: []string{"links", "url"}, Fixable: true,
-			Description: "URLs and email addresses sit inside angle brackets or a link.",
+			Description: "Outside code and HTML, URLs and email addresses sit in angle brackets or links.",
 			Rationale:   "Some Markdown parsers do not turn a bare URL or email address into a link.",
 			Fix: "The fix wraps the URL in angle brackets. gomdlint reports a URL without a fix " +
-				"when parsers may disagree about where it ends, such as in a table, inside emphasis or with an & in it. " +
+				"when parsers may disagree about where it ends, such as in a table, right after an emphasis marker or with an & in it. " +
 				"It also reports a www. address without a fix, because angle brackets do not make it a link. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD039", Name: "no-space-in-links", Tags: []string{"whitespace", "links"}, Fixable: true,
 			Description: "Link text has no spaces just inside its brackets.",
 			Rationale:   "The spaces end up inside the rendered link, where they serve no purpose.",
-			Fix:         "The fix deletes the spaces. " + noFixNearCheckbox,
+			Fix:         "The fix deletes the spaces. gomdlint reports some links without a fix, such as [text ][label] references. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD042", Name: "no-empty-links", Tags: []string{"links"},
@@ -41,9 +41,9 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD051", Name: "link-fragments", Tags: []string{"links"},
-			Description: "Links to a #fragment point at a heading or anchor in the same file.",
+			Description: "Links to a #fragment point at a heading or anchor in the same file, or at #top.",
 			Rationale: "A heading's anchor changes when the heading is renamed or removed, " +
-				"and a link to the old anchor goes nowhere.",
+				"and a link to the old anchor goes nowhere. Links to GitHub line numbers, such as #L20, pass too.",
 			Fix: "There is no automatic fix. Only the author knows the intended target.",
 		},
 		{
@@ -61,7 +61,7 @@ func linksCatalog() []lint.RuleMeta {
 				"Only the first of duplicate definitions takes effect, so the others change nothing. " +
 				"A definition labeled //, as in [//]: # (note), is a common way to write a comment, so it is ignored.",
 			Fix: "The fix deletes the unused or duplicate definition. " +
-				"gomdlint reports a definition without a fix when other text follows it on the next line. " + noFixNearCheckbox,
+				"gomdlint reports some definitions without a fix, such as one that other text follows on the next line. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD054", Name: "link-image-style", Tags: []string{"images", "links"},

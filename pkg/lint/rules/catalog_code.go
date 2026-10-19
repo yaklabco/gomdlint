@@ -13,10 +13,11 @@ func codeCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD031", Name: "blanks-around-fences", Tags: []string{"code", "blank_lines"}, Fixable: true,
-			Description: "Fenced code blocks have a blank line above and below.",
+			Description: "Fenced code blocks have a blank or comment line above and below.",
 			Rationale:   "Some parsers, such as kramdown, do not recognize a fenced code block without the blank lines.",
 			Fix: "The fix inserts the missing blank line, keeping any blockquote markers. " +
-				"gomdlint reports a fence in a tight list without a fix, because a blank line would make the list loose. " + noFixNearCheckbox,
+				"gomdlint reports some fences without a fix, such as a fence in a tight list when the blank line would make the list loose. " +
+				noFixNearCheckbox,
 		},
 		{
 			ID: "MD038", Name: "no-space-in-code", Tags: []string{"whitespace", "code"}, Fixable: true,

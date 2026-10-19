@@ -10,7 +10,8 @@ func emphasisCatalog() []lint.RuleMeta {
 			Description: "Emphasis markers touch the text they wrap, as in **bold**.",
 			Rationale:   "With a space inside, the markers do not make emphasis and show as literal * or _ characters.",
 			Fix: "The fix deletes the spaces inside the markers. gomdlint reports a pair without a fix " +
-				"when the markers may be meant literally, such as single asterisks with spaces on both sides. " + noFixNearCheckbox,
+				"when the markers may be meant literally, such as single asterisks with spaces on both sides. " +
+				"It does the same inside square brackets. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD049", Name: "emphasis-style", Tags: []string{"emphasis"}, Fixable: true,
