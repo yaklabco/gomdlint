@@ -734,19 +734,22 @@ Some of its fix checks are also stricter than they need to be.
   each code fence before it must start at column 0 after a blank line,
   where goldmark reads it at the top level, and no HTML block before it
   that may hold blank lines, such as a comment or a `<pre>` block, may go
-  on past its first line. A call matches a definition only when their
-  labels are the same bytes, or the same ASCII letters in any case, after
-  white space is collapsed, so `[^É]` does not call `[^é]:`, which
-  markdownlint matches. A call of any other definition, such as one in a
-  list item, a blockquote or a footnote, is read as goldmark reads it, as a
-  reference, and reported when no link reference definition matches, even
-  where markdownlint reads the footnote definition. With `shortcut_syntax`,
-  `[text][^1]` is reported wherever main reports it, even when markdownlint
-  finds `text` defined, except for a plain or blank `text` it ignores. No
-  definition counts in a document whose front matter markdownlint may read
-  differently, whose lines end with a carriage return alone, or where the
-  text markdownlint gives micromark starts with a byte order mark, as with
-  two at the start of the file or one right after front matter.
+  on past its first line. Only a link whose label after the `^` holds
+  nothing but ASCII letters, digits and hyphens, such as `[^1]` or
+  `[^my-note]`, calls such a definition, and only one with the same label
+  in any case, after white space is collapsed and trimmed. Every other
+  reference is read as goldmark reads it, and reported when no link
+  reference definition matches, even where markdownlint reads a footnote
+  call. That covers an image such as `![^1]`, a label such as
+  `[^my_note]`, `[^a\*b]` or `[^É]`, and a call of a definition in a list
+  item, a blockquote or a footnote. With
+  `shortcut_syntax`, `[text][^1]` is reported wherever main reports it,
+  even when markdownlint finds `text` defined, except for a plain or blank
+  `text` it ignores. No definition counts in a document whose front matter
+  markdownlint may read differently, whose lines end with a carriage return
+  alone, or where the text markdownlint gives micromark starts with a byte
+  order mark, as with two at the start of the file or one right after front
+  matter.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

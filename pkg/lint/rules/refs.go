@@ -127,10 +127,12 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 //
 // Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
 // "[^label]" calls a footnote that the document defines with a line that
-// starts "[^label]:", so it is no undefined reference. Only the definitions
-// that micromark is certain to read count (see certainFootnoteLabels), and
-// a call matches a definition only by labelKey. A call of any other label
-// is read as goldmark reads it.
+// starts "[^label]:", so it is no undefined reference. Only a link, never
+// an image, whose label is "^" and then ASCII letters, digits and hyphens
+// can call a footnote (see plainFootnoteCall), only the definitions that
+// micromark is certain to read count (see certainFootnoteLabels), and a
+// call matches a definition only by labelKey. Every other reference is
+// read as goldmark reads it.
 func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -158,9 +160,9 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		}
 
 		// A footnote definition is no link reference definition, so a
-		// footnote label calls the footnote even where goldmark resolved it
-		// as a link to a definition such as "[^n]: /url".
-		if strings.HasPrefix(usage.Label, "^") {
+		// plain footnote label calls the footnote even where goldmark
+		// resolved it as a link to a definition such as "[^n]: /url".
+		if plainFootnoteCall(usage) {
 			if footnotes == nil {
 				footnotes = certainFootnoteLabels(ctx)
 			}
@@ -220,15 +222,33 @@ func footnoteShortcut(
 	return !ok || !ignoresShortcut(text, ignoredLabels)
 }
 
+// plainFootnoteCall reports whether MD052 may read usage as a GFM footnote
+// call: a link, never an image, whose label is "^" and then nothing but
+// ASCII letters, digits and hyphens. No escape, entity, emphasis, code span
+// or HTML can change such a label, so micromark and markdownlint read it as
+// written. Every other label keeps main's handling, and so does an image:
+// markdownlint records an image's reference with the label it reads from
+// the image's own brackets, even where micromark goes on to read a "!" and
+// a footnote call there, and MD052 does not model which of them it reports.
+func plainFootnoteCall(usage *refs.ReferenceUsage) bool {
+	label, ok := strings.CutPrefix(usage.Label, "^")
+	if !ok || label == "" || usage.IsImage {
+		return false
+	}
+	for idx := range len(label) {
+		if char := label[idx]; char != '-' && !isASCIILetter(char) && !isASCIIDigit(char) {
+			return false
+		}
+	}
+	return true
+}
+
 // shortcutSource returns the source between the brackets of text in a full
-// reference "[text][label]" or "![text][label]", and false when the
-// reference's span does not hold it that way.
+// reference "[text][label]", and false when the reference's span does not
+// hold it that way.
 func shortcutSource(file *mdast.FileSnapshot, usage *refs.ReferenceUsage) (string, bool) {
 	start, okStart := file.Offset(usage.Position.StartLine, usage.Position.StartColumn)
 	end, okEnd := file.Offset(usage.Position.EndLine, usage.Position.EndColumn)
-	if usage.IsImage {
-		start++
-	}
 	suffix := "][" + usage.Label + "]"
 	if !okStart || !okEnd || end > len(file.Content) || start+1+len(suffix) > end || file.Content[start] != '[' ||
 		!bytes.HasSuffix(file.Content[:end], []byte(suffix)) {

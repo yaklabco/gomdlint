@@ -12,6 +12,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -956,7 +957,6 @@ func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
 		{name: "definition before the call", input: "# T\n\n[^first]: Defined before.\n\nUse [^first] here.\n"},
 		{name: "definition after the call", input: "# T\n\nUse [^first] here.\n\n[^first]: Defined after.\n"},
 		{name: "labels in another case", input: "# T\n\nUse [^Second].\n\n[^second]: Two words.\n"},
-		{name: "escaped bracket in the label", input: "# T\n\nUse [^e\\]x].\n\n[^e\\]x]: Escaped bracket.\n"},
 		{name: "definition on the first line", input: "[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
 		{name: "definition after a byte order mark", input: "\ufeff[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
 		{name: "definition right after front matter", input: "---\ntitle: x\n---\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
@@ -1194,19 +1194,21 @@ func TestReferenceLinkImagesRule_FootnotesAroundBlocks(t *testing.T) {
 	})
 }
 
-// TestReferenceLinkImagesRule_FootnoteLabels checks how MD052 matches the
-// labels it reads for GFM footnotes. A call matches a certain definition
-// only by labelKey, the same bytes or the same ASCII letters in any case,
-// so a call that markdownlint keeps apart from a definition never matches
-// it, and other calls get main's result. "[text][^label]" is reported
-// with shortcut_syntax exactly where main reports it, unless markdownlint
-// certainly ignores "text".
+// TestReferenceLinkImagesRule_FootnoteLabels checks which labels MD052
+// reads as GFM footnote calls. Only a link, not an image, whose label is
+// "^" and then ASCII letters, digits and hyphens calls a footnote, and
+// only a certain definition whose label holds the same letters in any
+// case. Images and other labels, which micromark or markdownlint may read
+// otherwise than as written, get main's result, and so do calls that
+// markdownlint keeps apart from a definition. "[text][^label]" is
+// reported with shortcut_syntax exactly where main reports it, unless
+// markdownlint certainly ignores "text".
 func TestReferenceLinkImagesRule_FootnoteLabels(t *testing.T) {
 	checkFootnoteCases(t, []footnoteCase{
 		{name: "full reference to a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n"},
 		{name: "footnote call with a long s", input: "Use [^\u017f].\n\n[^s]: Note text.\n", want: []footnotePosition{{1, 5}}},
 		{name: "shortcut before a footnote call with a sharp s", input: "Use [\u00df][^n].\n\n[^n]: Note text.\n\n[ss]: /a\n", want: []footnotePosition{{1, 5}}},
-		{name: "footnote call with an accented capital", input: "Use [^\u00c9].\n\n[^\u00e9]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "footnote call with an accented capital", input: "Use [^\u00c9].\n\n[^\u00e9]: Note text.\n", want: []footnotePosition{{1, 5}, {3, 1}}},
 		{name: "footnote call in another ASCII case", input: "Use [^Note].\n\n[^note]: Note text.\n"},
 		{
 			name:  "shortcut before a footnote call with a definition in math",
@@ -1219,11 +1221,69 @@ func TestReferenceLinkImagesRule_FootnoteLabels(t *testing.T) {
 		{name: "link in the text before a footnote call", input: "Use [x [b](/c)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
 		{name: "image after an ignored label before a footnote call", input: "Use [x![i](/a)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
 		{name: "next line control as the text before a footnote call", input: "Use [\u0085][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
-		{name: "image shortcut before a footnote call", input: "Use ![alt][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
-		{name: "ignored image shortcut before a footnote call", input: "Use ![x][^n].\n\n[^n]: Note text.\n"},
+		{
+			name:     "image shortcut before a footnote call",
+			input:    "Use ![alt][^n].\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "ignored image shortcut before a footnote call",
+			input:    "Use ![x][^n].\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
 		{name: "blank text before a footnote call", input: "Use [ ][^n].\n\n[^n]: Note text.\n"},
 		{name: "empty text before a footnote call", input: "Use [][^n].\n\n[^n]: Note text.\n"},
 		{name: "blank text before a footnote call in a list item", input: "- [ ][^n] note\n\n[^n]: Note text.\n"},
+		{name: "escaped bracket in the label", input: "# T\n\nUse [^e\\]x].\n\n[^e\\]x]: Escaped bracket.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
+		{
+			name:     "collapsed image with an escape in a footnote label",
+			input:    "Use ![^a\\*b][].\n\n[^a\\*b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {3, 1}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "collapsed image with emphasis in a footnote label",
+			input:    "Use ![^*n*][].\n\n[^*n*]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {3, 1}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{name: "shortcut image of a footnote label", input: "Use ![^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "shortcut image with an escape in a footnote label", input: "Use ![^a\\*b].\n\n[^a\\*b]: Note text.\n", want: []footnotePosition{{1, 5}, {3, 1}}},
+		{
+			name:     "full reference with an escape in a footnote label",
+			input:    "Use [x][^a\\*b].\n\n[^a\\*b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {3, 1}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "footnote label with an entity",
+			input:    "Use [^a&amp;b] and [x][^a&amp;b].\n\n[^a&amp;b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {1, 20}, {3, 1}},
+			wantFull: []footnotePosition{{1, 20}},
+		},
+		{
+			name:     "footnote label with an underscore",
+			input:    "Use [^my_note] and [x][^my_note].\n\n[^my_note]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {1, 20}, {3, 1}},
+			wantFull: []footnotePosition{{1, 20}},
+		},
+		{name: "footnote label with a code span", input: "Use [^`n`].\n\n[^`n`]: Note text.\n", want: []footnotePosition{{1, 5}, {3, 1}}},
+		{name: "footnote label with a hyphen", input: "Use [^my-note] and [x][^my-note].\n\n[^my-note]: Note text.\n"},
+		{name: "footnote label of digits", input: "Use [^1] and [x][^1].\n\n[^1]: Note text.\n"},
+		{
+			name:     "escaped hyphen in a footnote label",
+			input:    "Use [^a\\-b] and [x][^a\\-b].\n\n[^a-b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {1, 17}},
+			wantFull: []footnotePosition{{1, 17}},
+		},
+		{
+			name:     "collapsed image of a plain footnote label",
+			input:    "Use ![^n][].\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
 	})
 }
 
@@ -1441,6 +1501,46 @@ func TestIgnoresShortcut(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, ignoresShortcut(tt.text, tt.ignored))
+		})
+	}
+}
+
+// TestPlainFootnoteCall checks which usages MD052 may read as a footnote
+// call: a link, never an image, whose label is "^" and then nothing but
+// ASCII letters, digits and hyphens, which every parser reads as written.
+func TestPlainFootnoteCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage refs.ReferenceUsage
+		want  bool
+	}{
+		{name: "digits", usage: refs.ReferenceUsage{Label: "^1"}, want: true},
+		{name: "letters in any case", usage: refs.ReferenceUsage{Label: "^Note"}, want: true},
+		{name: "hyphen", usage: refs.ReferenceUsage{Label: "^my-note"}, want: true},
+		{name: "full reference", usage: refs.ReferenceUsage{Style: refs.StyleFull, Label: "^n"}, want: true},
+		{name: "image", usage: refs.ReferenceUsage{IsImage: true, Label: "^n"}, want: false},
+		{name: "no caret", usage: refs.ReferenceUsage{Label: "note"}, want: false},
+		{name: "caret alone", usage: refs.ReferenceUsage{Label: "^"}, want: false},
+		{name: "underscore", usage: refs.ReferenceUsage{Label: "^my_note"}, want: false},
+		{name: "escape", usage: refs.ReferenceUsage{Label: "^a\\*b"}, want: false},
+		{name: "emphasis", usage: refs.ReferenceUsage{Label: "^*n*"}, want: false},
+		{name: "entity", usage: refs.ReferenceUsage{Label: "^a&amp;b"}, want: false},
+		{name: "code span", usage: refs.ReferenceUsage{Label: "^`n`"}, want: false},
+		{name: "HTML", usage: refs.ReferenceUsage{Label: "^<b>n</b>"}, want: false},
+		{name: "space", usage: refs.ReferenceUsage{Label: "^a b"}, want: false},
+		{name: "letter outside ASCII", usage: refs.ReferenceUsage{Label: "^é"}, want: false},
+		{name: "second caret", usage: refs.ReferenceUsage{Label: "^^n"}, want: false},
+		{name: "comma", usage: refs.ReferenceUsage{Label: "^a,b"}, want: false},
+		{name: "dot", usage: refs.ReferenceUsage{Label: "^a.b"}, want: false},
+		{name: "slash", usage: refs.ReferenceUsage{Label: "^a/b"}, want: false},
+		{name: "colon", usage: refs.ReferenceUsage{Label: "^a:b"}, want: false},
+		{name: "at sign", usage: refs.ReferenceUsage{Label: "^a@b"}, want: false},
+		{name: "opening bracket", usage: refs.ReferenceUsage{Label: "^a[b"}, want: false},
+		{name: "opening brace", usage: refs.ReferenceUsage{Label: "^a{b"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, plainFootnoteCall(&tt.usage))
 		})
 	}
 }
