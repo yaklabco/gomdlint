@@ -727,29 +727,30 @@ Some of its fix checks are also stricter than they need to be.
   `no-duplicate-heading` (MD024) and `descriptive-link-text` (MD059) read
   a tag or code span in inline math as HTML or code.
 - `reference-links-images` (MD052) reads GFM footnotes as markdownlint does
-  only where micromark is certain to read the definition: a `[^1]:` line
-  at column 0, at the top level outside code blocks, HTML blocks and front
+  only where micromark is certain to read the definition: a `[^1]:` line at
+  column 0, at the top level outside code blocks, HTML blocks and front
   matter, at the start of the document, after a blank line or right after
   another such definition. No line before it may start with `$$` or `:::`,
-  each code fence before it must start at column 0 after a blank line,
-  where goldmark reads it at the top level, and no HTML block before it
-  that may hold blank lines, such as a comment or a `<pre>` block, may go
-  on past its first line. Only a link whose label after the `^` holds
-  nothing but ASCII letters, digits and hyphens, such as `[^1]` or
-  `[^my-note]`, calls such a definition, and only one with the same label
-  in any case, after white space is collapsed and trimmed. Every other
-  reference is read as goldmark reads it, and reported when no link
-  reference definition matches, even where markdownlint reads a footnote
-  call. That covers an image such as `![^1]`, a label such as
-  `[^my_note]`, `[^a\*b]` or `[^É]`, and a call of a definition in a list
-  item, a blockquote or a footnote. With
-  `shortcut_syntax`, `[text][^1]` is reported wherever main reports it,
-  even when markdownlint finds `text` defined, except for a plain or blank
-  `text` it ignores. No definition counts in a document whose front matter
-  markdownlint may read differently, whose lines end with a carriage return
-  alone, or where the text markdownlint gives micromark starts with a byte
-  order mark, as with two at the start of the file or one right after front
-  matter.
+  each code fence before it must start at column 0 after a blank line, where
+  goldmark reads it at the top level, and no HTML block before it that may
+  hold blank lines, such as a comment or a `<pre>` block, may go on past its
+  first line. Only a link whose label after the `^` holds nothing but ASCII
+  letters, digits and hyphens, such as `[^1]` or `[^my-note]`, calls such a
+  definition, and only one with the same label in any case, after white
+  space is collapsed and trimmed. Every other reference is read as goldmark
+  reads it, and reported when no link reference definition matches, even
+  where markdownlint reads a footnote call. That covers an image such as
+  `![^1]`, a label such as `[^my_note]`, `[^a\*b]` or `[^É]`, and a call of
+  a definition in a list item, a blockquote or a footnote. With
+  `shortcut_syntax`, `[text][^1]` is reported, even when markdownlint finds
+  `text` defined, unless a link reference definition such as `[^1]: /url`
+  defines its label, `^1` is one of `ignored_labels`, or `text` is blank or
+  holds nothing but ASCII letters, digits, spaces and tabs and, lowercased
+  with its white space collapsed, is one of `ignored_labels`. No definition
+  counts in a document whose front matter markdownlint may read differently,
+  whose lines end with a carriage return alone, or where the text
+  markdownlint gives micromark starts with a byte order mark, as with two at
+  the start of the file or one right after front matter.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

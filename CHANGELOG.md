@@ -319,21 +319,21 @@ formats change. The first entries under Changed may need action.
   certain to read the definition. A call such as `[^1]` is then no
   reference, so `shortcut_syntax` no longer reports it, and in `[text][^1]`
   the `[text]` is a shortcut reference, so `[text][^1]` is reported only
-  with `shortcut_syntax`, and there only where main reports it. Only a link
-  whose label after the `^` holds nothing but ASCII letters, digits and
-  hyphens is a call, and it calls only a definition with the same label in
-  any case, after white space is collapsed and trimmed. A definition counts
-  only on a `[^1]:` line at column 0, at the top level outside code blocks,
-  HTML blocks and front matter, at the start of the document, after a blank
-  line or right after another such definition. No line before it may start
-  with `$$` or `:::`, each code fence before it must start at column 0 after
-  a blank line, where goldmark reads it at the top level, and no HTML block
-  before it that may hold blank lines may go on past its first line. No
-  definition counts where micromark drops a byte order mark that the parser
-  reads as text: a second one at the start of the file, or one that starts
-  the first line after the front matter that holds more than white space.
-  Images such as `![^1][]`, other labels such as `[^a\*b]` or `[^é]`, and
-  calls of other definitions are read as before.
+  with `shortcut_syntax`, and there only where earlier versions reported it.
+  Only a link whose label after the `^` holds nothing but ASCII letters,
+  digits and hyphens is a call, and it calls only a definition with the same
+  label in any case, after white space is collapsed and trimmed. A
+  definition counts only on a `[^1]:` line at column 0, at the top level
+  outside code blocks, HTML blocks and front matter, at the start of the
+  document, after a blank line or right after another such definition. No
+  line before it may start with `$$` or `:::`, each code fence before it
+  must start at column 0 after a blank line, where goldmark reads it at the
+  top level, and no HTML block before it that may hold blank lines may go on
+  past its first line. No definition counts where micromark drops a byte
+  order mark that the parser reads as text: a second one at the start of the
+  file, or one that starts the first line after the front matter that holds
+  more than white space. Images such as `![^1][]`, other labels such as
+  `[^a\*b]` or `[^é]`, and calls of other definitions are read as before.
 - **MD054**: Reports no reference whose label is nothing but ASCII white
   space, such as a form feed, which markdownlint never reports.
 - **MD059**: Compares link text as written and skips only links whose text
