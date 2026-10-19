@@ -551,10 +551,11 @@ A markdownlint config, and a `markdownlint-configure-file` comment, read
 options as markdownlint does, under markdownlint's names only. gomdlint's
 name for one of the options above, such as `max`, and an option that only
 gomdlint has, such as `ignore_urls`, are options that the rule does not
-read there. They change nothing, and get a warning that offers
-markdownlint's name where there is one. Set them in a gomdlint config file.
-The options of gomdlint's own rules, `link-destination-style` (MDL001) and
-`table-alignment` (MDL003), which markdownlint lacks, keep their names.
+read there. They change nothing, and get a warning, which under a rule's
+own key offers markdownlint's name where there is one. Set them in a
+gomdlint config file. The options of gomdlint's own rules,
+`link-destination-style` (MDL001) and `table-alignment` (MDL003), which
+markdownlint lacks, keep their names.
 
 A config file gets a warning, with its path and line, for an option that
 the rule does not read, with the closest names, such as `unknown option

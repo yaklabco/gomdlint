@@ -273,10 +273,11 @@ func TestEngineConfigureFileUnknownOptionsChangeNothing(t *testing.T) {
 // markdownlint's spelling, as for any option that markdownlint does not
 // read. gomdlint used to fail the file over two spellings, and later read
 // gomdlint's spelling where it stood alone. markdownlint reports the long
-// lines with a line length of 20, and the table row only where gomdlint's
-// ignore_tables is ignored. With max alone, it applies its line length of
-// 80, which no line here passes, and an option that only gomdlint has,
-// ignore_urls, changes nothing either.
+// lines with a line length of 20, the table row among them, except where
+// markdownlint's tables is false and gomdlint's ignore_tables beside it is
+// ignored. With max alone, it applies its line length of 80, which no line
+// here passes, and an option that only gomdlint has, ignore_urls, changes
+// nothing either.
 func TestEngineConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 	document := func(parameter string) string {
 		return "<!-- markdownlint-configure-file " + parameter + " -->\n\n# Title\n\n" +

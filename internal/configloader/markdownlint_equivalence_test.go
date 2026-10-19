@@ -242,9 +242,9 @@ const everyOptionSettings = `{
 // the CLI's migration goldens, and a few more: every parameter set, every
 // rule set to true, false or a severity, and an option that no rule reads.
 // #42's translation applied gomdlint's own options and names of options,
-// which markdownlint ignores, and so does the catalog's now (see
-// TestConvertMarkdownlintConfig_GomdlintSpellings), so no fixture holds
-// them.
+// which markdownlint ignores. The catalog's translation now ignores them
+// too (see TestConvertMarkdownlintConfig_GomdlintSpellings), so no fixture
+// holds them.
 func markdownlintFixtures() []markdownlintFixture {
 	settings := []string{
 		// TestMigrated*.

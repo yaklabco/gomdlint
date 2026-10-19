@@ -576,8 +576,8 @@ func TestEngineConfigureFileSettingReplacesRuleDefaults(t *testing.T) {
 // markdownlint-configure-file: markdownlint's spellings configure the rule,
 // and an unknown option is ignored, as markdownlint ignores it, gomdlint's
 // spelling of an option among them, so of two spellings of one option
-// markdownlint's applies, where a config file rejects the two. They used
-// to fail the file.
+// markdownlint's applies, where a gomdlint config file rejects the two.
+// They used to fail the file.
 func TestEngineConfigureFileOptionSpellings(t *testing.T) {
 	const lineLength = "MD013"
 	long := strings.Repeat("word ", 20) + "end\n"

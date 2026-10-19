@@ -165,7 +165,10 @@ type OptionSpec struct {
 	Name string
 
 	// Aliases are other spellings of the option, such as markdownlint's
-	// spelling where gomdlint names an option differently.
+	// spelling where gomdlint names an option differently. For a rule with
+	// an ID of markdownlint's shape, MD and digits, a markdownlint
+	// configuration reads the option under its first alias only (see
+	// Registry.MarkdownlintRuleConfig).
 	Aliases []OptionAlias
 
 	// Type is the type of the option's value.
@@ -188,7 +191,10 @@ type OptionSpec struct {
 	Values []string
 
 	// GomdlintOnly reports that markdownlint has no such option. Every
-	// option of a rule that markdownlint lacks is one.
+	// option of a rule that markdownlint lacks is one. A markdownlint
+	// configuration cannot set such an option of a rule with an ID of
+	// markdownlint's shape, MD and digits, as markdownlint does not read it
+	// (see Registry.MarkdownlintRuleConfig).
 	GomdlintOnly bool
 
 	// Limit reports that the option, an integer, is a most that a count

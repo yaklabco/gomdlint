@@ -147,10 +147,11 @@ formats change. The first entries under Changed may need action.
   rule options under markdownlint's names only, as markdownlint does.
   gomdlint's names for options that markdownlint spells otherwise, such as
   `max` for `line_length`, and options that only gomdlint has, such as
-  `ignore_urls`, change nothing there, with a warning that offers
-  markdownlint's name where there is one. They used to apply, and a config
-  file that wrote both spellings of an option failed to load. gomdlint's
-  own config files still accept both.
+  `ignore_urls`, change nothing there, with a warning, which under a rule's
+  own key offers markdownlint's name where there is one. They used to
+  apply, and a config file that wrote both spellings of an option failed to
+  load. gomdlint's own config files still accept either name, and the
+  options of gomdlint's own rules and custom rules keep every name.
 - Go API: `lint.LookupRuleID`, `Registry.RegisterAlias`,
   `rules.RegisterLegacyAliases`, `RuleContext.Builder` and
   `analysis.Options.RuleFormat` are removed. `Registry.Lookup` resolves rule
@@ -162,7 +163,10 @@ formats change. The first entries under Changed may need action.
   `RuleConfig` literals no longer compile, and `config.RuleSettingKeys`
   lists `reset_options`. `config.MarkdownlintRuleConfig` sets
   `ResetOptions` for a value that turns the rule on, and
-  `Registry.MarkdownlintRuleConfig` then writes no defaults.
+  `Registry.MarkdownlintRuleConfig` then writes no defaults. For a rule
+  with an ID of markdownlint's shape, MD and digits,
+  `Registry.MarkdownlintRuleConfig` reads an option under its first alias,
+  or else its name, and not at all when it is marked `GomdlintOnly`.
 
 ### Added
 

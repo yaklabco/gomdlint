@@ -1103,12 +1103,14 @@ options that the key sets and its defaults for the others, as in
 markdownlint. `markdownlint-configure-file` keys reset them the same way.
 Markdownlint configs and configure-file comments read options through a
 second table of each rule's options (`ruleIndex.markdownlintOptions`),
-which knows markdownlint's spelling of each option and no other, so
-gomdlint's names and its own options are unknown options there, as in
-markdownlint. That table also reads a numeric string for a numeric option
-as JavaScript's `Number` reads it (`jsStringNumber`), as markdownlint's
-rules do, and an infinite value of an option marked `Limit` as
-`math.MaxInt`, which no count reaches.
+which, for a rule with an ID of markdownlint's shape (MD and digits),
+knows markdownlint's spelling of each option and no other, so gomdlint's
+names and its own options are unknown options there, as in markdownlint.
+The options of gomdlint's own rules and custom rules keep every spelling.
+For markdownlint's rules, that table also reads a numeric string for a
+numeric option as JavaScript's `Number` reads it (`jsStringNumber`), as
+markdownlint's rules do, and an infinite value of an option marked `Limit`
+as `math.MaxInt`, which no count reaches.
 
 **Rule Identification:** Config files accept a rule's ID (`MD001`), name
 (`heading-increment`), or markdownlint alias (`ul-style` for MD004)

@@ -33,6 +33,9 @@ const (
 	// which the comment ignores, as if it did not set the option, or a
 	// string that the option does not allow, which the rule treats as
 	// markdownlint does. A config file gets a warning for the same values.
+	// It also marks two spellings of one option of a rule that markdownlint
+	// lacks, such as a custom rule's name and alias, both set, of which the
+	// canonical one applies.
 	NoticeInvalidOption NoticeKind = "invalid-option"
 
 	// NoticeInvalidConfiguration marks a markdownlint-configure-file
@@ -79,8 +82,11 @@ type Notice struct {
 	// Rules are named as markdownlint names them (RuleMeta.MarkdownlintName),
 	// so that a comment written from them works in markdownlint too. For an
 	// unknown option of one rule, they are the option names it most likely
-	// means: markdownlint's spelling of a name of gomdlint's, or else the
-	// closest of markdownlint's spellings.
+	// means: for a rule that markdownlint has, markdownlint's spelling of a
+	// name of gomdlint's, or else the closest of markdownlint's spellings,
+	// and for another rule, the closest of its spellings. For a string that
+	// an option does not allow, they are the allowed values it most likely
+	// means.
 	Suggestions []string
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,

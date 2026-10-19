@@ -406,7 +406,8 @@ func optionNotices(registry *Registry, directive *inlineDirective, key string, r
 					[]string{names[idx]}, issue.Text(names[idx])))
 			default:
 				// A value of the wrong type, an item of the wrong type in a
-				// list, or a string that the option does not allow.
+				// list, a string that the option does not allow, or two
+				// spellings of one option of a rule that markdownlint lacks.
 				notices = append(notices, notice(NoticeInvalidOption, issue.Key, issue.Suggestions,
 					[]string{names[idx]}, issue.Text(names[idx])))
 			}
