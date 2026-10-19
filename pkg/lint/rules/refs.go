@@ -984,7 +984,7 @@ func footnoteStates(ctx *lint.RuleContext) ([]footnoteDefinition, map[int]footno
 
 // kelvinSign is U+212A, which JavaScript lowercases to "k", so
 // markdownlint reads it as that letter in a footnote label.
-const kelvinSign = "K"
+const kelvinSign = "\u212a"
 
 // footnoteMentions counts, by label in lowercase, the places in content
 // where "^" is followed by a run of ASCII letters, digits, hyphens and
