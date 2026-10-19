@@ -2088,6 +2088,71 @@ func TestLinkImageRefDefsRule_MarkerOnlyItem(t *testing.T) {
 	}
 }
 
+// TestLinkImageRefDefsRule_Footnotes checks MD053 against markdownlint
+// 0.41.1, which reads GFM footnote definitions as definitions and footnote
+// calls as references. MD053 reports a footnote definition that micromark
+// is certain to read (see certainFootnoteDefinitions), whose label holds
+// nothing but ASCII letters, digits and hyphens, when "^" and its label
+// appear nowhere else in the file, in any case, and a second definition of
+// such a label as a duplicate. markdownlint also reports lines 21, 23, 27
+// and 34, which MD053 cannot be certain of. No footnote definition gets a
+// fix: its note can go on past its first line.
+func TestLinkImageRefDefsRule_Footnotes(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"Text that calls[^used], [^Upper] and [^\u212aelvin].\n\n" + // 3: a Kelvin sign lowercases to k
+		"[^unused]: Some note.\n\n" + // 5
+		"[^used]: A note the text calls.\n\n" + // 7
+		"[^upper]: Called in another case.\n\n" + // 9
+		"[^kelvin]: Called with a Kelvin sign.\n\n" + // 11
+		"[^single]: /url\n\n" + // 13: also a link reference definition to goldmark
+		"[^long]: First line.\n    More of the note.\n\n" + // 15
+		"[^first]: Two in a row.\n[^second]: Right after it.\n\n" + // 18, 19
+		"[^my_note]: An underscore in the label.\n\n" + // 21
+		"> [^quoted]: In a blockquote.\n\n" + // 23
+		"Code mentions `[^coded]` and the definition follows.\n\n" + // 25
+		"[^coded]: Mentioned only in code.\n\n" + // 27
+		"[^twice]: First.\n\n" + // 29: goldmark reads line 31 as a link to it
+		"[^twice]: Second note here.\n\n" + // 31
+		"Paragraph text\n[^after-text]: Right after a paragraph line.\n" // 33, 34
+
+	diags := testHelper(t, NewLinkImageRefDefsRule(), markdown)
+	assert.Equal(t, []string{
+		"5: Unused reference definition [^unused]",
+		"13: Unused reference definition [^single]",
+		"15: Unused reference definition [^long]",
+		"18: Unused reference definition [^first]",
+		"19: Unused reference definition [^second]",
+		"29: Unused reference definition [^twice]",
+		"31: Duplicate reference definition [^twice]",
+	}, diagnosticLines(diags))
+	for _, diag := range diags {
+		assert.False(t, diag.HasFix(), "line %d: a footnote definition gets no fix", diag.StartLine)
+	}
+
+	ignored := testHelperWithOptions(t, NewLinkImageRefDefsRule(), "Text.\n\n[^note]: A note.\n",
+		map[string]any{"ignored_definitions": []any{"^note"}})
+	assert.Empty(t, ignored, "ignored_definitions holds the label with its ^")
+
+	self := testHelper(t, NewLinkImageRefDefsRule(), "Text.\n\n[^note]: A note that calls[^note] itself.\n")
+	assert.Empty(t, self, "a call in the note's own text is a call")
+}
+
+// TestLinkImageRefDefsRule_FootnoteFixWithheld checks that MD053 deletes no
+// definition whose label starts with "^". GitHub and micromark read it as
+// a footnote, whose note goes on in the indented lines after a blank line,
+// so deleting its first line would show those lines as a code block.
+func TestLinkImageRefDefsRule_FootnoteFixWithheld(t *testing.T) {
+	const input = "# Title\n\nSome text.\n\n[^b]: /url\n\n    Indented footnote content.\n"
+	diags := testHelper(t, NewLinkImageRefDefsRule(), input)
+	assert.Equal(t, []string{"5: Unused reference definition [^b]"}, diagnosticLines(diags))
+	require.Len(t, diags, 1)
+	assert.False(t, diags[0].HasFix())
+
+	plain := testHelper(t, NewLinkImageRefDefsRule(), "# Title\n\nSome text.\n\n[b]: /url\n")
+	require.Len(t, plain, 1)
+	assert.True(t, plain[0].HasFix(), "other unused definitions keep their fix")
+}
+
 // TestMultiLineLabelLengthLimit checks the limit on a label that spans two
 // lines, written as a code span like "` aaa\n `". The limit counts what
 // markdownlint counts: every character between the brackets except line

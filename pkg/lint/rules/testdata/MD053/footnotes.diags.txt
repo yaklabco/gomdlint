@@ -1,0 +1,5 @@
+footnotes.input.md:10:1 warning Unused reference definition [^unused] (MD053/link-image-reference-definitions)
+footnotes.input.md:12:1 warning Unused reference definition [^long] (MD053/link-image-reference-definitions)
+footnotes.input.md:15:1 warning Unused reference definition [^url] (MD053/link-image-reference-definitions)
+footnotes.input.md:17:1 warning Unused reference definition [^twice] (MD053/link-image-reference-definitions)
+footnotes.input.md:19:1 warning Duplicate reference definition [^twice] (MD053/link-image-reference-definitions)

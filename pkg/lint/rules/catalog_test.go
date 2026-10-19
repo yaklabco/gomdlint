@@ -297,7 +297,7 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		"MD048": true, // A new fence that would end the block early.
 		"MD049": true, // A new marker that could pair with nearby characters, or a reference label.
 		"MD050": true, // A new marker that could pair with nearby characters, or a reference label.
-		"MD053": true, // Text on the line after the definition.
+		"MD053": true, // Text on the line after the definition, and labels that start with ^.
 		"MD058": true, // A blank line that would loosen a tight list.
 	}
 
@@ -534,6 +534,22 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	{
 		id: "MD053", name: "blank line after the definition", phrase: "deletes the unused or duplicate definition",
 		input: "# Title\n\n[unused]: /target\n\nParagraph.\n", want: []catalogFinding{{3, true}},
+	},
+	{
+		id: "MD053", name: "unused footnote definition", phrase: "such as [^1]: A note. counts too",
+		input: "# Title\n\nText.\n\n[^1]: A note.\n", want: []catalogFinding{{5, false}},
+	},
+	{
+		id: "MD053", name: "called footnote definition", phrase: "such as [^1]: A note. counts too",
+		input: "# Title\n\nText[^1].\n\n[^1]: A note.\n",
+	},
+	{
+		id: "MD053", name: "footnote definition in a list", phrase: "outside lists and blockquotes",
+		input: "# Title\n\nText.\n\n- [^1]: A note.\n",
+	},
+	{
+		id: "MD053", name: "label that starts with a caret", phrase: "one whose label starts with ^",
+		input: "# Title\n\nText.\n\n[^b]: /url\n", want: []catalogFinding{{5, false}},
 	},
 
 	// MD036 makes a bold line a heading one level deeper than the one

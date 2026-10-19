@@ -1,0 +1,47 @@
+[
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 10,
+    "column": 1,
+    "message": "Unused reference definition [^unused]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 12,
+    "column": 1,
+    "message": "Unused reference definition [^long]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 15,
+    "column": 1,
+    "message": "Unused reference definition [^url]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 17,
+    "column": 1,
+    "message": "Unused reference definition [^twice]",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD053",
+    "name": "link-image-reference-definitions",
+    "line": 19,
+    "column": 1,
+    "message": "Duplicate reference definition [^twice]",
+    "severity": "warning",
+    "fixable": false
+  }
+]
