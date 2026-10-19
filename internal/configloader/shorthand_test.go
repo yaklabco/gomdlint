@@ -137,7 +137,8 @@ func TestLoad_RuleBooleanShorthandKeepsLowerLayerOptions(t *testing.T) {
 // TestLoad_RuleSeverityShorthand covers rules set to a severity, as
 // markdownlint allows with error and warning, and with gomdlint's info, by
 // ID, name or markdownlint name, under rules and rule_defaults, in YAML and
-// in JSON. Each sets the rule's severity alone and loads without warnings.
+// in JSON. Each turns the rule on at that severity, as markdownlint reads
+// it, and loads without warnings.
 func TestLoad_RuleSeverityShorthand(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +161,9 @@ func TestLoad_RuleSeverityShorthand(t *testing.T) {
 			require.NoError(t, err)
 			assert.Empty(t, result.Warnings)
 
-			severity := func(value string) config.RuleConfig { return config.RuleConfig{Severity: &value} }
+			severity := func(value string) config.RuleConfig {
+				return config.RuleConfig{Enabled: config.Bool(true), Severity: &value}
+			}
 			assert.Equal(t, map[string]config.RuleConfig{
 				"MD013": severity("warning"), "MD033": severity("info"), "MD004": severity("error"),
 			}, result.Config.Rules)
@@ -238,12 +241,13 @@ func TestLoad_RuleSeverityShorthandValidatesLikeTheSetting(t *testing.T) {
 }
 
 // TestLoad_RuleSeverityShorthandKeepsLowerLayerSettings covers a project
-// config that gives a severity to a rule that a user config configures.
-// The shorthand sets the severity alone, as the severity setting does, so
+// config that gives a severity to a rule that a user config configures
+// and turns off. As in markdownlint, the shorthand turns the rule on at
+// that severity, so it merges as enabled: true with the severity does:
 // the user's options, here written directly under the rule key and under
-// options, still apply, and so do its auto_fix and its enabled setting. A
-// later layer that sets options leaves the shorthand's severity alone in
-// turn.
+// options, still apply, and so does its auto_fix. The severity setting
+// alone leaves the rule off. A later layer that sets options leaves the
+// shorthand's severity and enabled setting alone in turn.
 func TestLoad_RuleSeverityShorthandKeepsLowerLayerSettings(t *testing.T) {
 	t.Parallel()
 
@@ -256,11 +260,12 @@ func TestLoad_RuleSeverityShorthandKeepsLowerLayerSettings(t *testing.T) {
 	user := write("user.yaml",
 		"rules:\n  MD013:\n    enabled: false\n    auto_fix: false\n    line_length: 120\n    options:\n      tables: false\n")
 	shorthand := write("shorthand.yml", "rules:\n  line-length: error\n")
+	turnedOn := write("on.yml", "rules:\n  line-length:\n    enabled: true\n    severity: error\n")
 	setting := write("setting.yml", "rules:\n  line-length:\n    severity: error\n")
 
 	got := mergeFiles(t, user, shorthand)
 
-	assert.Equal(t, mergeFiles(t, user, setting).Rules, got.Rules, "the shorthand merges as the setting does")
+	assert.Equal(t, mergeFiles(t, user, turnedOn).Rules, got.Rules, "the shorthand merges as enabled: true with the severity")
 	rule := got.Rules["MD013"]
 	require.NotNil(t, rule.Severity)
 	assert.Equal(t, "error", *rule.Severity)
@@ -268,13 +273,19 @@ func TestLoad_RuleSeverityShorthandKeepsLowerLayerSettings(t *testing.T) {
 	require.NotNil(t, rule.AutoFix)
 	assert.False(t, *rule.AutoFix, "the user's auto_fix applies")
 	require.NotNil(t, rule.Enabled)
-	assert.False(t, *rule.Enabled, "the user's enabled applies, as under severity: error")
+	assert.True(t, *rule.Enabled, "the shorthand turns the rule back on")
+
+	longForm := mergeFiles(t, user, setting).Rules["MD013"]
+	require.NotNil(t, longForm.Enabled)
+	assert.False(t, *longForm.Enabled, "the severity setting alone leaves the rule off")
 
 	lower := write("lower.yml", "rules:\n  MD013: warning\n")
 	options := write("options.yml", "rules:\n  MD013:\n    options:\n      max: 100\n")
 	layered := mergeFiles(t, lower, options).Rules["MD013"]
 	require.NotNil(t, layered.Severity)
 	assert.Equal(t, "warning", *layered.Severity, "a later layer's options leave the severity alone")
+	require.NotNil(t, layered.Enabled)
+	assert.True(t, *layered.Enabled)
 	assert.Equal(t, map[string]any{"max": 100}, layered.Options)
 }
 

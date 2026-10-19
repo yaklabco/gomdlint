@@ -117,8 +117,9 @@ func TestRuleConfig_RejectsOtherValues(t *testing.T) {
 // TestRuleConfig_SeverityShorthand covers markdownlint's shorthand of a
 // severity as a rule's value, error or warning, and gomdlint's own info,
 // under any rule key, in YAML and in JSON, under rules and rule_defaults.
-// It sets the severity alone, so it decodes exactly as the mapping that
-// sets only the severity does.
+// As in markdownlint, it turns the rule on at that severity, so it
+// decodes exactly as the mapping that sets enabled to true and the
+// severity does, and leaves the other settings alone.
 func TestRuleConfig_SeverityShorthand(t *testing.T) {
 	t.Parallel()
 
@@ -133,43 +134,43 @@ func TestRuleConfig_SeverityShorthand(t *testing.T) {
 		{
 			name:      "ID error",
 			shorthand: "rules:\n  MD013: error\n",
-			mapping:   "rules:\n  MD013:\n    severity: error\n",
+			mapping:   "rules:\n  MD013:\n    enabled: true\n    severity: error\n",
 			section:   rulesSection, key: "MD013", severity: "error",
 		},
 		{
 			name:      "name warning",
 			shorthand: "rules:\n  line-length: warning\n",
-			mapping:   "rules:\n  line-length:\n    severity: warning\n",
+			mapping:   "rules:\n  line-length:\n    enabled: true\n    severity: warning\n",
 			section:   rulesSection, key: "line-length", severity: "warning",
 		},
 		{
 			name:      "markdownlint name info",
 			shorthand: "rules:\n  ul-style: info\n",
-			mapping:   "rules:\n  ul-style:\n    severity: info\n",
+			mapping:   "rules:\n  ul-style:\n    enabled: true\n    severity: info\n",
 			section:   rulesSection, key: "ul-style", severity: "info",
 		},
 		{
 			name:      "quoted",
 			shorthand: "rules:\n  MD013: 'warning'\n",
-			mapping:   "rules:\n  MD013:\n    severity: 'warning'\n",
+			mapping:   "rules:\n  MD013:\n    enabled: true\n    severity: 'warning'\n",
 			section:   rulesSection, key: "MD013", severity: "warning",
 		},
 		{
 			name:      "JSON",
 			shorthand: `{"rules": {"line-length": "error"}}`,
-			mapping:   `{"rules": {"line-length": {"severity": "error"}}}`,
+			mapping:   `{"rules": {"line-length": {"enabled": true, "severity": "error"}}}`,
 			section:   rulesSection, key: "line-length", severity: "error",
 		},
 		{
 			name:      "rule_defaults",
 			shorthand: "rule_defaults:\n  MD009: info\n",
-			mapping:   "rule_defaults:\n  MD009:\n    severity: info\n",
+			mapping:   "rule_defaults:\n  MD009:\n    enabled: true\n    severity: info\n",
 			section:   ruleDefaultsSection, key: "MD009", severity: "info",
 		},
 		{
 			name:      "through an alias",
 			shorthand: "ignore: [&level warning]\nrules:\n  MD013: *level\n",
-			mapping:   "ignore: [&level warning]\nrules:\n  MD013:\n    severity: *level\n",
+			mapping:   "ignore: [&level warning]\nrules:\n  MD013:\n    enabled: true\n    severity: *level\n",
 			section:   rulesSection, key: "MD013", severity: "warning",
 		},
 	}
@@ -185,13 +186,14 @@ func TestRuleConfig_SeverityShorthand(t *testing.T) {
 			rule := tt.section(cfg)[tt.key]
 			require.NotNil(t, rule.Severity)
 			assert.Equal(t, tt.severity, *rule.Severity)
-			assert.Nil(t, rule.Enabled, "the shorthand leaves enabled alone")
+			require.NotNil(t, rule.Enabled)
+			assert.True(t, *rule.Enabled, "the shorthand turns the rule on")
 			assert.Nil(t, rule.AutoFix, "the shorthand leaves auto-fix alone")
 			assert.Nil(t, rule.Options, "the shorthand leaves the options alone")
 
 			mapping, err := config.FromYAML([]byte(tt.mapping))
 			require.NoError(t, err)
-			assert.Equal(t, mapping, cfg, "the shorthand reads as the severity setting alone")
+			assert.Equal(t, mapping, cfg, "the shorthand reads as enabled: true with the severity")
 
 			var decoded config.Config
 			require.NoError(t, yaml.Unmarshal([]byte(tt.shorthand), &decoded))
@@ -214,7 +216,7 @@ func TestRuleConfig_SeverityShorthandReadsLikeTheSetting(t *testing.T) {
 
 			shorthand, err := config.FromYAML([]byte("rules:\n  MD013: " + value + "\n"))
 			require.NoError(t, err)
-			mapping, err := config.FromYAML([]byte("rules:\n  MD013:\n    severity: " + value + "\n"))
+			mapping, err := config.FromYAML([]byte("rules:\n  MD013:\n    enabled: true\n    severity: " + value + "\n"))
 			require.NoError(t, err)
 
 			assert.Equal(t, mapping, shorthand)
@@ -237,6 +239,8 @@ func TestRuleConfig_SeverityShorthandSurvivesClone(t *testing.T) {
 	assert.Equal(t, settled(cfg.Rules), settled(clone.Rules))
 	require.NotNil(t, clone.Rules["MD013"].Severity)
 	assert.Equal(t, "info", *clone.Rules["MD013"].Severity)
+	require.NotNil(t, clone.Rules["MD013"].Enabled)
+	assert.True(t, *clone.Rules["MD013"].Enabled)
 }
 
 // TestRuleConfig_ShorthandSurvivesClone covers the YAML round trip that

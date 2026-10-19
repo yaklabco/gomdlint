@@ -117,14 +117,15 @@ func withHeader(header string, yamlBytes []byte) []byte {
 
 // UnmarshalYAML decodes the settings of one rule: a mapping of the settings
 // that RuleSettingKeys names, or one of markdownlint's shorthands. A bare
-// boolean enables (true) or disables (false) the rule, and a bare string,
-// a scalar that YAML reads as a string, is the rule's severity, as
-// markdownlint reads "error" and "warning". Each shorthand sets its one
-// setting and leaves the others alone, so "MD013: warning" decodes as
-// "MD013: {severity: warning}" does. Like the severity setting, the
-// shorthand takes any string, and validation rejects a string that names
-// no severity. Strings such as "yes" are not booleans here, as in
-// markdownlint, so they are severities that validation rejects.
+// boolean enables (true) or disables (false) the rule. A bare string, a
+// scalar that YAML reads as a string, turns the rule on at that severity,
+// as markdownlint reads "error" and "warning": "MD013: warning" decodes
+// as "MD013: {enabled: true, severity: warning}" does. Each shorthand
+// leaves the other settings alone, the options among them. Like the
+// severity setting, the shorthand takes any string, and validation
+// rejects a string that names no severity. Strings such as "yes" are not
+// booleans here, as in markdownlint, so they are severities that
+// validation rejects.
 //
 // A mapping may also write options directly under the rule key, the flat
 // shape that markdownlint uses. Only the options that the rule declares
@@ -153,7 +154,7 @@ func (rc *RuleConfig) UnmarshalYAML(value *yaml.Node) error {
 	case value.Kind == yaml.ScalarNode && value.ShortTag() == "!!str":
 		// A string decodes as its text, as the severity setting reads it.
 		severity := value.Value
-		*rc = RuleConfig{Severity: &severity}
+		*rc = RuleConfig{Enabled: Bool(true), Severity: &severity}
 		return nil
 	case value.Kind == yaml.MappingNode:
 		// The settings type without this method decodes the mapping as

@@ -217,9 +217,10 @@ func TestLint_RuleSeverityShorthand(t *testing.T) {
 // TestLint_RuleSeverityShorthandKeepsLowerLayerOptions covers a project
 // config that gives line-length a severity, over a user config, or the
 // project config's own rule_defaults, that sets its line length to 120.
-// The shorthand sets the severity alone, as "severity: error" does, so the
-// line length still applies: of layeredDoc's two long lines, only the
-// longer one is reported, as an error.
+// The shorthand turns the rule on at that severity, as "enabled: true" and
+// "severity: error" do, and keeps the line length of the layer below: of
+// layeredDoc's two long lines, only the longer one is reported, as an
+// error.
 func TestLint_RuleSeverityShorthandKeepsLowerLayerOptions(t *testing.T) {
 	const lineLength = "line-length:\n    line_length: 120\n"
 	tests := []struct {
@@ -251,11 +252,119 @@ func TestLint_RuleSeverityShorthandKeepsLowerLayerOptions(t *testing.T) {
 			assert.Equal(t, cli.ExitLintErrors, got.code)
 			assert.Equal(t, []finding{{rule: "MD013", line: 5, severity: "error"}}, reportedFindings(t, got.stdout))
 
-			// The same files with the severity written out lint alike.
-			project := strings.Replace(tt.files[".gomdlint.yml"], "line-length: error", "line-length:\n    severity: error", 1)
+			// The same files with the shorthand written out lint alike.
+			project := strings.Replace(tt.files[".gomdlint.yml"], "line-length: error",
+				"line-length:\n    enabled: true\n    severity: error", 1)
 			require.NoError(t, os.WriteFile(".gomdlint.yml", []byte(project), 0o644))
 			written := execute(t, "lint", "--format", "json", "doc.md")
 			assert.Equal(t, got, written)
+		})
+	}
+}
+
+// TestLint_RuleSeverityShorthandUnderRuleDefaults covers the shorthand
+// under rule_defaults, where it is a default like any other: a rule that
+// a lower layer turns off under rules stays off. The shorthand under rules
+// in turn turns on a rule that a higher layer turns off under
+// rule_defaults, as a migrated markdownlint config does for a rule that
+// its default: false turns off. Each case also lints with the project
+// config alone, which shows that its rule_defaults take effect, so the
+// user config is what changes the result.
+func TestLint_RuleSeverityShorthandUnderRuleDefaults(t *testing.T) {
+	longLines := []finding{{rule: "MD013", line: 3, severity: "error"}, {rule: "MD013", line: 5, severity: "error"}}
+	tests := []struct {
+		name, user, project string
+		want, projectAlone  []finding
+	}{
+		{
+			name:         "a rule that a user config turns off stays off",
+			user:         "rules:\n  line-length: false\n",
+			project:      "rule_defaults:\n  line-length: error\n",
+			projectAlone: longLines,
+		},
+		{
+			name:    "a user config turns on a rule that the project config turns off",
+			user:    "rules:\n  line-length: error\n",
+			project: "rule_defaults:\n  line-length: false\n",
+			want:    longLines,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inProject(t, map[string]string{
+				"doc.md":                    layeredDoc,
+				".xdg/gomdlint/config.yaml": tt.user,
+				".gomdlint.yml":             tt.project,
+			})
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, tt.want, reportedFindings(t, got.stdout))
+
+			require.NoError(t, os.Remove(filepath.Join(".xdg", "gomdlint", "config.yaml")))
+			alone := execute(t, "lint", "--format", "json", "doc.md")
+			require.Empty(t, alone.stderr)
+			assert.Equal(t, tt.projectAlone, reportedFindings(t, alone.stdout), "the project config alone")
+		})
+	}
+}
+
+// TestLint_RuleSeverityShorthandTurnsTheRuleOn covers a severity written as
+// a rule's value over settings that turn the rule off: a user config, the
+// project config's own rule_defaults, and a user config that also sets
+// the line length. As in markdownlint, the shorthand turns the rule on at
+// that severity, and the user's line length still applies. The severity
+// setting alone leaves the rule off.
+func TestLint_RuleSeverityShorthandTurnsTheRuleOn(t *testing.T) {
+	longLines := []finding{{rule: "MD013", line: 3, severity: "warning"}, {rule: "MD013", line: 5, severity: "warning"}}
+	tests := []struct {
+		name     string
+		lower    string
+		project  string
+		longForm string
+		want     []finding
+	}{
+		{
+			name:     "over a user config that turns the rule off",
+			lower:    "rules:\n  line-length: false\n",
+			project:  "rules:\n  line-length: warning\n",
+			longForm: "rules:\n  line-length:\n    severity: warning\n",
+			want:     longLines,
+		},
+		{
+			name:     "over rule_defaults that turn the rule off",
+			project:  "rule_defaults:\n  line-length: false\nrules:\n  line-length: error\n",
+			longForm: "rule_defaults:\n  line-length: false\nrules:\n  line-length:\n    severity: error\n",
+			want:     []finding{{rule: "MD013", line: 3, severity: "error"}, {rule: "MD013", line: 5, severity: "error"}},
+		},
+		{
+			name:     "keeping the line length of a user config that turns the rule off",
+			lower:    "rules:\n  line-length:\n    enabled: false\n    line_length: 120\n",
+			project:  "rules:\n  line-length: error\n",
+			longForm: "rules:\n  line-length:\n    severity: error\n",
+			want:     []finding{{rule: "MD013", line: 5, severity: "error"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := map[string]string{"doc.md": layeredDoc, ".gomdlint.yml": tt.project}
+			if tt.lower != "" {
+				files[".xdg/gomdlint/config.yaml"] = tt.lower
+			}
+			inProject(t, files)
+
+			got := execute(t, "lint", "--format", "json", "doc.md")
+
+			require.Empty(t, got.stderr)
+			assert.Equal(t, tt.want, reportedFindings(t, got.stdout))
+
+			require.NoError(t, os.WriteFile(".gomdlint.yml", []byte(tt.longForm), 0o644))
+			longForm := execute(t, "lint", "--format", "json", "doc.md")
+			require.Empty(t, longForm.stderr)
+			assert.Empty(t, reportedFindings(t, longForm.stdout), "the severity setting alone leaves the rule off")
 		})
 	}
 }

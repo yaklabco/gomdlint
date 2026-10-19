@@ -454,6 +454,43 @@ func TestResolveRules_FixRulesFilter(t *testing.T) {
 	}
 }
 
+// TestResolveRules_SeverityShorthandTurnsRulesOn covers a severity written
+// as a rule's value, which markdownlint reads as the rule turned on at
+// that severity: a rule that is off by default runs, and so does a rule
+// that rule_defaults turns off. The severity setting alone leaves both
+// off.
+func TestResolveRules_SeverityShorthandTurnsRulesOn(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	registry.Register(&offByDefaultRule{BaseRule: lint.NewBaseRule("TEST002", "second-rule", "Second", nil, false)})
+	registry.Register(newTestRule(testRuleID1, false))
+
+	resolve := func(content string) map[string]config.Severity {
+		t.Helper()
+
+		cfg, err := config.FromYAML([]byte(content))
+		if err != nil {
+			t.Fatalf("FromYAML(%q): %v", content, err)
+		}
+		severs := make(map[string]config.Severity)
+		for _, rule := range lint.ResolveRules(registry, cfg) {
+			severs[rule.Rule.ID()] = rule.Severity
+		}
+		return severs
+	}
+
+	assert.Equal(t, map[string]config.Severity{"TEST002": config.SeverityWarning, testRuleID1: config.SeverityWarning},
+		resolve("rules:\n  TEST002: warning\n"), "a rule that is off by default runs")
+	assert.Equal(t, map[string]config.Severity{testRuleID1: config.SeverityError},
+		resolve("rule_defaults:\n  MD001: false\nrules:\n  MD001: error\n"), "a rule that rule_defaults turns off runs")
+
+	assert.Equal(t, map[string]config.Severity{testRuleID1: config.SeverityWarning},
+		resolve("rules:\n  TEST002:\n    severity: warning\n"), "the setting alone leaves the rule off")
+	assert.Empty(t, resolve("rule_defaults:\n  MD001: false\nrules:\n  MD001:\n    severity: error\n"),
+		"the setting alone keeps a rule off that rule_defaults turns off")
+}
+
 func TestResolveRules_NilConfig(t *testing.T) {
 	t.Parallel()
 

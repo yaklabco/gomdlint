@@ -380,7 +380,7 @@ rules:
   # A bare true or false turns a rule on or off, as in markdownlint
   no-inline-html: false
 
-  # A bare severity sets the rule's severity, as in markdownlint
+  # A bare severity turns the rule on at that severity, as in markdownlint
   no-hard-tabs: error
 
 ignore:
@@ -438,15 +438,19 @@ tags for the three flags.
 
 A rule's value is a mapping of its settings, `enabled`, `severity`,
 `auto_fix` and `options`, or one of markdownlint's shorthands. `true` and
-`false` turn the rule on and off. A severity sets the rule's severity:
-`error` or `warning`, as in markdownlint, or gomdlint's `info`. So
-`line-length: warning` means `line-length: {severity: warning}`. Any other
-string is an invalid severity, which fails as it does under `severity`.
+`false` turn the rule on and off. A severity turns the rule on at that
+severity, as in markdownlint: `error` or `warning`, or gomdlint's `info`.
+So `line-length: warning` means
+`line-length: {enabled: true, severity: warning}`. Any other string is an
+invalid severity, which fails as it does under `severity`.
 
-The severity shorthand sets the severity and nothing else. The rule keeps
-the options, `auto_fix` setting and on or off state that `rule_defaults` or
-a lower layer gives it. So, unlike in markdownlint, `line-length: warning`
-does not turn `line-length` back on when a user config turns it off.
+Under `rules`, the shorthand turns the rule on even when `rule_defaults` or
+a lower layer, such as a user config, turns it off. It keeps the options
+and `auto_fix` setting that they give the rule. The long form differs:
+`line-length: {severity: warning}` sets the severity alone, so a rule that
+`rule_defaults` or a lower layer turns off stays off. Under `rule_defaults`,
+the shorthand is a default like any other there, so a rule that `rules`
+turns off, in any layer, stays off.
 
 ### Rule Options
 
@@ -525,8 +529,11 @@ Settings apply in this order, each layer overriding the ones before it:
 5. Environment variables
 6. Command-line flags
 
-Within one file, a rule's own settings under `rules` override
-`severity_default`. `--disable` wins over `--enable` for the same rule.
+A rule's own severity, under `rules` or `rule_defaults` in any layer,
+overrides `severity_default` from every layer, `GOMDLINT_SEVERITY_DEFAULT`
+included. A rule's settings under `rules`, in any layer, override its
+settings under `rule_defaults`, in every layer. `--disable` wins over
+`--enable` for the same rule.
 
 These environment variables set the matching settings: `GOMDLINT_FLAVOR`,
 `GOMDLINT_SEVERITY_DEFAULT`, `GOMDLINT_FIX`, `GOMDLINT_DRY_RUN`,

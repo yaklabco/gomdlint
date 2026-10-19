@@ -123,11 +123,13 @@ formats change. The first entries under Changed may need action.
   and `migrate` write JSON for an output name that ends in `.json`.
 - A bare `true` or `false` turns a rule on or off, as in markdownlint, such
   as `line-length: false` in YAML or `"MD013": false` in JSON.
-- A bare severity sets a rule's severity, as in markdownlint, such as
-  `line-length: warning` in YAML or `"MD013": "error"` in JSON. It means
-  `line-length: {severity: warning}`, so `error`, `warning` and gomdlint's
-  `info` work, another string fails as an invalid severity, and the rule
-  keeps the options and other settings that lower layers give it.
+- A bare severity turns a rule on at that severity, as in markdownlint, such
+  as `line-length: warning` in YAML or `"MD013": "error"` in JSON. It means
+  `line-length: {enabled: true, severity: warning}`, so under `rules` it
+  turns on a rule that `rule_defaults` or a lower layer turns off, and it
+  keeps the options and `auto_fix` setting that they give the rule. `error`,
+  `warning` and gomdlint's `info` work, and another string fails as an
+  invalid severity.
 - A catalog describes every rule: its ID, its name, the markdownlint names
   that differ from it, its category and its markdownlint tags. A rule can be
   named by ID, name or markdownlint name, in any case, in config files, in

@@ -17,8 +17,8 @@ const (
 // whether --fix applies its fixes, and its options.
 //
 // A configuration file may give a rule markdownlint's shorthand instead of
-// a mapping: true or false, which sets enabled, or a string, which sets
-// the severity (see UnmarshalYAML).
+// a mapping: true or false, which sets enabled, or a string, which turns
+// the rule on at that severity (see UnmarshalYAML).
 //
 // A configuration file may write the options under the options key, the
 // shape that gomdlint writes, or directly under the rule key, the flat
