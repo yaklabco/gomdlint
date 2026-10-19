@@ -47,7 +47,7 @@ func TestEmphasisIndependentSpans(t *testing.T) {
 			require.Empty(t, applyCompatibilityRule(t, NewNoSpaceInEmphasisRule(), input))
 		})
 	}
-	require.Len(t, applyCompatibilityRule(t, NewNoSpaceInEmphasisRule(), "** spaced **"), 1)
+	require.Len(t, applyCompatibilityRule(t, NewNoSpaceInEmphasisRule(), "** spaced **"), 2, "one finding for each side")
 }
 
 func TestFrontmatterIsNotMarkdown(t *testing.T) {
@@ -125,7 +125,7 @@ func TestReversedLinkInsideCode(t *testing.T) {
 func TestEmphasisDoesNotCrossTableCells(t *testing.T) {
 	input := "| A | B |\n| --- | --- |\n| * | * |\n"
 	require.Empty(t, applyCompatibilityRule(t, NewNoSpaceInEmphasisRule(), input))
-	require.Len(t, applyCompatibilityRule(t, NewNoSpaceInEmphasisRule(), "| A | B |\n| --- | --- |\n| ** spaced ** | text |\n"), 1)
+	require.Len(t, applyCompatibilityRule(t, NewNoSpaceInEmphasisRule(), "| A | B |\n| --- | --- |\n| ** spaced ** | text |\n"), 2)
 }
 
 func TestBareURLReferenceDefinitions(t *testing.T) {

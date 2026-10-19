@@ -3,7 +3,16 @@
     "rule": "MD037",
     "name": "no-space-in-emphasis",
     "line": 3,
-    "column": 10,
+    "column": 11,
+    "message": "Spaces inside emphasis markers",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD037",
+    "name": "no-space-in-emphasis",
+    "line": 3,
+    "column": 18,
     "message": "Spaces inside emphasis markers",
     "severity": "warning",
     "fixable": false
@@ -12,7 +21,16 @@
     "rule": "MD037",
     "name": "no-space-in-emphasis",
     "line": 5,
-    "column": 10,
+    "column": 12,
+    "message": "Spaces inside emphasis markers",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD037",
+    "name": "no-space-in-emphasis",
+    "line": 5,
+    "column": 19,
     "message": "Spaces inside emphasis markers",
     "severity": "warning",
     "fixable": true

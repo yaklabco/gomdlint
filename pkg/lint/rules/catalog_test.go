@@ -789,7 +789,7 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	},
 	{
 		id: "MD037", name: "markers inside square brackets", phrase: "It does the same inside square brackets",
-		input: "# Title\n\nNote [a ** b ** c] here.\n", want: []catalogFinding{{3, false}},
+		input: "# Title\n\nNote [a ** b ** c] here.\n", want: []catalogFinding{{3, false}, {3, false}},
 	},
 	{
 		id: "MD044", name: "name in a URL", phrase: "Outside URLs", options: map[string]any{"names": []any{"GitHub"}},

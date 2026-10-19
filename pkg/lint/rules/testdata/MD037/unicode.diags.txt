@@ -1,2 +1,4 @@
-unicode.input.md:3:10 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis)
-unicode.input.md:5:10 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis) [fixable]
+unicode.input.md:3:11 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis)
+unicode.input.md:3:18 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis)
+unicode.input.md:5:12 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis) [fixable]
+unicode.input.md:5:19 warning Spaces inside emphasis markers (MD037/no-space-in-emphasis) [fixable]

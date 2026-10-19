@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -183,14 +182,14 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 			// into emphasis, so no fix is offered for content without letters.
 			name:      "arithmetic is reported without a fix",
 			input:     "See 2 * 3 * 4\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			// Single asterisks with whitespace on both sides read as
 			// multiplication, so no fix is offered.
 			name:      "multiplication is reported without a fix",
 			input:     "The product is a * b * c.\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			name:      "single asterisk spaced on one side only",
@@ -213,7 +212,7 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 		{
 			name:      "pair across lines",
 			input:     "Some ** text\nmore ** here\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 2},
 			wantFixed: "Some **text\nmore** here\n",
 		},
 		{name: "escaped markers", input: "Some \\* text \\* here\n", wantLines: []int{}},
@@ -225,12 +224,12 @@ func TestNoSpaceInEmphasisRule_DelimiterRuns(t *testing.T) {
 		{
 			name:      "letters between spaced single asterisks",
 			input:     "a * b * c\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			name:      "letters between spaced underscores",
 			input:     "a _ b _ c\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFixed: "a _b_ c\n",
 		},
 		{
@@ -499,7 +498,7 @@ func TestNoSpaceInEmphasisRule(t *testing.T) {
 		{
 			name:      "spaces in emphasis",
 			input:     "Some * spaced * text.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 		},
 		{
 			name:      "empty file",
@@ -677,25 +676,25 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			// multiplication, so the fix is withheld.
 			name:      "single violation - spaces in asterisk emphasis",
 			input:     "Some * text * here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some * text * here.\n",
 		},
 		{
 			name:      "strong emphasis with spaces",
 			input:     "Some ** text ** here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some **text** here.\n",
 		},
 		{
 			name:      "underscore emphasis with spaces",
 			input:     "Some _ text _ here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some _text_ here.\n",
 		},
 		{
 			name:      "strong underscore emphasis with spaces",
 			input:     "Some __ text __ here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some __text__ here.\n",
 		},
 		{
@@ -745,14 +744,8 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+			// Findings that share a fix carry the same edits, which apply once.
+			fixed := []byte(applyAllEdits(t, tt.input, diags))
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
@@ -802,6 +795,40 @@ func TestEmphasisStyleRules_MarkdownlintMarkers(t *testing.T) {
 	require.Len(t, diags, 2)
 	assert.False(t, diags[0].HasFix())
 	assert.False(t, diags[1].HasFix())
+}
+
+// TestNoSpaceInEmphasisRule_MarkdownlintSides checks MD037 against
+// markdownlint 0.41.1, which reports the spaces inside each marker of a
+// pair on their own, at the first space. Spaces on one side alone keep the
+// markers literal, so both findings of a pair carry the fix that deletes
+// the spaces on both sides, which the engine applies once.
+func TestNoSpaceInEmphasisRule_MarkdownlintSides(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"Both * sides * here.\n\n" + // 3
+		"Left ** only** here.\n\n" + // 5
+		"Right __only __ here.\n\n" + // 7
+		"Tabs *\tboth\t* here.\n\n" + // 9
+		"Many *   spaces   * here.\n\n" + // 11
+		"Two * a * and * b * here.\n\n" + // 13
+		"> Quoted ** both ** text.\n\n" + // 15
+		"- Listed _ both _ text.\n\n" + // 17
+		"Across * lines\nend * here.\n\n" + // 19, 20
+		"Triple *** both *** here.\n" // 22
+	diags := applyRuleWithOptions(t, NewNoSpaceInEmphasisRule(), markdown, nil)
+	assert.Equal(t, [][2]int{
+		{3, 7}, {3, 13}, {5, 8}, {7, 13}, {9, 7}, {9, 12}, {11, 7}, {11, 16},
+		{13, 6}, {13, 8}, {13, 16}, {13, 18}, {15, 12}, {15, 17}, {17, 11}, {17, 16},
+		{19, 9}, {20, 4}, {22, 11}, {22, 16},
+	}, diagPositions(diags))
+	if assert.Len(t, diags, 20) {
+		assert.Equal(t, 10, diags[6].EndColumn, "a finding covers its spaces")
+		assert.Equal(t, diags[14].FixEdits, diags[15].FixEdits, "both sides carry the fix of the pair")
+		assert.True(t, diags[14].HasFix())
+	}
+
+	fixed, passes := fixWithEngine(t, "# Title\n\nQuoted ** both ** text.\n", NewNoSpaceInEmphasisRule())
+	assert.Equal(t, "# Title\n\nQuoted **both** text.\n", fixed)
+	assert.Equal(t, 1, passes)
 }
 
 func TestEmphasisStyleRule_Fix(t *testing.T) {
