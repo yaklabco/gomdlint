@@ -746,7 +746,7 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 		start := content.StartOffset + punctStart
 
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File,
-			mdast.SourceRange{StartOffset: start, EndOffset: content.EndOffset}),
+			mdast.SourceRange{StartOffset: spaceBefore(ctx.File, content.StartOffset, start), EndOffset: content.EndOffset}),
 			fmt.Sprintf("Heading ends with trailing punctuation %q", run)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Remove trailing punctuation from the heading")
@@ -757,6 +757,28 @@ func (r *NoTrailingPunctuationRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnos
 	}
 
 	return checker.filter(diags), nil
+}
+
+// spaceBefore returns the start of the white space that ends right at
+// offset, on its line and from textStart on, or offset when none does.
+// White space is what a JavaScript regular expression's \s matches, as in
+// markdownlint's MD026 pattern, which reports it with the punctuation
+// after it in the heading's text, from textStart.
+func spaceBefore(file *mdast.FileSnapshot, textStart, offset int) int {
+	line := lineOf(file, offset)
+	if line == nil {
+		return offset
+	}
+	low := max(line.StartOffset, textStart)
+	start := offset
+	for start > low {
+		char, size := utf8.DecodeLastRune(file.Content[low:start])
+		if !isJSWhiteSpace(char) {
+			break
+		}
+		start -= size
+	}
+	return start
 }
 
 // trailingPunctuationFix deletes the punctuation starting at start, with the

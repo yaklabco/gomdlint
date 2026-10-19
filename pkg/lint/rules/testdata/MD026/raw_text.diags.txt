@@ -1,5 +1,5 @@
 raw_text.input.md:10:10 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]
 raw_text.input.md:13:14 warning Heading ends with trailing punctuation "!!!" (MD026/no-trailing-punctuation) [fixable]
-raw_text.input.md:15:16 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]
+raw_text.input.md:15:15 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]
 raw_text.input.md:17:19 warning Heading ends with trailing punctuation "。" (MD026/no-trailing-punctuation) [fixable]
 raw_text.input.md:21:20 warning Heading ends with trailing punctuation "." (MD026/no-trailing-punctuation) [fixable]

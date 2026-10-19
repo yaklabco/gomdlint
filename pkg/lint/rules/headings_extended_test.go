@@ -607,6 +607,24 @@ func TestNoMissingSpaceClosedATXRule_MarkdownlintColumns(t *testing.T) {
 		"a byte order mark keeps its bytes before the column, and the column starts a character")
 }
 
+// TestNoTrailingPunctuationRule_MarkdownlintColumns checks that MD026
+// points at the white space before the trailing punctuation, which its fix
+// deletes too, as markdownlint 0.41.1 does. White space before an escaping
+// backslash does not touch the punctuation, so there the finding starts at
+// the punctuation.
+func TestNoTrailingPunctuationRule_MarkdownlintColumns(t *testing.T) {
+	diags := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), headingSpacesMarkdown, nil)
+	assert.Equal(t, [][2]int{{29, 10}, {31, 10}, {33, 13}, {35, 9}}, diagPositions(diags))
+
+	other := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), "# Title\n\n## No-break space\u00a0.\n", nil)
+	assert.Equal(t, [][2]int{{3, 18}}, diagPositions(other), "a no-break space is white space to markdownlint")
+
+	// The space after the opening hashes is no heading text, so a heading
+	// of punctuation only is reported at the punctuation.
+	only := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), "# Title\n\n## .\n\n> ## !\n\nText .\n---\n", nil)
+	assert.Equal(t, [][2]int{{3, 4}, {5, 6}, {7, 5}}, diagPositions(only))
+}
+
 func TestNoMissingSpaceATXRule_Metadata(t *testing.T) {
 	rule := NewNoMissingSpaceATXRule()
 
