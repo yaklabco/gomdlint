@@ -463,8 +463,8 @@ top-level blockquote it notes the same groups, where a block opens in the
 blockquote with no other block of the blockquote open, or right after such
 a closed block. It also notes where each item of a list starts, for the
 lists at the top level and in a top-level blockquote, where each body row
-of a GFM table there starts, and which paragraph each link reference
-definition comes from.
+of a GFM table there starts, which paragraph each link reference
+definition comes from, and which labels links look up.
 
 A check parses the groups that hold its edits, followed by a sentinel line
 that must start a group the way the original's next group starts. Inside a
@@ -474,12 +474,16 @@ items with the item before and the item after them, and inside a long
 table the edited rows after the table's header and delimiter rows, with a
 sentinel line that must stay a row. It splices the result into the
 original's render signature (`fix_region_model.go`) or outline
-(`fix_safety_regions.go`) and compares exactly. It parses the whole
-document, as before, when an edit changes link reference definitions or can
-reach the front matter, or, for the render signature, when a region changes
-the anchor counts after it. `fix_anchors.go` works out how the anchors of
-headings change. `fixcheck.go` finds references to heading anchors in one
-pass over the document.
+(`fix_safety_regions.go`) and compares exactly. When the edits change the
+definitions, the check works out the labels whose first definition changes
+and goes on only when no link looks one of them up, in the original or in
+the edited regions, so that every link resolves as before. It parses the
+whole document, as before, when an edit can reach the front matter or
+changes the definition of a label that a link looks up, or, for the render
+signature, when a region changes the anchor counts after it.
+`fix_anchors.go` works out how the anchors of headings change.
+`fixcheck.go` finds references to heading anchors in one pass over the
+document.
 
 The safety argument, why a region check decides exactly as a check of the
 whole document would, is the top comment of
@@ -487,8 +491,16 @@ whole document would, is the top comment of
 One is many fixes inside one large block other than a top-level
 blockquote, or a list or table at the top level or in a top-level
 blockquote: a long paragraph, a table read with the `commonmark` flavor,
-or a blockquote nested in another or in a list item. The other is fixes
-that change link reference definitions.
+a blockquote nested in another or in a list item, or a long run of
+definitions, which is one paragraph. The other is fixes that change the
+definition of a label that a link looks up.
+
+Besides its fix checks, each rule that offers fixes parses the whole
+document again for its checker. The code, link, reference and table rules
+parse it for the outline (`fix_safety.go`), and the list and whitespace
+rules for the render signature (`fix_check.go`). The heading, emphasis,
+horizontal rule and proper name rules parse it for their block summaries
+(`fixcheck.go`), and once more to check their fixes together.
 
 ## Rule Catalog and Registry
 
