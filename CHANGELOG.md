@@ -411,6 +411,16 @@ formats change. The first entries under Changed may need action.
   keys, where one of them used to win at random. Unknown config keys, such
   as `flavour`, and flag-only keys such as `rule_format` warn with the file
   and line.
+- A mapping key that is a sequence or a mapping, such as `? [MD013]` in
+  YAML, or an alias of one, is an error that names its line anywhere in a
+  gomdlint config file, `line 3: mapping key must be a scalar`, before
+  gomdlint decodes the file. Beside a merge key, `<<`, or in a mapping that
+  one brings in, such a key could stop gomdlint with an internal error,
+  exit code 70. Elsewhere it failed with an error from the YAML decoder,
+  which named the anchor's line for an alias. In a value that loading
+  never reads, it loaded: with a warning in the value of an unknown key or
+  option, and with none in the value of a null key or in a merged value
+  that another value replaces.
 - A config that gives several rules an invalid severity fails with the error
   for the first of them by rule ID, those under `rules` before those under
   `rule_defaults`. The rule that the error named used to change from run to

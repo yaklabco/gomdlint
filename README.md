@@ -458,7 +458,12 @@ rule or an option under `options`. A key that a YAML alias writes a second
 time gets the same error, as if the key were written out. gomdlint does not
 read the value of an unknown top-level key, or of an option that a rule
 does not have when it is written directly under the rule key, so it does
-not check the keys in those values.
+not check those values for keys written twice.
+
+Every key in a config file must be a scalar, such as a name or a number.
+A sequence or a mapping written as a key, or an alias of one, is an error
+anywhere in the file, even in a value that gomdlint does not read. The
+error names the key's line, as in `line 3: mapping key must be a scalar`.
 
 ### Rule Options
 

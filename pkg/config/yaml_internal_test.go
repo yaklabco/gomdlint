@@ -80,6 +80,25 @@ func TestExpandAliasKeysKeepsTheCommentsOfAnAliasKey(t *testing.T) {
 		[3]string{key.HeadComment, key.LineComment, key.FootComment})
 }
 
+// TestCheckScalarKeys covers the check of a document's keys. Scalars pass,
+// written out or through an alias, among them merge keys, tagged and null
+// keys, and keys beside collections as values. A key that is a collection
+// is named once by the line where it is written, though aliases name the
+// mapping that holds it, and the check does not enter it.
+func TestCheckScalarKeys(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, CheckScalarKeys(nil))
+	require.NoError(t, CheckScalarKeys(parseNode(t, "")))
+	require.NoError(t, CheckScalarKeys(parseNode(t,
+		"x: &k key\nm: {*k : 1, <<: {a: 1}, !!binary YQ==: 2, ~: 3, 1: [a, {b: c}], '': {d: [e]}}\n")))
+
+	err := CheckScalarKeys(parseNode(t, "b: &b {? [x] : 1, ? {y: {? [z] : 2}} : 3}\nc: *b\nd: [*b, *b]\n"))
+	var typeErr *yaml.TypeError
+	require.ErrorAs(t, err, &typeErr)
+	assert.Equal(t, []string{"line 1: mapping key must be a scalar", "line 1: mapping key must be a scalar"}, typeErr.Errors)
+}
+
 // TestExpandAliasKeysLeavesAliasesOfCollectionsAndMergeKeys covers the
 // alias keys that stay aliases: one of a collection, which may contain the
 // alias, and one of a merge key, which decoding reads as an ordinary key.

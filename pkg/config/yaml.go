@@ -198,6 +198,53 @@ func checkRepeatedKeys(mapping *yaml.Node) error {
 	return repeatedKey(options, "options.")
 }
 
+// CheckScalarKeys returns a *yaml.TypeError that names the line of each
+// mapping key in node, a parsed YAML document or a node of one, that is no
+// scalar: a sequence or a mapping written as a key, or an alias of one, in
+// the order of the document. It returns nil when every key is a scalar.
+//
+// A configuration names everything it sets with a scalar key, so no
+// configuration holds such a key, and yaml.v3 can panic on one in a
+// mapping that merges another or is merged: it hashes the keys of such
+// mappings, and a collection cannot be hashed. FromYAML and the
+// configuration loader check a document before they expand its alias keys
+// (see ExpandAliasKeys) and decode it, so such a key is an error wherever
+// it is written, even in a value that decoding never reads.
+//
+// The check walks the content of the nodes and not the nodes that aliases
+// name, so it looks at each node once. It judges an alias key by the node
+// that the alias names, whatever the anchor's name, and it does not look
+// inside a key that it rejects. So pass it the whole document: for a node
+// of a document it checks that node's content only, and nil does not make
+// decoding the node safe, since an alias in it may name a node elsewhere.
+func CheckScalarKeys(node *yaml.Node) error {
+	var problems []string
+	var walk func(parent *yaml.Node)
+	walk = func(parent *yaml.Node) {
+		for idx, child := range parent.Content {
+			if parent.Kind == yaml.MappingNode && idx%2 == 0 && !scalarKey(child) {
+				problems = append(problems, fmt.Sprintf("line %d: mapping key must be a scalar", child.Line))
+				continue
+			}
+			walk(child)
+		}
+	}
+	if node != nil {
+		walk(node)
+	}
+	if len(problems) > 0 {
+		return &yaml.TypeError{Errors: problems}
+	}
+	return nil
+}
+
+// scalarKey reports whether key, a key of a mapping, is no sequence or
+// mapping, and no alias of one.
+func scalarKey(key *yaml.Node) bool {
+	target := aliasTarget(key)
+	return target == nil || (target.Kind != yaml.SequenceNode && target.Kind != yaml.MappingNode)
+}
+
 // ExpandAliasKeys returns node, a parsed YAML document or a node of one,
 // with each key that an alias writes for a scalar expanded: written out as
 // a copy of the scalar, at the alias's place and with the alias's
@@ -222,8 +269,9 @@ func checkRepeatedKeys(mapping *yaml.Node) error {
 //
 // FromYAML and the configuration loader decode documents with their alias
 // keys expanded, and read their flat options from the expanded documents
-// (see ReadFlatOptions). Decoding a Config with yaml.Unmarshal alone
-// expands nothing.
+// (see ReadFlatOptions). They check that every key is a scalar first (see
+// CheckScalarKeys), so on their paths no alias key names a collection.
+// Decoding a Config with yaml.Unmarshal alone expands nothing.
 func ExpandAliasKeys(node *yaml.Node) *yaml.Node {
 	if !reachesAliasKey(node, make(map[*yaml.Node]bool)) {
 		return node
@@ -675,11 +723,16 @@ func describeNode(node *yaml.Node) string {
 // writes directly under rule keys. It does not know which options the rules
 // declare, so it reads every key under a rule other than the settings as an
 // option (see ReadFlatOptions). A configuration loader that knows the
-// rules reads only their options. A key that a YAML alias repeats gets
-// the error that the key written out twice gets (see ExpandAliasKeys).
+// rules reads only their options. A key that is no scalar is an error
+// before anything decodes the document (see CheckScalarKeys), and a key
+// that a YAML alias repeats gets the error that the key written out twice
+// gets (see ExpandAliasKeys).
 func FromYAML(data []byte) (*Config, error) {
 	var parsed yaml.Node
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+	if err := CheckScalarKeys(&parsed); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	doc := ExpandAliasKeys(&parsed)

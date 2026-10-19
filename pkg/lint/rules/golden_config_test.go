@@ -176,9 +176,10 @@ func checkSidecarOptions(rule lint.Rule, options map[string]any) error {
 // outside the rules. The settings of each rule read as a config file's do,
 // and every key under a rule ID that is no rule setting is read as an
 // option (see config.ReadFlatOptions), so that loadGoldenConfig rejects
-// those the rule does not read. A key that a YAML alias repeats is an
-// error, as in a config file (see config.ExpandAliasKeys). Option values
-// decode into the same Go types as in the product's YAML loader.
+// those the rule does not read. A key that is no scalar, and a key that
+// a YAML alias repeats, are errors, as in a config file (see
+// config.CheckScalarKeys and config.ExpandAliasKeys). Option values decode
+// into the same Go types as in the product's YAML loader.
 //
 // The keys of a sidecar with alias keys are checked before, and apart
 // from, the decode that rejects unknown keys, since yaml.v3 offers that
@@ -189,10 +190,14 @@ func checkSidecarOptions(rule lint.Rule, options map[string]any) error {
 // anchor name that name two keys, which a config file accepts. A sidecar
 // has no use for either.
 func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
-	// The keys are checked first, as decoding a config file checks them,
-	// with the alias keys expanded, when there are any.
+	// The keys are checked first, as loading a config file checks them:
+	// each must be a scalar, and, with the alias keys expanded when there
+	// are any, none may repeat.
 	var parsed yaml.Node
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
+	}
+	if err := config.CheckScalarKeys(&parsed); err != nil {
 		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
 	}
 	doc := config.ExpandAliasKeys(&parsed)

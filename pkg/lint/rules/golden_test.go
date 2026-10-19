@@ -511,10 +511,17 @@ rules:
 			content: "rules:\n  &id MD013:\n    line_length: 100\n  *id :\n    line_length: 90\nflavour: gfm\n",
 			wantErr: `line 4: mapping key "MD013" already defined at line 2`,
 		},
+		{
+			// yaml.v3 panics on such a key beside a merge key.
+			name:    "sequence key beside a merge key",
+			content: "rules:\n  <<: {MD013: {line_length: 100}}\n  ? [MD044]\n  : {names: [GitHub]}\n",
+			wantErr: "line 3: mapping key must be a scalar",
+		},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := loadGoldenConfig(writeSidecar(t, tt.content))
+			var err error
+			require.NotPanics(t, func() { _, err = loadGoldenConfig(writeSidecar(t, tt.content)) })
 			if tt.wantIs != nil {
 				require.ErrorIs(t, err, tt.wantIs)
 				return

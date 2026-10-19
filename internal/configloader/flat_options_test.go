@@ -411,17 +411,19 @@ func TestLoad_RejectsAKeyWrittenTwiceThroughAnAlias(t *testing.T) {
 	}
 }
 
-// TestLoad_LeavesAnAliasKeyOfItsOwnMappingToDecoding checks a config file
-// in which an alias key names the mapping that holds it. Loading fails
-// with the error that decoding gives a node that contains itself, as it
-// did before alias keys were expanded, rather than looping.
-func TestLoad_LeavesAnAliasKeyOfItsOwnMappingToDecoding(t *testing.T) {
+// TestLoad_RejectsAnAliasKeyOfItsOwnMapping checks a config file in which
+// an alias key names the mapping that holds it. Loading fails with the
+// error for a key that is no scalar, at the alias's line, before anything
+// decodes the file. Decoding used to report that the node contains itself,
+// and an expansion of the key would make a cycle that decoding never
+// leaves.
+func TestLoad_RejectsAnAliasKeyOfItsOwnMapping(t *testing.T) {
 	t.Parallel()
 
 	_, err := loadProject(t, "rules:\n  MD013:\n    options:\n      x: &m {*m : 1}\n")
 
 	require.Error(t, err)
-	assert.Equal(t, "parse YAML: yaml: anchor 'm' value contains itself", afterConfigFile(t, err))
+	assert.Equal(t, "parse YAML: yaml: unmarshal errors:\n  line 4: mapping key must be a scalar", afterConfigFile(t, err))
 }
 
 // afterConfigFile returns the message of err, an error of loading a

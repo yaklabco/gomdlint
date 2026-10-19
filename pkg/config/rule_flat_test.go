@@ -363,12 +363,15 @@ var repeatedRuleSettingKeys = []repeatedKeyCase{
 			`line 1: mapping key "tables" already defined at line 1`,
 	},
 	{
-		// YAML decodes the options and the other mappings that they merge.
-		name:    "in a mapping that the options merge",
-		literal: "a: &a {max: 1, max: 2}\nb: &b\n  ? [x]\n  : 1\nrules:\n  MD013:\n    options:\n      <<: [*a, *b]\n",
-		alias:   "a: &a {&k max: 1, *k : 2}\nb: &b\n  ? [x]\n  : 1\nrules:\n  MD013:\n    options:\n      <<: [*a, *b]\n",
+		// YAML decodes the options and the other mappings that they merge,
+		// and then the rule's other settings.
+		name: "in a mapping that the options merge",
+		literal: "a: &a {max: 1, max: 2}\nb: &b {tables: true}\nrules:\n  MD013:\n    options:\n" +
+			"      <<: [*a, *b]\n    enabled: maybe\n",
+		alias: "a: &a {&k max: 1, *k : 2}\nb: &b {tables: true}\nrules:\n  MD013:\n    options:\n" +
+			"      <<: [*a, *b]\n    enabled: maybe\n",
 		want: `line 1: mapping key "max" already defined at line 1` + "\n  " +
-			"line 3: cannot unmarshal !!seq into string",
+			"line 7: cannot unmarshal !!str `maybe` into bool",
 	},
 	{
 		name:    "in an option value",
@@ -617,25 +620,18 @@ func TestFromYAML_RejectsATopLevelKeyRepeatedThroughAnAlias(t *testing.T) {
 }
 
 // TestFromYAML_KeepsTheErrorsOfADocumentWithoutAliasKeys covers documents
-// that write no alias key, beside another error: one that repeats no key
-// but holds a key that decoding rejects, and mappings that YAML rejects for
-// a key written out twice, though a merge key or a key of another type
-// keeps them from being mappings of string keys. Such a document is its
-// own literal twin, so the checks leave it to decoding, which reports
-// every error, as it did before the checks.
+// that write no alias key, beside another error: mappings that YAML
+// rejects for a key written out twice, though a merge key or a key of
+// another type keeps them from being mappings of string keys. Such a
+// document is its own literal twin, so the checks leave it to decoding,
+// which reports every error, as it did before the checks. A key that is
+// no scalar is an error before decoding instead (see
+// TestFromYAML_RejectsAKeyThatIsNoScalar).
 func TestFromYAML_KeepsTheErrorsOfADocumentWithoutAliasKeys(t *testing.T) {
 	t.Parallel()
 
 	const ignoreError = "line %d: cannot unmarshal !!str `vendor/**` into []string"
 	for name, tt := range map[string]struct{ content, want string }{
-		"no repeat under a rule": {
-			content: "rules:\n  MD013:\n    ? [a]\n    : 1\n    enabled: maybe\n",
-			want:    "line 3: cannot unmarshal !!seq into string\n  line 5: cannot unmarshal !!str `maybe` into bool",
-		},
-		"no repeat at the top": {
-			content: "? [a]\n: 1\nflavor: [x]\n",
-			want:    "line 1: cannot unmarshal !!seq into string\n  line 3: cannot unmarshal !!seq into config.Flavor",
-		},
 		"a rule key beside a merge key": {
 			content: "x-shared: &shared\n  MD009: false\nrules:\n  <<: *shared\n" +
 				"  MD013: {line_length: 120}\n  MD013: {line_length: 100}\nignore: vendor/**\n",
@@ -664,10 +660,6 @@ func TestFromYAML_KeepsTheErrorsOfADocumentWithoutAliasKeys(t *testing.T) {
 		"a binary setting": {
 			content: "rules:\n  MD013:\n    enabled: true\n    !!binary ZW5hYmxlZA==: false\n",
 			want:    "line 4: field enabled already set in type config.settings",
-		},
-		"a sequence key in a merged mapping that merges in turn": {
-			content: "c: &c {tables: true}\na: &a\n  <<: *c\n  ? [x]\n  : 1\nrules:\n  MD013:\n    <<: *a\n",
-			want:    "line 4: cannot unmarshal !!seq into string",
 		},
 		"a setting beside a merge key": {
 			content: "rules:\n  MD013:\n    <<: {tables: true}\n    max: 1\n    max: 2\nflavor: [x]\n",
@@ -716,53 +708,39 @@ func TestFromYAML_LeavesKeysThatYAMLDoesNotCompareToDecoding(t *testing.T) {
 	assert.Equal(t, yamlErrors+`line 5: "max" and "*b" both set option "max"; keep one of them`, err.Error())
 }
 
-// TestFromYAML_LeavesAliasKeysOfCollectionsAsTheyWere covers alias keys
-// that name a collection, which ExpandAliasKeys leaves as aliases. Each
-// document gets base's error, among them the error of a collection that
-// contains the alias itself, which decoding catches only through the
-// alias. Expanded, such a key would make a cycle that decoding never
-// leaves.
-func TestFromYAML_LeavesAliasKeysOfCollectionsAsTheyWere(t *testing.T) {
+// TestFromYAML_RejectsAliasKeysOfCollections covers alias keys that name a
+// collection, among them aliases of a mapping that holds them, which
+// decoding catches only through the alias. ExpandAliasKeys leaves such a
+// key an alias, since expanded it would make a cycle that decoding never
+// leaves, and FromYAML rejects it at the alias's line before anything
+// decodes the document. Decoding used to report that a node contains
+// itself, or the errors of the collection.
+func TestFromYAML_RejectsAliasKeysOfCollections(t *testing.T) {
 	t.Parallel()
 
-	const containsItself = "yaml: anchor 'm' value contains itself"
-	for name, tt := range map[string]struct{ content, want string }{
-		"under options": {
-			content: "rules:\n  MD013:\n    options:\n      x: &m {*m : 1}\n",
-			want:    containsItself,
-		},
-		"under the rule key": {
-			content: "rules:\n  MD013:\n    x: &m {*m : 1}\n",
-			want:    `rules.MD013: line 3: option "x": ` + containsItself,
-		},
-		"deeper": {
-			content: "rules:\n  MD013:\n    options:\n      x: &m {k: {*m : 1}}\n",
-			want:    containsItself,
-		},
-		"under rules beside a merge key": {
-			content: "rules:\n  <<: {}\n  ? &m {*m : 1}\n  : false\n",
-			want:    containsItself,
-		},
-		"at the top beside a merge key": {
-			content: "<<: {}\n? &m {*m : 1}\n: x\n",
-			want:    containsItself,
-		},
+	for name, tt := range map[string]struct{ content, line string }{
+		"under options":      {content: "rules:\n  MD013:\n    options:\n      x: &m {*m : 1}\n", line: "line 4"},
+		"under the rule key": {content: "rules:\n  MD013:\n    x: &m {*m : 1}\n", line: "line 3"},
+		"deeper":             {content: "rules:\n  MD013:\n    options:\n      x: &m {k: {*m : 1}}\n", line: "line 4"},
+		// The key is the mapping itself, which the check does not enter.
+		"under rules beside a merge key": {content: "rules:\n  <<: {}\n  ? &m {*m : 1}\n  : false\n", line: "line 3"},
+		"at the top beside a merge key":  {content: "<<: {}\n? &m {*m : 1}\n: x\n", line: "line 2"},
 		"entered through another alias": {
 			content: "t: &t\n  p: &p\n    ? *t\n    : 1\nrules:\n  MD013:\n    options:\n      x: *p\n",
-			want:    "yaml: anchor 't' value contains itself",
+			line:    "line 3",
 		},
 		"a collection key": {
 			content: "x: &c {a: 1, a: 2}\nrules:\n  MD013:\n    options:\n      ? *c\n      : 1\n",
-			want:    yamlErrors + `line 1: mapping key "a" already defined at line 1`,
+			line:    "line 5",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := config.FromYAML([]byte(tt.content))
-
+			var err error
+			require.NotPanics(t, func() { _, err = config.FromYAML([]byte(tt.content)) })
 			require.Error(t, err)
-			assert.Equal(t, "parse yaml: "+tt.want, err.Error())
+			assert.Equal(t, "parse yaml: "+yamlErrors+tt.line+notAScalar, err.Error())
 		})
 	}
 }
@@ -821,8 +799,8 @@ func TestFromYAML_LeavesAFailingMergeToDecoding(t *testing.T) {
 			want:    "yaml: cannot decode !!str `abc` as a !!int",
 		},
 		{
-			literal: "flavor: !!int abc\nrules:\n  <<: {MD013: false}\n  ? [x]\n  : 1\n",
-			alias:   "flavor: !!int abc\nrules:\n  <<: {MD013: false}\n  ? [x]\n  : 1\n",
+			literal: "flavor: !!int abc\nrules:\n  <<: {MD013: false}\n  MD013: true\n  MD013: false\n",
+			alias:   "flavor: !!int abc\nrules:\n  <<: {MD013: false}\n  MD013: true\n  MD013: false\n",
 			want:    "yaml: cannot decode !!str `abc` as a !!int",
 		},
 	} {

@@ -299,8 +299,13 @@ func loadConfigFile(path string) (*config.Config, []string, error) {
 		return nil, nil, fmt.Errorf("%s: parse %s: %w", path, format, err)
 	}
 
-	// Every pass reads the alias keys expanded, so a key that an alias
-	// repeats gets the error of the key written out twice.
+	// A key that is no scalar ends loading before any pass decodes the
+	// file, since yaml.v3 can panic on one in a mapping that merges another
+	// or is merged. Every pass reads the alias keys expanded, so a key that
+	// an alias repeats gets the error of the key written out twice.
+	if err := config.CheckScalarKeys(doc); err != nil {
+		return nil, nil, fmt.Errorf("%s: parse %s: %w", path, format, err)
+	}
 	doc = config.ExpandAliasKeys(doc)
 	cfg := &config.Config{}
 	if doc.Kind != 0 { // An empty YAML file holds no node and sets nothing.
