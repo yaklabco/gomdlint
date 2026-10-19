@@ -2,8 +2,6 @@ package configloader
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -254,15 +252,33 @@ func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 	}
 }
 
-// TestConvertMarkdownlintConfig_OptionConflict checks that two spellings
-// of one option fail the migration, as in a gomdlint config file.
-func TestConvertMarkdownlintConfig_OptionConflict(t *testing.T) {
+// TestConvertMarkdownlintConfig_GomdlintSpellings covers options in
+// gomdlint's spelling in a markdownlint config. markdownlint 0.41.1 reads
+// each option of its rules under its own spelling only, so it ignores
+// gomdlint's names, such as max for line_length and ignore_code_blocks for
+// MD009's inverted code_blocks, and gomdlint's own options, such as
+// ignore_urls. So does gomdlint, with a warning that offers markdownlint's
+// spelling, where it used to apply them, and to fail the migration over
+// two spellings of one option. The options of gomdlint's own rules, which
+// markdownlint lacks, keep their spellings.
+func TestConvertMarkdownlintConfig_GomdlintSpellings(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), ".markdownlint.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"MD013": {"line_length": 100, "max": 90}}`), 0o600))
+	result := convertSettings(t, `{
+		"MD013": {"line_length": 100, "max": 90, "ignore_urls": true},
+		"MD009": {"ignore_code_blocks": false},
+		"MD012": {"max_consecutive": 2},
+		"MDL003": {"min_dashes": 4}
+	}`)
 
-	_, err := ConvertMarkdownlintConfig(path)
-
-	require.EqualError(t, err, `MD013: "line_length" and "max" both set line-length option "max"; keep one of them`)
+	assert.Equal(t, []string{
+		`unknown option "ignore_urls" for line-length; it is ignored`,
+		`unknown option "max" for line-length (did you mean "line_length"?); it is ignored`,
+		`unknown option "ignore_code_blocks" for no-trailing-spaces (did you mean "code_blocks"?); it is ignored`,
+		`unknown option "max_consecutive" for no-multiple-blank-lines (did you mean "maximum"?); it is ignored`,
+	}, result.Warnings)
+	assert.Equal(t, map[string]any{"max": float64(100)}, result.Config.Rules["MD013"].Options)
+	assert.Nil(t, result.Config.Rules["MD009"].Options)
+	assert.Nil(t, result.Config.Rules["MD012"].Options)
+	assert.Equal(t, map[string]any{"min_dashes": float64(4)}, result.Config.Rules["MDL003"].Options)
 }

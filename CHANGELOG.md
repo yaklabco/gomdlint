@@ -143,6 +143,14 @@ formats change. The first entries under Changed may need action.
   `reset_options: true` for such rules, and no longer writes those defaults
   under `rules`. `true` in a gomdlint config still keeps the options of
   lower layers.
+- A markdownlint config, and a `markdownlint-configure-file` comment, read
+  rule options under markdownlint's names only, as markdownlint does.
+  gomdlint's names for options that markdownlint spells otherwise, such as
+  `max` for `line_length`, and options that only gomdlint has, such as
+  `ignore_urls`, change nothing there, with a warning that offers
+  markdownlint's name where there is one. They used to apply, and a config
+  file that wrote both spellings of an option failed to load. gomdlint's
+  own config files still accept both.
 - Go API: `lint.LookupRuleID`, `Registry.RegisterAlias`,
   `rules.RegisterLegacyAliases`, `RuleContext.Builder` and
   `analysis.Options.RuleFormat` are removed. `Registry.Lookup` resolves rule
@@ -221,11 +229,11 @@ formats change. The first entries under Changed may need action.
   finding or exit code.
 - The same warnings for `markdownlint-configure-file` comments that
   markdownlint ignores in whole or in part. A comment that holds no object
-  of settings, a key that names no rule, an option that its rule does not
-  read, and gomdlint's spelling of an option beside markdownlint's each get
-  one. JSON output gives them the kinds `invalid-configuration`,
-  `unknown-rule`, `unknown-option` and `option-conflict`, and
-  `unread-configuration` for a comment that gomdlint does not read.
+  of settings, a key that names no rule, and an option that markdownlint
+  does not read for its rule, gomdlint's spelling of an option among them,
+  each get one. JSON output gives them the kinds `invalid-configuration`,
+  `unknown-rule` and `unknown-option`, and `unread-configuration` for a
+  comment that gomdlint does not read.
 - JSON output reports rules that failed, under `summary.ruleErrors` and each
   file's `ruleErrors`.
 - `--format diff` previews the fixes without writing them, and

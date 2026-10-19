@@ -317,40 +317,29 @@ func NormalizeOptions(specs []OptionSpec, options map[string]any) (map[string]an
 // MarkdownlintRuleConfig converts value, the setting of the registered rule
 // with the given ID in a markdownlint configuration, to gomdlint's settings
 // for the rule (see config.MarkdownlintRuleConfig). Its options are
-// rewritten through the rule's declared options, as NormalizeOptions does:
-// markdownlint's spellings become canonical names, and options that the
-// rule does not read are left out, as markdownlint ignores them. A value
-// that turns the rule on resets the options that lower configuration
-// layers give the rule (see config.RuleConfig.ResetOptions), so its
-// settings hold the options that it writes and no others. A value that
-// turns the rule off writes out the options marked MarkdownlintPinned, set
-// to their defaults under the options that it writes, so that it replaces
-// them in a lower configuration layer, as gomdlint's translation always
-// has. The issues report each option left out or kept in doubt, and two
-// spellings of one option. A rule that declares no options keeps them as
-// written.
+// rewritten through the rule's declared options under the spellings that
+// markdownlint reads (see newMarkdownlintOptionTable), as NormalizeOptions
+// does: markdownlint's spellings become canonical names, and options that
+// markdownlint does not read for the rule, gomdlint's own names and options
+// among them, are left out, as markdownlint ignores them. A value that
+// turns the rule on resets the options that lower configuration layers
+// give the rule (see config.RuleConfig.ResetOptions), so its settings hold
+// the options that it writes and no others. A value that turns the rule
+// off writes out the options marked MarkdownlintPinned, set to their
+// defaults under the options that it writes, so that it replaces them in a
+// lower configuration layer, as gomdlint's translation always has. The
+// issues report each option left out or kept in doubt. A rule that
+// declares no options keeps them as written.
 func (r *Registry) MarkdownlintRuleConfig(id string, value any) (config.RuleConfig, []OptionIssue) {
 	var issues []OptionIssue
-	table := r.lookups().options[id]
+	table := r.lookups().markdownlintOptions[id]
 	cfg := config.MarkdownlintRuleConfig(id, value, func(_ string, options map[string]any) map[string]any {
 		if table == nil {
 			return options
 		}
 		normalized, found := table.normalize(options)
 		issues = found
-		unknown := make(map[string]bool)
-		for _, issue := range found {
-			if issue.Kind == OptionIssueUnknown {
-				unknown[issue.Key] = true
-			}
-		}
-		translated := make(map[string]any, len(normalized))
-		for key, option := range normalized {
-			if !unknown[key] {
-				translated[key] = option
-			}
-		}
-		return translated
+		return normalized
 	})
 	if table != nil && !cfg.ResetOptions {
 		options := table.pinned()
@@ -370,7 +359,7 @@ func (r *Registry) MarkdownlintRuleConfig(id string, value any) (config.RuleConf
 // settings reset none.
 func (r *Registry) MarkdownlintDefaultRuleConfig(id string, value any) config.RuleConfig {
 	return config.MarkdownlintDefaultRuleConfig(id, value, func(ruleID string, options map[string]any) map[string]any {
-		table := r.lookups().options[ruleID]
+		table := r.lookups().markdownlintOptions[ruleID]
 		if table == nil {
 			return options
 		}
@@ -382,6 +371,20 @@ func (r *Registry) MarkdownlintDefaultRuleConfig(id string, value any) config.Ru
 type optionTable struct {
 	specs     []OptionSpec
 	spellings map[string]optionSpelling
+
+	// renamed maps, in a table of the spellings that a markdownlint
+	// configuration gives the options (see newMarkdownlintOptionTable),
+	// gomdlint's name of each option that markdownlint spells otherwise to
+	// markdownlint's spelling, which an issue about the name suggests. It
+	// is nil in a table of gomdlint's spellings.
+	renamed map[string]string
+
+	// dropUnknown makes normalize leave out the keys that spell no option,
+	// as markdownlint ignores them, where NormalizeOptions keeps them. In a
+	// table of markdownlint's spellings, such a key can be the canonical
+	// name of an option that another key spells, such as max beside
+	// line_length.
+	dropUnknown bool
 }
 
 // optionSpelling is a name or alias of the option specs[index].
@@ -411,6 +414,54 @@ func newOptionTable(specs []OptionSpec) *optionTable {
 	return table
 }
 
+// newMarkdownlintOptionTable indexes specs, the options that the rule with
+// the given ID declares, by the spellings that a markdownlint configuration
+// gives them. markdownlint 0.41.1 reads each option of its rules under its
+// own spelling only: the option's first alias, where gomdlint names the
+// option differently, such as line_length for max, and its name otherwise.
+// So gomdlint's names for such options, and the options that only gomdlint
+// has (OptionSpec.GomdlintOnly), name no option there, as in markdownlint,
+// and no option has two spellings. markdownlint lacks gomdlint's own rules
+// (see IsGomdlintOnlyRule), whose options keep every spelling. Either way,
+// normalizing leaves out the keys that spell no option.
+func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
+	if IsGomdlintOnlyRule(id) {
+		table := newOptionTable(specs)
+		table.dropUnknown = true
+		return table
+	}
+	table := &optionTable{
+		specs: specs, spellings: make(map[string]optionSpelling, len(specs)),
+		renamed: make(map[string]string), dropUnknown: true,
+	}
+	for idx, spec := range specs {
+		if spec.GomdlintOnly {
+			continue
+		}
+		name, spelling := spec.Name, optionSpelling{index: idx}
+		if len(spec.Aliases) > 0 {
+			alias := spec.Aliases[0]
+			name, spelling.alias, spelling.inverted = alias.Name, true, alias.Inverted
+			table.renamed[spec.Name] = alias.Name
+		}
+		if _, taken := table.spellings[name]; !taken {
+			table.spellings[name] = spelling
+		}
+	}
+	return table
+}
+
+// suggest returns the spellings that key, which spells no option of the
+// table, most likely means: markdownlint's spelling of the option that key
+// is gomdlint's name for, in a table of a markdownlint configuration's
+// spellings, and otherwise the closest spellings (see closestWords).
+func (t *optionTable) suggest(key string) []string {
+	if spelling, ok := t.renamed[key]; ok {
+		return []string{spelling}
+	}
+	return closestWords(key, t.allSpellings())
+}
+
 // normalize implements NormalizeOptions for the table's options.
 func (t *optionTable) normalize(options map[string]any) (map[string]any, []OptionIssue) {
 	if len(options) == 0 || t.canonical(options) {
@@ -431,8 +482,9 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 		if !known {
 			issues = append(issues, OptionIssue{
 				Kind: OptionIssueUnknown, Key: key, Value: options[key],
-				Suggestions: closestWords(key, t.allSpellings()), NoOptions: len(t.specs) == 0,
+				Suggestions: t.suggest(key), NoOptions: len(t.specs) == 0,
 			})
+			changed = changed || t.dropUnknown
 			continue
 		}
 		previous, conflict := chosen[spelling.index]
@@ -491,7 +543,7 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 	}
 	normalized := make(map[string]any, len(options))
 	for _, key := range keys {
-		if _, known := t.spellings[key]; !known {
+		if _, known := t.spellings[key]; !known && !t.dropUnknown {
 			normalized[key] = options[key]
 		}
 	}

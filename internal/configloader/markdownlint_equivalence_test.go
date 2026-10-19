@@ -240,8 +240,11 @@ const everyOptionSettings = `{
 // markdownlintFixtures returns the markdownlint configs of the #19
 // regression tests (the TestMigrated tests), of the conversion tests and of
 // the CLI's migration goldens, and a few more: every parameter set, every
-// rule set to true, false or a severity, gomdlint's own options, and an
-// option that no rule reads.
+// rule set to true, false or a severity, and an option that no rule reads.
+// #42's translation applied gomdlint's own options and names of options,
+// which markdownlint ignores, and so does the catalog's now (see
+// TestConvertMarkdownlintConfig_GomdlintSpellings), so no fixture holds
+// them.
 func markdownlintFixtures() []markdownlintFixture {
 	settings := []string{
 		// TestMigrated*.
@@ -322,7 +325,7 @@ func markdownlintFixtures() []markdownlintFixture {
 		`{"default": false, "line-length": {"tables": false}, "MD013": {"line_length": 100}}`,
 		// More.
 		everyOptionSettings,
-		`{"default": false, "MD013": {"ignore_urls": true, "markdownlint_compatible": false, "bogus": 1}}`,
+		`{"default": false, "MD013": {"strict": true, "bogus": 1}}`,
 		`{"default": "error", "MD013": "warning", "MD009": null, "MD033": {"enabled": true}}`,
 	}
 

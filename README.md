@@ -525,8 +525,8 @@ error. `init` and `migrate` write options under `options`.
 
 Every option that markdownlint documents works under markdownlint's name, so
 markdownlint's documentation of a rule's parameters holds for gomdlint too.
-Nine options have a gomdlint name that differs, and gomdlint accepts both
-spellings:
+Nine options have a gomdlint name that differs, and gomdlint's own config
+files accept both spellings:
 
 | Rule | gomdlint name | markdownlint name |
 | --- | --- | --- |
@@ -542,10 +542,17 @@ spellings:
 
 An inverted name holds the opposite value, so `tables: false` means
 `ignore_tables: true`. Setting both spellings of one option for a rule is
-an error in a config file. A `markdownlint-configure-file` comment that
-sets both reads markdownlint's spelling, as markdownlint does, and warns
-that gomdlint's spelling is ignored. Options that markdownlint lacks keep
+an error in a gomdlint config file. Options that markdownlint lacks keep
 markdownlint's behaviour by default.
+
+A markdownlint config, and a `markdownlint-configure-file` comment, read
+options as markdownlint does, under markdownlint's names only. gomdlint's
+name for one of the options above, such as `max`, and an option that only
+gomdlint has, such as `ignore_urls`, are options that the rule does not
+read there. They change nothing, and get a warning that offers
+markdownlint's name where there is one. Set them in a gomdlint config file.
+The options of gomdlint's own rules, `link-destination-style` (MDL001) and
+`table-alignment` (MDL003), which markdownlint lacks, keep their names.
 
 A config file gets a warning, with its path and line, for an option that
 the rule does not read, with the closest names, such as `unknown option
@@ -681,18 +688,18 @@ written as JSON with comments and trailing commas, or as YAML, which reads
 as in a markdownlint config file. Like markdownlint, gomdlint never fails a
 file over such a comment. A comment that holds no object changes nothing. A
 key that names no rule configures nothing, and the other keys still apply.
-An option that the rule does not read changes nothing. Of two spellings of
-one option, markdownlint's applies. Each of these gets a warning on stderr,
-in JSON `notices` and in SARIF `toolConfigurationNotifications`, and none
-changes the findings or the exit code. As in markdownlint, the keys apply
-in the order they are written, and the first `default` key, in any case,
-sets every rule's baseline. A key that turns a rule on gives it the options
-that it sets and markdownlint's defaults for the others, whatever the
-config gives the rule. The configure-file comments of one file act as
-one object. A key that a later comment writes again keeps its first place
-and takes the later value. A comment without a `-->` of its own runs on to
-the `-->` of a later one, as in markdownlint, so it holds the comments
-after it.
+An option that the rule does not read changes nothing, and that includes
+gomdlint's spelling of an option, as in a markdownlint config. Each of
+these gets a warning on stderr, in JSON `notices` and in SARIF
+`toolConfigurationNotifications`, and none changes the findings or the exit
+code. As in markdownlint, the keys apply in the order they are written, and
+the first `default` key, in any case, sets every rule's baseline. A key
+that turns a rule on gives it the options that it sets and markdownlint's
+defaults for the others, whatever the config gives the rule. The
+configure-file comments of one file act as one object. A key that a later
+comment writes again keeps its first place and takes the later value. A
+comment without a `-->` of its own runs on to the `-->` of a later one, as
+in markdownlint, so it holds the comments after it.
 
 ## Markdown Support
 

@@ -542,9 +542,11 @@ func TestRegistryMarkdownlintRuleConfig(t *testing.T) {
 	assert.Equal(t, "style", issues[1].Key)
 
 	cfg, issues = registry.MarkdownlintRuleConfig("MD013", map[string]any{"line_length": 100, "max": 90})
-	assert.Equal(t, map[string]any{"max": 90}, cfg.Options, "the canonical spelling wins")
+	assert.Equal(t, map[string]any{"max": 100}, cfg.Options, "markdownlint reads its own spelling only")
 	require.Len(t, issues, 1)
-	assert.Equal(t, lint.OptionIssueConflict, issues[0].Kind)
+	assert.Equal(t, lint.OptionIssueUnknown, issues[0].Kind)
+	assert.Equal(t, "max", issues[0].Key)
+	assert.Equal(t, []string{"line_length"}, issues[0].Suggestions)
 
 	cfg, issues = registry.MarkdownlintRuleConfig("MD005", map[string]any{"indent": 2})
 	assert.Nil(t, cfg.Options, "a rule without options keeps none")

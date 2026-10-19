@@ -612,10 +612,10 @@ markdownlint comment that names no rule or tag (`NoticeUnknownRule`, with
 the closest suggestions), and for each use of one of gomdlint's former tags
 (`NoticeDeprecatedTag`, with the rules it covers). A
 `markdownlint-configure-file` comment never fails the file. It gets a
-notice for each key that names no rule, for each option that its rules do
-not read (`NoticeUnknownOption`), for each option written in gomdlint's
-spelling beside markdownlint's (`NoticeOptionConflict`), and for holding no
-object of settings (`NoticeInvalidConfiguration`). A configure-file comment
+notice for each key that names no rule, for each option that markdownlint
+does not read for its rules, gomdlint's spellings among them
+(`NoticeUnknownOption`), and for holding no object of settings
+(`NoticeInvalidConfiguration`). A configure-file comment
 without a `-->` of its own runs on to that of a later comment, so the
 engine reads such comments only while their text comes to at most four
 times the file's length and 1 MiB more, and gives each of the rest a notice
@@ -1094,6 +1094,11 @@ migrated config): the merge drops the options of the layers below, and
 resolution leaves out those of `rule_defaults`, so the rule reads the
 options that the key sets and its defaults for the others, as in
 markdownlint. `markdownlint-configure-file` keys reset them the same way.
+Markdownlint configs and configure-file comments read options through a
+second table of each rule's options (`ruleIndex.markdownlintOptions`),
+which knows markdownlint's spelling of each option and no other, so
+gomdlint's names and its own options are unknown options there, as in
+markdownlint.
 
 **Rule Identification:** Config files accept a rule's ID (`MD001`), name
 (`heading-increment`), or markdownlint alias (`ul-style` for MD004)

@@ -21,15 +21,11 @@ const (
 	// markdownlint-configure-file key that the rule the key names does not
 	// read, or, for a tag, that none of its rules reads. The comment does
 	// nothing with the option, as in markdownlint, and applies the rest of
-	// the setting.
+	// the setting. gomdlint's own spelling of an option that markdownlint
+	// spells otherwise, such as max for line_length, and an option that
+	// only gomdlint has are such options, since markdownlint does not read
+	// them.
 	NoticeUnknownOption NoticeKind = "unknown-option"
-
-	// NoticeOptionConflict marks an option that a
-	// markdownlint-configure-file setting writes in gomdlint's spelling as
-	// well as in markdownlint's, such as max beside line_length. markdownlint
-	// knows its own spelling only, so the comment reads that one and ignores
-	// gomdlint's, as markdownlint does, where a config file rejects the two.
-	NoticeOptionConflict NoticeKind = "option-conflict"
 
 	// NoticeInvalidConfiguration marks a markdownlint-configure-file
 	// comment whose parameter holds no object of settings: text that is
@@ -63,8 +59,7 @@ type Notice struct {
 	Directive string
 
 	// Name is the word, the configure-file key or, for an unknown option,
-	// the option, as the comment writes it. For an option conflict it is
-	// gomdlint's spelling, which is ignored. It is empty for a
+	// the option, as the comment writes it. It is empty for a
 	// configure-file comment that holds no settings
 	// (NoticeInvalidConfiguration), or that gomdlint does not read
 	// (NoticeUnreadConfiguration).
@@ -76,14 +71,14 @@ type Notice struct {
 	// Rules are named as markdownlint names them (RuleMeta.MarkdownlintName),
 	// so that a comment written from them works in markdownlint too. For an
 	// unknown option of one rule, they are the option names it most likely
-	// means.
+	// means: markdownlint's spelling of a name of gomdlint's, or else the
+	// closest of markdownlint's spellings.
 	Suggestions []string
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead, for an unknown option, the rules
-	// whose setting holds it, none of which reads it, and, for an option
-	// conflict, the rule whose option it is, in rule ID order, named as
-	// markdownlint names them.
+	// which the comment can name instead, and, for an unknown option, the
+	// rules whose setting holds it, none of which reads it, in rule ID
+	// order, named as markdownlint names them.
 	Rules []string
 
 	// Message describes the problem in a sentence that starts with

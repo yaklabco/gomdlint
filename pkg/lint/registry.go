@@ -88,6 +88,11 @@ type ruleIndex struct {
 	// declares its options (RuleMeta.OptionsDeclared), or that declares
 	// them itself (OptionDeclarer), to those options.
 	options map[string]*optionTable
+
+	// markdownlintOptions maps the ID of each rule in options to its
+	// options as a markdownlint configuration spells them (see
+	// newMarkdownlintOptionTable).
+	markdownlintOptions map[string]*optionTable
 }
 
 // directiveWord says what a word of a markdownlint comment, or a key of a
@@ -457,10 +462,11 @@ func (r *Registry) buildIndex() *ruleIndex {
 		tags:  make(map[string][]Rule),
 		rules: make([]indexedRule, 0, len(ids)),
 
-		tagSpellings:      make(map[string]string),
-		words:             make(map[string]*directiveWord),
-		markdownlintNames: make(map[string]string),
-		options:           make(map[string]*optionTable),
+		tagSpellings:        make(map[string]string),
+		words:               make(map[string]*directiveWord),
+		markdownlintNames:   make(map[string]string),
+		options:             make(map[string]*optionTable),
+		markdownlintOptions: make(map[string]*optionTable),
 	}}
 
 	// The catalog's words come from every entry, registered or not, so that
@@ -486,12 +492,17 @@ func (r *Registry) buildIndex() *ruleIndex {
 		}
 		build.rules = append(build.rules, indexed)
 		build.addTags(rule, meta)
+		var specs []OptionSpec
 		switch declarer, declares := rule.(OptionDeclarer); {
 		case meta.OptionsDeclared:
-			build.options[id] = newOptionTable(meta.Options)
+			specs = meta.Options
 		case declares:
-			build.options[id] = newOptionTable(declarer.DeclaredOptions())
+			specs = declarer.DeclaredOptions()
+		default:
+			continue
 		}
+		build.options[id] = newOptionTable(specs)
+		build.markdownlintOptions[id] = newMarkdownlintOptionTable(id, specs)
 	}
 
 	build.tagNames = slices.Sorted(maps.Keys(build.tags))

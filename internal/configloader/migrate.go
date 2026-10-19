@@ -84,16 +84,18 @@ type markdownlintTranslator struct {
 //
 // Rule options are translated through the rule catalog: markdownlint's
 // spellings become gomdlint's canonical names, such as max for
-// line_length, and options that the rule does not read, or whose values
-// have the wrong type, are left out with a warning, as markdownlint ignores
-// them. A rule key that turns a rule on resets the options that a lower
+// line_length, and options that markdownlint does not read for the rule,
+// gomdlint's own names and options among them, or whose values have the
+// wrong type, are left out with a warning, as markdownlint ignores them.
+// The warning for a name of gomdlint's offers markdownlint's spelling. A
+// rule key that turns a rule on resets the options that a lower
 // configuration layer, such as a user config, gives the rule (see
 // config.RuleConfig.ResetOptions), as markdownlint gives the rule the
 // options of the key's value and no others. The default key, and a rule
 // key that turns a rule off, write out markdownlint's defaults for some
 // options of some rules instead (see lint.OptionSpec.MarkdownlintPinned),
 // so that they replace those of a lower layer, as gomdlint's translation
-// always has. Two spellings of one option are an error.
+// always has.
 func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	return convertMarkdownlintConfig(path, markdownlintTranslator{
 		rule:        (*lint.Registry).MarkdownlintRuleConfig,
@@ -167,9 +169,7 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 				continue
 			}
 		}
-		if err := conversion.processRuleKey(setting.Key, setting.Value); err != nil {
-			return nil, fmt.Errorf("%s: %w", setting.Key, err)
-		}
+		conversion.processRuleKey(setting.Key, setting.Value)
 	}
 
 	result.Config = cfg
@@ -222,19 +222,6 @@ type markdownlintConversion struct {
 	cfg       *config.Config
 	result    *MigrationResult
 	locate    *sourceLocator
-}
-
-// rule converts value, the setting of the rule with the given ID, and
-// returns the problems its options hold, other than two spellings of one
-// option, which are an error.
-func (c *markdownlintConversion) rule(id string, value any) (config.RuleConfig, []lint.OptionIssue, error) {
-	converted, issues := c.translate.rule(c.registry, id, value)
-	for _, issue := range issues {
-		if issue.Kind == lint.OptionIssueConflict {
-			return config.RuleConfig{}, nil, errors.New(issue.Text(c.ruleName(id)))
-		}
-	}
-	return converted, issues, nil
 }
 
 // ruleName returns the name of the registered rule with the given ID.
@@ -324,21 +311,19 @@ func (l *sourceLocator) optionLine(key, option string, item int) int {
 //
 // The value's options are translated for each rule (see
 // lint.Registry.MarkdownlintRuleConfig), with a warning for each option
-// that a rule cannot use. A tag gives its options to every rule it covers,
-// as in markdownlint, so an option that one of them does not read is no
-// mistake: only an option that none of them reads gets a warning.
-func (c *markdownlintConversion) processRuleKey(key string, value any) error {
+// that a rule cannot use, gomdlint's own spellings among them, which
+// markdownlint does not read. A tag gives its options to every rule it
+// covers, as in markdownlint, so an option that one of them does not read
+// is no mistake: only an option that none of them reads gets a warning.
+func (c *markdownlintConversion) processRuleKey(key string, value any) {
 	ruleIDs, known := c.registry.MarkdownlintConfigRuleIDs(key)
 	if !known {
 		c.warn(0, c.registry.UnknownKeyText(key)+"; it is ignored")
-		return nil
+		return
 	}
 	unread := make(map[string]int) // option key -> the rules that do not read it
 	for _, id := range ruleIDs {
-		converted, issues, err := c.rule(id, value)
-		if err != nil {
-			return err
-		}
+		converted, issues := c.translate.rule(c.registry, id, value)
 		for _, issue := range issues {
 			if issue.Kind == lint.OptionIssueUnknown && len(ruleIDs) > 1 {
 				unread[issue.Key]++
@@ -353,7 +338,6 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) error {
 			c.warn(c.locate.optionLine(key, option, 0), lint.UnknownTagOptionText(option, key))
 		}
 	}
-	return nil
 }
 
 // GenerateMigrationHeader returns a header comment for migrated configs.
