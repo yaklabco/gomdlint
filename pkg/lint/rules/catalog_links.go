@@ -24,7 +24,7 @@ func linksCatalog() []lint.RuleMeta {
 			ID: "MD039", Name: "no-space-in-links", Tags: []string{"whitespace", "links"}, Fixable: true,
 			Description: "Link text has no spaces just inside its brackets.",
 			Rationale:   "The spaces end up inside the rendered link, where they serve no purpose.",
-			Fix:         "The fix deletes the spaces. gomdlint reports some links without a fix, such as [text ][label] references. " + noFixNearCheckbox,
+			Fix:         "The fix deletes the spaces. gomdlint reports some links without a fix, such as one whose text ends in a line break. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD042", Name: "no-empty-links", Tags: []string{"links"},

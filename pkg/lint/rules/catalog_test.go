@@ -290,7 +290,7 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		"MD035": true, // A dash rule under a paragraph would make a heading, and some rules in list items.
 		"MD036": true, // Only some emphasized lines can become headings.
 		"MD037": true, // Markers that may be meant literally, and markers inside square brackets.
-		"MD039": true, // Full reference links.
+		"MD039": true, // Link text that starts or ends with a line break, ends in a space after a backslash, or holds only spaces.
 		"MD040": true, // Only a language the code proves, and allowed_languages permits, is inserted.
 		"MD044": true, // Names inside raw HTML.
 		"MD047": true, // Raw HTML only.
@@ -839,8 +839,12 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\nSee *docs at https://example.com/a now* here.\n", want: []catalogFinding{{3, true}},
 	},
 	{
-		id: "MD039", name: "full reference link", phrase: "reports some links without a fix",
-		input: "# Title\n\nSee [ref ][r] here.\n\n[r]: https://example.com/r\n", want: []catalogFinding{{3, false}},
+		id: "MD039", name: "link text that ends in a line break", phrase: "such as one whose text ends in a line break",
+		input: "# Title\n\nSee [text\n](https://example.com) here.\n", want: []catalogFinding{{3, false}},
+	},
+	{
+		id: "MD039", name: "full reference link", phrase: "The fix deletes the spaces",
+		input: "# Title\n\nSee [text ][label] here.\n\n[label]: /destination\n", want: []catalogFinding{{3, true}},
 	},
 	{id: "MD051", name: "link to #top", phrase: "or at #top", input: "# Title\n\n[b](#top)\n"},
 }
