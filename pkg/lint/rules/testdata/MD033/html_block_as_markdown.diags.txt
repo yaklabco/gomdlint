@@ -1,0 +1,5 @@
+html_block_as_markdown.input.md:3:1 warning HTML element 'div' is not allowed (MD033/no-inline-html)
+html_block_as_markdown.input.md:5:47 warning HTML element 'b' is not allowed (MD033/no-inline-html)
+html_block_as_markdown.input.md:8:3 warning HTML element 'details' is not allowed (MD033/no-inline-html)
+html_block_as_markdown.input.md:9:39 warning HTML element 'summary' is not allowed (MD033/no-inline-html)
+html_block_as_markdown.input.md:12:1 warning HTML element 'pre' is not allowed (MD033/no-inline-html)

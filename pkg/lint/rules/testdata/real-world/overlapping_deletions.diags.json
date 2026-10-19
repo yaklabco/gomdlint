@@ -4,6 +4,15 @@
     "name": "no-multiple-blank-lines",
     "line": 5,
     "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "no-multiple-blank-lines",
+    "line": 6,
+    "column": 1,
     "message": "Multiple consecutive blank lines (found 3, max 1)",
     "severity": "warning",
     "fixable": true
@@ -12,6 +21,15 @@
     "rule": "MD012",
     "name": "no-multiple-blank-lines",
     "line": 9,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "no-multiple-blank-lines",
+    "line": 10,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 3, max 1)",
     "severity": "warning",
@@ -22,6 +40,24 @@
     "name": "no-multiple-blank-lines",
     "line": 13,
     "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "no-multiple-blank-lines",
+    "line": 14,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 3, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "no-multiple-blank-lines",
+    "line": 15,
+    "column": 1,
     "message": "Multiple consecutive blank lines (found 4, max 1)",
     "severity": "warning",
     "fixable": true
@@ -30,6 +66,24 @@
     "rule": "MD012",
     "name": "no-multiple-blank-lines",
     "line": 18,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 2, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "no-multiple-blank-lines",
+    "line": 19,
+    "column": 1,
+    "message": "Multiple consecutive blank lines (found 3, max 1)",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD012",
+    "name": "no-multiple-blank-lines",
+    "line": 20,
     "column": 1,
     "message": "Multiple consecutive blank lines (found 4, max 1)",
     "severity": "warning",

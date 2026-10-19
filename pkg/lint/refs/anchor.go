@@ -20,7 +20,7 @@ const (
 	// AnchorFromHTMLName is from an HTML anchor's name attribute.
 	AnchorFromHTMLName
 
-	// AnchorFromCustomID is from {#custom-id} syntax (not yet supported).
+	// AnchorFromCustomID is from {#custom-id} syntax in a heading.
 	AnchorFromCustomID
 )
 

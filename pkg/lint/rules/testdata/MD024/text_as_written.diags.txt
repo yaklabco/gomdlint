@@ -1,0 +1,2 @@
+text_as_written.input.md:11:1 warning Duplicate heading text "Install" (first occurrence on line 3) (MD024/no-duplicate-heading)
+text_as_written.input.md:17:1 warning Duplicate heading text "Setext heading" (first occurrence on line 13) (MD024/no-duplicate-heading)

@@ -275,7 +275,9 @@ strikethrough, tables and task checkboxes node kinds of their own. Token
 ranges are derived from the spans. Code, HTML block and front matter tokens
 follow the parse, while other markers are recognized line by line, so rules
 use spans for structure. The `gfm` flavor adds goldmark's GFM extension,
-and `commonmark` adds none.
+and `commonmark` adds none. Fixes near anything that could be read as a
+task checkbox are withheld by the checkbox guard, which finds such text by
+bytes, not by the parser's checkboxes.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark
@@ -293,8 +295,30 @@ line measured in CommonMark columns (`ContainerPrefix`), blank-line checks
 that see through `>` markers, and the text that adds a blank line inside a
 blockquote (`BlankLineText`). `pkg/lint/refs` collects reference
 definitions, the references that the parser leaves as text, and heading
-anchors built as GitHub builds them. `pkg/lint/mdscan` scans the HTML
-constructs inside HTML blocks and GFM autolink literals.
+anchors built as GitHub builds them. `pkg/lint/mdscan` matches HTML
+constructs and GFM autolink literals. The HTML rules find the tags of an
+HTML block as markdownlint does, by parsing the block's lines again as
+Markdown without HTML blocks and indented code
+(`pkg/lint/rules/html_block_markdown.go`, with the parser from
+`NewHTMLBlockContent`), and marking tags in tables. goldmark parses no
+math, so no rule skips it. MD052 reads GFM footnotes, which goldmark does
+not parse either, from the lines of the file, and counts only the
+definitions that micromark is certain to read
+(`certainFootnoteLabels` in `pkg/lint/rules/refs.go`): a `[^label]:` line
+at column 0 that goldmark reads at the top level, after a blank line or
+another such definition. Every line before it that may open a block
+holding blank lines must open one that micromark reads as goldmark does:
+none may open math, a directive or an HTML block of kinds 1 to 5 that goes
+on past its first line, whose end the two parsers may read on different
+lines, and a code fence must start at column 0 after a blank line, at the
+top level of goldmark's tree (`sharedBlocks`). Only a link whose label
+after the `^` holds nothing but ASCII letters, digits and hyphens can call
+a footnote (`plainFootnoteCall`), since every parser reads such a label as
+written. It calls a definition only when their labels match by `labelKey`:
+the same bytes, or the same ASCII letters in any case, after white space is
+collapsed, never by Unicode case folding, on which goldmark and
+markdownlint disagree. Images and other labels are read as goldmark reads
+them.
 
 ## Fix Engine
 
@@ -323,6 +347,32 @@ A rule proposes one fix per finding as a set of `fix.TextEdit` byte ranges.
 `fix.Validator` checks each fix on its own: every edit lies within the
 content, no two edits overlap, and no edit splits a CRLF pair or a UTF-8
 character. An invalid fix is dropped from its finding only.
+
+The engine then withholds every fix that changes or makes a possible task
+list checkbox (`pkg/lint/checkbox_guard.go`), whatever rule offers it, and
+reports its finding without a fix. micromark and GitHub's cmark-gfm read
+checkboxes in different places, so the guard reads no renderer's rules.
+A candidate is any line that holds `[`, one character and `]`, or ends with
+`[`, wherever on the line; no reading of list markers, containers or
+footnotes decides it. Its region covers its run, the lines around it up to
+a blank line, and the line on either side of the run. A fix may not change
+a region, insert text inside one or next to one at either end of the
+content, join a region's first line to the line before, or leave the lines
+around its edits with more candidates than they had.
+
+Plain task items, `[ ]`, `[x]` or `[X]` followed by spacing and text on the
+marker line of an item goldmark reads as a list item, above any footnote
+definition, still take fixes that change only the marker for one of its
+kind, the spacing after it, the indentation and trailing whitespace. No
+line may come in or go directly before or after one, except that blank
+lines before it may go while one stays, and one blank line may come in
+before an item whose list can follow paragraph text in both renderers, a
+bullet list or an ordered list whose first marker is `1.` or `1)`, on whose
+line no blockquote starts, as MD032 adds it. Before an item whose list
+cannot, after a line that is not blank, the lines up to the nearest blank
+line take only changes to their trailing whitespace
+(`pkg/lint/checkbox_plain.go`, which states why both renderers read the
+same checkbox after these changes).
 
 Fixes of different rules can each be safe and still corrupt a file
 together. One rule removing `$` prompts in a code block while another
@@ -377,16 +427,16 @@ because the engine may apply any subset of them.
   MD029, MD030, MD032 and MD047. It compares render signatures: the front
   matter, block kinds and nesting, heading levels with the anchors GitHub
   gives them, list kinds, start numbers and tightness, code and raw HTML
-  byte for byte, resolved link destinations and titles, and inline text with
-  the whitespace that HTML collapses. With the `commonmark` flavor it also
-  parses as GFM. A document whose raw HTML is anything other than
-  whitespace, well-formed comments, and start tags of `br`, `wbr`, `hr` and
-  `img` with only the presentational attributes that `benignAttribute`
-  allows, each used once (`benignHTML`), keeps none of these rules' fixes,
-  because no signature models how a style sheet, an event handler or an
-  element left open changes the page. `list_fix_safety.go` plans
-  list item moves together, so that moves which are only safe together form
-  one fix.
+  byte for byte, resolved link destinations and titles, task checkboxes, and
+  inline text with the whitespace that HTML collapses. With the
+  `commonmark` flavor it also parses as GFM. A document whose raw
+  HTML is anything other than whitespace, well-formed comments, and start
+  tags of `br`, `wbr`, `hr` and `img` with only the presentational
+  attributes that `benignAttribute` allows, each used once (`benignHTML`),
+  keeps none of these rules' fixes, because no signature models how a style
+  sheet, an event handler or an element left open changes the page.
+  `list_fix_safety.go` plans list item moves together, so that moves which
+  are only safe together form one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through
   `verifyFixes`: MD011, MD014, MD031, MD034, MD038 to MD040, MD048, MD053,
   MD058 and MDL003. Each rule names the one change its fix may make

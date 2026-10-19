@@ -1,0 +1,1 @@
+ignore_code_languages.input.md:16:1 warning Hard tab character found (MD010/no-hard-tabs)

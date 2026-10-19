@@ -159,15 +159,15 @@ func (c *Context) ResolveLabel(label string) *ReferenceDefinition {
 // ValidateFragment checks if a fragment references a valid anchor. The
 // fragment may be percent-encoded, as browsers decode it before matching ids.
 func (c *Context) ValidateFragment(fragment string) bool {
-	return c.validateFragment(fragment, c.Anchors.Has)
+	return c.validateFragment(fragment, c.Anchors.Has, func(id string) bool { return id == "top" })
 }
 
 // ValidateFragmentIgnoreCase is ValidateFragment with case-insensitive anchor matching.
 func (c *Context) ValidateFragmentIgnoreCase(fragment string) bool {
-	return c.validateFragment(fragment, c.Anchors.HasIgnoreCase)
+	return c.validateFragment(fragment, c.Anchors.HasIgnoreCase, func(id string) bool { return strings.EqualFold(id, "top") })
 }
 
-func (c *Context) validateFragment(fragment string, has func(string) bool) bool {
+func (c *Context) validateFragment(fragment string, has, isTop func(string) bool) bool {
 	if fragment == "" {
 		return true // No fragment is always valid
 	}
@@ -180,8 +180,10 @@ func (c *Context) validateFragment(fragment string, has func(string) bool) bool 
 		return true
 	}
 
-	// Special case: #top is always valid (HTML standard)
-	if strings.EqualFold(id, "top") {
+	// Special case: #top always goes to the top of the page (HTML
+	// standard). Like markdownlint, only the lowercase form counts unless
+	// case is ignored.
+	if isTop(id) {
 		return true
 	}
 
@@ -228,6 +230,15 @@ func (c *Context) UnresolvedUsages() []*ReferenceUsage {
 		}
 	}
 	return unresolved
+}
+
+// BlankLabel reports whether label holds nothing but ASCII white space:
+// spaces, tabs, line endings, vertical tabs and form feeds. markdownlint
+// records an undefined reference only when its text, trimmed as JavaScript
+// trims it, is not empty, so it never reports such a label, although
+// micromark and goldmark read a label of form feeds or vertical tabs.
+func BlankLabel(label string) bool {
+	return strings.Trim(label, " \t\n\v\f\r") == ""
 }
 
 // NormalizeLabel normalizes a reference label for matching, exactly as the

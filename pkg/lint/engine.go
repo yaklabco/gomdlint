@@ -236,6 +236,7 @@ func (e *Engine) lintFile(
 
 	validator := fix.NewValidator(content)
 	var fixes []pendingFix
+	var checkboxes *checkboxGuard // Built for the first fix.
 
 	// Run each rule.
 	declared := e.Registry.lookups().options
@@ -297,8 +298,16 @@ func (e *Engine) lintFile(
 					diag.FixEdits = nil
 				} else {
 					diag.FixEdits = convertNewlines(edits, lineEnding)
+					// A fix that changes or makes a possible task list
+					// checkbox is withheld; the finding stays.
+					if checkboxes == nil {
+						checkboxes = newCheckboxGuard(content, snapshot.Root)
+					}
+					if checkboxes.withholds(diag.FixEdits) {
+						diag.FixEdits = nil
+					}
 					// Collect the fix if auto-fix is enabled for this rule.
-					if rr.AutoFix {
+					if rr.AutoFix && len(diag.FixEdits) > 0 {
 						fixes = append(fixes, pendingFix{ruleID: rule.ID(), edits: diag.FixEdits, diagnostics: 1})
 					}
 				}

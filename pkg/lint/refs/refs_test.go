@@ -2,6 +2,7 @@ package refs
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -98,7 +99,9 @@ func TestContext_ValidateFragment(t *testing.T) {
 		{"empty fragment", "", true},
 		{"just hash", "#", true},
 		{"special top", "#top", true},
-		{"special TOP", "#TOP", true},
+		// markdownlint matches "#top" in lowercase only, unless case is
+		// ignored.
+		{"special TOP", "#TOP", false},
 		{"github line ref", "#L20", true},
 		{"valid anchor", "#heading-one", true},
 		{"valid html anchor", "#custom-id", true},
@@ -112,6 +115,12 @@ func TestContext_ValidateFragment(t *testing.T) {
 				t.Errorf("ValidateFragment(%q) = %v, want %v", tt.fragment, got, tt.expected)
 			}
 		})
+	}
+
+	for fragment, want := range map[string]bool{"#TOP": true, "#Top": true, "#HEADING-ONE": true, "#nonexistent": false} {
+		if got := ctx.ValidateFragmentIgnoreCase(fragment); got != want {
+			t.Errorf("ValidateFragmentIgnoreCase(%q) = %v, want %v", fragment, got, want)
+		}
 	}
 }
 
@@ -678,5 +687,34 @@ func TestGenerateAnchor_JavaScriptLowercase(t *testing.T) {
 		if got := NewAnchorMap().GenerateAnchor(tt.text); got != tt.want {
 			t.Errorf("GenerateAnchor(%q) = %q, want %q", tt.text, got, tt.want)
 		}
+	}
+}
+
+// TestBlankLabel checks which labels markdownlint never reports: those of
+// nothing but ASCII white space, which a no-break space is not.
+func TestBlankLabel(t *testing.T) {
+	tests := []struct {
+		label string
+		want  bool
+	}{
+		{label: "", want: true},
+		{label: " ", want: true},
+		{label: "\t", want: true},
+		{label: "\n", want: true},
+		{label: "\r", want: true},
+		{label: "\v", want: true},
+		{label: "\f", want: true},
+		{label: " \f \v\t", want: true},
+		{label: "x", want: false},
+		{label: " x ", want: false},
+		{label: "\xc2\xa0", want: false},
+		{label: "^", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.label), func(t *testing.T) {
+			if got := BlankLabel(tt.label); got != tt.want {
+				t.Errorf("BlankLabel(%q) = %v, want %v", tt.label, got, tt.want)
+			}
+		})
 	}
 }

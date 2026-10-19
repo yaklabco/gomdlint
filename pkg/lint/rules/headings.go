@@ -126,7 +126,7 @@ func (r *SingleH1Rule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	switch {
 	case frontMatterTitle:
 		firstDuplicate = 0
-	case titleOnly && len(h1Headings) > 0 && !headingIsFirstContent(ctx, h1Headings[0]):
+	case titleOnly && len(h1Headings) > 0 && !headingIsFirstContent(ctx, h1Headings[0], firstDefinitionLine(ctx)):
 		return nil, nil
 	}
 

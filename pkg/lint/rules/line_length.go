@@ -58,11 +58,14 @@ type lineLengthOptions struct {
 }
 
 func readLineLengthOptions(ctx *lint.RuleContext) lineLengthOptions {
-	maxLength := ctx.OptionInt("max", defaultMaxLineLength)
+	// markdownlint reads each length as "value || default", so 0 means the
+	// default: 80 for the line length, and the line length for headings and
+	// code blocks.
+	maxLength := orDefault(ctx.OptionInt("max", defaultMaxLineLength), defaultMaxLineLength)
 	return lineLengthOptions{
 		max:              maxLength,
-		headingMax:       ctx.OptionInt("heading_max", maxLength),
-		codeBlockMax:     ctx.OptionInt("code_block_max", maxLength),
+		headingMax:       orDefault(ctx.OptionInt("heading_max", maxLength), maxLength),
+		codeBlockMax:     orDefault(ctx.OptionInt("code_block_max", maxLength), maxLength),
 		ignoreCodeBlocks: ctx.OptionBool("ignore_code_blocks", false),
 		ignoreTables:     ctx.OptionBool("ignore_tables", false),
 		ignoreHeadings:   ctx.OptionBool("ignore_headings", false),
@@ -71,6 +74,14 @@ func readLineLengthOptions(ctx *lint.RuleContext) lineLengthOptions {
 		strict:           ctx.OptionBool("strict", false),
 		stern:            ctx.OptionBool("stern", false),
 	}
+}
+
+// orDefault returns value, or defaultValue when value is 0.
+func orDefault(value, defaultValue int) int {
+	if value == 0 {
+		return defaultValue
+	}
+	return value
 }
 
 // Apply checks that no line exceeds the maximum length.

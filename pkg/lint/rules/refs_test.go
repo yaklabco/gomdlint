@@ -12,6 +12,7 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -701,6 +702,37 @@ func TestLinkFragmentsRule_GitHubSlugs(t *testing.T) {
 	}
 }
 
+// TestLinkFragmentsRule_CustomAnchorsAndTop checks MD051 against
+// markdownlint 0.41.1: "{#name}" in a heading's text adds the anchor name
+// when the name is lowercase words joined by single hyphens or underscores,
+// and "#top" matches only in lowercase unless case is ignored.
+func TestLinkFragmentsRule_CustomAnchorsAndTop(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"## Custom {#custom}\n\n" + // 3
+		"## Upper {#Upper}\n\n" + // 5
+		"## Two {#one} {#two}\n\n" + // 7
+		"## Doubled {#a--b}\n\n" + // 9
+		"Setext {#setext-anchor}\n-----------------------\n\n" + // 11
+		"## Code `{#in-code}`\n\n" + // 14
+		"## Under {#under_score}\n\n" + // 16
+		"[a](#custom) [b](#custom-custom) [c](#Upper) [d](#upper) [e](#one) [f](#two)\n" + // 18
+		"[g](#a--b) [h](#setext-anchor) [i](#in-code) [j](#under_score) [k](#TOP)\n" + // 19
+		"[l](#top) [m](#Top) [n](#L12) [o](#Custom)\n" // 20
+
+	type position struct{ line, column int }
+	positions := func(options map[string]any) []position {
+		diags := applyRuleWithOptions(t, NewLinkFragmentsRule(), markdown, options)
+		got := make([]position, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, position{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+
+	assert.Equal(t, []position{{18, 34}, {18, 46}, {19, 1}, {19, 64}, {20, 11}, {20, 31}}, positions(nil))
+	assert.Equal(t, []position{{18, 34}, {18, 46}, {19, 1}}, positions(map[string]any{"ignore_case": true}))
+}
+
 func TestDescriptiveLinkTextRule(t *testing.T) {
 	rule := NewDescriptiveLinkTextRule()
 
@@ -798,6 +830,1093 @@ func TestDescriptiveLinkTextRule_MarkdownlintDefaults(t *testing.T) {
 	})
 	if len(diags) != 1 || diags[0].Message != "Link text 'info' is not descriptive" {
 		t.Errorf("prohibited_texts: got %+v, want one diagnostic for 'info'", diags)
+	}
+}
+
+// TestDescriptiveLinkTextRule_MarkdownlintPositions checks MD059 against
+// markdownlint 0.41.1 on the same document: the link text is compared as
+// written, a link is skipped only when its text holds code or HTML directly,
+// autolinks are never checked, and a finding points at the first character
+// of the link text, one column after the bracket.
+func TestDescriptiveLinkTextRule_MarkdownlintPositions(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"[*`here`*](x)\n\n" + // 3: code inside emphasis is not direct
+		"[`here`](x)\n\n" + // 5: code directly in the text
+		"[**here**](x)\n\n" + // 7
+		"[here](x)\n\n" + // 9
+		"![here](y) and [more](z)\n\n" + // 11
+		"[here <b>x</b>](x)\n\n" + // 13: HTML directly in the text
+		"[![here](a.png)](x)\n\n" + // 15: the image's source is part of the text
+		"[h&#101;re](x)\n\n" + // 17
+		"> [here](x)\n\n" + // 19
+		"[click\nhere](x)\n\n" + // 21: text over two lines
+		"[here][ref] and [here][] and [here]\n\n" + // 24
+		"[~~here~~](x)\n\n" + // 26
+		"| a | b |\n| - | - |\n| [link](x) | y |\n\n" + // 30
+		"Some <https://example.com> text.\n\n" + // 32
+		"[here\\!](x) and [\\here](x) and [&nbsp;here](x)\n\n" + // 34
+		"[ref]: /u\n[here]: /v\n"
+
+	type position struct{ line, column int }
+	positions := func(options map[string]any) []position {
+		diags := applyRuleWithOptions(t, NewDescriptiveLinkTextRule(), markdown, options)
+		got := make([]position, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, position{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+
+	assert.Equal(t, []position{
+		{3, 2}, {7, 2}, {9, 2}, {11, 17}, {19, 4}, {21, 2}, {24, 2}, {24, 18}, {24, 31},
+		{26, 2}, {30, 4}, {34, 2}, {34, 18},
+	}, positions(nil))
+	assert.Equal(t, []position{
+		{3, 2}, {7, 2}, {9, 2}, {19, 4}, {24, 2}, {24, 18}, {24, 31}, {26, 2}, {34, 2}, {34, 18},
+	}, positions(map[string]any{"prohibited_texts": []any{"https example com", "here"}}))
+}
+
+// TestDescriptiveLinkTextRule_StrikethroughAndMath checks MD059 against
+// markdownlint 0.41.1, which parses no strikethrough, so code or HTML in a
+// strikethrough is directly in the link text for it, and the link is
+// skipped. Code or HTML in inline math is code or HTML too, as on main:
+// goldmark parses no math, where markdownlint reads it as math and reports
+// the links on lines 15 and 17.
+func TestDescriptiveLinkTextRule_StrikethroughAndMath(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"[~~`here`~~](x)\n\n" + // 3: the code is direct
+		"[~~*`here`*~~](x)\n\n" + // 5: emphasis holds the code
+		"[~here~](x)\n\n" + // 7
+		"[~~here <b>x</b>~~](x)\n\n" + // 9
+		"[*~~`here`~~*](x)\n\n" + // 11: emphasis holds the code
+		"[~~`a`~~ here](x)\n\n" + // 13
+		"[$<here>$](x)\n\n" + // 15: the tag is HTML
+		"[$`here`$](x)\n\n" + // 17: the code is code
+		"[here $<b>$](x)\n" // 19
+
+	diags := applyRuleWithOptions(t, NewDescriptiveLinkTextRule(), markdown, nil)
+	type position struct{ line, column int }
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{5, 2}, {7, 2}, {11, 2}}, got)
+}
+
+// footnoteCase is an MD052 footnote case: its input, and the positions of
+// its findings with shortcut_syntax (want) and without it (wantFull).
+type footnoteCase struct {
+	name     string
+	input    string
+	want     []footnotePosition
+	wantFull []footnotePosition
+}
+
+// footnotePosition is the line and column of an MD052 finding.
+type footnotePosition struct{ line, column int }
+
+// checkFootnoteCases runs MD052 on each case, with shortcut_syntax and
+// without it.
+func checkFootnoteCases(t *testing.T, tests []footnoteCase) {
+	t.Helper()
+	positions := func(input string, options map[string]any) []footnotePosition {
+		diags := applyRuleWithOptions(t, NewReferenceLinkImagesRule(), input, options)
+		got := make([]footnotePosition, 0, len(diags))
+		for _, diag := range diags {
+			got = append(got, footnotePosition{diag.StartLine, diag.StartColumn})
+		}
+		return got
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := tt.want
+			if want == nil {
+				want = []footnotePosition{}
+			}
+			wantFull := tt.wantFull
+			if wantFull == nil {
+				wantFull = []footnotePosition{}
+			}
+			assert.Equal(t, want, positions(tt.input, map[string]any{"shortcut_syntax": true}), "with shortcut_syntax")
+			assert.Equal(t, wantFull, positions(tt.input, nil), "without shortcut_syntax")
+		})
+	}
+}
+
+// TestReferenceLinkImagesRule_CertainFootnotes checks MD052 on GFM
+// footnotes whose definition micromark is certain to read (see
+// certainFootnoteLabels), where it reports what markdownlint 0.41.1
+// reports: "[^label]" calls the footnote, and in "[text][^label]" the
+// second pair calls it, so the first is a shortcut reference, and the
+// pair is reported with shortcut_syntax where main reports it. Two
+// definitions in a row count, as micromark reads each, and so does a
+// definition right after front matter, at the start of micromark's
+// document.
+func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{name: "definition before the call", input: "# T\n\n[^first]: Defined before.\n\nUse [^first] here.\n"},
+		{name: "definition after the call", input: "# T\n\nUse [^first] here.\n\n[^first]: Defined after.\n"},
+		{name: "labels in another case", input: "# T\n\nUse [^Second].\n\n[^second]: Two words.\n"},
+		{name: "definition on the first line", input: "[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
+		{name: "definition after a byte order mark", input: "\ufeff[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
+		{name: "definition right after front matter", input: "---\ntitle: x\n---\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
+		{name: "definitions in a row", input: "# T\n\nUse [^a], [^b] and [x][^c].\n\n[^a]: One note.\n[^b]: Two notes.\n[^c]: Three notes.\n"},
+		{name: "definition after one that opens math", input: "# T\n\nUse [^a] and [x][^b].\n\n[^a]: $$\n[^b]: Two notes.\n"},
+		{name: "definition after one that opens a fence", input: "# T\n\nUse [^a] and [x][^b].\n\n[^a]: ```\n[^b]: Two notes.\n"},
+		{name: "definition before math", input: "# T\n\nUse [^n] and [x][^n].\n\n[^n]: Note text.\n\n$$\nx\n$$\n"},
+		{name: "definition after a list", input: "# T\n\nUse [^n] and [x][^n].\n\n- item\n\n[^n]: Note text.\n"},
+		{name: "definition after a closed fence in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n\n[^n]: y\n"},
+		{name: "definition after a fenced code block", input: "# T\n\nUse [^n] and [x][^n].\n\n```\n[^n]: in code\n\n```\n\n[^n]: Note text.\n"},
+		{name: "definition after a one-line comment", input: "# T\n\nUse [^n] and [x][^n].\n\n<!-- note -->\n\n[^n]: Note text.\n"},
+		{name: "definition after a div", input: "# T\n\nUse [^n] and [x][^n].\n\n<div>\n<b>x</b>\n</div>\n\n[^n]: Note text.\n"},
+		{name: "definition after one-line CDATA", input: "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[x]]]]>\n\n[^n]: Note text.\n"},
+		{name: "undefined footnotes", input: "# T\n\nMore [^missing] and [^] and [^ x] text.\n", want: []footnotePosition{{3, 6}, {3, 21}, {3, 29}}},
+		{name: "label with a space is no footnote", input: "# T\n\nUse [^a b].\n\n[^a b]: Not a footnote.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
+		{name: "footnote call after link text", input: "# T\n\nUse [text][^first].\n\n[^first]: Note text.\n", want: []footnotePosition{{3, 5}}},
+		{name: "footnote call that is also a link definition", input: "# T\n\nUse [^n] here.\n\n[^n]: /url\n"},
+		{name: "byte order mark on a later line", input: "# T\n\nUse [^n] and [x][^n].\n\n\ufeff<!--\n\n[^n]: Note text.\n-->\n"},
+		{name: "definition after a one-line pre block", input: "# T\n\nUse [^n] and [x][^n].\n\n<pre>x</pre>\n\n[^n]: Note text.\n"},
+	})
+}
+
+// TestReferenceLinkImagesRule_FootnotesAroundBlocks checks MD052 on GFM
+// footnote definitions in or after blocks that micromark may read
+// otherwise than goldmark: code, HTML, math, directives, code fences that
+// hold blank lines unless both parsers read them alike, and HTML blocks of
+// kinds 1 to 5 that go on past their first line. The definitions do not
+// count, and MD052 reports what main reports.
+func TestReferenceLinkImagesRule_FootnotesAroundBlocks(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{
+			name:     "definition after a comment over several lines",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<!--\n\n[^n]: in a comment\n-->\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {10, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "fence in a nested footnote",
+			input:    "Use [x][^n].\n\n[^a]: one\n    [^b]: two\n    ```\n    [^n]: three four\n    ```\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "fence in a nested footnote after a blank line",
+			input:    "Use [x][^n].\n\n[^a]: one\n\n    [^b]: two\n    ```\n    [^n]: three four\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{name: "definition in code", input: "# T\n\nUse [^c].\n\n```\n[^c]: in code\n```\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition in HTML", input: "# T\n\nUse [^h].\n\n<div>\n[^h]: in html\n</div>\n", want: []footnotePosition{{3, 5}}},
+		{
+			name:     "definition in an HTML block after a blank line",
+			input:    "# T\n\nUse [^h] and [x][^h].\n\n<!--\n\n[^h]: in a comment\n-->\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a fence after a blank line",
+			input:    "# T\n\nUse [^c] and [x][^c].\n\n```\n\n[^c]: in code\n```\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{name: "definition in indented code", input: "# T\n\nUse [^n].\n\n    [^n]: indented code\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition in math", input: "# T\n\nUse [^n].\n\n$$\n[^n]: in math\n$$\n", want: []footnotePosition{{3, 5}, {6, 1}}},
+		{name: "definition after closed math", input: "# T\n\nUse [^n].\n\n$$\nx\n$$\n\n[^n]: y\n"},
+		{
+			name:     "definition after closed math with a full reference",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n$$\nx\n$$\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after math in code",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n```\n$$\n```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a quoted fence",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n> $$\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a directive",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n:::note\n\n[^n]: Note text.\n:::\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a closed directive",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n:::note\nx\n:::\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "indented definition after a directive",
+			input:    "Use [x][^n].\n\n:::note\n[^a]: one\n:::\n    [^n]: three four\n",
+			want:     []footnotePosition{{1, 5}, {4, 1}, {6, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "definition that ends a list item before a fence",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n- item\n[^x]: y\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {6, 1}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition that ends a list item before a comment",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n- item\n[^x]: y\n  <!--\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {6, 1}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "lazy table row before a fence",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n- | a |\n  | - |\n| b |\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {10, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after CDATA that micromark does not close",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[\nx]]]>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {8, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after one-line CDATA that micromark does not close",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<![CDATA[x]]]>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence that a tag line holds for micromark",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<del\t>\n```\nx\n\n```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {11, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence that an end tag with a space holds for goldmark",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n</ div>\n```\nx\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after an empty item that micromark refuses",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n    code\n\n-\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {10, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after an empty item after a definition",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n[ref]: /url\n-\n  ```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence in a script block that micromark ends early",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<script/>\n\n```\n\n</script>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {11, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a fence right after text",
+			input:    "# T\n\nUse [^n] and [x][^n].\ntext\n```\nx\n```\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a declaration that goldmark does not read",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<!doctype\n\n[^n]: Note text.\n>\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a declaration after text",
+			input:    "# T\n\nUse [^n] and [x][^n].\ntext\n<!x\n\n[^n]: Note text.\n>\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition in a declaration that goldmark reads",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<!DOCTYPE\n\n[^n]: Note text.\n>\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{name: "definition in indented code in a list item", input: "# T\n\nUse [^n].\n\n- item\n\n      [^n]: indented in item\n", want: []footnotePosition{{3, 5}}},
+		{name: "indented code in a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n\n        [^n]: code\n", want: []footnotePosition{{3, 5}}},
+		{name: "fenced code in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: note\n    ```\n    [^n]: code\n    ```\n", want: []footnotePosition{{3, 5}}},
+		{name: "fenced code after an empty footnote line", input: "# T\n\nUse [^n].\n\n[^o]:\n    ```\n    [^n]: code\n    ```\n"},
+		{name: "definition in math in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n    $$\n    [^n]: x\n    $$\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{
+			name:  "definition in math in an item after a heading",
+			input: "# T\n\nUse [^n].\n\n## H\n3. $$\n   [^n]: y\n   $$\n\nEnd.\n",
+			want:  []footnotePosition{{3, 5}, {7, 4}},
+		},
+		{name: "definition after indented math", input: "# T\n\nUse [^n].\n\nIntro\n  $$\n[^n]: y\n  $$\n", want: []footnotePosition{{3, 5}, {7, 1}}},
+		{name: "definition after indented math that starts a block", input: "# T\n\nUse [^n].\n\n  $$\n[^n]: y\n  $$\n", want: []footnotePosition{{3, 5}, {6, 1}}},
+		{name: "definition after math that ends a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n$$\nx\n$$\n    [^n]: y\n", want: []footnotePosition{{3, 5}, {9, 5}}},
+		{name: "definition after an HTML block in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n\n    <div>\n    [^n]: y\n", want: []footnotePosition{{3, 5}}},
+		{
+			name:  "definition after a fence in a nested footnote",
+			input: "# T\n\nUse [^n].\n\n[^o]: a\n    [^p]: b\n        ```\n    [^n]: y\n",
+			want:  []footnotePosition{{3, 5}, {8, 5}},
+		},
+		{name: "definition after HTML on a footnote's first line", input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n    [^n]: y\n", want: []footnotePosition{{3, 5}, {6, 5}}},
+		{
+			name:  "definition in a list from 01 after indented code and a blank line",
+			input: "# T\n\nUse [^n].\n\n    code\n\n01. a\n    [^n]: y\n",
+			want:  []footnotePosition{{3, 5}, {8, 5}},
+		},
+		{
+			name:  "definition in a sibling of a footnote with HTML",
+			input: "# T\n\nUse [^n].\n\n[^o]: <div> x\n[^p]: b\n    [^n]: y\n",
+			want:  []footnotePosition{{3, 5}, {7, 5}},
+		},
+		{name: "definition after a fence that a footnote's end closes", input: "# T\n\nUse [^n].\n\n[^o]: a\n    ```\n[^n]: y\n", want: []footnotePosition{{3, 5}, {7, 1}}},
+		{
+			name:     "references in math",
+			input:    "# T\n\nInline $[a][b]$ and $[^n]$ math.\n\n$$\n[c][d] and [e]\n$$\n\n[f][g] outside.\n",
+			want:     []footnotePosition{{3, 9}, {3, 22}, {6, 1}, {6, 12}, {9, 1}},
+			wantFull: []footnotePosition{{3, 9}, {6, 1}, {9, 1}},
+		},
+		{
+			name:     "definition after a script block that goldmark ends at a long s",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<script>\n</\u017fcript>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {8, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{
+			name:     "definition after a pre block over several lines",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n<pre>\nx\n</pre>\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {9, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+	})
+}
+
+// TestReferenceLinkImagesRule_FootnoteLabels checks which labels MD052
+// reads as GFM footnote calls. Only a link, not an image, whose label is
+// "^" and then ASCII letters, digits and hyphens calls a footnote, and
+// only a certain definition whose label holds the same letters in any
+// case. Images and other labels, which micromark or markdownlint may read
+// otherwise than as written, get main's result, and so do calls that
+// markdownlint keeps apart from a definition. "[text][^label]" is
+// reported with shortcut_syntax exactly where main reports it, unless
+// markdownlint certainly ignores "text".
+func TestReferenceLinkImagesRule_FootnoteLabels(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{name: "full reference to a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[^n]: /url\n"},
+		{name: "footnote call with a long s", input: "Use [^\u017f].\n\n[^s]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "shortcut before a footnote call with a sharp s", input: "Use [\u00df][^n].\n\n[^n]: Note text.\n\n[ss]: /a\n", want: []footnotePosition{{1, 5}}},
+		{name: "footnote call with an accented capital", input: "Use [^\u00c9].\n\n[^\u00e9]: Note text.\n", want: []footnotePosition{{1, 5}, {3, 1}}},
+		{name: "footnote call in another ASCII case", input: "Use [^Note].\n\n[^note]: Note text.\n"},
+		{
+			name:  "shortcut before a footnote call with a definition in math",
+			input: "Use [text][^n].\n\n[^n]: Note text.\n\n$$\n\n[text]: /a\n",
+			want:  []footnotePosition{{1, 5}},
+		},
+		{name: "shortcut before a footnote call with a defined label", input: "Use [text][^n].\n\n[^n]: Note text.\n\n[text]: /a\n", want: []footnotePosition{{1, 5}}},
+		{name: "shortcut before a footnote call that markdownlint ignores", input: "Use [X][^n].\n\n[^n]: Note text.\n"},
+		{name: "image as the text before a footnote call", input: "Use [![badge](/b.svg)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "link in the text before a footnote call", input: "Use [x [b](/c)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "image after an ignored label before a footnote call", input: "Use [x![i](/a)][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "next line control as the text before a footnote call", input: "Use [\u0085][^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{
+			name:     "image shortcut before a footnote call",
+			input:    "Use ![alt][^n].\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "ignored image shortcut before a footnote call",
+			input:    "Use ![x][^n].\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{name: "blank text before a footnote call", input: "Use [ ][^n].\n\n[^n]: Note text.\n"},
+		{name: "empty text before a footnote call", input: "Use [][^n].\n\n[^n]: Note text.\n"},
+		{name: "blank text before a footnote call in a list item", input: "- [ ][^n] note\n\n[^n]: Note text.\n"},
+		{name: "escaped bracket in the label", input: "# T\n\nUse [^e\\]x].\n\n[^e\\]x]: Escaped bracket.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
+		{
+			name:     "collapsed image with an escape in a footnote label",
+			input:    "Use ![^a\\*b][].\n\n[^a\\*b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {3, 1}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "collapsed image with emphasis in a footnote label",
+			input:    "Use ![^*n*][].\n\n[^*n*]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {3, 1}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{name: "shortcut image of a footnote label", input: "Use ![^n].\n\n[^n]: Note text.\n", want: []footnotePosition{{1, 5}}},
+		{name: "shortcut image with an escape in a footnote label", input: "Use ![^a\\*b].\n\n[^a\\*b]: Note text.\n", want: []footnotePosition{{1, 5}, {3, 1}}},
+		{
+			name:     "full reference with an escape in a footnote label",
+			input:    "Use [x][^a\\*b].\n\n[^a\\*b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {3, 1}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{
+			name:     "footnote label with an entity",
+			input:    "Use [^a&amp;b] and [x][^a&amp;b].\n\n[^a&amp;b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {1, 20}, {3, 1}},
+			wantFull: []footnotePosition{{1, 20}},
+		},
+		{
+			name:     "footnote label with an underscore",
+			input:    "Use [^my_note] and [x][^my_note].\n\n[^my_note]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {1, 20}, {3, 1}},
+			wantFull: []footnotePosition{{1, 20}},
+		},
+		{name: "footnote label with a code span", input: "Use [^`n`].\n\n[^`n`]: Note text.\n", want: []footnotePosition{{1, 5}, {3, 1}}},
+		{name: "footnote label with a hyphen", input: "Use [^my-note] and [x][^my-note].\n\n[^my-note]: Note text.\n"},
+		{name: "footnote label of digits", input: "Use [^1] and [x][^1].\n\n[^1]: Note text.\n"},
+		{
+			name:     "escaped hyphen in a footnote label",
+			input:    "Use [^a\\-b] and [x][^a\\-b].\n\n[^a-b]: Note text.\n",
+			want:     []footnotePosition{{1, 5}, {1, 17}},
+			wantFull: []footnotePosition{{1, 17}},
+		},
+		{
+			name:     "collapsed image of a plain footnote label",
+			input:    "Use ![^n][].\n\n[^n]: Note text.\n",
+			want:     []footnotePosition{{1, 5}},
+			wantFull: []footnotePosition{{1, 5}},
+		},
+		{name: "form feed as the text before a footnote call", input: "Use [\f][^n].\n\n[^n]: Note text.\n"},
+	})
+}
+
+// TestReferenceLinkImagesRule_UncertainFootnotes checks MD052 on GFM
+// footnote definitions that micromark is not certain to read where they
+// stand: in a container or a footnote, indented, or after a line that is
+// not blank. They do not count, so their calls are read as goldmark reads
+// them, and MD052 reports what main reports. markdownlint counts most of
+// them. A certain definition in the same document, such as "[^o]:" at
+// column 0, still counts.
+func TestReferenceLinkImagesRule_UncertainFootnotes(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{name: "definition in a list item", input: "# T\n\nUse [^third].\n\n- item\n\n  [^third]: In a list.\n", want: []footnotePosition{{3, 5}, {7, 3}}},
+		{name: "definition in a blockquote", input: "# T\n\nUse [^q].\n\n> [^q]: In a quote.\n", want: []footnotePosition{{3, 5}, {5, 3}}},
+		{name: "definition that interrupts a paragraph", input: "# T\n\nUse [^n].\nSome text\n[^n]: Interrupts the paragraph.\n", want: []footnotePosition{{3, 5}, {5, 1}}},
+		{
+			name:     "definition after a heading",
+			input:    "# T\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{2, 1}, {4, 5}, {4, 14}},
+			wantFull: []footnotePosition{{4, 14}},
+		},
+		{name: "indented definition", input: "# T\n\nUse [^i].\n\n   [^i]: Indented three.\n", want: []footnotePosition{{3, 5}, {5, 4}}},
+		{name: "paragraph line indented four columns", input: "# T\n\nUse [^n].\n\ntext\n    [^n]: note text\n", want: []footnotePosition{{3, 5}, {6, 5}}},
+		{name: "definition that interrupts a list item's paragraph", input: "# T\n\nUse [^n].\n\n- item\n   [^n]: in item\n", want: []footnotePosition{{3, 5}, {6, 4}}},
+		{name: "definition on a lazy line", input: "# T\n\nUse [^n].\n\n> quote\n[^n]: lazy\n", want: []footnotePosition{{3, 5}, {6, 1}}},
+		{
+			name:     "definition after a quote marker line",
+			input:    "# T\n\nUse [^n] and [x][^n].\n\n> quote\n>\n[^n]: Note text.\n",
+			want:     []footnotePosition{{3, 5}, {3, 14}, {7, 1}},
+			wantFull: []footnotePosition{{3, 14}},
+		},
+		{name: "definition in a quoted list item", input: "# T\n\nUse [^n].\n\n> - a\n>     [^n]: x\n", want: []footnotePosition{{3, 5}, {6, 7}}},
+		{name: "quoted list item line indented four columns", input: "# T\n\nUse [^n].\n\n> - a\n>       [^n]: x\n", want: []footnotePosition{{3, 5}, {6, 9}}},
+		{name: "tab past a list item's indentation", input: "# T\n\nUse [^n].\n\n- a\n\n\t[^n]: tab\n"},
+		{name: "defined link text before a footnote that is also a link definition", input: "# T\n\nUse [text][^n].\n\n[text]: /a\n[^n]: /url\n"},
+		{
+			name:     "definition after a definition's continuation line",
+			input:    "# T\n\nUse [^a], [^b] and [x][^b].\n\n[^a]: One note.\n    more\n[^b]: Two notes.\n",
+			want:     []footnotePosition{{3, 11}, {3, 20}, {7, 1}},
+			wantFull: []footnotePosition{{3, 20}},
+		},
+		{name: "definition in a footnote's content", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^n]: inner\n", want: []footnotePosition{{3, 5}, {6, 5}}},
+		{name: "definition after text in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: text\n    [^n]: inner\n"},
+		{name: "definition after a blank line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n\n    [^n]: inner\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition two footnotes deep", input: "# T\n\nUse [^n].\n\n[^o]:\n    [^p]:\n        [^n]: inner\n"},
+		{name: "seven columns into a footnote", input: "# T\n\nUse [^n].\n\n[^o]:\n       [^n]: seven\n", want: []footnotePosition{{3, 5}, {6, 8}}},
+		{name: "lazy line in a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\nlazy\n    [^n]: inner\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{name: "footnote in a list item", input: "# T\n\nUse [^n].\n\n- [^o]:\n      [^n]: inner\n", want: []footnotePosition{{3, 5}, {5, 3}, {6, 7}}},
+		{name: "line after a closed footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n\ntext\n    [^n]: not\n", want: []footnotePosition{{3, 5}, {8, 5}}},
+		{name: "indented line in an item marked 01", input: "# T\n\nUse [^n].\n\nIntro\n01. $$\n    [^n]: y\n    $$\n\nEnd.\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{name: "definition in an item marked 01", input: "# T\n\nUse [^n].\n\nIntro\n01. a\n    [^n]: y\n\nEnd.\n", want: []footnotePosition{{3, 5}, {7, 5}}},
+		{name: "definition after a heading that ends a footnote", input: "# T\n\nUse [^n].\n\n[^o]: a\n# H\n    [^n]: y\n", want: []footnotePosition{{3, 5}}},
+		{name: "definition in an item marked 1", input: "# T\n\nUse [^n].\n\n1. [^n]: y\n"},
+		{name: "definition in the second item of a list from 1", input: "# T\n\nUse [^n].\n\n1. a\n2. b\n   [^n]: y\n", want: []footnotePosition{{3, 5}, {7, 4}}},
+		{name: "definition after a formula on one line", input: "# T\n\nUse [^n].\n\n- Equation:\n  $$E = mc^2$$\n  [^n]: y\n", want: []footnotePosition{{3, 5}, {7, 3}}},
+		{name: "definition in a bullet item", input: "# T\n\nUse [^n].\n\n- [^n]: y\n"},
+		{name: "indented line after text", input: "Intro\n    $$\n\n[a][b]\n", want: []footnotePosition{{4, 1}}, wantFull: []footnotePosition{{4, 1}}},
+	})
+}
+
+// TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions checks
+// MD052 where markdownlint may take other lines than the parser for front
+// matter, a carriage return alone ends a line, or the text that
+// markdownlint gives micromark starts with a byte order mark. No
+// definition counts there, and MD052 reports what main reports.
+func TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions(t *testing.T) {
+	checkFootnoteCases(t, []footnoteCase{
+		{
+			name:     "front matter closed with dots",
+			input:    "---\ntitle: x\n...\n\n[^n]: Note text.\n---\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{5, 1}, {8, 5}, {8, 14}},
+			wantFull: []footnotePosition{{8, 14}},
+		},
+		{
+			name:     "front matter opened with a no-break space",
+			input:    "---\u00a0\ntitle: x\n---\n\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{5, 1}, {7, 5}, {7, 14}},
+			wantFull: []footnotePosition{{7, 14}},
+		},
+		{
+			name:     "line separator in front matter",
+			input:    "---\ntitle: x\u2028---\n---\n\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{5, 1}, {7, 5}, {7, 14}},
+			wantFull: []footnotePosition{{7, 14}},
+		},
+		{
+			name:     "carriage return alone",
+			input:    "# T\r\rUse [^n] and [x][^n].\r\r[^n]: Note text.\r",
+			want:     []footnotePosition{{1, 10}, {1, 19}, {1, 29}},
+			wantFull: []footnotePosition{{1, 19}},
+		},
+		{name: "two byte order marks", input: "\ufeff\ufeffIntro\n\n[^b]: note text.\n\nUse [^b].\n", want: []footnotePosition{{3, 1}, {5, 5}}},
+		{
+			name:     "byte order mark after front matter",
+			input:    "---\ntitle: x\n---\n\ufeff<!--\n\n[^n]: Note text.\n-->\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{6, 1}, {9, 5}, {9, 14}},
+			wantFull: []footnotePosition{{9, 14}},
+		},
+		{
+			name:     "byte order mark after front matter and a no-break space line",
+			input:    "---\ntitle: x\n---\n\u00a0\n\ufeff<!--\n\n[^n]: Note text.\n-->\n\nUse [^n] and [x][^n].\n",
+			want:     []footnotePosition{{7, 1}, {10, 5}, {10, 14}},
+			wantFull: []footnotePosition{{10, 14}},
+		},
+		{
+			name:  "byte order mark after front matter before a fence",
+			input: "---\ntitle: x\n---\n\ufeff```\n\n[^n]: Note text.\n```\n\nUse [^n] and [x][^n].\n",
+			want:  []footnotePosition{{6, 1}},
+		},
+		{name: "two byte order marks before a fence", input: "\ufeff\ufeff```\n\n[^b]: note text.\n```\n\nUse [^b] and [x][^b].\n", want: []footnotePosition{{3, 1}}},
+	})
+}
+
+// TestMarkdownlintFrontMatterLines checks the front matter that
+// markdownlint 0.41.1's frontMatterRe takes, up to its closing line, which
+// MD052 compares with the parser's before it counts a footnote definition.
+func TestMarkdownlintFrontMatterLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   int
+		wantOK bool
+	}{
+		{name: "no front matter", input: "# T\n", want: 0, wantOK: true},
+		{name: "YAML", input: "---\na: 1\n---\nText\n", want: 3, wantOK: true},
+		{name: "spaces and a tab after the markers", input: "--- \t\na: 1\n---  \n", want: 3, wantOK: true},
+		{name: "YAML closed with dots only", input: "---\na: 1\n...\n", want: 0, wantOK: true},
+		{name: "YAML closed with dots and then dashes", input: "---\na: 1\n...\n---\n", want: 4, wantOK: true},
+		{name: "TOML closed with dots", input: "+++\na = 1\n...\n", want: 3, wantOK: true},
+		{name: "JSON", input: "{\n\"a\": 1\n}\n", want: 3, wantOK: true},
+		{name: "no-break space after the opening", input: "---\u00a0\na: 1\n---\n", want: 3, wantOK: true},
+		{name: "text after the opening", input: "--- x\na: 1\n---\n", want: 0, wantOK: true},
+		{name: "four dashes", input: "----\na\n---\n", want: 0, wantOK: true},
+		{name: "unclosed", input: "---\na: 1\n", want: 0, wantOK: true},
+		{name: "closing with a no-break space", input: "---\na: 1\n---\u00a0\n", want: 3, wantOK: true},
+		{name: "closing without a final newline", input: "---\na: 1\n---", want: 3, wantOK: true},
+		{name: "byte order mark", input: "\ufeff---\na: 1\n---\n", want: 3, wantOK: true},
+		{name: "line separator", input: "---\na\u2028---\n---\n", want: 0, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := markdownlintFrontMatterLines(parseForCheck(t, tt.input))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestMicromarkDropsByteOrderMark checks where the text that markdownlint
+// gives micromark starts with a byte order mark: after the one markdownlint
+// drops from the file, or after front matter and the white space lines
+// that markdownlint's pattern takes with it.
+func TestMicromarkDropsByteOrderMark(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "no byte order mark", input: "# T\n", want: false},
+		{name: "one byte order mark", input: "\ufeff# T\n", want: false},
+		{name: "two byte order marks", input: "\ufeff\ufeff# T\n", want: true},
+		{name: "byte order mark before front matter", input: "\ufeff---\na: 1\n---\n# T\n", want: false},
+		{name: "byte order mark right after front matter", input: "---\na: 1\n---\n\ufeff<!--\n", want: true},
+		{name: "after a blank line after front matter", input: "---\na: 1\n---\n\n\ufeff<!--\n", want: true},
+		{name: "after a no-break space line after front matter", input: "---\na: 1\n---\n\u00a0\n\ufeff<!--\n", want: true},
+		{name: "after text after front matter", input: "---\na: 1\n---\ntext\n\ufeff<!--\n", want: false},
+		{name: "after a line that holds only a byte order mark", input: "---\na: 1\n---\n\ufeff\n\ufeff<!--\n", want: true},
+		// micromark keeps this one, as the pattern takes the line, but a
+		// line that starts with a byte order mark is left unsure.
+		{name: "line that holds only a byte order mark after front matter", input: "---\na: 1\n---\n\ufeff\n# T\n", want: true},
+		{name: "line separator after front matter", input: "---\na: 1\n---\n\u2028\n# T\n", want: true},
+		{name: "byte order mark on a later line", input: "# T\n\n\ufeff<!--\n", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, micromarkDropsByteOrderMark(parseForCheck(t, tt.input)))
+		})
+	}
+}
+
+// TestHasLoneCarriageReturn checks for the line ending that micromark reads
+// and the parser does not: a carriage return that no line feed follows.
+func TestHasLoneCarriageReturn(t *testing.T) {
+	assert.False(t, hasLoneCarriageReturn([]byte("a\r\nb\r\n")))
+	assert.False(t, hasLoneCarriageReturn([]byte("a\nb")))
+	assert.True(t, hasLoneCarriageReturn([]byte("a\rb\n")))
+	assert.True(t, hasLoneCarriageReturn([]byte("a\r\nb\r")))
+	assert.True(t, hasLoneCarriageReturn([]byte("a\r\r\n")))
+}
+
+// TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes checks MD052 where
+// task checkboxes or blank brackets decide what is a reference. The parser
+// reads goldmark's checkboxes, as main did: after link reference definitions
+// "[x]" is a shortcut reference, which markdownlint and main report when "x"
+// is not ignored, and at the start of a list item's first block, a heading
+// included, brackets holding one space, tab, form feed or carriage return,
+// "x" or "X" are a checkbox. markdownlint never reports a label of nothing
+// but ASCII white space, so MD052 does not either. Blank text before a
+// label is read as main reads it.
+func TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes(t *testing.T) {
+	type position struct{ line, column int }
+	shortcut := map[string]any{"shortcut_syntax": true}
+	xNotIgnored := map[string]any{"shortcut_syntax": true, "ignored_labels": []string{"skip"}}
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		want    []position
+	}{
+		{name: "checkbox after a definition", input: "- [c]: /url\n  [x] done\n", options: xNotIgnored, want: []position{{2, 3}}},
+		{name: "checkbox after two definitions", input: "- [c]: /url\n  [d]: /other\n  [x] done\n", options: xNotIgnored, want: []position{{3, 3}}},
+		{
+			name:    "checkbox after a blank first line and a definition",
+			input:   "-\n  [c]: /url\n  [x] done\n",
+			options: xNotIgnored,
+			want:    []position{{3, 3}},
+		},
+		// The parser reads a checkbox here, as main does, so "[x]" is no
+		// reference. markdownlint, which reads no checkboxes, reports 1:3.
+		{name: "checkbox", input: "- [x] done\n", options: xNotIgnored},
+		{name: "form feed before an empty pair in a list item", input: "- [\f][] done\n"},
+		{name: "form feed before an empty pair in a list item with shortcut_syntax", input: "- [\f][] done\n", options: shortcut},
+		{name: "form feed before an empty pair", input: "Use [\f][] done\n"},
+		{name: "form feed in a list item", input: "- [\f] done\n", options: shortcut},
+		{name: "vertical tab before an empty pair", input: "Use [\v][] done.\n"},
+		{name: "form feeds and spaces before an empty pair", input: "Use [ \f \f ][] done.\n"},
+		{name: "form feed as a full reference's label", input: "Use [text][\f] done.\n", options: shortcut},
+		{name: "form feed as an image's label", input: "Use ![alt][\f] done.\n"},
+		// White space outside ASCII is a label, as on main, although
+		// markdownlint trims it and reports nothing.
+		{name: "no-break space before an empty pair", input: "Use [\xc2\xa0][] done.\n", want: []position{{1, 5}}},
+		{name: "letter before an empty pair", input: "Use [y][] done.\n", want: []position{{1, 5}}},
+		// The parser reads a checkbox from "[\f]" and "[x]" at the start of
+		// an item, as main does, so the brackets after it are a shortcut.
+		{name: "form feed before a label in a list item", input: "- [\f][y] done\n"},
+		{name: "form feed before a label in a list item with shortcut_syntax", input: "- [\f][y] done\n", options: shortcut, want: []position{{1, 6}}},
+		{name: "checkbox before a footnote label", input: "- [x][^n]\n\n[c]: /url\n[^n]: Note text.\n"},
+		{
+			name:    "checkbox before a footnote label with shortcut_syntax",
+			input:   "- [x][^n]\n\n[c]: /url\n[^n]: Note text.\n",
+			options: shortcut,
+			want:    []position{{1, 6}, {4, 1}},
+		},
+		// Blank text before a label makes a full reference, as on main.
+		{name: "form feed before a label", input: "Use [\f][y] done.\n", want: []position{{1, 5}}},
+		{name: "form feed before a label with shortcut_syntax", input: "Use [\f][y] done.\n", options: shortcut, want: []position{{1, 5}}},
+		{name: "space before a label in an image", input: "Use ![ ][y] done.\n", options: shortcut, want: []position{{1, 5}}},
+		{name: "space before a label in a heading", input: "# T [ ][y] done\n", options: shortcut, want: []position{{1, 5}}},
+		// At the start of a heading that starts a list item, the parser
+		// reads a checkbox, as main does, and then the brackets after it.
+		{name: "space before a label in a heading in a list item", input: "- ## [ ][y] done\n"},
+		{name: "space before a label in a heading in a list item with shortcut_syntax", input: "- ## [ ][y] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "tab before a label in a quoted heading", input: "> - ## [\t][y] done\n", options: shortcut, want: []position{{1, 11}}},
+		{name: "space before a label in a setext heading", input: "- [ ][y]\n  ---\n", options: shortcut, want: []position{{1, 6}}},
+		{name: "space before a footnote label in a heading", input: "- ## [ ][^n] done\n", options: shortcut, want: []position{{1, 9}}},
+		// Two spaces make no checkbox, so the brackets make a full reference.
+		{name: "two spaces before a label in a heading", input: "- ## [  ][y] done\n", options: shortcut, want: []position{{1, 6}}},
+		{name: "space before a collapsed reference in a heading", input: "- ## [ ][y][] done\n", want: []position{{1, 9}}},
+		{name: "space before a full reference in a heading", input: "- ## [ ][y][z] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "space before a full reference to x in a heading", input: "- ## [ ][x][y] done\n", want: []position{{1, 9}}},
+		{name: "space before a full reference with an ignored label in a heading", input: "- ## [ ][y][x] done\n", options: shortcut},
+		{
+			name:    "space before a full reference and a shortcut in a heading",
+			input:   "- ## [ ][y][z][w] done\n",
+			options: shortcut,
+			want:    []position{{1, 9}, {1, 15}},
+		},
+		{name: "x before a full reference in a heading", input: "- ## [x][y][z] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "x before a label in a heading", input: "- ## [x][y] done\n"},
+		{name: "x before a label in a heading with shortcut_syntax", input: "- ## [x][y] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "space before a label over two lines in a setext heading", input: "- [ ][a\n  b]\n  ---\n", options: shortcut, want: []position{{1, 6}}},
+		{
+			name:    "space before a label over two lines in a quoted setext heading",
+			input:   "> - [ ][a\n>   b]\n>   ---\n",
+			options: shortcut,
+			want:    []position{{1, 8}},
+		},
+		{name: "space before a label in a heading after a blank first line", input: "-\n  ## [ ][y] done\n", options: shortcut, want: []position{{2, 9}}},
+		// After a definition, goldmark reads no checkbox.
+		{name: "space before a label in a heading after a definition", input: "- [c]: /url\n  ## [ ][y] done\n", options: shortcut, want: []position{{2, 6}}},
+		{name: "x before a label in a heading after a blank first line and a definition", input: "-\n  [c]: /url\n  ## [x][y] done\n", want: []position{{3, 6}}},
+		{
+			name:    "x before a label in a heading after a blank first line and a definition with shortcut_syntax",
+			input:   "-\n  [c]: /url\n  ## [x][y] done\n",
+			options: shortcut,
+			want:    []position{{3, 6}},
+		},
+		{
+			name:    "x before a label in a setext heading after a blank first line and a definition",
+			input:   "-\n  [c]: /url\n  [x][y] done\n  ---\n",
+			options: shortcut,
+			want:    []position{{3, 3}},
+		},
+		{
+			name:    "space before a label in a heading after a blank first line and a definition",
+			input:   "-\n  [c]: /url\n  ## [ ][y] done\n",
+			options: shortcut,
+			want:    []position{{3, 6}},
+		},
+		// Nor does anything before the brackets.
+		{name: "space before a label in emphasis in a heading", input: "- ## *[ ][y]* done\n", options: shortcut, want: []position{{1, 7}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewReferenceLinkImagesRule(), tt.input, tt.options)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestRulesReadNoCheckboxAfterDefinitions checks the link rules on "[x]"
+// after link reference definitions that start a list item. The parser reads
+// no checkbox there, as goldmark and GitHub's cmark-gfm read none, so "[x]"
+// is a reference: it uses the definition of "x", which MD053 then keeps,
+// and its link is empty for MD042 and a shortcut for MD054, as markdownlint
+// and main report.
+func TestRulesReadNoCheckboxAfterDefinitions(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name    string
+		rule    lint.Rule
+		input   string
+		options map[string]any
+		want    []position
+	}{
+		{name: "MD053 definition of a spaced label", rule: NewLinkImageRefDefsRule(), input: "- [c]: /url\n  [x] done [c]\n\n[ x ]: /x\n"},
+		{name: "MD053 definition", rule: NewLinkImageRefDefsRule(), input: "- [c]: /url\n  [x] done [c]\n\n[x]: /x\n"},
+		{name: "MD042 empty fragment", rule: NewEmptyLinkRule(), input: "- [c]: /url\n  [x] done\n\n[x]: #\n", want: []position{{2, 3}}},
+		{
+			name:    "MD054 shortcut",
+			rule:    NewLinkImageStyleRule(),
+			input:   "- [c]: /url\n  [x] done [c]\n\n[x]: /x\n",
+			options: map[string]any{"shortcut": false},
+			want:    []position{{2, 3}, {2, 12}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, tt.rule, tt.input, tt.options)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestRulesReadCheckboxesInHeadings checks the link rules where goldmark,
+// as on main, reads a checkbox at the start of a heading that starts a list
+// item, and where it reads none: under CommonMark, MD052 reads "[x][y]" as
+// a full reference; "[X]" is a checkbox and no link, though "[x]: #" would
+// define it; and so is "[\r]", before "(/url)" or a label.
+func TestRulesReadCheckboxesInHeadings(t *testing.T) {
+	type position struct{ line, column int }
+	tests := []struct {
+		name    string
+		rule    lint.Rule
+		flavor  config.Flavor
+		input   string
+		options map[string]any
+		want    []position
+	}{
+		{name: "MD052 under CommonMark", rule: NewReferenceLinkImagesRule(), flavor: config.FlavorCommonMark, input: "- ## [x][y] done\n", want: []position{{1, 6}}},
+		{
+			name:    "MD052 under CommonMark with shortcut_syntax",
+			rule:    NewReferenceLinkImagesRule(),
+			flavor:  config.FlavorCommonMark,
+			input:   "- ## [x][y] done\n",
+			options: map[string]any{"shortcut_syntax": true},
+			want:    []position{{1, 6}},
+		},
+		{
+			name:    "MD052 with shortcut_syntax",
+			rule:    NewReferenceLinkImagesRule(),
+			input:   "- ## [x][y] done\n",
+			options: map[string]any{"shortcut_syntax": true},
+			want:    []position{{1, 9}},
+		},
+		{name: "MD042 on a checkbox", rule: NewEmptyLinkRule(), input: "- # [X]\n\n[x]: #\n"},
+		{name: "MD054 on a checkbox", rule: NewLinkImageStyleRule(), input: "- # [X]\n\n[x]: #\n", options: map[string]any{"shortcut": false}},
+		{name: "MD039 on a checkbox before a destination", rule: NewLinkSpacesRule(), input: "- # [\r](/url)\n"},
+		{name: "MD039 on a checkbox before a destination and a period", rule: NewLinkSpacesRule(), input: "- ## [ ](/url).\n"},
+		{name: "MD054 on a checkbox before a label", rule: NewLinkImageStyleRule(), input: "- # [\r][y]\n\n[y]: /url\n", options: map[string]any{"full": false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flavor := tt.flavor
+			if flavor == "" {
+				flavor = config.FlavorGFM
+			}
+			file, err := goldmark.New(string(flavor)).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+			cfg := config.NewConfig()
+			cfg.Flavor = flavor
+			ruleCfg := &config.RuleConfig{Options: engineOptions(tt.rule.ID(), tt.options)}
+			diags, err := tt.rule.Apply(lint.NewRuleContext(context.Background(), file, cfg, ruleCfg))
+			require.NoError(t, err)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestLinkImageStyleRule_BlankLabels checks that MD054 reports no reference
+// whose label is nothing but ASCII white space, as markdownlint reports
+// none, and that the parser's checkboxes hide the brackets they hide on
+// main.
+func TestLinkImageStyleRule_BlankLabels(t *testing.T) {
+	type position struct{ line, column int }
+	noCollapsed := map[string]any{"collapsed": false}
+	noShortcut := map[string]any{"shortcut": false}
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		want    []position
+	}{
+		{name: "collapsed form feed in a list item", input: "- [\f][] done\n\n[\f]: /url\n", options: noCollapsed},
+		{name: "shortcut form feed in a list item", input: "- [\f] done\n\n[\f]: /url\n", options: noShortcut},
+		{name: "collapsed form feed", input: "Use [\f][] done.\n\n[\f]: /url\n", options: noCollapsed},
+		{name: "shortcut form feed", input: "Use [\f] done.\n\n[\f]: /url\n", options: noShortcut},
+		{name: "collapsed form feed in a heading", input: "- ## [\f][] done\n\n[\f]: /url\n", options: noCollapsed},
+		{name: "collapsed letter", input: "Use [y][] done.\n\n[y]: /url\n", options: noCollapsed, want: []position{{1, 5}}},
+		{name: "checkbox before an empty pair", input: "- [x][] done\n\n[x]: /url\n", options: noCollapsed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewLinkImageStyleRule(), tt.input, tt.options)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestIgnoresShortcut checks when markdownlint certainly ignores the
+// shortcut reference before a footnote call: only for a label of ASCII
+// letters, digits and spaces, compared as normalizeReference gives it with
+// ignored_labels as written.
+func TestIgnoresShortcut(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		ignored []string
+		want    bool
+	}{
+		{name: "default label", text: "x", ignored: []string{"x"}, want: true},
+		{name: "label in upper case", text: "X", ignored: []string{"x"}, want: true},
+		{name: "ignored label in upper case", text: "x", ignored: []string{"X"}, want: false},
+		{name: "white space collapsed", text: " x  y ", ignored: []string{"x y"}, want: true},
+		{name: "emphasis", text: "*x*", ignored: []string{"*x*"}, want: false},
+		{name: "escape", text: "a\\*b", ignored: []string{"a\\*b"}, want: false},
+		{name: "letter outside ASCII", text: "é", ignored: []string{"é"}, want: false},
+		{name: "blank", text: " ", ignored: []string{"x"}, want: true},
+		{name: "tab", text: "\t", ignored: nil, want: true},
+		{name: "empty", text: "", ignored: nil, want: true},
+		{name: "form feed", text: "\f", ignored: nil, want: true},
+		{name: "vertical tab and space", text: "\v ", ignored: []string{"x"}, want: true},
+		{name: "no-break space", text: "\u00a0", ignored: nil, want: false},
+		{name: "label not ignored", text: "y", ignored: []string{"x"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ignoresShortcut(tt.text, tt.ignored))
+		})
+	}
+}
+
+// TestPlainFootnoteCall checks which usages MD052 may read as a footnote
+// call: a link, never an image, whose label is "^" and then nothing but
+// ASCII letters, digits and hyphens, which every parser reads as written.
+func TestPlainFootnoteCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage refs.ReferenceUsage
+		want  bool
+	}{
+		{name: "digits", usage: refs.ReferenceUsage{Label: "^1"}, want: true},
+		{name: "letters in any case", usage: refs.ReferenceUsage{Label: "^Note"}, want: true},
+		{name: "hyphen", usage: refs.ReferenceUsage{Label: "^my-note"}, want: true},
+		{name: "full reference", usage: refs.ReferenceUsage{Style: refs.StyleFull, Label: "^n"}, want: true},
+		{name: "image", usage: refs.ReferenceUsage{IsImage: true, Label: "^n"}, want: false},
+		{name: "no caret", usage: refs.ReferenceUsage{Label: "note"}, want: false},
+		{name: "caret alone", usage: refs.ReferenceUsage{Label: "^"}, want: false},
+		{name: "underscore", usage: refs.ReferenceUsage{Label: "^my_note"}, want: false},
+		{name: "escape", usage: refs.ReferenceUsage{Label: "^a\\*b"}, want: false},
+		{name: "emphasis", usage: refs.ReferenceUsage{Label: "^*n*"}, want: false},
+		{name: "entity", usage: refs.ReferenceUsage{Label: "^a&amp;b"}, want: false},
+		{name: "code span", usage: refs.ReferenceUsage{Label: "^`n`"}, want: false},
+		{name: "HTML", usage: refs.ReferenceUsage{Label: "^<b>n</b>"}, want: false},
+		{name: "space", usage: refs.ReferenceUsage{Label: "^a b"}, want: false},
+		{name: "letter outside ASCII", usage: refs.ReferenceUsage{Label: "^é"}, want: false},
+		{name: "second caret", usage: refs.ReferenceUsage{Label: "^^n"}, want: false},
+		{name: "comma", usage: refs.ReferenceUsage{Label: "^a,b"}, want: false},
+		{name: "dot", usage: refs.ReferenceUsage{Label: "^a.b"}, want: false},
+		{name: "slash", usage: refs.ReferenceUsage{Label: "^a/b"}, want: false},
+		{name: "colon", usage: refs.ReferenceUsage{Label: "^a:b"}, want: false},
+		{name: "at sign", usage: refs.ReferenceUsage{Label: "^a@b"}, want: false},
+		{name: "opening bracket", usage: refs.ReferenceUsage{Label: "^a[b"}, want: false},
+		{name: "opening brace", usage: refs.ReferenceUsage{Label: "^a{b"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, plainFootnoteCall(&tt.usage))
+		})
+	}
+}
+
+// TestLabelKey checks the keys under which MD052 matches footnote labels:
+// white space collapsed and trimmed as markdownlint's normalizeReference
+// does, lowercase only for a label that is all ASCII, and every other byte
+// kept, so labels with a character outside ASCII match only when they are
+// the same bytes.
+func TestLabelKey(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+		want  string
+	}{
+		{name: "ASCII letters in any case", label: "^Note", want: "^note"},
+		{name: "white space collapsed and trimmed", label: " a \t\n b ", want: "a b"},
+		{name: "JavaScript white space", label: "a\u00a0\u2028\ufeffb\u3000", want: "a b"},
+		{name: "accented capital kept", label: "^É", want: "^É"},
+		{name: "long s kept", label: "^\u017f", want: "^\u017f"},
+		{name: "sharp s kept", label: "ß", want: "ß"},
+		{name: "ASCII next to a letter outside ASCII kept", label: "^Aé", want: "^Aé"},
+		{name: "invalid bytes kept", label: "a\xffb", want: "a\xffb"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, labelKey(tt.label))
+		})
+	}
+	assert.NotEqual(t, labelKey("\xfe"), labelKey("\xff"), "invalid bytes stay apart")
+}
+
+// TestFootnoteDefinitionLabel checks the labels that micromark reads in a
+// footnote definition, whose length it counts in UTF-16 code units, up to
+// 999.
+func TestFootnoteDefinitionLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		want   string
+		wantOK bool
+	}{
+		{name: "label", text: "[^note]: text", want: "note", wantOK: true},
+		{name: "escaped bracket", text: "[^a\\]b]: text", want: "a\\]b", wantOK: true},
+		{name: "empty label", text: "[^]: text"},
+		{name: "space in the label", text: "[^a b]: text"},
+		{name: "no colon", text: "[^note] text"},
+		{name: "999 code units", text: "[^" + strings.Repeat("\U0001F600", 499) + "a]: x", want: strings.Repeat("\U0001F600", 499) + "a", wantOK: true},
+		{name: "1000 code units", text: "[^" + strings.Repeat("\U0001F600", 500) + "]: x"},
+		{name: "999 code units with an escape", text: "[^" + strings.Repeat("a", 997) + "\\]]: x", want: strings.Repeat("a", 997) + "\\]", wantOK: true},
+		{name: "1000 code units with an escape", text: "[^" + strings.Repeat("a", 998) + "\\]]: x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := footnoteDefinitionLabel([]byte(tt.text))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestOpensRawHTMLBlock checks which lines open an HTML block of kinds 1 to
+// 5 that does not end on the line, as micromark reads them.
+func TestOpensRawHTMLBlock(t *testing.T) {
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{line: "<!--", want: true},
+		{line: "<!-- note -->", want: false},
+		{line: "<!-->", want: false},
+		{line: "<?php", want: true},
+		{line: "<?>", want: false},
+		{line: "<![CDATA[ x", want: true},
+		{line: "<![CDATA[ x ]]>", want: false},
+		{line: "<![CDATA[x]]]>", want: true},
+		{line: "<![CDATA[x]]]]>", want: false},
+		{line: "<![CDATA[]]>", want: false},
+		{line: "<![CDATA[>", want: true},
+		{line: "<![CDATA[x]>", want: true},
+		{line: "<!doctype", want: true},
+		{line: "<!DOCTYPE html>", want: false},
+		{line: "<script>", want: true},
+		{line: "<SCRIPT src=a.js>", want: true},
+		{line: "<textarea", want: true},
+		{line: "<pre\tclass=x>", want: true},
+		{line: "<script>a</b></script>", want: false},
+		{line: "<script></</script>", want: false},
+		{line: "<script>x</script", want: true},
+		{line: "<script></\u017fcript>", want: true},
+		{line: "<pre>x</PRE>", want: false},
+		{line: "<pre>x</pre >", want: true},
+		{line: "<pre>x</prescription>", want: true},
+		{line: "<style>x</script>", want: false},
+		{line: "<prescription>", want: false},
+		{line: "<script/>", want: false},
+		{line: "<scripts>", want: false},
+		{line: "<div>", want: false},
+		{line: "text <!--", want: false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, opensRawHTMLBlock([]byte(tt.line)), "%q", tt.line)
 	}
 }
 

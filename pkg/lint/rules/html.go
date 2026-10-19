@@ -64,11 +64,12 @@ func (r *InlineHTMLRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		span := block.SourceRange()
-		sources.with(block, func(source []byte) {
-			for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
-				report(construct, allowed)
+		eachHTMLBlockConstruct(&sources, block, func(_ []byte, construct mdscan.HTMLConstruct, inTable bool) {
+			if inTable {
+				report(construct, tableAllowed)
+				return
 			}
+			report(construct, allowed)
 		})
 	}
 
@@ -187,6 +188,26 @@ func (s *htmlSources) construct(node *mdast.Node) (mdscan.HTMLConstruct, bool) {
 		construct, ok = htmlNodeConstruct(source, node)
 	})
 	return construct, ok
+}
+
+// eachHTMLBlockConstruct calls use with each raw HTML construct that
+// markdownlint finds in an HTML block (see htmlBlockInlineHTML), with the
+// block's source, from which the construct reads, and with whether the
+// construct lies in a table. The source is valid only during the call.
+func eachHTMLBlockConstruct(
+	sources *htmlSources, block *mdast.Node, use func(source []byte, construct mdscan.HTMLConstruct, inTable bool),
+) {
+	tags := htmlBlockInlineHTML(sources.file, block)
+	if len(tags) == 0 {
+		return
+	}
+	sources.with(block, func(source []byte) {
+		for _, tag := range tags {
+			if construct, ok := mdscan.MatchHTML(source[:tag.span.EndOffset], tag.span.StartOffset); ok {
+				use(source, construct, tag.inTable)
+			}
+		}
+	})
 }
 
 // with calls use with the source of node. The source is valid only during

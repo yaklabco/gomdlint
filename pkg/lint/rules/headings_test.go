@@ -378,6 +378,18 @@ func TestSingleH1Rule_MarkdownlintDefaults(t *testing.T) {
 			wantLines: []int{4},
 		},
 		{
+			// goldmark leaves definitions out of the tree, but markdownlint
+			// counts one as content, so the first H1 is not a title.
+			name:      "leading definition means no title",
+			input:     "[a]: /url\n# A\n\n# B\n",
+			wantLines: []int{},
+		},
+		{
+			name:      "definition after the first H1",
+			input:     "# A\n\n[a]: /url\n\n# B\n",
+			wantLines: []int{5},
+		},
+		{
 			name:      "title_only false flags every later H1",
 			input:     "Intro.\n\n# A\n\n# B\n",
 			options:   map[string]any{"title_only": false},

@@ -349,8 +349,10 @@ var (
 	imgAriaHiddenAttributePattern = regexp.MustCompile(`(?i)\saria-hidden\s*=\s*['"]?([^'"\s>]*)`)
 )
 
-// Apply checks that Markdown images have non-empty alt text and that HTML img
+// Apply checks that Markdown images have alt text and that HTML img
 // elements have an alt attribute or are hidden with aria-hidden="true".
+// Like markdownlint, a Markdown image lacks alt text only when nothing at
+// all is written between its brackets, so "![ ](a.png)" passes.
 func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
@@ -364,8 +366,7 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 			return diags, ctx.Ctx.Err()
 		}
 
-		alt := lint.ImageAlt(img)
-		if len(bytes.TrimSpace([]byte(alt))) > 0 {
+		if hasAltText(img) {
 			continue
 		}
 
@@ -404,6 +405,18 @@ func (r *ImageAltTextRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 	return diags, nil
 }
 
+// hasAltText reports whether something is written between the brackets of a
+// Markdown image, which markdownlint counts as alt text even when it is only
+// whitespace or raw HTML. Without the source range of the brackets it falls
+// back to the image's text.
+func hasAltText(img *mdast.Node) bool {
+	label, full := img.ContentRange(), img.SourceRange()
+	if label.StartOffset > full.StartOffset && label.EndOffset >= label.StartOffset && label.EndOffset < full.EndOffset {
+		return label.EndOffset > label.StartOffset
+	}
+	return len(bytes.TrimSpace([]byte(lint.ImageAlt(img)))) > 0
+}
+
 // sortDiagnosticsByPosition orders diagnostics by start line, then start column.
 func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 	sort.SliceStable(diags, func(i, j int) bool {
@@ -420,7 +433,7 @@ func sortDiagnosticsByPosition(diags []lint.Diagnostic) {
 func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 	var images []htmlImage
 	sources := htmlSources{file: ctx.File}
-	keep := func(source []byte, construct mdscan.HTMLConstruct) {
+	keep := func(source []byte, construct mdscan.HTMLConstruct, _ bool) {
 		if construct.IsOpeningElement() && strings.EqualFold(construct.Name, "img") {
 			// The source is valid only while it is read, so the image keeps
 			// its own copy of the tag.
@@ -428,17 +441,12 @@ func (r *ImageAltTextRule) htmlImages(ctx *lint.RuleContext) []htmlImage {
 		}
 	}
 	for _, block := range ctx.HTMLBlocks() {
-		span := block.SourceRange()
-		sources.with(block, func(source []byte) {
-			for _, construct := range mdscan.ScanHTML(source, span.StartOffset, span.EndOffset) {
-				keep(source, construct)
-			}
-		})
+		eachHTMLBlockConstruct(&sources, block, keep)
 	}
 	for _, inline := range ctx.HTMLInlines() {
 		sources.with(inline, func(source []byte) {
 			if construct, ok := htmlNodeConstruct(source, inline); ok {
-				keep(source, construct)
+				keep(source, construct, false)
 			}
 		})
 	}

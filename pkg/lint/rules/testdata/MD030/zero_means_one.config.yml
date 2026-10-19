@@ -1,0 +1,7 @@
+rules:
+  MD030:
+    options:
+      ul_single: 0
+      ol_single: 0
+      ul_multi: 0
+      ol_multi: 0

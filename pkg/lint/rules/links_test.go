@@ -183,6 +183,37 @@ func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
 	}
 }
 
+// TestLinkSpacesRule_LinksAfterTaskCheckboxes checks MD039 where a list
+// item starts with brackets. The parser reads them as a task checkbox as
+// goldmark does, at the start of the item's first block, a heading
+// included, so "[ ](/url)" there is no link, as on main, though markdownlint,
+// which reads no checkboxes, reports it. A link after a checkbox is checked.
+func TestLinkSpacesRule_LinksAfterTaskCheckboxes(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantColumns []int
+	}{
+		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{}},
+		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{}},
+		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{}},
+		{name: "checkbox before parenthesized text", input: "- [ ] (https://example.org)\n", wantColumns: []int{}},
+		{name: "checkbox before a link", input: "- [ ] [ text ](/url)\n", wantColumns: []int{8, 13}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewLinkSpacesRule(), tt.input, nil)
+			columns := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				require.Equal(t, 1, diag.StartLine)
+				columns = append(columns, diag.StartColumn)
+			}
+			require.Equal(t, tt.wantColumns, columns)
+		})
+	}
+}
+
 // TestLinkSpacesRule_Fix trims the whitespace inside link text like markdownlint:
 // only spaces and tabs on the same line as the bracket are removed.
 func TestLinkSpacesRule_Fix(t *testing.T) {
@@ -342,9 +373,11 @@ func TestImageAltTextRule(t *testing.T) {
 			wantN: 1,
 		},
 		{
+			// markdownlint counts whitespace between the brackets as alt
+			// text.
 			name:  "image with whitespace alt",
 			input: "![   ](image.png)",
-			wantN: 1,
+			wantN: 0,
 		},
 		{
 			name:  "multiple images mixed",
@@ -380,6 +413,120 @@ func TestImageAltTextRule(t *testing.T) {
 	}
 }
 
+// TestImageAltTextRule_EmptyLabel checks MD045 against markdownlint 0.41.1,
+// which reports a Markdown image only when nothing at all is written between
+// its brackets: whitespace, a line ending or raw HTML there is alt text.
+func TestImageAltTextRule_EmptyLabel(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"![ ](a.png) and ![](b.png) and ![  ](c.png) and ![alt](d.png)\n\n" + // 3
+		"![<b></b>](e.png) and ![*](f.png) and ![&nbsp;](g.png)\n\n" + // 5
+		"![][ref] and ![ ][ref] and ![ref] and ![ref][]\n\n" + // 7
+		"![\n](h.png)\n\n" + // 9
+		"[![](i.png)](https://example.com)\n\n" + // 12
+		"> ![](j.png) quoted\n\n" + // 14
+		"[ref]: /image.png\n"
+
+	type position struct{ line, column int }
+	diags := applyRuleWithOptions(t, NewImageAltTextRule(), markdown, nil)
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{3, 17}, {7, 1}, {12, 2}, {14, 3}}, got)
+}
+
+// TestRulesDoNotSkipMath checks that MD011, MD033, MD045 and MD052 read
+// math as main does: goldmark parses no math, so a math block or inline
+// math is Markdown to them, where markdownlint 0.41.1, which parses math,
+// skips it. In the last four rows, markdownlint reports the same.
+func TestRulesDoNotSkipMath(t *testing.T) {
+	const tail = "(a)[b] <i> ![](x) [missing][label]"
+	type position struct{ line, column int }
+	tests := []struct {
+		name  string
+		input string
+		want  map[string][]position // By rule ID.
+	}{
+		{
+			name:  "math block",
+			input: "$$\n" + tail + "\n$$\n",
+			want:  map[string][]position{"MD011": {{2, 1}}, "MD033": {{2, 8}}, "MD045": {{2, 12}}, "MD052": {{2, 19}}},
+		},
+		{
+			name:  "math block with a blank line",
+			input: "$$\nx\n\n" + tail + "\n$$\n",
+			want:  map[string][]position{"MD011": {{4, 1}}, "MD033": {{4, 8}}, "MD045": {{4, 12}}, "MD052": {{4, 19}}},
+		},
+		{
+			name:  "inline math",
+			input: "Inline $" + tail + "$ math.\n",
+			want:  map[string][]position{"MD011": {{1, 9}}, "MD033": {{1, 16}}, "MD045": {{1, 20}}, "MD052": {{1, 27}}},
+		},
+		{
+			name:  "inline math between double dollar signs",
+			input: "Display $$" + tail + "$$ math.\n",
+			want:  map[string][]position{"MD011": {{1, 11}}, "MD033": {{1, 18}}, "MD045": {{1, 22}}, "MD052": {{1, 29}}},
+		},
+		{
+			name:  "math in a blockquote",
+			input: "> $$\n> " + tail + "\n> $$\n",
+			want:  map[string][]position{"MD011": {{2, 3}}, "MD033": {{2, 10}}, "MD045": {{2, 14}}, "MD052": {{2, 21}}},
+		},
+		{
+			name:  "math in a list item",
+			input: "- $$\n  " + tail + "\n  $$\n",
+			want:  map[string][]position{"MD011": {{2, 3}}, "MD033": {{2, 10}}, "MD045": {{2, 14}}, "MD052": {{2, 21}}},
+		},
+		{
+			name:  "math in an HTML block",
+			input: "<div>\n$$\n<i> <img src=\"a.png\">\n$$\n</div>\n",
+			want:  map[string][]position{"MD033": {{1, 1}, {3, 1}, {3, 5}}, "MD045": {{3, 5}}},
+		},
+		{
+			name:  "inline math in an HTML block",
+			input: "<div>\n$<i>$ and $<img src=\"a.png\">$\n</div>\n",
+			want:  map[string][]position{"MD033": {{1, 1}, {2, 2}, {2, 12}}, "MD045": {{2, 12}}},
+		},
+		{
+			name:  "math in a directive",
+			input: ":::note\n$$\nx\n:::\n\n" + tail + "\n",
+			want:  map[string][]position{"MD011": {{6, 1}}, "MD033": {{6, 8}}, "MD045": {{6, 12}}, "MD052": {{6, 19}}},
+		},
+		{
+			name:  "list item started in math",
+			input: "$$\n- a\n$$\n  $$\n$$\n" + tail + "\n",
+			want:  map[string][]position{"MD011": {{6, 1}}, "MD033": {{6, 8}}, "MD045": {{6, 12}}, "MD052": {{6, 19}}},
+		},
+		{
+			name:  "math in an item after indented code",
+			input: "    code\n\n3. a\n   $$\n$$\n" + tail + "\n",
+			want:  map[string][]position{"MD011": {{6, 1}}, "MD033": {{6, 8}}, "MD045": {{6, 12}}, "MD052": {{6, 19}}},
+		},
+		{
+			name:  "math fences around an HTML block",
+			input: "$$\n- a\n$$\n  <div>\n$$\n(a)[b]\n$$\n",
+			want:  map[string][]position{"MD011": {{6, 1}}, "MD033": {{4, 3}}},
+		},
+	}
+	rules := []lint.Rule{NewReversedLinkRule(), NewInlineHTMLRule(), NewImageAltTextRule(), NewReferenceLinkImagesRule()}
+	for _, tt := range tests {
+		for _, rule := range rules {
+			t.Run(tt.name+" "+rule.ID(), func(t *testing.T) {
+				diags := applyRuleWithOptions(t, rule, tt.input, nil)
+				got := make([]position, 0, len(diags))
+				for _, diag := range diags {
+					got = append(got, position{diag.StartLine, diag.StartColumn})
+				}
+				want := tt.want[rule.ID()]
+				if want == nil {
+					want = []position{}
+				}
+				assert.Equal(t, want, got)
+			})
+		}
+	}
+}
+
 // TestImageAltTextRule_HTMLImages checks HTML img elements like markdownlint:
 // an alt attribute (even an empty one) or aria-hidden="true" satisfies the rule.
 func TestImageAltTextRule_HTMLImages(t *testing.T) {
@@ -397,6 +544,13 @@ func TestImageAltTextRule_HTMLImages(t *testing.T) {
 		{name: "uppercase element name", input: "Text <IMG SRC=\"a.png\"> here.\n", want: []position{{1, 6}}},
 		{name: "img inside HTML block", input: "<p>\n  <img src=\"a.png\">\n</p>\n", want: []position{{2, 3}}},
 		{name: "img inside HTML comment", input: "<!-- <img src=\"a.png\"> -->\n"},
+		{
+			// markdownlint reads an HTML block's lines as Markdown, so an
+			// img in a code span there is code.
+			name:  "img in a code span in an HTML block",
+			input: "<div>\n`<img src=\"a.png\">` code\n<img src=\"b.png\">\n</div>\n",
+			want:  []position{{3, 1}},
+		},
 		{name: "other elements ignored", input: "<div class=\"x\">text</div>\n"},
 		{name: "quoted HTML block img spanning lines", input: "> <img src=\"a.png\"\n> alt=\"x\">\n"},
 		{name: "quoted inline img spanning lines", input: "> Text <img src=\"a.png\"\n> alt=\"x\"> more.\n"},
@@ -592,7 +746,8 @@ func TestImageAltTextRule_HTMLImagesKeepMaskedTags(t *testing.T) {
 	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
 	require.NoError(t, err)
 
-	images := NewImageAltTextRule().htmlImages(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+	ctx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
+	images := NewImageAltTextRule().htmlImages(ctx)
 
 	require.Len(t, images, 2)
 	assert.Equal(t, "<img src=\"a.png\"\n  alt=\"x\">", string(images[0].tag))

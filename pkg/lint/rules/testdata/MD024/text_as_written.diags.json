@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD024",
+    "name": "no-duplicate-heading",
+    "line": 11,
+    "column": 1,
+    "message": "Duplicate heading text \"Install\" (first occurrence on line 3)",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD024",
+    "name": "no-duplicate-heading",
+    "line": 17,
+    "column": 1,
+    "message": "Duplicate heading text \"Setext heading\" (first occurrence on line 13)",
+    "severity": "warning",
+    "fixable": false
+  }
+]

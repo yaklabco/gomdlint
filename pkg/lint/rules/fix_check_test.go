@@ -217,6 +217,28 @@ func TestFixCheckKeeps(t *testing.T) {
 			want: false,
 		},
 		{
+			name:  "making a task checkbox",
+			input: "- [y] task\n",
+			old:   "[y]", new: "[x]",
+			want: false,
+		},
+		{
+			// The fix check reads checkboxes as the parser does, so it reads
+			// "[x]task" as a checkbox too. Lint's checkbox guard withholds
+			// every fix that changes the text of a possible checkbox, this
+			// one included.
+			name:  "joining a task checkbox to its text",
+			input: "- [x] task\n",
+			old:   "] task", new: "]task",
+			want: true,
+		},
+		{
+			name:  "widening the space after a task checkbox",
+			input: "- [x] task\n",
+			old:   "] task", new: "]  task",
+			want: true,
+		},
+		{
 			name:  "changing a link destination",
 			input: "A [link](/a) here.\n",
 			old:   "/a", new: "/b",

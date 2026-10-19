@@ -25,7 +25,7 @@ func TestListAndWhitespaceRulesIgnoreByteOrderMark(t *testing.T) {
 		{"MD007 indented list on the first line", NewULIndentRule(), nil, "  - a\n  - b\n", 2},
 		{"MD009 trailing space on the first line", NewTrailingWhitespaceRule(), nil, "text \nmore\n", 1},
 		{"MD010 tab on the first line", NewHardTabsRule(), nil, "\tcode\n", 1},
-		{"MD012 blank lines at the start", NewMultipleBlankLinesRule(), nil, "\n\n\ntext\n", 1},
+		{"MD012 blank lines at the start", NewMultipleBlankLinesRule(), nil, "\n\n\ntext\n", 2},
 		{"MD013 long first line", NewMaxLineLengthRule(), map[string]any{"line_length": 20}, "aaaa bbbb cccc dddd eeee ffff\n", 1},
 		{"MD027 quote space on the first line", NewNoMultipleSpaceBlockquoteRule(), nil, ">  quoted\n", 1},
 		{"MD027 quote space before a list item on the first line", NewNoMultipleSpaceBlockquoteRule(), nil, ">  - item\n", 1},

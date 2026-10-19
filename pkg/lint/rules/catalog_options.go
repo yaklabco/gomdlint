@@ -94,7 +94,8 @@ func catalogOptions() map[string][]lint.OptionSpec {
 			},
 			{
 				Name: "ignore_code_languages", Type: lint.OptionStringList, Default: []string{},
-				Description: "Languages of fenced code blocks to skip, matched against the first word of the info string in any case.",
+				Description: "Languages of fenced code blocks to skip, matched against the first word of the info string " +
+					"in any case. When it names any language, fences that name none are skipped too.",
 			},
 			{
 				Name: "spaces_per_tab", Type: lint.OptionInteger, Default: 1,
@@ -109,15 +110,18 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD013": {
 			{
 				Name: "max", Aliases: []lint.OptionAlias{{Name: "line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, MarkdownlintPinned: true, Description: "Most characters allowed on a line.",
+				Default: defaultMaxLineLength, MarkdownlintPinned: true,
+				Description: "Most characters allowed on a line. 0 counts as 80, as in markdownlint.",
 			},
 			{
 				Name: "heading_max", Aliases: []lint.OptionAlias{{Name: "heading_line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, DefaultFrom: "max", Description: "Most characters allowed on a heading line.",
+				Default: defaultMaxLineLength, DefaultFrom: "max",
+				Description: "Most characters allowed on a heading line. 0 counts as max.",
 			},
 			{
 				Name: "code_block_max", Aliases: []lint.OptionAlias{{Name: "code_block_line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, DefaultFrom: "max", Description: "Most characters allowed on a line of a code block.",
+				Default: defaultMaxLineLength, DefaultFrom: "max",
+				Description: "Most characters allowed on a line of a code block. 0 counts as max.",
 			},
 			{
 				Name: "ignore_code_blocks", Aliases: []lint.OptionAlias{{Name: "code_blocks", Inverted: true}},
@@ -421,7 +425,7 @@ func frontMatterTitleOption(role string) lint.OptionSpec {
 func listMarkerSpaceOption(name, list string) lint.OptionSpec {
 	return lint.OptionSpec{
 		Name: name, Type: lint.OptionInteger, Default: 1,
-		Description: "Spaces after the marker of each item of a " + list + ".",
+		Description: "Spaces after the marker of each item of a " + list + ". 0 counts as 1, as in markdownlint.",
 	}
 }
 

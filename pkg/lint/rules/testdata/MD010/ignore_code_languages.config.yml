@@ -1,0 +1,5 @@
+rules:
+  MD010:
+    options:
+      ignore_code_languages:
+        - makefile

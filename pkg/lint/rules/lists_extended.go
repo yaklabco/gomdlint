@@ -349,10 +349,10 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 		return nil, nil
 	}
 
-	ulSingle := ctx.OptionInt("ul_single", 1)
-	ulMulti := ctx.OptionInt("ul_multi", 1)
-	olSingle := ctx.OptionInt("ol_single", 1)
-	olMulti := ctx.OptionInt("ol_multi", 1)
+	ulSingle := markerSpacingOption(ctx, "ul_single")
+	ulMulti := markerSpacingOption(ctx, "ul_multi")
+	olSingle := markerSpacingOption(ctx, "ol_single")
+	olMulti := markerSpacingOption(ctx, "ol_multi")
 
 	plan := newListShiftPlan(ctx.File)
 	var mismatches []spacingMismatch
@@ -417,10 +417,12 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
 	for _, mismatch := range mismatches {
+		// Like markdownlint, the finding covers the marker and the spaces
+		// after it.
 		marker := mismatch.marker
 		pos := mdast.SourcePosition{
 			StartLine:   marker.Line,
-			StartColumn: marker.End - marker.LineStart + 1,
+			StartColumn: marker.Start - marker.LineStart + 1,
 			EndLine:     marker.Line,
 			EndColumn:   marker.ContentStart - marker.LineStart + 1,
 		}
@@ -435,6 +437,15 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	}
 
 	return keepSafeFixes(ctx, diags), nil
+}
+
+// markerSpacingOption reads one of MD030's spacing options. Like markdownlint,
+// which reads "value || 1", a value of 0 means the default of 1.
+func markerSpacingOption(ctx *lint.RuleContext, name string) int {
+	if spaces := ctx.OptionInt(name, 1); spaces != 0 {
+		return spaces
+	}
+	return 1
 }
 
 // listItemsAreSingleLines reports whether every item of a list occupies one

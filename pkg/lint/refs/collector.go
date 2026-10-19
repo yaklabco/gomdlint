@@ -70,7 +70,8 @@ func (c *collector) visit(node *mdast.Node) error {
 	return nil
 }
 
-// collectHeadingAnchor generates an anchor from a heading.
+// collectHeadingAnchor generates an anchor from a heading, and adds the
+// custom anchors written in it.
 func (c *collector) collectHeadingAnchor(node *mdast.Node) {
 	text := extractHeadingText(node)
 	if text == "" {
@@ -79,6 +80,36 @@ func (c *collector) collectHeadingAnchor(node *mdast.Node) {
 
 	pos := node.SourcePosition()
 	c.ctx.Anchors.AddFromHeading(text, pos)
+	c.collectCustomAnchors(node, pos)
+}
+
+// customAnchorPattern matches a custom heading anchor, "{#name}", as
+// markdownlint reads it: words of lowercase ASCII letters and digits joined
+// by single hyphens or underscores.
+var customAnchorPattern = regexp.MustCompile(`\{#([a-z\d]+(?:[-_][a-z\d]+)*)\}`)
+
+// collectCustomAnchors adds an anchor for each "{#name}" in a heading's text
+// as written, as markdownlint does. The slug of the heading's text, which
+// holds the name too, stays an anchor, and slugs of later headings are
+// numbered as before.
+func (c *collector) collectCustomAnchors(node *mdast.Node, pos mdast.SourcePosition) {
+	content := node.ContentRange()
+	file := c.ctx.File
+	if file == nil || content.StartOffset < 0 || content.EndOffset <= content.StartOffset ||
+		content.EndOffset > len(file.Content) {
+		return
+	}
+	source := file.Content[content.StartOffset:content.EndOffset]
+	if !bytes.Contains(source, []byte("{#")) {
+		return
+	}
+	for _, match := range customAnchorPattern.FindAllSubmatch(source, -1) {
+		id := string(match[1])
+		if c.ctx.Anchors.Has(id) {
+			continue
+		}
+		c.ctx.Anchors.Add(&Anchor{ID: id, Source: AnchorFromCustomID, Position: pos, Text: string(match[0])})
+	}
 }
 
 // HeadingAnchors returns the anchor of every heading under root, in document

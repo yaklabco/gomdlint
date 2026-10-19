@@ -1,0 +1,5 @@
+rules:
+  MD013:
+    options:
+      line_length: 0
+      heading_line_length: 0

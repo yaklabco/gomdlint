@@ -215,6 +215,55 @@ func TestInlineHTMLRule_EachElement(t *testing.T) {
 			input: "<div>a < b and c<d</div>\n",
 			want:  []htmlDiagWant{{1, 1, "div"}},
 		},
+		// markdownlint 0.41.1 reads an HTML block's lines as Markdown in
+		// which no line starts an HTML block or indented code, so a tag is
+		// code in a code span or a fenced code block, and text after a
+		// backslash or as a link destination.
+		{
+			name:  "tag in a code span in a block",
+			input: "<div>\n`<span>` inside\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}},
+		},
+		{
+			name:  "tags in code spans with longer backtick strings",
+			input: "<div>\n``<span>`` and `` ` <em> ` ``\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}},
+		},
+		{
+			name:  "tag after an unmatched backtick",
+			input: "<div>\n`<span>\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 2, "span"}},
+		},
+		{
+			name:  "escaped tag in a block",
+			input: "<div>\n\\<em> escaped and <b>bold</b>\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 19, "b"}},
+		},
+		{
+			name:  "tag in a fenced code block in a block",
+			input: "<pre>\n```html\n<i>fenced</i>\n```\n</pre>\n",
+			want:  []htmlDiagWant{{1, 1, "pre"}},
+		},
+		{
+			name:  "tag as a link destination in a block",
+			input: "<div>\n[link](<b>) and <https://example.com/<i>\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 38, "i"}},
+		},
+		{
+			name:  "code span in a quoted block",
+			input: "> <div>\n> `<span>` in a quote and <span\n> class=\"x\">split</span>\n> </div>\n",
+			want:  []htmlDiagWant{{1, 3, "div"}, {2, 27, "span"}},
+		},
+		{
+			name:  "code span in a block in a list item",
+			input: "- <details>\n  `<summary>` in an item and <summary>real</summary>\n  </details>\n",
+			want:  []htmlDiagWant{{1, 3, "details"}, {2, 30, "summary"}},
+		},
+		{
+			name:  "indented tags in a block",
+			input: "<table>\n    <tr><td>indented <b>cells</b></td></tr>\n</table>\n",
+			want:  []htmlDiagWant{{1, 1, "table"}, {2, 5, "tr"}, {2, 9, "td"}, {2, 22, "b"}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -253,6 +302,75 @@ func TestInlineHTMLRule_TableAllowedElements(t *testing.T) {
 	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, map[string]any{
 		"table_allowed_elements": []any{"br"},
 	}), []htmlDiagWant{{1, 5, "br"}})
+}
+
+// TestInlineHTMLRule_MathAndTablesInHTMLBlocks checks MD033 against
+// markdownlint 0.41.1, which reads a table in an HTML block's lines as a
+// table, so table_allowed_elements applies to its cells. A tag in math is
+// HTML, as on main: goldmark parses no math, where markdownlint skips it.
+func TestInlineHTMLRule_MathAndTablesInHTMLBlocks(t *testing.T) {
+	tableOptions := map[string]any{"allowed_elements": []any{"div", "span", "img"}, "table_allowed_elements": []any{}}
+	tests := []struct {
+		name    string
+		input   string
+		options map[string]any
+		want    []htmlDiagWant
+	}{
+		{name: "inline math in a block", input: "<div>\n$<img>$\n</div>\n", want: []htmlDiagWant{{1, 1, "div"}, {2, 2, "img"}}},
+		{name: "math block in a block", input: "<div>\n$$\n<img>\n$$\n</div>\n", want: []htmlDiagWant{{1, 1, "div"}, {3, 1, "img"}}},
+		{
+			name:  "math and a tag after it in a block",
+			input: "<div>\nText $<b>$ and <i>x</i>.\n</div>\n",
+			want:  []htmlDiagWant{{1, 1, "div"}, {2, 7, "b"}, {2, 16, "i"}},
+		},
+		{
+			name:  "inline math outside blocks",
+			input: "Text $<b>$ here.\n\n$<img src=\"a.png\">$\n",
+			want:  []htmlDiagWant{{1, 7, "b"}, {3, 2, "img"}},
+		},
+		{
+			name:    "table in a block",
+			input:   "<div>\n| a | b |\n| - | - |\n| <span> | <img> |\n</div>\n",
+			options: tableOptions,
+			want:    []htmlDiagWant{{4, 3, "span"}, {4, 12, "img"}},
+		},
+		{
+			name:    "table in a quoted block",
+			input:   "> <div>\n> | a | b |\n> | - | - |\n> | <span> | c |\n> </div>\n",
+			options: tableOptions,
+			want:    []htmlDiagWant{{4, 5, "span"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, tt.input, tt.options), tt.want)
+		})
+	}
+}
+
+// TestPlainBlockHTMLMatchesTheParsedLines checks that the plain parse of an
+// HTML block's lines, which serves lines without a table, finds the raw
+// HTML that the parse with source spans finds.
+func TestPlainBlockHTMLMatchesTheParsedLines(t *testing.T) {
+	for _, source := range []string{
+		"<details>\n<summary>More</summary>\n<script>alert(1)</script>\n</details>",
+		"<div><span>x</span></div>",
+		"<div>\n<!-- <b>hidden</b> -->\n</div>",
+		"<div\n  class=\"note\">\ntext\n</div>",
+		"> <div>\n> <span>x</span>\n> </div>",
+		"> <div\n> title=\"<b>\">\n> x\n> </div>",
+		"<div>\n`<span>` inside and ``<em>``\n\\<em> escaped and <b>bold</b>\n</div>",
+		"<pre>\n```html\n<i>fenced</i>\n```\n</pre>",
+		"<div>\n[link](<b>) and <https://example.com/<i>\n</div>",
+		"- <details>\n  `<summary>` in an item and <summary>real</summary>\n  </details>",
+		"<table>\n    <tr><td>indented <b>cells</b></td></tr>\n</table>",
+		"<div>\n$<b>x</b>$ and $$\n<i>y</i>\n$$\n</div>",
+	} {
+		t.Run(source, func(t *testing.T) {
+			const start = 7
+			assert.Equal(t, parsedBlockHTML("test.md", []byte(source), start), plainBlockHTML([]byte(source), start))
+		})
+	}
 }
 
 // TestHTMLSourcesMaskOneNodeAtATime checks that htmlSources masks the

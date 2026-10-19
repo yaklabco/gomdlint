@@ -277,6 +277,84 @@ formats change. The first entries under Changed may need action.
   scheme, after escapes and character references are resolved, or with
   `//`. Links to `sms:`, `urn:` or `vscode:` URIs and email autolinks used to
   count as relative.
+- **MD010**: Reports each run of tabs, as markdownlint does, instead of one
+  finding per line. With `ignore_code_languages` set, it skips fences that
+  name no language.
+- **MD012**: Reports each blank line past the maximum, as markdownlint
+  does, and no longer reports the blank lines right after front matter. One
+  pass of fixes still removes a whole run.
+- **MD013**, **MD030**: Read an option set to 0 as its default, as
+  markdownlint does: 80 characters for `line_length`, the line length for
+  headings and code blocks, and 1 space for MD030. MD030 findings point at
+  the list marker.
+- **MD018**: Reports lines that start with seven or more hashes. A space
+  cannot make them headings, so they get no fix.
+- **MD022**: Counts a line of only `>` or an HTML comment as blank, as MD031
+  and MD058 do.
+- **MD022**, **MD025**, **MD041**: Count a link reference definition as
+  content, as markdownlint does. `[a]: /url` before `# H` gets MD041 on its
+  line and MD022 on the heading, and a definition before the first H1 means
+  the document has no title for MD025.
+- **MD024**: Compares headings as written, without their raw HTML, so
+  `## Foo` and `## *Foo*` differ, and reports a repeated empty heading. HTML
+  in a strikethrough is left out too, since markdownlint parses no
+  strikethrough. With `siblings_only`, it compares a heading with the
+  earlier headings of its level since the last heading of a lower level.
+- **MD028**: Reports blank lines between blockquotes that are indented or in
+  a list item, one finding for each line, and no longer takes quote markers
+  in an HTML block for blockquotes.
+- **MD033**, **MD045**: Read the lines of an HTML block as Markdown, as
+  markdownlint does, so a tag in a code span, in a fenced code block or
+  after a backslash is not HTML, and MD033 applies `table_allowed_elements`
+  in a table there.
+- **MD036**: Reads a strikethrough in bold or italic text as plain text, as
+  markdownlint does, so `**~~Old~~ title**` is reported.
+- **MD045**: Reports a Markdown image only when nothing is written between
+  its brackets, so `![ ](a.png)` passes, as in markdownlint.
+- **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
+  `#TOP` unless `ignore_case` is set.
+- **MD052**: No longer reports a reference whose label is nothing but ASCII
+  white space, such as a form feed, for which markdownlint records no
+  reference. Reads GFM footnotes as markdownlint does where micromark is
+  certain to read the definition. A call such as `[^1]` is then no
+  reference, so `shortcut_syntax` no longer reports it, and in `[text][^1]`
+  the `[text]` is a shortcut reference, so `[text][^1]` is reported only
+  with `shortcut_syntax`, and there only where earlier versions reported it.
+  Only a link whose label after the `^` holds nothing but ASCII letters,
+  digits and hyphens is a call, and it calls only a definition with the same
+  label in any case, after white space is collapsed and trimmed. A
+  definition counts only on a `[^1]:` line at column 0, at the top level
+  outside code blocks, HTML blocks and front matter, at the start of the
+  document, after a blank line or right after another such definition. No
+  line before it may start with `$$` or `:::`, each code fence before it
+  must start at column 0 after a blank line, where goldmark reads it at the
+  top level, and no HTML block before it that may hold blank lines may go on
+  past its first line. No definition counts where micromark drops a byte
+  order mark that the parser reads as text: a second one at the start of the
+  file, or one that starts the first line after the front matter that holds
+  more than white space. Images such as `![^1][]`, other labels such as
+  `[^a\*b]` or `[^é]`, and calls of other definitions are read as before.
+- **MD054**: Reports no reference whose label is nothing but ASCII white
+  space, such as a form feed, which markdownlint never reports.
+- **MD059**: Compares link text as written and skips only links whose text
+  holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
+  strikethrough counts as direct. Findings point at the link text, one
+  column after the bracket, and autolinks are never checked.
+- No fix changes or makes a task list checkbox. micromark and GitHub's
+  cmark-gfm read checkboxes in different places, so any line that holds a
+  `[`, one character or a line ending, and `]`, wherever on the line, keeps
+  fixes off its paragraph and the lines on either side of it, and a fix that
+  makes such a line is withheld too. Its finding is reported without a fix.
+  A paragraph that holds `[1]` or `a[i]` keeps its fixes that way as well.
+  Plain task items such as `- [ ] todo` still get the fixes that change only
+  their marker for one of its kind, the spacing after it, their indentation
+  or their trailing whitespace (MD004, MD005, MD007, MD009, MD010, MD027,
+  MD029, MD030), which both renderers read the same, and MD032 still adds
+  the blank line before a bullet task list, or an ordered one whose first
+  marker is `1.` or `1)`. MD030, MD007 and MD010 used to turn text such as
+  `-  [\t] task` into a checkbox, MD009 removed checkboxes or the hard line
+  break after one, and MD032 and MD018 could make micromark read a checkbox
+  where it read none.
 - Fixes of two rules no longer combine to corrupt a file. MD014 removing
   prompts while MD048 changed the fences could close a code block early, and
   MD007 moving an item right while MD030 narrowed the item above could nest

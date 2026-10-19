@@ -400,71 +400,66 @@ func (r *MultipleBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 	}
 
 	var diags []lint.Diagnostic
-	streakStart := 0
-	streakCount := 0
+	count := 0
 
-	for lineNum := ctx.File.FrontMatterLines + 1; lineNum <= len(ctx.File.Lines); lineNum++ {
+	for lineNum := firstLineAfterFrontMatter(ctx.File); lineNum <= len(ctx.File.Lines); lineNum++ {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
 		// Like markdownlint, blank lines inside code blocks are content and
-		// end any streak in progress.
-		if !ctx.IsLineInCodeBlock(lineNum) && isBlankText(ctx.File, lineNum) {
-			if streakCount == 0 {
-				streakStart = lineNum
-			}
-			streakCount++
-		} else {
-			if streakCount > maxConsecutive {
-				diag := r.createDiagnostic(ctx, streakStart, streakCount, maxConsecutive)
-				diags = append(diags, diag)
-			}
-			streakCount = 0
+		// end any run in progress, and each blank line past the maximum is a
+		// finding of its own.
+		if ctx.IsLineInCodeBlock(lineNum) || !isBlankText(ctx.File, lineNum) {
+			count = 0
+			continue
 		}
-	}
-
-	// Handle trailing blank lines streak (but don't double-report with MD011).
-	// We still report if there's a streak in the middle that ends at EOF.
-	if streakCount > maxConsecutive {
-		diag := r.createDiagnostic(ctx, streakStart, streakCount, maxConsecutive)
-		diags = append(diags, diag)
+		count++
+		if count > maxConsecutive {
+			diags = append(diags, r.createDiagnostic(ctx, lineNum, count, maxConsecutive))
+		}
 	}
 
 	return keepSafeFixes(ctx, diags), nil
 }
 
+// firstLineAfterFrontMatter returns the first line markdownlint checks for
+// blank lines: the line after any front matter and the blank lines right
+// after it, which markdownlint's front matter pattern ("^---\s*" and the
+// like) takes into the front matter.
+func firstLineAfterFrontMatter(file *mdast.FileSnapshot) int {
+	line := file.FrontMatterLines + 1
+	if file.FrontMatterLines == 0 {
+		return line
+	}
+	for line <= len(file.Lines) && isBlankText(file, line) {
+		line++
+	}
+	return line
+}
+
+// createDiagnostic reports a blank line past the maximum, the count-th in a
+// row. Its fix deletes the line ending before the line and the line's own
+// whitespace, so the fixes of a run's extra lines touch without overlapping
+// and together remove them all, even the empty line after a final newline.
 func (r *MultipleBlankLinesRule) createDiagnostic(
 	ctx *lint.RuleContext,
-	streakStart, streakCount, maxConsecutive int,
+	lineNum, count, maxConsecutive int,
 ) lint.Diagnostic {
-	excessCount := streakCount - maxConsecutive
-	firstExcessLine := streakStart + maxConsecutive
-	lastExcessLine := streakStart + streakCount - 1
-
-	startOffset := ctx.File.Lines[firstExcessLine-1].StartOffset
-	endOffset := ctx.File.Lines[lastExcessLine-1].EndOffset
-	if last := ctx.File.Lines[lastExcessLine-1]; last.EndOffset == last.NewlineStart && firstExcessLine > 1 {
-		// The final line has no line ending of its own (it may be the empty
-		// line after a trailing newline), so deleting it means deleting the
-		// line ending in front of the excess lines instead.
-		startOffset = ctx.File.Lines[firstExcessLine-2].NewlineStart
-	}
-
 	builder := fix.NewEditBuilder()
-	builder.Delete(startOffset, endOffset)
+	builder.Delete(ctx.File.Lines[lineNum-2].NewlineStart, ctx.File.Lines[lineNum-1].NewlineStart)
 
 	pos := mdast.SourcePosition{
-		StartLine:   firstExcessLine,
+		StartLine:   lineNum,
 		StartColumn: 1,
-		EndLine:     lastExcessLine,
+		EndLine:     lineNum,
 		EndColumn:   1,
 	}
 
 	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-		fmt.Sprintf("Multiple consecutive blank lines (found %d, max %d)", streakCount, maxConsecutive)).
+		fmt.Sprintf("Multiple consecutive blank lines (found %d, max %d)", count, maxConsecutive)).
 		WithSeverity(config.SeverityWarning).
-		WithSuggestion(fmt.Sprintf("Remove %d blank line(s)", excessCount)).
+		WithSuggestion("Remove the blank line").
 		WithFix(builder).
 		Build()
 }

@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "MD051",
+    "name": "link-fragments",
+    "line": 8,
+    "column": 39,
+    "message": "Link fragment '#TOP' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD051",
+    "name": "link-fragments",
+    "line": 9,
+    "column": 4,
+    "message": "Link fragment '#Upper' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

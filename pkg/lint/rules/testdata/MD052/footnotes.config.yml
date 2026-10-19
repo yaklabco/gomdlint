@@ -1,0 +1,4 @@
+rules:
+  MD052:
+    options:
+      shortcut_syntax: true

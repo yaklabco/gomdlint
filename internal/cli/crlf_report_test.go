@@ -14,10 +14,10 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
-// crlfFixDocument has one finding for each kind of fix, all fixed in one
-// pass without conflicts: a blank line inserted below the heading, trailing
-// spaces deleted, extra blank lines deleted, an emphasis style rewritten
-// with two edits, and the final newline added.
+// crlfFixDocument has findings for each kind of fix, all fixed in one pass
+// without conflicts: a blank line inserted below the heading, trailing
+// spaces deleted, two extra blank lines deleted by a fix each, an emphasis
+// style rewritten with two edits, and the final newline added.
 const crlfFixDocument = "# Title\r\nSome text   \r\n\r\n\r\n\r\nText *one* and _two_.\r\nEnd"
 
 // jsonReportedEdits returns the fix edits of every diagnostic in a JSON
@@ -135,7 +135,7 @@ func TestFix_JSONAndSARIFFixesReproduceTheBytesWrittenToCRLFFiles(t *testing.T) 
 	written := readBytes(t, path)
 
 	require.NotEqual(t, crlfFixDocument, string(written), "the document must have fixes")
-	require.Len(t, jsonEdits, 6, "one edit for each fix, two for the emphasis style")
+	require.Len(t, jsonEdits, 7, "one edit for each fix, two for the emphasis style")
 	assert.Zero(t, bareLineFeeds(written), "--fix keeps the CRLF line endings")
 
 	assert.Equal(t, string(written), applyReported(t, original, jsonEdits),
