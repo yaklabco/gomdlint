@@ -171,8 +171,15 @@ func (c *collector) scanUnresolved(container *mdast.Node, chars []inlineChar) {
 // what follows it, records the reference, and returns the index the scan
 // continues from. A "(" after the pair began an inline link the parser
 // rejected, since a valid one would be a link node, so the pair falls back
-// to a reference as in CommonMark.
+// to a reference as in CommonMark. A full reference whose text is blank
+// (see BlankLabel) is no reference, as markdownlint records none, and a
+// pair that goldmark's own task list extension reads as a checkbox (see
+// goldmarkHeadingCheckbox) is skipped, so that what follows it is read
+// afresh.
 func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, opener bracketOpener, closing int) int {
+	if goldmarkHeadingCheckbox(container, chars, opener, closing) {
+		return closing
+	}
 	next := closing + 1
 	switch {
 	case isChar(chars, next, '[') && isChar(chars, next+1, ']'):
@@ -184,7 +191,9 @@ func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, o
 	case isChar(chars, next, '['):
 		if labelEnd, ok := labelEndIndex(chars, next); ok {
 			if label := c.labelSource(container, chars, next, labelEnd); validLabel(label) {
-				c.addUnresolved(chars, opener, closing, labelEnd, StyleFull, label)
+				if !c.blankText(container, chars, opener.index, closing) {
+					c.addUnresolved(chars, opener, closing, labelEnd, StyleFull, label)
+				}
 				return labelEnd
 			}
 		}
@@ -193,6 +202,42 @@ func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, o
 		c.addUnresolved(chars, opener, closing, closing, StyleShortcut, label)
 	}
 	return closing
+}
+
+// blankText reports whether the source between the brackets at chars[open]
+// and chars[closing] is blank (see BlankLabel). Any character that is not
+// white space, or an inline node, rules that out before the source is read.
+func (c *collector) blankText(container *mdast.Node, chars []inlineChar, open, closing int) bool {
+	for idx := open + 1; idx < closing; idx++ {
+		if char := chars[idx]; char.opaque || char.literal || strings.IndexByte(" \t\n\v\f\r", char.ch) < 0 {
+			return false
+		}
+	}
+	return BlankLabel(c.labelSource(container, chars, open, closing))
+}
+
+// goldmarkHeadingCheckbox reports whether goldmark's own task list
+// extension reads a checkbox from the bracket pair at chars[opener.index]
+// and chars[closing]: one space, tab, form feed, carriage return, "x" or
+// "X" between brackets that start a heading that is a list item's first
+// child. goldmark makes each link reference definition that starts an item
+// a child before the heading, which the tree leaves out, so the heading must
+// start where the item's content does, and on the item's first line or, as
+// an item can start with one blank line, on the next. The parser reads no
+// checkbox in a heading, so that the link in "- ## [ ](/url)." stays a link,
+// and goldmark reads the brackets after such a checkbox afresh.
+func goldmarkHeadingCheckbox(container *mdast.Node, chars []inlineChar, opener bracketOpener, closing int) bool {
+	if container.Kind != mdast.NodeHeading || opener.index != 0 || closing != 2 {
+		return false
+	}
+	item := container.Parent
+	if item == nil || item.Kind != mdast.NodeListItem || item.FirstChild != container ||
+		container.SourceRange().StartOffset != item.ContentRange().StartOffset ||
+		container.SourcePosition().StartLine > item.SourcePosition().StartLine+1 {
+		return false
+	}
+	inside := chars[1]
+	return !inside.opaque && !inside.literal && strings.IndexByte(" \t\f\rxX", inside.ch) >= 0
 }
 
 // addUnresolved records an unresolved reference whose link text closes at

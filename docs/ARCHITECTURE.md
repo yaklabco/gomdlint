@@ -274,13 +274,14 @@ link's reference style and its label without container prefixes, and gives
 strikethrough, tables and task checkboxes node kinds of their own. Token
 ranges are derived from the spans. Code, HTML block and front matter tokens
 follow the parse, while other markers are recognized line by line, so rules
-use spans for structure. The `gfm` flavor adds goldmark's linkify, table
-and strikethrough extensions and a task list extension of its own, which
-reads a checkbox where micromark does (`GFMExtensions`), except after link
-reference definitions that start a list item, where it reads none, as
-goldmark does. Every goldmark instance that a fix check builds for GFM uses
+use spans for structure. The `gfm` flavor adds goldmark's linkify, table,
+strikethrough and task list extensions (`GFMExtensions`), with one change:
+no checkbox is read in a heading, so that the link in `- ## [ ](/url).`
+stays a link. Every goldmark instance that a fix check builds for GFM uses
 the same extensions, so the checks and the rules read the same checkboxes.
-`commonmark` adds none.
+Fixes near anything that could be read as a checkbox are withheld by the
+checkbox guard, which finds such text by bytes, not by the parser's
+checkboxes. `commonmark` adds none.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark
@@ -298,10 +299,15 @@ line measured in CommonMark columns (`ContainerPrefix`), blank-line checks
 that see through `>` markers, and the text that adds a blank line inside a
 blockquote (`BlankLineText`). `pkg/lint/refs` collects reference
 definitions, the references that the parser leaves as text, and heading
-anchors built as GitHub builds them. `pkg/lint/mdscan` matches HTML
-constructs and GFM autolink literals. The HTML rules find the tags of an
-HTML block as markdownlint does, by parsing the block's lines again as
-Markdown without HTML blocks and indented code
+anchors built as GitHub builds them. It records no full reference whose
+text is nothing but ASCII white space, which markdownlint records as no
+reference, and it skips the brackets that goldmark's own task list
+extension reads as a checkbox at the start of a heading that starts a
+list item (`goldmarkHeadingCheckbox`), where the parser reads none, so
+that the brackets after them are read as goldmark reads them.
+`pkg/lint/mdscan` matches HTML constructs and GFM autolink literals. The
+HTML rules find the tags of an HTML block as markdownlint does, by parsing
+the block's lines again as Markdown without HTML blocks and indented code
 (`pkg/lint/rules/html_block_markdown.go`, with the parser from
 `NewHTMLBlockContent`), and marking tags in tables. goldmark parses no
 math, so no rule skips it. MD052 reads GFM footnotes, which goldmark does

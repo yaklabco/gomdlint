@@ -184,9 +184,11 @@ func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
 }
 
 // TestLinkSpacesRule_LinksInTaskListItems checks that MD039 sees the links
-// GFM reads at the start of a list item where goldmark alone would read a
-// task checkbox: in a heading, or right before "(". markdownlint 0.41.1
-// reports each side of the whitespace at the same column.
+// GFM reads at the start of a heading in a list item, where goldmark alone
+// would read a task checkbox. markdownlint 0.41.1 reports each side of the
+// whitespace at the same column. Right before "(" the parser reads a
+// checkbox, as goldmark and main do, so MD039 sees no link there, where
+// markdownlint reports one.
 func TestLinkSpacesRule_LinksInTaskListItems(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -195,7 +197,7 @@ func TestLinkSpacesRule_LinksInTaskListItems(t *testing.T) {
 	}{
 		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{7, 7}},
 		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{9, 9}},
-		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{4, 4}},
+		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{}},
 		{name: "checkbox before parenthesized text", input: "- [ ] (https://example.org)\n", wantColumns: []int{}},
 		{name: "checkbox before a link", input: "- [ ] [ text ](/url)\n", wantColumns: []int{8, 13}},
 	}

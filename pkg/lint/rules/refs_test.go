@@ -1476,12 +1476,14 @@ func TestHasLoneCarriageReturn(t *testing.T) {
 }
 
 // TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes checks MD052 where
-// the parser's task checkboxes decide what is a reference. markdownlint
-// never reports a label of nothing but ASCII white space, such as a form
-// feed, so MD052 does not either: not "[\f][]" in a list item, where the
-// parser reads no checkbox from it, nor elsewhere. After link reference
-// definitions the parser reads no checkbox, so "[x]" there is a shortcut
-// reference, which markdownlint and main report when "x" is not ignored.
+// task checkboxes or blank brackets decide what is a reference. The parser
+// reads goldmark's checkboxes, as main did, so after link reference
+// definitions "[x]" is a shortcut reference, which markdownlint and main
+// report when "x" is not ignored. markdownlint never reports a label or a
+// full reference's text of nothing but ASCII white space, so MD052 does
+// not either, except where main read a checkbox from the blank brackets,
+// at the start of a heading that starts a list item, and read the brackets
+// after it as references of their own.
 func TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes(t *testing.T) {
 	type position struct{ line, column int }
 	shortcut := map[string]any{"shortcut_syntax": true}
@@ -1515,6 +1517,73 @@ func TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes(t *testing.T) {
 		// markdownlint trims it and reports nothing.
 		{name: "no-break space before an empty pair", input: "Use [\xc2\xa0][] done.\n", want: []position{{1, 5}}},
 		{name: "letter before an empty pair", input: "Use [y][] done.\n", want: []position{{1, 5}}},
+		// The parser reads a checkbox from "[\f]" and "[x]" at the start of
+		// an item, as main does, so the brackets after it are a shortcut.
+		{name: "form feed before a label in a list item", input: "- [\f][y] done\n"},
+		{name: "form feed before a label in a list item with shortcut_syntax", input: "- [\f][y] done\n", options: shortcut, want: []position{{1, 6}}},
+		{name: "checkbox before a footnote label", input: "- [x][^n]\n\n[c]: /url\n[^n]: Note text.\n"},
+		{
+			name:    "checkbox before a footnote label with shortcut_syntax",
+			input:   "- [x][^n]\n\n[c]: /url\n[^n]: Note text.\n",
+			options: shortcut,
+			want:    []position{{1, 6}, {4, 1}},
+		},
+		// Blank text before a label makes no full reference, which
+		// markdownlint reports, if at all, as a shortcut at the label.
+		{name: "form feed before a label", input: "Use [\f][y] done.\n"},
+		{name: "form feed before a label with shortcut_syntax", input: "Use [\f][y] done.\n", options: shortcut},
+		{name: "space before a label in an image", input: "Use ![ ][y] done.\n", options: shortcut},
+		{name: "space before a label in a heading", input: "# T [ ][y] done\n", options: shortcut},
+		// At the start of a heading that starts a list item, main reads a
+		// checkbox from one white space character in brackets, and then a
+		// shortcut, which markdownlint reports there too.
+		{name: "space before a label in a heading in a list item", input: "- ## [ ][y] done\n"},
+		{name: "space before a label in a heading in a list item with shortcut_syntax", input: "- ## [ ][y] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "tab before a label in a quoted heading", input: "> - ## [\t][y] done\n", options: shortcut, want: []position{{1, 11}}},
+		{name: "space before a label in a setext heading", input: "- [ ][y]\n  ---\n", options: shortcut, want: []position{{1, 6}}},
+		{name: "space before a footnote label in a heading", input: "- ## [ ][^n] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "two spaces before a label in a heading", input: "- ## [  ][y] done\n", options: shortcut},
+		// After main's checkbox, the brackets that follow it are read
+		// afresh, as main reads them.
+		{name: "space before a collapsed reference in a heading", input: "- ## [ ][y][] done\n", want: []position{{1, 9}}},
+		{name: "space before a full reference in a heading", input: "- ## [ ][y][z] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "space before a full reference to x in a heading", input: "- ## [ ][x][y] done\n", want: []position{{1, 9}}},
+		{name: "space before a full reference with an ignored label in a heading", input: "- ## [ ][y][x] done\n", options: shortcut},
+		{
+			name:    "space before a full reference and a shortcut in a heading",
+			input:   "- ## [ ][y][z][w] done\n",
+			options: shortcut,
+			want:    []position{{1, 9}, {1, 15}},
+		},
+		{name: "x before a full reference in a heading", input: "- ## [x][y][z] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "x before a label in a heading", input: "- ## [x][y] done\n"},
+		{name: "x before a label in a heading with shortcut_syntax", input: "- ## [x][y] done\n", options: shortcut, want: []position{{1, 9}}},
+		{name: "space before a label over two lines in a setext heading", input: "- [ ][a\n  b]\n  ---\n", options: shortcut, want: []position{{1, 6}}},
+		{
+			name:    "space before a label over two lines in a quoted setext heading",
+			input:   "> - [ ][a\n>   b]\n>   ---\n",
+			options: shortcut,
+			want:    []position{{1, 8}},
+		},
+		{name: "space before a label in a heading after a blank first line", input: "-\n  ## [ ][y] done\n", options: shortcut, want: []position{{2, 9}}},
+		// Not at the start of the item's first block, main read no
+		// checkbox, so the blank text makes no reference.
+		{name: "space before a label in a heading after a definition", input: "- [c]: /url\n  ## [ ][y] done\n", options: shortcut},
+		{name: "x before a label in a heading after a blank first line and a definition", input: "-\n  [c]: /url\n  ## [x][y] done\n", want: []position{{3, 6}}},
+		{
+			name:    "x before a label in a heading after a blank first line and a definition with shortcut_syntax",
+			input:   "-\n  [c]: /url\n  ## [x][y] done\n",
+			options: shortcut,
+			want:    []position{{3, 6}},
+		},
+		{
+			name:    "x before a label in a setext heading after a blank first line and a definition",
+			input:   "-\n  [c]: /url\n  [x][y] done\n  ---\n",
+			options: shortcut,
+			want:    []position{{3, 3}},
+		},
+		{name: "space before a label in a heading after a blank first line and a definition", input: "-\n  [c]: /url\n  ## [ ][y] done\n", options: shortcut},
+		{name: "space before a label in emphasis in a heading", input: "- ## *[ ][y]* done\n", options: shortcut},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1574,29 +1643,40 @@ func TestRulesReadNoCheckboxAfterDefinitions(t *testing.T) {
 	}
 }
 
-// TestBlankLabel checks which labels MD052 never reports: those of nothing
-// but ASCII white space, which a no-break space is not.
-func TestBlankLabel(t *testing.T) {
+// TestLinkImageStyleRule_BlankLabels checks that MD054 reports no reference
+// whose label is nothing but ASCII white space, as markdownlint reports
+// none, and that the parser's checkboxes hide the brackets they hide on
+// main.
+func TestLinkImageStyleRule_BlankLabels(t *testing.T) {
+	type position struct{ line, column int }
+	noCollapsed := map[string]any{"collapsed": false}
+	noShortcut := map[string]any{"shortcut": false}
 	tests := []struct {
-		label string
-		want  bool
+		name    string
+		input   string
+		options map[string]any
+		want    []position
 	}{
-		{label: "", want: true},
-		{label: " ", want: true},
-		{label: "\t", want: true},
-		{label: "\n", want: true},
-		{label: "\r", want: true},
-		{label: "\v", want: true},
-		{label: "\f", want: true},
-		{label: " \f \v\t", want: true},
-		{label: "x", want: false},
-		{label: " x ", want: false},
-		{label: "\xc2\xa0", want: false},
-		{label: "^", want: false},
+		{name: "collapsed form feed in a list item", input: "- [\f][] done\n\n[\f]: /url\n", options: noCollapsed},
+		{name: "shortcut form feed in a list item", input: "- [\f] done\n\n[\f]: /url\n", options: noShortcut},
+		{name: "collapsed form feed", input: "Use [\f][] done.\n\n[\f]: /url\n", options: noCollapsed},
+		{name: "shortcut form feed", input: "Use [\f] done.\n\n[\f]: /url\n", options: noShortcut},
+		{name: "collapsed form feed in a heading", input: "- ## [\f][] done\n\n[\f]: /url\n", options: noCollapsed},
+		{name: "collapsed letter", input: "Use [y][] done.\n\n[y]: /url\n", options: noCollapsed, want: []position{{1, 5}}},
+		{name: "checkbox before an empty pair", input: "- [x][] done\n\n[x]: /url\n", options: noCollapsed},
 	}
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%q", tt.label), func(t *testing.T) {
-			assert.Equal(t, tt.want, blankLabel(tt.label))
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewLinkImageStyleRule(), tt.input, tt.options)
+			got := make([]position, 0, len(diags))
+			for _, diag := range diags {
+				got = append(got, position{diag.StartLine, diag.StartColumn})
+			}
+			want := tt.want
+			if want == nil {
+				want = []position{}
+			}
+			assert.Equal(t, want, got)
 		})
 	}
 }

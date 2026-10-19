@@ -197,11 +197,11 @@ func TestFixCheckKeeps(t *testing.T) {
 		},
 		{
 			// GFM renderers read the checkbox even when the file is linted
-			// as CommonMark, and none reads one right before other text.
+			// as CommonMark.
 			name:   "breaking a task checkbox under CommonMark",
 			flavor: config.FlavorCommonMark,
 			input:  "- [ ] task\n",
-			old:    "[ ] task", new: "[ ]task",
+			old:    "[ ]", new: "[\n  ]",
 			want: false,
 		},
 		{
@@ -212,23 +212,27 @@ func TestFixCheckKeeps(t *testing.T) {
 		},
 		{
 			name:  "removing a task checkbox",
+			input: "- [ ] task\n",
+			old:   "[ ]", new: "[\n  ]",
+			want: false,
+		},
+		{
+			name:  "making a task checkbox",
+			input: "- [y] task\n",
+			old:   "[y]", new: "[x]",
+			want: false,
+		},
+		{
+			// The fix check reads checkboxes as the parser does, so it reads
+			// "[x]task" as a checkbox too. Lint's checkbox guard withholds
+			// every fix that changes the text of a possible checkbox, this
+			// one included.
+			name:  "joining a task checkbox to its text",
 			input: "- [x] task\n",
 			old:   "] task", new: "]task",
-			want: false,
+			want: true,
 		},
 		{
-			// A tab between the brackets that becomes one column wide makes
-			// a checkbox for micromark.
-			name:  "making a task checkbox",
-			input: "-  [\t] task\n",
-			old:   "-  [", new: "- [",
-			want: false,
-		},
-		{
-			// The fix check reads checkboxes as micromark does. The engine
-			// still withholds this fix, as it withholds every fix that
-			// changes the text of a possible checkbox (lint's checkbox
-			// guard).
 			name:  "widening the space after a task checkbox",
 			input: "- [x] task\n",
 			old:   "] task", new: "]  task",

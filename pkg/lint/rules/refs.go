@@ -124,7 +124,9 @@ func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 // shortcut_syntax is set, whose label matches no definition. The parser turns
 // every reference with a defined label into a link or image, so only the
 // reference syntax it left as text can be undefined. A reference whose label
-// is nothing but white space is never reported (see blankLabel).
+// is nothing but white space is never reported (see refs.BlankLabel), and
+// the scanner of that syntax records no full reference whose text is
+// nothing but white space.
 //
 // Like markdownlint, MD052 reads GFM footnotes, which goldmark does not:
 // "[^label]" calls a footnote that the document defines with a line that
@@ -156,7 +158,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		if blankLabel(usage.Label) {
+		if refs.BlankLabel(usage.Label) {
 			continue
 		}
 
@@ -186,15 +188,6 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	return diags, nil
-}
-
-// blankLabel reports whether label holds nothing but ASCII white space:
-// spaces, tabs, line endings, vertical tabs and form feeds. markdownlint
-// records an undefined reference only when its text, trimmed as JavaScript
-// trims it, is not empty, so it never reports such a label, although
-// micromark and goldmark read a label of form feeds or vertical tabs.
-func blankLabel(label string) bool {
-	return strings.Trim(label, " \t\n\v\f\r") == ""
 }
 
 // undefinedLabel builds the finding for usage, a reference whose label
@@ -269,14 +262,14 @@ func shortcutSource(file *mdast.FileSnapshot, usage *refs.ReferenceUsage) (strin
 
 // ignoresShortcut reports whether markdownlint certainly ignores a shortcut
 // reference whose source between its brackets is text. It records no
-// reference for blank text (see blankLabel), and ignores a label that,
+// reference for blank text (see refs.BlankLabel), and ignores a label that,
 // lowercased with its white space collapsed by normalizeReference, equals
 // one of ignored_labels as written. That is certain only for text of
 // nothing but ASCII letters, digits, spaces and tabs, which markdownlint
 // reads as written, with no markup, and which Go and JavaScript lowercase
 // alike.
 func ignoresShortcut(text string, ignoredLabels []string) bool {
-	if blankLabel(text) {
+	if refs.BlankLabel(text) {
 		return true
 	}
 	for idx := range len(text) {
@@ -973,8 +966,10 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Reference syntax the parser left as text is not a link or image.
-		if usage.Unresolved {
+		// Reference syntax the parser left as text is not a link or image,
+		// and markdownlint reads no reference whose label is nothing but
+		// white space (see refs.BlankLabel).
+		if usage.Unresolved || (isReferenceStyle(usage.Style) && refs.BlankLabel(usage.Label)) {
 			continue
 		}
 
@@ -1022,6 +1017,12 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 	}
 
 	return diags, nil
+}
+
+// isReferenceStyle reports whether style is that of a reference: full,
+// collapsed or shortcut.
+func isReferenceStyle(style refs.ReferenceStyle) bool {
+	return style == refs.StyleFull || style == refs.StyleCollapsed || style == refs.StyleShortcut
 }
 
 // isURLAsText reports whether an inline link could be written as an

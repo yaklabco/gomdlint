@@ -232,6 +232,15 @@ func (c *Context) UnresolvedUsages() []*ReferenceUsage {
 	return unresolved
 }
 
+// BlankLabel reports whether label holds nothing but ASCII white space:
+// spaces, tabs, line endings, vertical tabs and form feeds. markdownlint
+// records an undefined reference only when its text, trimmed as JavaScript
+// trims it, is not empty, so it never reports such a label, although
+// micromark and goldmark read a label of form feeds or vertical tabs.
+func BlankLabel(label string) bool {
+	return strings.Trim(label, " \t\n\v\f\r") == ""
+}
+
 // NormalizeLabel normalizes a reference label for matching, exactly as the
 // parser does when it resolves references: trim, apply Unicode full case
 // folding (so "Straße" matches "STRASSE"), and collapse whitespace.

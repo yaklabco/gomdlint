@@ -313,41 +313,40 @@ formats change. The first entries under Changed may need action.
   its brackets, so `![ ](a.png)` passes, as in markdownlint.
 - **MD051**: Accepts custom heading anchors such as `{#install}`, and reports
   `#TOP` unless `ignore_case` is set.
-- **MD052**: No longer reports a reference whose label is nothing but
-  white space, such as a form feed, which markdownlint never reports. Reads
-  GFM footnotes as markdownlint does where micromark is certain to read the
-  definition. A call such as `[^1]` is then no reference, so
-  `shortcut_syntax` no longer reports it, and in `[text][^1]` the `[text]`
-  is a shortcut reference, so `[text][^1]` is reported only with
-  `shortcut_syntax`, and there only where main reports it. Only a link
+- **MD052**: No longer reports a reference whose label is nothing but ASCII
+  white space, such as a form feed, nor a full reference whose text is, such
+  as `[ ][label]`, as markdownlint records no reference for either. At the
+  start of a heading that starts a list item, where goldmark read a task
+  checkbox, it reads the brackets after the checkbox as references of their
+  own, as before. Reads GFM footnotes as markdownlint does where micromark
+  is certain to read the definition. A call such as `[^1]` is then no
+  reference, so `shortcut_syntax` no longer reports it, and in `[text][^1]`
+  the `[text]` is a shortcut reference, so `[text][^1]` is reported only
+  with `shortcut_syntax`, and there only where main reports it. Only a link
   whose label after the `^` holds nothing but ASCII letters, digits and
   hyphens is a call, and it calls only a definition with the same label in
   any case, after white space is collapsed and trimmed. A definition counts
   only on a `[^1]:` line at column 0, at the top level outside code blocks,
   HTML blocks and front matter, at the start of the document, after a blank
   line or right after another such definition. No line before it may start
-  with `$$` or `:::`, each code fence before it must start at column 0
-  after a blank line, where goldmark reads it at the top level, and no HTML
-  block before it that may hold blank lines may go on past its first line.
-  No definition counts where micromark drops a byte order mark that the
-  parser reads as text: a second one at the start of the file, or one that
-  starts the first line after the front matter that holds more than white
-  space. Images such as `![^1][]`, other labels such as `[^a\*b]` or
-  `[^é]`, and calls of other definitions are read as before.
+  with `$$` or `:::`, each code fence before it must start at column 0 after
+  a blank line, where goldmark reads it at the top level, and no HTML block
+  before it that may hold blank lines may go on past its first line. No
+  definition counts where micromark drops a byte order mark that the parser
+  reads as text: a second one at the start of the file, or one that starts
+  the first line after the front matter that holds more than white space.
+  Images such as `![^1][]`, other labels such as `[^a\*b]` or `[^é]`, and
+  calls of other definitions are read as before.
+- **MD054**: Reports no reference whose label is nothing but ASCII white
+  space, such as a form feed, which markdownlint never reports.
 - **MD059**: Compares link text as written and skips only links whose text
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
   strikethrough counts as direct. Findings point at the link text, one
   column after the bracket, and autolinks are never checked.
-- `[ ]`, `[x]` and `[X]` make a task checkbox where micromark reads one:
-  at the start of a list item's first paragraph, before whitespace or a
-  line ending with more of the paragraph after it. A tab between the
-  brackets counts only where it is one column wide, and a line ending
-  counts when the next line starts with the `]`. In a heading, or right
-  before other text, they are text or a link, so **MD039** reports
-  `- ## [ ](/url).` and **MD034** no longer reports the address in
-  `- [x](https://example.com)`. After link reference definitions that
-  start an item they are no checkbox, as before and as on GitHub, so `[x]`
-  there is text or a link.
+- A heading that starts a list item holds no task checkbox, where goldmark
+  read one, so **MD039** reports `- ## [ ](/url).`, as markdownlint does.
+  Everywhere else the parser reads the task checkboxes goldmark reads, as
+  before.
 - No fix changes or makes a task list checkbox. micromark and GitHub's
   cmark-gfm read checkboxes in different places, so any line that holds a
   `[`, one character or a line ending, and `]`, wherever on the line, keeps
