@@ -7,5 +7,14 @@
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": true
+  },
+  {
+    "rule": "MD049",
+    "name": "emphasis-style",
+    "line": 5,
+    "column": 30,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": true
   }
 ]

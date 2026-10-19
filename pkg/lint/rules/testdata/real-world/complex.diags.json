@@ -45,10 +45,28 @@
     "fixable": true
   },
   {
+    "rule": "MD049",
+    "name": "emphasis-style",
+    "line": 165,
+    "column": 73,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
     "rule": "MD050",
     "name": "strong-style",
     "line": 167,
     "column": 46,
+    "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD050",
+    "name": "strong-style",
+    "line": 167,
+    "column": 72,
     "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": true
@@ -72,10 +90,37 @@
     "fixable": true
   },
   {
+    "rule": "MD050",
+    "name": "strong-style",
+    "line": 173,
+    "column": 32,
+    "message": "Strong style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
+    "rule": "MD049",
+    "name": "emphasis-style",
+    "line": 173,
+    "column": 34,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": true
+  },
+  {
     "rule": "MD049",
     "name": "emphasis-style",
     "line": 175,
     "column": 15,
+    "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD049",
+    "name": "emphasis-style",
+    "line": 175,
+    "column": 29,
     "message": "Emphasis style \"underscore\" does not match expected \"asterisk\"",
     "severity": "warning",
     "fixable": false

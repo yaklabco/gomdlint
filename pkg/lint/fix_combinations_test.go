@@ -279,6 +279,20 @@ func TestPipeline_TwoRulesThatWantOneBlankLineInsertOne(t *testing.T) {
 	assert.Empty(t, result.Diagnostics)
 }
 
+func TestPipeline_FixesBothMarkersOfAnEmphasisOnce(t *testing.T) {
+	t.Parallel()
+
+	// MD049 reports each marker of "_b_", and both findings carry the fix
+	// that replaces both markers.
+	const content = "# H\n\n*a* and _b_ here.\n"
+	result := fixWithRules(t, content, config.NewConfig(), productRules(t, "MD049")...)
+
+	assert.Equal(t, "# H\n\n*a* and *b* here.\n", fixedContent(result, content))
+	assert.Equal(t, 1, result.FixPasses)
+	assert.Equal(t, 2, result.TotalFixesApplied, "the fix fixes both findings")
+	assert.Empty(t, result.Diagnostics)
+}
+
 func TestPipeline_FixesABlockWithManyRulesWithinThePassLimit(t *testing.T) {
 	t.Parallel()
 

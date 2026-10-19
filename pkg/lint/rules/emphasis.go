@@ -611,9 +611,11 @@ func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 // (markerLength 2) like markdownlint: the style option is asterisk,
 // underscore or consistent (the style of the first emphasis), and emphasis
 // inside a word is never reported for the underscore style, because
-// underscores cannot mark emphasis there.
+// underscores cannot mark emphasis there. Each delimiter run of an emphasis
+// in the wrong style is a finding of its own.
 //
-// The fix replaces both delimiter runs. It is withheld when the new markers
+// The fix replaces both delimiter runs, and both findings of an emphasis
+// carry it, so the engine applies it once. It is withheld when the new markers
 // could pair differently: when the emphasized text holds the target marker,
 // when a target marker is adjacent outside, or when an underscore would sit
 // next to a letter or digit.
@@ -655,22 +657,27 @@ func checkEmphasisStyle(
 			continue
 		}
 
-		diagBuilder := lint.NewDiagnostic(ruleID, node,
-			fmt.Sprintf("%s style %q does not match expected %q", label, actual, style)).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion(fmt.Sprintf("Use %q for all %s", style, suggestionNoun))
 		// New markers in a link label would change the label, so no fix is
 		// offered for emphasis that could be part of one.
 		var builder *fix.EditBuilder
 		if !inLinkLabel(ctx, node) {
 			builder = checker.offer(emphasisStyleFix(ctx.File, node, open, closing, style), fixIntent{local: true})
 		}
-		if builder != nil {
-			diagBuilder = diagBuilder.WithFix(builder)
+		// Like markdownlint, each marker is reported on its own. Neither can
+		// change alone, so both findings carry the fix that changes both.
+		for _, marker := range []mdast.SourceRange{open, closing} {
+			diagBuilder := lint.NewDiagnosticAt(ruleID, ctx.File.Path, rangePosition(ctx.File, marker),
+				fmt.Sprintf("%s style %q does not match expected %q", label, actual, style)).
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion(fmt.Sprintf("Use %q for all %s", style, suggestionNoun))
+			if builder != nil {
+				diagBuilder = diagBuilder.WithFix(builder)
+			}
+			diags = append(diags, diagBuilder.Build())
 		}
-		diags = append(diags, diagBuilder.Build())
 	}
 
+	sortDiagnosticsByPosition(diags)
 	return checker.filter(diags), nil
 }
 

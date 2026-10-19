@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -296,7 +297,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			name:      "MD049 consistent",
 			rule:      NewEmphasisStyleRule(),
 			input:     "Some *text* and _more_ here.\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "Some *text* and *more* here.\n",
 		},
@@ -305,7 +306,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "Some _text_ here.\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "Some *text* here.\n",
 		},
@@ -314,7 +315,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "Some *text* here.\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "Some _text_ here.\n",
 		},
@@ -329,7 +330,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			name:      "MD049 intraword emphasis still sets the consistent style",
 			rule:      NewEmphasisStyleRule(),
 			input:     "foo*bar*baz and _x_\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "foo*bar*baz and *x*\n",
 		},
@@ -339,7 +340,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "_a*b_\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			// "*foo**bar*" would merge the markers into one run.
@@ -347,7 +348,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "*foo*_bar_\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			// After a letter such as U+00E9, "_foo_" is not emphasis:
@@ -356,7 +357,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "\u00E9*foo*\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			// A combining mark is neither whitespace nor punctuation, so an
@@ -365,14 +366,14 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "e\u0301*word*\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			name:      "MD050 no fix to underscore after a combining mark",
 			rule:      NewStrongStyleRule(),
 			input:     "e\u0301**word**\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			// The link text is the label of a reference whose definition
@@ -381,21 +382,21 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "See [*bold*].\n\nOne.\n\nTwo.\n\n[*bold*]: /target\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			name:      "MD050 no fix to a reference label",
 			rule:      NewStrongStyleRule(),
 			input:     "See [**bold**].\n\nOne.\n\nTwo.\n\n[**bold**]: /target\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 		{
 			name:      "MD049 underscore between punctuation",
 			rule:      NewEmphasisStyleRule(),
 			input:     "(*word*)\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "(_word_)\n",
 		},
@@ -404,7 +405,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "~~struck~~ and *x*\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "~~struck~~ and _x_\n",
 		},
@@ -413,7 +414,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "**bold _it_ text**\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "**bold *it* text**\n",
 		},
@@ -422,7 +423,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "_x `c`_\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "*x `c`*\n",
 		},
@@ -431,7 +432,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewEmphasisStyleRule(),
 			input:     "_[docs](https://example.com) here_\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "*[docs](https://example.com) here*\n",
 		},
@@ -439,7 +440,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			name:      "MD050 consistent",
 			rule:      NewStrongStyleRule(),
 			input:     "Some **text** and __more__ here.\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "Some **text** and **more** here.\n",
 		},
@@ -448,7 +449,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewStrongStyleRule(),
 			input:     "**text**\n",
 			options:   map[string]any{"style": "underscore"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFix:   true,
 			wantFixed: "__text__\n",
 		},
@@ -464,7 +465,7 @@ func TestEmphasisAndStrongStyle_Fix(t *testing.T) {
 			rule:      NewStrongStyleRule(),
 			input:     "__a*b__\n",
 			options:   map[string]any{"style": "asterisk"},
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 		},
 	}
 
@@ -768,6 +769,41 @@ func TestNoSpaceInEmphasisRule_Fix(t *testing.T) {
 	}
 }
 
+// TestEmphasisStyleRules_MarkdownlintMarkers checks MD049 and MD050 against
+// markdownlint 0.41.1, which reports each marker of an emphasis in the
+// wrong style on its own, at the marker. Neither marker can change alone,
+// so both findings carry the fix that changes both, which the engine
+// applies once.
+func TestEmphasisStyleRules_MarkdownlintMarkers(t *testing.T) {
+	emphasis := "# Title\n\nFirst *asterisk* sets it.\n\n" +
+		"Then _under_ and _two_ here.\n\n" + // 5
+		"Across _two\nlines_ here.\n\n" + // 7, 8
+		"> Quoted _text_ here.\n" // 10
+	diags := applyRuleWithOptions(t, NewEmphasisStyleRule(), emphasis, nil)
+	assert.Equal(t, [][2]int{{5, 6}, {5, 12}, {5, 18}, {5, 22}, {7, 8}, {8, 6}, {10, 10}, {10, 15}}, diagPositions(diags))
+	if assert.Len(t, diags, 8) {
+		assert.Equal(t, diags[0].FixEdits, diags[1].FixEdits, "both markers carry the fix that changes both")
+		assert.Equal(t, 7, diags[0].EndColumn, "a finding covers its marker")
+	}
+	fixed, passes := fixWithEngine(t, emphasis, NewEmphasisStyleRule())
+	assert.Equal(t, strings.ReplaceAll(emphasis, "_", "*"), fixed)
+	assert.Equal(t, 1, passes)
+
+	strong := "# Title\n\nFirst **asterisk** sets it.\n\n" +
+		"Then __under__ here.\n\n" + // 5
+		"Across __two\nlines__ here.\n" // 7, 8
+	diags = applyRuleWithOptions(t, NewStrongStyleRule(), strong, nil)
+	assert.Equal(t, [][2]int{{5, 6}, {5, 13}, {7, 8}, {8, 6}}, diagPositions(diags))
+	fixed, _ = fixWithEngine(t, strong, NewStrongStyleRule())
+	assert.Equal(t, strings.ReplaceAll(strong, "__", "**"), fixed)
+
+	// A fix that is withheld is withheld for both markers.
+	diags = applyRuleWithOptions(t, NewEmphasisStyleRule(), "# Title\n\n*a* and _a*b_ here.\n", nil)
+	require.Len(t, diags, 2)
+	assert.False(t, diags[0].HasFix())
+	assert.False(t, diags[1].HasFix())
+}
+
 func TestEmphasisStyleRule_Fix(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -791,20 +827,20 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 		{
 			name:      "style mismatch - consistent mode",
 			input:     "Some *text* and _more_ here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some *text* and *more* here.\n",
 		},
 		{
 			name:      "explicit style config - asterisk required",
 			input:     "Some _text_ here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some *text* here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
 			name:      "explicit style config - underscore required",
 			input:     "Some *text* here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some _text_ here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
@@ -839,15 +875,8 @@ func TestEmphasisStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes.
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
-			assert.Equal(t, tt.wantFix, string(fixed))
+			// Findings that share a fix carry the same edits, which apply once.
+			assert.Equal(t, tt.wantFix, applyAllEdits(t, tt.input, diags))
 		})
 	}
 }
@@ -875,20 +904,20 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 		{
 			name:      "style mismatch - consistent mode",
 			input:     "Some **text** and __more__ here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some **text** and **more** here.\n",
 		},
 		{
 			name:      "explicit style config - asterisk required",
 			input:     "Some __text__ here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some **text** here.\n",
 			config:    map[string]any{"style": "asterisk"},
 		},
 		{
 			name:      "explicit style config - underscore required",
 			input:     "Some **text** here.\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "Some __text__ here.\n",
 			config:    map[string]any{"style": "underscore"},
 		},
@@ -923,15 +952,8 @@ func TestStrongStyleRule_Fix(t *testing.T) {
 			require.NoError(t, err)
 			assert.Len(t, diags, tt.wantDiags)
 
-			// Collect and apply fixes.
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
-			assert.Equal(t, tt.wantFix, string(fixed))
+			// Findings that share a fix carry the same edits, which apply once.
+			assert.Equal(t, tt.wantFix, applyAllEdits(t, tt.input, diags))
 		})
 	}
 }
