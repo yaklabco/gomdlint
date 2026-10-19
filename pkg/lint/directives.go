@@ -359,18 +359,22 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 
 // optionNotices returns the notices for the options in value, the setting
 // of key in directive, a markdownlint-configure-file comment, that the rules
-// that key names do not read (see Registry.MarkdownlintRuleConfig).
+// that key names do not read, or whose values they cannot use (see
+// Registry.MarkdownlintRuleConfig), as configuration files warn about them.
 // markdownlint ignores an option that it does not know, as gomdlint does,
-// so the notices change nothing. gomdlint's own spelling of an option that
-// markdownlint spells otherwise, such as max for line_length, is such an
-// option.
+// so those notices change nothing. gomdlint's own spelling of an option
+// that markdownlint spells otherwise, such as max for line_length, is such
+// an option.
 //
 // For a key that names one rule there is one for each option that the rule
 // does not read, which offers the closest option names, or markdownlint's
 // spelling of a name of gomdlint's, and for a key that names several, a
-// tag, one for each option that none of its rules reads, as configuration
-// files warn about them. Each names the rules as markdownlint names them,
-// in ID order.
+// tag, one for each option that none of its rules reads. Each rule also
+// gets one for each value of the wrong type, or item of the wrong type in a
+// list, which the comment ignores, and for each string that the option
+// does not allow, with the closest allowed values. Each notice names the
+// rules as markdownlint names them, in ID order: the notices of each rule
+// in turn, in order of option, and then those for a tag.
 func optionNotices(registry *Registry, directive *inlineDirective, key string, rules []Rule, value any) []Notice {
 	if options, ok := value.(map[string]any); !ok || len(options) == 0 {
 		return nil
@@ -389,24 +393,24 @@ func optionNotices(registry *Registry, directive *inlineDirective, key string, r
 
 	names := make([]string, len(sorted))
 	unread := make(map[string]int) // option -> the rules that do not read it
-	var issues []OptionIssue       // The unknown options of the one rule.
+	var notices []Notice
 	for idx, rule := range sorted {
 		names[idx] = registry.markdownlintName(rule)
 		_, found := registry.MarkdownlintRuleConfig(rule.ID(), value)
 		for _, issue := range found {
-			if issue.Kind == OptionIssueUnknown {
+			switch {
+			case issue.Kind == OptionIssueUnknown && len(sorted) > 1:
 				unread[issue.Key]++
-				issues = append(issues, issue)
+			case issue.Kind == OptionIssueUnknown:
+				notices = append(notices, notice(NoticeUnknownOption, issue.Key, issue.Suggestions,
+					[]string{names[idx]}, issue.Text(names[idx])))
+			default:
+				// A value of the wrong type, an item of the wrong type in a
+				// list, or a string that the option does not allow.
+				notices = append(notices, notice(NoticeInvalidOption, issue.Key, issue.Suggestions,
+					[]string{names[idx]}, issue.Text(names[idx])))
 			}
 		}
-	}
-
-	var notices []Notice
-	if len(sorted) == 1 {
-		for _, issue := range issues {
-			notices = append(notices, notice(NoticeUnknownOption, issue.Key, issue.Suggestions, names, issue.Text(names[0])))
-		}
-		return notices
 	}
 	for _, option := range slices.Sorted(maps.Keys(unread)) {
 		if unread[option] == len(sorted) {

@@ -229,11 +229,13 @@ formats change. The first entries under Changed may need action.
   finding or exit code.
 - The same warnings for `markdownlint-configure-file` comments that
   markdownlint ignores in whole or in part. A comment that holds no object
-  of settings, a key that names no rule, and an option that markdownlint
-  does not read for its rule, gomdlint's spelling of an option among them,
-  each get one. JSON output gives them the kinds `invalid-configuration`,
-  `unknown-rule` and `unknown-option`, and `unread-configuration` for a
-  comment that gomdlint does not read.
+  of settings, a key that names no rule, an option that markdownlint does
+  not read for its rule, gomdlint's spelling of an option among them, and
+  an option value that the rule cannot use, such as a list with an item of
+  the wrong type, each get one. JSON output gives them the kinds
+  `invalid-configuration`, `unknown-rule`, `unknown-option` and
+  `invalid-option`, and `unread-configuration` for a comment that gomdlint
+  does not read.
 - JSON output reports rules that failed, under `summary.ruleErrors` and each
   file's `ruleErrors`.
 - `--format diff` previews the fixes without writing them, and

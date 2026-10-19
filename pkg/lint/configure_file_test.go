@@ -351,6 +351,7 @@ func TestEngineConfigureFileNoticesChangeNoFindings(t *testing.T) {
 		{noticed: `{"MD009": false`, quiet: `{}`},
 		{noticed: `[1]`, quiet: `{}`},
 		{noticed: `{"MD999": false, "MD013": false}`, quiet: `{"MD013": false}`},
+		{noticed: `{"MD009": {"br_spaces": "x", "strict": true}}`, quiet: `{"MD009": {"strict": true}}`},
 	} {
 		t.Run(tt.noticed, func(t *testing.T) {
 			noticed := lintDefault(t, configuredDoc(tt.noticed))

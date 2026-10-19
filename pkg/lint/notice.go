@@ -27,6 +27,14 @@ const (
 	// them.
 	NoticeUnknownOption NoticeKind = "unknown-option"
 
+	// NoticeInvalidOption marks an option in the setting of a
+	// markdownlint-configure-file key whose value the rule cannot use: a
+	// value of the wrong type, or a list with an item of the wrong type,
+	// which the comment ignores, as if it did not set the option, or a
+	// string that the option does not allow, which the rule treats as
+	// markdownlint does. A config file gets a warning for the same values.
+	NoticeInvalidOption NoticeKind = "invalid-option"
+
 	// NoticeInvalidConfiguration marks a markdownlint-configure-file
 	// comment whose parameter holds no object of settings: text that is
 	// neither JSON, with comments and trailing commas, nor YAML, or a value

@@ -614,8 +614,9 @@ the closest suggestions), and for each use of one of gomdlint's former tags
 `markdownlint-configure-file` comment never fails the file. It gets a
 notice for each key that names no rule, for each option that markdownlint
 does not read for its rules, gomdlint's spellings among them
-(`NoticeUnknownOption`), and for holding no object of settings
-(`NoticeInvalidConfiguration`). A configure-file comment
+(`NoticeUnknownOption`), for each option value that its rule cannot use
+(`NoticeInvalidOption`), as a config file gets a warning for each, and for
+holding no object of settings (`NoticeInvalidConfiguration`). A configure-file comment
 without a `-->` of its own runs on to that of a later comment, so the
 engine reads such comments only while their text comes to at most four
 times the file's length and 1 MiB more, and gives each of the rest a notice

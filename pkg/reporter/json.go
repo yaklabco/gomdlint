@@ -51,10 +51,10 @@ type JSONFileResult struct {
 // about a word that is one of gomdlint's deprecated tags, which still work
 // but will stop working in a later release. A configure-file comment also
 // gets one for an option that the rules of its setting do not read, in
-// gomdlint's spelling too, which markdownlint does not read, for holding
-// no object of settings, which markdownlint ignores, and for running on
-// through later comments past what gomdlint reads of such comments, which
-// markdownlint reads.
+// gomdlint's spelling too, which markdownlint does not read, for an option
+// value that its rule cannot use, for holding no object of settings, which
+// markdownlint ignores, and for running on through later comments past
+// what gomdlint reads of such comments, which markdownlint reads.
 type JSONNotice struct {
 	// Line is the 1-based line on which the comment starts.
 	Line int `json:"line"`
@@ -62,9 +62,11 @@ type JSONNotice struct {
 	// Kind is "unknown-rule" for a word or key that names no rule or tag,
 	// "deprecated-tag" for a deprecated tag, "unknown-option" for an option
 	// that the rules of a configure-file setting do not read,
-	// "invalid-configuration" for a configure-file comment that holds no
-	// object of settings, and "unread-configuration" for a configure-file
-	// comment without a "-->" of its own that gomdlint does not read.
+	// "invalid-option" for an option value in such a setting that its rule
+	// cannot use, "invalid-configuration" for a configure-file comment that
+	// holds no object of settings, and "unread-configuration" for a
+	// configure-file comment without a "-->" of its own that gomdlint does
+	// not read.
 	Kind string `json:"kind"`
 
 	// Directive is the kind of comment, such as "markdownlint-disable".

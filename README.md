@@ -689,7 +689,10 @@ as in a markdownlint config file. Like markdownlint, gomdlint never fails a
 file over such a comment. A comment that holds no object changes nothing. A
 key that names no rule configures nothing, and the other keys still apply.
 An option that the rule does not read changes nothing, and that includes
-gomdlint's spelling of an option, as in a markdownlint config. Each of
+gomdlint's spelling of an option, as in a markdownlint config. A value of
+the wrong type, such as `"yes"` for a boolean or a list with a number
+among strings, counts as unset, and a string that the option does not
+allow applies as markdownlint applies it, as in a config file. Each of
 these gets a warning on stderr, in JSON `notices` and in SARIF
 `toolConfigurationNotifications`, and none changes the findings or the exit
 code. As in markdownlint, the keys apply in the order they are written, and
