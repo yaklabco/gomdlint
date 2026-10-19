@@ -297,13 +297,19 @@ func (r *Registry) Suggest(key string) []Suggestion {
 // none, because naming some of them would mislead. Rule IDs are dense, so a
 // mistyped ID such as MD002 is one edit away from eleven rules.
 func (r *Registry) Closest(key string) []Suggestion {
-	return closest(r.rankSuggestions(key), true)
+	return closest(r.rankSuggestions(key), func(Suggestion) bool { return true })
 }
 
 // ClosestRules is Closest for a key in a place that takes rules but not
 // tags: it leaves tags out before it picks the best suggestions.
 func (r *Registry) ClosestRules(key string) []Suggestion {
-	return closest(r.rankSuggestions(key), false)
+	return closest(r.rankSuggestions(key), func(suggestion Suggestion) bool { return !suggestion.IsTag() })
+}
+
+// ClosestTags is Closest for a key in a place that takes tags but not
+// rules: it leaves rules out before it picks the best suggestions.
+func (r *Registry) ClosestTags(key string) []Suggestion {
+	return closest(r.rankSuggestions(key), Suggestion.IsTag)
 }
 
 // rankedSuggestion is a suggestion with its rank: the edit distance of a
@@ -355,13 +361,13 @@ func (r *Registry) rankSuggestions(key string) []rankedSuggestion {
 }
 
 // closest returns the suggestions of the best rank in ranked, which is in
-// Suggest's order, leaving tags out unless withTags is set. It returns none
-// when more than maxClosest share that rank.
-func closest(ranked []rankedSuggestion, withTags bool) []Suggestion {
+// Suggest's order, among those that keep accepts. It returns none when more
+// than maxClosest share that rank.
+func closest(ranked []rankedSuggestion, keep func(Suggestion) bool) []Suggestion {
 	var best []Suggestion
 	bestRank := noMatch
 	for _, entry := range ranked {
-		if entry.IsTag() && !withTags {
+		if !keep(entry.Suggestion) {
 			continue
 		}
 		if bestRank == noMatch {

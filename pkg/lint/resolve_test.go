@@ -509,6 +509,39 @@ func TestResolveRules_NilConfig(t *testing.T) {
 	}
 }
 
+// TestResolveAllRules covers the settings of every rule, as the rules and
+// explain commands show them: a rule that the configuration turns off is
+// resolved too, with the severity it would report at, and a nil
+// configuration gives each rule its built-in settings.
+func TestResolveAllRules(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	registry.Register(newTestRule(testRuleID2, true))
+	registry.Register(newTestRule(testRuleID1, false))
+	cfg := config.NewConfig()
+	severity := string(config.SeverityError)
+	cfg.Rules[testRuleID2] = config.RuleConfig{Enabled: config.Bool(false), Severity: &severity}
+
+	all := lint.ResolveAllRules(registry, cfg)
+
+	if assert.Len(t, all, 2) {
+		assert.Equal(t, testRuleID1, all[0].Rule.ID(), "in rule ID order")
+		assert.True(t, all[0].Enabled)
+		assert.Equal(t, config.SeverityWarning, all[0].Severity)
+		assert.Equal(t, testRuleID2, all[1].Rule.ID())
+		assert.False(t, all[1].Enabled, "a rule that the configuration turns off")
+		assert.Equal(t, config.SeverityError, all[1].Severity, "keeps the severity it would report at")
+		assert.Equal(t, all[:1], lint.ResolveRules(registry, cfg), "ResolveRules keeps the enabled rules")
+	}
+
+	defaults := lint.ResolveAllRules(registry, nil)
+	if assert.Len(t, defaults, 2) {
+		assert.True(t, defaults[1].Enabled, "without a configuration, the rule's own default")
+		assert.Equal(t, config.SeverityWarning, defaults[1].Severity)
+	}
+}
+
 func TestResolvedRule_ConfigPresent(t *testing.T) {
 	t.Parallel()
 

@@ -497,6 +497,18 @@ func TestRegistry_ClosestSkipsAmbiguousKeys(t *testing.T) {
 	assert.Empty(t, reg.ClosestRules("MD0"))
 }
 
+func TestRegistry_ClosestTagsLeavesOutRules(t *testing.T) {
+	reg := describedRegistry()
+
+	assert.Equal(t, []Suggestion{{Name: "table"}}, reg.ClosestTags("tables"))
+	assert.Equal(t, []Suggestion{{Name: "bullet"}}, reg.ClosestTags("BULET"))
+	// Suggest also offers required-headings, which contains the key.
+	assert.Equal(t, []Suggestion{{Name: "headings"}}, reg.ClosestTags("heading"))
+	assert.Empty(t, reg.ClosestTags("no-trailling-spaces"), "only a rule is close")
+	assert.Empty(t, reg.ClosestTags("ul-styel"), "only an alias is close")
+	assert.Empty(t, reg.ClosestTags("zzzzzz"))
+}
+
 func TestRegistry_ClosestRulesLeavesOutTags(t *testing.T) {
 	reg := describedRegistry()
 
