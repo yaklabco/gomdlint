@@ -9,6 +9,7 @@ import (
 	"maps"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/internal/logging"
@@ -374,7 +375,7 @@ func (o *fixOffers) offer(edits []fix.TextEdit) bool {
 // apart reports whether fixes must keep the line endings of content apart
 // (see fix.LineEndingWriter.KeepsApart).
 func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks *topLevelBlocks, apart bool) {
-	changes, idle := splitNoops(fixes, content)
+	changes, idle := splitNoops(mergeSharedFixes(fixes), content)
 	merged, conflicting := mergeBlankLineInsertions(changes)
 	for idx := range conflicting {
 		conflicting[idx].mergeConflict = true
@@ -662,6 +663,45 @@ func editsTouch(edits []fix.TextEdit, from, to int) bool {
 // fix.ResolveFixes orders fixes by their first edits.
 func compareEditRanges(left, right fix.TextEdit) int {
 	return cmp.Or(cmp.Compare(left.StartOffset, right.StartOffset), cmp.Compare(left.EndOffset, right.EndOffset))
+}
+
+// mergeSharedFixes makes the fixes of one rule that hold the same edits one
+// fix, which fixes each of their diagnostics. A rule gives several findings
+// one fix when one change resolves them all, as MD049 reports both markers
+// of an emphasis with the fix that replaces both. Applied once, the edits
+// fix every such finding, while a second copy would conflict with the
+// first and be skipped. Fixes of different rules are never merged.
+func mergeSharedFixes(fixes []pendingFix) []pendingFix {
+	type sharedFix struct {
+		ruleID string
+		edits  string
+	}
+	merged := make([]pendingFix, 0, len(fixes))
+	seen := make(map[sharedFix]int, len(fixes))
+	for _, pending := range fixes {
+		key := sharedFix{ruleID: pending.ruleID, edits: editsKey(pending.edits)}
+		if idx, ok := seen[key]; ok {
+			merged[idx].diagnostics += pending.diagnostics
+			continue
+		}
+		seen[key] = len(merged)
+		merged = append(merged, pending)
+	}
+	return merged
+}
+
+// editsKey identifies a fix by its edits, in order.
+func editsKey(edits []fix.TextEdit) string {
+	var key strings.Builder
+	for _, edit := range edits {
+		key.WriteString(strconv.Itoa(edit.StartOffset))
+		key.WriteByte(':')
+		key.WriteString(strconv.Itoa(edit.EndOffset))
+		key.WriteByte(':')
+		key.WriteString(strconv.Quote(edit.NewText))
+		key.WriteByte(';')
+	}
+	return key.String()
 }
 
 // mergeBlankLineInsertions combines one rule's formatting requirements at
