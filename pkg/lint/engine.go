@@ -84,9 +84,9 @@ type FileResult struct {
 	Edits []fix.TextEdit
 
 	// AcceptedFixes is the number of diagnostics whose fixes Edits holds. It
-	// can differ from len(Edits): one fix may take several edits, and the
-	// blank-line fixes of several diagnostics of one rule at one boundary
-	// share one.
+	// can differ from len(Edits): one fix may take several edits, several
+	// diagnostics of one rule may share one fix, and the blank-line fixes of
+	// several diagnostics of one rule at one boundary share one.
 	AcceptedFixes int
 
 	// SkippedEdits contains the edits of fixes that were not applied because
@@ -354,8 +354,9 @@ func (o *fixOffers) offer(edits []fix.TextEdit) bool {
 }
 
 // selectEdits decides which fixes this pass applies to content and records
-// the outcome in result. Each rule's blank-line insertions at one boundary
-// are merged first. Then each top-level block keeps the fixes of one rule,
+// the outcome in result. Each rule's fixes with the same edits, and its
+// blank-line insertions at one boundary, are merged first (see
+// mergeSharedFixes). Then each top-level block keeps the fixes of one rule,
 // and the other rules' fixes there are deferred (see selectFixes). Finally
 // the fixes taken are resolved against each other, so a fix that overlaps
 // another fix of the same rule is skipped.
@@ -550,7 +551,8 @@ type pendingFix struct {
 	edits  []fix.TextEdit
 
 	// diagnostics is the number of diagnostics the fix fixes: one, or more
-	// for one rule's blank-line insertions merged into one fix.
+	// for one rule's fixes with the same edits, or its blank-line insertions
+	// at one boundary, merged into one fix.
 	diagnostics int
 
 	// mergeConflict marks a blank-line insertion for a different container
@@ -669,8 +671,10 @@ func compareEditRanges(left, right fix.TextEdit) int {
 // fix, which fixes each of their diagnostics. A rule gives several findings
 // one fix when one change resolves them all, as MD049 reports both markers
 // of an emphasis with the fix that replaces both. Applied once, the edits
-// fix every such finding, while a second copy would conflict with the
-// first and be skipped. Fixes of different rules are never merged.
+// fix every such finding. Resolved against each other, a second copy of a
+// replacement would conflict with the first and be skipped, and one of an
+// insertion would insert its text again; copies of a deletion merged
+// already. Fixes of different rules are never merged.
 func mergeSharedFixes(fixes []pendingFix) []pendingFix {
 	type sharedFix struct {
 		ruleID string
