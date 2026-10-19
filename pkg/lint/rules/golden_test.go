@@ -487,12 +487,29 @@ rules:
 		{
 			name:    "option set twice through an alias",
 			content: "rules:\n  MD013:\n    &opt line_length: 100\n    *opt : 20\n",
-			wantErr: `line 4: "line_length" and "*opt" both set option "line_length"`,
+			wantErr: `line 4: mapping key "line_length" already defined at line 3`,
 		},
 		{
 			name:    "option set twice through an alias under options",
 			content: "rules:\n  MD013:\n    options:\n      &opt max: 100\n      *opt : 20\n",
-			wantErr: `line 5: "options.max" and "options.*opt" both set option "max"`,
+			wantErr: `line 5: mapping key "max" already defined at line 4`,
+		},
+		{
+			name:    "rule set twice through an alias",
+			content: "rules:\n  &id MD013:\n    line_length: 100\n  *id :\n    line_length: 90\n",
+			wantErr: `line 4: mapping key "MD013" already defined at line 2`,
+		},
+		{
+			// A sidecar without alias keys gets every error of its decode.
+			name:    "type error beside a misspelled key",
+			content: "rules:\n  MD013:\n    enabled: 3\nflavour: gfm\n",
+			wantErr: "field flavour not found",
+		},
+		{
+			// The rule keys are checked before the sidecar is decoded.
+			name:    "rule set twice through an alias beside a misspelled key",
+			content: "rules:\n  &id MD013:\n    line_length: 100\n  *id :\n    line_length: 90\nflavour: gfm\n",
+			wantErr: `line 4: mapping key "MD013" already defined at line 2`,
 		},
 	}
 	for _, tt := range invalid {

@@ -176,9 +176,32 @@ func checkSidecarOptions(rule lint.Rule, options map[string]any) error {
 // outside the rules. The settings of each rule read as a config file's do,
 // and every key under a rule ID that is no rule setting is read as an
 // option (see config.ReadFlatOptions), so that loadGoldenConfig rejects
-// those the rule does not read. Option values decode into the same Go types
-// as in the product's YAML loader.
+// those the rule does not read. A key that a YAML alias repeats is an
+// error, as in a config file (see config.ExpandAliasKeys). Option values
+// decode into the same Go types as in the product's YAML loader.
+//
+// The keys of a sidecar with alias keys are checked before, and apart
+// from, the decode that rejects unknown keys, since yaml.v3 offers that
+// check to a decoder of bytes alone. So a sidecar that repeats a key
+// through an alias fails without the errors for its unknown keys, which
+// its literal twin also gets. That decode reads the sidecar as written, so
+// it compares alias keys by anchor name and rejects two aliases of one
+// anchor name that name two keys, which a config file accepts. A sidecar
+// has no use for either.
 func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
+	// The keys are checked first, as decoding a config file checks them,
+	// with the alias keys expanded, when there are any.
+	var parsed yaml.Node
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
+	}
+	doc := config.ExpandAliasKeys(&parsed)
+	if doc != &parsed {
+		if err := doc.Decode(new(goldenSidecar)); err != nil {
+			return goldenSidecar{}, fmt.Errorf("parse: %w", err)
+		}
+	}
+
 	var sidecar goldenSidecar
 
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -204,15 +227,15 @@ func decodeGoldenSidecar(data []byte) (goldenSidecar, error) {
 		return goldenSidecar{}, errEmptySidecar
 	}
 
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
-	}
+	// sidecar.Rules came from the bytes as written, and doc has its alias
+	// keys expanded, but both take the same keys: the decode of doc above
+	// rejected every key that an alias repeats, and the decode of the bytes
+	// every alias that repeats an anchor name.
 	rules := config.Config{Rules: sidecar.Rules}
-	if err := config.ReadFlatOptions(&doc, &rules, func(string, string) bool { return true }); err != nil {
+	if err := config.ReadFlatOptions(doc, &rules, func(string, string) bool { return true }); err != nil {
 		return goldenSidecar{}, fmt.Errorf("parse: %w", err)
 	}
-	if sidecar.settings, err = writtenRuleSettings(&doc); err != nil {
+	if sidecar.settings, err = writtenRuleSettings(doc); err != nil {
 		return goldenSidecar{}, err
 	}
 

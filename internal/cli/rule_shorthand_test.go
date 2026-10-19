@@ -390,9 +390,56 @@ func TestLint_InvalidSeverityShorthand(t *testing.T) {
 	}
 }
 
+// TestLint_RejectsKeysRepeatedThroughAliases covers a gomdlint config in
+// which a YAML alias writes a key of a mapping a second time: a rule key,
+// a rule setting, an option directly under the rule key or an option under
+// options. The run fails as it does for the key written out twice, with
+// the same error.
+func TestLint_RejectsKeysRepeatedThroughAliases(t *testing.T) {
+	tests := []struct {
+		name, literal, alias string
+	}{
+		{
+			name:    "rule key",
+			literal: "rules:\n  line-length: false\n  line-length: true\n",
+			alias:   "rules:\n  &rule line-length: false\n  *rule : true\n",
+		},
+		{
+			name:    "rule setting",
+			literal: "rules:\n  MD013:\n    enabled: false\n    enabled: true\n",
+			alias:   "rules:\n  MD013:\n    &set enabled: false\n    *set : true\n",
+		},
+		{
+			name:    "option under the rule key",
+			literal: "rules:\n  MD013:\n    line_length: 200\n    line_length: 20\n",
+			alias:   "rules:\n  MD013:\n    &opt line_length: 200\n    *opt : 20\n",
+		},
+		{
+			name:    "option under options",
+			literal: "rules:\n  MD013:\n    options:\n      max: 200\n      max: 20\n",
+			alias:   "rules:\n  MD013:\n    options:\n      &opt max: 200\n      *opt : 20\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": tt.literal})
+			literal := transcript(t, execute(t, "lint", "doc.md"), dir)
+
+			dir = inProject(t, map[string]string{"doc.md": severityDoc, ".gomdlint.yml": tt.alias})
+			alias := transcript(t, execute(t, "lint", "doc.md"), dir)
+
+			assert.Contains(t, literal, "exit code 65\n")
+			assert.Contains(t, literal, "already defined at line")
+			assert.Equal(t, literal, alias)
+		})
+	}
+}
+
 // TestRuleShorthandMessagesGolden runs command lines whose gomdlint config
-// sets a rule to a string that is no severity, and compares the transcript
-// of each with testdata/golden/<name>.golden.
+// sets a rule to a string that is no severity, or writes a rule key twice
+// through a YAML alias, and compares the transcript of each with
+// testdata/golden/<name>.golden.
 func TestRuleShorthandMessagesGolden(t *testing.T) {
 	skipUnlessSlashPaths(t)
 
@@ -401,6 +448,7 @@ func TestRuleShorthandMessagesGolden(t *testing.T) {
 		config string
 	}{
 		{name: "lint-config-severity-shorthand-invalid", config: "rules:\n  line-length: warn\n"},
+		{name: "lint-config-rule-repeated-through-alias", config: "rules:\n  &rule line-length: false\n  *rule : error\n"},
 	}
 
 	for _, tt := range tests {

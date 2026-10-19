@@ -1,0 +1,5 @@
+exit code 65
+-- stdout --
+-- stderr --
+Error: load configuration: load project config: $PROJECT/.gomdlint.yml: parse YAML: yaml: unmarshal errors:
+  line 3: mapping key "line-length" already defined at line 2

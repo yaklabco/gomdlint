@@ -43,9 +43,13 @@ formats change. The first entries under Changed may need action.
   one option both there and under `options` is an error. A key that names no
   option of the rule is still ignored with a warning, and its value is not
   read.
-- A key that a YAML alias writes a second time, under a rule or under its
-  `options`, is an error, as a key written twice already was. Loading used
-  to keep the later value without a word.
+- A key that a YAML alias writes a second time is an error in any part of a
+  gomdlint config file that gomdlint reads, the same one that the key
+  written out twice gets, such as `mapping key "MD013" already defined at
+  line 2`. That includes rule keys under `rules` and `rule_defaults`, the
+  keys under a rule and those under its `options`. Loading used to keep one
+  of the values without a word, or fail with an error that named an
+  internal type.
 - `--color always` colours output that goes to a pipe or a file, and it
   overrides `NO_COLOR`, because the flag asks for colour explicitly.
 - Exit codes tell failures apart: 1 for error findings, 2 for warnings with

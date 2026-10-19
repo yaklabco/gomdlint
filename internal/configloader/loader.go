@@ -299,6 +299,9 @@ func loadConfigFile(path string) (*config.Config, []string, error) {
 		return nil, nil, fmt.Errorf("%s: parse %s: %w", path, format, err)
 	}
 
+	// Every pass reads the alias keys expanded, so a key that an alias
+	// repeats gets the error of the key written out twice.
+	doc = config.ExpandAliasKeys(doc)
 	cfg := &config.Config{}
 	if doc.Kind != 0 { // An empty YAML file holds no node and sets nothing.
 		if err := doc.Decode(cfg); err != nil {

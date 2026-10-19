@@ -135,10 +135,15 @@ func withHeader(header string, yamlBytes []byte) []byte {
 // setting is always the setting, so an option spelled like one can be set
 // only under options.
 //
-// Two keys in one mapping that read as one name, such as a key and an
-// alias of it, are an error, directly under the rule key and under
-// options: YAML rejects a key written twice, but compares an alias key by
-// its anchor, so decoding would keep the later value silently.
+// Two keys in one mapping that read as one name are an error, directly
+// under the rule key and under options: decoding would keep one of the
+// values silently. FromYAML and the configuration loader read a document
+// with its alias keys expanded (see ExpandAliasKeys), so YAML itself
+// rejects a key that an alias repeats with its own error for a key
+// written twice, and this check meets only keys that YAML takes for two,
+// such as a key and a binary key that holds its text. Decoding a document
+// that is not expanded, with yaml.Unmarshal alone, meets alias keys here
+// too, with this check's words.
 //
 // YAML is a superset of JSON, so JSON config files get the shorthands and
 // the flat shape too.
@@ -193,6 +198,96 @@ func checkRepeatedKeys(mapping *yaml.Node) error {
 	return repeatedKey(options, "options.")
 }
 
+// ExpandAliasKeys returns node, a parsed YAML document or a node of one,
+// with each key that an alias writes for a scalar expanded: written out as
+// a copy of the scalar, at the alias's place and with the alias's
+// comments, without the anchor. yaml.v3 compares an alias key by its
+// anchor, so for a key that an alias repeats, decoding would keep one of
+// the values silently, or report a field set twice in other words.
+// Expanded, the key gets YAML's error for a key written twice, as the key
+// written out would, beside the document's other errors and in YAML's
+// order. Decoding and reading the result otherwise gives what node gives.
+//
+// Only scalars expand: a key can only decode to a name from a scalar, and
+// a collection may contain the alias itself, which decoding catches only
+// through the alias. An alias of a merge key stays an alias too, which
+// decoding reads as an ordinary key, where the key written out would
+// merge.
+//
+// The result is node itself when decoding node reaches no such alias key,
+// as in most documents. Otherwise it is a copy of the nodes that decoding
+// reaches, through their content and the nodes that their aliases name,
+// and node is left as it is. Every other alias of the copy names the copy
+// of its node, so a node that contains itself still does.
+//
+// FromYAML and the configuration loader decode documents with their alias
+// keys expanded, and read their flat options from the expanded documents
+// (see ReadFlatOptions). Decoding a Config with yaml.Unmarshal alone
+// expands nothing.
+func ExpandAliasKeys(node *yaml.Node) *yaml.Node {
+	if !reachesAliasKey(node, make(map[*yaml.Node]bool)) {
+		return node
+	}
+
+	copies := make(map[*yaml.Node]*yaml.Node)
+	var copyNode func(original *yaml.Node) *yaml.Node
+	copyNode = func(original *yaml.Node) *yaml.Node {
+		if made, ok := copies[original]; ok {
+			return made
+		}
+		made := new(yaml.Node)
+		*made = *original
+		copies[original] = made
+		if original.Alias != nil {
+			made.Alias = copyNode(original.Alias)
+		}
+		if len(original.Content) > 0 {
+			made.Content = make([]*yaml.Node, len(original.Content))
+		}
+		for idx, child := range original.Content {
+			if isAliasKey(original, idx) {
+				key := *copyNode(child.Alias)
+				key.Anchor = ""
+				key.Line, key.Column = child.Line, child.Column
+				key.HeadComment, key.LineComment, key.FootComment = child.HeadComment, child.LineComment, child.FootComment
+				made.Content[idx] = &key
+				continue
+			}
+			made.Content[idx] = copyNode(child)
+		}
+		return made
+	}
+	return copyNode(node)
+}
+
+// reachesAliasKey reports whether decoding node reaches a key that an alias
+// writes, through the content of the nodes and the nodes that their aliases
+// name. walked holds the nodes that it has looked at, each once.
+func reachesAliasKey(node *yaml.Node, walked map[*yaml.Node]bool) bool {
+	if node == nil || walked[node] {
+		return false
+	}
+	walked[node] = true
+	if node.Kind == yaml.AliasNode {
+		return reachesAliasKey(node.Alias, walked)
+	}
+	for idx, child := range node.Content {
+		if isAliasKey(node, idx) || reachesAliasKey(child, walked) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAliasKey reports whether the node at idx in the content of node is a key
+// of a mapping that an alias writes for a scalar other than a merge key:
+// one that ExpandAliasKeys expands.
+func isAliasKey(node *yaml.Node, idx int) bool {
+	child := node.Content[idx]
+	return node.Kind == yaml.MappingNode && idx%2 == 0 && child.Kind == yaml.AliasNode &&
+		child.Alias != nil && child.Alias.Kind == yaml.ScalarNode && !isMergeKey(child.Alias)
+}
+
 // FlatOptionConflictError is the error of an option that a rule's settings
 // write both directly under the rule key and under options, under the same
 // name: either value could win.
@@ -230,6 +325,12 @@ func (e *FlatOptionConflictError) Error() string {
 // the same name is a *FlatOptionConflictError. Rules are read in order of
 // key, and the keys of each rule in order of name, so the first error is
 // the same every time.
+//
+// doc must be the very node that cfg was decoded from, so that both take
+// the same keys. A caller that decodes a document with its alias keys
+// expanded, as FromYAML and the configuration loader do (see
+// ExpandAliasKeys), passes the expanded document: ReadFlatOptions expands
+// nothing itself.
 func ReadFlatOptions(doc *yaml.Node, cfg *Config, reads func(rule, option string) bool) error {
 	root := doc
 	if root != nil && root.Kind == yaml.DocumentNode {
@@ -574,18 +675,20 @@ func describeNode(node *yaml.Node) string {
 // writes directly under rule keys. It does not know which options the rules
 // declare, so it reads every key under a rule other than the settings as an
 // option (see ReadFlatOptions). A configuration loader that knows the
-// rules reads only their options.
+// rules reads only their options. A key that a YAML alias repeats gets
+// the error that the key written out twice gets (see ExpandAliasKeys).
 func FromYAML(data []byte) (*Config, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	var parsed yaml.Node
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
-	cfg, err := decodeConfig(&doc)
+	doc := ExpandAliasKeys(&parsed)
+	cfg, err := decodeConfig(doc)
 	if err != nil {
 		return nil, err
 	}
 	if doc.Kind != 0 {
-		if err := ReadFlatOptions(&doc, cfg, func(string, string) bool { return true }); err != nil {
+		if err := ReadFlatOptions(doc, cfg, func(string, string) bool { return true }); err != nil {
 			return nil, fmt.Errorf("parse yaml: %w", err)
 		}
 	}
