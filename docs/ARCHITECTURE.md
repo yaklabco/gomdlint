@@ -252,7 +252,9 @@ Finally the engine selects the edits for this pass (see
 The selected reporter formats the runner's result (see
 [Reporters](#reporters)). The CLI writes config warnings, notices, fixes
 that were not written and rule failures to stderr after the report, so
-every output format shows them and stdout holds only the report.
+every output format shows them and stdout holds only the report. Text
+output that lists findings ends with a line, which the CLI adds, that names
+`gomdlint explain`.
 
 ## Parser and Source Spans
 

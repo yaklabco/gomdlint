@@ -9,6 +9,7 @@ doc.md (3 issues)
     Suggestion: Remove trailing whitespace
 
 3 issues (3 errors), in 1 file, 3 fixable
+Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.
 -- stderr --
 INFO using $PROJECT/.markdownlint.json, translated to gomdlint settings for this run; to save them, run: gomdlint migrate $PROJECT/.markdownlint.json --output $PROJECT/.gomdlint.yml
 WARN $PROJECT/.markdownlint.json: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored

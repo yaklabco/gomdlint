@@ -66,6 +66,30 @@ func TestRulesCommandPrintsPlainTable(t *testing.T) {
 	}
 }
 
+// TestLintTextOutputPointsAtExplain covers the line that ends text output
+// with findings, which names the explain command. Output without findings,
+// such as after --fix fixes them all, and every other format leave it out.
+func TestLintTextOutputPointsAtExplain(t *testing.T) {
+	const hint = "Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.\n"
+	inProject(t, map[string]string{"bad.md": trailingDoc, "good.md": fixedDoc})
+
+	got := execute(t, "lint", "--color", "never", "good.md", "bad.md")
+	assert.True(t, strings.HasSuffix(got.stdout, "1 fixable\n"+hint), "the last line, after the summary: %q", got.stdout)
+	assert.Equal(t, 1, strings.Count(got.stdout, hint), "once")
+
+	got = execute(t, "lint", "--color", "never", "good.md")
+	assert.NotContains(t, got.stdout, "gomdlint explain", "no findings")
+
+	for _, format := range []string{"table", "summary", "json", "sarif", "diff"} {
+		got = execute(t, "lint", "--color", "never", "--format", format, "bad.md")
+		assert.NotContains(t, got.stdout, "gomdlint explain", "--format %s", format)
+	}
+
+	got = execute(t, "lint", "--color", "never", "--fix", "--no-backups", "bad.md")
+	require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.NotContains(t, got.stdout, "gomdlint explain", "every finding fixed")
+}
+
 func TestVersionCommandPrintsPlainVersion(t *testing.T) {
 	t.Parallel()
 

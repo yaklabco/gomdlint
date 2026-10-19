@@ -243,7 +243,8 @@ gomdlint lint --format diff --fix file.md  # diff - the fixes --fix made
 
 Text output lists each finding with its location, severity, rule and
 message, the order markdownlint-cli2 uses, followed by the source line and a
-suggestion. `--no-context` leaves out the source lines.
+suggestion. `--no-context` leaves out the source lines. After the summary, a
+last line names `gomdlint explain`, which describes each rule.
 
 ```text
 README.md (3 issues)
@@ -261,6 +262,7 @@ README.md (3 issues)
     Suggestion: Remove trailing punctuation from the heading
 
 3 issues (3 warnings), in 1 file, 2 fixable
+Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.
 ```
 
 Columns count characters, so a finding after multibyte text points at its

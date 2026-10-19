@@ -16,6 +16,7 @@ import (
 	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // Register built-in rules
@@ -293,8 +294,12 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 
 	// Report results.
-	if _, err := rep.Report(ctx, result); err != nil {
+	shown, err := rep.Report(ctx, result)
+	if err != nil {
 		return withExitCode(ExitIOError, fmt.Errorf("report results: %w", err))
+	}
+	if err := writeExplainHint(cmd, colorMode, format, shown); err != nil {
+		return err
 	}
 	for _, warning := range noticeWarnings(result, workDir) {
 		logger.Warn(warning)
@@ -314,6 +319,19 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 	}
 
 	return resultError(result, flags.strict)
+}
+
+// writeExplainHint ends a report in format that lists shown findings with a
+// line that names the command that explains them, for text output only.
+func writeExplainHint(cmd *cobra.Command, colorMode string, format reporter.Format, shown int) error {
+	if format != reporter.FormatText || shown == 0 {
+		return nil
+	}
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintln(out, pretty.NewStylesFor(colorMode, out).Dim.Render(explainHint)); err != nil {
+		return withExitCode(ExitIOError, fmt.Errorf("report results: %w", err))
+	}
+	return nil
 }
 
 // runnerOptions builds the file discovery and processing options of a run.
@@ -494,6 +512,9 @@ type ruleLists struct {
 
 // listRulesHint ends the error about rule flag values that name no rule.
 const listRulesHint = "Run 'gomdlint rules' to list rules."
+
+// explainHint ends text output that lists findings.
+const explainHint = "Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it."
 
 // resolveRuleListFlags resolves the values of --enable, --disable and
 // --fix-rules through registry. A value that names no rule or tag is a

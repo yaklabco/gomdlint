@@ -18,6 +18,8 @@ formats change. The first entries under Changed may need action.
   the ID instead, `--rule-format combined` shows both, and the
   `GOMDLINT_RULE_FORMAT` environment variable sets the default. The summary
   no longer cuts long rule names.
+- Text output that lists findings ends with a line that names
+  `gomdlint explain`.
 - `gomdlint rules` lists the rules by category, sorted by name, in a table
   of each rule's name, ID, fix support, status and description, followed by
   a count. The status is `off` or the severity of the rule's findings under
