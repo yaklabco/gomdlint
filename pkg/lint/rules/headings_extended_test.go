@@ -499,11 +499,20 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			wantFixed: "## Learn C\\#\n",
 		},
 		{
+			// Like markdownlint, the fix deletes the characters after the
+			// first, which may be a tab.
 			name:      "MD019 with tabs",
 			rule:      NewNoMultipleSpaceATXRule(),
-			input:     "#\t\tTabbed\n",
-			wantLines: []int{1},
-			wantFixed: "# Tabbed\n",
+			input:     "#\t\tTabbed\n\n##  \tMixed\n",
+			wantLines: []int{1, 3},
+			wantFixed: "#\tTabbed\n\n## Mixed\n",
+		},
+		{
+			name:      "MD021 with tabs",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "#\t\tTabbed heading\t\t#\n",
+			wantLines: []int{1, 1},
+			wantFixed: "#\tTabbed heading\t#\n",
 		},
 		{
 			name:      "MD021 only right side",
@@ -521,10 +530,12 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			wantFixed: "## \n",
 		},
 		{
+			// The spaces of an empty closed heading are on both sides, so
+			// markdownlint reports them twice, and both findings share a fix.
 			name:      "MD021 empty closed heading",
 			rule:      NewNoMultipleSpaceClosedATXRule(),
 			input:     "##  ##\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFixed: "## ##\n",
 		},
 		{name: "MD019 skips an empty closed heading", rule: NewNoMultipleSpaceATXRule(), input: "##  ##\n", wantLines: []int{}},
@@ -605,6 +616,13 @@ func TestNoMissingSpaceClosedATXRule_MarkdownlintColumns(t *testing.T) {
 	other := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), "\uFEFF# Right#\n\n# Caf\u00e9#\n", nil)
 	assert.Equal(t, [][2]int{{1, 10}, {3, 6}}, diagPositions(other),
 		"a byte order mark keeps its bytes before the column, and the column starts a character")
+
+	// A finding for a missing opening space covers the opening hashes and
+	// the character after them, and one for a closing space runs through
+	// the closing hashes.
+	ends := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), "#Text #\n\n##Two ##\n\n## Right##\n", nil)
+	require.Len(t, ends, 3)
+	assert.Equal(t, []int{3, 4, 11}, []int{ends[0].EndColumn, ends[1].EndColumn, ends[2].EndColumn})
 }
 
 // TestNoMultipleSpaceClosedATXRule_MarkdownlintSides checks MD021 against
