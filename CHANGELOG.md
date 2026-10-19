@@ -567,6 +567,11 @@ formats change. The first entries under Changed may need action.
   `"line_length": "100"` or `"0x64"`, as its number, as markdownlint's
   rules do. gomdlint ignored such a value with a warning, and without one
   in a comment. gomdlint's own config files still take numbers only.
+- An infinite `line_length`, `heading_line_length`,
+  `code_block_line_length` or `maximum` in a markdownlint config, such as
+  YAML's `.inf`, lifts the limit, as in markdownlint, where gomdlint
+  ignored it with a warning. Warnings write an infinite or NaN value as
+  JavaScript does, such as `Infinity`, where they wrote `+Inf`.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up
   after wide characters and tabs.

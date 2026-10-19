@@ -350,6 +350,26 @@ func TestCatalogDeclaresEveryOptionRead(t *testing.T) {
 	}
 }
 
+// TestCatalogLimits pins the options marked Limit: the integers that
+// markdownlint 0.41.1 compares counts with, so that an infinite value
+// lifts the limit, MD012's maximum and MD013's three line lengths. Each
+// rule reads the option as a most that a count may reach, so math.MaxInt,
+// which a markdownlint configuration's infinity reads as, lifts it too.
+// markdownlint fails or never finishes with an infinite value of the other
+// integers, such as MD007's indent or MD022's lines_above.
+func TestCatalogLimits(t *testing.T) {
+	var limits []string
+	for _, meta := range Catalog() {
+		for _, spec := range meta.Options {
+			if spec.Limit {
+				assert.Equal(t, lint.OptionInteger, spec.Type, "%s %s", meta.ID, spec.Name)
+				limits = append(limits, meta.ID+" "+spec.Name)
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{"MD012 max_consecutive", "MD013 max", "MD013 heading_max", "MD013 code_block_max"}, limits)
+}
+
 // TestCatalogDefaultsMatchCode runs every golden case twice: as it is, and
 // with every option of its rules set explicitly to its declared default,
 // and requires the same findings and fixed text. A declared default that

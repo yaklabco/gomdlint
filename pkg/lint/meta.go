@@ -191,6 +191,15 @@ type OptionSpec struct {
 	// option of a rule that markdownlint lacks is one.
 	GomdlintOnly bool
 
+	// Limit reports that the option, an integer, is a most that a count
+	// may reach, such as line-length's max, which an infinite value lifts
+	// in markdownlint 0.41.1, since no count reaches it. A markdownlint
+	// configuration may write such a value as YAML's .inf, a JSON number
+	// beyond float64's range or the string "Infinity", and gomdlint reads
+	// it there as math.MaxInt, which no count reaches either. An infinite
+	// value of any other option is of the wrong type.
+	Limit bool
+
 	// MarkdownlintPinned reports that a markdownlint configuration sets the
 	// option to Default explicitly in each setting of the rule that resets
 	// no options, the default key and a rule key that turns the rule off, so

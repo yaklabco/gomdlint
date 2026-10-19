@@ -1101,7 +1101,8 @@ which knows markdownlint's spelling of each option and no other, so
 gomdlint's names and its own options are unknown options there, as in
 markdownlint. That table also reads a numeric string for a numeric option
 as JavaScript's `Number` reads it (`jsStringNumber`), as markdownlint's
-rules do.
+rules do, and an infinite value of an option marked `Limit` as
+`math.MaxInt`, which no count reaches.
 
 **Rule Identification:** Config files accept a rule's ID (`MD001`), name
 (`heading-increment`), or markdownlint alias (`ul-style` for MD004)

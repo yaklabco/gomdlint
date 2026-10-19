@@ -105,23 +105,23 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		},
 		"MD011": {},
 		"MD012": {{
-			Name: "max_consecutive", Aliases: []lint.OptionAlias{{Name: "maximum"}}, Type: lint.OptionInteger, Default: 1,
+			Name: "max_consecutive", Aliases: []lint.OptionAlias{{Name: "maximum"}}, Type: lint.OptionInteger, Default: 1, Limit: true,
 			Description: "Most blank lines allowed in a row. Values below 1 count as 1.",
 		}},
 		"MD013": {
 			{
 				Name: "max", Aliases: []lint.OptionAlias{{Name: "line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, MarkdownlintPinned: true,
+				Default: defaultMaxLineLength, Limit: true, MarkdownlintPinned: true,
 				Description: "Most characters allowed on a line. 0 counts as 80, as in markdownlint.",
 			},
 			{
 				Name: "heading_max", Aliases: []lint.OptionAlias{{Name: "heading_line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, DefaultFrom: "max",
+				Default: defaultMaxLineLength, DefaultFrom: "max", Limit: true,
 				Description: "Most characters allowed on a heading line. 0 counts as max.",
 			},
 			{
 				Name: "code_block_max", Aliases: []lint.OptionAlias{{Name: "code_block_line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, DefaultFrom: "max",
+				Default: defaultMaxLineLength, DefaultFrom: "max", Limit: true,
 				Description: "Most characters allowed on a line of a code block. 0 counts as max.",
 			},
 			{

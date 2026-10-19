@@ -653,7 +653,11 @@ A numeric option reads a numeric string, such as `"20"`, `"2e1"` or
 `"0x14"`, as the number that JavaScript's `Number` reads from it, as
 markdownlint's rules read their numeric options. The items of a list, such
 as `lines_above: ["2"]`, stay strings, which count as of the wrong type,
-and options of other types read no numbers.
+and options of other types read no numbers. An infinite `line_length`,
+`heading_line_length`, `code_block_line_length` or `maximum`, such as
+YAML's `.inf`, lifts the limit, as in markdownlint. Any other option
+ignores an infinite value with a warning, where markdownlint fails or
+never finishes.
 
 A key that turns a rule on, with `true`, a severity or an object, gives the
 rule the options that it sets and markdownlint's defaults for the others,

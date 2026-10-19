@@ -337,13 +337,18 @@ func quotedChoices(words []string, conjunction string) string {
 }
 
 // describeOptionValue writes an option's value for a message: a string
-// quoted, null for nil, and anything else as JSON writes it.
+// quoted, null for nil, an infinity or NaN as JavaScript writes it, such as
+// Infinity, and anything else as JSON writes it.
 func describeOptionValue(value any) string {
 	switch typed := value.(type) {
 	case nil:
 		return jsNull
 	case string:
 		return strconv.Quote(typed)
+	case float64:
+		if math.IsInf(typed, 0) || math.IsNaN(typed) {
+			return jsNumberString(typed)
+		}
 	}
 	if encoded, err := json.Marshal(value); err == nil {
 		return string(encoded)
@@ -522,17 +527,22 @@ func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
 // as value === undefined ? default : Number(value), so a numeric string,
 // such as "10" or " 0x0A ", reads as its number (see jsStringNumber). The
 // items of a list stay as they are, as MD022, the one rule whose numeric
-// option takes a list, uses them.
+// option takes a list, uses them. An infinite limit (OptionSpec.Limit)
+// reads as math.MaxInt, which no count reaches, as none reaches infinity.
 func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, bool) {
-	text, isText := value.(string)
-	if !t.markdownlintValues || !isText || (spec.Type != OptionInteger && spec.Type != OptionIntegerOrList) {
+	if !t.markdownlintValues || (spec.Type != OptionInteger && spec.Type != OptionIntegerOrList) {
 		return value, false
 	}
-	number, ok := jsStringNumber(text)
-	if !ok {
-		return value, false
+	read, differs := value, false
+	if text, isText := value.(string); isText {
+		if number, ok := jsStringNumber(text); ok {
+			read, differs = number, true
+		}
 	}
-	return number, true
+	if number, isNumber := read.(float64); isNumber && spec.Limit && math.IsInf(number, 1) {
+		read, differs = math.MaxInt, true
+	}
+	return read, differs
 }
 
 // suggest returns the spellings that key, which spells no option of the
