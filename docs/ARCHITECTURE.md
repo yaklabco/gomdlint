@@ -458,26 +458,37 @@ document an edit can affect. A recording parse of the original
 (`docLayout` in `fix_regions.go`) notes the lines where goldmark starts a
 group of blocks whose parse no longer depends on what came before: a line
 where it opens a block with no block open, or a top-level block right after
-a closed thematic break, ATX heading or one-line HTML block. It also notes
-where each item of a top-level list starts and which paragraph each link
-reference definition comes from.
+a closed thematic break, ATX heading or one-line HTML block. Inside a
+top-level blockquote it notes the same groups, where a block opens in the
+blockquote with no other block of the blockquote open, or right after such
+a closed block. It also notes where each item of a list starts, for the
+lists at the top level and in a top-level blockquote, where each body row
+of a GFM table there starts, and which paragraph each link reference
+definition comes from.
 
 A check parses the groups that hold its edits, followed by a sentinel line
-that must start a group the way the original's next group starts, or,
-inside a long list, the edited items with the item before and the item
-after them. It splices the result into the original's render signature
-(`fix_region_model.go`) or outline (`fix_safety_regions.go`) and compares
-exactly. It parses the whole document, as before, when an edit changes link
-reference definitions or can reach the front matter, or, for the render
-signature, when a region changes the anchor counts after it.
-`fix_anchors.go` works out how the anchors of headings change. `fixcheck.go`
-finds references to heading anchors in one pass over the document.
+that must start a group the way the original's next group starts. Inside a
+long blockquote it parses the blockquote's groups that hold the edits, with
+a sentinel line in the blockquote. Inside a long list it parses the edited
+items with the item before and the item after them, and inside a long
+table the edited rows after the table's header and delimiter rows, with a
+sentinel line that must stay a row. It splices the result into the
+original's render signature (`fix_region_model.go`) or outline
+(`fix_safety_regions.go`) and compares exactly. It parses the whole
+document, as before, when an edit changes link reference definitions or can
+reach the front matter, or, for the render signature, when a region changes
+the anchor counts after it. `fix_anchors.go` works out how the anchors of
+headings change. `fixcheck.go` finds references to heading anchors in one
+pass over the document.
 
 The safety argument, why a region check decides exactly as a check of the
 whole document would, is the top comment of
-`pkg/lint/rules/fix_regions.go`. Two shapes still cost a parse per fix: many
-fixes inside one large block other than a top-level list, and fixes that
-change link reference definitions.
+`pkg/lint/rules/fix_regions.go`. Two shapes still cost a parse per fix.
+One is many fixes inside one large block other than a top-level
+blockquote, or a list or table at the top level or in a top-level
+blockquote: a long paragraph, a table read with the `commonmark` flavor,
+or a blockquote nested in another or in a list item. The other is fixes
+that change link reference definitions.
 
 ## Rule Catalog and Registry
 

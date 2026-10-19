@@ -469,6 +469,14 @@ formats change. The first entries under Changed may need action.
   whole document. MD018, MD020, MD022 and MD036 build their lookups once per
   document instead of scanning it again for each line or heading. Fix checks
   parse only the part of the document that an edit can affect.
+- Many fixes inside one long blockquote or table no longer take time that
+  grows with the square of its length. A fix check parses the groups of
+  blocks of a top-level blockquote that the fix can affect, the items around
+  the edited ones of a list in such a blockquote, and the edited rows of a
+  GFM table after its header and delimiter rows. A list of 8,000 items in a
+  blockquote, each with trailing spaces, took 200 seconds to lint and now
+  takes under a second, and a table of 8,000 such rows went from 160 seconds
+  to about one. Findings, fixes and fixed output stay as they were.
 - goldmark moves to v1.8.6, past GO-2026-5320, a flaw in its HTML renderer
   that gomdlint never calls. Releases build with Go 1.26.9, which govulncheck
   finds free of GO-2026-4602, reachable through `filepath.WalkDir` with Go

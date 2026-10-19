@@ -718,8 +718,11 @@ Some of its fix checks are also stricter than they need to be.
 - Two kinds of document still lint slowly. Removing a long run of unused
   reference definitions with `link-image-reference-definitions` (MD053)
   takes time that grows with the square of the run's length. Many fixes
-  inside one large block other than a list, such as a long table or
-  blockquote, cost a parse of that block each.
+  inside one large block cost a parse of that block each, unless the block
+  is a top-level blockquote, or a list or table at the top level or in a
+  top-level blockquote. Such blocks include a long paragraph, a table read
+  with the `commonmark` flavor, which has no tables, and a blockquote
+  inside another blockquote or a list item.
 - goldmark parses no math, so no rule skips it. `no-reversed-links`
   (MD011), `no-inline-html` (MD033), `no-alt-text` (MD045) and
   `reference-links-images` (MD052) report in a `$$` math block and in

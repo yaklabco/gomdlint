@@ -109,6 +109,41 @@ var regionSnippets = []string{
 	// "a-2" to find a free number.
 	"# a\n\n# a-1\n\n# a-2\n\n# `a `\n\n# `a `\n",
 	"## a-b\n## a-\tb\n## `a ` b\n",
+	// Top-level blockquotes of several groups, where quote regions are used:
+	// groups after a quoted blank line, after a closed block, after a closed
+	// fence, whose first block follows no blank line, and after a quote line
+	// that holds only the marker; lazy continuation lines, nested
+	// blockquotes, definitions and repeated anchors in a quote, setext
+	// headings and indented code that run on, and a quote that interrupts a
+	// paragraph.
+	"> First quoted paragraph   \n>\n> Second quoted paragraph   \n>\n> Third quoted paragraph\n",
+	"> # Quoted heading\n> Text after the heading   \n> ***\n> Text after a break   \n>\n> End of quote\n",
+	"> ```\n> code in a quote  \n> ```\n> Text after a fence   \n>\n> more quoted text\n",
+	">\n> After an empty quote line   \n>\n> second quoted\n",
+	"> lazy start   \nlazy continuation   \n>\n> next quoted   \n>\n> last quoted\n",
+	"> > nested quote   \n> >\n> > nested two\n>\n> outer again   \n>\n> outer end\n",
+	"> [qref]: /quoted\n>\n> See [qref] here   \n>\n> ## Quoted anchor\n>\n> ## Quoted anchor\n>\n> end\n",
+	"> <!-- quoted comment -->\n> Text after a comment   \n>\n> Setext in a quote\n> ---\n> Text after setext   \n>\n> end\n",
+	">     indented code in a quote\n> text after code   \n>\n> end of the quote\n",
+	"Paragraph before a quote\n> quote that interrupts   \n>\n> second quoted   \n>\n> third\n",
+	// Lists in blockquotes, where list regions are used.
+	"> - quoted one   \n> - quoted two\n> - quoted three   \n> - quoted four\n> - quoted five\n",
+	"> - loose one\n>\n> - loose two   \n>\n> - loose three\n>\n> - loose four\n>\n> - loose five\n",
+	"> Text before a list\n> - qa\n> - qb   \n> - qc\n> - qd\n> - qe\n>\n> After the list   \n",
+	"> 1. qone\n> 2. qtwo   \n> 3. qthree\n> 4. qfour\n> 5. qfive\n",
+	"> - [ ] quoted task\n> - [x] quoted done\n> - [ ] more   \n> - [ ] end\n> - [ ] last\n",
+	"> - qitem\nlazy item line\n> - qother   \n> - qmore\n> - qend\n",
+	// Tables with body rows at the top level and in blockquotes, where table
+	// regions are used: rows with trailing spaces, extra or missing cells
+	// and escaped pipes, a table made from the end of a paragraph or after a
+	// definition, and a lazy row in a quote.
+	"| h1 | h2 |\n| -- | -- |\n| a  | b  |   \n| c  | d  |\n| e  | f  |   \n",
+	"Text before a table\n| th | ti |\n| -- | -- |\n| 1 | 2 |   \n| 3 | 4 |\n",
+	"| t |\n| :-: |\n| `a \\| b` |\n| x |   \n| y |\n",
+	"| ta | tb |\n|---|---|\n| 1 | 2 | 3 |\n| 4 |\n| 5 | 6 |   \n",
+	"[tref]: /table\n| a | b |\n| - | - |\n| [tref] | 2 |   \n| x | y |\n",
+	"> | qa | qb |\n> | -- | -- |\n> | 1 | 2 |   \n> | 3 | 4 |\n> | 5 | 6 |   \n",
+	"> | qa | qb |\n> | -- | -- |\n> | 1 | 2 |\n| 3 | 4 |   \n> | 5 | 6 |\n",
 }
 
 // regionEditTexts are the texts random edits insert.
@@ -116,6 +151,7 @@ var regionEditTexts = []string{
 	"", "", " ", "  ", "   ", "\t", "\n", "\n\n", "x", "- ", "* ", "1. ", "2) ", "> ", "#", "# ",
 	"```", "~~~", "<div>", "</div>", "<!--", "-->", "---", "===", "|", "[docs]: /changed\n", "    ",
 	"\\", "[", "]", "*", "_", "\xef\xbb\xbf", "---\n", "+++", "{\n",
+	">", "\n>\n", "> > ", "| - |", "|\n",
 }
 
 // randomRegionDocument joins random snippets, sometimes after front matter
@@ -938,7 +974,7 @@ func TestDecomposeRegionsMatchesFullMerges(t *testing.T) {
 			stub := func(calls *[]region) func(region, []placedEdit) stubOutcome {
 				return func(reg region, _ []placedEdit) stubOutcome {
 					*calls = append(*calls, reg)
-					key := uint64(reg.list+2)*1000003 + uint64(reg.first)*1009 + uint64(reg.last)*7 + seed
+					key := uint64(reg.kind)*7919 + uint64(reg.at+2)*1000003 + uint64(reg.first)*1009 + uint64(reg.last)*7 + seed
 					return stubOutcome{reg: reg, holds: key%5 < 3, cannotCheck: key%50 == 7}
 				}
 			}
@@ -1071,7 +1107,7 @@ func TestGroupRegionsEndAtTheOriginalKind(t *testing.T) {
 	layout := newDocLayout(gfm, []byte(input))
 	require.NotNil(t, layout)
 	require.Equal(t, []bool{false, false, true}, layout.afterClosed)
-	reg := region{list: -1, first: 1, last: 1}
+	reg := groupRegionOf(1)
 	at := strings.Index(input, "***   ") + len("***   ")
 	// A blank line after the break makes the next group start with no block
 	// open, though the edit does not reach its line.
@@ -1280,7 +1316,7 @@ func TestRegionParsesShareDefinitions(t *testing.T) {
 	require.Greater(t, groups, paragraphs)
 	start := time.Now()
 	for group := groups - paragraphs; group < groups; group++ {
-		parse := layout.parseRegion(region{list: -1, first: group, last: group}, nil)
+		parse := layout.parseRegion(groupRegionOf(group), nil)
 		require.True(t, parse.holds)
 		require.True(t, parse.refsSame)
 		require.Len(t, parse.blocks, 1)

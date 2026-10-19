@@ -10,6 +10,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
+	gmextast "github.com/yuin/goldmark/extension/ast"
 
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	gmparser "github.com/yaklabco/gomdlint/pkg/parser/goldmark"
@@ -21,12 +22,14 @@ import (
 type regionModel struct {
 	*docLayout
 	sig string
-	// groupSig and groupHeading hold, for each group and for the end, where
-	// its blocks start in sig and the index of its first heading.
-	groupSig     []int
-	groupHeading []int
-	listSigs     []listSig
-	history      anchorHistory
+	// groups holds where the blocks of each group start in sig. listSigs,
+	// quoteSigs and tableSigs hold where the parts of each list, blockquote
+	// and table of the layout are.
+	groups    regionParts
+	listSigs  []listSig
+	quoteSigs []regionParts
+	tableSigs []regionParts
+	history   anchorHistory
 	// outcomes caches what parsing a region with its edits found, and
 	// cached counts the bytes it holds of its own (see cacheBudget).
 	outcomes map[string]*regionOutcome
@@ -42,17 +45,16 @@ func (m *regionModel) cacheBudget() int {
 	return 8*len(m.sig) + 1<<20
 }
 
-// listSig is where the signature of a top-level list has its parts.
+// listSig is where the signature of a list that the layout knows has its
+// parts.
 type listSig struct {
 	ordered bool
 	start   int
 	tight   bool
-	// tokenStart and tokenEnd bound the token that opens the list.
+	// tokenStart and tokenEnd bound the token that opens the list, and items
+	// holds where the signature of each item starts.
 	tokenStart, tokenEnd int
-	// itemSig and itemHeading hold, for each item and for the end, where its
-	// signature starts and the index of its first heading.
-	itemSig     []int
-	itemHeading []int
+	items                regionParts
 }
 
 // buildRegionModel builds the region model of content for a recording
@@ -67,25 +69,20 @@ func buildRegionModel(markdown goldmark.Markdown, content []byte, baseline strin
 	model := &regionModel{
 		docLayout: layout,
 		listSigs:  make([]listSig, len(layout.lists)),
+		quoteSigs: make([]regionParts, len(layout.quotes)),
+		tableSigs: make([]regionParts, len(layout.tables)),
 		outcomes:  make(map[string]*regionOutcome),
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "FM%q", content[layout.base:layout.base+layout.frontMatter])
 	writer := signatureWriter{source: layout.source, out: &out, anchors: make(map[string]int), log: &model.history}
 	for group := range len(layout.bounds) - 1 {
-		model.groupSig = append(model.groupSig, out.Len())
-		model.groupHeading = append(model.groupHeading, len(model.history.slugs))
+		model.groups.add(out.Len(), len(model.history.slugs))
 		for _, node := range layout.nodes[layout.groupNodes[group]:layout.groupNodes[group+1]] {
-			list, isList := node.(*gmast.List)
-			if index, found := layout.listIndex[node]; isList && found {
-				model.listSigs[index] = writeListSignature(&writer, list)
-				continue
-			}
-			writer.block(node)
+			model.writeBlock(&writer, node)
 		}
 	}
-	model.groupSig = append(model.groupSig, out.Len())
-	model.groupHeading = append(model.groupHeading, len(model.history.slugs))
+	model.groups.add(out.Len(), len(model.history.slugs))
 	model.sig = out.String()
 	if model.sig != baseline {
 		return nil
@@ -93,8 +90,64 @@ func buildRegionModel(markdown goldmark.Markdown, content []byte, baseline strin
 	return model
 }
 
-// writeListSignature writes the signature of a top-level list, as
-// signatureWriter.block does, and returns where its parts are.
+// writeBlock writes the signature of a top-level block or a block of a
+// top-level blockquote, as signatureWriter.block does, and records where
+// the parts of a list, blockquote or table that the layout knows are.
+func (m *regionModel) writeBlock(writer *signatureWriter, node gmast.Node) {
+	if index, found := m.listIndex[node]; found {
+		if list, isList := node.(*gmast.List); isList {
+			m.listSigs[index] = writeListSignature(writer, list)
+			return
+		}
+	}
+	if index, found := m.quoteIndex[node]; found {
+		m.writeQuoteSignature(writer, node, index)
+		return
+	}
+	if index, found := m.tableIndex[node]; found {
+		m.tableSigs[index] = writeTableSignature(writer, node)
+		return
+	}
+	writer.block(node)
+}
+
+// writeQuoteSignature writes the signature of a top-level blockquote, as
+// signatureWriter.block does, and records where the blocks of each of its
+// groups start.
+func (m *regionModel) writeQuoteSignature(writer *signatureWriter, node gmast.Node, index int) {
+	quote := m.quotes[index]
+	var parts regionParts
+	writer.out.WriteString(node.Kind().String() + "(")
+	for group := range len(quote.bounds) {
+		parts.add(writer.out.Len(), len(writer.log.slugs))
+		for _, child := range quote.nodes[quote.groupNodes[group]:quote.groupNodes[group+1]] {
+			m.writeBlock(writer, child)
+		}
+	}
+	parts.add(writer.out.Len(), len(writer.log.slugs))
+	writer.out.WriteString(")")
+	m.quoteSigs[index] = parts
+}
+
+// writeTableSignature writes the signature of a table, as
+// signatureWriter.block does, and returns where the signature of each body
+// row starts. A table holds no headings.
+func writeTableSignature(writer *signatureWriter, table gmast.Node) regionParts {
+	var parts regionParts
+	writer.out.WriteString(table.Kind().String() + "(")
+	for row := table.FirstChild(); row != nil; row = row.NextSibling() {
+		if _, isRow := row.(*gmextast.TableRow); isRow {
+			parts.add(writer.out.Len(), len(writer.log.slugs))
+		}
+		writer.block(row)
+	}
+	parts.add(writer.out.Len(), len(writer.log.slugs))
+	writer.out.WriteString(")")
+	return parts
+}
+
+// writeListSignature writes the signature of a list that the layout knows,
+// as signatureWriter.block does, and returns where its parts are.
 func writeListSignature(writer *signatureWriter, list *gmast.List) listSig {
 	tight := gmparser.ListTight(list, writer.source)
 	sig := listSig{ordered: list.IsOrdered(), start: list.Start, tight: tight}
@@ -102,12 +155,10 @@ func writeListSignature(writer *signatureWriter, list *gmast.List) listSig {
 	writer.out.WriteString(listToken(list.IsOrdered(), list.Start, tight))
 	sig.tokenEnd = writer.out.Len()
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-		sig.itemSig = append(sig.itemSig, writer.out.Len())
-		sig.itemHeading = append(sig.itemHeading, len(writer.log.slugs))
+		sig.items.add(writer.out.Len(), len(writer.log.slugs))
 		writer.block(item)
 	}
-	sig.itemSig = append(sig.itemSig, writer.out.Len())
-	sig.itemHeading = append(sig.itemHeading, len(writer.log.slugs))
+	sig.items.add(writer.out.Len(), len(writer.log.slugs))
 	writer.out.WriteString(")")
 	return sig
 }
@@ -140,18 +191,28 @@ type regionOutcome struct {
 // sigSpan returns where a region's part of the signature starts and ends,
 // and the indexes of its first heading and of the first heading after it.
 func (m *regionModel) sigSpan(reg region) (int, int, int, int) {
-	if reg.isList() {
-		sig := m.listSigs[reg.list]
-		return sig.itemSig[reg.first-1], sig.itemSig[reg.last+2], sig.itemHeading[reg.first-1], sig.itemHeading[reg.last+2]
+	switch reg.kind {
+	case quoteRegion:
+		return m.quoteSigs[reg.at].partOf(reg)
+	case listRegion:
+		return m.listSigs[reg.at].items.partOf(reg)
+	case tableRegion:
+		return m.tableSigs[reg.at].partOf(reg)
+	default:
+		return m.groups.partOf(reg)
 	}
-	return m.groupSig[reg.first], m.groupSig[reg.last+1], m.groupHeading[reg.first], m.groupHeading[reg.last+1]
+}
+
+// regionKey starts the key under which the outcome of a region is cached.
+func regionKey(key *strings.Builder, reg region) {
+	fmt.Fprintf(key, "%d:%d:%d:%d|", reg.kind, reg.at, reg.first, reg.last)
 }
 
 // evaluate parses a region with the edits that start in it, sorted, or
 // returns the cached outcome.
 func (m *regionModel) evaluate(reg region, edits []placedEdit) *regionOutcome {
 	var key strings.Builder
-	fmt.Fprintf(&key, "%d:%d:%d|", reg.list, reg.first, reg.last)
+	regionKey(&key, reg)
 	plain := make([]fix.TextEdit, len(edits))
 	for idx, edit := range edits {
 		plain[idx] = edit.edit
@@ -165,7 +226,7 @@ func (m *regionModel) evaluate(reg region, edits []placedEdit) *regionOutcome {
 	outcome.start, outcome.end = start, end
 	if outcome.holds && !outcome.undecided {
 		if reg.isList() {
-			outcome.loosens = m.lists[reg.list].loosens(reg, outcome.tight)
+			outcome.loosens = m.lists[reg.at].loosens(reg, outcome.tight)
 		}
 		m.finish(outcome, from, to)
 	}
@@ -416,10 +477,10 @@ func (m *regionModel) newRegionState(edits []fix.TextEdit) *regionState {
 			return nil
 		}
 		if reg := regions[idx]; reg.isList() {
-			withRegions[reg.list] = true
-			state.inside[reg.list] += m.lists[reg.list].looseIn(reg)
+			withRegions[reg.at] = true
+			state.inside[reg.at] += m.lists[reg.at].looseIn(reg)
 			if outcome.loosens {
-				state.loosening[reg.list]++
+				state.loosening[reg.at]++
 			}
 		}
 	}
@@ -511,22 +572,22 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 	changes := make(map[int]change)
 	for _, idx := range absorbed {
 		if reg := state.regions[idx]; reg.isList() {
-			c := changes[reg.list]
-			c.inside -= m.lists[reg.list].looseIn(reg)
+			c := changes[reg.at]
+			c.inside -= m.lists[reg.at].looseIn(reg)
 			if state.outcomes[idx].loosens {
 				c.loosening--
 			}
-			changes[reg.list] = c
+			changes[reg.at] = c
 		}
 	}
 	for idx, reg := range regions {
 		if reg.isList() {
-			c := changes[reg.list]
-			c.inside += m.lists[reg.list].looseIn(reg)
+			c := changes[reg.at]
+			c.inside += m.lists[reg.at].looseIn(reg)
 			if outcomes[idx].loosens {
 				c.loosening++
 			}
-			changes[reg.list] = c
+			changes[reg.at] = c
 		}
 	}
 	// The state's other regions keep their parts, so the signature after the
