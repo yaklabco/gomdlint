@@ -60,13 +60,14 @@ func completeRules(registry *lint.Registry) cobra.CompletionFunc {
 			meta, _ := registry.Meta(rule.ID())
 			tags = append(tags, meta.Tags...)
 
-			offer(rule.Name(), rule.Description())
+			description := lint.RuleDescription(rule, meta)
+			offer(rule.Name(), description)
 			if partial == "" {
 				continue
 			}
-			offer(rule.ID(), rule.Description())
+			offer(rule.ID(), description)
 			for _, alias := range meta.Aliases {
-				offer(alias, rule.Description())
+				offer(alias, description)
 			}
 		}
 

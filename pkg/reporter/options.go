@@ -59,14 +59,21 @@ type Options struct {
 	ToolVersion string
 
 	// Registry supplies rule metadata (descriptions, tags and default
-	// severities) to formats that describe rules, such as SARIF. When nil,
-	// lint.DefaultRegistry is used.
+	// severities) to formats that describe rules, such as SARIF. Rule
+	// descriptions come from the rules' catalog entries where the entries
+	// have them. When nil, lint.DefaultRegistry is used.
 	Registry RuleLookup
 }
 
-// RuleLookup finds a rule by its ID. *lint.Registry implements it.
+// RuleLookup finds a rule and its catalog entry by the rule's ID.
+// *lint.Registry implements it.
 type RuleLookup interface {
+	// GetByID returns the rule with the given ID.
 	GetByID(id string) (lint.Rule, bool)
+
+	// Meta returns the catalog entry of the rule with the given ID. It
+	// reports false for a rule without an entry.
+	Meta(id string) (lint.RuleMeta, bool)
 }
 
 // DefaultOptions returns Options with sensible defaults.

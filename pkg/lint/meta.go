@@ -6,12 +6,14 @@ import (
 )
 
 // Category groups rules by the Markdown construct they check. Each rule
-// belongs to exactly one. Categories order rule listings and documentation.
-// Unlike tags, they are not accepted where a rule can be named: several
-// share a name with a markdownlint tag that covers different rules.
+// belongs to exactly one. Documentation, such as the README's rule
+// categories, groups the rules by category, while rule listings such as
+// gomdlint rules keep rule ID order. Unlike tags, categories are not
+// accepted where a rule can be named: several share a name with a
+// markdownlint tag that covers different rules.
 type Category string
 
-// The categories, in the order that rule listings present them.
+// The categories, in the order that documentation presents them.
 const (
 	CategoryHeadings    Category = "headings"
 	CategoryLists       Category = "lists"
@@ -25,8 +27,8 @@ const (
 	CategorySpelling    Category = "spelling"
 )
 
-// Categories returns every category, in the order that rule listings
-// present them.
+// Categories returns every category, in the order that documentation
+// presents them.
 func Categories() []Category {
 	return []Category{
 		CategoryHeadings, CategoryLists, CategoryLayout, CategoryCode, CategoryLinks,
@@ -34,9 +36,10 @@ func Categories() []Category {
 	}
 }
 
-// RuleMeta is a rule's catalog entry: the identifiers that name the rule and
-// how it is classified. The rules package keeps one entry for each built-in
-// rule and records it with Registry.Describe.
+// RuleMeta is a rule's catalog entry: the identifiers that name the rule,
+// how it is classified, and what it checks, why, and what its fix does. The
+// rules package keeps one entry for each built-in rule and records it with
+// Registry.Describe.
 type RuleMeta struct {
 	// ID is the rule's permanent identifier, such as MD009.
 	ID string
@@ -71,6 +74,24 @@ type RuleMeta struct {
 	// own CanFix does.
 	Fixable bool
 
+	// Description says what correct Markdown looks like under the rule's
+	// default options, such as "Lines do not end in spaces or tabs, except 2
+	// spaces for a hard line break." It is plain text without Markdown, on
+	// one line of under 80 characters, made of sentences that end with a
+	// period. Rule listings and SARIF short descriptions show it as it is.
+	Description string
+
+	// Rationale gives the reason for the rule: what goes wrong in Markdown
+	// that breaks it. It is plain text on one line, made of sentences.
+	Rationale string
+
+	// Fix says what the rule's fix changes, and which findings a user can
+	// expect the rule to report without a fix. A rule that cannot fix what
+	// it finds says that there is no automatic fix. It is plain text on one
+	// line, made of sentences. Shared checks that parse the fixed document
+	// can hold back other fixes too.
+	Fix string
+
 	// Options describes the options the rule reads. An empty list declares
 	// nothing: it does not mean that the rule has no options.
 	Options []OptionSpec
@@ -82,6 +103,16 @@ type RuleMeta struct {
 	// other option as unknown. Every built-in rule's entry declares its
 	// options.
 	OptionsDeclared bool
+}
+
+// RuleDescription returns the one-line description of rule: the description
+// in meta, its catalog entry, or the rule's own description when meta has
+// none, as the zero entry of a rule without one has none.
+func RuleDescription(rule Rule, meta RuleMeta) string {
+	if meta.Description != "" {
+		return meta.Description
+	}
+	return rule.Description()
 }
 
 // clone returns a copy of meta that shares no slices with it.

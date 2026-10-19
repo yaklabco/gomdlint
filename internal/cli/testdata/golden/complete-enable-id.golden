@@ -1,7 +1,7 @@
-MD001	Heading levels should only increment by one level at a time
-MD003	Heading style should be consistent
-MD004	Unordered list style should be consistent
-MD005	Inconsistent indentation for list items at the same level
-MD007	Unordered list indentation
-MD009	Lines should not have trailing spaces
+MD001	Each heading is at most one level deeper than the heading or title before it.
+MD003	Headings all use the first heading's style: # Title, # Title #, or underlined.
+MD004	Every bullet uses the same marker as the first bullet in the file.
+MD005	Items in a list start at the same column. Ordered numbers may right-align.
+MD007	Outside ordered lists, bullets sit at the margin and indent 2 spaces per level.
+MD009	Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
 :4
