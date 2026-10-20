@@ -793,9 +793,9 @@ Some of its fix checks are also stricter than they need to be.
   `list-marker-space` (MD030), `blanks-around-lists` (MD032) and
   `single-trailing-newline` (MD047). Their findings are still reported.
 - `blanks-around-tables` (MD058) reports a table in a list without a fix
-  whenever the blank line it needs would fall between two items or between
-  two blocks of an item. That keeps a tight list tight, but it also
-  withholds the fix in loose lists, where the blank line would be safe.
+  when an item of the list holds an HTML block, or a fenced code block
+  without a closing fence, outside a blockquote. goldmark can then read a
+  tight list as loose, so the fix is withheld even in a list that is loose.
 - goldmark reads `> -  first item` followed by `> <tab>- second item`, where
   `<tab>` is a tab character, as one list item that continues with the text
   `- second item`. CommonMark reads two items, so the list rules see one

@@ -401,8 +401,8 @@ func (r *TableBlankLinesRule) DefaultEnabled() bool {
 // line holding only blockquote markers, whitespace, or HTML comments is
 // blank, and the fix inserts a blank line that keeps the enclosing
 // blockquotes whole. Text directly after a table is one of its rows. The
-// fix is withheld where the blank line would separate two blocks of a list
-// (see blankLineSplitsList).
+// fix is withheld where the blank line would make a tight list loose (see
+// blankLineLoosensList).
 func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil || ctx.File == nil {
 		return nil, nil
@@ -410,6 +410,7 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 
 	var diags []lint.Diagnostic
 	inserted := blankLineInserts{}
+	tightness := listTightness{}
 	for _, table := range ctx.Tables() {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
@@ -423,14 +424,14 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 
 		if pos.StartLine > 1 && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, pos.StartLine-1)) {
 			var builder *fix.EditBuilder
-			if !blankLineSplitsList(table, pos.StartLine) {
+			if !blankLineLoosensList(table, pos.StartLine, tightness) {
 				builder = inserted.insert(ctx.File.Lines[pos.StartLine-1].StartOffset, blankLine)
 			}
 			diags = append(diags, r.blankLineDiagnostic(ctx, rows[0].start, "before", builder))
 		}
 		if pos.EndLine < len(ctx.File.Lines) && !isMarkdownlintBlankLine(lint.LineContent(ctx.File, pos.EndLine+1)) {
 			var builder *fix.EditBuilder
-			if !blankLineSplitsList(table, pos.EndLine+1) {
+			if !blankLineLoosensList(table, pos.EndLine+1, tightness) {
 				builder = inserted.insert(ctx.File.Lines[pos.EndLine].StartOffset, blankLine)
 			}
 			diags = append(diags, r.blankLineDiagnostic(ctx, rows[len(rows)-1].start, "after", builder))
@@ -439,28 +440,90 @@ func (r *TableBlankLinesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	return verifyFixes(ctx, diags, fixAllowance{}), nil
 }
 
-// blankLineSplitsList reports whether a blank line inserted before line,
-// inside the containers of table, would separate two items of a list or two
-// blocks of an item: whether a list or list item between the table and its
-// innermost blockquote holds both line and the line before it. The inserted
-// line carries the markers of the table's blockquotes, so it stays inside
-// them, and only the lists within the innermost one take it for a blank
-// line.
+// blankLineLoosensList reports whether a blank line inserted before line,
+// inside the containers of table, would make a tight list loose. The
+// innermost list or list item between the table and its innermost
+// blockquote that holds both line and the line before it takes the blank
+// line between two of its items or two blocks of one item. That makes its
+// list loose: the list itself, or the item's list. So the line loosens the
+// list when it is tight, and leaves a loose list loose. The lists around
+// that list hold the line inside one block of an item, which leaves them as
+// they are. The inserted line carries the markers of the table's
+// blockquotes, so it stays inside them, and only the lists within the
+// innermost one take it for a blank line. A list or item without a position
+// counts as tight, and so does a list that tightness finds may be tight.
 //
-// Such a line makes a tight list loose, which changes how every item of the
-// list renders. The re-parse that checks fixes cannot see that: goldmark
-// gives a table made from a paragraph no record of a blank line before it, so
-// a list whose item gains one before a table still parses as tight. The fix
-// is therefore withheld in loose lists as well, where it would be safe, and
-// for a list without a position.
-func blankLineSplitsList(table *mdast.Node, line int) bool {
+// A tight list made loose changes how every item of the list renders, and
+// this guard is what keeps that from happening. The re-parse that checks
+// the fix cannot always see it: the region checks for a long list at the
+// top level or in a top-level blockquote give a table made from a paragraph
+// no record of a blank line before it. It still checks each fix that this
+// lets through, such as one in a loose list that would move the table out
+// of its item.
+func blankLineLoosensList(table *mdast.Node, line int, tightness listTightness) bool {
 	for node := table.Parent; node != nil; node = node.Parent {
 		switch node.Kind {
 		case mdast.NodeBlockquote, mdast.NodeDocument:
 			return false
 		case mdast.NodeList, mdast.NodeListItem:
 			pos := node.SourcePosition()
-			if !pos.IsValid() || (pos.StartLine < line && line <= pos.EndLine) {
+			if !pos.IsValid() {
+				return true
+			}
+			if pos.StartLine < line && line <= pos.EndLine {
+				list := node
+				if node.Kind == mdast.NodeListItem {
+					list = node.Parent
+				}
+				return tightness.mayBeTight(list)
+			}
+		}
+	}
+	return false
+}
+
+// listTightness caches, for each list node, whether a blank line inside it
+// may make it loose (see mayBeTight), so that MD058 reads each list once.
+type listTightness map[*mdast.Node]bool
+
+// mayBeTight reports whether list may be tight as micromark, markdownlint's
+// parser, reads it. It may when the parser reads it as tight or gives it no
+// list attributes, and also when an item holds a fenced code block without
+// a closing fence or an HTML block. micromark takes the blank lines that
+// follow such a block in its item into the block, as CommonMark does for a
+// fence, where goldmark gives them to the next item or block, so goldmark
+// reads the list as loose where micromark reads it as tight. A node that is
+// no list counts as tight too.
+func (t listTightness) mayBeTight(list *mdast.Node) bool {
+	if list == nil || list.Kind != mdast.NodeList || list.Block == nil || list.Block.List == nil || list.Block.List.Tight {
+		return true
+	}
+	tight, ok := t[list]
+	if !ok {
+		tight = holdsBlankLineTaker(list)
+		t[list] = tight
+	}
+	return tight
+}
+
+// holdsBlankLineTaker reports whether a block in the items of node, or of
+// the lists inside them, can take in the blank lines that end its item: a
+// fenced code block without a closing fence, or an HTML block, whose kind,
+// which says whether its end condition passes blank lines, the parsed tree
+// does not keep. A block inside a blockquote cannot, since a blank line
+// ends the blockquote first.
+func holdsBlankLineTaker(node *mdast.Node) bool {
+	for child := node.FirstChild; child != nil; child = child.Next {
+		switch child.Kind {
+		case mdast.NodeHTMLBlock:
+			return true
+		case mdast.NodeCodeBlock:
+			code := child.Block
+			if code == nil || code.CodeBlock == nil || (!code.CodeBlock.Indented && !code.CodeBlock.Closed) {
+				return true
+			}
+		case mdast.NodeList, mdast.NodeListItem:
+			if holdsBlankLineTaker(child) {
 				return true
 			}
 		}

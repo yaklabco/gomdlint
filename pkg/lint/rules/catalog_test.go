@@ -298,7 +298,7 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		"MD049": true, // A new marker that could pair with nearby characters, or a reference label.
 		"MD050": true, // A new marker that could pair with nearby characters, or a reference label.
 		"MD053": true, // Text on the line after the definition.
-		"MD058": true, // A blank line between two items or two blocks of one item.
+		"MD058": true, // A blank line that would loosen a tight list.
 	}
 
 	fixing := make(map[string]bool)
@@ -552,9 +552,8 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\n*Italic line*\n\nText.\n", want: []catalogFinding{{3, false}},
 	},
 
-	// MD022 and MD031 add no blank line that would make a tight list
-	// loose, and MD058 adds none between two items or two blocks of an
-	// item, in any list.
+	// MD022, MD031 and MD058 add no blank line that would make a tight list
+	// loose, and can add them in loose lists.
 	{
 		id: "MD022", name: "heading in a tight list", phrase: "a heading in a tight list without a fix",
 		input: "# Title\n\n- # Heading\n  text\n- item\n", want: []catalogFinding{{3, false}},
@@ -576,12 +575,12 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\n1. Run:\n   ```sh\n   make\n   ```\n\n2. Next\n", want: []catalogFinding{{4, true}},
 	},
 	{
-		id: "MD058", name: "table between blocks and items", phrase: "between two items or two blocks of one item",
+		id: "MD058", name: "table in a tight list", phrase: "a table in a tight list when the blank line would make the list loose",
 		input: "# Title\n\n- item\n  | a | b |\n  | --- | --- |\n- next\n", want: []catalogFinding{{4, false}, {5, false}},
 	},
 	{
-		id: "MD058", name: "table in a loose item", phrase: "a table inside a list without a fix",
-		input: "# Title\n\n- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n", want: []catalogFinding{{6, false}},
+		id: "MD058", name: "table in a loose list", phrase: "inserts the missing blank line",
+		input: "# Title\n\n- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n", want: []catalogFinding{{6, true}},
 	},
 	{
 		id: "MD058", name: "table in a quote inside an item", phrase: "keeping any blockquote markers",

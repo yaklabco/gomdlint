@@ -318,12 +318,13 @@ formats change. The first entries under Changed may need action.
   at markdownlint's columns, MD058's fix no longer moves a row out of its
   table, and MDL003's fix no longer strips list indentation until the table
   becomes a paragraph.
-- **MD022**, **MD031**, **MD058**: A fix no longer inserts a blank line
-  before a table inside a tight list item, which made the list loose. Such
-  findings are reported without a fix.
-- **MD058**: No longer adds a blank line before or after a table in a list
-  where the line would separate two items or two blocks of an item. Such
-  tables are reported without a fix.
+- **MD022**, **MD031**: A fix no longer inserts a blank line before a table
+  inside a tight list item, which made the list loose. Such findings are
+  reported without a fix.
+- **MD058**: No longer adds a blank line before or after a table in a tight
+  list where the line would separate two items or two blocks of an item,
+  which made the list loose. Such tables are reported without a fix. In a
+  loose list, the blank line can still be added.
 - **MDL001**: Reads a destination as absolute when it starts with a URI
   scheme, after escapes and character references are resolved, or with
   `//`. Links to `sms:`, `urn:` or `vscode:` URIs and email autolinks used to
