@@ -276,6 +276,7 @@ func TestIntegration_RulesCommandWithFormat(t *testing.T) {
 			cmd.SetErr(&stderr)
 			cmd.SetArgs([]string{
 				"rules",
+				"--defaults", // The test runs in the package directory, under the repository's configuration.
 				"--rule-format", tt.ruleFormat,
 			})
 

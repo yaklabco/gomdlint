@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: --enabled and --disabled exclude each other; give one of them
+Run 'gomdlint rules --help' for usage.

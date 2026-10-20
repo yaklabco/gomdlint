@@ -193,7 +193,7 @@ func ListEnvVars() map[string]string {
 		"GOMDLINT_DRY_RUN":          "Dry-run mode: true or false",
 		"GOMDLINT_JOBS":             "Number of parallel workers (0 = auto)",
 		"GOMDLINT_FORMAT":           "Output format: text, table, json, sarif, diff, or summary",
-		"GOMDLINT_RULE_FORMAT":      "How lint text, table and summary output name rules: name, id, or combined",
+		"GOMDLINT_RULE_FORMAT":      "How lint text, table and summary output and rule listings name rules: name, id, or combined",
 		"GOMDLINT_BACKUPS_ENABLED":  "Enable backups when fixing: true or false",
 		"GOMDLINT_BACKUPS_MODE":     "Backup mode: sidecar or none",
 		"GOMDLINT_IGNORE":           "Comma-separated list of ignore patterns",

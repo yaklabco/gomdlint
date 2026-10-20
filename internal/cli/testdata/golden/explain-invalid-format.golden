@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: invalid format "html"; valid formats: text, json, markdown
+Run 'gomdlint explain --help' for usage.

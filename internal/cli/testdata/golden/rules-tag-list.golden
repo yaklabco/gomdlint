@@ -1,0 +1,10 @@
+exit code 0
+-- stdout --
+NAME           ID     FIX  STATUS   DESCRIPTION
+
+Whitespace and layout
+  hr-style     MD035  yes  warning  Every horizontal rule is written the same way as the first one, such as ---.
+  line-length  MD013  yes  off      Lines fit in 80 characters, with exemptions such as lone links and definitions.
+
+2 of 55 rules, 1 on, 2 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

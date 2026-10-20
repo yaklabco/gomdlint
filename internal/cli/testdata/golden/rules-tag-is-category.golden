@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: --tag: unknown tag "lists" (did you mean --category lists?); tags: accessibility, atx, atx_closed, blank_lines, blockquote, bullet, code, emphasis, hard_tab, headings, hr, html, images, indentation, language, line_length, links, ol, spaces, spelling, table, ul, url, whitespace
+Run 'gomdlint rules --help' for usage.

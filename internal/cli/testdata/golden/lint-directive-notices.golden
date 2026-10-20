@@ -5,6 +5,7 @@ notices.md (1 issue)
     Suggestion: Remove trailing whitespace
 
 1 issue (1 warning), in 1 file, 1 fixable
+Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.
 -- stderr --
 WARN notices.md:3: markdownlint-disable: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
 WARN notices.md:7: markdownlint-disable: deprecated tag "lists" (write its rules instead: ul-style); it will stop working in a later release

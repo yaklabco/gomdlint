@@ -1,0 +1,11 @@
+exit code 0
+-- stdout --
+# Rules with the tag blockquote
+
+## Blockquotes
+
+| Name | ID | Fix | Description |
+| --- | --- | --- | --- |
+| `no-blanks-blockquote` | MD028 | no | No blank line sits between two blockquotes. |
+| `no-multiple-space-blockquote` | MD027 | yes | Outside code and list item text, at most one space follows a blockquote's \>. |
+-- stderr --

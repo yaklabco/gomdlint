@@ -46,7 +46,7 @@ func TestRootCommandHasSubcommands(t *testing.T) {
 
 	cmd := cli.NewRootCommand(info)
 
-	expectedSubcommands := []string{"lint", "rules", "init", "version"}
+	expectedSubcommands := []string{"lint", "rules", "explain", "init", "version"}
 
 	for _, name := range expectedSubcommands {
 		subCmd, _, err := cmd.Find([]string{name})

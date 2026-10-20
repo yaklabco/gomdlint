@@ -1,0 +1,81 @@
+exit code 0
+-- stdout --
+NAME                                ID      FIX  STATUS   DESCRIPTION
+
+Headings
+  first-line-heading                MD041   no   warning  Comments aside, the file starts with a top-level heading or front matter title.
+  heading-blank-lines               MD022   yes  warning  Headings have a blank or comment line above and below.
+  heading-increment                 MD001   no   warning  Each heading is at most one level deeper than the heading or title before it.
+  heading-start-left                MD023   yes  warning  Headings start at the beginning of their line, list item or blockquote.
+  heading-style                     MD003   yes  warning  Headings all use the first heading's style: # Title, # Title #, or underlined.
+  no-duplicate-heading              MD024   no   warning  No two headings have exactly the same text.
+  no-emphasis-as-heading            MD036   yes  warning  Outside lists and blockquotes, a bold or italic line is not a stand-in heading.
+  no-missing-space-atx              MD018   yes  warning  A space follows the # marks that open a heading at the start of a line.
+  no-missing-space-closed-atx       MD020   yes  warning  A closed heading at the start of a line has a space inside each run of #.
+  no-multiple-space-atx             MD019   yes  warning  Only one space follows the # marks that open a heading.
+  no-multiple-space-closed-atx      MD021   yes  warning  A closed heading has only one space inside each run of #.
+  no-trailing-punctuation           MD026   yes  warning  Headings do not end with a period, comma, semicolon, colon or exclamation mark.
+  required-headings                 MD043   no   warning  Headings follow the configured outline in order. No outline is set by default.
+  single-h1                         MD025   no   warning  A document that starts with a title has no other top-level heading.
+
+Lists
+  blanks-around-lists               MD032   yes  warning  Lists outside other lists have a blank or comment line above and below.
+  list-indent                       MD005   yes  warning  Items in a list start at the same column. Ordered numbers may right-align.
+  list-marker-space                 MD030   yes  warning  One space, or one tab, separates each list marker from the item's text.
+  ol-prefix                         MD029   yes  warning  Ordered list items are numbered 1, 1, 1, or 1, 2, 3, or 0, 1, 2, and so on.
+  ul-indent                         MD007   yes  warning  Outside ordered lists, bullets sit at the margin and indent 2 spaces per level.
+  unordered-list-style              MD004   yes  warning  Every bullet uses the same marker as the first bullet in the file.
+
+Whitespace and layout
+  hr-style                          MD035   yes  warning  Every horizontal rule is written the same way as the first one, such as ---.
+  line-length                       MD013   yes  warning  Lines fit in 80 characters, with exemptions such as lone links and definitions.
+  no-hard-tabs                      MD010   yes  warning  Lines contain no tab characters, including inside code.
+  no-multiple-blank-lines           MD012   yes  warning  Outside code, no two blank lines follow each other, except after front matter.
+  no-trailing-spaces                MD009   yes  warning  Outside code blocks, lines end in no spaces or tabs, or in exactly 2 of them.
+  single-trailing-newline           MD047   yes  warning  The file ends with a newline, or a last line of only whitespace, > or comments.
+
+Code
+  blanks-around-fences              MD031   yes  warning  Fenced code blocks have a blank or comment line above and below.
+  code-block-style                  MD046   no   warning  Code blocks all use the first block's style, fenced or indented.
+  code-fence-style                  MD048   yes  warning  Code fences all use the first fence's character, backtick or tilde.
+  commands-show-output              MD014   yes  warning  Code blocks that show only commands leave out the $ prompt.
+  fenced-code-language              MD040   yes  warning  Fenced code blocks name their language after the opening fence.
+  no-space-in-code                  MD038   yes  warning  Code span text has no spaces around it, except one each side or by a backtick.
+
+Links and images
+  descriptive-link-text             MD059   no   warning  Link text describes its target instead of saying "click here" or "more".
+  link-destination-style            MDL001  no   warning  Links in a file, other than #fragment links, are all relative or all absolute.
+  link-fragments                    MD051   no   warning  Links to a #fragment point at a heading or anchor in the same file, or at #top.
+  link-image-reference-definitions  MD053   yes  warning  Every reference definition is used and defined once, except [//] comments.
+  link-image-style                  MD054   no   warning  Links and images use only the allowed styles. By default, all are allowed.
+  no-alt-text                       MD045   no   warning  Markdown images have alt text, and HTML images have alt or aria-hidden="true".
+  no-bare-urls                      MD034   yes  warning  Outside code and HTML, URLs and email addresses sit in angle brackets or links.
+  no-empty-links                    MD042   no   warning  Inline links have a destination, and no link points at just #.
+  no-reversed-links                 MD011   yes  warning  Inline links put the text in brackets and the URL in parentheses: [text](url).
+  no-space-in-links                 MD039   yes  warning  Link text has no spaces just inside its brackets.
+  reference-links-images            MD052   no   warning  Labels in [text][label] and [label][] references are defined, except x.
+
+Tables
+  blanks-around-tables              MD058   yes  info     Tables have a blank or comment line above and below.
+  table-alignment                   MDL003  yes  warning  Each cell of a table's delimiter row has at least 3 dashes.
+  table-column-count                MD056   no   warning  Every table row has as many cells as the header row.
+  table-column-style                MD060   no   warning  Each table follows one style: aligned pipes, one space of padding, or none.
+  table-pipe-style                  MD055   no   warning  Table rows use leading and trailing pipes the same way throughout.
+
+Emphasis
+  emphasis-style                    MD049   yes  warning  All italic text uses one marker, *text* or _text_, except * inside a word.
+  no-space-in-emphasis              MD037   yes  warning  Emphasis markers touch the text they wrap, as in **bold**.
+  strong-style                      MD050   yes  warning  All bold text uses one marker, **text** or __text__, except ** inside a word.
+
+Blockquotes
+  no-blanks-blockquote              MD028   no   warning  No blank line sits between two blockquotes.
+  no-multiple-space-blockquote      MD027   yes  warning  Outside code and list item text, at most one space follows a blockquote's >.
+
+HTML
+  no-inline-html                    MD033   no   warning  Documents contain no raw HTML elements other than allowed ones.
+
+Spelling
+  proper-names                      MD044   yes  warning  Outside URLs, proper names match the configured capitals, none by default.
+
+55 rules, 55 on, 37 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

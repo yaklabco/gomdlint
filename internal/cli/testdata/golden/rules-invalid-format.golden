@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: invalid format "sarif"; valid formats: text, json, markdown
+Run 'gomdlint rules --help' for usage.

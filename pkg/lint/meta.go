@@ -6,14 +6,18 @@ import (
 )
 
 // Category groups rules by the Markdown construct they check. Each rule
-// belongs to exactly one. Documentation, such as the README's rule
-// categories, groups the rules by category, while rule listings such as
-// gomdlint rules keep rule ID order. Unlike tags, categories are not
-// accepted where a rule can be named: several share a name with a
-// markdownlint tag that covers different rules.
+// belongs to exactly one. Rule listings, such as gomdlint rules, and
+// documentation, such as the README's rule categories, group the rules by
+// category, in the order of Categories. The registry keeps rule ID order.
+// Unlike tags, categories are not accepted where rules are configured or
+// selected, in config keys, rule flags and markdownlint comments: several
+// share a name with a markdownlint tag that covers different rules. Only
+// discovery accepts them, such as gomdlint explain and the --category
+// filter of gomdlint rules.
 type Category string
 
-// The categories, in the order that documentation presents them.
+// The categories, in the order that listings and documentation present
+// them.
 const (
 	CategoryHeadings    Category = "headings"
 	CategoryLists       Category = "lists"
@@ -27,13 +31,42 @@ const (
 	CategorySpelling    Category = "spelling"
 )
 
-// Categories returns every category, in the order that documentation
-// presents them.
+// Categories returns every category, in the order that listings and
+// documentation present them.
 func Categories() []Category {
 	return []Category{
 		CategoryHeadings, CategoryLists, CategoryLayout, CategoryCode, CategoryLinks,
 		CategoryTables, CategoryEmphasis, CategoryBlockquotes, CategoryHTML, CategorySpelling,
 	}
+}
+
+// Title returns the name that listings and documentation give the category
+// in headings, such as "Whitespace and layout" for layout. A category that
+// gomdlint does not define is titled by its key.
+func (c Category) Title() string {
+	switch c {
+	case CategoryHeadings:
+		return "Headings"
+	case CategoryLists:
+		return "Lists"
+	case CategoryLayout:
+		return "Whitespace and layout"
+	case CategoryCode:
+		return "Code"
+	case CategoryLinks:
+		return "Links and images"
+	case CategoryTables:
+		return "Tables"
+	case CategoryEmphasis:
+		return "Emphasis"
+	case CategoryBlockquotes:
+		return "Blockquotes"
+	case CategoryHTML:
+		return "HTML"
+	case CategorySpelling:
+		return "Spelling"
+	}
+	return string(c)
 }
 
 // RuleMeta is a rule's catalog entry: the identifiers that name the rule,

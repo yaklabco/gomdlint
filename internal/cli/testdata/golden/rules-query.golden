@@ -1,0 +1,13 @@
+exit code 0
+-- stdout --
+NAME                    ID      FIX  STATUS   DESCRIPTION
+
+Tables
+  blanks-around-tables  MD058   yes  info     Tables have a blank or comment line above and below.
+  table-alignment       MDL003  yes  warning  Each cell of a table's delimiter row has at least 3 dashes.
+  table-column-count    MD056   no   warning  Every table row has as many cells as the header row.
+  table-column-style    MD060   no   warning  Each table follows one style: aligned pipes, one space of padding, or none.
+  table-pipe-style      MD055   no   warning  Table rows use leading and trailing pipes the same way throughout.
+
+5 of 55 rules, 5 on, 2 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

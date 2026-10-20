@@ -1,0 +1,14 @@
+exit code 0
+-- stdout --
+RULE                          FIX  STATUS   DESCRIPTION
+
+Lists
+  MD004/unordered-list-style  yes  info     Every bullet uses the same marker as the first bullet in the file.
+  MD005/list-indent           yes  warning  Items in a list start at the same column. Ordered numbers may right-align.
+  MD007/ul-indent             yes  warning  Outside ordered lists, bullets sit at the margin and indent 2 spaces per level.
+  MD029/ol-prefix             yes  warning  Ordered list items are numbered 1, 1, 1, or 1, 2, 3, or 0, 1, 2, and so on.
+  MD030/list-marker-space     yes  warning  One space, or one tab, separates each list marker from the item's text.
+  MD032/blanks-around-lists   yes  warning  Lists outside other lists have a blank or comment line above and below.
+
+6 of 55 rules, 6 on, 6 fixable. Run 'gomdlint explain <rule>' for details.
+-- stderr --

@@ -15,12 +15,13 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
-// ruleLine returns the line of the rules listing that starts with identifier.
+// ruleLine returns the line of the rules listing whose rule, indented under
+// its category, starts with identifier.
 func ruleLine(t *testing.T, listing, identifier string) string {
 	t.Helper()
 
 	for _, line := range strings.Split(listing, "\n") {
-		if strings.HasPrefix(line, identifier+" ") {
+		if strings.HasPrefix(line, "  "+identifier+" ") {
 			return line
 		}
 	}
@@ -33,11 +34,12 @@ func TestRulesCommandPrintsPlainTable(t *testing.T) {
 
 	tests := []struct {
 		format     string
+		header     string
 		identifier string
 	}{
-		{format: "name", identifier: "no-trailing-spaces"},
-		{format: "id", identifier: "MD009"},
-		{format: "combined", identifier: "MD009/no-trailing-spaces"},
+		{format: "name", header: "NAME", identifier: "no-trailing-spaces"},
+		{format: "id", header: "ID", identifier: "MD009"},
+		{format: "combined", header: "RULE", identifier: "MD009/no-trailing-spaces"},
 	}
 	md009, ok := lint.DefaultRegistry.Meta("MD009")
 	require.True(t, ok)
@@ -47,12 +49,14 @@ func TestRulesCommandPrintsPlainTable(t *testing.T) {
 		t.Run(tt.format, func(t *testing.T) {
 			t.Parallel()
 
-			got := execute(t, "rules", "--rule-format", tt.format)
+			// The test runs in the package directory, so --defaults keeps
+			// the repository's own configuration out of the listing.
+			got := execute(t, "rules", "--defaults", "--rule-format", tt.format)
 
 			require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
 			assert.NotContains(t, got.stdout, "INFO")
 			assert.NotContains(t, got.stdout, "\x1b[", "no styling in plain output")
-			assert.True(t, strings.HasPrefix(got.stdout, "RULE "), "starts with a header:\n%s", got.stdout)
+			assert.True(t, strings.HasPrefix(got.stdout, tt.header+" "), "starts with a header:\n%s", got.stdout)
 
 			line := ruleLine(t, got.stdout, tt.identifier)
 			assert.Contains(t, line, "warning")
@@ -60,6 +64,30 @@ func TestRulesCommandPrintsPlainTable(t *testing.T) {
 			assert.True(t, strings.HasSuffix(line, "  "+md009.Description), "the catalog description: %q", line)
 		})
 	}
+}
+
+// TestLintTextOutputPointsAtExplain covers the line that ends text output
+// with findings, which names the explain command. Output without findings,
+// such as after --fix fixes them all, and every other format leave it out.
+func TestLintTextOutputPointsAtExplain(t *testing.T) {
+	const hint = "Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.\n"
+	inProject(t, map[string]string{"bad.md": trailingDoc, "good.md": fixedDoc})
+
+	got := execute(t, "lint", "--color", "never", "good.md", "bad.md")
+	assert.True(t, strings.HasSuffix(got.stdout, "1 fixable\n"+hint), "the last line, after the summary: %q", got.stdout)
+	assert.Equal(t, 1, strings.Count(got.stdout, hint), "once")
+
+	got = execute(t, "lint", "--color", "never", "good.md")
+	assert.NotContains(t, got.stdout, "gomdlint explain", "no findings")
+
+	for _, format := range []string{"table", "summary", "json", "sarif", "diff"} {
+		got = execute(t, "lint", "--color", "never", "--format", format, "bad.md")
+		assert.NotContains(t, got.stdout, "gomdlint explain", "--format %s", format)
+	}
+
+	got = execute(t, "lint", "--color", "never", "--fix", "--no-backups", "bad.md")
+	require.Equal(t, cli.ExitSuccess, got.code, got.stderr)
+	assert.NotContains(t, got.stdout, "gomdlint explain", "every finding fixed")
 }
 
 func TestVersionCommandPrintsPlainVersion(t *testing.T) {

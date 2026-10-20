@@ -1,0 +1,5 @@
+exit code 64
+-- stdout --
+-- stderr --
+Error: accepts 1 arg(s), received 0
+Run 'gomdlint explain --help' for usage.

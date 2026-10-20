@@ -41,6 +41,15 @@ const exitCodeHelp = `Exit codes:
   70  internal error, a rule that failed, or an interrupted run
   74  a file could not be read or written`
 
+// docsExitCodeHelp documents the exit codes of the rules and explain
+// commands in their help.
+const docsExitCodeHelp = `Exit codes:
+  0   success
+  64  invalid command-line usage, such as a rule that does not exist
+  65  invalid configuration
+  70  internal error
+  74  the output could not be written`
+
 // ErrLintIssuesFound is returned when lint issues are found.
 var ErrLintIssuesFound = errors.New("lint issues found")
 

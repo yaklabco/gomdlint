@@ -9,5 +9,6 @@ configured.md (3 issues)
     Suggestion: Remove trailing whitespace
 
 3 issues (3 warnings), in 1 file, 2 fixable
+Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.
 -- stderr --
 WARN configured.md:1: markdownlint-configure-file: unknown rule "MD009 MD010" (a key names one rule or tag; write "MD009" and "MD010" as separate keys); it is ignored

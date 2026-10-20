@@ -36,12 +36,26 @@ type ResolvedRule struct {
 func ResolveRules(registry *Registry, cfg *config.Config) []ResolvedRule {
 	var resolved []ResolvedRule
 
-	declared := registry.lookups().options
-	for _, rule := range registry.Rules() {
-		rr := resolveRule(rule, cfg, declared[rule.ID()])
+	for _, rr := range ResolveAllRules(registry, cfg) {
 		if rr.Enabled {
 			resolved = append(resolved, rr)
 		}
+	}
+
+	return resolved
+}
+
+// ResolveAllRules resolves the configuration of every rule in registry, in
+// rule ID order, as ResolveRules does, whether or not the configuration
+// enables it. A disabled rule keeps the severity it would report at. A nil
+// configuration gives each rule its built-in settings.
+func ResolveAllRules(registry *Registry, cfg *config.Config) []ResolvedRule {
+	rules := registry.Rules()
+	resolved := make([]ResolvedRule, 0, len(rules))
+
+	declared := registry.lookups().options
+	for _, rule := range rules {
+		resolved = append(resolved, resolveRule(rule, cfg, declared[rule.ID()]))
 	}
 
 	return resolved

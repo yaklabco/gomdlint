@@ -18,6 +18,7 @@ internal/               Application-specific wiring (not importable)
   ignore/               gitignore-style matching for directory walks
   jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
   logging/              Structured logging setup
+  ruledocs/             Rule listings and rule pages, as text, Markdown and JSON
   ui/                   Terminal output styling (Lipgloss)
 pkg/                    Reusable library packages
   mdast/                Markdown AST types and the source span contract
@@ -251,7 +252,9 @@ Finally the engine selects the edits for this pass (see
 The selected reporter formats the runner's result (see
 [Reporters](#reporters)). The CLI writes config warnings, notices, fixes
 that were not written and rule failures to stderr after the report, so
-every output format shows them and stdout holds only the report.
+every output format shows them and stdout holds only the report. Text
+output that lists findings ends with a line, which the CLI adds, that names
+`gomdlint explain`.
 
 ## Parser and Source Spans
 
@@ -514,9 +517,12 @@ category, markdownlint's tags for it, and whether it can fix. It also holds
 three plain-text fields: what correct Markdown looks like under the default
 options (`Description`), why the rule matters (`Rationale`), and what its
 fix changes and which findings get no fix (`Fix`). Categories group the
-rules in documentation, such as the README's rule categories, and are not
-accepted where a rule can be named. Rule listings such as `gomdlint rules`
-are in rule ID order. `gomdlint rules`, shell completion and SARIF rule
+rules in listings, such as `gomdlint rules`, and in documentation, such as
+the README's rule categories, in the order of `lint.Categories`, and
+`Category.Title` names them in headings. They are not accepted where a rule
+can be named, though `gomdlint explain` takes them. The registry keeps rule
+ID order, and only display code sorts by category and name.
+`gomdlint rules`, `gomdlint explain`, shell completion and SARIF rule
 descriptors read each description through `lint.RuleDescription`, which
 falls back to the rule's own `Description()` when the entry has none. A tag
 may cover several rules, as in markdownlint. gomdlint's own rules, MDL001
@@ -538,9 +544,30 @@ The registry resolves names through the catalog:
   markdownlint tag covers.
 - `Suggest` ranks the rules and tags that a key naming neither most likely
   means: typos within two edits first, using `internal/editdistance`, then
-  substring matches. `Closest` and `ClosestRules` pick the best of them for
-  error and warning messages, and none when more than three are equally
-  close.
+  substring matches. `Closest`, `ClosestRules` and `ClosestTags` pick the
+  best of them for error and warning messages, and none when more than three
+  are equally close.
+
+## Rule Documentation
+
+`internal/ruledocs/`, `internal/cli/rules.go`, `internal/cli/explain.go`
+
+`ruledocs` turns the catalog into documentation for people. `Entries`
+describes each registered rule from its catalog entry, with its built-in
+state and its state under a configuration, which
+`lint.ResolveAllRules` resolves for every rule, enabled or not. `Filter`
+selects rules by words, category, tag, fix support and state. The renderers
+write a listing as a text table, as Markdown tables or as JSON, and one
+rule's page as text or Markdown. Markdown output escapes the punctuation of
+the plain-text catalog, so that each text renders exactly as written, and
+wraps prose at 80 columns.
+
+`gomdlint rules` and `gomdlint explain` load the configuration that `lint`
+would load, with `--config` and the environment, unless `--defaults` asks
+for the built-in settings, and print the renderers' output. Tests check
+that the Markdown escapes round-trip every catalog text through goldmark,
+and that the Markdown page of every rule and the Markdown listing pass
+gomdlint's own rules.
 
 ## Notices
 

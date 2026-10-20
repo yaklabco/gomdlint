@@ -9,6 +9,7 @@ doc.md (3 issues)
     Suggestion: Remove trailing whitespace
 
 3 issues (3 warnings), in 1 file, 3 fixable
+Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.
 -- stderr --
 WARN $PROJECT/.gomdlint.yml:2: unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
 WARN $PROJECT/.gomdlint.yml:3: unknown rule "hard_tab" (it is a tag; configure its rules instead: no-hard-tabs); it is ignored
