@@ -180,9 +180,14 @@ formats change. The first entries under Changed may need action.
   `.markdownlint-cli2.yaml`: gomdlint reads their `config` key as a
   markdownlint config, applies it for a run and migrates it, with
   markdownlint-cli2's order of names and its preference for a markdownlint
-  config file in the same directory. Their other keys, such as `globs` and
-  `ignores`, and JavaScript options files, which gomdlint cannot read, get
-  warnings.
+  config file in the same directory. An options file without a `config`
+  key leaves the search for a markdownlint config to the directories
+  above, as in markdownlint-cli2, where an options file that sets `config`
+  wins over the markdownlint config file beside it. Their other keys, such
+  as `globs` and `ignores`, also in an options file that the search
+  passes, and JavaScript options files, which gomdlint cannot read, get
+  warnings. A gomdlint config beside an options file without `config`
+  gets no warning about it.
 - A warning for each config file that another one in its directory
   shadows, naming both, such as `.gomdlint.json` beside `.gomdlint.yml`,
   which `gomdlint init --format json` can leave behind. gomdlint reads one

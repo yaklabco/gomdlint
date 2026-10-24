@@ -148,3 +148,58 @@ func TestReadMarkdownlintCLI2OptionsRejectsWhatMarkdownlintCLI2Rejects(t *testin
 		})
 	}
 }
+
+// TestReadMarkdownlintCLI2OptionsConfigSet covers whether an options file
+// sets a markdownlint configuration, which markdownlint-cli2 0.23.3 decides
+// by JavaScript's truth of the config key's value: a directory whose
+// options file sets none takes the markdownlint config file of the nearest
+// parent directory that has one, even when the file has a config key that
+// holds null, false, 0 or the empty string.
+func TestReadMarkdownlintCLI2OptionsConfigSet(t *testing.T) {
+	t.Parallel()
+
+	values := map[string]bool{
+		"{}": true, `{"MD013": false}`: true, "[]": true, `"x"`: true, "1": true, "true": true,
+		"1e400": true, "-1e400": true, `{"MD013": {"line_length": 1e400}}`: true,
+		"null": false, "false": false, "0": false, `""`: false, "-0": false, "0.0": false, "0e5": false,
+	}
+	for value, set := range values {
+		t.Run("JSON "+value, func(t *testing.T) {
+			t.Parallel()
+
+			options, err := lint.ReadMarkdownlintCLI2Options([]byte(`{"config": `+value+`}`), lint.MarkdownlintJSONC)
+			require.NoError(t, err)
+			assert.Equal(t, set, options.ConfigSet)
+		})
+		t.Run("YAML "+value, func(t *testing.T) {
+			t.Parallel()
+
+			options, err := lint.ReadMarkdownlintCLI2Options([]byte("config: "+value+"\n"), lint.MarkdownlintYAML)
+			require.NoError(t, err)
+			assert.Equal(t, set, options.ConfigSet)
+		})
+	}
+
+	for _, text := range []string{"{}", `{"globs": ["*.md"]}`, "[]", "null"} {
+		t.Run("no config key "+text, func(t *testing.T) {
+			t.Parallel()
+
+			options, err := lint.ReadMarkdownlintCLI2Options([]byte(text), lint.MarkdownlintJSONC)
+			require.NoError(t, err)
+			assert.False(t, options.ConfigSet)
+		})
+	}
+	yamlTexts := map[string]bool{
+		"config:\n": false, "config: ~\n": false, "config: .nan\n": false, "config: 0x0\n": false,
+		"config: {MD013: false}\n": true, "config: &c []\nx: *c\n": true, "x: &c 1\nconfig: *c\n": true,
+	}
+	for text, set := range yamlTexts {
+		t.Run("YAML "+text, func(t *testing.T) {
+			t.Parallel()
+
+			options, err := lint.ReadMarkdownlintCLI2Options([]byte(text), lint.MarkdownlintYAML)
+			require.NoError(t, err)
+			assert.Equal(t, set, options.ConfigSet)
+		})
+	}
+}

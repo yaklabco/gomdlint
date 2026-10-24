@@ -38,28 +38,70 @@ func ruleOff(cfg *config.Config, id string) bool {
 
 // TestDiscoverPaths_MarkdownlintCLI2Files covers the discovery of
 // markdownlint-cli2 options files. The nearest directory that holds a
-// markdownlint config file or an options file holds the markdownlint
-// configuration: its config file, which markdownlint-cli2 prefers to the
-// options file's config key, and otherwise its options file.
+// markdownlint configuration holds the one that applies: its markdownlint
+// config file, which markdownlint-cli2 prefers to the options file's config
+// key, or else an options file that sets the config key
+// (lint.MarkdownlintCLI2Options.ConfigSet), as markdownlint-cli2 0.23.3
+// lints a directory whose options files set none with a parent
+// directory's markdownlint config file. An options file that gomdlint
+// cannot read, such as a JavaScript one, may set it, so it stops the
+// search. Past an options file, a parent directory's options file that
+// sets the config key wins over the config file beside it, as
+// markdownlint-cli2 merges options files before it looks at config files.
+// Without any configuration, the nearest options file applies, so that
+// markdownlint's defaults apply and its other keys get warnings. A nearer
+// options file that the search passed is kept for its warnings.
 func TestDiscoverPaths_MarkdownlintCLI2Files(t *testing.T) {
 	t.Parallel()
 
+	const withConfig = "{\"config\": {}}\n"
 	tests := []struct {
 		name               string
-		files              []string // relative to the repository, which holds docs
+		files              map[string]string // relative to the repository, which holds docs
 		markdownlint, cli2 string
+		nearer             string // the options file that the search passed
 	}{
-		{name: "options file alone", files: []string{".markdownlint-cli2.jsonc"},
+		{name: "options file alone", files: map[string]string{".markdownlint-cli2.jsonc": withConfig},
 			markdownlint: ".markdownlint-cli2.jsonc", cli2: ".markdownlint-cli2.jsonc"},
-		{name: "YAML options file", files: []string{".markdownlint-cli2.yaml"},
+		{name: "options file alone without config", files: map[string]string{".markdownlint-cli2.jsonc": "{}\n"},
+			markdownlint: ".markdownlint-cli2.jsonc", cli2: ".markdownlint-cli2.jsonc"},
+		{name: "YAML options file", files: map[string]string{".markdownlint-cli2.yaml": "config: {}\n"},
 			markdownlint: ".markdownlint-cli2.yaml", cli2: ".markdownlint-cli2.yaml"},
-		{name: "both kinds", files: []string{".markdownlint-cli2.yaml", ".markdownlint.json"},
+		{name: "both kinds", files: map[string]string{".markdownlint-cli2.yaml": "config: {}\n", ".markdownlint.json": "{}\n"},
 			markdownlint: ".markdownlint.json", cli2: ".markdownlint-cli2.yaml"},
-		{name: "JSONC before YAML", files: []string{".markdownlint-cli2.yaml", ".markdownlint-cli2.jsonc"},
+		{name: "JSONC before YAML", files: map[string]string{".markdownlint-cli2.yaml": "config: {}\n", ".markdownlint-cli2.jsonc": withConfig},
 			markdownlint: ".markdownlint-cli2.jsonc", cli2: ".markdownlint-cli2.jsonc"},
-		{name: "nearer options file", files: []string{".markdownlint.json", "docs/.markdownlint-cli2.jsonc"},
+		{name: "nearer options file", files: map[string]string{".markdownlint.json": "{}\n", "docs/.markdownlint-cli2.jsonc": withConfig},
 			markdownlint: "docs/.markdownlint-cli2.jsonc", cli2: "docs/.markdownlint-cli2.jsonc"},
-		{name: "config file alone", files: []string{".markdownlint.yaml"}, markdownlint: ".markdownlint.yaml"},
+		{name: "nearer options file without config", files: map[string]string{
+			".markdownlint.json": "{}\n", "docs/.markdownlint-cli2.jsonc": "{\"ignores\": []}\n",
+		}, markdownlint: ".markdownlint.json", nearer: "docs/.markdownlint-cli2.jsonc"},
+		{name: "nearer options file with a null config", files: map[string]string{
+			".markdownlint.json": "{}\n", "docs/.markdownlint-cli2.yaml": "config: ~\n",
+		}, markdownlint: ".markdownlint.json", nearer: "docs/.markdownlint-cli2.yaml"},
+		{name: "options files, the nearer without config", files: map[string]string{
+			".markdownlint-cli2.jsonc": withConfig, "docs/.markdownlint-cli2.jsonc": "{}\n",
+		}, markdownlint: ".markdownlint-cli2.jsonc", cli2: ".markdownlint-cli2.jsonc", nearer: "docs/.markdownlint-cli2.jsonc"},
+		{
+			// Past a nearer options file, markdownlint-cli2 merges a parent's
+			// options file, whose config then wins over the parent's
+			// markdownlint config file.
+			name: "both kinds above a nearer options file without config", files: map[string]string{
+				".markdownlint.json": "{}\n", ".markdownlint-cli2.jsonc": withConfig, "docs/.markdownlint-cli2.jsonc": "{}\n",
+			}, markdownlint: ".markdownlint-cli2.jsonc", cli2: ".markdownlint-cli2.jsonc", nearer: "docs/.markdownlint-cli2.jsonc",
+		},
+		{
+			name: "both kinds above a nearer options file, without config", files: map[string]string{
+				".markdownlint.json": "{}\n", ".markdownlint-cli2.jsonc": "{}\n", "docs/.markdownlint-cli2.jsonc": "{}\n",
+			}, markdownlint: ".markdownlint.json", cli2: ".markdownlint-cli2.jsonc", nearer: "docs/.markdownlint-cli2.jsonc",
+		},
+		{name: "nearer JavaScript options file", files: map[string]string{
+			".markdownlint.json": "{}\n", "docs/.markdownlint-cli2.cjs": "module.exports = {};\n",
+		}, markdownlint: "docs/.markdownlint-cli2.cjs", cli2: "docs/.markdownlint-cli2.cjs"},
+		{name: "nearer options file that cannot be read", files: map[string]string{
+			".markdownlint.json": "{}\n", "docs/.markdownlint-cli2.jsonc": "config:\n",
+		}, markdownlint: "docs/.markdownlint-cli2.jsonc", cli2: "docs/.markdownlint-cli2.jsonc"},
+		{name: "config file alone", files: map[string]string{".markdownlint.yaml": "{}\n"}, markdownlint: ".markdownlint.yaml"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,11 +109,11 @@ func TestDiscoverPaths_MarkdownlintCLI2Files(t *testing.T) {
 
 			repo := t.TempDir()
 			require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
-			for _, name := range tt.files {
-				writeMarkdownlint(t, repo, name, "{}\n")
-			}
 			docs := filepath.Join(repo, "docs")
 			require.NoError(t, os.MkdirAll(docs, 0o755))
+			for name, content := range tt.files {
+				writeMarkdownlint(t, repo, name, content)
+			}
 
 			paths, err := DiscoverPaths(context.Background(), docs)
 			require.NoError(t, err)
@@ -82,8 +124,34 @@ func TestDiscoverPaths_MarkdownlintCLI2Files(t *testing.T) {
 				want = filepath.Join(repo, tt.cli2)
 			}
 			assert.Equal(t, want, paths.MarkdownlintCLI2)
+			wantNearer := ""
+			if tt.nearer != "" {
+				wantNearer = filepath.Join(repo, tt.nearer)
+			}
+			assert.Equal(t, wantNearer, paths.MarkdownlintCLI2Nearer)
 		})
 	}
+}
+
+// TestLoad_WarnsAboutAPassedOptionsFile covers an options file without the
+// config key below a directory with a markdownlint config file. The search
+// passes it, as markdownlint-cli2 does, but its other keys still configure
+// markdownlint-cli2 for its directory, so they get warnings as they would
+// if the search had stopped there.
+func TestLoad_WarnsAboutAPassedOptionsFile(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
+	writeMarkdownlint(t, repo, ".markdownlint.json", `{"MD013": false}`)
+	options := writeMarkdownlint(t, repo, "docs/.markdownlint-cli2.jsonc", "{\n  \"ignores\": [\"gen/**\"]\n}\n")
+
+	result, err := Load(context.Background(), markdownlintOptions(filepath.Join(repo, "docs"), false, "", nil))
+	require.NoError(t, err)
+	assert.True(t, ruleOff(result.Config, "MD013"), "the parent's markdownlint config applies")
+	assert.Equal(t, []string{
+		options + `:2: unsupported markdownlint-cli2 option "ignores" (set ignore in a gomdlint config instead); it is ignored`,
+	}, result.Warnings)
 }
 
 // TestLoad_MarkdownlintCLI2Config covers a project whose markdownlint

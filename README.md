@@ -631,15 +631,23 @@ keeps markdownlint's defaults. A value other than an object gets a warning.
 gomdlint also reads the `config` key of a markdownlint-cli2 options file,
 `.markdownlint-cli2.jsonc` or `.markdownlint-cli2.yaml`, as a markdownlint
 config. It looks for both kinds of file upward from the working directory
-and uses the nearest directory that holds either. There, as in
-markdownlint-cli2, a markdownlint config file wins over the options file's
-`config` key, with a warning, and `.markdownlint-cli2.jsonc` wins over
-`.markdownlint-cli2.yaml`. An options file is read as its name says, JSON
-with comments and trailing commas or YAML, and markdownlint-cli2 fails on
-one that its parser rejects, so it fails the run when it holds the
-configuration. Its other keys, such as `globs`, `ignores` and
+and uses the nearest directory that holds a markdownlint config file or an
+options file that sets `config`. As in markdownlint-cli2, an options file
+without `config` passes the search on to the directories above, and one
+that sets it to `null`, `false`, `0` or an empty string does too. Without
+such a directory, gomdlint reads the nearest options file, so that
+markdownlint's defaults apply. In a directory with both kinds of file, a
+markdownlint config file wins over the options file's `config` key, with
+a warning, as in markdownlint-cli2, except in a parent directory of an
+options file that the search passed, where markdownlint-cli2 merges the
+options first, so their `config` key wins. `.markdownlint-cli2.jsonc` wins
+over `.markdownlint-cli2.yaml`. An options file is read as its name says,
+JSON with comments and trailing commas or YAML, and markdownlint-cli2
+fails on one that its parser rejects, so it fails the run when it holds
+the configuration. Its other keys, such as `globs`, `ignores` and
 `customRules`, configure markdownlint-cli2 itself, which gomdlint does not
-read, so each gets a warning. gomdlint cannot run a JavaScript options
+read, so each gets a warning, in the options file that applies and in a
+nearer one that the search passed. gomdlint cannot run a JavaScript options
 file, `.markdownlint-cli2.cjs` or `.markdownlint-cli2.mjs`, which gets a
 warning too. markdownlint-cli2 merges the options files of the directories
 between the working directory and each file, and gomdlint reads only the

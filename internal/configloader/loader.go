@@ -178,10 +178,10 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 		}
 		paths.Explicit = explicitPath
 		paths.Project = ""
-		paths.Markdownlint, paths.MarkdownlintCLI2 = "", ""
+		paths.Markdownlint, paths.MarkdownlintCLI2, paths.MarkdownlintCLI2Nearer = "", "", ""
 	}
 	if opts.IgnoreMarkdownlint {
-		paths.Markdownlint, paths.MarkdownlintCLI2 = "", ""
+		paths.Markdownlint, paths.MarkdownlintCLI2, paths.MarkdownlintCLI2Nearer = "", "", ""
 	}
 
 	// Load and merge in order (lowest to highest precedence)
@@ -229,15 +229,10 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 			return nil, err
 		}
 		if paths.Markdownlint != "" && filepath.Dir(paths.Markdownlint) == filepath.Dir(paths.Project) {
-			result.Warnings = append(result.Warnings,
-				fmt.Sprintf("both %s and %s exist; using %s", paths.Project, paths.Markdownlint, paths.Project))
+			result.Warnings = append(result.Warnings, projectShadowWarnings(paths.Project, paths.Markdownlint)...)
 		}
 	case paths.Markdownlint != "":
-		result.Warnings = append(result.Warnings, shadowWarnings(paths, paths.Markdownlint)...)
-		if options := paths.MarkdownlintCLI2; options != "" && options != paths.Markdownlint {
-			result.Warnings = append(result.Warnings, shadowWarnings(paths, options)...)
-			result.Warnings = append(result.Warnings, sideOptionsWarnings(options, paths.Markdownlint)...)
-		}
+		result.Warnings = append(result.Warnings, markdownlintFileWarnings(paths)...)
 		translated, err := applyMarkdownlint(paths.Markdownlint, opts, result)
 		if err != nil {
 			return nil, err
@@ -291,13 +286,50 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 	return result, nil
 }
 
+// markdownlintFileWarnings returns the warnings about the markdownlint
+// files that paths names, when gomdlint reads paths.Markdownlint in place
+// of a project config: the files that each shadows in its directory, and
+// the problems with an options file whose configuration gomdlint does not
+// lint with (see sideOptionsWarnings), beside paths.Markdownlint or nearer.
+func markdownlintFileWarnings(paths *ConfigPaths) []string {
+	warnings := shadowWarnings(paths, paths.Markdownlint)
+	for _, options := range []string{paths.MarkdownlintCLI2, paths.MarkdownlintCLI2Nearer} {
+		if options != "" && options != paths.Markdownlint {
+			warnings = append(warnings, shadowWarnings(paths, options)...)
+			warnings = append(warnings, sideOptionsWarnings(options, paths.Markdownlint)...)
+		}
+	}
+	return warnings
+}
+
+// projectShadowWarnings returns the warning for markdownlint, the file
+// that holds the markdownlint configuration in the directory of project,
+// a gomdlint project config, which gomdlint reads in its place. An options
+// file that gomdlint reads and that does not set the config key holds only
+// settings of markdownlint-cli2 itself, which a project may keep beside a
+// gomdlint config, so it gets none.
+func projectShadowWarnings(project, markdownlint string) []string {
+	shadowed := markdownlint
+	if isMarkdownlintCLI2File(markdownlint) {
+		if options, read := readOptionsFile(markdownlint); read {
+			if !options.ConfigSet {
+				return nil
+			}
+			shadowed = "the config key of " + markdownlint
+		}
+	}
+	return []string{fmt.Sprintf("both %s and %s exist; using %s", project, shadowed, project)}
+}
+
 // sideOptionsWarnings returns the warnings for path, a markdownlint-cli2
-// options file beside configFile, the markdownlint config file of its
-// directory, whose configuration markdownlint-cli2 lints with. gomdlint
-// takes nothing from the options file, so each problem with it is a
-// warning: a file that cannot be read, such as a JavaScript one, each key
-// that configures markdownlint-cli2 itself (see markdownlintCLI2Warnings),
-// and a config key, which configFile shadows.
+// options file whose configuration gomdlint does not lint with: one beside
+// configFile, the markdownlint config file of its directory, which
+// markdownlint-cli2 lints with, or a nearer one that sets no config key
+// (ConfigPaths.MarkdownlintCLI2Nearer). gomdlint takes nothing from the
+// options file, so each problem with it is a warning: a file that cannot
+// be read, such as a JavaScript one, each key that configures
+// markdownlint-cli2 itself (see markdownlintCLI2Warnings), and a config key
+// that sets a configuration, which configFile shadows.
 func sideOptionsWarnings(path, configFile string) []string {
 	if IsJavaScriptConfig(path) {
 		return []string{path + ": JavaScript, which gomdlint cannot read; its markdownlint-cli2 options are ignored"}
@@ -317,7 +349,7 @@ func sideOptionsWarnings(path, configFile string) []string {
 		return []string{fmt.Sprintf("%s: cannot read it (%v); it is ignored", path, err)}
 	}
 	var warnings []string
-	if options.Config != nil {
+	if options.ConfigSet {
 		warnings = append(warnings, fmt.Sprintf("both %s and the config key of %s exist; using %s", configFile, path, configFile))
 	}
 	for _, warning := range markdownlintCLI2Warnings(options, root) {

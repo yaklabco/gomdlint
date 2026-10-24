@@ -674,6 +674,20 @@ func TestMigrate_FindsMarkdownlintCLI2OptionsFile(t *testing.T) {
 	assert.Contains(t, string(written), "MD013:\n    enabled: false")
 }
 
+// TestMigrate_OptionsFileWithoutConfig covers migrate in a directory whose
+// only markdownlint file is an options file without the config key. It
+// holds no markdownlint configuration, so migrate writes one with
+// markdownlint's defaults, and has no config key to advise deleting.
+func TestMigrate_OptionsFileWithoutConfig(t *testing.T) {
+	inProject(t, map[string]string{".markdownlint-cli2.jsonc": `{"globs": ["**/*.md"]}`})
+
+	got := execute(t, "migrate")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stdout+got.stderr)
+	assert.NotContains(t, got.stdout, "delete")
+	assert.Contains(t, got.stdout, "the markdownlint-cli2 options file sets no config key")
+}
+
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config
 // sets and a markdownlint config cannot: its ignore patterns, flavor,
 // gitignore and default_ignores settings and backups. While gomdlint

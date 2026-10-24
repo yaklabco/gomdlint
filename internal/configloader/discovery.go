@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // ConfigPaths represents discovered configuration file paths.
@@ -27,7 +30,9 @@ type ConfigPaths struct {
 	// Markdownlint is the file that holds the markdownlint configuration:
 	// a markdownlint config file such as .markdownlint.json, or a
 	// markdownlint-cli2 options file, whose config key holds it, in the
-	// nearest directory that holds either (see MarkdownlintCLI2).
+	// nearest directory that holds a config file or an options file that
+	// sets the config key, or else the nearest options file (see
+	// MarkdownlintCLI2).
 	Markdownlint string
 
 	// MarkdownlintCLI2 is the markdownlint-cli2 options file, such as
@@ -36,6 +41,13 @@ type ConfigPaths struct {
 	// directory and lints with the markdownlint config file, so this is
 	// Markdownlint itself only in a directory without one.
 	MarkdownlintCLI2 string
+
+	// MarkdownlintCLI2Nearer is the nearest markdownlint-cli2 options file
+	// when it is nearer than Markdownlint's directory, which the search
+	// passed because it does not set the config key, or the empty string.
+	// Its other keys still configure markdownlint-cli2, so they get
+	// warnings.
+	MarkdownlintCLI2Nearer string
 
 	// Shadowed maps each config file found to the other config files in
 	// its directory, in their order of precedence, which it shadows:
@@ -115,7 +127,9 @@ var vcsRootMarkers = []string{".git", ".hg", ".svn"}
 //   - Project config by searching upward from workDir for one of
 //     gomdlintConfigFiles, such as .gomdlint.yml or .gomdlint.json
 //   - Markdownlint config, by searching upward from workDir for a
-//     markdownlint config file or a markdownlint-cli2 options file
+//     markdownlint config file or a markdownlint-cli2 options file that
+//     sets its config key (see markdownlintDir.optionsSetConfig), or
+//     else the nearest options file
 //
 // Missing files are represented as empty strings (not errors).
 func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
@@ -145,19 +159,46 @@ func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
 	paths.shadow(paths.Project, shadowed)
 
 	// Find a markdownlint config, searching upward like the project config,
-	// in the nearest directory that holds a markdownlint config file or a
-	// markdownlint-cli2 options file.
-	var markdownlint markdownlintDir
+	// in the nearest directory that holds a markdownlint configuration (see
+	// markdownlintDir.optionsSetConfig), or else the nearest options file.
+	var markdownlint, nearestOptions markdownlintDir
 	err = walkUpward(ctx, workDir, func(dir string) bool {
-		markdownlint = readMarkdownlintDir(dir)
-		return markdownlint.source() != ""
+		found := readMarkdownlintDir(dir)
+		passed := nearestOptions.options != "" // an options file in a nearer directory
+		if found.options != "" && !passed {
+			nearestOptions = found
+		}
+		setsConfig := found.optionsSetConfig()
+		if found.config == "" && !setsConfig {
+			return false
+		}
+		// Past an options file, markdownlint-cli2 merges this directory's
+		// options file before it looks at its config file, so a config key
+		// that the options file sets wins (markdownlint-cli2.mjs, the merge
+		// by inheritance). In the directory it starts from, the config
+		// file wins.
+		found.preferOptions = passed && setsConfig
+		markdownlint = found
+		return true
 	})
 	if err != nil {
 		return nil, err
 	}
+	switch {
+	case markdownlint.source() == "":
+		markdownlint = nearestOptions
+	case nearestOptions.options != markdownlint.options:
+		paths.MarkdownlintCLI2Nearer = nearestOptions.options
+		paths.shadow(nearestOptions.options, nearestOptions.optionsShadowed)
+	}
 	paths.Markdownlint, paths.MarkdownlintCLI2 = markdownlint.source(), markdownlint.options
-	paths.shadow(markdownlint.config, markdownlint.configShadowed)
-	paths.shadow(markdownlint.options, markdownlint.optionsShadowed)
+	if markdownlint.preferOptions {
+		paths.shadow(markdownlint.options, slices.Concat(
+			[]string{markdownlint.config}, markdownlint.configShadowed, markdownlint.optionsShadowed))
+	} else {
+		paths.shadow(markdownlint.config, markdownlint.configShadowed)
+		paths.shadow(markdownlint.options, markdownlint.optionsShadowed)
+	}
 
 	return paths, nil
 }
@@ -316,6 +357,11 @@ func walkUpward(ctx context.Context, startDir string, found func(dir string) boo
 type markdownlintDir struct {
 	config, options                 string
 	configShadowed, optionsShadowed []string
+
+	// preferOptions reports that the options file's config key holds the
+	// configuration in place of the config file, as it does in a parent
+	// directory of an options file that sets none.
+	preferOptions bool
 }
 
 // readMarkdownlintDir returns what dir holds of the markdownlint
@@ -327,12 +373,42 @@ func readMarkdownlintDir(dir string) markdownlintDir {
 	return found
 }
 
+// optionsSetConfig reports whether the directory's options file sets the
+// config key (see lint.MarkdownlintCLI2Options.ConfigSet). An options file
+// that gomdlint cannot read, such as a JavaScript one, may set it, and so
+// counts as one, so that loading it warns or fails. markdownlint-cli2
+// 0.23.3 lints a directory whose options files set none with the
+// markdownlint config file of the nearest parent directory that has one.
+func (d markdownlintDir) optionsSetConfig() bool {
+	if d.options == "" {
+		return false
+	}
+	options, read := readOptionsFile(d.options)
+	return !read || options.ConfigSet
+}
+
+// readOptionsFile reads path, a markdownlint-cli2 options file, as
+// markdownlint-cli2 reads it, and reports whether it could: not for a
+// JavaScript options file, nor for one that cannot be opened or parsed.
+func readOptionsFile(path string) (*lint.MarkdownlintCLI2Options, bool) {
+	if IsJavaScriptConfig(path) {
+		return nil, false
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	options, _, err := readMarkdownlintCLI2Options(path, content)
+	return options, err == nil
+}
+
 // source returns the file that holds the directory's markdownlint
 // configuration: its markdownlint config file, which markdownlint-cli2
-// prefers to the config key of its options file, and otherwise its options
-// file, or the empty string when it holds neither.
+// prefers to the config key of its options file unless preferOptions says
+// otherwise, and otherwise its options file, or the empty string when it
+// holds neither.
 func (d markdownlintDir) source() string {
-	if d.config != "" {
+	if d.config != "" && !d.preferOptions {
 		return d.config
 	}
 	return d.options
@@ -351,13 +427,17 @@ func findMarkdownlintConfig(dir string) string {
 // settings are now in a gomdlint config file. A markdownlint config file
 // can go. A markdownlint-cli2 options file holds keys that configure
 // markdownlint-cli2 itself and that migration leaves out, such as globs,
-// so only its config key can go.
+// so only its config key can go, and when it has none, nothing can.
 func MigratedSourceAdvice(path string) string {
-	if isMarkdownlintCLI2File(path) {
-		return "you can now delete the config key of the markdownlint-cli2 options file; " +
-			"its other keys still configure markdownlint-cli2"
+	if !isMarkdownlintCLI2File(path) {
+		return "you can now delete the old markdownlint configuration file"
 	}
-	return "you can now delete the old markdownlint configuration file"
+	if options, read := readOptionsFile(path); read && !options.ConfigSet {
+		return "the markdownlint-cli2 options file sets no config key, " +
+			"so the migrated configuration holds markdownlint's defaults"
+	}
+	return "you can now delete the config key of the markdownlint-cli2 options file; " +
+		"its other keys still configure markdownlint-cli2"
 }
 
 // isMarkdownlintCLI2File reports whether path names a markdownlint-cli2

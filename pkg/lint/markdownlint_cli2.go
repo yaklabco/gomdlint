@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 
@@ -35,6 +37,13 @@ type MarkdownlintCLI2Options struct {
 	// a configuration. For YAML, its Positions are those of the keys under
 	// the config key. It is nil when the file has no config key.
 	Config *MarkdownlintSource
+
+	// ConfigSet reports that the config key holds a value that JavaScript
+	// reads as true: anything but null, false, 0, NaN and the empty string.
+	// markdownlint-cli2 lints the files of a directory whose options files
+	// set none with the markdownlint config file of the nearest parent
+	// directory that has one.
+	ConfigSet bool
 
 	// NotObject describes the value that the file holds in place of an
 	// object, as MarkdownlintSource.NotObject does.
@@ -119,8 +128,56 @@ func readMarkdownlintCLI2JSON(text []byte) (*MarkdownlintCLI2Options, error) {
 		if options.Config, err = readMarkdownlintJSON(config); err != nil {
 			return nil, err
 		}
+		options.ConfigSet = jsonTruthy(config)
 	}
 	return options, nil
+}
+
+// jsonTruthy reports whether JavaScript reads text, one valid JSON value,
+// as true (see jsTruthy). It reads the text itself, as a number beyond
+// float64's range, which JSON.parse reads as an infinity, would fail to
+// decode.
+func jsonTruthy(text []byte) bool {
+	text = bytes.TrimSpace(text)
+	switch {
+	case len(text) == 0:
+		return false
+	case text[0] == '{' || text[0] == '[':
+		return true
+	case text[0] == '"':
+		return len(text) > len(`""`)
+	}
+	switch string(text) {
+	case "null", "false":
+		return false
+	case "true":
+		return true
+	}
+	// A JSON number, which always parses, as an infinity if it is beyond
+	// float64's range, or as 0 if it is too small to tell from 0.
+	number, err := strconv.ParseFloat(string(text), 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		return true // Valid JSON is no other value; this is unreachable.
+	}
+	return number != 0
+}
+
+// jsTruthy reports whether JavaScript reads value, as encoding/json or the
+// YAML converter decodes it, as true: anything but null, false, 0, NaN and
+// the empty string.
+func jsTruthy(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case bool:
+		return typed
+	case float64:
+		return typed != 0 && !math.IsNaN(typed)
+	case string:
+		return typed != ""
+	default:
+		return true
+	}
 }
 
 // readMarkdownlintCLI2YAML reads text as an options file in YAML, as js-yaml
@@ -163,8 +220,10 @@ func readMarkdownlintCLI2YAML(text []byte) (*MarkdownlintCLI2Options, error) {
 		config := &MarkdownlintSource{Settings: &MarkdownlintSettings{}, Syntax: MarkdownlintYAML}
 		if converted, ok := converter.done[yamlAliasTarget(valueNode)]; ok && converted.pairs != nil {
 			config.Settings, config.Positions = pairsSettings(converted.pairs), converted.place
+			options.ConfigSet = true
 		} else if value, found := settings.Value(MarkdownlintCLI2ConfigKey); found {
 			config.NotObject = notObjectKind(value)
+			options.ConfigSet = jsTruthy(value)
 		}
 		options.Config = config
 		break // YAML rejects a key written twice.

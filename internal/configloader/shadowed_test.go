@@ -118,3 +118,39 @@ func TestLoad_ExplicitConfigShadowsNothing(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_ProjectConfigBesideOptionsFile covers a gomdlint config beside a
+// markdownlint-cli2 options file. The gomdlint config wins over a
+// markdownlint configuration, so an options file that sets the config key
+// gets a warning that names the key. One without it holds no markdownlint
+// configuration, only settings of markdownlint-cli2 itself, as the file
+// that migrate advises keeping does, so it gets no warning.
+func TestLoad_ProjectConfigBesideOptionsFile(t *testing.T) {
+	tests := []struct {
+		name, options string
+		warns         bool
+	}{
+		{name: "config key", options: "{\"config\": {\"MD013\": false}}\n", warns: true},
+		{name: "no config key", options: "{\"globs\": [\"**/*.md\"]}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			project := t.TempDir()
+			gomdlintConfig := writeMarkdownlint(t, project, ".gomdlint.yml", "{}\n")
+			options := writeMarkdownlint(t, project, ".markdownlint-cli2.jsonc", tt.options)
+
+			result, err := Load(t.Context(), LoadOptions{
+				WorkingDir: project, IgnoreSystemConfig: true, IgnoreUserConfig: true, IgnoreEnv: true, NonInteractive: true,
+			})
+			require.NoError(t, err)
+
+			if !tt.warns {
+				assert.Empty(t, result.Warnings)
+				return
+			}
+			assert.Equal(t, []string{
+				"both " + gomdlintConfig + " and the config key of " + options + " exist; using " + gomdlintConfig,
+			}, result.Warnings)
+		})
+	}
+}

@@ -1065,7 +1065,9 @@ and stands in for the project config only when there is none. It is a
 markdownlint config file, or the `config` key of a markdownlint-cli2
 options file in a directory without one (`ConfigPaths.MarkdownlintCLI2`,
 read by `lint.ReadMarkdownlintCLI2Options` with the one parser its name
-selects), and the options file's other keys get warnings. `--config`
+selects), and the options file's other keys get warnings. An options
+file whose `config` key is absent or false to JavaScript does not stop
+the search (`MarkdownlintCLI2Options.ConfigSet`). `--config`
 replaces project discovery. A markdownlint config is read as
 markdownlint-cli2 reads one that it finds, whatever its name
 (`lint.ReadMarkdownlintConfig`). The reader tries JSON with comments and
