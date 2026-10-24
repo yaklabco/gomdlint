@@ -375,7 +375,8 @@ func TestEngine_KeepsCarriageReturnsApartAcrossManyFixes(t *testing.T) {
 		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 3, EndOffset: 5}},
 		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 9, EndOffset: 10}},
 	}, result.SkippedEdits)
-	assert.False(t, fix.JoinsLineEndings([]byte(content), result.Edits))
+	_, _, joined := fix.JoinAt([]byte(content), result.Edits)
+	assert.False(t, joined)
 }
 
 func TestEngine_MergesBlankLineInsertionsInCRFiles(t *testing.T) {

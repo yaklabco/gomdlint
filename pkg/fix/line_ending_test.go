@@ -128,7 +128,7 @@ func TestLineEndingWriter(t *testing.T) {
 		},
 		{
 			// Without a carriage return alone in the content, nothing is
-			// withheld, as before line endings were kept apart.
+			// withheld, so such files are fixed as they always were.
 			name: "adjacent edits in content without carriage returns alone", content: "ab",
 			edits:  []fix.TextEdit{{StartOffset: 0, EndOffset: 1, NewText: "\r"}, {StartOffset: 1, EndOffset: 2, NewText: "\n"}},
 			want:   []string{"\r", "\n"},
@@ -182,7 +182,7 @@ func TestLineEndingWriter(t *testing.T) {
 		},
 		{
 			// Without a carriage return alone, a CRLF file's newlines are all
-			// written as CRLF, as before line endings were kept.
+			// written as CRLF, as they always were.
 			name: "lines rewritten in a CRLF file without carriage returns alone", content: "a\r\nb\nc\r\nd\r\n",
 			edits: []fix.TextEdit{{StartOffset: 3, EndOffset: 6, NewText: "B\nC"}}, want: []string{"B\r\nC"}, wantOK: true,
 		},
@@ -229,6 +229,10 @@ func TestJoinAt(t *testing.T) {
 		{name: "carriage returns kept apart", content: "a\rb\n",
 			edits: []fix.TextEdit{{StartOffset: 2, EndOffset: 2, NewText: "\r"}}},
 		{name: "CRLF pair of the content", content: "a\r\nb", edits: []fix.TextEdit{{StartOffset: 3, EndOffset: 4, NewText: "c"}}},
+		{name: "line feed inserted after a final carriage return", content: "a\r",
+			edits: []fix.TextEdit{{StartOffset: 2, EndOffset: 2, NewText: "\n"}}, from: 2, to: 2, joined: true},
+		{name: "empty edits at one offset", content: "a\rb\n",
+			edits: []fix.TextEdit{{StartOffset: 2, EndOffset: 2}, {StartOffset: 2, EndOffset: 2}}},
 	}
 
 	for _, tt := range tests {
@@ -236,9 +240,52 @@ func TestJoinAt(t *testing.T) {
 			t.Parallel()
 			from, to, joined := fix.JoinAt([]byte(tt.content), tt.edits)
 			assert.Equal(t, tt.joined, joined)
-			assert.Equal(t, tt.joined, fix.JoinsLineEndings([]byte(tt.content), tt.edits))
 			if tt.joined {
 				assert.Equal(t, []int{tt.from, tt.to}, []int{from, to})
+			}
+		})
+	}
+}
+
+// TestLineEndingWriter_KeepsApartOnlyWithCarriageReturnsAlone checks that
+// content without a carriage return alone, written with its own dominant
+// line ending, gets every newline in that ending and no fix withheld.
+func TestLineEndingWriter_KeepsApartOnlyWithCarriageReturnsAlone(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		keeps   bool
+	}{
+		{name: "empty", content: ""},
+		{name: "lf", content: "a\nb\n"},
+		{name: "crlf", content: "a\r\nb\r\n"},
+		{name: "lf and crlf", content: "a\r\nb\nc\r\n"},
+		{name: "byte order mark and crlf", content: "\ufeffa\r\nb\r\n"},
+		{name: "carriage return alone", content: "a\nb\rc\n", keeps: true},
+		{name: "final carriage return", content: "a\nb\r", keeps: true},
+		{name: "cr", content: "a\rb\r", keeps: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			content := []byte(tt.content)
+			ending := fix.DetectLineEnding(content)
+			writer := fix.NewLineEndingWriter(content, ending)
+			assert.Equal(t, tt.keeps, writer.KeepsApart())
+			if tt.keeps {
+				return
+			}
+			texts := []string{"\n", "x\ny\n", "\r", "\r\n", "a\r\nb\n"}
+			edits := make([]fix.TextEdit, len(texts))
+			for idx, text := range texts {
+				edits[idx] = fix.TextEdit{StartOffset: 0, EndOffset: 0, NewText: text}
+			}
+			assert.True(t, writer.WriteNewlines(edits))
+			for idx, edit := range edits {
+				assert.Equal(t, fix.ConvertNewlines(texts[idx], ending), edit.NewText)
 			}
 		})
 	}

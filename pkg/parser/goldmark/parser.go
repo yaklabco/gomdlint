@@ -164,16 +164,15 @@ func (p *Parser) parse(
 	// feed (see mdast.LineFeedContent), with the front matter blanked. Both
 	// keep every offset, so goldmark's positions are positions in the content.
 	snapshot.FrontMatterLines = frontMatterLines(snapshot, base)
-	parseContent := snapshot.Content
-	if snapshot.FrontMatterLines > 0 || mdast.HasBareCarriageReturn(snapshot.Content) {
-		parseContent = copyContent(snapshot.Content)
-		mdast.WriteLineFeeds(parseContent)
-		if snapshot.FrontMatterLines > 0 {
-			end := snapshot.Lines[snapshot.FrontMatterLines-1].EndOffset
-			for idx := range end {
-				if parseContent[idx] != '\n' && parseContent[idx] != '\r' {
-					parseContent[idx] = ' '
-				}
+	parseContent := mdast.LineFeedContent(snapshot.Content)
+	if snapshot.FrontMatterLines > 0 {
+		// LineFeedContent returns the content itself when it has no
+		// carriage return alone, and the content must stay as it is.
+		parseContent = copyContent(parseContent)
+		end := snapshot.Lines[snapshot.FrontMatterLines-1].EndOffset
+		for idx := range end {
+			if parseContent[idx] != '\n' && parseContent[idx] != '\r' {
+				parseContent[idx] = ' '
 			}
 		}
 	}

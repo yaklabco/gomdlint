@@ -85,13 +85,13 @@ func LineFeedContent(content []byte) []byte {
 		return content
 	}
 	out := bytes.Clone(content)
-	WriteLineFeeds(out)
+	writeLineFeeds(out)
 	return out
 }
 
-// WriteLineFeeds writes every carriage return in content that no line feed
+// writeLineFeeds writes every carriage return in content that no line feed
 // follows as a line feed, in place.
-func WriteLineFeeds(content []byte) {
+func writeLineFeeds(content []byte) {
 	for idx, char := range content {
 		if char == '\r' && (idx+1 == len(content) || content[idx+1] != '\n') {
 			content[idx] = '\n'
@@ -105,7 +105,7 @@ func LineFeedText(text string) string {
 	for idx := range len(text) {
 		if text[idx] == '\r' && (idx+1 == len(text) || text[idx+1] != '\n') {
 			out := []byte(text)
-			WriteLineFeeds(out[idx:])
+			writeLineFeeds(out[idx:])
 			return string(out)
 		}
 	}

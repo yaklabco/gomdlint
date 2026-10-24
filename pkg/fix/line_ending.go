@@ -100,7 +100,8 @@ func NewLineEndingWriter(content []byte, lineEnding string) *LineEndingWriter {
 // right before a line feed once fixes are applied, so that fixes must keep
 // the two apart: when the content holds a carriage return that no line feed
 // follows, or when fixes are written with such carriage returns. Otherwise
-// fixes are written as before line endings were kept apart.
+// every newline of a fix is written with the dominant line ending, and no
+// fix is withheld for its line endings.
 func (w *LineEndingWriter) KeepsApart() bool {
 	return w.keep
 }
@@ -151,7 +152,11 @@ func (w *LineEndingWriter) WriteNewlines(edits []TextEdit) bool {
 		}
 		edit.NewText = ConvertNewlines(edit.NewText, ending)
 	}
-	return !w.keep || !JoinsLineEndings(w.content, edits)
+	if !w.keep {
+		return true
+	}
+	_, _, joined := JoinAt(w.content, edits)
+	return !joined
 }
 
 // joinsAround reports whether text, written for edit, would join a carriage
@@ -231,23 +236,17 @@ func endsWithNewline(text string) bool {
 	return strings.HasSuffix(text, LineEndingLF) && !strings.HasSuffix(text, LineEndingCRLF)
 }
 
-// JoinsLineEndings reports whether applying edits, sorted and without
-// overlaps, to content puts a carriage return right before a line feed that
-// did not follow it (see JoinAt).
-func JoinsLineEndings(content []byte, edits []TextEdit) bool {
-	_, _, joined := JoinAt(content, edits)
-	return joined
-}
-
 // JoinAt finds the first place where applying edits, sorted and without
 // overlaps, to content puts a carriage return right before a line feed that
 // did not follow it: where the text of an edit, or the content an edit
 // leaves, meets the text of the next edit or the content after it. The
 // edits must not split a CRLF pair of content, as Validator.Validate
 // ensures, so every such pair is a new one, which joins two line endings
-// into one. from and to are the content offsets where the piece that ends
-// with the carriage return ends and where the piece that starts with the
-// line feed starts; every edit between the two pieces lies in [from, to].
+// into one. It returns from, to and true for the first such place, where
+// from is the content offset at which the piece that ends with the carriage
+// return ends and to the content offset at which the piece that starts with
+// the line feed starts; every edit between the two pieces lies in [from, to].
+// It returns 0, 0 and false when the edits join no line endings.
 func JoinAt(content []byte, edits []TextEdit) (int, int, bool) {
 	// last is the last byte of the fixed content so far and lastEnd the
 	// content offset where the piece that holds it ends; has reports

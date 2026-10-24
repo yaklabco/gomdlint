@@ -573,8 +573,10 @@ func resolveFixes(fixes []pendingFix, content []byte, apart bool) ([]fix.TextEdi
 		fixed += pending.diagnostics
 	}
 	accepted, skippedFixes := fix.ResolveFixes(groups)
-	if apart && fix.JoinsLineEndings(content, accepted) {
-		accepted, skippedFixes = resolveApart(groups, content, accepted, skippedFixes)
+	if apart {
+		if _, _, joined := fix.JoinAt(content, accepted); joined {
+			accepted, skippedFixes = resolveApart(groups, content, accepted, skippedFixes)
+		}
 	}
 
 	skipped := make([]pendingFix, 0, len(skippedFixes))
