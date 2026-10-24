@@ -13,7 +13,7 @@ cmd/gomdlint/           CLI entry point
 internal/               Application-specific wiring (not importable)
   cli/                  Cobra command definitions and exit codes
   configloader/         Configuration discovery, merging and migration
-  display/              Character columns and display paths for reporters
+  display/              UTF-16 columns and display paths for reporters
   editdistance/         Edit distance for rule name suggestions
   ignore/               gitignore-style matching for directory walks
   jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
@@ -750,11 +750,16 @@ lists them under each file's `notices`, and SARIF output records them as
 
 Positions stay byte offsets inside the linter. Reporters convert them at the
 boundary, from the file snapshot the diagnostics were computed against.
-`internal/display` turns byte columns into 1-based character columns, or
-UTF-16 code units for SARIF, skipping a leading byte order mark, and paths
-into paths relative to the working directory. The runner sorts each file's
-findings before any reporter sees them. `--rule-format` names rules by
-name, ID or both in text, table and summary output.
+`internal/display` turns byte columns into 1-based columns counted in UTF-16
+code units, the unit of markdownlint and of SARIF's default `columnKind`,
+skipping a leading byte order mark, and paths into paths relative to the
+working directory. The runner sorts each file's findings before any reporter
+sees them, so a `display.Columns` converter that continues along a line
+decodes each line once for the start columns and once for the end columns.
+The text reporter places its caret by the display cells of the text before
+the column, so it stays under the target after wide characters and tabs.
+`--rule-format` names rules by name, ID or both in text, table and summary
+output.
 
 ## Design Patterns
 
