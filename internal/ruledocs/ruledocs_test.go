@@ -63,7 +63,8 @@ func TestMarkdownListLintsClean(t *testing.T) {
 
 // TestTextPagesFitTheTerminal writes the text page of every built-in rule
 // and checks that its lines fit in 80 columns, apart from the address of
-// markdownlint's documentation, and that wrapping keeps each word of a
+// markdownlint's documentation and the lines of example documents, which
+// show the documents as they are, and that wrapping keeps each word of a
 // configuration or command line that the page quotes on one line.
 func TestTextPagesFitTheTerminal(t *testing.T) {
 	for _, entry := range ruledocs.Entries(lint.DefaultRegistry, nil) {
@@ -72,7 +73,7 @@ func TestTextPagesFitTheTerminal(t *testing.T) {
 		text := page.String()
 
 		for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
-			if !strings.HasPrefix(line, "markdownlint: https://") {
+			if !strings.HasPrefix(line, "markdownlint: https://") && !strings.HasPrefix(line, "  |") {
 				assert.LessOrEqual(t, utf8.RuneCountInString(line), 80, "%s: %q", entry.ID, line)
 			}
 		}

@@ -109,7 +109,7 @@ func markdownItem(item string) string {
 
 // markdownBlock writes lines as a fenced code block in language.
 func markdownBlock(language string, lines ...string) string {
-	return "```" + language + "\n" + strings.Join(lines, "\n") + "\n```"
+	return markdownFence(language, strings.Join(lines, "\n"))
 }
 
 // markdownDocument collects the blocks of a Markdown document, which a
@@ -185,6 +185,14 @@ func WriteMarkdownPage(writer io.Writer, entry Entry) error {
 	if entry.Fix != "" {
 		doc.heading(2, "Fix")
 		doc.add(markdownProse(entry.Fix))
+	}
+	parts, err := exampleParts(entry)
+	if err != nil {
+		return err
+	}
+	if len(parts) > 0 {
+		doc.heading(2, "Example")
+		doc.add(markdownExample(parts)...)
 	}
 
 	doc.heading(2, "Configure")
