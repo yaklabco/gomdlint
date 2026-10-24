@@ -33,7 +33,7 @@ without a fix.
 
 ## Example
 
-This document breaks the rule:
+This document breaks the rule. Its last line has no newline:
 
 ```markdown
 # Guide
