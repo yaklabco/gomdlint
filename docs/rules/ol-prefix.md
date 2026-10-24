@@ -35,6 +35,34 @@ it up to a blank line, because it could add or remove a task list checkbox. In a
 document with raw HTML other than comments and plain br, wbr, hr or img tags,
 gomdlint reports every finding without a fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Release steps
+
+1. Update the changelog.
+2. Tag the release.
+2. Push the tag.
+```
+
+gomdlint reports:
+
+```text
+5:1 Ordered list item numbered 2 should be 3
+```
+
+The fix changes it to:
+
+```markdown
+# Release steps
+
+1. Update the changelog.
+2. Tag the release.
+3. Push the tag.
+```
+
 ## Configure
 
 ```yaml

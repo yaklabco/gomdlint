@@ -31,6 +31,30 @@ could add or remove a task list checkbox. In a document with raw HTML other than
 comments and plain br, wbr, hr or img tags, gomdlint reports every finding
 without a fix.
 
+## Example
+
+This document breaks the rule. Its last line has no newline:
+
+```markdown
+# Guide
+
+Run the tool in the project root.
+```
+
+gomdlint reports:
+
+```text
+3:33 File should end with a newline
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+Run the tool in the project root.
+```
+
 ## Configure
 
 Under `rules`, `single-trailing-newline: false` turns the rule off and

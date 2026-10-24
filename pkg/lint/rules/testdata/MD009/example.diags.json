@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD009",
+    "name": "no-trailing-spaces",
+    "line": 3,
+    "column": 18,
+    "message": "Trailing whitespace",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -26,6 +26,37 @@ without a fix when the fix would change a line with one character in brackets,
 such as \[x\] or \[1\], or the lines around it up to a blank line, because it
 could add or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+````markdown
+# Install
+
+```sh
+$ git clone https://github.com/yaklabco/gomdlint.git
+$ cd gomdlint
+```
+````
+
+gomdlint reports:
+
+```text
+4:1 Dollar signs used before commands without showing output
+5:1 Dollar signs used before commands without showing output
+```
+
+The fix changes it to:
+
+````markdown
+# Install
+
+```sh
+git clone https://github.com/yaklabco/gomdlint.git
+cd gomdlint
+```
+````
+
 ## Configure
 
 Under `rules`, `commands-show-output: false` turns the rule off and

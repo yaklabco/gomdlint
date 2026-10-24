@@ -21,6 +21,13 @@ import (
 // with the built-in rules under cfg, and fails for each finding.
 func assertLintsClean(t *testing.T, path string, content []byte, cfg *config.Config) {
 	t.Helper()
+	assertLintsCleanExcept(t, path, content, cfg, nil)
+}
+
+// assertLintsCleanExcept lints content as assertLintsClean does, and fails
+// for each finding unless excused, when not nil, returns true for it.
+func assertLintsCleanExcept(t *testing.T, path string, content []byte, cfg *config.Config, excused func(lint.Diagnostic) bool) {
+	t.Helper()
 
 	engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), lint.DefaultRegistry)
 	result, err := engine.LintFile(context.Background(), path, content, cfg)
@@ -28,6 +35,9 @@ func assertLintsClean(t *testing.T, path string, content []byte, cfg *config.Con
 	assert.Empty(t, result.RuleErrors, "%s", path)
 	lines := strings.Split(string(content), "\n")
 	for _, diag := range result.Diagnostics {
+		if excused != nil && excused(diag) {
+			continue
+		}
 		var line string
 		if diag.StartLine >= 1 && diag.StartLine <= len(lines) {
 			line = lines[diag.StartLine-1]
@@ -38,14 +48,45 @@ func assertLintsClean(t *testing.T, path string, content []byte, cfg *config.Con
 
 // TestMarkdownPagesLintClean writes the Markdown page of every built-in
 // rule, as explain --format markdown prints it and the docs will hold it,
-// and lints it with gomdlint's own rules and defaults.
+// and lints it with gomdlint's own rules and defaults. A rule that checks
+// code, such as no-hard-tabs, also finds its example's problem in the code
+// block that shows the example on its page, so the page's own rule may
+// report the lines of the document that breaks it, and nothing else.
 func TestMarkdownPagesLintClean(t *testing.T) {
 	for _, entry := range ruledocs.Entries(lint.DefaultRegistry, nil) {
 		var page bytes.Buffer
 		require.NoError(t, ruledocs.WriteMarkdownPage(&page, entry))
 
-		assertLintsClean(t, entry.Name+".md", page.Bytes(), config.NewConfig())
+		broken := brokenExampleLines(t, page.String())
+		assertLintsCleanExcept(t, entry.Name+".md", page.Bytes(), config.NewConfig(), func(diag lint.Diagnostic) bool {
+			return diag.RuleID == entry.ID && broken[diag.StartLine]
+		})
 	}
+}
+
+// brokenExampleLines returns the numbers of the lines of a Markdown page
+// that show the example document that breaks the page's rule: the lines in
+// the code block after the paragraph that introduces it.
+func brokenExampleLines(t *testing.T, page string) map[int]bool {
+	t.Helper()
+
+	lines := strings.Split(page, "\n")
+	numbers := make(map[int]bool)
+	for idx, line := range lines {
+		if !strings.HasPrefix(line, "This document breaks the rule") {
+			continue
+		}
+		require.Less(t, idx+2, len(lines), "a code block follows %q", line)
+		opening := lines[idx+2]
+		fence := opening[:len(opening)-len(strings.TrimLeft(opening, "`"))]
+		require.GreaterOrEqual(t, len(fence), 3, "a code block follows %q", line)
+		next := idx + 3
+		for ; next < len(lines) && lines[next] != fence; next++ {
+			numbers[next+1] = true
+		}
+		require.Less(t, next, len(lines), "the code block after %q closes", line)
+	}
+	return numbers
 }
 
 // TestMarkdownListLintsClean writes the Markdown table of every built-in

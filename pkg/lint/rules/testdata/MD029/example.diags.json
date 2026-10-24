@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD029",
+    "name": "ol-prefix",
+    "line": 5,
+    "column": 1,
+    "message": "Ordered list item numbered 2 should be 3",
+    "severity": "warning",
+    "fixable": true
+  }
+]

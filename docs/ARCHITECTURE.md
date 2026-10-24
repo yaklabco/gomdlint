@@ -625,7 +625,9 @@ would load, with `--config` and the environment, unless `--defaults` asks
 for the built-in settings, and print the renderers' output. Tests check
 that the Markdown escapes round-trip every catalog text through goldmark,
 and that the Markdown page of every rule and the Markdown listing pass
-gomdlint's own rules.
+gomdlint's own rules. A rule that checks code, such as `no-hard-tabs`, may
+report its page only in the code block that shows the document that breaks
+it.
 
 ### Examples
 

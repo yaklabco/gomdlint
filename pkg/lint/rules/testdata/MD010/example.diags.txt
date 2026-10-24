@@ -1,0 +1,1 @@
+example.input.md:3:24 warning Hard tab character found (MD010/no-hard-tabs) [fixable]

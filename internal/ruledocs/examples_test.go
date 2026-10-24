@@ -2,6 +2,7 @@ package ruledocs_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,6 +88,22 @@ func TestTextPageShowsTheExample(t *testing.T) {
 		"  | The parser keeps the spaces at the end of a line.\n"+
 		"\n"+
 		"Configure:\n")
+}
+
+// TestPagesSayThatTheExampleEndsWithoutANewline covers an example document
+// whose last line has no newline, which a code block cannot show: the
+// label of the document says so, on both pages.
+func TestPagesSayThatTheExampleEndsWithoutANewline(t *testing.T) {
+	entry := builtInEntry(t, "MD047")
+	var markdown, text bytes.Buffer
+	require.NoError(t, ruledocs.WriteMarkdownPage(&markdown, entry))
+	require.NoError(t, ruledocs.WriteTextPage(&text, entry, entry.Name))
+
+	label := "This document breaks the rule. Its last line has no newline:"
+	assert.Contains(t, markdown.String(), "\n\n"+label+"\n\n```markdown\n# Guide\n")
+	assert.Contains(t, text.String(), "\n\n"+label+"\n  | # Guide\n")
+	assert.Equal(t, 1, strings.Count(markdown.String(), label), "only the document that breaks the rule")
+	assert.Contains(t, markdown.String(), "\n\nThe fix changes it to:\n\n")
 }
 
 // TestPagesWithoutAnExample covers a rule without an example: its pages

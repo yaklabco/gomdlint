@@ -27,6 +27,35 @@ blank line, because it could add or remove a task list checkbox. In a document
 with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint
 reports every finding without a fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Requirements
+
+You need these tools:
+- Go
+- Make
+```
+
+gomdlint reports:
+
+```text
+4:1 Missing blank line before list
+```
+
+The fix changes it to:
+
+```markdown
+# Requirements
+
+You need these tools:
+
+- Go
+- Make
+```
+
 ## Configure
 
 Under `rules`, `blanks-around-lists: false` turns the rule off and

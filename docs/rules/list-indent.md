@@ -28,6 +28,34 @@ or \[1\], or the lines around it up to a blank line, because it could add or
 remove a task list checkbox. In a document with raw HTML other than comments and
 plain br, wbr, hr or img tags, gomdlint reports every finding without a fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Setup
+
+1. Clone the repository.
+ 2. Install the tools.
+3. Run the tests.
+```
+
+gomdlint reports:
+
+```text
+4:1 List item indentation 1 does not match expected 0
+```
+
+The fix changes it to:
+
+```markdown
+# Setup
+
+1. Clone the repository.
+2. Install the tools.
+3. Run the tests.
+```
+
 ## Configure
 
 Under `rules`, `list-indent: false` turns the rule off and `list-indent: error`

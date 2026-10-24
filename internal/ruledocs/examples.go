@@ -16,6 +16,7 @@ import (
 const (
 	exampleConfigLabel = "With this configuration:"
 	exampleInputLabel  = "This document breaks the rule:"
+	exampleNoEOLLabel  = "This document breaks the rule. Its last line has no newline:"
 	exampleReportLabel = "gomdlint reports:"
 	exampleFixedLabel  = "The fix changes it to:"
 	exampleGoodLabel   = "This document follows the rule:"
@@ -61,8 +62,15 @@ func exampleParts(entry Entry) ([]examplePart, error) {
 		}
 		parts = append(parts, examplePart{label: exampleConfigLabel, language: "yaml", content: configText})
 	}
+	// A code block cannot show that the last line has no newline. Only the
+	// document that breaks a rule can lack one: the fixed and good
+	// documents pass every rule, single-trailing-newline too.
+	inputLabel := exampleInputLabel
+	if !strings.HasSuffix(example.Input, "\n") {
+		inputLabel = exampleNoEOLLabel
+	}
 	parts = append(parts,
-		examplePart{label: exampleInputLabel, language: "markdown", content: example.Input},
+		examplePart{label: inputLabel, language: "markdown", content: example.Input},
 		examplePart{label: exampleReportLabel, language: "text", content: findingsText(entry, example.Findings), findings: true})
 	if example.Fixed != example.Input {
 		parts = append(parts, examplePart{label: exampleFixedLabel, language: "markdown", content: example.Fixed})

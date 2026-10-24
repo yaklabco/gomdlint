@@ -40,6 +40,32 @@ blank line, because it could add or remove a task list checkbox. In a document
 with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint
 reports every finding without a fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+Install the tool. 
+Then run it in the project root.
+```
+
+gomdlint reports:
+
+```text
+3:18 Trailing whitespace
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+Install the tool.
+Then run it in the project root.
+```
+
 ## Configure
 
 ```yaml

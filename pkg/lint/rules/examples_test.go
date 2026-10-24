@@ -23,9 +23,6 @@ import (
 // it has its examples: TestEveryRuleHasExamples fails while a category
 // here has them all.
 var examplesPending = []lint.Category{
-	lint.CategoryLists,
-	lint.CategoryLayout,
-	lint.CategoryCode,
 	lint.CategoryLinks,
 	lint.CategoryTables,
 	lint.CategoryEmphasis,

@@ -50,6 +50,20 @@ or [1], or the lines around it up to a blank line, because it could add or
 remove a task list checkbox. In a document with raw HTML other than comments and
 plain br, wbr, hr or img tags, gomdlint reports every finding without a fix.
 
+This document breaks the rule:
+  | # Guide
+  |
+  | Run the tool in the root of the project, and it checks every Markdown file below it.
+
+gomdlint reports:
+  3:81 Line length 84 exceeds maximum 80
+
+The fix changes it to:
+  | # Guide
+  |
+  | Run the tool in the root of the project, and it checks every Markdown file below
+  | it.
+
 Configure:
   rules:
     line-length:
