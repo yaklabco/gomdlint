@@ -740,17 +740,41 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 // htmlHiddenFromCheck reports whether content may hold raw HTML that is not
 // benign where the signature's parsers read none, though GitHub renders it.
 // Such a document keeps no fix, like one whose raw HTML is not benign (see
-// keepSafeFixes). It finds TOML and JSON front matter in content with a
-// "<", which starts all raw HTML. The parsers blank front matter, but GitHub
-// renders "+++" and "{" front matter as Markdown, where raw HTML may open an
-// element that holds the rest of the page, and a block the front matter
-// leaves open, such as a paragraph or a list item, may take in raw HTML
-// after it, such as an indented line that the parsers read as code. GitHub
-// shows YAML front matter as a table, so it is left to the check.
+// keepSafeFixes). It finds three places, each only in content with a "<",
+// which starts all raw HTML:
+//
+//   - TOML and JSON front matter. The parsers blank front matter, but GitHub
+//     renders "+++" and "{" front matter as Markdown, where raw HTML may open
+//     an element that holds the rest of the page, and a block the front
+//     matter leaves open, such as a paragraph or a list item, may take in
+//     raw HTML after it, such as an indented line that the parsers read as
+//     code. GitHub shows YAML front matter as a table, so it is left to the
+//     check.
+//   - Raw HTML in a GFM footnote. The parsers do not read footnotes: they may
+//     read "[^1]: <code>" as a link reference definition and an indented
+//     footnote paragraph as code. GitHub writes footnotes after the
+//     document, where the browser opens a formatting element again for the
+//     footnotes after it. So content with a "[^" is parsed once more with a
+//     parser that reads every footnote definition, whatever references it,
+//     and its raw HTML must be benign too.
+//   - A "[^" where a footnote definition may start that goldmark does not
+//     read as cmark-gfm, which GitHub uses, does (see parseFootnotes). Its
+//     raw HTML may look like code or text to goldmark. The test for such
+//     places finds more than any renderer reads, such as a definition shown
+//     in a code block, which costs fixes in documents that also hold a "<".
 func htmlHiddenFromCheck(content []byte) bool {
-	content, _, frontMatter := signatureSource(content)
-	return bytes.IndexByte(content, '<') >= 0 && frontMatter > 0 &&
-		!bytes.HasPrefix(content, []byte(yamlFrontMatterFence))
+	if bytes.IndexByte(content, '<') < 0 {
+		return false
+	}
+	content, source, frontMatter := signatureSource(content)
+	if frontMatter > 0 && !bytes.HasPrefix(content, []byte(yamlFrontMatterFence)) {
+		return true
+	}
+	if bytes.IndexByte(source, '<') < 0 || !bytes.Contains(source, []byte("[^")) {
+		return false
+	}
+	doc, unread := parseFootnotes(source)
+	return unread || !htmlRegionsBenign(doc, source)
 }
 
 // benignHTML reports whether raw HTML can show nothing that the render

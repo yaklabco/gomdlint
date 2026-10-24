@@ -819,6 +819,24 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta gamma\ndelta epsilon\n",
 		},
 		{
+			// GitHub writes the code element after the document, where the
+			// browser opens it again around the next footnote.
+			name:     "no fix in a footnote after a footnote with raw HTML",
+			flavor:   goldmark.FlavorGFM,
+			input:    "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "wraps a footnote after a footnote with a line break element",
+			flavor:   goldmark.FlavorGFM,
+			input:    "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  true,
+			wantText: "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta\ngamma delta epsilon\n",
+		},
+		{
 			// GitHub renders TOML front matter as Markdown, where the code
 			// element holds the rest of the page.
 			name:     "no fix after TOML front matter with raw HTML",
