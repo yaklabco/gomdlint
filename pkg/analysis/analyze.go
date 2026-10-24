@@ -106,7 +106,7 @@ func createDiagnosticEntry(path, severity string, columns *display.Columns, diag
 		Severity:    severity,
 		Message:     diag.Message,
 		StartLine:   diag.StartLine,
-		StartColumn: columns.Column(mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}),
+		StartColumn: columns.ColumnWithin(mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}, diag.StartColumnUTF16Offset),
 		EndLine:     diag.EndLine,
 		EndColumn:   columns.Column(mdast.Position{Line: diag.EndLine, Column: diag.EndColumn}),
 		Suggestion:  diag.Suggestion,

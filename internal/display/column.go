@@ -4,10 +4,8 @@ package display
 
 import (
 	"bytes"
-	"slices"
-	"unicode/utf16"
-	"unicode/utf8"
 
+	"github.com/yaklabco/gomdlint/internal/jstext"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -119,6 +117,21 @@ func (c *Columns) Column(pos mdast.Position) int {
 	return units + 1
 }
 
+// ColumnWithin converts pos as Column does, where pos points at the start of
+// a character and the position lies within code units into it, and returns
+// the column of that code unit. A finding that markdownlint starts on the
+// second half of a surrogate pair has within 1 (see
+// lint.Diagnostic.StartColumnUTF16Offset). An unknown column stays 0, and a
+// negative within counts as 0.
+func (c *Columns) ColumnWithin(pos mdast.Position, within int) int {
+	column := c.Column(pos)
+	if column == 0 {
+		return 0
+	}
+
+	return column + max(within, 0)
+}
+
 // longLine returns the index of a long line, whose text is text, creating it
 // on first use.
 func (c *Columns) longLine(line int, text []byte) *lineIndex {
@@ -164,27 +177,12 @@ func (l *lineIndex) unitsBefore(offset int) (int, int) {
 // character that offset points inside counts in full.
 func decode(text []byte, from mark, offset int) mark {
 	for from.offset < len(text) && from.offset < offset {
-		size, units := nextCharacter(text[from.offset:])
+		size, units := jstext.Next(text[from.offset:])
 		from.offset += size
 		from.units += units
 	}
 
 	return from
-}
-
-// ByteOffset returns the byte offset in text after its first units UTF-16
-// code units, counted as Columns counts them. A count that ends inside a
-// character outside the Basic Multilingual Plane covers that character, and
-// a count past the end of text returns its length.
-func ByteOffset(text []byte, units int) int {
-	offset, counted := 0, 0
-	for offset < len(text) && counted < units {
-		size, charUnits := nextCharacter(text[offset:])
-		offset += size
-		counted += charUnits
-	}
-
-	return offset
 }
 
 // LineText returns the text of a 1-based line of snapshot without its line
@@ -202,74 +200,4 @@ func LineText(snapshot *mdast.FileSnapshot, line int) []byte {
 	}
 
 	return text
-}
-
-// nextCharacter returns the length in bytes of the character at the start of
-// text, which must not be empty, and the UTF-16 code units it occupies once
-// decoded as Node decodes UTF-8 (the WHATWG UTF-8 decoder): a well-formed
-// character keeps its own code units, and a maximal ill-formed sequence
-// becomes one U+FFFD, one code unit.
-func nextCharacter(text []byte) (int, int) {
-	char, size := utf8.DecodeRune(text)
-	if char != utf8.RuneError || size > 1 {
-		return size, utf16.RuneLen(char)
-	}
-
-	return maximalSubpart(text), 1
-}
-
-// maximalSubpart returns the length of the ill-formed sequence at the start
-// of text that a UTF-8 decoder replaces with one U+FFFD: the lead byte and
-// the continuation bytes after it that still form the start of a well-formed
-// character, at least one byte. Unicode calls this the maximal subpart.
-func maximalSubpart(text []byte) int {
-	idx := slices.IndexFunc(utf8Leads[:], func(lead utf8Lead) bool {
-		return text[0] >= lead.first && text[0] <= lead.last
-	})
-	if idx < 0 {
-		return 1
-	}
-
-	lead := utf8Leads[idx]
-	low, high := lead.low, lead.high
-	size := 1
-	for size <= lead.continuations && size < len(text) {
-		next := text[size]
-		if next < low || next > high {
-			break
-		}
-		size++
-		low, high = utf8.RuneSelf, continuationMax
-	}
-
-	return size
-}
-
-// continuationMax is the largest UTF-8 continuation byte. The smallest is
-// utf8.RuneSelf.
-const continuationMax = 0xBF
-
-// utf8Lead describes the well-formed UTF-8 sequences whose lead byte lies in
-// [first, last]: the number of continuation bytes after the lead, and the
-// range [low, high] of the first of them. Every later continuation byte lies
-// in [utf8.RuneSelf, continuationMax].
-type utf8Lead struct {
-	first, last   byte
-	continuations int
-	low, high     byte
-}
-
-// utf8Leads are the lead bytes of well-formed UTF-8, after Table 3-7 of the
-// Unicode Standard. Other bytes never start a well-formed sequence.
-//
-//nolint:gochecknoglobals,mnd // Read-only lookup table of byte values.
-var utf8Leads = [...]utf8Lead{
-	{first: 0xC2, last: 0xDF, continuations: 1, low: 0x80, high: 0xBF},
-	{first: 0xE0, last: 0xE0, continuations: 2, low: 0xA0, high: 0xBF},
-	{first: 0xE1, last: 0xEC, continuations: 2, low: 0x80, high: 0xBF},
-	{first: 0xED, last: 0xED, continuations: 2, low: 0x80, high: 0x9F},
-	{first: 0xEE, last: 0xEF, continuations: 2, low: 0x80, high: 0xBF},
-	{first: 0xF0, last: 0xF0, continuations: 3, low: 0x90, high: 0xBF},
-	{first: 0xF1, last: 0xF3, continuations: 3, low: 0x80, high: 0xBF},
-	{first: 0xF4, last: 0xF4, continuations: 3, low: 0x80, high: 0x8F},
 }

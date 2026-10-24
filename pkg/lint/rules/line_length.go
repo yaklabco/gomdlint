@@ -6,9 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/yaklabco/gomdlint/internal/jstext"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -124,9 +124,13 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 			continue
 		}
 
+		// markdownlint reports the code unit after the limit, which can be the
+		// second half of a surrogate pair. The byte column then points at the
+		// character and the offset into it is kept for reporters.
+		limitOffset, intoCharacter := jstext.Limit(line, maxLength)
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: textOffset + markdownlintByteLimit(line, maxLength) + 1,
+			StartColumn: textOffset + limitOffset + 1,
 			EndLine:     lineNum,
 			EndColumn:   textOffset + len(line) + 1,
 		}
@@ -134,7 +138,8 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 			fmt.Sprintf("Line length %d exceeds maximum %d", length, maxLength)).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion(fmt.Sprintf("Shorten the line to at most %d characters", maxLength))
+			WithSuggestion(fmt.Sprintf("Shorten the line to at most %d characters", maxLength)).
+			WithStartColumnUTF16Offset(intoCharacter)
 		if fixer := scan.wrapFix(lineNum, maxLength); fixer != nil {
 			diagBuilder = diagBuilder.WithFix(fixer)
 		}
@@ -233,23 +238,10 @@ func markdownlintMeasuredLength(opts lineLengthOptions, line string, linkOnly bo
 	return markdownlintTextLength(prefix) + 1, false
 }
 
+// markdownlintTextLength returns the length markdownlint gives text: its
+// UTF-16 code units once decoded as Node decodes UTF-8 (see jstext).
 func markdownlintTextLength(text string) int {
-	length := 0
-	for _, char := range text {
-		length += utf16.RuneLen(char)
-	}
-	return length
-}
-
-func markdownlintByteLimit(text string, limit int) int {
-	length := 0
-	for offset, char := range text {
-		length += utf16.RuneLen(char)
-		if length > limit {
-			return offset
-		}
-	}
-	return len(text)
+	return jstext.Length(text)
 }
 
 // markdownlintCodeLines returns the lines of code blocks, including the fence

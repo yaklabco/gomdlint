@@ -141,7 +141,12 @@ func TestFormatSourceContext_CaretAlignment(t *testing.T) {
 		{name: "ascii", line: "# Title  ", column: 8, want: "# Title  ", under: "  "},
 		{name: "wide emoji", line: "\U0001F600 emoji   ", column: 9, want: "\U0001F600 emoji   ", under: "   "},
 		{name: "emoji then tab", line: "\U0001F600\U0001F600 tab\there", column: 9, want: "\U0001F600\U0001F600 tab    here", under: "    here"},
-		{name: "column inside an emoji", line: "\U0001F600x", column: 2, want: "\U0001F600x", under: "x"},
+		// Column 2 is the second code unit of the emoji, so the caret marks the emoji.
+		{name: "column inside an emoji", line: "\U0001F600x", column: 2, want: "\U0001F600x", under: "\U0001F600x"},
+		{name: "column after an emoji", line: "\U0001F600x", column: 3, want: "\U0001F600x", under: "x"},
+		// Node decodes the encoded surrogate to three U+FFFD, three cells wide.
+		{name: "ill-formed utf-8", line: "\xed\xa0\x80 trail   ", column: 10, want: "\ufffd\ufffd\ufffd trail   ", under: "   "},
+		{name: "truncated character", line: "\xe2\x82 x\ty", column: 4, want: "\ufffd x y", under: " y"},
 		{name: "combining mark", line: "e\u0301 combining   ", column: 13, want: "e\u0301 combining   ", under: "   "},
 		{name: "bmp letters", line: "ÄÖÜ trail   ", column: 10, want: "ÄÖÜ trail   ", under: "   "},
 		{name: "cjk", line: "中文 trailing ", column: 12, want: "中文 trailing ", under: " "},

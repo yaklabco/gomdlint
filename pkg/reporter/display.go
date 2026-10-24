@@ -54,7 +54,8 @@ func displayOutcome(file runner.FileOutcome, workDir string) runner.FileOutcome 
 }
 
 // displayDiagnostic returns diag with its path in display form and its
-// columns converted from bytes to UTF-16 code units by columns. filePath and
+// columns converted from bytes to UTF-16 code units by columns, the start
+// column including the code units into its character. filePath and
 // shownPath are the outcome's path before and after conversion, reused for
 // the common case of a diagnostic that names its own file.
 func displayDiagnostic(
@@ -68,7 +69,9 @@ func displayDiagnostic(
 		diag.FilePath = display.Path(diag.FilePath, workDir)
 	}
 
-	diag.StartColumn = columns.Column(mdast.Position{Line: diag.StartLine, Column: diag.StartColumn})
+	start := mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}
+	diag.StartColumn = columns.ColumnWithin(start, diag.StartColumnUTF16Offset)
+	diag.StartColumnUTF16Offset = 0 // Now part of StartColumn.
 	diag.EndColumn = columns.Column(mdast.Position{Line: diag.EndLine, Column: diag.EndColumn})
 
 	return diag

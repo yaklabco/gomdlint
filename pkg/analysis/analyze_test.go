@@ -385,3 +385,37 @@ func TestAnalyze_CountsFilesThatCouldNotBeLintedAndRuleFailures(t *testing.T) {
 	assert.Equal(t, 2, report.Totals.RuleErrors, "rules recorded without an error do not count")
 	assert.Zero(t, report.Totals.Issues)
 }
+
+// TestAnalyze_ColumnInsideACharacter covers a finding that starts one UTF-16
+// code unit into an emoji, as markdownlint's line length rule reports it:
+// the reported start column is the second half of the surrogate pair.
+func TestAnalyze_ColumnInsideACharacter(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("aa\U0001F600 more\n")
+	result := &runner.Result{
+		Files: []runner.FileOutcome{{
+			Path: "doc.md",
+			Result: &lint.PipelineResult{
+				FileResult: &lint.FileResult{
+					Snapshot: mdast.NewFileSnapshot("doc.md", content),
+					Diagnostics: []lint.Diagnostic{{
+						RuleID:                 "MD013",
+						Severity:               config.SeverityWarning,
+						StartLine:              1,
+						StartColumn:            3,
+						StartColumnUTF16Offset: 1,
+						EndLine:                1,
+						EndColumn:              len(content),
+					}},
+				},
+			},
+		}},
+	}
+
+	report := Analyze(result, DefaultOptions())
+
+	require.Len(t, report.Diagnostics, 1)
+	assert.Equal(t, 4, report.Diagnostics[0].StartColumn)
+	assert.Equal(t, 10, report.Diagnostics[0].EndColumn)
+}

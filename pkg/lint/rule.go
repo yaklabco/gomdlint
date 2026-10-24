@@ -30,6 +30,16 @@ type Diagnostic struct {
 	// StartColumn is the 1-based column number where the issue starts.
 	StartColumn int
 
+	// StartColumnUTF16Offset is how many UTF-16 code units into the character
+	// at StartColumn the issue starts. Columns count bytes inside the linter
+	// and cannot point into a character, while markdownlint, counting UTF-16
+	// code units, can start a finding in the middle of a character outside
+	// the Basic Multilingual Plane, such as the second half of an emoji's
+	// surrogate pair. A rule that matches such a column points StartColumn at
+	// the character and sets this to 1. Reporters add it to the column they
+	// report. It is 0 otherwise.
+	StartColumnUTF16Offset int
+
 	// EndLine is the 1-based line number where the issue ends.
 	EndLine int
 
