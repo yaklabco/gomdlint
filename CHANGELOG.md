@@ -333,11 +333,12 @@ formats change. The first entries under Changed may need action.
   does, so 48 CJK characters measure 48, not 144, an emoji measures 2 and
   each ill-formed UTF-8 sequence 1. When the limit falls inside an emoji,
   the finding starts at the second half of its surrogate pair, as in
-  markdownlint. Its wrap fix wraps only paragraph text, carries
-  blockquote and list prefixes onto new lines, keeps code spans, inline
-  HTML, link destinations and task checkboxes whole, and no longer starts a
-  line with a list marker, heading marker or fence. Lines that hold only a
-  link, and reference definitions, are exempt, as in markdownlint.
+  markdownlint. Its wrap fix wraps only paragraph text, carries blockquote
+  and list prefixes onto new lines, keeps code spans, inline HTML, link
+  destinations and task checkboxes whole, and no longer starts a line with
+  a list marker, heading marker or fence. Lines that hold only a link, and
+  reference definitions, are exempt, as in markdownlint. The 999 limit on a
+  definition's label counts UTF-16 code units, as micromark does.
 - **MD027**: No longer reports the content indentation of list items in
   blockquotes, or pulls paragraphs out of them.
 - **MD032**: Checks nested lists, and its fix adds the container's own blank
