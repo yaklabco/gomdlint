@@ -39,7 +39,7 @@ go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
 
 Then check the version:
 
-    gomdlint --version
+    gomdlint version
 ````
 
 gomdlint reports:
@@ -60,7 +60,7 @@ go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
 Then check the version:
 
 ```sh
-gomdlint --version
+gomdlint version
 ```
 ````
 
