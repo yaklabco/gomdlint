@@ -223,8 +223,9 @@ formats change. The first entries under Changed may need action.
   of the list.
 - **MD026**: Decides from the heading's source, so `` ## Run `make.` `` keeps
   its closing backtick. It no longer empties a heading that would show
-  nothing without its punctuation, such as `## .`. Such headings are reported
-  without a fix.
+  nothing without its punctuation, such as `## .` or a heading of the blank
+  Braille pattern U+2800 and a period. Such headings are reported without a
+  fix.
 - **MD035**: Edits only the thematic break, so a break no longer moves out
   of its list item, and it withholds a change that would turn a break under
   a paragraph into a setext heading underline.
@@ -409,6 +410,18 @@ formats change. The first entries under Changed may need action.
   still holds the content that was linted.
 - Fixes in CRLF files write CRLF line endings, and JSON and SARIF output
   show the bytes a fix writes.
+- A carriage return that no line feed follows ends a line, as in CommonMark
+  and markdownlint. gomdlint read a file whose lines end that way as one
+  line, so no rule saw its structure, and each such carriage return inside a
+  file left the line numbers of later findings one short. Every rule now
+  reads these files as markdownlint does. In these files, fixes keep each
+  line's own line ending: a file whose lines end with carriage returns
+  stays that way, a line a fix adds takes the most common ending, and a fix
+  that would merge a carriage return with a line feed after it into one
+  line ending is withheld. Files without such a carriage return get the
+  same findings, fixes and fixed output as before, apart from the MD026
+  change for the blank Braille pattern U+2800, and a fix there still writes
+  every newline with the file's most common line ending.
 - One invalid fix no longer drops every fix in the file, and a panic in a
   rule, or anywhere else while a file is processed, no longer stops the run.
   Each is reported, and the run exits 70.

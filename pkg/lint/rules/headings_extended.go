@@ -840,18 +840,23 @@ func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
 }
 
 // showsText reports whether source text renders a visible character: one
-// that is graphic, not a space and not default ignorable, so neither
-// whitespace nor a character that renders nothing, such as U+200B or the
-// variation selector U+FE0F, counts.
+// that is graphic, not a space, not default ignorable and not the blank
+// Braille pattern U+2800, so neither whitespace nor a character that renders
+// nothing, such as U+200B or the variation selector U+FE0F, counts.
 func showsText(source []byte) bool {
 	var rendered bytes.Buffer
 	writer := bufio.NewWriter(&rendered)
 	gmhtml.DefaultWriter.Write(writer, source)
 	_ = writer.Flush() // A bytes.Buffer never fails to write.
 	return bytes.ContainsFunc(rendered.Bytes(), func(r rune) bool {
-		return unicode.IsGraphic(r) && !unicode.IsSpace(r) && !defaultIgnorable(r)
+		return unicode.IsGraphic(r) && !unicode.IsSpace(r) && !defaultIgnorable(r) && r != brailleBlank
 	})
 }
+
+// brailleBlank is U+2800 BRAILLE PATTERN BLANK, a symbol whose glyph shows
+// no dots. Unicode gives it neither the White_Space nor the
+// Default_Ignorable_Code_Point property, but it renders as blank space.
+const brailleBlank = '\u2800'
 
 // defaultIgnorable reports whether char has Unicode's Default_Ignorable_Code_Point
 // property, which marks characters that render nothing unless a renderer

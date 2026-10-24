@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -193,9 +194,12 @@ func NewEngine(parser Parser, registry *Registry) *Engine {
 // A rule that returns an error, panics, or proposes invalid fix edits does
 // not stop the others: the failure is recorded in FileResult.RuleErrors and
 // only that rule's results (or only the invalid fix) are dropped. The
-// newlines in fix text are written with the file's dominant line ending.
-// The fixes of one rule per top-level block are returned as Edits, and the
-// other rules' fixes in those blocks as DeferredEdits.
+// newlines in fix text are written with the file's dominant line ending
+// (see fix.LineEndingWriter), and a fix that would join a carriage return
+// that ends a line to a line feed is withheld, so fixes keep every line
+// ending of the file. The fixes of one rule per top-level block are
+// returned as Edits, and the other rules' fixes in those blocks as
+// DeferredEdits.
 //
 // A diagnostic keeps its fix edits only when --fix would apply them (see
 // ResolvedRule.Fixable), whether or not cfg has Fix set, so FixableCount
@@ -235,8 +239,8 @@ func (e *Engine) lintFile(
 	}
 
 	validator := fix.NewValidator(content)
+	offers := &fixOffers{content: content, root: snapshot.Root, endings: fix.NewLineEndingWriter(content, lineEnding)}
 	var fixes []pendingFix
-	var checkboxes *checkboxGuard // Built for the first fix.
 
 	// Run each rule.
 	declared := e.Registry.lookups().options
@@ -297,13 +301,9 @@ func (e *Engine) lintFile(
 					invalid = append(invalid, fmt.Errorf("fix for line %d: %w", diag.StartLine, err))
 					diag.FixEdits = nil
 				} else {
-					diag.FixEdits = convertNewlines(edits, lineEnding)
-					// A fix that changes or makes a possible task list
-					// checkbox is withheld; the finding stays.
-					if checkboxes == nil {
-						checkboxes = newCheckboxGuard(content, snapshot.Root)
-					}
-					if checkboxes.withholds(diag.FixEdits) {
+					// A withheld fix leaves its finding without a fix.
+					diag.FixEdits = edits
+					if !offers.offer(diag.FixEdits) {
 						diag.FixEdits = nil
 					}
 					// Collect the fix if auto-fix is enabled for this rule.
@@ -324,8 +324,32 @@ func (e *Engine) lintFile(
 		}
 	}
 
-	selectEdits(result, fixes, content, newTopLevelBlocks(snapshot))
+	selectEdits(result, fixes, content, newTopLevelBlocks(snapshot), offers.endings.KeepsApart())
 	return result, nil
+}
+
+// fixOffers decides which valid fixes of one file the engine offers.
+type fixOffers struct {
+	content []byte
+	root    *mdast.Node
+	endings *fix.LineEndingWriter
+	// checkboxes is built for the first fix that needs it.
+	checkboxes *checkboxGuard
+}
+
+// offer writes the newlines of a valid fix, edits, in the file's line
+// endings, in place, and reports whether the engine offers the fix. A fix
+// that would join a carriage return that ends a line to a line feed after
+// it is withheld, and so is one that changes or makes a possible task list
+// checkbox.
+func (o *fixOffers) offer(edits []fix.TextEdit) bool {
+	if !o.endings.WriteNewlines(edits) {
+		return false
+	}
+	if o.checkboxes == nil {
+		o.checkboxes = newCheckboxGuard(o.content, o.root)
+	}
+	return !o.checkboxes.withholds(edits)
 }
 
 // selectEdits decides which fixes this pass applies to content and records
@@ -346,7 +370,10 @@ func (e *Engine) lintFile(
 // change nothing, so the pipeline sees that the remaining fixes make no
 // progress without applying two rules' fixes to one block. Their conflicts
 // are reported as skipped, like those of any fixes the pass applies.
-func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks *topLevelBlocks) {
+//
+// apart reports whether fixes must keep the line endings of content apart
+// (see fix.LineEndingWriter.KeepsApart).
+func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks *topLevelBlocks, apart bool) {
 	changes, idle := splitNoops(fixes, content)
 	merged, conflicting := mergeBlankLineInsertions(changes)
 	for idx := range conflicting {
@@ -360,7 +387,7 @@ func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks 
 		selection = selectFixes(candidates, blocks, content)
 		var accepted []pendingFix
 		accepted, conflicts = splitMergeConflicts(selection.selected)
-		result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(accepted)
+		result.Edits, result.SkippedEdits, result.AcceptedFixes = resolveFixes(accepted, content, apart)
 		if len(selection.deferred) == 0 || changesContent(content, result.Edits) {
 			break
 		}
@@ -386,7 +413,7 @@ func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks 
 		// A blank-line insertion that conflicts with another at its boundary
 		// is never applied, so it is reported, not offered.
 		offered, idleConflicts := splitMergeConflicts(idle)
-		if edits, skipped, count := resolveFixes(offered); !changesContent(content, edits) {
+		if edits, skipped, count := resolveFixes(offered, content, apart); !changesContent(content, edits) {
 			result.Edits, result.AcceptedFixes = edits, count
 			result.SkippedEdits = append(result.SkippedEdits, skipped...)
 			result.SkippedEdits = appendEditsOf(result.SkippedEdits, idleConflicts)
@@ -530,9 +557,11 @@ type pendingFix struct {
 	mergeConflict bool
 }
 
-// resolveFixes picks the fixes to apply and lists the edits of the others.
-// It also returns the number of diagnostics the accepted fixes fix.
-func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit, int) {
+// resolveFixes picks the fixes to apply to content and lists the edits of
+// the others. It also returns the number of diagnostics the accepted fixes
+// fix. Where apart is true, fixes that would join line endings of content
+// together are resolved apart (see resolveApart).
+func resolveFixes(fixes []pendingFix, content []byte, apart bool) ([]fix.TextEdit, []SkippedEdit, int) {
 	if len(fixes) == 0 {
 		return nil, nil, 0
 	}
@@ -544,6 +573,11 @@ func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit, int) {
 		fixed += pending.diagnostics
 	}
 	accepted, skippedFixes := fix.ResolveFixes(groups)
+	if apart {
+		if _, _, joined := fix.JoinAt(content, accepted); joined {
+			accepted, skippedFixes = resolveApart(groups, content, accepted, skippedFixes)
+		}
+	}
 
 	skipped := make([]pendingFix, 0, len(skippedFixes))
 	for _, idx := range skippedFixes {
@@ -553,13 +587,81 @@ func resolveFixes(fixes []pendingFix) ([]fix.TextEdit, []SkippedEdit, int) {
 	return accepted, appendEditsOf(nil, skipped), fixed
 }
 
-// convertNewlines writes the newlines in the text of edits as lineEnding, in
-// place. The engine only passes its own copies from fix.Validator.
-func convertNewlines(edits []fix.TextEdit, lineEnding string) []fix.TextEdit {
-	for idx := range edits {
-		edits[idx].NewText = fix.ConvertNewlines(edits[idx].NewText, lineEnding)
+// resolveApart takes fixes out of the resolution of groups, accepted and
+// skipped as fix.ResolveFixes gives them, until the accepted edits keep the
+// line endings of content apart: no carriage return that ends a line comes
+// right before a line feed. Each fix keeps them apart on its own (see
+// fix.LineEndingWriter), but fixes that touch can join them together, as two
+// deletions do that empty the text between them. Of the fixes with an edit
+// where two line endings would join, it takes out the one fix.ResolveFixes
+// considers last, which leaves the choices it made before that fix as they
+// were, and resolves the rest again. A fix taken out is skipped and
+// proposed again in the next pass. It returns the accepted edits and the
+// indexes of the skipped fixes in ascending order.
+func resolveApart(groups [][]fix.TextEdit, content []byte, accepted []fix.TextEdit, skipped []int) ([]fix.TextEdit, []int) {
+	firsts := make([]fix.TextEdit, len(groups))
+	for idx, edits := range groups {
+		if len(edits) > 0 {
+			firsts[idx] = slices.MinFunc(edits, compareEditRanges)
+		}
 	}
-	return edits
+	taken := slices.Clone(groups)
+	var out []int
+	for {
+		from, to, joined := fix.JoinAt(content, accepted)
+		if !joined {
+			break
+		}
+		// The fix to take out has an edit in [from, to] and was accepted.
+		wasSkipped := make([]bool, len(taken))
+		for _, idx := range skipped {
+			wasSkipped[idx] = true
+		}
+		last := -1
+		for idx, edits := range taken {
+			if len(edits) == 0 || wasSkipped[idx] || !editsTouch(edits, from, to) {
+				continue
+			}
+			if last < 0 || cmp.Or(compareEditRanges(firsts[idx], firsts[last]), cmp.Compare(idx, last)) > 0 {
+				last = idx
+			}
+		}
+		if last < 0 {
+			// The edits between the two pieces belong to accepted fixes, so
+			// this does not happen. If it did, every fix waits for the next
+			// pass rather than write the joined line endings.
+			return nil, allFixes(len(groups))
+		}
+		taken[last] = nil
+		out = append(out, last)
+		accepted, skipped = fix.ResolveFixes(taken)
+	}
+	skipped = append(skipped, out...)
+	slices.Sort(skipped)
+	return accepted, skipped
+}
+
+// allFixes returns the indexes of count fixes in ascending order.
+func allFixes(count int) []int {
+	indexes := make([]int, count)
+	for idx := range indexes {
+		indexes[idx] = idx
+	}
+	return indexes
+}
+
+// editsTouch reports whether an edit of edits lies in [from, to] or touches
+// it.
+func editsTouch(edits []fix.TextEdit, from, to int) bool {
+	return slices.ContainsFunc(edits, func(edit fix.TextEdit) bool {
+		return edit.StartOffset <= to && edit.EndOffset >= from
+	})
+}
+
+// compareEditRanges orders edits by start offset, then by end offset, as
+// fix.ResolveFixes orders fixes by their first edits.
+func compareEditRanges(left, right fix.TextEdit) int {
+	return cmp.Or(cmp.Compare(left.StartOffset, right.StartOffset), cmp.Compare(left.EndOffset, right.EndOffset))
 }
 
 // mergeBlankLineInsertions combines one rule's formatting requirements at
@@ -621,16 +723,16 @@ type blankLines struct {
 // parseBlankLines splits a blank-line insertion into its lines. It reports
 // false when the lines do not share one prefix and one line ending.
 func parseBlankLines(text string) (blankLines, bool) {
-	lines := strings.SplitAfter(text, "\n")
-	lines = lines[:len(lines)-1] // text ends with "\n", so the last part is empty
+	lines := mdast.BuildLines([]byte(text))
+	if len(lines) < 2 {
+		return blankLines{}, false
+	}
+	lines = lines[:len(lines)-1] // text ends with a line ending, so the last line is empty
 
 	var parsed blankLines
 	for idx, line := range lines {
-		body := strings.TrimSuffix(line, "\n")
-		ending := "\n"
-		if trimmed, ok := strings.CutSuffix(body, "\r"); ok {
-			body, ending = trimmed, "\r\n"
-		}
+		body := text[line.StartOffset:line.NewlineStart]
+		ending := text[line.NewlineStart:line.EndOffset]
 		if idx == 0 {
 			parsed.prefix, parsed.ending = body, ending
 			continue
@@ -676,10 +778,12 @@ func mergeBlankLines(kept, next string) (string, bool) {
 
 // isBlankLineInsertion reports whether edit only inserts blank lines: text
 // that ends with a line break and whose lines hold nothing but container
-// markers (spaces, tabs and '>'), such as "\n", ">\n" or "  > >\r\n". Rules
-// insert such lines to add a blank line inside a blockquote or list item.
+// markers (spaces, tabs and '>'), such as "\n", ">\n", "  > >\r\n" or ">\r".
+// Rules insert such lines to add a blank line inside a blockquote or list
+// item.
 func isBlankLineInsertion(edit fix.TextEdit) bool {
-	if edit.StartOffset != edit.EndOffset || !strings.HasSuffix(edit.NewText, "\n") {
+	if edit.StartOffset != edit.EndOffset ||
+		(!strings.HasSuffix(edit.NewText, "\n") && !strings.HasSuffix(edit.NewText, "\r")) {
 		return false
 	}
 	for _, line := range strings.SplitAfter(edit.NewText, "\n") {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/yaklabco/gomdlint/internal/cli"
 	"github.com/yaklabco/gomdlint/pkg/fix"
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // runLint runs "gomdlint lint" with a minimal config and no backups and
@@ -193,6 +194,192 @@ func TestFix_CRLFRuleFixturesMatchTheirLFFixes(t *testing.T) {
 		assert.Zero(t, bareLineFeeds(fixedCRLF), "%s: fixing a CRLF file added bare LF line endings", name)
 		assert.Equal(t, string(toCRLF(fixedLF)), string(fixedCRLF), "%s: CRLF and LF fixes differ", name)
 	}
+}
+
+// toCR returns content with every line feed written as a carriage return,
+// the line ending of a classic Mac OS file. content must hold no carriage
+// return.
+func toCR(content []byte) []byte {
+	return bytes.ReplaceAll(content, []byte("\n"), []byte("\r"))
+}
+
+// toMixed returns content with its line feeds written, line by line, as CR
+// and CRLF in turn. content must hold no carriage return.
+//
+// No line ends with a line feed alone, so no fix can make one CRLF line
+// ending of a carriage return and a line feed, and every fix of the LF
+// version applies. Where lines end with LF too, the engine withholds a fix
+// that would leave a carriage return right before a line feed
+// (TestFix_MixedFileKeepsEachLineEnding).
+func toMixed(content []byte) []byte {
+	endings := []string{"\r", "\r\n"}
+	lines := strings.Split(string(content), "\n")
+	var out strings.Builder
+	for idx, line := range lines {
+		out.WriteString(line)
+		if idx < len(lines)-1 {
+			out.WriteString(endings[idx%len(endings)])
+		}
+	}
+	return []byte(out.String())
+}
+
+// toLF returns content with every line ending written as a line feed.
+func toLF(content []byte) []byte {
+	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+	return bytes.ReplaceAll(content, []byte("\r"), []byte("\n"))
+}
+
+func TestFix_CRFileKeepsItsLineEndings(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	lfPath := filepath.Join(dir, "lf.md")
+	crPath := filepath.Join(dir, "cr.md")
+	require.NoError(t, os.WriteFile(lfPath, []byte(crlfDocument), 0o644))
+	require.NoError(t, os.WriteFile(crPath, toCR([]byte(crlfDocument)), 0o644))
+
+	runLint(t, "--fix", lfPath)
+	runLint(t, "--fix", crPath)
+
+	fixedLF := readBytes(t, lfPath)
+	fixedCR := readBytes(t, crPath)
+
+	require.NotEqual(t, crlfDocument, string(fixedLF), "the document must have fixable findings")
+	assert.NotContains(t, string(fixedCR), "\n", "fixing a CR file must not add line feeds")
+	assert.Equal(t, string(toCR(fixedLF)), string(fixedCR), "a CR file must get the same fixes as its LF version")
+	assert.True(t, bytes.HasSuffix(fixedCR, []byte("End\r")), "the final newline must be CR")
+}
+
+// TestFix_MixedFileKeepsEachLineEnding fixes a file whose lines end with LF,
+// CR and CRLF. Each line keeps its own ending; the lines that fixes add take
+// the dominant ending, here CR, the first of three tied endings.
+func TestFix_MixedFileKeepsEachLineEnding(t *testing.T) {
+	t.Parallel()
+
+	const original = "# Title\r" + // Needs a blank line below it.
+		"Some text   \n" + // Trailing spaces.
+		"\r\n" + // Three blank lines, one too many twice.
+		"\r" +
+		"\r\n" +
+		"Text *one* and _two_.\n" + // Two emphasis styles.
+		"End" // No final newline.
+	path := filepath.Join(t.TempDir(), "doc.md")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))
+
+	runLint(t, "--fix", path)
+
+	assert.Equal(t, "# Title\r"+
+		"\r"+
+		"Some text\n"+
+		"\r\n"+
+		"Text *one* and *two*.\n"+
+		"End\r", string(readBytes(t, path)))
+}
+
+func TestFix_CRAndMixedRuleFixturesMatchTheirLFFixes(t *testing.T) {
+	t.Parallel()
+
+	fixtures := filepath.Join("..", "..", "pkg", "lint", "rules", "testdata")
+	dir := t.TempDir()
+	variants := map[string]func([]byte) []byte{
+		"lf": func(content []byte) []byte { return content }, "cr": toCR, "mixed": toMixed, "lfcr": toLFCR,
+	}
+	for name := range variants {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, name), 0o755))
+	}
+
+	var names []string
+	err := filepath.WalkDir(fixtures, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".input.md") {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil || bytes.Contains(content, []byte("\r")) {
+			return err
+		}
+		rel, err := filepath.Rel(fixtures, path)
+		if err != nil {
+			return err
+		}
+		name := strings.ReplaceAll(filepath.ToSlash(rel), "/", "__")
+		names = append(names, name)
+		for variant, convert := range variants {
+			if err := os.WriteFile(filepath.Join(dir, variant, name), convert(content), 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	if len(names) == 0 {
+		t.Skip("no rule fixtures found")
+	}
+
+	for variant := range variants {
+		runLint(t, "--fix", filepath.Join(dir, variant))
+	}
+
+	for _, name := range names {
+		fixedLF := readBytes(t, filepath.Join(dir, "lf", name))
+		fixedCR := readBytes(t, filepath.Join(dir, "cr", name))
+		fixedMixed := readBytes(t, filepath.Join(dir, "mixed", name))
+		assert.NotContains(t, string(fixedCR), "\n", "%s: fixing a CR file added line feeds", name)
+		assert.Equal(t, string(toCR(fixedLF)), string(fixedCR), "%s: CR and LF fixes differ", name)
+		assert.Zero(t, bareLineFeeds(fixedMixed), "%s: fixing a CR and CRLF file added bare LF line endings", name)
+		assert.Equal(t, string(fixedLF), string(toLF(fixedMixed)), "%s: mixed and LF fixes differ", name)
+
+		// Where lines end with LF and CR, some fixes are withheld, so only
+		// the endings of the lines --fix keeps are compared.
+		original := uniqueLineEndings(toLFCR(readBytes(t, filepath.Join(fixtures, strings.ReplaceAll(name, "__", "/")))))
+		for text, ending := range uniqueLineEndings(readBytes(t, filepath.Join(dir, "lfcr", name))) {
+			if want, kept := original[text]; kept && want != "" {
+				assert.Equal(t, want, ending, "%s: the line %q took another ending", name, text)
+			}
+		}
+	}
+}
+
+// toLFCR returns content with its line feeds written, line by line, as LF
+// and CR in turn. A carriage return right before a line feed would make one
+// CRLF line ending of the two, so such a line ends with LF instead. content
+// must hold no carriage return.
+func toLFCR(content []byte) []byte {
+	lines := strings.Split(string(content), "\n")
+	var out strings.Builder
+	for idx, line := range lines {
+		out.WriteString(line)
+		if idx == len(lines)-1 {
+			break
+		}
+		if idx%2 == 1 && (lines[idx+1] != "" || idx+1 == len(lines)-1) {
+			out.WriteString("\r")
+		} else {
+			out.WriteString("\n")
+		}
+	}
+	return []byte(out.String())
+}
+
+// uniqueLineEndings returns, for each non-blank line of content whose text
+// no other line has, its line ending, empty for a last line without one.
+func uniqueLineEndings(content []byte) map[string]string {
+	endings := make(map[string]string)
+	counts := make(map[string]int)
+	for _, line := range mdast.BuildLines(content) {
+		text := string(content[line.StartOffset:line.NewlineStart])
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		counts[text]++
+		endings[text] = string(content[line.NewlineStart:line.EndOffset])
+	}
+	for text, count := range counts {
+		if count > 1 {
+			delete(endings, text)
+		}
+	}
+	return endings
 }
 
 func TestFix_WritesThroughSymlinks(t *testing.T) {

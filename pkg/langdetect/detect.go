@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/go-enry/go-enry/v2"
+
+	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
 // Language identifiers returned by Detect.
@@ -41,8 +43,10 @@ const (
 const minDockerInstructions = 2
 
 // Detect returns the language of a code block, or "text" when the whole
-// block does not name one beyond doubt.
+// block does not name one beyond doubt. A line of the block ends with a line
+// feed, a carriage return and a line feed, or a carriage return alone.
 func Detect(content []byte) string {
+	content = mdast.LineFeedContent(content)
 	if len(bytes.TrimSpace(content)) == 0 {
 		return langText
 	}

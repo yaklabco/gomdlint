@@ -114,7 +114,7 @@ func parsedBlockHTML(path string, source []byte, start int) []blockHTML {
 // segment to the end of its last.
 func plainBlockHTML(source []byte, start int) []blockHTML {
 	var tags []blockHTML
-	document := htmlBlockMarkdown.Parser().Parse(gmtext.NewReader(source))
+	document := htmlBlockMarkdown.Parser().Parse(gmtext.NewReader(mdast.LineFeedContent(source)))
 	_ = gmast.Walk(document, func(node gmast.Node, entering bool) (gmast.WalkStatus, error) { //nolint:errcheck // The walker never returns an error.
 		raw, ok := node.(*gmast.RawHTML)
 		if !ok || !entering || raw.Segments.Len() == 0 {

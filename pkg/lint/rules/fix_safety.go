@@ -348,8 +348,11 @@ func touchedSpans(spans []mdast.SourceRange, edit fix.TextEdit) []int {
 // fixVerifier compares the outline of the document with candidate fixes
 // applied against the original document's outline.
 type fixVerifier struct {
-	ctx      context.Context
-	file     *mdast.FileSnapshot
+	ctx  context.Context
+	file *mdast.FileSnapshot
+	// content is the document's content as the checks read it (see
+	// checkedContent).
+	content  []byte
 	parser   *goldmark.Parser
 	allow    fixAllowance
 	original string
@@ -375,10 +378,12 @@ func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	verifier := &fixVerifier{ctx: ctx, file: ruleCtx.File, parser: goldmark.New(flavor), allow: allow}
+	verifier := &fixVerifier{
+		ctx: ctx, file: ruleCtx.File, content: checkedContent(ruleCtx.File.Content), parser: goldmark.New(flavor), allow: allow,
+	}
 	// The original is parsed again with the same parser as the fixed copies,
 	// so both outlines come from the same flavor.
-	if original, err := verifier.parser.Parse(ctx, ruleCtx.File.Path, ruleCtx.File.Content); err == nil {
+	if original, err := verifier.parser.Parse(ctx, ruleCtx.File.Path, verifier.content); err == nil {
 		verifier.original, verifier.parsed = documentOutline(original, allow), true
 		verifier.originalFile = original
 	}
@@ -416,7 +421,7 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 	if !v.parsed || v.ctx.Err() != nil {
 		return false
 	}
-	prepared, err := fix.PrepareEdits(edits, len(v.file.Content))
+	prepared, err := fix.PrepareEdits(checkedEdits(edits), len(v.content))
 	if err != nil {
 		return false
 	}
@@ -431,7 +436,7 @@ func (v *fixVerifier) accepts(edits []fix.TextEdit) bool {
 // acceptsWhole reports whether the content with edits, prepared, applied has
 // the original document's outline, parsing the whole document.
 func (v *fixVerifier) acceptsWhole(prepared []fix.TextEdit) bool {
-	content := fix.ApplyEdits(v.file.Content, prepared)
+	content := fix.ApplyEdits(v.content, prepared)
 	v.wholeParsed += len(content)
 	fixed, err := v.parser.Parse(v.ctx, v.file.Path, content)
 	if err != nil {

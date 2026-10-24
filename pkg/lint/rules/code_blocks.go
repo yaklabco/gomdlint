@@ -100,11 +100,8 @@ func infoWords(info string) []string {
 }
 
 // fenceInfo returns the info string of a fenced code block as GFM reads it:
-// the text after the opening fence characters to the end of the line, where
-// a carriage return ends a line as well as a line feed, without the spaces
-// and tabs around it. goldmark ends lines only at line feeds, so its info
-// string can take in the text after a bare carriage return, and it drops a
-// carriage return that comes before the info string.
+// the text after the opening fence characters to the end of the line,
+// without the spaces and tabs around it.
 func fenceInfo(file *mdast.FileSnapshot, cb *mdast.Node) string {
 	if after, ok := afterOpeningFence(file, cb); ok {
 		if rest, ok := restOfLine(file, after); ok {
@@ -143,8 +140,7 @@ func afterOpeningFence(file *mdast.FileSnapshot, cb *mdast.Node) (int, bool) {
 }
 
 // restOfLine returns the source from offset to the end of its line, without
-// the line ending. Lines end only at line feeds here, as in goldmark, so the
-// text can hold a bare carriage return.
+// the line ending.
 func restOfLine(file *mdast.FileSnapshot, offset int) (string, bool) {
 	line, _ := file.LineAt(offset)
 	if line < 1 || line > len(file.Lines) || offset > file.Lines[line-1].NewlineStart {
@@ -178,9 +174,7 @@ func allowedLanguages(ctx *lint.RuleContext) map[string]bool {
 // every language is allowed, leaves out the language detected, or when the
 // fixed fence would name another language than the one inserted: the rule
 // would report such a language on the next run, and the fix check reads no
-// info string. It also returns nil when the fence line holds a bare carriage
-// return: GFM ends the line there and reads what follows as code, which
-// goldmark reads into the fence, so detection would not see the block's code.
+// info string.
 func (r *CodeBlockLanguageRule) buildLanguageFix(
 	file *mdast.FileSnapshot,
 	cb *mdast.Node,
@@ -191,7 +185,7 @@ func (r *CodeBlockLanguageRule) buildLanguageFix(
 	if !ok {
 		return nil
 	}
-	if rest, ok := restOfLine(file, insertAt); !ok || strings.ContainsRune(rest, '\r') {
+	if _, ok := restOfLine(file, insertAt); !ok {
 		return nil
 	}
 

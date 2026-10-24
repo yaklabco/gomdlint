@@ -442,12 +442,22 @@ func firstLineAfterFrontMatter(file *mdast.FileSnapshot) int {
 // row. Its fix deletes the line ending before the line and the line's own
 // whitespace, so the fixes of a run's extra lines touch without overlapping
 // and together remove them all, even the empty line after a final newline.
+// Where that would leave a carriage return that ends a line right before
+// the line feed that ends this one, which would make the two one line
+// ending, the fix deletes this line and its line ending instead. The engine
+// withholds that fix too where it would still join two line endings, as
+// when the next line is empty and ends with a line feed.
 func (r *MultipleBlankLinesRule) createDiagnostic(
 	ctx *lint.RuleContext,
 	lineNum, count, maxConsecutive int,
 ) lint.Diagnostic {
+	content, lines := ctx.File.Content, ctx.File.Lines
+	start, end := lines[lineNum-2].NewlineStart, lines[lineNum-1].NewlineStart
+	if start > 0 && content[start-1] == '\r' && end < len(content) && content[end] == '\n' {
+		start, end = lines[lineNum-1].StartOffset, lines[lineNum-1].EndOffset
+	}
 	builder := fix.NewEditBuilder()
-	builder.Delete(ctx.File.Lines[lineNum-2].NewlineStart, ctx.File.Lines[lineNum-1].NewlineStart)
+	builder.Delete(start, end)
 
 	pos := mdast.SourcePosition{
 		StartLine:   lineNum,

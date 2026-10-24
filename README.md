@@ -83,7 +83,17 @@ with `--no-backups` if your files are under version control.
 
 Preview changes before applying them with `--dry-run`, or show them as a
 unified diff with `--format diff`, which writes nothing unless you add
-`--fix`.
+`--fix`. Like `diff` and `patch`, the diff ends lines only at line feeds, so
+a file whose lines end with carriage returns alone shows as one line.
+
+A line ends with a line feed, a carriage return and a line feed, or a
+carriage return alone, as in CommonMark and markdownlint. In a file with a
+carriage return alone, fixes keep each line's own line ending. A line that
+a fix adds takes the file's most common line ending, and a fix that would
+merge a carriage return and a line feed after it into one line ending is
+withheld. In any other file, every newline that a fix writes takes the
+file's most common line ending, so a fix that rewrites lines of a file
+mixing LF and CRLF writes them all with that ending.
 
 Limit auto-fixing to specific rules with `--fix-rules`, which takes rule
 names, IDs and markdownlint tags.
@@ -837,9 +847,9 @@ Some of its fix checks are also stricter than they need to be.
   holds nothing but ASCII letters, digits, spaces and tabs and, lowercased
   with its white space collapsed, is one of `ignored_labels`. No definition
   counts in a document whose front matter markdownlint may read differently,
-  whose lines end with a carriage return alone, or where the text
-  markdownlint gives micromark starts with a byte order mark, as with two at
-  the start of the file or one right after front matter.
+  or where the text markdownlint gives micromark starts with a byte order
+  mark, as with two at the start of the file or one right after front
+  matter.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.

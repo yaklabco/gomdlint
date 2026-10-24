@@ -25,7 +25,7 @@ func TestSelectEdits_SelectsAgainWhenTheSelectionChangesNothing(t *testing.T) {
 	}
 
 	var result FileResult
-	selectEdits(&result, fixes, content, blocks)
+	selectEdits(&result, fixes, content, blocks, false)
 
 	assert.Equal(t, []fix.TextEdit{{StartOffset: 3, EndOffset: 4, NewText: "b"}}, result.Edits,
 		"the rules whose fixes changed nothing together sit out, and TEST003 gets the block")
@@ -33,7 +33,7 @@ func TestSelectEdits_SelectsAgainWhenTheSelectionChangesNothing(t *testing.T) {
 	assert.Empty(t, result.DeferredEdits)
 
 	var alone FileResult
-	selectEdits(&alone, fixes[:2], content, blocks)
+	selectEdits(&alone, fixes[:2], content, blocks, false)
 
 	assert.Len(t, alone.Edits, 2, "with no fix waiting, the pipeline sees that the fixes make no progress")
 	assert.Empty(t, alone.DeferredEdits)
@@ -91,4 +91,20 @@ func TestChangesContent(t *testing.T) {
 			assert.Equal(t, tt.want, changesContent([]byte(content), tt.edits))
 		})
 	}
+}
+
+func TestResolveApart_SkipsEveryFixWhenNoAcceptedFixHoldsTheJoin(t *testing.T) {
+	t.Parallel()
+
+	// The accepted edits join the carriage return to the line feed, but no
+	// fix has an edit there, as fix.ResolveFixes never leaves it. Rather
+	// than write the joined line endings, every fix waits.
+	content := []byte("a\rxy\nb")
+	groups := [][]fix.TextEdit{{{StartOffset: 6, EndOffset: 7, NewText: "c"}}}
+	accepted := []fix.TextEdit{{StartOffset: 2, EndOffset: 4}, {StartOffset: 6, EndOffset: 7, NewText: "c"}}
+
+	gotAccepted, gotSkipped := resolveApart(groups, content, accepted, nil)
+
+	assert.Empty(t, gotAccepted)
+	assert.Equal(t, []int{0}, gotSkipped)
 }

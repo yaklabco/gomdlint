@@ -125,7 +125,7 @@ func checkMarkers(t *testing.T, file *mdast.FileSnapshot, node *mdast.Node) {
 	switch node.Kind {
 	case mdast.NodeHeading:
 		if src[0] != '#' {
-			lines := bytes.Split(src, []byte("\n"))
+			lines := splitLines(src)
 			underline := bytes.TrimLeft(bytes.TrimSpace(lines[len(lines)-1]), "> ")
 			require.Greater(t, len(lines), 1, "setext heading without underline: %q", src)
 			require.True(t, len(bytes.Trim(underline, "=")) == 0 || len(bytes.Trim(underline, "-")) == 0,
@@ -166,7 +166,7 @@ func checkMarkers(t *testing.T, file *mdast.FileSnapshot, node *mdast.Node) {
 			require.Equal(t, byte('['), src[0], "link: %q", src)
 		}
 	case mdast.NodeSoftBreak, mdast.NodeHardBreak:
-		require.Equal(t, byte('\n'), src[len(src)-1], "break does not end with a line ending: %q", src)
+		require.Contains(t, "\r\n", string(src[len(src)-1]), "break does not end with a line ending: %q", src)
 	}
 	_ = file
 }
@@ -181,11 +181,21 @@ func checkCodeBlockMarkers(t *testing.T, node *mdast.Node, src []byte) {
 	fence := bytes.Repeat([]byte{attrs.FenceChar}, attrs.FenceLength)
 	require.True(t, bytes.HasPrefix(src, fence), "fenced code does not start with its fence %q: %q", fence, src)
 	if attrs.Closed {
-		lines := bytes.Split(src, []byte("\n"))
-		closing := bytes.TrimLeft(bytes.TrimRight(lines[len(lines)-1], " \t\r"), " \t>")
+		lines := splitLines(src)
+		closing := bytes.TrimLeft(bytes.TrimRight(lines[len(lines)-1], " \t"), " \t>")
 		require.GreaterOrEqual(t, len(closing), attrs.FenceLength, "closing fence too short: %q", src)
 		require.Empty(t, bytes.Trim(closing, string(attrs.FenceChar)), "closed code does not end with its fence: %q", src)
 	}
+}
+
+// splitLines splits text into its lines, without their line endings: a line
+// feed, a carriage return and a line feed, or a carriage return alone.
+func splitLines(src []byte) [][]byte {
+	var lines [][]byte
+	for _, line := range mdast.BuildLines(src) {
+		lines = append(lines, src[line.StartOffset:line.NewlineStart])
+	}
+	return lines
 }
 
 // checkTextSegmentsAgree parses the content again with plain goldmark and
@@ -248,9 +258,10 @@ func movedResidual(content []byte, spans map[mdast.SourceRange]bool, want mdast.
 	return false
 }
 
-// blankedSource returns the content goldmark parses: front matter blanked.
+// blankedSource returns the content goldmark parses: carriage returns alone
+// written as line feeds, and front matter blanked.
 func blankedSource(file *mdast.FileSnapshot) []byte {
-	source := bytes.Clone(file.Content)
+	source := bytes.Clone(mdast.LineFeedContent(file.Content))
 	if file.FrontMatterLines > 0 {
 		for idx := range file.Lines[file.FrontMatterLines-1].EndOffset {
 			if source[idx] != '\n' && source[idx] != '\r' {

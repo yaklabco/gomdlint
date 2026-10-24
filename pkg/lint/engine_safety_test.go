@@ -288,6 +288,108 @@ func TestEngine_ConvertsFixNewlinesToTheFileLineEnding(t *testing.T) {
 	}))
 	require.Len(t, lf.Edits, 1)
 	assert.Equal(t, "\n", lf.Edits[0].NewText)
+
+	cr := lintWithRules(t, "# Title\rPara\r", true, insertRule("TEST001", 8, "\n"))
+	require.Len(t, cr.Edits, 1)
+	assert.Equal(t, "\r", cr.Edits[0].NewText)
+	assert.Equal(t, "\r", cr.Diagnostics[0].FixEdits[0].NewText)
+
+	// Without a carriage return alone, a file that mixes LF and CRLF gets
+	// its dominant ending, even next to a line that ends with LF.
+	mixed := lintWithRules(t, "# Title\r\nPara\nMore\r\n", true, insertRule("TEST001", 14, "\n"))
+	require.Len(t, mixed.Edits, 1)
+	assert.Equal(t, "\r\n", mixed.Edits[0].NewText)
+}
+
+func TestEngine_KeepsCarriageReturnsApartFromLineFeeds(t *testing.T) {
+	t.Parallel()
+
+	// Most lines end with a line feed, but a line feed after the heading's
+	// carriage return would make one CRLF line ending of the two.
+	after := lintWithRules(t, "# Title\rPara\nMore\n", true, insertRule("TEST001", 8, "\n"))
+	require.Len(t, after.Edits, 1)
+	assert.Equal(t, "\r", after.Edits[0].NewText)
+
+	// Deleting the CRLF pair would join the carriage return before it to
+	// the line feed after it, so the fix is withheld and the finding stays.
+	deletion := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{fixDiag("TEST001", fix.TextEdit{StartOffset: 2, EndOffset: 4})}, nil
+	})
+	joined := lintWithRules(t, "a\r\r\n\nb\n", true, deletion)
+	require.Len(t, joined.Diagnostics, 1)
+	assert.Empty(t, joined.Diagnostics[0].FixEdits)
+	assert.Empty(t, joined.Edits)
+	assert.Empty(t, joined.RuleErrors, "a withheld fix is not a rule failure")
+}
+
+// TestEngine_KeepsCarriageReturnsApartAcrossFixes checks fixes that each keep
+// a carriage return that ends a line apart from a line feed, but that touch
+// and together would join the two: the first is applied, and the other
+// waits for the next pass.
+func TestEngine_KeepsCarriageReturnsApartAcrossFixes(t *testing.T) {
+	t.Parallel()
+
+	deletions := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 2, EndOffset: 3}),
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 3, EndOffset: 4}),
+		}, nil
+	})
+	result := lintWithRules(t, "a\r x\nb\n", true, deletions)
+	require.Len(t, result.Diagnostics, 2)
+	assert.NotEmpty(t, result.Diagnostics[0].FixEdits)
+	assert.NotEmpty(t, result.Diagnostics[1].FixEdits)
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 2, EndOffset: 3}}, result.Edits)
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Equal(t, []lint.SkippedEdit{{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 3, EndOffset: 4}}}, result.SkippedEdits)
+}
+
+// TestEngine_KeepsCarriageReturnsApartAcrossManyFixes checks several joins
+// at once: of the fixes that would join two line endings together, the one
+// that comes last is skipped each time, whether its deletion merges with
+// another or not, and fixes elsewhere are kept.
+func TestEngine_KeepsCarriageReturnsApartAcrossManyFixes(t *testing.T) {
+	t.Parallel()
+
+	// "a\r" ends a line, then " xy" and a line feed; "b\r", then " z" and a
+	// line feed; then "c".
+	const content = "a\r xy\nb\r z\nc\n"
+	deletions := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+		return []lint.Diagnostic{
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 2, EndOffset: 4}),  // " x"
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 3, EndOffset: 5}),  // "xy", merged with the first
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 8, EndOffset: 9}),  // " "
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 9, EndOffset: 10}), // "z", touching the third
+			fixDiag("TEST001", fix.TextEdit{StartOffset: 12, EndOffset: 12, NewText: "d"}),
+		}, nil
+	})
+	result := lintWithRules(t, content, true, deletions)
+	require.Len(t, result.Diagnostics, 5)
+	assert.Equal(t, []fix.TextEdit{
+		{StartOffset: 2, EndOffset: 4},
+		{StartOffset: 8, EndOffset: 9},
+		{StartOffset: 12, EndOffset: 12, NewText: "d"},
+	}, result.Edits)
+	assert.Equal(t, 3, result.AcceptedFixes)
+	assert.Equal(t, []lint.SkippedEdit{
+		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 3, EndOffset: 5}},
+		{RuleID: "TEST001", Edit: fix.TextEdit{StartOffset: 9, EndOffset: 10}},
+	}, result.SkippedEdits)
+	_, _, joined := fix.JoinAt([]byte(content), result.Edits)
+	assert.False(t, joined)
+}
+
+func TestEngine_MergesBlankLineInsertionsInCRFiles(t *testing.T) {
+	t.Parallel()
+
+	result := lintWithRules(t, "# Title\r- item\r", true, insertRule("TEST001", 8, "\n"), insertRule("TEST002", 8, "\n"))
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 8, EndOffset: 8, NewText: "\r"}}, result.Edits,
+		"two blank-line requirements at one boundary insert one blank line")
+
+	quoted := lintWithRules(t, "> # A\r> ## B\r", true, insertionsRule("TEST001", 6, "\n\n", ">\n"))
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 6, EndOffset: 6, NewText: ">\r>\r"}}, quoted.Edits,
+		"the container prefix survives with the larger count and the file's line ending")
+	assert.Equal(t, 2, quoted.AcceptedFixes)
 }
 
 func TestEngine_MergesBlankLineInsertionsInCRLFFiles(t *testing.T) {
