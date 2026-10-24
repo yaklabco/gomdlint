@@ -255,7 +255,7 @@ func TestUpdateReadmeSkipsCodeBlocks(t *testing.T) {
 	assert.Contains(t, text, "(docs/rules/heading-increment.md)")
 
 	_, err = ruledocs.UpdateReadme([]byte("# Project\n\n"+sample), entries)
-	assert.Error(t, err, "markers only in code mark no block")
+	require.Error(t, err, "markers only in code mark no block")
 
 	unclosed := "# Project\n\n```\n" + ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n"
 	_, err = ruledocs.UpdateReadme([]byte(unclosed), entries)
@@ -277,16 +277,16 @@ func TestUpdateReadmeReadsTheREADMEAsMarkdown(t *testing.T) {
 		"markers in a blockquote":   "> " + ruledocs.ReadmeBlockBegin + "\n> " + ruledocs.ReadmeBlockEnd + "\n\n" + block,
 		"a fence in a list item":    "- item\n\n  ```\n  code\n  ```\n\n" + block + "\n" + sample,
 	} {
-		updated, err := ruledocs.UpdateReadme([]byte(readme), entries)
-		if !assert.NoError(t, err, name) {
-			continue
-		}
-		text := string(updated)
-		assert.NotContains(t, text, "STALE-BLOCK", name)
-		if strings.Contains(readme, "SAMPLE") {
-			assert.Contains(t, text, sample, "%s: the sample stays as it is", name)
-		}
-		assert.Contains(t, text, "(docs/rules/heading-increment.md)", name)
+		t.Run(name, func(t *testing.T) {
+			updated, err := ruledocs.UpdateReadme([]byte(readme), entries)
+			require.NoError(t, err)
+			text := string(updated)
+			assert.NotContains(t, text, "STALE-BLOCK")
+			if strings.Contains(readme, "SAMPLE") {
+				assert.Contains(t, text, sample, "the sample stays as it is")
+			}
+			assert.Contains(t, text, "(docs/rules/heading-increment.md)")
+		})
 	}
 }
 

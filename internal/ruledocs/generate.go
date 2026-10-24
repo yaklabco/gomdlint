@@ -10,7 +10,6 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/parser"
 	gmtext "github.com/yuin/goldmark/text"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -136,7 +135,8 @@ type readmeLine struct {
 // blockquote, where a README may show the markers, marks nothing. It fails
 // when no line, or more than one, holds marker.
 func markerLine(text, marker string) (readmeLine, error) {
-	doc := readmeParser().Parse(gmtext.NewReader([]byte(text)))
+	markdown := goldmark.New(goldmark.WithExtensions(extension.GFM)) // As GitHub reads a README.
+	doc := markdown.Parser().Parse(gmtext.NewReader([]byte(text)))
 
 	var found []readmeLine
 	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
@@ -167,12 +167,6 @@ func markerLine(text, marker string) (readmeLine, error) {
 	default:
 		return readmeLine{}, fmt.Errorf("the README has %d lines %s, and needs one", len(found), marker)
 	}
-}
-
-// readmeParser returns a parser of GitHub Flavored Markdown, as GitHub
-// reads a README.
-func readmeParser() parser.Parser {
-	return goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
 }
 
 // countsText says how many rules entries holds, and how many fix what
