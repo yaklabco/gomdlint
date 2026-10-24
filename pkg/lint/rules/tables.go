@@ -260,11 +260,6 @@ func NewTableColumnCountRule() *TableColumnCountRule {
 	}
 }
 
-// DefaultEnabled returns true.
-func (r *TableColumnCountRule) DefaultEnabled() bool {
-	return true
-}
-
 // Apply reports rows with a different number of cells than the header row.
 // A row with too few cells is reported at its last character; a row with
 // too many at the start of its first extra cell.
@@ -321,11 +316,6 @@ func NewTableAlignmentRule() *TableAlignmentRule {
 			true, // Auto-fixable.
 		),
 	}
-}
-
-// DefaultEnabled returns true.
-func (r *TableAlignmentRule) DefaultEnabled() bool {
-	return true
 }
 
 // Apply reports delimiter rows with a cell of fewer than min_dashes dashes.
@@ -390,11 +380,6 @@ func NewTableBlankLinesRule() *TableBlankLinesRule {
 			true, // Auto-fixable.
 		),
 	}
-}
-
-// DefaultEnabled returns true.
-func (r *TableBlankLinesRule) DefaultEnabled() bool {
-	return true
 }
 
 // Apply checks the lines before and after each table. Like markdownlint, a
