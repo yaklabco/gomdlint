@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD033",
+    "name": "no-inline-html",
+    "line": 3,
+    "column": 7,
+    "message": "HTML element 'kbd' is not allowed",
+    "severity": "warning",
+    "fixable": false
+  }
+]

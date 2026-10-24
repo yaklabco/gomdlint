@@ -1,0 +1,1 @@
+example.input.md:3:1 warning Emphasis used instead of a heading (MD036/no-emphasis-as-heading) [fixable]

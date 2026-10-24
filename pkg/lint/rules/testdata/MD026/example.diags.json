@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD026",
+    "name": "no-trailing-punctuation",
+    "line": 3,
+    "column": 11,
+    "message": "Heading ends with trailing punctuation \":\"",
+    "severity": "warning",
+    "fixable": true
+  }
+]
