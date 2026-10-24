@@ -899,19 +899,26 @@ func TestCatalogTextsHoldForTheRules(t *testing.T) {
 	}
 }
 
-// TestCatalogNamesMarkdownlintsRules checks lint.IsMarkdownlintRule against
-// the catalog: every rule that the catalog describes outside gomdlint's own
-// MDL namespace is one of markdownlint 0.41.1's 53 rules, and no other ID is.
+// TestCatalogNamesMarkdownlintsRules checks lint.IsMarkdownlintRule and
+// lint.IsGomdlintOnlyRule against the catalog: each rule that the catalog
+// describes is one of markdownlint 0.41.1's 53 rules or one of gomdlint's
+// own, and never both. With the sizes of the two sets, which an internal
+// test of pkg/lint pins, no other ID is in either.
 func TestCatalogNamesMarkdownlintsRules(t *testing.T) {
-	count := 0
+	markdownlintRules, gomdlintRules := 0, 0
 	for _, meta := range Catalog() {
-		assert.Equal(t, !lint.IsGomdlintOnlyRule(meta.ID), lint.IsMarkdownlintRule(meta.ID), meta.ID)
+		assert.NotEqual(t, lint.IsGomdlintOnlyRule(meta.ID), lint.IsMarkdownlintRule(meta.ID), meta.ID)
 		if lint.IsMarkdownlintRule(meta.ID) {
-			count++
+			markdownlintRules++
+		}
+		if lint.IsGomdlintOnlyRule(meta.ID) {
+			gomdlintRules++
 		}
 	}
-	assert.Equal(t, 53, count, "markdownlint 0.41.1 has 53 rules")
-	for _, id := range []string{"MD002", "MD006", "MD057", "MD900", "MDL001", "md013", ""} {
+	assert.Equal(t, 53, markdownlintRules, "markdownlint 0.41.1 has 53 rules")
+	assert.Equal(t, 2, gomdlintRules)
+	for _, id := range []string{"MD002", "MD006", "MD057", "MD900", "MDL002", "MDL900", "md013", ""} {
 		assert.False(t, lint.IsMarkdownlintRule(id), id)
+		assert.False(t, lint.IsGomdlintOnlyRule(id), id)
 	}
 }

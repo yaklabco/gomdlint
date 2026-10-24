@@ -170,6 +170,9 @@ formats change. The first entries under Changed may need action.
   `lint.OptionSpec` gains `Limit`, `ZeroIsDefault`, `MarkdownlintZero` and
   `MarkdownlintZeroIsDefault`, `lint.OptionIssue` gains `ReadsAsZero`, and
   `lint.MarkdownlintCLI2Options` holds a markdownlint-cli2 options file.
+  `lint.IsGomdlintOnlyRule` now reports only gomdlint's own rules, MDL001
+  and MDL003, so a custom rule under an ID such as MDL900 takes
+  markdownlint's `default` key and tags as other custom rules do.
 
 ### Added
 

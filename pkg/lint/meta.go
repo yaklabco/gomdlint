@@ -2,7 +2,6 @@ package lint
 
 import (
 	"slices"
-	"strings"
 )
 
 // Category groups rules by the Markdown construct they check. Each rule
@@ -262,12 +261,19 @@ type OptionAlias struct {
 	Inverted bool
 }
 
+// gomdlintRuleIDs are the IDs of gomdlint's own rules, which its catalog
+// describes, as a catalog test checks.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var gomdlintRuleIDs = map[string]bool{"MDL001": true, "MDL003": true}
+
 // IsGomdlintOnlyRule reports whether the rule with the given ID is one of
 // gomdlint's own rules, which markdownlint does not have. gomdlint gives
 // its own rules IDs in the MDL namespace, such as MDL001, and the rules it
-// shares with markdownlint their markdownlint IDs, such as MD009.
+// shares with markdownlint their markdownlint IDs, such as MD009. A custom
+// rule is neither, even under an ID such as MDL900 in that namespace.
 func IsGomdlintOnlyRule(id string) bool {
-	return strings.HasPrefix(id, "MDL")
+	return gomdlintRuleIDs[id]
 }
 
 // markdownlintRuleIDs are the IDs of markdownlint 0.41.1's rules, each of

@@ -93,3 +93,27 @@ func TestEngineDirectiveWordsFoldFullUpperCases(t *testing.T) {
 		})
 	}
 }
+
+// TestEngineMarkdownlintDefaultCoversCustomMDLRules covers a custom rule
+// under an ID that starts with MDL, the namespace of gomdlint's own rules.
+// markdownlint 0.41.1 applies the default key to every rule it runs,
+// custom ones included, and only gomdlint's own rules, which markdownlint
+// lacks, stay off. So a configure-file comment that sets default to true
+// leaves the custom MDL900 on, as it leaves ACME1.
+func TestEngineMarkdownlintDefaultCoversCustomMDLRules(t *testing.T) {
+	registry := lint.NewRegistry()
+	for _, id := range []string{"MDL900", "ACME1"} {
+		registry.Register(&everyLineRule{optionRule: optionRule{id: id, name: "custom-" + id}})
+	}
+	result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md",
+		[]byte("<!-- markdownlint-configure-file {\"default\": true} -->\ntext\n"), config.NewConfig())
+	require.NoError(t, err)
+
+	reported := map[string]bool{}
+	for _, diag := range result.Diagnostics {
+		reported[diag.RuleID] = true
+	}
+	assert.Equal(t, map[string]bool{"MDL900": true, "ACME1": true}, reported)
+	assert.False(t, lint.IsGomdlintOnlyRule("MDL900"))
+	assert.True(t, lint.IsGomdlintOnlyRule("MDL001"))
+}

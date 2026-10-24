@@ -75,10 +75,9 @@ func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
 }
 
 // inMarkdownlint reports whether markdownlint has the rule: whether its ID
-// is one of markdownlint's, MD and a number, rather than one of gomdlint's
-// own.
+// is one of markdownlint's rules (see lint.IsMarkdownlintRule).
 func (e *Entry) inMarkdownlint() bool {
-	return strings.HasPrefix(e.ID, "MD") && !lint.IsGomdlintOnlyRule(e.ID)
+	return lint.IsMarkdownlintRule(e.ID)
 }
 
 // markdownlintRuleName returns the name that markdownlint gives the rule
