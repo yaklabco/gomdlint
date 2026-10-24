@@ -18,14 +18,14 @@ internal/               Application-specific wiring (not importable)
   ignore/               gitignore-style matching for directory walks
   jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
   logging/              Structured logging setup
-  ruledocs/             Rule listings and rule pages, as text, Markdown and JSON
+  ruledocs/             Rule listings, rule pages, the rule reference and the config schema
   ui/                   Terminal output styling (Lipgloss)
 pkg/                    Reusable library packages
   mdast/                Markdown AST types and the source span contract
   lint/                 Core linting engine, rule interface, registry, pipeline
   lint/mdscan/          Scanners for inline HTML and autolink literals
   lint/refs/            Reference definitions, usages and heading anchors
-  lint/rules/           55 built-in rules, their catalog and their fix checks
+  lint/rules/           55 built-in rules, their catalog, examples and fix checks
   fix/                  Text edits, fix resolution, line endings and diffs
   parser/goldmark/      Goldmark-based parser implementation
   runner/               File discovery and concurrent processing
@@ -575,7 +575,7 @@ three plain-text fields: what correct Markdown looks like under the default
 options (`Description`), why the rule matters (`Rationale`), and what its
 fix changes and which findings get no fix (`Fix`). Categories group the
 rules in listings, such as `gomdlint rules`, and in documentation, such as
-the README's rule categories, in the order of `lint.Categories`, and
+the rule reference, in the order of `lint.Categories`, and
 `Category.Title` names them in headings. They are not accepted where a rule
 can be named, though `gomdlint explain` takes them. The registry keeps rule
 ID order, and only display code sorts by category and name.
@@ -625,6 +625,64 @@ for the built-in settings, and print the renderers' output. Tests check
 that the Markdown escapes round-trip every catalog text through goldmark,
 and that the Markdown page of every rule and the Markdown listing pass
 gomdlint's own rules.
+
+### Examples
+
+`pkg/lint/rules/examples.go`, `pkg/lint/rules/testdata/<ID>/example*`
+
+A rule's example is a pair of golden scenarios in its testdata directory.
+`example.input.md` is a short hand-written document that breaks the rule,
+and the golden tests generate its fixed text and findings, as for any
+scenario. A rule that cannot fix what it finds also has
+`example_good.input.md`, a document that follows it. An example that needs
+options has a `.config.yml` sidecar, and so does its good example, with the
+same content. `pkg/lint/rules` embeds the files, and `RuleExample` reads
+them, so the pages that `explain` prints and the rule reference show tested
+output.
+
+Tests check that every rule has its examples, except the rules of the
+categories in `examplesPending` in `examples_test.go`, which later changes
+cover. They lint each example with every rule on: the document that breaks
+the rule breaks only that rule, with the findings the example lists, and
+the fixed and good documents are clean. A category leaves
+`examplesPending` once every rule in it has examples, and the test fails
+until it does.
+
+### Generated Reference
+
+`internal/ruledocs/generate.go`, `internal/ruledocs/schema.go`, `docs/rules/`,
+`docs/schema/`
+
+The rule reference is generated from the catalog and the examples:
+
+- `docs/rules/<name>.md`, the Markdown page of each rule, named after the
+  rule, as `explain --format markdown` prints it;
+- `docs/rules/README.md`, their index, a table for each category;
+- `docs/schema/gomdlint.schema.json`, a JSON Schema (draft 7) of the
+  configuration, which names each rule by its name, its ID and its aliases,
+  in any case, with its settings and its options;
+- the README's rule list, between `<!-- BEGIN GENERATED RULES -->` and
+  `<!-- END GENERATED RULES -->`.
+
+Regenerate all of them with one command, after any change to the catalog,
+the option specs, the rule messages that examples show, or the renderers:
+
+```bash
+go test ./internal/ruledocs -update
+```
+
+Without `-update`, `TestGeneratedDocsAreUpToDate` fails when a generated
+file differs from the repository's, or when `docs/rules` or `docs/schema`
+holds a file that is not generated. Each generated file starts with a
+notice of how to regenerate it. Pages link to each other with relative
+links, which work on GitHub, in forks and in a checkout at any commit. The
+schema's `$id` is its address on the main branch, which a configuration
+file's `# yaml-language-server: $schema=` line can use. Tests validate the
+repository's configuration and every fixture configuration against the
+schema, and check that it accepts exactly what the loader loads without an
+error or a warning, except two keys that name one rule, which a schema
+cannot see. They also lint the generated Markdown with the repository's
+configuration, and check the counts of rules in the README's prose.
 
 ## Notices
 
