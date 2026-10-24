@@ -1197,6 +1197,11 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 		{name: "period after a variation selector reference", input: "## &#xFE0F;.\n"},
 		{name: "period after a supplementary variation selector", input: "## \U000e0100.\n"},
 		{name: "period after a Hangul filler", input: "## \u3164.\n"},
+		// U+2800 is a symbol, not white space and not default ignorable,
+		// but its glyph is blank.
+		{name: "period after a Braille pattern blank", input: "## \u2800.\n"},
+		{name: "period after Braille pattern blanks in emphasis", input: "## *\u2800\u2800*.\n"},
+		{name: "period after a letter and a Braille pattern blank", input: "## a\u2800.\n", wantFixed: "## a\u2800\n"},
 		{name: "period after default ignorable characters alone", input: "## \u200b\u2060\u034f\ufe0f.\n"},
 		{name: "period after an emoji with a variation selector", input: "## \u2764\ufe0f.\n", wantFixed: "## \u2764\ufe0f\n"},
 		{name: "period after a letter with a combining mark", input: "## e\u0301.\n", wantFixed: "## e\u0301\n"},

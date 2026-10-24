@@ -223,8 +223,9 @@ formats change. The first entries under Changed may need action.
   of the list.
 - **MD026**: Decides from the heading's source, so `` ## Run `make.` `` keeps
   its closing backtick. It no longer empties a heading that would show
-  nothing without its punctuation, such as `## .`. Such headings are reported
-  without a fix.
+  nothing without its punctuation, such as `## .` or a heading of the blank
+  Braille pattern U+2800 and a period. Such headings are reported without a
+  fix.
 - **MD035**: Edits only the thematic break, so a break no longer moves out
   of its list item, and it withholds a change that would turn a break under
   a paragraph into a setext heading underline.
