@@ -4,6 +4,7 @@ package display
 
 import (
 	"bytes"
+	"slices"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -222,37 +223,53 @@ func nextCharacter(text []byte) (int, int) {
 // the continuation bytes after it that still form the start of a well-formed
 // character, at least one byte. Unicode calls this the maximal subpart.
 func maximalSubpart(text []byte) int {
-	lead := text[0]
-	low, high := byte(0x80), byte(0xBF)
-	var continuations int
-	switch {
-	case lead >= 0xC2 && lead <= 0xDF:
-		continuations = 1
-	case lead == 0xE0:
-		continuations, low = 2, 0xA0
-	case lead == 0xED:
-		continuations, high = 2, 0x9F
-	case lead >= 0xE1 && lead <= 0xEF:
-		continuations = 2
-	case lead == 0xF0:
-		continuations, low = 3, 0x90
-	case lead == 0xF4:
-		continuations, high = 3, 0x8F
-	case lead >= 0xF1 && lead <= 0xF3:
-		continuations = 3
-	default:
+	idx := slices.IndexFunc(utf8Leads[:], func(lead utf8Lead) bool {
+		return text[0] >= lead.first && text[0] <= lead.last
+	})
+	if idx < 0 {
 		return 1
 	}
 
+	lead := utf8Leads[idx]
+	low, high := lead.low, lead.high
 	size := 1
-	for size <= continuations && size < len(text) {
+	for size <= lead.continuations && size < len(text) {
 		next := text[size]
 		if next < low || next > high {
 			break
 		}
 		size++
-		low, high = 0x80, 0xBF
+		low, high = utf8.RuneSelf, continuationMax
 	}
 
 	return size
+}
+
+// continuationMax is the largest UTF-8 continuation byte. The smallest is
+// utf8.RuneSelf.
+const continuationMax = 0xBF
+
+// utf8Lead describes the well-formed UTF-8 sequences whose lead byte lies in
+// [first, last]: the number of continuation bytes after the lead, and the
+// range [low, high] of the first of them. Every later continuation byte lies
+// in [utf8.RuneSelf, continuationMax].
+type utf8Lead struct {
+	first, last   byte
+	continuations int
+	low, high     byte
+}
+
+// utf8Leads are the lead bytes of well-formed UTF-8, after Table 3-7 of the
+// Unicode Standard. Other bytes never start a well-formed sequence.
+//
+//nolint:gochecknoglobals,mnd // Read-only lookup table of byte values.
+var utf8Leads = [...]utf8Lead{
+	{first: 0xC2, last: 0xDF, continuations: 1, low: 0x80, high: 0xBF},
+	{first: 0xE0, last: 0xE0, continuations: 2, low: 0xA0, high: 0xBF},
+	{first: 0xE1, last: 0xEC, continuations: 2, low: 0x80, high: 0xBF},
+	{first: 0xED, last: 0xED, continuations: 2, low: 0x80, high: 0x9F},
+	{first: 0xEE, last: 0xEF, continuations: 2, low: 0x80, high: 0xBF},
+	{first: 0xF0, last: 0xF0, continuations: 3, low: 0x90, high: 0xBF},
+	{first: 0xF1, last: 0xF3, continuations: 3, low: 0x80, high: 0xBF},
+	{first: 0xF4, last: 0xF4, continuations: 3, low: 0x80, high: 0x8F},
 }
