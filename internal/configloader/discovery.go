@@ -177,7 +177,7 @@ func DiscoverPaths(ctx context.Context, workDir string) (*ConfigPaths, error) {
 		// that the options file sets wins (markdownlint-cli2.mjs, the merge
 		// by inheritance). In the directory it starts from, the config
 		// file wins.
-		found.preferOptions = passed && setsConfig
+		found.preferOptions = passed && setsConfig && found.config != ""
 		markdownlint = found
 		return true
 	})

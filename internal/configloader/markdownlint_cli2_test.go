@@ -154,6 +154,24 @@ func TestLoad_WarnsAboutAPassedOptionsFile(t *testing.T) {
 	}, result.Warnings)
 }
 
+// TestLoad_PassedOptionsFileBelowAnOptionsFile covers an options file
+// without the config key below one that sets it, with no markdownlint
+// config file in either directory. The parent's config applies, and
+// nothing is shadowed, so no warning names a file.
+func TestLoad_PassedOptionsFileBelowAnOptionsFile(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
+	writeMarkdownlint(t, repo, ".markdownlint-cli2.jsonc", `{"config": {"MD013": false}}`)
+	writeMarkdownlint(t, repo, "docs/.markdownlint-cli2.jsonc", "{}\n")
+
+	result, err := Load(context.Background(), markdownlintOptions(filepath.Join(repo, "docs"), false, "", nil))
+	require.NoError(t, err)
+	assert.True(t, ruleOff(result.Config, "MD013"), "the parent's config applies")
+	assert.Empty(t, result.Warnings)
+}
+
 // TestLoad_MarkdownlintCLI2Config covers a project whose markdownlint
 // configuration is the config key of an options file: it applies to the
 // run, as markdownlint-cli2 applies it, in JSON with comments and in YAML.
