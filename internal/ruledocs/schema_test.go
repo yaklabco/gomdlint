@@ -43,11 +43,8 @@ func compileSchema(t *testing.T) *jsonschema.Schema {
 func validateYAML(t *testing.T, schema *jsonschema.Schema, data []byte) error {
 	t.Helper()
 
-	var value any
+	var value any // An empty file, like one that holds only null, is null.
 	require.NoError(t, yaml.Unmarshal(data, &value))
-	if value == nil {
-		value = map[string]any{} // An empty file sets nothing.
-	}
 	encoded, err := json.Marshal(value)
 	require.NoError(t, err)
 	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(encoded))
@@ -125,6 +122,7 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 		schemaValid bool
 	}{
 		{name: "empty", yaml: "", valid: true},
+		{name: "only null", yaml: "null\n", valid: true},
 		{name: "a rule by name", yaml: "rules:\n  line-length: false\n", valid: true},
 		{name: "a rule by ID", yaml: "rules:\n  MD013: false\n", valid: true},
 		{name: "a rule by markdownlint's name", yaml: "rules:\n  ul-style: error\n", valid: true},
@@ -174,7 +172,7 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			schemaErr := validateYAML(t, schema, []byte(tt.yaml))
-			loaded := loadsCleanly(t, tt.yaml)
+			loaded := loadsCleanly(t, ".gomdlint.yml", tt.yaml)
 
 			assert.Equal(t, tt.valid, loaded, "gomdlint loads it cleanly")
 			if tt.valid || tt.schemaValid {
@@ -186,12 +184,65 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 	}
 }
 
+// TestSchemaAgreesWithTheLoaderOnEverySetting sets each setting that a
+// configuration file reads, at the top level, under backups, and for a rule
+// and one of its options, to each of many values, in a YAML and a JSON
+// file: null, empty strings, the spellings of true and false that yaml.v3
+// reads into a boolean setting, strings that look like booleans, numbers,
+// lists, mappings, and the values of the enumerated settings. The schema
+// accepts each file that gomdlint loads without an error or a warning, and
+// rejects the others.
+func TestSchemaAgreesWithTheLoaderOnEverySetting(t *testing.T) {
+	schema := compileSchema(t)
+
+	paths := [][]string{
+		{"flavor"}, {"severity_default"}, {"rules"}, {"rule_defaults"}, {"ignore"},
+		{"gitignore"}, {"default_ignores"}, {"backups"}, {"backups", "enabled"}, {"backups", "mode"},
+		{"rules", "MD013"}, {"rules", "MD013", "enabled"}, {"rules", "MD013", "severity"},
+		{"rules", "MD013", "auto_fix"}, {"rules", "MD013", "reset_options"}, {"rules", "MD013", "options"},
+		{"rule_defaults", "MD013", "enabled"}, {"rule_defaults", "MD013", "severity"},
+		{"rules", "MD013", "options", "max"}, {"rules", "MD013", "options", "ignore_tables"},
+		{"rules", "MD013", "strict"}, {"rules", "MD003", "options", "style"},
+	}
+	values := []any{
+		nil, "", " ", "yes", "Yes", "YES", "y", "Y", "on", "On", "ON", "no", "No", "NO", "n", "N", "off", "Off", "OFF",
+		"yES", "true", "false", "True", "1", "0", true, false, 0, 1, 80, -1, 2.5,
+		"error", "warning", "info", "Error", "gfm", "commonmark", "GFM", "sidecar", "none", "consistent", "atx",
+		[]any{}, []any{"a"}, []any{1}, []any{true}, []any{nil}, map[string]any{},
+	}
+
+	for _, path := range paths {
+		for _, value := range values {
+			doc := any(value)
+			for idx := len(path) - 1; idx >= 0; idx-- {
+				doc = map[string]any{path[idx]: doc}
+			}
+			content, err := json.Marshal(doc)
+			require.NoError(t, err)
+
+			for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
+				schemaErr := validateYAML(t, schema, content)
+				loaded := loadsCleanly(t, name, string(content))
+				if loaded != (schemaErr == nil) {
+					t.Errorf("%s %s: gomdlint loads it cleanly: %t, the schema accepts it: %t (%v)",
+						name, content, loaded, schemaErr == nil, schemaErr)
+				}
+			}
+		}
+	}
+
+	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		assert.True(t, loadsCleanly(t, name, "null"), "%s holding only null", name)
+		assert.NoError(t, validateYAML(t, schema, []byte("null")), "%s holding only null", name)
+	}
+}
+
 // loadsCleanly reports whether gomdlint loads content, a configuration
-// file, without an error or a warning.
-func loadsCleanly(t *testing.T, content string) bool {
+// file named name, without an error or a warning.
+func loadsCleanly(t *testing.T, name, content string) bool {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), ".gomdlint.yml")
+	path := filepath.Join(t.TempDir(), name)
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	result, err := configloader.Load(context.Background(), configloader.LoadOptions{
 		WorkingDir:         filepath.Dir(path),

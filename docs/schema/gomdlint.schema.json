@@ -22,18 +22,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "front_matter_title": {
               "anyOf": [
@@ -76,11 +124,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -125,18 +197,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -184,11 +304,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -252,18 +396,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -294,11 +486,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -361,18 +577,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -384,11 +648,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -433,18 +721,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "indent": {
               "default": 2,
@@ -488,11 +824,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -552,11 +912,35 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "br_spaces": {
               "default": 2,
@@ -575,11 +959,35 @@
               ]
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "ignore_code_blocks": {
               "default": true,
@@ -648,11 +1056,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -705,11 +1137,35 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "code_blocks": {
               "default": true,
@@ -720,11 +1176,35 @@
               ]
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "ignore_code_languages": {
               "anyOf": [
@@ -783,11 +1263,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -840,18 +1344,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -863,11 +1415,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -912,18 +1488,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "max_consecutive": {
               "default": 1,
@@ -968,11 +1592,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1017,11 +1665,35 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "code_block_line_length": {
               "description": "Another spelling of code_block_max.",
@@ -1046,11 +1718,35 @@
               ]
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "heading_line_length": {
               "description": "Another spelling of heading_max.",
@@ -1265,11 +1961,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1338,18 +2058,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1361,11 +2129,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1410,18 +2202,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1433,11 +2273,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1482,18 +2346,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1505,11 +2417,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1554,18 +2490,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1577,11 +2561,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1626,18 +2634,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1649,11 +2705,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1698,18 +2778,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "include_front_matter": {
               "default": false,
@@ -1826,11 +2954,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1875,18 +3027,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1898,11 +3098,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -1947,18 +3171,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -1979,11 +3251,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2044,18 +3340,66 @@
               ]
             },
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "front_matter_title": {
               "anyOf": [
@@ -2130,11 +3474,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2187,18 +3555,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -2235,11 +3651,35 @@
               "description": "Characters that a heading may not end with."
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2284,18 +3724,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "list_items": {
               "default": true,
@@ -2324,11 +3812,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2373,18 +3885,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -2396,11 +3956,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2453,18 +4037,66 @@
               ]
             },
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -2502,11 +4134,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2568,18 +4224,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "ol_multi": {
               "default": 1,
@@ -2640,11 +4344,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2705,18 +4433,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "list_items": {
               "default": true,
@@ -2745,11 +4521,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2794,18 +4594,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -2817,11 +4665,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2881,18 +4753,66 @@
               "description": "HTML elements to allow, in any case."
             },
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -2934,11 +4854,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -2997,18 +4941,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3020,11 +5012,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3069,18 +5085,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3105,11 +5169,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3166,18 +5254,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3214,11 +5350,35 @@
               "description": "Characters that end a line of emphasis that reads as a sentence, which is not reported."
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3263,18 +5423,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3286,11 +5494,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3335,18 +5567,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3358,11 +5638,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3407,18 +5711,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3430,11 +5782,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3494,18 +5870,66 @@
               "description": "Languages to allow. An empty list allows every language."
             },
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "language_only": {
               "default": false,
@@ -3549,11 +5973,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3606,18 +6054,66 @@
               ]
             },
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "front_matter_title": {
               "anyOf": [
@@ -3684,11 +6180,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3733,18 +6253,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -3756,11 +6324,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3805,18 +6397,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "headings": {
               "anyOf": [
@@ -3875,11 +6515,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -3924,11 +6588,35 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "code_blocks": {
               "default": true,
@@ -3939,11 +6627,35 @@
               ]
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "html_elements": {
               "default": true,
@@ -4010,11 +6722,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4059,18 +6795,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -4082,11 +6866,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4131,18 +6939,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -4171,11 +7027,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4236,18 +7116,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "max_trailing_blank_lines": {
               "description": "Most blank lines allowed at the end of the file. Unset, any number is allowed.",
@@ -4274,11 +7202,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4323,18 +7275,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -4363,11 +7363,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4428,18 +7452,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -4468,11 +7540,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4533,18 +7629,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -4573,11 +7717,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4638,18 +7806,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "ignore_case": {
               "default": false,
@@ -4702,11 +7918,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4751,18 +7991,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "ignored_labels": {
               "anyOf": [
@@ -4817,11 +8105,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4874,18 +8186,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "ignored_definitions": {
               "anyOf": [
@@ -4932,11 +8292,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -4981,11 +8365,35 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "autolink": {
               "default": true,
@@ -5004,11 +8412,35 @@
               ]
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "full": {
               "default": true,
@@ -5085,11 +8517,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5150,18 +8606,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -5192,11 +8696,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5259,18 +8787,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -5282,11 +8858,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5331,18 +8931,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -5354,11 +9002,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5403,18 +9075,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "markdownlint_compatible": {
               "default": true,
@@ -5523,11 +9243,35 @@
               "description": "Another spelling of patterns."
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5580,18 +9324,66 @@
               ]
             },
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "markdownlint_compatible": {
               "default": true,
@@ -5645,11 +9437,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5711,18 +9527,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "options": {
               "additionalProperties": false,
@@ -5751,11 +9615,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -5816,18 +9704,66 @@
           "additionalProperties": false,
           "properties": {
             "auto_fix": {
-              "description": "Let --fix apply the rule's fixes.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Let --fix apply the rule's fixes."
             },
             "enabled": {
-              "description": "Run the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Run the rule."
             },
             "min_dashes": {
               "default": 3,
@@ -5856,11 +9792,35 @@
               ]
             },
             "reset_options": {
-              "description": "Drop the options that lower configuration layers give the rule.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "enum": [
+                    "y",
+                    "Y",
+                    "yes",
+                    "Yes",
+                    "YES",
+                    "on",
+                    "On",
+                    "ON",
+                    "n",
+                    "N",
+                    "no",
+                    "No",
+                    "NO",
+                    "off",
+                    "Off",
+                    "OFF"
+                  ]
+                }
+              ],
+              "description": "Drop the options that lower configuration layers give the rule."
             },
             "severity": {
               "allOf": [
@@ -7000,12 +10960,36 @@
       "description": "The backups that gomdlint writes of the files it fixes.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            {
+              "enum": [
+                "y",
+                "Y",
+                "yes",
+                "Yes",
+                "YES",
+                "on",
+                "On",
+                "ON",
+                "n",
+                "N",
+                "no",
+                "No",
+                "NO",
+                "off",
+                "Off",
+                "OFF"
+              ]
+            }
+          ],
           "default": true,
-          "description": "Back up each file before fixing it.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "description": "Back up each file before fixing it."
         },
         "mode": {
           "default": "sidecar",
@@ -7013,6 +10997,7 @@
           "enum": [
             "sidecar",
             "none",
+            "",
             null
           ]
         }
@@ -7023,12 +11008,36 @@
       ]
     },
     "default_ignores": {
+      "anyOf": [
+        {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "enum": [
+            "y",
+            "Y",
+            "yes",
+            "Yes",
+            "YES",
+            "on",
+            "On",
+            "ON",
+            "n",
+            "N",
+            "no",
+            "No",
+            "NO",
+            "off",
+            "Off",
+            "OFF"
+          ]
+        }
+      ],
       "default": true,
-      "description": "Skip node_modules and vendor directories when walking directories.",
-      "type": [
-        "boolean",
-        "null"
-      ]
+      "description": "Skip node_modules and vendor directories when walking directories."
     },
     "flavor": {
       "default": "gfm",
@@ -7036,21 +11045,51 @@
       "enum": [
         "commonmark",
         "gfm",
+        "",
         null
       ]
     },
     "gitignore": {
+      "anyOf": [
+        {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "enum": [
+            "y",
+            "Y",
+            "yes",
+            "Yes",
+            "YES",
+            "on",
+            "On",
+            "ON",
+            "n",
+            "N",
+            "no",
+            "No",
+            "NO",
+            "off",
+            "Off",
+            "OFF"
+          ]
+        }
+      ],
       "default": true,
-      "description": "Skip the files that .gitignore files ignore when walking directories.",
-      "type": [
-        "boolean",
-        "null"
-      ]
+      "description": "Skip the files that .gitignore files ignore when walking directories."
     },
     "ignore": {
       "description": "Glob patterns of files not to lint, relative to the configuration file's directory.",
       "items": {
-        "type": "string"
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
       },
       "type": [
         "array",
@@ -7081,7 +11120,10 @@
               "$ref": "#/definitions/severity"
             },
             {
-              "type": "null"
+              "enum": [
+                "",
+                null
+              ]
             }
           ]
         }
@@ -7090,5 +11132,8 @@
     }
   },
   "title": "gomdlint configuration",
-  "type": "object"
+  "type": [
+    "object",
+    "null"
+  ]
 }

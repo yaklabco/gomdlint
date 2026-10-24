@@ -679,7 +679,13 @@ links, which work on GitHub, in forks and in a checkout at any commit. The
 schema's `$id` is its address on the main branch, which a configuration
 file's `# yaml-language-server: $schema=` line can use. Every setting may
 be null, which the loader reads as unset and `migrate` writes for unset
-rule settings. Tests validate the repository's configuration, every
+rule settings, and so may the whole file. The schema also takes what
+yaml.v3 reads into the settings: an empty `flavor`, `severity_default` or
+backup `mode`, the YAML 1.1 spellings of true and false, such as `yes` and
+`off`, for the boolean settings but not for rule options, and any scalar
+as an ignore pattern. A test sets each setting to many values in YAML and
+JSON files and checks that the schema and the loader agree on every one.
+Tests validate the repository's configuration, every
 fixture configuration, the `init` templates and a migrated configuration
 against the schema. They check that it accepts exactly what the loader
 loads without an error or a warning, except for mistakes that a schema
