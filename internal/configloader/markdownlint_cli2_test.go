@@ -156,7 +156,8 @@ func TestLoad_WarnsAboutAPassedOptionsFile(t *testing.T) {
 
 // TestLoad_PassedOptionsFileBelowAnOptionsFile covers an options file
 // without the config key below one that sets it, with no markdownlint
-// config file in either directory. The parent's config applies, and
+// config file in either directory. In gomdlint's upward search, which
+// markdownlint-cli2 does not make, the parent's config applies, and
 // nothing is shadowed, so no warning names a file.
 func TestLoad_PassedOptionsFileBelowAnOptionsFile(t *testing.T) {
 	t.Parallel()

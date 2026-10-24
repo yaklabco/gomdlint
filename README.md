@@ -980,11 +980,17 @@ Some of its fix checks are also stricter than they need to be.
   maximum below 1 as 1. markdownlint compares lengths and counts with a
   fractional limit, such as `"line_length": 100.5`, as it is, and gomdlint
   ignores it with a warning.
-- markdownlint rejects a set of custom rules in which two names, or a
-  name and a tag, are equal in upper case. gomdlint's Go API accepts such
-  rules: of two rules with the same name, the one registered last keeps
-  it, and a word that is both a name and a tag names the rule and the
-  tag's rules.
+- markdownlint rejects a set of custom rules in which two IDs or names, or
+  a name and a tag, are equal in upper case. gomdlint's Go API accepts
+  such rules. An ID wins over a name. Of two rules with the same name,
+  the one registered last keeps it, and of two names equal only in upper
+  case, the spelling that sorts first wins. A word that is a rule's name
+  and a tag of a catalog entry names the rule and the tag's rules, while a
+  tag that a rule reports itself yields to the name.
+- markdownlint compares a comment's word with a custom rule's whole name,
+  so no word names a rule registered with whitespace around its name.
+  gomdlint ignores that whitespace, as its config files do, and suggests
+  the rule's ID, which both read.
 - markdownlint's rules read options of other types with JavaScript's
   conversions too, such as `"strict": "false"`, which reads as true, and a
   number in a list of strings, which reads as its text. gomdlint reads only
