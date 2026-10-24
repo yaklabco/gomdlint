@@ -33,6 +33,10 @@ type examplePart struct {
 	label    string
 	language string
 	content  string
+
+	// findings marks the part that lists findings, which a text page
+	// indents instead of showing behind a gutter, as it shows documents.
+	findings bool
 }
 
 // exampleParts returns the parts of the example of entry's built-in rule,
@@ -59,7 +63,7 @@ func exampleParts(entry Entry) ([]examplePart, error) {
 	}
 	parts = append(parts,
 		examplePart{label: exampleInputLabel, language: "markdown", content: example.Input},
-		examplePart{label: exampleReportLabel, language: "text", content: findingsText(entry, example.Findings)})
+		examplePart{label: exampleReportLabel, language: "text", content: findingsText(entry, example.Findings), findings: true})
 	if example.Fixed != example.Input {
 		parts = append(parts, examplePart{label: exampleFixedLabel, language: "markdown", content: example.Fixed})
 	}
@@ -146,7 +150,7 @@ func textExample(parts []examplePart) [][]string {
 		lines := []string{part.label}
 		for _, line := range strings.Split(strings.TrimSuffix(part.content, "\n"), "\n") {
 			switch {
-			case part.language == "text":
+			case part.findings:
 				lines = append(lines, "  "+line)
 			case line == "":
 				lines = append(lines, exampleGutter)

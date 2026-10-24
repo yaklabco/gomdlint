@@ -94,14 +94,14 @@ func TestExamplesShowOnlyTheirRule(t *testing.T) {
 			require.NoError(t, err)
 
 			got := lintWithEveryRule(t, cfg, example.Input)
-			want := make([]ExampleFinding, 0, len(got))
+			reported := make([]ExampleFinding, 0, len(got))
 			for _, diag := range got {
 				assert.Equal(t, meta.ID, diag.RuleID, "only %s reports the example: %s", meta.ID, diag.Message)
-				want = append(want, ExampleFinding{
+				reported = append(reported, ExampleFinding{
 					Line: diag.StartLine, Column: diag.StartColumn, Message: diag.Message, Fixable: diag.HasFix(),
 				})
 			}
-			assert.Equal(t, want, example.Findings, "the example lists what the rule reports")
+			assert.Equal(t, example.Findings, reported, "the example lists what the rule reports")
 
 			if meta.Fixable {
 				assert.Empty(t, lintWithEveryRule(t, cfg, example.Fixed), "the fixed example is clean")
