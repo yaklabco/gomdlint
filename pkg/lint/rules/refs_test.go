@@ -1889,6 +1889,9 @@ func TestFootnoteDefinitionLabel(t *testing.T) {
 		{name: "1000 code units", text: "[^" + strings.Repeat("\U0001F600", 500) + "]: x"},
 		{name: "999 code units with an escape", text: "[^" + strings.Repeat("a", 997) + "\\]]: x", want: strings.Repeat("a", 997) + "\\]", wantOK: true},
 		{name: "1000 code units with an escape", text: "[^" + strings.Repeat("a", 998) + "\\]]: x"},
+		// Node decodes each truncated character to one U+FFFD, one code unit.
+		{name: "999 ill-formed sequences", text: "[^" + strings.Repeat("\xe2\x82", 999) + "]: x", want: strings.Repeat("\xe2\x82", 999), wantOK: true},
+		{name: "1000 ill-formed sequences", text: "[^" + strings.Repeat("\xe2\x82", 1000) + "]: x"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

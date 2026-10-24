@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 	"unicode"
-	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/yaklabco/gomdlint/internal/jstext"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -776,7 +776,7 @@ func footnoteDefinitionLabel(text []byte) (string, bool) {
 	}
 	size := 0
 	for idx := len("[^"); idx < len(text); {
-		char, width := utf8.DecodeRune(text[idx:])
+		char, _ := utf8.DecodeRune(text[idx:])
 		switch {
 		case size > maxFootnoteLabel:
 			return "", false
@@ -792,8 +792,9 @@ func footnoteDefinitionLabel(text []byte) (string, bool) {
 			size += 2
 			continue
 		}
+		width, units := jstext.Next(text[idx:])
 		idx += width
-		size += utf16.RuneLen(char)
+		size += units
 	}
 	return "", false
 }

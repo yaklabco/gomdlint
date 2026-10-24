@@ -40,3 +40,24 @@ func TestSortDiagnosticsIsStable(t *testing.T) {
 		lastArrival[diag.StartLine] = arrival
 	}
 }
+
+// TestSortDiagnosticsOrdersPositionsInsideACharacter covers two findings at
+// the byte column of one emoji: one at its start and one a UTF-16 code unit
+// into it, as markdownlint's line length rule can report. The finding
+// inside the emoji has the later reported column, so it comes second, before
+// the rule ID decides.
+func TestSortDiagnosticsOrdersPositionsInsideACharacter(t *testing.T) {
+	t.Parallel()
+
+	diagnostics := []lint.Diagnostic{
+		{RuleID: "MD001", StartLine: 1, StartColumn: 80, StartColumnUTF16Offset: 1},
+		{RuleID: "MD013", StartLine: 1, StartColumn: 80},
+	}
+
+	sortDiagnostics(diagnostics)
+
+	if diagnostics[0].RuleID != "MD013" || diagnostics[1].RuleID != "MD001" {
+		t.Errorf("got %s then %s, want the finding at the start of the emoji first",
+			diagnostics[0].RuleID, diagnostics[1].RuleID)
+	}
+}
