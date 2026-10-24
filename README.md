@@ -975,6 +975,11 @@ Some of its fix checks are also stricter than they need to be.
   `br_spaces`, `no-hard-tabs`' `spaces_per_tab` and
   `blanks-around-headings`' `lines_above` and `lines_below` as 0. gomdlint
   ignores it with a warning and uses the default.
+- markdownlint's `no-multiple-blanks` reports every line of a document for
+  a `maximum` below 0, such as -1 or `-Infinity`. gomdlint reads any
+  maximum below 1 as 1. markdownlint compares lengths and counts with a
+  fractional limit, such as `"line_length": 100.5`, as it is, and gomdlint
+  ignores it with a warning.
 - markdownlint's rules read options of other types with JavaScript's
   conversions too, such as `"strict": "false"`, which reads as true, and a
   number in a list of strings, which reads as its text. gomdlint reads only
