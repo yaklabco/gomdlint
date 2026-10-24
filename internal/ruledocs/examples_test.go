@@ -2,6 +2,7 @@ package ruledocs_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -101,6 +102,7 @@ func TestPagesSayThatTheExampleEndsWithoutANewline(t *testing.T) {
 	label := "This document breaks the rule. Its last line has no newline:"
 	assert.Contains(t, markdown.String(), "\n\n"+label+"\n\n```markdown\n# Guide\n")
 	assert.Contains(t, text.String(), "\n\n"+label+"\n  | # Guide\n")
+	assert.Equal(t, 1, strings.Count(markdown.String(), label), "only the document that breaks the rule")
 	assert.Contains(t, markdown.String(), "\n\nThe fix changes it to:\n\n")
 }
 

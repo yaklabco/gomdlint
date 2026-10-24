@@ -25,7 +25,7 @@ func assertLintsClean(t *testing.T, path string, content []byte, cfg *config.Con
 }
 
 // assertLintsCleanExcept lints content as assertLintsClean does, and fails
-// for each finding that excused, when set, does not excuse.
+// for each finding unless excused, when not nil, returns true for it.
 func assertLintsCleanExcept(t *testing.T, path string, content []byte, cfg *config.Config, excused func(lint.Diagnostic) bool) {
 	t.Helper()
 
@@ -77,11 +77,14 @@ func brokenExampleLines(t *testing.T, page string) map[int]bool {
 			continue
 		}
 		require.Less(t, idx+2, len(lines), "a code block follows %q", line)
-		fence := strings.TrimRight(lines[idx+2], "abcdefghijklmnopqrstuvwxyz")
-		require.True(t, strings.HasPrefix(fence, "```"), "a code block follows %q", line)
-		for next := idx + 3; next < len(lines) && lines[next] != fence; next++ {
+		opening := lines[idx+2]
+		fence := opening[:len(opening)-len(strings.TrimLeft(opening, "`"))]
+		require.GreaterOrEqual(t, len(fence), 3, "a code block follows %q", line)
+		next := idx + 3
+		for ; next < len(lines) && lines[next] != fence; next++ {
 			numbers[next+1] = true
 		}
+		require.Less(t, next, len(lines), "the code block after %q closes", line)
 	}
 	return numbers
 }
