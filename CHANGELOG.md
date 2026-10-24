@@ -94,7 +94,8 @@ formats change. The first entries under Changed may need action.
   character outside the Basic Multilingual Plane counts two columns, as in
   markdownlint. Ill-formed UTF-8 counts as markdownlint reads it, one column
   for each sequence that decodes to a replacement character. The caret under
-  a source line in text output still sits under the target. JSON fix offsets
+  a source line in text output still sits under the target, and the line
+  shows each ill-formed sequence as that replacement character. JSON fix offsets
   stay byte offsets. Every human-readable format shows a path relative to the
   working directory when the file lies inside it.
 - Fixes are checked before they are applied. Each fixing rule parses the
@@ -328,8 +329,11 @@ formats change. The first entries under Changed may need action.
 - **MD012**: No longer counts or deletes blank lines in code. At the end of
   a file it removes the extra blank lines, where it used to offer an empty
   edit that MD047 reported again.
-- **MD013**: Measures characters instead of bytes, so 48 CJK characters
-  measure 48, not 144. Its wrap fix wraps only paragraph text, carries
+- **MD013**: Measures UTF-16 code units instead of bytes, as markdownlint
+  does, so 48 CJK characters measure 48, not 144, an emoji measures 2 and
+  each ill-formed UTF-8 sequence 1. When the limit falls inside an emoji,
+  the finding starts at the second half of its surrogate pair, as in
+  markdownlint. Its wrap fix wraps only paragraph text, carries
   blockquote and list prefixes onto new lines, keeps code spans, inline
   HTML, link destinations and task checkboxes whole, and no longer starts a
   line with a list marker, heading marker or fence. Lines that hold only a

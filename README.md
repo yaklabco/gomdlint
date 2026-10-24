@@ -1080,6 +1080,7 @@ gomdlint/
     cli/               # Cobra commands and flag handling
     configloader/      # Config discovery, loading, merging and migration
     display/           # UTF-16 columns and paths for reporters
+    jstext/            # UTF-16 lengths of text, as markdownlint measures them
     editdistance/      # Edit distance for rule name suggestions
     ignore/            # gitignore matching for directory walks
     logging/           # Structured logging setup

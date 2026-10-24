@@ -16,6 +16,7 @@ internal/               Application-specific wiring (not importable)
   display/              UTF-16 columns and display paths for reporters
   editdistance/         Edit distance for rule name suggestions
   ignore/               gitignore-style matching for directory walks
+  jstext/               UTF-16 lengths of text, as markdownlint measures them
   jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
   logging/              Structured logging setup
   ruledocs/             Rule listings and rule pages, as text, Markdown and JSON
@@ -684,15 +685,21 @@ boundary, from the file snapshot the diagnostics were computed against.
 `internal/display` turns byte columns into 1-based columns counted in UTF-16
 code units, the unit of markdownlint and the one SARIF logs declare as
 `columnKind: utf16CodeUnits`, skipping a leading byte order mark, and paths
-into paths relative to the working directory. Ill-formed UTF-8 counts as
-Node decodes it, one column for each maximal ill-formed sequence. A
+into paths relative to the working directory. `internal/jstext` holds the
+measure that columns, the text caret and `line-length` (MD013) share: UTF-16
+code units after decoding UTF-8 as Node does, so ill-formed UTF-8 counts one
+unit for each maximal ill-formed sequence. A byte column cannot point inside
+a character, so a rule that starts a finding in the middle of a surrogate
+pair, as MD013 does when its limit splits an emoji, points at the character
+and sets `Diagnostic.StartColumnUTF16Offset`, which reporters add. A
 `display.Columns` converter serves all the findings of one file in any
 order: it decodes a short line for each lookup and a long line once, keeping
 a mark every 256 bytes that later lookups resume from. The text reporter
 places its caret by the display cells of the text before the column, so it
-stays under the target after wide characters and tabs. The runner sorts each
-file's findings before any reporter sees them. `--rule-format` names rules
-by name, ID or both in text, table and summary output.
+stays under the target after wide characters, tabs and ill-formed UTF-8,
+which it prints as U+FFFD. The runner sorts each file's findings before any
+reporter sees them. `--rule-format` names rules by name, ID or both in text,
+table and summary output.
 
 ## Design Patterns
 
