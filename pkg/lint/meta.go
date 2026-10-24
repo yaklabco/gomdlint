@@ -198,12 +198,15 @@ type OptionSpec struct {
 	GomdlintOnly bool
 
 	// Limit reports that the option, an integer, is a most that a count
-	// may reach, such as line-length's max, which an infinite value lifts
-	// in markdownlint 0.41.1, since no count reaches it. A markdownlint
-	// configuration may write such a value as YAML's .inf, a JSON number
-	// beyond float64's range or the string "Infinity", and gomdlint reads
-	// it there as math.MaxInt, which no count reaches either. An infinite
-	// value of any other option is of the wrong type.
+	// may reach, such as line-length's max, which markdownlint 0.41.1
+	// compares counts with. So a value beyond every count, such as
+	// Infinity, which a markdownlint configuration may write as YAML's
+	// .inf, a JSON number beyond float64's range or the string "Infinity",
+	// or a number of 2^63 or more, lifts the limit, since no count reaches
+	// it. gomdlint reads such a value there as math.MaxInt, which no count
+	// reaches either, and one below -2^63, such as -Infinity, as
+	// math.MinInt, which every count exceeds. A value beyond int's range of
+	// any other option is of the wrong type.
 	Limit bool
 
 	// MarkdownlintPinned reports that a markdownlint configuration sets the

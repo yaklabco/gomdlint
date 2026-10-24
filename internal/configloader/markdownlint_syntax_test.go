@@ -2,6 +2,7 @@ package configloader
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -296,49 +297,79 @@ func TestConvertMarkdownlintConfig_NumbersBeyondFloat64(t *testing.T) {
 	assert.Equal(t, []string{`ul-indent option "indent" must be an integer, not Infinity; it is ignored`}, result.Warnings)
 }
 
-// TestLoad_MarkdownlintInfiniteLimits covers infinite limits in a YAML
-// markdownlint config, written as .inf, which js-yaml reads as Infinity.
-// markdownlint-cli2 0.23.3 then reports neither the long line nor the
-// three blank lines, and neither does gomdlint, with no warning, for the
-// config loaded for a run and for the config that migrate writes.
-func TestLoad_MarkdownlintInfiniteLimits(t *testing.T) {
+// TestLoad_MarkdownlintLimitsBeyondInt covers limits beyond the range of
+// an int in a markdownlint config, for the config loaded for a run and for
+// the config that migrate writes, which apply with no warning. Infinity,
+// which YAML writes as .inf and a JSON number beyond float64's range reads
+// as, and a number of 2^63 or more, are limits that no count reaches:
+// markdownlint-cli2 0.23.3 reports neither the long lines nor the three
+// blank lines with them, and neither does gomdlint. With -Infinity as
+// heading_line_length, markdownlint checks no heading's length, and
+// gomdlint, which reads the value as the smallest int, checks none either,
+// as for any length below 1, while the paragraph's line still gets the
+// line_length of 20.
+func TestLoad_MarkdownlintLimitsBeyondInt(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	source := writeMarkdownlint(t, dir, ".markdownlint.yaml", "MD013:\n  line_length: .inf\nMD012:\n  maximum: .inf\n")
-	document := []byte("# Title\n\n" + strings.Repeat("word ", 40) + "end\n\n\n\nText.\n")
-	findings := func(t *testing.T, cfg *config.Config) []string {
-		t.Helper()
-		registry := lint.NewRegistry()
-		rules.RegisterAll(registry)
-		result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
-			context.Background(), "doc.md", document, cfg)
-		require.NoError(t, err)
-		var ids []string
-		for _, diag := range result.Diagnostics {
-			ids = append(ids, diag.RuleID)
-		}
-		return ids
+	tests := []struct {
+		name, file, text, document string
+		want                       []string
+	}{
+		{
+			name: "infinite in YAML", file: ".markdownlint.yaml",
+			text:     "MD013:\n  line_length: .inf\nMD012:\n  maximum: .inf\n",
+			document: "# Title\n\n" + strings.Repeat("word ", 40) + "end\n\n\n\nText.\n",
+		},
+		{
+			name: "beyond int in JSON", file: ".markdownlint.json",
+			text: `{"MD013": {"line_length": 20, "heading_line_length": -1e400, "code_block_line_length": 1e19}, ` +
+				`"MD012": {"maximum": "9223372036854775808"}}`,
+			document: "# A heading longer than twenty characters\n\n" +
+				"A paragraph line longer than twenty characters.\n\n\n\n" +
+				"    a code block line longer than twenty characters\n",
+			want: []string{"MD013:3"},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	result, err := Load(t.Context(), markdownlintOptions(dir, false, "", nil))
-	require.NoError(t, err)
-	assert.Empty(t, result.Warnings)
-	assert.Empty(t, findings(t, result.Config), "the config loaded for a run")
+			dir := t.TempDir()
+			source := writeMarkdownlint(t, dir, tt.file, tt.text)
+			findings := func(t *testing.T, cfg *config.Config) []string {
+				t.Helper()
+				registry := lint.NewRegistry()
+				rules.RegisterAll(registry)
+				result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+					context.Background(), "doc.md", []byte(tt.document), cfg)
+				require.NoError(t, err)
+				var found []string
+				for _, diag := range result.Diagnostics {
+					found = append(found, fmt.Sprintf("%s:%d", diag.RuleID, diag.StartLine))
+				}
+				return found
+			}
 
-	converted, err := ConvertMarkdownlintConfig(source)
-	require.NoError(t, err)
-	migrated := filepath.Join(t.TempDir(), ".gomdlint.yml")
-	content, err := converted.FileContent(migrated)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(migrated, content, 0o600))
-	loaded, err := Load(t.Context(), LoadOptions{
-		WorkingDir: filepath.Dir(migrated), ExplicitPath: migrated, IgnoreEnv: true,
-		IgnoreUserConfig: true, IgnoreSystemConfig: true, IgnoreMarkdownlint: true, NonInteractive: true,
-	})
-	require.NoError(t, err)
-	assert.Empty(t, loaded.Warnings)
-	assert.Empty(t, findings(t, loaded.Config), "the migrated config")
+			result, err := Load(t.Context(), markdownlintOptions(dir, false, "", nil))
+			require.NoError(t, err)
+			assert.Empty(t, result.Warnings)
+			assert.Equal(t, tt.want, findings(t, result.Config), "the config loaded for a run")
+
+			converted, err := ConvertMarkdownlintConfig(source)
+			require.NoError(t, err)
+			migrated := filepath.Join(t.TempDir(), ".gomdlint.yml")
+			content, err := converted.FileContent(migrated)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(migrated, content, 0o600))
+			loaded, err := Load(t.Context(), LoadOptions{
+				WorkingDir: filepath.Dir(migrated), ExplicitPath: migrated, IgnoreEnv: true,
+				IgnoreUserConfig: true, IgnoreSystemConfig: true, IgnoreMarkdownlint: true, NonInteractive: true,
+			})
+			require.NoError(t, err)
+			assert.Empty(t, loaded.Warnings)
+			assert.Equal(t, tt.want, findings(t, loaded.Config), "the migrated config")
+		})
+	}
 }
 
 // TestLoad_MarkdownlintJSONCComesFirst covers a directory that holds both

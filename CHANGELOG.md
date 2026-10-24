@@ -593,8 +593,11 @@ formats change. The first entries under Changed may need action.
   in a comment. gomdlint's own config files still take numbers only.
 - An infinite `line_length`, `heading_line_length`,
   `code_block_line_length` or `maximum` in a markdownlint config, such as
-  YAML's `.inf`, lifts the limit, as in markdownlint, where gomdlint
-  ignored it with a warning. Warnings write an infinite or NaN value as
+  YAML's `.inf`, or one of 2^63 or more, lifts the limit, as in
+  markdownlint, where gomdlint ignored it with a warning. A length of
+  `-Infinity` checks no line, as in markdownlint, and a `maximum` of
+  `-Infinity` counts as 1, as any `maximum` below 1 does in gomdlint.
+  Warnings write an infinite or NaN value as
   JavaScript does, such as `Infinity`, where they wrote `+Inf`.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up

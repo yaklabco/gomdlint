@@ -549,8 +549,10 @@ func markdownlintHasRule(id string) bool {
 // as value === undefined ? default : Number(value), so a numeric string,
 // such as "10" or " 0x0A ", reads as its number (see jsStringNumber). The
 // items of a list stay as they are, as MD022, the one rule whose numeric
-// option takes a list, uses them. An infinite limit (OptionSpec.Limit)
-// reads as math.MaxInt, which no count reaches, as none reaches infinity.
+// option takes a list, uses them. A limit (OptionSpec.Limit) beyond the
+// range of an int, such as an infinite one, reads as the nearest int,
+// math.MaxInt or math.MinInt, which compares with every count as the value
+// does: no count reaches the one, and every count exceeds the other.
 func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, bool) {
 	if !t.markdownlintValues || (spec.Type != OptionInteger && spec.Type != OptionIntegerOrList) {
 		return value, false
@@ -561,8 +563,15 @@ func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, bool) 
 			read, differs = number, true
 		}
 	}
-	if number, isNumber := read.(float64); isNumber && spec.Limit && math.IsInf(number, 1) {
-		read, differs = math.MaxInt, true
+	if number, isNumber := read.(float64); isNumber && spec.Limit {
+		// The bounds are those of isWholeNumber: 2^63 is beyond an int, and
+		// -2^63 is one.
+		switch {
+		case number >= math.MaxInt64:
+			read, differs = math.MaxInt, true
+		case number < math.MinInt64:
+			read, differs = math.MinInt, true
+		}
 	}
 	return read, differs
 }

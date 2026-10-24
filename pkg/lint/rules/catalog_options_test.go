@@ -3,9 +3,11 @@ package rules
 import (
 	"context"
 	"maps"
+	"math"
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -354,8 +356,9 @@ func TestCatalogDeclaresEveryOptionRead(t *testing.T) {
 // markdownlint 0.41.1 compares counts with, so that an infinite value
 // lifts the limit, MD012's maximum and MD013's three line lengths. Each
 // rule reads the option as a most that a count may reach, so math.MaxInt,
-// which a markdownlint configuration's infinity reads as, lifts it too.
-// markdownlint fails or never finishes with an infinite value of the other
+// which a markdownlint configuration's infinity reads as, lifts it too
+// (see TestCatalogLimitsAtTheEdgesOfInt). markdownlint fails, never
+// finishes or reads in a way of its own an infinite value of the other
 // integers, such as MD007's indent or MD022's lines_above.
 func TestCatalogLimits(t *testing.T) {
 	var limits []string
@@ -368,6 +371,55 @@ func TestCatalogLimits(t *testing.T) {
 		}
 	}
 	assert.ElementsMatch(t, []string{"MD012 max_consecutive", "MD013 max", "MD013 heading_max", "MD013 code_block_max"}, limits)
+}
+
+// TestCatalogLimitsAtTheEdgesOfInt runs each rule with each of its limits
+// at math.MaxInt and at math.MinInt, which a markdownlint configuration's
+// values beyond int's range read as. A limit at math.MaxInt must find what
+// a limit beyond every count in the document finds, and one at
+// math.MinInt what a limit of -1 finds, so that no rule adds to or
+// subtracts from a limit in a way that overflows.
+func TestCatalogLimitsAtTheEdgesOfInt(t *testing.T) {
+	document := []byte("# A heading line that is longer than the limit of twenty\n\n" +
+		"A paragraph line that is longer than the limit of twenty.\n\n\n\n\n" +
+		"    a code block line that is longer than the limit of twenty\n")
+	registry := catalogRegistry(t)
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "doc.md", document)
+	require.NoError(t, err)
+
+	for _, meta := range Catalog() {
+		for _, spec := range meta.Options {
+			if !spec.Limit {
+				continue
+			}
+			rule, ok := registry.GetByID(meta.ID)
+			require.True(t, ok, meta.ID)
+			findings := func(t *testing.T, value int) []string {
+				t.Helper()
+				// The other limits are 20, so that each line has a limit
+				// it exceeds apart from the one under test.
+				options := map[string]any{}
+				for _, other := range meta.Options {
+					if other.Limit {
+						options[other.Name] = 20
+					}
+				}
+				options[spec.Name] = value
+				ruleCfg := &config.RuleConfig{Options: options}
+				diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
+				require.NoError(t, err)
+				var found []string
+				for _, diag := range diags {
+					found = append(found, diag.RuleID+" line "+strconv.Itoa(diag.StartLine))
+				}
+				return found
+			}
+			t.Run(meta.ID+" "+spec.Name, func(t *testing.T) {
+				assert.Equal(t, findings(t, 1<<20), findings(t, math.MaxInt), "math.MaxInt")
+				assert.Equal(t, findings(t, -1), findings(t, math.MinInt), "math.MinInt")
+			})
+		}
+	}
 }
 
 // TestCatalogDefaultsMatchCode runs every golden case twice: as it is, and
