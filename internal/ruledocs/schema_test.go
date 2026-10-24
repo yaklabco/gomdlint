@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,9 +22,6 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
-// schemaURL is where the schema says it lives, which compiles it.
-const schemaURL = "https://raw.githubusercontent.com/yaklabco/gomdlint/main/docs/schema/gomdlint.schema.json"
-
 // compileSchema compiles the generated JSON Schema of the configuration.
 func compileSchema(t *testing.T) *jsonschema.Schema {
 	t.Helper()
@@ -33,8 +32,8 @@ func compileSchema(t *testing.T) *jsonschema.Schema {
 	require.NoError(t, err)
 
 	compiler := jsonschema.NewCompiler()
-	require.NoError(t, compiler.AddResource(schemaURL, doc))
-	schema, err := compiler.Compile(schemaURL)
+	require.NoError(t, compiler.AddResource(ruledocs.SchemaURL, doc))
+	schema, err := compiler.Compile(ruledocs.SchemaURL)
 	require.NoError(t, err)
 	return schema
 }
@@ -81,9 +80,37 @@ func TestSchemaAcceptsTheRepositoryConfigs(t *testing.T) {
 	}
 }
 
+// TestSchemaAcceptsTheConfigsGomdlintWrites validates the configurations
+// that gomdlint writes against the schema: the templates of gomdlint init,
+// in YAML and JSON, minimal and full, and a markdownlint configuration that
+// gomdlint migrate translates, which writes every rule setting, unset ones
+// as null.
+func TestSchemaAcceptsTheConfigsGomdlintWrites(t *testing.T) {
+	schema := compileSchema(t)
+
+	for _, full := range []bool{false, true} {
+		for _, format := range []string{"yaml", "json"} {
+			content, err := config.GenerateTemplate(config.TemplateOptions{Full: full, Format: format})
+			require.NoError(t, err)
+			assert.NoError(t, validateYAML(t, schema, content), "init, full %t, %s", full, format)
+		}
+	}
+
+	source := filepath.Join(t.TempDir(), ".markdownlint.json")
+	require.NoError(t, os.WriteFile(source, []byte(`{"default": true, "MD013": {"line_length": 100}, "MD033": false, "no-hard-tabs": "error"}`), 0o600))
+	migrated, err := configloader.ConvertMarkdownlintConfig(source)
+	require.NoError(t, err)
+	for _, target := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		content, err := migrated.FileContent(target)
+		require.NoError(t, err)
+		assert.NoError(t, validateYAML(t, schema, content), "migrate to %s:\n%s", target, content)
+	}
+}
+
 // TestSchemaAgreesWithTheLoader validates configurations against the
 // schema and loads them as gomdlint does: the schema accepts each one that
-// gomdlint loads without an error or a warning, and rejects the others.
+// gomdlint loads without an error or a warning, and rejects the others,
+// except the mistakes that a schema cannot see, which it accepts.
 func TestSchemaAgreesWithTheLoader(t *testing.T) {
 	schema := compileSchema(t)
 
@@ -131,6 +158,19 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 		{name: "an unknown backup setting", yaml: "backups:\n  keep: 3\n"},
 
 		{name: "two keys for one rule", yaml: "rules:\n  MD013: false\n  line-length: true\n", schemaValid: true},
+		{name: "an option and its other spelling", yaml: "rules:\n  line-length:\n    options:\n      max: 90\n      line_length: 100\n", schemaValid: true},
+		{name: "an option flat and under options", yaml: "rules:\n  line-length:\n    max: 90\n    options:\n      max: 100\n", schemaValid: true},
+		{name: "an invalid glob", yaml: "ignore: [\"[\"]\n", schemaValid: true},
+
+		// yaml.v3 reads a null as the zero value, so gomdlint loads every
+		// setting as unset, and gomdlint migrate writes unset rule settings
+		// as null.
+		{name: "null settings", yaml: "flavor:\nseverity_default:\nrules:\nrule_defaults:\nignore:\n" +
+			"gitignore:\ndefault_ignores:\nbackups:\n", valid: true},
+		{name: "null backup settings", yaml: "backups:\n  enabled:\n  mode:\n", valid: true},
+		{name: "a null rule", yaml: "rules:\n  MD013:\n", valid: true},
+		{name: "null rule settings", yaml: "rules:\n  MD013:\n    enabled: null\n    severity: null\n" +
+			"    auto_fix: null\n    reset_options: null\n    options: null\n", valid: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			schemaErr := validateYAML(t, schema, []byte(tt.yaml))
@@ -203,8 +243,8 @@ func TestSchemaDescribesEveryRule(t *testing.T) {
 	}
 
 	topKeys := []string{"backups", "default_ignores", "flavor", "gitignore", "ignore", "rule_defaults", "rules", "severity_default"}
-	assert.ElementsMatch(t, topKeys, keysOf(doc.Properties), "the settings that a configuration file reads")
-	assert.ElementsMatch(t, topKeys, configKeys(), "the keys of config.Config")
+	assert.ElementsMatch(t, topKeys, slices.Collect(maps.Keys(doc.Properties)), "the settings that a configuration file reads")
+	assert.ElementsMatch(t, topKeys, configKeys(t), "the keys of config.Config")
 }
 
 // TestSchemaOptionDefaults covers the defaults that the schema gives
@@ -236,34 +276,19 @@ func TestSchemaOptionDefaults(t *testing.T) {
 	assert.Nil(t, settings["heading_max"].Default, "heading_max defaults to the value of max")
 }
 
-// keysOf returns the keys of properties.
-func keysOf(properties map[string]json.RawMessage) []string {
-	keys := make([]string, 0, len(properties))
-	for key := range properties {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
 // configKeys returns the keys that a configuration file can set, as
 // config.Config's YAML encoding writes them all.
-func configKeys() []string {
+func configKeys(t *testing.T) []string {
+	t.Helper()
+
 	cfg := config.NewConfig()
 	cfg.SeverityDefault = string(config.SeverityInfo)
 	cfg.RuleDefaults = map[string]config.RuleConfig{"MD001": {}}
 	cfg.Gitignore = config.Bool(true)
 	cfg.DefaultIgnores = config.Bool(true)
 	data, err := cfg.ToYAML()
-	if err != nil {
-		return nil
-	}
+	require.NoError(t, err)
 	var top map[string]any
-	if err := yaml.Unmarshal(data, &top); err != nil {
-		return nil
-	}
-	keys := make([]string, 0, len(top))
-	for key := range top {
-		keys = append(keys, key)
-	}
-	return keys
+	require.NoError(t, yaml.Unmarshal(data, &top))
+	return slices.Collect(maps.Keys(top))
 }

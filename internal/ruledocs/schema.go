@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -42,7 +43,10 @@ type schemaObject map[string]any
 // directly under the rule's key, as markdownlint writes them. The schema
 // rejects what gomdlint warns about or rejects: unknown keys, rules,
 // options, severities, flavors and backup modes, and values of the wrong
-// type. A rule without declared options may hold any option.
+// type. A rule without declared options may hold any option. Every setting
+// may be null, which gomdlint reads as unset (see nullable). The schema
+// cannot see some mistakes that gomdlint rejects, such as two keys for one
+// rule, two spellings of one option, and a glob that does not parse.
 func WriteSchema(writer io.Writer, entries []Entry) error {
 	definitions := schemaObject{
 		severityDefinition: schemaObject{
@@ -68,39 +72,39 @@ func WriteSchema(writer io.Writer, entries []Entry) error {
 			"flavor": schemaObject{
 				"description": "The Markdown flavor that gomdlint parses: gfm, GitHub Flavored Markdown, " +
 					"or commonmark, in which tables and autolink literals are plain text.",
-				"enum":    []string{string(config.FlavorCommonMark), string(config.FlavorGFM)},
+				"enum":    []any{string(config.FlavorCommonMark), string(config.FlavorGFM), nil},
 				"default": string(config.FlavorGFM),
 			},
 			"severity_default": described("The severity of every rule's findings, "+
-				"unless the rule's own settings give it another.", ref(severityDefinition)),
+				"unless the rule's own settings give it another.", orNull(ref(severityDefinition))),
 			"rules": described("The settings of each rule, keyed by its name, its ID or "+
 				"one of markdownlint's names for it.", ref(rulesDefinition)),
 			"rule_defaults": described("Settings of rules that the settings under rules override, "+
 				"in this file and in every other configuration layer.", ref(rulesDefinition)),
 			"ignore": schemaObject{
 				"description": "Glob patterns of files not to lint, relative to the configuration file's directory.",
-				"type":        "array",
+				"type":        nullable("array"),
 				"items":       schemaObject{"type": "string"},
 			},
 			"gitignore": schemaObject{
 				"description": "Skip the files that .gitignore files ignore when walking directories.",
-				"type":        "boolean",
+				"type":        nullable("boolean"),
 				"default":     true,
 			},
 			"default_ignores": schemaObject{
 				"description": "Skip node_modules and vendor directories when walking directories.",
-				"type":        "boolean",
+				"type":        nullable("boolean"),
 				"default":     true,
 			},
 			"backups": schemaObject{
 				"description":          "The backups that gomdlint writes of the files it fixes.",
-				"type":                 "object",
+				"type":                 nullable("object"),
 				"additionalProperties": false,
 				"properties": schemaObject{
-					"enabled": schemaObject{"description": "Back up each file before fixing it.", "type": "boolean", "default": true},
+					"enabled": schemaObject{"description": "Back up each file before fixing it.", "type": nullable("boolean"), "default": true},
 					"mode": schemaObject{
 						"description": "Where backups go: sidecar, next to the file, or none.",
-						"enum":        []string{"sidecar", "none"},
+						"enum":        []any{"sidecar", "none", nil},
 						"default":     "sidecar",
 					},
 				},
@@ -133,7 +137,7 @@ func rulesSchema(entries []Entry) schemaObject {
 	}
 	return schemaObject{
 		"description":          "Rule settings, keyed by a rule's name, its ID or one of markdownlint's names for it.",
-		"type":                 "object",
+		"type":                 nullable("object"),
 		"properties":           properties,
 		"patternProperties":    patterns,
 		"additionalProperties": false,
@@ -158,22 +162,25 @@ func ruleSchema(entry Entry) schemaObject {
 	properties := optionProperties(entry)
 	options := schemaObject{
 		"description": "The options of " + entry.Name + ".",
-		"type":        "object",
+		"type":        nullable("object"),
 		"properties":  properties,
 	}
 	settings := schemaObject{
-		"enabled":       schemaObject{"description": "Run the rule.", "type": "boolean"},
-		"severity":      described("The severity of the rule's findings.", ref(severityDefinition)),
-		"auto_fix":      schemaObject{"description": "Let --fix apply the rule's fixes.", "type": "boolean"},
-		"reset_options": schemaObject{"description": "Drop the options that lower configuration layers give the rule.", "type": "boolean"},
+		"enabled":       schemaObject{"description": "Run the rule.", "type": nullable("boolean")},
+		"severity":      described("The severity of the rule's findings.", orNull(ref(severityDefinition))),
+		"auto_fix":      schemaObject{"description": "Let --fix apply the rule's fixes.", "type": nullable("boolean")},
+		"reset_options": schemaObject{"description": "Drop the options that lower configuration layers give the rule.", "type": nullable("boolean")},
 		"options":       options,
 	}
 	mapping := schemaObject{"type": "object", "properties": settings}
 	if entry.OptionsDeclared {
 		// Options may stand under the rule's key too, as markdownlint
 		// writes them.
+		// The loader reads the setting keys as settings, never as options.
 		for name, option := range properties {
-			settings[name] = option
+			if !slices.Contains(config.RuleSettingKeys(), name) {
+				settings[name] = option
+			}
 		}
 		mapping["additionalProperties"] = false
 		options["additionalProperties"] = false
@@ -185,6 +192,7 @@ func ruleSchema(entry Entry) schemaObject {
 			schemaObject{"description": "true turns the rule on and false turns it off.", "type": "boolean"},
 			described("Turns the rule on at this severity.", ref(severityDefinition)),
 			mapping,
+			schemaObject{"description": "Null leaves the rule's settings as they are.", "type": "null"},
 		},
 	}
 }
@@ -243,6 +251,20 @@ func optionSchema(spec lint.OptionSpec, description string, inverted bool) schem
 		option["anyOf"] = []any{values, schemaObject{"const": false}, null}
 	}
 	return option
+}
+
+// nullable returns the types of a setting of JSON type kind, or null.
+// yaml.v3 reads a null as the zero value, so gomdlint reads a null setting
+// as one that is not set, and gomdlint migrate writes unset rule settings
+// as null.
+func nullable(kind string) []string {
+	return []string{kind, "null"}
+}
+
+// orNull returns a schema that takes what schema takes, or null, as
+// nullable does for a type.
+func orNull(schema schemaObject) schemaObject {
+	return schemaObject{"anyOf": []any{schema, schemaObject{"type": "null"}}}
 }
 
 // ruleDefinition returns the name of the definition of entry's rule.

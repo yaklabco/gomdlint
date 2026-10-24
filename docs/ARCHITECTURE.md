@@ -677,12 +677,16 @@ holds a file that is not generated. Each generated file starts with a
 notice of how to regenerate it. Pages link to each other with relative
 links, which work on GitHub, in forks and in a checkout at any commit. The
 schema's `$id` is its address on the main branch, which a configuration
-file's `# yaml-language-server: $schema=` line can use. Tests validate the
-repository's configuration and every fixture configuration against the
-schema, and check that it accepts exactly what the loader loads without an
-error or a warning, except two keys that name one rule, which a schema
-cannot see. They also lint the generated Markdown with the repository's
-configuration, and check the counts of rules in the README's prose.
+file's `# yaml-language-server: $schema=` line can use. Every setting may
+be null, which the loader reads as unset and `migrate` writes for unset
+rule settings. Tests validate the repository's configuration, every
+fixture configuration, the `init` templates and a migrated configuration
+against the schema. They check that it accepts exactly what the loader
+loads without an error or a warning, except for mistakes that a schema
+cannot see: two keys that name one rule, two spellings of one option, and
+a glob that does not parse. They also lint the generated Markdown with the
+repository's configuration, and check the counts of rules in the README's
+prose.
 
 ## Notices
 
