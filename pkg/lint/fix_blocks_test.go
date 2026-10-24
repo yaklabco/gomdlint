@@ -439,6 +439,124 @@ func TestEngine_WithholdsFixThatChangesALineWhereTheRuleIsDisabled(t *testing.T)
 	}
 }
 
+// An edit that ends where a disabled line starts changes that line when it
+// joins text onto it, by deleting the line break before it or by writing
+// text without one.
+func TestEngine_WithholdsFixThatJoinsTextOntoADisabledLine(t *testing.T) {
+	t.Parallel()
+
+	const directive = " <!-- markdownlint-disable-line TEST001 -->"
+	tests := []struct {
+		name    string
+		content string
+		edit    fix.TextEdit
+		want    string // The fixed content, or "" when the fix is withheld.
+	}{
+		{
+			name:    "deleted line feed",
+			content: "abc\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 3, EndOffset: 4},
+		},
+		{
+			name:    "deleted carriage return and line feed",
+			content: "abc\r\ndef" + directive + "\r\n",
+			edit:    fix.TextEdit{StartOffset: 3, EndOffset: 5},
+		},
+		{
+			name:    "line feed replaced with a space",
+			content: "abc\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 3, EndOffset: 4, NewText: " "},
+		},
+		{
+			name:    "blank line replaced with text",
+			content: "abc\n\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 4, EndOffset: 5, NewText: "x "},
+		},
+		{
+			name:    "deleted text and line feed from mid-line",
+			content: "abc\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 1, EndOffset: 4},
+		},
+		{
+			// A carriage return alone ends a line, so the disabled line
+			// keeps its text.
+			name:    "line end replaced with a lone carriage return",
+			content: "abc\r\ndef" + directive + "\r\n",
+			edit:    fix.TextEdit{StartOffset: 2, EndOffset: 5, NewText: "x\r"},
+			want:    "abx\rdef" + directive + "\r\n",
+		},
+		{
+			// The carriage return and the line feed that ends the disabled
+			// blank line make one line ending, so the blank line goes.
+			name:    "text ending with a carriage return before a line feed",
+			content: "abc <!-- markdownlint-disable-next-line TEST001 -->\r\n\nxyz\r\n",
+			edit:    fix.TextEdit{StartOffset: 0, EndOffset: len("abc <!-- markdownlint-disable-next-line TEST001 -->\r\n"), NewText: "q\r"},
+		},
+		{
+			name:    "deleted lone carriage return",
+			content: "abc\rdef" + directive + "\r",
+			edit:    fix.TextEdit{StartOffset: 3, EndOffset: 4},
+		},
+		{
+			name:    "lone carriage return line end replaced with a line feed",
+			content: "abc\rdef" + directive + "\r",
+			edit:    fix.TextEdit{StartOffset: 2, EndOffset: 4, NewText: "x\n"},
+			want:    "abx\rdef" + directive + "\r",
+		},
+		{
+			name:    "deleted whole line from its start",
+			content: "abc\nxyz\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 4, EndOffset: 8},
+			want:    "abc\ndef" + directive + "\n",
+		},
+		{
+			name:    "deleted blank line from the end of the line above",
+			content: "abc\n\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 3, EndOffset: 4},
+			want:    "abc\ndef" + directive + "\n",
+		},
+		{
+			name:    "line end replaced with a line feed",
+			content: "abc\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 2, EndOffset: 4, NewText: "x\n"},
+			want:    "abx\ndef" + directive + "\n",
+		},
+		{
+			name:    "line end replaced with a carriage return and line feed",
+			content: "abc\r\ndef" + directive + "\r\n",
+			edit:    fix.TextEdit{StartOffset: 2, EndOffset: 5, NewText: "x\n"},
+			want:    "abx\r\ndef" + directive + "\r\n",
+		},
+		{
+			name:    "deleted blank line",
+			content: "abc\n\ndef" + directive + "\n",
+			edit:    fix.TextEdit{StartOffset: 4, EndOffset: 5},
+			want:    "abc\ndef" + directive + "\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+				return []lint.Diagnostic{fixDiag("TEST001", tt.edit)}, nil
+			})
+
+			result := lintMarkdown(t, tt.content, rule)
+
+			require.Len(t, result.Diagnostics, 1, "the finding stays either way")
+			require.Empty(t, result.RuleErrors, "the fix is valid")
+			if tt.want == "" {
+				assert.False(t, result.Diagnostics[0].HasFix(), "the fix would join text onto the disabled line")
+				assert.Empty(t, result.Edits)
+				return
+			}
+			assert.True(t, result.Diagnostics[0].HasFix())
+			assert.Equal(t, tt.want, string(fix.ApplyEdits([]byte(tt.content), result.Edits)))
+		})
+	}
+}
+
 func TestEngine_TreatsFrontMatterAsItsOwnBlock(t *testing.T) {
 	t.Parallel()
 

@@ -622,13 +622,17 @@ func newDisabledLines(file *mdast.FileSnapshot, states []bool) disabledLines {
 	return disabledLines{file: file, before: before}
 }
 
-// changed reports whether edits change the text of a disabled line. A
-// deletion or replacement changes every line it touches, except that a
-// deletion from the end of one line's text to the end of a later one's
-// removes only the later lines, as MD012 deletes a blank line below a
-// disabled one. An insertion changes the line it lands in, except that whole
-// lines inserted at the start or the end of a line's text leave that line
-// as it was, as the blank line that MD022 adds below a disabled heading.
+// changed reports whether edits change the text of a disabled line.
+//
+// A deletion or replacement changes every line it touches. It also changes
+// the line after it when it ends where that line starts and joins text onto
+// it. A deletion from the end of one line's text to the end of a later
+// one's is the exception: it removes only the later lines, as MD012 deletes
+// a blank line below a disabled one.
+//
+// An insertion changes the line it lands in, except that whole lines
+// inserted at the start or the end of a line's text leave that line as it
+// was, as the blank line that MD022 adds below a disabled heading.
 func (d disabledLines) changed(edits []fix.TextEdit) bool {
 	if d.before == nil {
 		return false
@@ -650,7 +654,7 @@ func (d disabledLines) changedLines(edit fix.TextEdit) (int, int, bool) {
 	}
 	info := d.file.Lines[first-1]
 	if edit.StartOffset == edit.EndOffset {
-		atStart := edit.StartOffset == info.StartOffset && endsWithLineEnding(edit.NewText)
+		atStart := edit.StartOffset == info.StartOffset && d.endsWithLineEnding(edit.NewText, edit.EndOffset)
 		atEnd := edit.StartOffset == info.NewlineStart && startsWithLineEnding(edit.NewText)
 		return first, first, !atStart && !atEnd
 	}
@@ -663,6 +667,16 @@ func (d disabledLines) changedLines(edit fix.TextEdit) (int, int, bool) {
 		}
 	}
 	last, _ := d.file.LineAt(edit.EndOffset - 1)
+	// An edit that ends where the next line starts joins text onto that line
+	// unless it leaves a line break before it: its text ends with one, or it
+	// deletes whole lines from a line start.
+	if next := last + 1; next <= len(d.file.Lines) && edit.EndOffset == d.file.Lines[next-1].StartOffset {
+		keepsBreak := d.endsWithLineEnding(edit.NewText, edit.EndOffset) ||
+			(edit.NewText == "" && edit.StartOffset == info.StartOffset)
+		if !keepsBreak {
+			last = next
+		}
+	}
 	return first, last, true
 }
 
@@ -672,11 +686,17 @@ func startsWithLineEnding(text string) bool {
 	return strings.HasPrefix(text, "\n") || strings.HasPrefix(text, "\r")
 }
 
-// endsWithLineEnding reports whether text ends with a line ending: a line
-// feed, or a carriage return alone, as the engine writes a fix's line feeds
-// in a file whose lines end with one.
-func endsWithLineEnding(text string) bool {
-	return strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
+// endsWithLineEnding reports whether text, written into the content right
+// before offset, ends with a line ending: a line feed, or a carriage return
+// alone, as the engine writes a fix's line feeds in a file whose lines end
+// with one. A carriage return that a line feed at offset follows makes one
+// line ending with it, which ends the line after offset instead.
+func (d disabledLines) endsWithLineEnding(text string, offset int) bool {
+	if strings.HasSuffix(text, "\n") {
+		return true
+	}
+	content := d.file.Content
+	return strings.HasSuffix(text, "\r") && (offset >= len(content) || content[offset] != '\n')
 }
 
 // count returns the number of disabled lines among lines first to last.
