@@ -87,10 +87,13 @@ unified diff with `--format diff`, which writes nothing unless you add
 a file whose lines end with carriage returns alone shows as one line.
 
 A line ends with a line feed, a carriage return and a line feed, or a
-carriage return alone, as in CommonMark and markdownlint. Fixes keep each
-line's own line ending. A line that a fix adds takes the file's most common
-line ending, and a fix that would merge a carriage return and a line feed
-after it into one line ending is withheld.
+carriage return alone, as in CommonMark and markdownlint. In a file with a
+carriage return alone, fixes keep each line's own line ending. A line that
+a fix adds takes the file's most common line ending, and a fix that would
+merge a carriage return and a line feed after it into one line ending is
+withheld. In any other file, every newline that a fix writes takes the
+file's most common line ending, so a fix that rewrites lines of a file
+mixing LF and CRLF writes them all with that ending.
 
 Limit auto-fixing to specific rules with `--fix-rules`, which takes rule
 names, IDs and markdownlint tags.
