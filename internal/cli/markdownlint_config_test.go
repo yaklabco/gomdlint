@@ -656,7 +656,9 @@ func TestMarkdownlintConfig_MarkdownlintCLI2OptionsFile(t *testing.T) {
 
 // TestMigrate_FindsMarkdownlintCLI2OptionsFile covers migrate without an
 // input file in a directory whose only markdownlint configuration is an
-// options file: migrate finds it and converts its config key.
+// options file: migrate finds it and converts its config key. Its other
+// keys still configure markdownlint-cli2, so migrate advises deleting the
+// config key, not the file.
 func TestMigrate_FindsMarkdownlintCLI2OptionsFile(t *testing.T) {
 	inProject(t, map[string]string{".markdownlint-cli2.yaml": "config:\n  MD013: false\n"})
 
@@ -665,6 +667,8 @@ func TestMigrate_FindsMarkdownlintCLI2OptionsFile(t *testing.T) {
 	require.Equal(t, cli.ExitSuccess, got.code, got.stdout+got.stderr)
 	assert.Contains(t, got.stdout, "found markdownlint config")
 	assert.Contains(t, got.stdout, ".markdownlint-cli2.yaml")
+	assert.Contains(t, got.stdout, "you can now delete the config key of the markdownlint-cli2 options file")
+	assert.NotContains(t, got.stdout, "delete the old markdownlint configuration file")
 	written, err := os.ReadFile(".gomdlint.yml")
 	require.NoError(t, err)
 	assert.Contains(t, string(written), "MD013:\n    enabled: false")

@@ -263,6 +263,21 @@ func TestLoad_MarkdownlintCLI2Errors(t *testing.T) {
 		assert.True(t, strings.HasSuffix(result.Warnings[0], "); it is ignored"), result.Warnings[0])
 	})
 
+	t.Run("options file that cannot be opened beside a config file", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		configFile := writeMarkdownlint(t, dir, ".markdownlint.json", `{"MD009": false}`)
+		options := filepath.Join(dir, ".markdownlint-cli2.jsonc")
+
+		// The warning names the file once, not again in the error.
+		warnings := sideOptionsWarnings(options, configFile)
+		require.Len(t, warnings, 1)
+		assert.True(t, strings.HasPrefix(warnings[0], options+": cannot read it ("), warnings[0])
+		assert.True(t, strings.HasSuffix(warnings[0], "); it is ignored"), warnings[0])
+		assert.Equal(t, 1, strings.Count(warnings[0], options), warnings[0])
+	})
+
 	t.Run("JavaScript options file alone", func(t *testing.T) {
 		t.Parallel()
 

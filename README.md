@@ -945,6 +945,11 @@ Some of its fix checks are also stricter than they need to be.
   markdownlint config or a `markdownlint-configure-file` comment. gomdlint
   does not read TOML. A config written in TOML gets a warning or a config
   error, and a comment written in TOML configures nothing, with a warning.
+- markdownlint-cli2 reads markdownlint config files and options files only
+  in the directory it runs from and the directories below it. gomdlint
+  also looks for them upward from the working directory, so a
+  `.markdownlint-cli2.jsonc` file in a parent directory configures a run
+  from a subdirectory in gomdlint but not in markdownlint-cli2.
 - markdownlint-cli2 reads a `.markdownlint.json` or `.jsonc` file that
   starts with a byte order mark as YAML, because its JSON parser rejects the
   mark. YAML reads each comment in such a file together with the key after

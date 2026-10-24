@@ -94,3 +94,27 @@ func TestLoad_WarnsOnlyAboutConfigFilesItReads(t *testing.T) {
 		"both " + gomdlintConfig + " and " + markdownlintConfig + " exist; using " + gomdlintConfig,
 	}, result.Warnings)
 }
+
+// TestLoad_ExplicitConfigShadowsNothing covers a config file named with
+// --config in a directory that holds another config file. gomdlint reads
+// the named file because the option names it, not because its name comes
+// first there, so neither file shadows the other and nothing warns about
+// it, whichever of the two the option names.
+func TestLoad_ExplicitConfigShadowsNothing(t *testing.T) {
+	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		t.Run(name, func(t *testing.T) {
+			project := t.TempDir()
+			writeMarkdownlint(t, project, ".gomdlint.yml", "{}\n")
+			writeMarkdownlint(t, project, ".gomdlint.json", "{}\n")
+
+			explicit := filepath.Join(project, name)
+			result, err := Load(t.Context(), LoadOptions{
+				WorkingDir: project, ExplicitPath: explicit, IgnoreSystemConfig: true,
+				IgnoreUserConfig: true, IgnoreEnv: true, NonInteractive: true,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, []string{explicit}, result.LoadedFrom)
+			assert.Empty(t, result.Warnings)
+		})
+	}
+}

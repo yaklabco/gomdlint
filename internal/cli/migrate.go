@@ -139,7 +139,7 @@ func runMigrate(out io.Writer, flags *migrateFlags) error {
 		logger.Warn("review warnings above and verify the migrated configuration")
 	}
 
-	logger.Info("you can now delete the old markdownlint configuration file")
+	logger.Info(configloader.MigratedSourceAdvice(inputPath))
 
 	return nil
 }

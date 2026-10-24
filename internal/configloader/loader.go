@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"math"
 	"os"
@@ -177,10 +178,10 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 		}
 		paths.Explicit = explicitPath
 		paths.Project = ""
-		paths.Markdownlint = ""
+		paths.Markdownlint, paths.MarkdownlintCLI2 = "", ""
 	}
 	if opts.IgnoreMarkdownlint {
-		paths.Markdownlint = ""
+		paths.Markdownlint, paths.MarkdownlintCLI2 = "", ""
 	}
 
 	// Load and merge in order (lowest to highest precedence)
@@ -197,7 +198,10 @@ func Load(ctx context.Context, opts LoadOptions) (*LoadResult, error) {
 			result.IgnoreBaseDir = ignoreBase
 		}
 		result.LoadedFrom = append(result.LoadedFrom, path)
-		result.Warnings = append(result.Warnings, shadowWarnings(paths, path)...)
+		if path != paths.Explicit {
+			// --config names its file, so the file shadows nothing.
+			result.Warnings = append(result.Warnings, shadowWarnings(paths, path)...)
+		}
 		result.Warnings = append(result.Warnings, warnings...)
 		return nil
 	}
@@ -305,6 +309,11 @@ func sideOptionsWarnings(path, configFile string) []string {
 		options, root, err = readMarkdownlintCLI2Options(path, content)
 	}
 	if err != nil {
+		// The warning names the file, so an I/O error's path would repeat it.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			err = pathErr.Err
+		}
 		return []string{fmt.Sprintf("%s: cannot read it (%v); it is ignored", path, err)}
 	}
 	var warnings []string
@@ -433,7 +442,7 @@ func applyMarkdownlint(path string, opts LoadOptions, result *LoadResult) (*conf
 		} else {
 			result.MigrationPerformed = true
 			result.Notices = append(result.Notices,
-				fmt.Sprintf("saved the settings of %s as %s; you can delete the old file", path, target))
+				fmt.Sprintf("saved the settings of %s as %s; %s", path, target, MigratedSourceAdvice(path)))
 		}
 	}
 	if !result.MigrationPerformed {

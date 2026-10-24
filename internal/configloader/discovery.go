@@ -346,6 +346,20 @@ func findMarkdownlintConfig(dir string) string {
 	return readMarkdownlintDir(dir).source()
 }
 
+// MigratedSourceAdvice returns the advice, in a sentence without its final
+// period, for what to do with path, a markdownlint configuration whose
+// settings are now in a gomdlint config file. A markdownlint config file
+// can go. A markdownlint-cli2 options file holds keys that configure
+// markdownlint-cli2 itself and that migration leaves out, such as globs,
+// so only its config key can go.
+func MigratedSourceAdvice(path string) string {
+	if isMarkdownlintCLI2File(path) {
+		return "you can now delete the config key of the markdownlint-cli2 options file; " +
+			"its other keys still configure markdownlint-cli2"
+	}
+	return "you can now delete the old markdownlint configuration file"
+}
+
 // isMarkdownlintCLI2File reports whether path names a markdownlint-cli2
 // options file, as markdownlint-cli2 tells one: by a name that ends in
 // .markdownlint-cli2 and a supported extension.
