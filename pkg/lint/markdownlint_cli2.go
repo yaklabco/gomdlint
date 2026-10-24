@@ -89,6 +89,9 @@ func readMarkdownlintCLI2JSON(text []byte) (*MarkdownlintCLI2Options, error) {
 	}
 	options := &MarkdownlintCLI2Options{Syntax: MarkdownlintJSONC}
 	decoder := json.NewDecoder(bytes.NewReader(text))
+	// A number stays as its text, as one beyond float64's range, which
+	// JSON.parse reads as an infinity, fails to decode as a float64.
+	decoder.UseNumber()
 	token, err := decoder.Token()
 	if err != nil {
 		return nil, fmt.Errorf("read JSON: %w", err)

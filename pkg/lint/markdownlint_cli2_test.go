@@ -48,6 +48,9 @@ func TestReadMarkdownlintCLI2Options(t *testing.T) {
 		{name: "JSON without config", syntax: lint.MarkdownlintJSONC, text: `{"ignores": []}`, keys: []string{"ignores"}},
 		{name: "JSON list", syntax: lint.MarkdownlintJSONC, text: `[1]`, file: "a list"},
 		{name: "JSON null", syntax: lint.MarkdownlintJSONC, text: `null`},
+		// JSON.parse reads a number beyond float64's range as an infinity.
+		{name: "JSON number beyond float64", syntax: lint.MarkdownlintJSONC, text: `1e400`, file: "a number"},
+		{name: "JSON negative number beyond float64", syntax: lint.MarkdownlintJSONC, text: `-1e400`, file: "a number"},
 		{
 			name: "YAML", syntax: lint.MarkdownlintYAML,
 			text: "config:\n  MD009: true\n  whitespace: false\nignores:\n  - x.md\n",
