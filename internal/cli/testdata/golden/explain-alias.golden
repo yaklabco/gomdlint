@@ -23,6 +23,19 @@ Options, under rules.first-line-heading.options:
 
 Fix: There is no automatic fix. Only the author can write the title.
 
+This document breaks the rule:
+  | This guide explains how to install the tool.
+  |
+  | # Guide
+
+gomdlint reports:
+  1:1 First line should be a top-level heading
+
+This document follows the rule:
+  | # Guide
+  |
+  | This guide explains how to install the tool.
+
 Configure:
   rules:
     first-line-heading:

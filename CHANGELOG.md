@@ -230,6 +230,17 @@ formats change. The first entries under Changed may need action.
   of its `--rule-format`.
 - Shell completion completes the argument of `gomdlint explain`, and the
   `--category` and `--tag` filters of `gomdlint rules`.
+- A rule reference under `docs/rules` has a page for each rule and an index,
+  generated from the catalog, and the README's rule list is generated with
+  it. The heading, blockquote, HTML and spelling rules have examples, shown
+  on their pages and by `gomdlint explain`: a document that breaks the rule,
+  what gomdlint reports, and the fixed document or one that follows the
+  rule. The golden tests generate the reports and fixed documents, so the
+  examples show tested output.
+- `docs/schema/gomdlint.schema.json` is a JSON Schema of the configuration,
+  generated from the catalog. Editors that read it, such as VS Code with the
+  YAML extension, complete rule names, IDs, markdownlint names and options,
+  describe each rule, and flag unknown rules and options.
 - `--enable`, `--disable` and `--fix-rules` accept markdownlint tags, such as
   `whitespace`, which stand for every rule they cover.
 - Unknown rule names get suggestions in the rule flags, config files,

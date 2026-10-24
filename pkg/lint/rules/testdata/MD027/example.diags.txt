@@ -1,0 +1,1 @@
+example.input.md:3:3 warning Multiple spaces (2) after blockquote symbol (MD027/no-multiple-space-blockquote) [fixable]

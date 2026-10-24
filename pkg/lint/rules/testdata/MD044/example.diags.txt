@@ -1,0 +1,2 @@
+example.input.md:3:13 warning Proper name "javascript" should be "JavaScript" (MD044/proper-names) [fixable]
+example.input.md:3:36 warning Proper name "github" should be "GitHub" (MD044/proper-names) [fixable]

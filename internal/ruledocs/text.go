@@ -201,6 +201,13 @@ func WriteTextPage(writer io.Writer, entry Entry, asked string) error {
 	}
 	page.add(textOptions(entry)...)
 	page.prose("Fix: ", entry.Fix)
+	parts, err := exampleParts(entry)
+	if err != nil {
+		return err
+	}
+	for _, section := range textExample(parts) {
+		page.add(section...)
+	}
 
 	if example := exampleConfig(entry); example != nil {
 		lines := make([]string, 0, len(example)+1)
