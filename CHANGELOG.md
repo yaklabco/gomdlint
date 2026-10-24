@@ -88,10 +88,10 @@ formats change. The first entries under Changed may need action.
   lists only the markers that the rows show, so a table reads the same
   without colour.
 - Columns count UTF-16 code units instead of bytes in text, table and JSON
-  output and in the report of the `analysis` package, the unit markdownlint
-  and markdownlint-cli2 report and SARIF output uses. A finding after
-  multibyte text points at its target, and an emoji or another character
-  outside the Basic Multilingual Plane counts two columns, as in
+  output and in the report of the `analysis` package. markdownlint and
+  markdownlint-cli2 report this unit, and SARIF output already used it. A
+  finding after multibyte text points at its target, and an emoji or another
+  character outside the Basic Multilingual Plane counts two columns, as in
   markdownlint. Ill-formed UTF-8 counts as markdownlint reads it, one column
   for each sequence that decodes to a replacement character. The caret under
   a source line in text output still sits under the target. JSON fix offsets
