@@ -65,8 +65,15 @@ func TestRulesBuildFindingsAtDefaultSeverity(t *testing.T) {
 			require.True(t, ok, "rule %s", tc.RuleID)
 			input, err := os.ReadFile(tc.InputPath)
 			require.NoError(t, err)
-			options := mustGoldenRun(t, tc).cfg.Rules[tc.RuleID].Options
-			for _, diag := range applyRuleWithOptions(t, rule, string(input), options) {
+			// Parse with the case's flavor and apply its options, as the
+			// golden case does.
+			run := mustGoldenRun(t, tc)
+			file, err := run.parser.Parse(context.Background(), tc.InputPath, input)
+			require.NoError(t, err)
+			ruleCfg := &config.RuleConfig{Options: engineOptions(rule.ID(), run.cfg.Rules[tc.RuleID].Options)}
+			diags, err := rule.Apply(lint.NewRuleContext(context.Background(), file, run.cfg, ruleCfg))
+			require.NoError(t, err)
+			for _, diag := range diags {
 				assert.Equal(t, rule.DefaultSeverity(), diag.Severity, "line %d", diag.StartLine)
 			}
 		})
