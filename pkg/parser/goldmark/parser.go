@@ -159,15 +159,21 @@ func (p *Parser) parse(
 	// it, and spans keep counting from the start of the file.
 	base := bomLength(snapshot.Content)
 
-	// Parse with goldmark.
+	// Parse with goldmark. goldmark ends lines only at line feeds, so it
+	// parses a copy in which a carriage return that ends a line is a line
+	// feed (see mdast.LineFeedContent), with the front matter blanked. Both
+	// keep every offset, so goldmark's positions are positions in the content.
 	snapshot.FrontMatterLines = frontMatterLines(snapshot, base)
 	parseContent := snapshot.Content
-	if snapshot.FrontMatterLines > 0 {
+	if snapshot.FrontMatterLines > 0 || mdast.HasBareCarriageReturn(snapshot.Content) {
 		parseContent = copyContent(snapshot.Content)
-		end := snapshot.Lines[snapshot.FrontMatterLines-1].EndOffset
-		for idx := range end {
-			if parseContent[idx] != '\n' && parseContent[idx] != '\r' {
-				parseContent[idx] = ' '
+		mdast.WriteLineFeeds(parseContent)
+		if snapshot.FrontMatterLines > 0 {
+			end := snapshot.Lines[snapshot.FrontMatterLines-1].EndOffset
+			for idx := range end {
+				if parseContent[idx] != '\n' && parseContent[idx] != '\r' {
+					parseContent[idx] = ' '
+				}
 			}
 		}
 	}

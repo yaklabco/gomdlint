@@ -690,6 +690,17 @@ func TestMultipleBlankLinesRule_EachLine(t *testing.T) {
 			name: "carriage return line endings", input: "# T\r\n\r\nA\r\n\r\n\r\n\r\nB\r\n",
 			wantLines: []int{5, 6}, wantFound: []int{2, 3}, wantFix: "# T\r\n\r\nA\r\n\r\nB\r\n",
 		},
+		{
+			name: "carriage returns alone", input: "# T\r\rA\r\r\r\rB\r",
+			wantLines: []int{5, 6}, wantFound: []int{2, 3}, wantFix: "# T\r\rA\r\rB\r",
+		},
+		{
+			// Deleting the CRLF pair would join the carriage return that ends
+			// "A" to the line feed of the next line, so the fix deletes the
+			// next line instead.
+			name: "blank lines between a carriage return and a line feed", input: "# T\r\rA\r\r\n\nB\n",
+			wantLines: []int{5}, wantFound: []int{2}, wantFix: "# T\r\rA\r\r\nB\n",
+		},
 	}
 
 	for _, tt := range tests {

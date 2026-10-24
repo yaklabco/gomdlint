@@ -424,7 +424,8 @@ func (t *tokenizer) consumeText() {
 	}
 }
 
-// consumeNewline consumes a newline (LF or CRLF).
+// consumeNewline consumes a line ending: LF, CRLF, or a CR that no LF
+// follows.
 func (t *tokenizer) consumeNewline() {
 	if t.pos >= len(t.content) {
 		return

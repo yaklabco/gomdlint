@@ -337,18 +337,13 @@ func isASCII(text string) bool {
 // a fenced code block that both parsers read alike (see sharedBlocks.vet).
 //
 // No definition counts where markdownlint may not take the parser's front
-// matter (see markdownlintFrontMatterLines), where a carriage return that
-// no line feed follows ends a line, as it does for micromark and not for
-// the parser, or where micromark drops a byte order mark that the parser
-// reads as text (see micromarkDropsByteOrderMark). A definition that does
-// not count leaves its calls read as goldmark reads them, as before MD052
-// read footnotes.
+// matter (see markdownlintFrontMatterLines), or where micromark drops a byte
+// order mark that the parser reads as text (see
+// micromarkDropsByteOrderMark). A definition that does not count leaves its
+// calls read as goldmark reads them, as before MD052 read footnotes.
 func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 	file := ctx.File
 	labels := make(map[string]bool)
-	if hasLoneCarriageReturn(file.Content) {
-		return labels
-	}
 	if frontMatter, ok := markdownlintFrontMatterLines(file); !ok || frontMatter != file.FrontMatterLines ||
 		micromarkDropsByteOrderMark(file) {
 		return labels
@@ -554,21 +549,6 @@ func topLevelLines(ctx *lint.RuleContext) []bool {
 		topLevel[line] = open == 0 && !html[line] && !ctx.IsLineInCodeBlock(line)
 	}
 	return topLevel
-}
-
-// hasLoneCarriageReturn reports whether content holds a carriage return
-// that no line feed follows.
-func hasLoneCarriageReturn(content []byte) bool {
-	for {
-		idx := bytes.IndexByte(content, '\r')
-		if idx < 0 {
-			return false
-		}
-		if idx+1 == len(content) || content[idx+1] != '\n' {
-			return true
-		}
-		content = content[idx+2:]
-	}
 }
 
 // micromarkDropsByteOrderMark reports whether the text that markdownlint

@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -468,10 +469,11 @@ func TestCodeBlockLanguageRule_LineEndings(t *testing.T) {
 		{name: "mixed line endings without a language",
 			input:        "# Title\r\n\n```\r#!/bin/bash\necho hi\r\n```\n",
 			options:      allowBashOnly,
-			wantMessages: []string{"Fenced code block has no language specified"}},
+			wantMessages: []string{"Fenced code block has no language specified"},
+			wantFixed:    "# Title\r\n\n```bash\r#!/bin/bash\necho hi\r\n```\n"},
 		{
-			// GFM's code starts with "echo hi", which goldmark reads into the
-			// fence line, so the shebang it sees first is not the code's start.
+			// The code starts with "echo hi", so a shebang on a later line
+			// names no language.
 			name:         "bare carriage return before a line that starts with a shebang",
 			input:        "# Title\n\n```\recho hi\n#!/bin/bash\necho x\n```\n",
 			wantMessages: []string{"Fenced code block has no language specified"},
@@ -506,24 +508,40 @@ func TestCodeBlockLanguageRule_LineEndings(t *testing.T) {
 	}
 }
 
-// TestCodeBlockLanguageRule_CarriageReturnLines verifies that MD040 offers no
-// fix in a document whose lines end in carriage returns alone. goldmark ends
-// lines only at line feeds, so it reads such a document as one line and finds
-// no fence there, where markdownlint 0.41.1 reports line 3 of each: a missing
-// language and an info string with a title. Whatever MD040 reports there, a
-// fix must not change the document.
+// TestCodeBlockLanguageRule_CarriageReturnLines verifies that MD040 reads a
+// document whose lines end with carriage returns alone as it reads the same
+// document with line feeds, as markdownlint 0.41.1 does: it reports line 3
+// of the first two, a missing language and an info string with a title, and
+// fixes the first.
 func TestCodeBlockLanguageRule_CarriageReturnLines(t *testing.T) {
 	options := map[string]any{"allowed_languages": []any{"bash"}, "language_only": true}
-	for _, input := range []string{
-		"# Title\r\r```\r#!/bin/bash\recho hi\r```\r",
-		"# Title\r\r```bash title=x\recho hi\r```\r",
-		"# Title\r\r```bash\recho hi\r```\r",
-	} {
-		diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), input, options)
-		for _, diag := range diags {
-			assert.False(t, diag.HasFix(), "%q keeps a fix", input)
+	tests := []struct {
+		input     string
+		wantLines []int
+		wantFixed string // Output after the fixes; empty means unchanged.
+	}{
+		{input: "# Title\n\n```\n#!/bin/bash\necho hi\n```\n", wantLines: []int{3}, wantFixed: "# Title\n\n```bash\n#!/bin/bash\necho hi\n```\n"},
+		{input: "# Title\n\n```bash title=x\necho hi\n```\n", wantLines: []int{3}},
+		{input: "# Title\n\n```bash\necho hi\n```\n"},
+	}
+	toCR := strings.NewReplacer("\n", "\r")
+	for _, tt := range tests {
+		for _, input := range []string{tt.input, toCR.Replace(tt.input)} {
+			diags := applyRuleWithOptions(t, NewCodeBlockLanguageRule(), input, options)
+			lines := []int{}
+			for _, diag := range diags {
+				lines = append(lines, diag.StartLine)
+			}
+			assert.Equal(t, append([]int{}, tt.wantLines...), lines, "%q", input)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			if input != tt.input {
+				want = toCR.Replace(want)
+			}
+			assert.Equal(t, want, applyAllEdits(t, input, diags))
 		}
-		assert.Equal(t, input, applyAllEdits(t, input, diags))
 	}
 }
 

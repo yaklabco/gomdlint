@@ -174,7 +174,7 @@ func listTokens(file *mdast.FileSnapshot, list *mdast.Node, allow fixAllowance) 
 // not the layout's takes no regions of its own: its regions become those of
 // its container.
 func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *outlineModel {
-	layout := newDocLayout(recordingMarkdown(verifier.parser.Flavor()), verifier.file.Content)
+	layout := newDocLayout(recordingMarkdown(verifier.parser.Flavor()), verifier.content)
 	if layout == nil {
 		return nil
 	}

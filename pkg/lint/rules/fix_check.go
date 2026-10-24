@@ -57,11 +57,15 @@ const individualFixChecks = 16
 // they are kept one at a time in document order, each only when the fixes
 // kept before it and it still leave the document unchanged.
 func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagnostic {
+	if !slices.ContainsFunc(diags, func(diag lint.Diagnostic) bool { return len(diag.FixEdits) > 0 }) {
+		return diags
+	}
+	content := checkedContent(ctx.File.Content)
 	var candidates []int
 	for idx := range diags {
 		switch {
 		case len(diags[idx].FixEdits) == 0:
-		case !changesContent(ctx.File.Content, diags[idx].FixEdits):
+		case !changesContent(content, checkedEdits(diags[idx].FixEdits)):
 			diags[idx].FixEdits = nil
 		default:
 			candidates = append(candidates, idx)
@@ -74,7 +78,7 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 	if ctx.Config != nil && ctx.Config.Flavor != "" {
 		flavor = ctx.Config.Flavor
 	}
-	check := newFixCheck(ctx.File, flavor)
+	check := newFixCheckOf(ctx.File, content, flavor)
 	if !check.htmlBenign() {
 		for _, idx := range candidates {
 			diags[idx].FixEdits = nil
@@ -332,7 +336,7 @@ func (c *fixCheck) keptInOrder(diags []lint.Diagnostic, kept []int) ([]int, int)
 		for _, other := range together {
 			edits = append(edits, diags[other].FixEdits...)
 		}
-		accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(c.content))
+		accepted, _, _, err := fix.PrepareEditsFiltered(checkedEdits(edits), len(c.content))
 		states = nil
 		if err == nil {
 			states = c.regionStates(accepted)
@@ -365,7 +369,7 @@ func (c *fixCheck) tryAdd(states []*regionState, edits []fix.TextEdit) (bool, bo
 	if states == nil {
 		return false, false, nil
 	}
-	prepared, err := fix.PrepareEdits(edits, len(c.content))
+	prepared, err := fix.PrepareEdits(checkedEdits(edits), len(c.content))
 	if err != nil {
 		return false, false, nil
 	}
@@ -413,7 +417,9 @@ func (c *fixCheck) keptInBatches(diags []lint.Diagnostic, batch []int) []int {
 // document's signatures would; where that cannot be shown, it parses the
 // whole document.
 type fixCheck struct {
-	file      *mdast.FileSnapshot
+	file *mdast.FileSnapshot
+	// content is the file's content as the checks read it (see
+	// checkedContent).
 	content   []byte
 	flavor    config.Flavor
 	markdowns []goldmark.Markdown
@@ -432,11 +438,17 @@ type fixCheck struct {
 }
 
 func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
+	return newFixCheckOf(file, checkedContent(file.Content), flavor)
+}
+
+// newFixCheckOf returns a fixCheck for file, whose content as the checks read
+// it is content (see checkedContent).
+func newFixCheckOf(file *mdast.FileSnapshot, content []byte, flavor config.Flavor) *fixCheck {
 	markdowns := []goldmark.Markdown{goldmark.New(goldmark.WithExtensions(gmext.GFM))}
 	if flavor != config.FlavorGFM {
 		markdowns = append(markdowns, goldmark.New())
 	}
-	return &fixCheck{file: file, content: file.Content, flavor: flavor, markdowns: markdowns}
+	return &fixCheck{file: file, content: content, flavor: flavor, markdowns: markdowns}
 }
 
 // keeps reports whether applying edits leaves the render signatures of the
@@ -446,7 +458,7 @@ func (c *fixCheck) keeps(edits []fix.TextEdit) bool {
 	if len(edits) == 0 || !c.htmlBenign() {
 		return false
 	}
-	prepared, err := fix.PrepareEdits(edits, len(c.content))
+	prepared, err := fix.PrepareEdits(checkedEdits(edits), len(c.content))
 	if err != nil {
 		return false
 	}
@@ -512,7 +524,7 @@ func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
 	for _, idx := range indexes {
 		edits = append(edits, diags[idx].FixEdits...)
 	}
-	accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(c.content))
+	accepted, _, _, err := fix.PrepareEditsFiltered(checkedEdits(edits), len(c.content))
 	if err != nil || !c.htmlBenign() {
 		return false
 	}

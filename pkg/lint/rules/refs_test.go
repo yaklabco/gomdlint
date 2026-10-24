@@ -951,10 +951,12 @@ func checkFootnoteCases(t *testing.T, tests []footnoteCase) {
 // pair is reported with shortcut_syntax where main reports it. Two
 // definitions in a row count, as micromark reads each, and so does a
 // definition right after front matter, at the start of micromark's
-// document.
+// document, and one on a line that a carriage return alone ends.
 func TestReferenceLinkImagesRule_CertainFootnotes(t *testing.T) {
 	checkFootnoteCases(t, []footnoteCase{
 		{name: "definition before the call", input: "# T\n\n[^first]: Defined before.\n\nUse [^first] here.\n"},
+		{name: "lines that end with carriage returns alone", input: "# T\r\rUse [^n] and [x][^n].\r\r[^n]: Note text.\r"},
+		{name: "mixed line endings", input: "# T\r\n\rUse [^n] and [x][^n].\n\r[^n]: Note text.\r\n"},
 		{name: "definition after the call", input: "# T\n\nUse [^first] here.\n\n[^first]: Defined after.\n"},
 		{name: "labels in another case", input: "# T\n\nUse [^Second].\n\n[^second]: Two words.\n"},
 		{name: "definition on the first line", input: "[^n]: Note text.\n\nUse [^n] and [x][^n].\n"},
@@ -1347,9 +1349,9 @@ func TestReferenceLinkImagesRule_UncertainFootnotes(t *testing.T) {
 
 // TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions checks
 // MD052 where markdownlint may take other lines than the parser for front
-// matter, a carriage return alone ends a line, or the text that
-// markdownlint gives micromark starts with a byte order mark. No
-// definition counts there, and MD052 reports what main reports.
+// matter, or the text that markdownlint gives micromark starts with a byte
+// order mark. No definition counts there, and MD052 reports what main
+// reports.
 func TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions(t *testing.T) {
 	checkFootnoteCases(t, []footnoteCase{
 		{
@@ -1369,12 +1371,6 @@ func TestReferenceLinkImagesRule_FootnotesWithoutCertainDefinitions(t *testing.T
 			input:    "---\ntitle: x\u2028---\n---\n\n[^n]: Note text.\n\nUse [^n] and [x][^n].\n",
 			want:     []footnotePosition{{5, 1}, {7, 5}, {7, 14}},
 			wantFull: []footnotePosition{{7, 14}},
-		},
-		{
-			name:     "carriage return alone",
-			input:    "# T\r\rUse [^n] and [x][^n].\r\r[^n]: Note text.\r",
-			want:     []footnotePosition{{1, 10}, {1, 19}, {1, 29}},
-			wantFull: []footnotePosition{{1, 19}},
 		},
 		{name: "two byte order marks", input: "\ufeff\ufeffIntro\n\n[^b]: note text.\n\nUse [^b].\n", want: []footnotePosition{{3, 1}, {5, 5}}},
 		{
@@ -1463,16 +1459,6 @@ func TestMicromarkDropsByteOrderMark(t *testing.T) {
 			assert.Equal(t, tt.want, micromarkDropsByteOrderMark(parseForCheck(t, tt.input)))
 		})
 	}
-}
-
-// TestHasLoneCarriageReturn checks for the line ending that micromark reads
-// and the parser does not: a carriage return that no line feed follows.
-func TestHasLoneCarriageReturn(t *testing.T) {
-	assert.False(t, hasLoneCarriageReturn([]byte("a\r\nb\r\n")))
-	assert.False(t, hasLoneCarriageReturn([]byte("a\nb")))
-	assert.True(t, hasLoneCarriageReturn([]byte("a\rb\n")))
-	assert.True(t, hasLoneCarriageReturn([]byte("a\r\nb\r")))
-	assert.True(t, hasLoneCarriageReturn([]byte("a\r\r\n")))
 }
 
 // TestReferenceLinkImagesRule_BlankLabelsAndCheckboxes checks MD052 where

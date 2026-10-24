@@ -84,10 +84,12 @@ func NewRuleContext(
 	}
 }
 
-// LineEnding returns the file's dominant line ending, fix.LineEndingLF or
-// fix.LineEndingCRLF. Rules build fix text with "\n" and the engine converts
-// it to this ending; rules only need it to compute lengths or offsets of
-// text they insert.
+// LineEnding returns the file's dominant line ending, fix.LineEndingLF,
+// fix.LineEndingCRLF or fix.LineEndingCR. Rules build fix text with "\n" and
+// the engine converts it to this ending; rules only need it to compute
+// lengths or offsets of text they insert. In a file with a carriage return
+// that no line feed follows, the engine may write some newlines with another
+// ending, to keep the file's line endings apart (see fix.LineEndingWriter).
 func (rc *RuleContext) LineEnding() string {
 	if rc.lineEnding == "" {
 		var content []byte

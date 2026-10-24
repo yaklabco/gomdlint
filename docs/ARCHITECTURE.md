@@ -68,7 +68,8 @@ implementations. Custom rules only need to implement `Apply()`.
 
 A rule attaches fix edits to `Diagnostic.FixEdits`. The edits of one
 diagnostic form one fix, applied together or not at all, and `"\n"` in their
-text is written with the file's line ending.
+text is written with the file's line ending (see
+[Fix Engine](#fix-engine)).
 
 ### Parser Interface
 
@@ -240,8 +241,8 @@ returns, a recovered panic (`ErrRulePanic`) or an invalid fix
 lines where their rule is disabled, applies the resolved severity, and
 validates each finding's fix. A finding keeps its fix only when `--fix`
 would apply it (`ResolvedRule.Fixable`), and newlines in fix text are
-written with the file's dominant line ending (`fix.DetectLineEnding`).
-Finally the engine selects the edits for this pass (see
+written with the file's line endings (`fix.LineEndingWriter`, see
+[Fix Engine](#fix-engine)). Finally the engine selects the edits for this pass (see
 [Fix Engine](#fix-engine)) and returns a `FileResult` with the diagnostics,
 `Edits`, `DeferredEdits`, `SkippedEdits`, `RuleErrors` and `Notices`.
 
@@ -270,6 +271,16 @@ is the package documentation of `pkg/mdast`. Spans are half-open byte
 ranges, a child's full span lies inside its parent's, siblings never
 overlap, and block spans start after any container prefix, such as the `>`
 of a blockquote.
+
+A line ends with a line feed, a carriage return and a line feed, or a
+carriage return alone, as in CommonMark and markdownlint. The line model
+(`mdast.BuildLines`), and so every line and column, reads all three.
+goldmark ends lines only at line feeds and reads a carriage return alone as
+a space, so the parser gives goldmark a copy of the content with each such
+carriage return written as a line feed (`mdast.LineFeedContent`). The copy
+has the same length, so every goldmark offset is an offset into the content,
+which the snapshot keeps as it was. Code that parses document text with
+goldmark directly, or scans it for line feeds, reads that copy too.
 
 The parser also reads the real ordered list delimiter and fence character,
 parses past a leading byte order mark with stable offsets, records each
@@ -351,6 +362,24 @@ A rule proposes one fix per finding as a set of `fix.TextEdit` byte ranges.
 content, no two edits overlap, and no edit splits a CRLF pair or a UTF-8
 character. An invalid fix is dropped from its finding only.
 
+Fixes keep each line's own line ending. `fix.LineEndingWriter` writes each
+`"\n"` of fix text with the file's dominant line ending
+(`fix.DetectLineEnding`) of the original file, in every pass: LF, CRLF, or
+a carriage return alone. A file without a carriage return alone gets
+nothing more, as before. In a file with one, or in a pass that writes such
+carriage returns, a carriage return and a line feed after it would make one
+CRLF line ending, so the writer keeps them apart. An edit that rewrites
+lines, holding as many line endings as the text it replaces, writes the
+line endings it replaces, in order, unless that would join a line ending
+at either end of the edit. Where the dominant ending would make one CRLF
+line ending with a carriage return before the edit or a line feed after
+it, the edit's newlines are written as a carriage return or a line feed
+instead. A fix that would still put a carriage return that ends a line
+right before a line feed, as a deletion between the two does, is withheld.
+Fixes that would do it together are resolved apart (`resolveApart`): the
+one that comes last is skipped, like a fix in conflict, and waits for the
+next pass.
+
 The engine then withholds every fix that changes or makes a possible task
 list checkbox (`pkg/lint/checkbox_guard.go`), whatever rule offers it, and
 reports its finding without a fix. micromark and GitHub's cmark-gfm read
@@ -401,7 +430,8 @@ next pass.
 `fix.GenerateDiff` builds the unified diff for `--format diff`. It compares
 lines with their line endings, using Myers' algorithm in linear space with a
 work budget for pathological inputs. Where a file lacks a final newline, it
-prints `\ No newline at end of file`.
+prints `\ No newline at end of file`. Its lines end at line feeds only, as
+`diff` and `patch` read them, so the diff stays a patch that applies.
 
 ## Fix Checks
 
@@ -413,7 +443,10 @@ three checkers. A checker applies the fixes, parses the result again with
 the document's flavor, compares it with the original, and withholds any fix
 that changes the document in a way the rule does not intend. The finding
 stays, without its fix. Each checker checks fixes alone and together,
-because the engine may apply any subset of them.
+because the engine may apply any subset of them. The checkers read the
+document, and the text of fixes, with each carriage return that ends a line
+written as a line feed (`checkedContent` in `fix_line_endings.go`), so a
+rule's `"\n"` is a line ending of its own there, as the engine writes it.
 
 - `fixcheck.go` serves the heading, emphasis, thematic break and proper name
   rules: MD003, MD018 to MD023, MD026, MD035 to MD037, MD044, MD049 and

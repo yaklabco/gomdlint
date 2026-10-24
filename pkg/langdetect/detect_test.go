@@ -34,6 +34,10 @@ func TestDetect_WholeBlockEvidence(t *testing.T) {
 		{"dockerfile", "FROM golang:1.21\nWORKDIR /app\nCOPY . .\nRUN go build", "dockerfile"},
 		{"dockerfile with a lowercase stage keyword", "FROM golang:1.21 as build\nRUN go build\n", "dockerfile"},
 		{"dockerfile with comments and continuations", "# build stage\nFROM golang:1.21 AS build\nRUN apt-get update && \\\n    apt-get install -y git\nCMD [\"app\"]\n", "dockerfile"},
+		// A carriage return that no line feed follows ends a line too.
+		{"shebang before a carriage return", "#!/bin/bash\recho hello\r", "bash"},
+		{"unified diff with carriage returns", "--- a/f\r+++ b/f\r@@ -1 +1 @@\r-old\r+new\r", "diff"},
+		{"dockerfile with carriage returns", "FROM golang:1.21\rWORKDIR /app\rRUN go build\r", "dockerfile"},
 	}
 
 	for _, tt := range tests {

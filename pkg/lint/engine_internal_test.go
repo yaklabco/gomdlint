@@ -25,7 +25,7 @@ func TestSelectEdits_SelectsAgainWhenTheSelectionChangesNothing(t *testing.T) {
 	}
 
 	var result FileResult
-	selectEdits(&result, fixes, content, blocks)
+	selectEdits(&result, fixes, content, blocks, false)
 
 	assert.Equal(t, []fix.TextEdit{{StartOffset: 3, EndOffset: 4, NewText: "b"}}, result.Edits,
 		"the rules whose fixes changed nothing together sit out, and TEST003 gets the block")
@@ -33,7 +33,7 @@ func TestSelectEdits_SelectsAgainWhenTheSelectionChangesNothing(t *testing.T) {
 	assert.Empty(t, result.DeferredEdits)
 
 	var alone FileResult
-	selectEdits(&alone, fixes[:2], content, blocks)
+	selectEdits(&alone, fixes[:2], content, blocks, false)
 
 	assert.Len(t, alone.Edits, 2, "with no fix waiting, the pipeline sees that the fixes make no progress")
 	assert.Empty(t, alone.DeferredEdits)

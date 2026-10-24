@@ -109,7 +109,10 @@ func headingAttrs(level int, style HeadingStyle) string {
 // fixChecker collects the fixes that a rule offers and keeps those that are
 // safe each on its own and all together.
 type fixChecker struct {
-	ctx     *lint.RuleContext
+	ctx *lint.RuleContext
+	// content is the document's content as the checks read it (see
+	// checkedContent).
+	content []byte
 	pending []pendingFix
 	// before is the outline of the document as it is, parsed when first
 	// needed; ready reports whether that parse worked.
@@ -133,7 +136,11 @@ type pendingFix struct {
 
 // newFixChecker returns a fixChecker for a rule's run.
 func newFixChecker(ctx *lint.RuleContext) *fixChecker {
-	return &fixChecker{ctx: ctx, children: blockChildren{}}
+	var content []byte
+	if ctx.File != nil {
+		content = checkedContent(ctx.File.Content)
+	}
+	return &fixChecker{ctx: ctx, content: content, children: blockChildren{}}
 }
 
 // offer records a fix and returns builder, so that a diagnostic carries its
@@ -173,7 +180,7 @@ func (c *fixChecker) filter(diags []lint.Diagnostic) []lint.Diagnostic {
 // document's heading anchors, when its rule shows it local and it cannot
 // reach the front matter, and against the whole document otherwise.
 func (c *fixChecker) safeAlone(pending pendingFix) bool {
-	if !pending.intent.local || touchesFrontMatter(c.ctx.File, pending.edits) {
+	if !pending.intent.local || touchesFrontMatter(c.ctx.File, c.content, pending.edits) {
 		return c.documentKept(pending.edits, []fixIntent{pending.intent})
 	}
 	return c.localKept(pending)
@@ -183,7 +190,7 @@ func (c *fixChecker) safeAlone(pending pendingFix) bool {
 // its intent says, and leaves the headings' anchors alone when the document
 // could refer to them.
 func (c *fixChecker) localKept(pending pendingFix) bool {
-	window, ok := checkWindow(c.ctx, pending.edits, []fixIntent{pending.intent}, c.children)
+	window, ok := checkWindow(c.ctx, c.content, pending.edits, []fixIntent{pending.intent}, c.children)
 	if !ok || !slices.EqualFunc(window.want, window.after, sameBlock) {
 		return false
 	}
@@ -241,7 +248,7 @@ func (c *fixChecker) safeTogether(candidates []int) []int {
 func (c *fixChecker) outline() (docOutline, bool) {
 	if c.before == nil {
 		c.before = &docOutline{}
-		if doc, ok := reparse(c.ctx, c.ctx.File.Content); ok {
+		if doc, ok := reparse(c.ctx, c.content); ok {
 			*c.before = outlineOf(doc)
 			c.ready = true
 		}
@@ -258,7 +265,7 @@ func (c *fixChecker) documentKept(edits []fix.TextEdit, intents []fixIntent) boo
 	if !ok || len(edits) == 0 {
 		return false
 	}
-	content, ok := applyShiftedEdits(c.ctx.File.Content, edits, 0)
+	content, ok := applyShiftedEdits(c.content, edits, 0)
 	if !ok {
 		return false
 	}
@@ -291,7 +298,10 @@ func editsKey(edits []fix.TextEdit) string {
 // fixes whose effects stay there: front matter, reference definitions and
 // heading anchors elsewhere are out of its sight.
 func fixesKeepDocument(ctx *lint.RuleContext, edits []fix.TextEdit, intents []fixIntent) bool {
-	window, ok := checkWindow(ctx, edits, intents, nil)
+	if ctx.File == nil {
+		return false
+	}
+	window, ok := checkWindow(ctx, checkedContent(ctx.File.Content), edits, intents, nil)
 	return ok && slices.EqualFunc(window.want, window.after, sameBlock)
 }
 
@@ -303,11 +313,13 @@ type windowCheck struct {
 	start, end          int
 }
 
-// checkWindow parses the blocks around edits before and after applying them.
-// ok is false when the edits do not apply or the intents cannot be met.
-// cache, which may be nil, keeps the block children it looks up.
+// checkWindow parses the blocks around edits before and after applying them
+// to content, the document's content as checkedContent gives it. ok is false
+// when the edits do not apply or the intents cannot be met. cache, which may
+// be nil, keeps the block children it looks up.
 func checkWindow(
 	ctx *lint.RuleContext,
+	content []byte,
 	edits []fix.TextEdit,
 	intents []fixIntent,
 	cache blockChildren,
@@ -339,7 +351,7 @@ func checkWindow(
 		prefix = "\n"
 	}
 	shift := len(prefix) - start
-	before := append([]byte(prefix), file.Content[start:end]...)
+	before := append([]byte(prefix), content[start:end]...)
 	after, ok := applyShiftedEdits(before, edits, shift)
 	if !ok {
 		return windowCheck{}, false
@@ -368,8 +380,9 @@ func checkWindow(
 
 // touchesFrontMatter reports whether edits could change the document's front
 // matter: they touch its first line, or that line could open front matter
-// and a line they edit could close it, before or after the edit.
-func touchesFrontMatter(file *mdast.FileSnapshot, edits []fix.TextEdit) bool {
+// and a line they edit could close it, before or after the edit. content is
+// the document's content as checkedContent gives it.
+func touchesFrontMatter(file *mdast.FileSnapshot, content []byte, edits []fix.TextEdit) bool {
 	if len(file.Lines) == 0 {
 		return false
 	}
@@ -383,7 +396,7 @@ func touchesFrontMatter(file *mdast.FileSnapshot, edits []fix.TextEdit) bool {
 		return false
 	}
 	closes := func(text string) bool {
-		for _, line := range strings.Split(text, "\n") {
+		for _, line := range strings.Split(mdast.LineFeedText(text), "\n") {
 			switch strings.TrimRight(line, " \t\r") {
 			case "---", "...", "+++", "}":
 				return true
@@ -394,11 +407,11 @@ func touchesFrontMatter(file *mdast.FileSnapshot, edits []fix.TextEdit) bool {
 	for _, edit := range edits {
 		lineStart := lineStartOf(file, edit.StartOffset)
 		lineEnd := lineEndOf(file, edit.EndOffset)
-		if edit.EndOffset < len(file.Content) {
+		if edit.EndOffset < len(content) {
 			lineEnd = lineEndOf(file, edit.EndOffset+1)
 		}
-		edited := string(file.Content[lineStart:edit.StartOffset]) + edit.NewText + string(file.Content[edit.EndOffset:lineEnd])
-		if closes(string(file.Content[lineStart:lineEnd])) || closes(edited) {
+		edited := string(content[lineStart:edit.StartOffset]) + edit.NewText + string(content[edit.EndOffset:lineEnd])
+		if closes(string(content[lineStart:lineEnd])) || closes(edited) {
 			return true
 		}
 	}
@@ -559,10 +572,12 @@ func lineEndOf(file *mdast.FileSnapshot, offset int) int {
 }
 
 // applyShiftedEdits applies edits, whose offsets are shift bytes off from
-// text's, to a copy of text.
+// text's, to a copy of text. text is content as checkedContent gives it, and
+// the edits' text is read the same way (see checkedEdit).
 func applyShiftedEdits(text []byte, edits []fix.TextEdit, shift int) ([]byte, bool) {
 	shifted := make([]fix.TextEdit, 0, len(edits))
 	for _, edit := range edits {
+		edit = checkedEdit(edit)
 		edit.StartOffset += shift
 		edit.EndOffset += shift
 		shifted = append(shifted, edit)

@@ -409,6 +409,16 @@ formats change. The first entries under Changed may need action.
   still holds the content that was linted.
 - Fixes in CRLF files write CRLF line endings, and JSON and SARIF output
   show the bytes a fix writes.
+- A carriage return that no line feed follows ends a line, as in CommonMark
+  and markdownlint. gomdlint read a file whose lines end that way as one
+  line, so no rule saw its structure, and each such carriage return inside a
+  file left the line numbers of later findings one short. Every rule now
+  reads these files as markdownlint does. Fixes keep each line's own line
+  ending: a file whose lines end with carriage returns stays that way, a
+  line a fix adds takes the most common ending, and a fix that would merge a
+  carriage return with a line feed after it into one line ending is
+  withheld. Files without such a carriage return get the same findings,
+  fixes and fixed output as before.
 - One invalid fix no longer drops every fix in the file, and a panic in a
   rule, or anywhere else while a file is processed, no longer stops the run.
   Each is reported, and the run exits 70.

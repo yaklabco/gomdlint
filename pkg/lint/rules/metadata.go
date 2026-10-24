@@ -1004,11 +1004,16 @@ func maskHTMLBlockStarts(text []byte) ([]byte, []mdast.SourceRange) {
 				masked[pos] = ','
 			}
 		}
-		newline := bytes.IndexByte(text[next:], '\n')
+		// A line ends with a line feed, a carriage return and a line feed,
+		// or a carriage return alone.
+		newline := bytes.IndexAny(text[next:], "\r\n")
 		if newline < 0 {
 			break
 		}
 		lineStart = next + newline + 1
+		if text[lineStart-1] == '\r' && lineStart < len(text) && text[lineStart] == '\n' {
+			lineStart++
+		}
 	}
 	return masked, tags
 }
