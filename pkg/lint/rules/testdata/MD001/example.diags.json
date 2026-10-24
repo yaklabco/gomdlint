@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD001",
+    "name": "heading-increment",
+    "line": 3,
+    "column": 1,
+    "message": "Heading level jumped from H1 to H3",
+    "severity": "warning",
+    "fixable": false
+  }
+]

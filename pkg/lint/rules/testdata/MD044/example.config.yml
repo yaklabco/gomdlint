@@ -1,0 +1,6 @@
+rules:
+  MD044:
+    options:
+      names:
+        - JavaScript
+        - GitHub

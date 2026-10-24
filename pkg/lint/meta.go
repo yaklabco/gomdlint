@@ -6,7 +6,7 @@ import (
 
 // Category groups rules by the Markdown construct they check. Each rule
 // belongs to exactly one. Rule listings, such as gomdlint rules, and
-// documentation, such as the README's rule categories, group the rules by
+// documentation, such as the generated rule reference, group the rules by
 // category, in the order of Categories. The registry keeps rule ID order.
 // Unlike tags, categories are not accepted where rules are configured or
 // selected, in config keys, rule flags and markdownlint comments: several

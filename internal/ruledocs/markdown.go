@@ -3,8 +3,6 @@ package ruledocs
 import (
 	"io"
 	"strings"
-
-	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 const (
@@ -109,7 +107,7 @@ func markdownItem(item string) string {
 
 // markdownBlock writes lines as a fenced code block in language.
 func markdownBlock(language string, lines ...string) string {
-	return "```" + language + "\n" + strings.Join(lines, "\n") + "\n```"
+	return markdownFence(language, strings.Join(lines, "\n"))
 }
 
 // markdownDocument collects the blocks of a Markdown document, which a
@@ -142,21 +140,10 @@ func WriteMarkdown(writer io.Writer, title string, entries []Entry) error {
 	var doc markdownDocument
 	doc.heading(1, title)
 
-	listed := groups(entries, config.RuleFormatName)
-	if len(listed) == 0 {
+	if len(entries) == 0 {
 		doc.add("No rules match.")
 	}
-	for _, group := range listed {
-		doc.heading(2, group.title())
-		rows := make([]string, 0, len(group.entries)+2) // The header and delimiter rows, then a row per rule.
-		rows = append(rows, "| Name | ID | Fix | Description |", "| --- | --- | --- | --- |")
-		for _, entry := range group.entries {
-			rows = append(rows, "| "+strings.Join([]string{
-				markdownCode(entry.Name), markdownText(entry.ID), yesNo(entry.Fixable), markdownText(entry.Description),
-			}, " | ")+" |")
-		}
-		doc.add(strings.Join(rows, "\n"))
-	}
+	addRuleTables(&doc, entries, 2, nil)
 
 	return write(writer, doc.String())
 }
@@ -185,6 +172,14 @@ func WriteMarkdownPage(writer io.Writer, entry Entry) error {
 	if entry.Fix != "" {
 		doc.heading(2, "Fix")
 		doc.add(markdownProse(entry.Fix))
+	}
+	parts, err := exampleParts(entry)
+	if err != nil {
+		return err
+	}
+	if len(parts) > 0 {
+		doc.heading(2, "Example")
+		doc.add(markdownExample(parts)...)
 	}
 
 	doc.heading(2, "Configure")

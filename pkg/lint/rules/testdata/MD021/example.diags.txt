@@ -1,0 +1,2 @@
+example.input.md:3:4 warning Multiple spaces after opening hashes on closed ATX style heading (MD021/no-multiple-space-closed-atx) [fixable]
+example.input.md:3:13 warning Multiple spaces before closing hashes on closed ATX style heading (MD021/no-multiple-space-closed-atx) [fixable]

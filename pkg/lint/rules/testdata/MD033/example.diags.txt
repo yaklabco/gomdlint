@@ -1,0 +1,1 @@
+example.input.md:3:7 warning HTML element 'kbd' is not allowed (MD033/no-inline-html)

@@ -11,6 +11,7 @@ require (
 	github.com/go-enry/go-enry/v2 v2.9.6
 	github.com/mattn/go-isatty v0.0.24
 	github.com/muesli/termenv v0.16.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/yaklabco/stave v0.10.3

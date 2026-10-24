@@ -1,0 +1,1 @@
+example.input.md:3:4 warning Multiple spaces (3) after hash on ATX style heading (MD019/no-multiple-space-atx) [fixable]

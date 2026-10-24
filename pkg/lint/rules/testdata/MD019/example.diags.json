@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD019",
+    "name": "no-multiple-space-atx",
+    "line": 3,
+    "column": 4,
+    "message": "Multiple spaces (3) after hash on ATX style heading",
+    "severity": "warning",
+    "fixable": true
+  }
+]

@@ -1,0 +1,1 @@
+example.input.md:3:1 warning Heading style 'atx_closed' does not match expected style 'atx' (MD003/heading-style) [fixable]

@@ -1,0 +1,1 @@
+example.input.md:4:1 warning Blank line inside blockquote separates it into multiple blockquotes (MD028/no-blanks-blockquote)

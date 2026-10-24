@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/yaklabco/gomdlint/main/docs/schema/gomdlint.schema.json
 # gomdlint configuration
 # See: https://github.com/yaklabco/gomdlint
 
