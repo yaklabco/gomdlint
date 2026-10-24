@@ -898,3 +898,20 @@ func TestCatalogTextsHoldForTheRules(t *testing.T) {
 		})
 	}
 }
+
+// TestCatalogNamesMarkdownlintsRules checks lint.IsMarkdownlintRule against
+// the catalog: every rule that the catalog describes outside gomdlint's own
+// MDL namespace is one of markdownlint 0.41.1's 53 rules, and no other ID is.
+func TestCatalogNamesMarkdownlintsRules(t *testing.T) {
+	count := 0
+	for _, meta := range Catalog() {
+		assert.Equal(t, !lint.IsGomdlintOnlyRule(meta.ID), lint.IsMarkdownlintRule(meta.ID), meta.ID)
+		if lint.IsMarkdownlintRule(meta.ID) {
+			count++
+		}
+	}
+	assert.Equal(t, 53, count, "markdownlint 0.41.1 has 53 rules")
+	for _, id := range []string{"MD002", "MD006", "MD057", "MD900", "MDL001", "md013", ""} {
+		assert.False(t, lint.IsMarkdownlintRule(id), id)
+	}
+}

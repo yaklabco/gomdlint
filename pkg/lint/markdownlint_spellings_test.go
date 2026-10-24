@@ -130,30 +130,46 @@ func TestRegistryMarkdownlintRuleConfigTagOptions(t *testing.T) {
 	}
 }
 
-// TestRegistryMarkdownlintRuleConfigCustomRules covers custom rules, whose
-// IDs have another shape than markdownlint's MD and digits: markdownlint
-// lacks them, so a markdownlint configuration reads their options under
-// every spelling that they declare, and options that they mark
-// gomdlint-only apply too.
+// TestRegistryMarkdownlintRuleConfigCustomRules covers custom rules, which
+// markdownlint lacks, whatever their IDs: X001, and MD900, whose ID has the
+// shape of markdownlint's own but names none of its rules. A markdownlint
+// configuration reads their options under every spelling that they
+// declare, and options that they mark gomdlint-only apply too, as
+// markdownlint passes every option of a custom rule to it.
 func TestRegistryMarkdownlintRuleConfigCustomRules(t *testing.T) {
 	t.Parallel()
 
-	registry := lint.NewRegistry()
-	registry.Register(&optionRule{id: "X001", name: "custom"})
-	registry.Describe(lint.RuleMeta{ID: "X001", Name: "custom", OptionsDeclared: true, Options: []lint.OptionSpec{
-		{Name: "depth", Type: lint.OptionInteger, Default: 1, GomdlintOnly: true},
-		{Name: "style", Aliases: []lint.OptionAlias{{Name: "old_style"}}, Type: lint.OptionString, Default: "a"},
-	}})
+	for _, id := range []string{"X001", "MD900"} {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
 
-	for _, value := range []map[string]any{{"depth": 2, "style": "b"}, {"depth": 2, "old_style": "b"}} {
-		cfg, issues := registry.MarkdownlintRuleConfig("X001", value)
-		assert.Equal(t, map[string]any{"depth": 2, "style": "b"}, cfg.Options, "%v", value)
-		assert.Empty(t, issues, "%v", value)
+			registry := lint.NewRegistry()
+			registry.Register(&optionRule{id: id, name: "custom"})
+			registry.Describe(lint.RuleMeta{ID: id, Name: "custom", OptionsDeclared: true, Options: []lint.OptionSpec{
+				{Name: "depth", Aliases: []lint.OptionAlias{{Name: "old_depth"}}, Type: lint.OptionInteger, Default: 1},
+				{Name: "level", Type: lint.OptionInteger, Default: 1, GomdlintOnly: true},
+				{Name: "style", Aliases: []lint.OptionAlias{{Name: "old_style"}}, Type: lint.OptionString, Default: "a"},
+			}})
+
+			for _, value := range []map[string]any{
+				{"depth": 4, "level": 2, "style": "b"}, {"old_depth": 4, "level": 2, "old_style": "b"},
+			} {
+				cfg, issues := registry.MarkdownlintRuleConfig(id, value)
+				assert.Equal(t, map[string]any{"depth": 4, "level": 2, "style": "b"}, cfg.Options, "%v", value)
+				assert.Empty(t, issues, "%v", value)
+			}
+
+			// A numeric string is no number to a custom rule, which reads its
+			// options as they are.
+			_, issues := registry.MarkdownlintRuleConfig(id, map[string]any{"depth": "4"})
+			require.Len(t, issues, 1)
+			assert.Equal(t, lint.OptionIssueWrongType, issues[0].Kind)
+
+			_, issues = registry.MarkdownlintRuleConfig(id, map[string]any{"style": "b", "old_style": "c"})
+			require.Len(t, issues, 1)
+			assert.Equal(t, lint.OptionIssueConflict, issues[0].Kind)
+		})
 	}
-
-	_, issues := registry.MarkdownlintRuleConfig("X001", map[string]any{"style": "b", "old_style": "c"})
-	require.Len(t, issues, 1)
-	assert.Equal(t, lint.OptionIssueConflict, issues[0].Kind)
 }
 
 // TestNoOptionsInAMarkdownlintConfiguration covers the note that a rule

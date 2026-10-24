@@ -165,8 +165,8 @@ type OptionSpec struct {
 	Name string
 
 	// Aliases are other spellings of the option, such as markdownlint's
-	// spelling where gomdlint names an option differently. For a rule with
-	// an ID of markdownlint's shape, MD and digits, a markdownlint
+	// spelling where gomdlint names an option differently. For one of
+	// markdownlint's rules (see IsMarkdownlintRule), a markdownlint
 	// configuration reads the option under its first alias only (see
 	// Registry.MarkdownlintRuleConfig).
 	Aliases []OptionAlias
@@ -192,8 +192,8 @@ type OptionSpec struct {
 
 	// GomdlintOnly reports that markdownlint has no such option. Every
 	// option of a rule that markdownlint lacks is one. A markdownlint
-	// configuration cannot set such an option of a rule with an ID of
-	// markdownlint's shape, MD and digits, as markdownlint does not read it
+	// configuration cannot set such an option of one of markdownlint's rules
+	// (see IsMarkdownlintRule), as markdownlint does not read it
 	// (see Registry.MarkdownlintRuleConfig).
 	GomdlintOnly bool
 
@@ -268,6 +268,31 @@ type OptionAlias struct {
 // shares with markdownlint their markdownlint IDs, such as MD009.
 func IsGomdlintOnlyRule(id string) bool {
 	return strings.HasPrefix(id, "MDL")
+}
+
+// markdownlintRuleIDs are the IDs of markdownlint 0.41.1's rules, each of
+// which gomdlint's catalog describes under the same ID, as a catalog test
+// checks.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var markdownlintRuleIDs = map[string]bool{
+	"MD001": true, "MD003": true, "MD004": true, "MD005": true, "MD007": true, "MD009": true,
+	"MD010": true, "MD011": true, "MD012": true, "MD013": true, "MD014": true, "MD018": true,
+	"MD019": true, "MD020": true, "MD021": true, "MD022": true, "MD023": true, "MD024": true,
+	"MD025": true, "MD026": true, "MD027": true, "MD028": true, "MD029": true, "MD030": true,
+	"MD031": true, "MD032": true, "MD033": true, "MD034": true, "MD035": true, "MD036": true,
+	"MD037": true, "MD038": true, "MD039": true, "MD040": true, "MD041": true, "MD042": true,
+	"MD043": true, "MD044": true, "MD045": true, "MD046": true, "MD047": true, "MD048": true,
+	"MD049": true, "MD050": true, "MD051": true, "MD052": true, "MD053": true, "MD054": true,
+	"MD055": true, "MD056": true, "MD058": true, "MD059": true, "MD060": true,
+}
+
+// IsMarkdownlintRule reports whether the rule with the given ID is one of
+// markdownlint 0.41.1's rules, which gomdlint reimplements under the same
+// ID. A custom rule is not, even under an ID such as MD900 that has the
+// shape of markdownlint's, as markdownlint lacks it too.
+func IsMarkdownlintRule(id string) bool {
+	return markdownlintRuleIDs[id]
 }
 
 // clone returns a copy of spec that shares no slice with it: not its

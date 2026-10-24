@@ -407,8 +407,8 @@ func NormalizeOptions(specs []OptionSpec, options map[string]any) (map[string]an
 // rewritten through the rule's declared options, as NormalizeOptions does:
 // markdownlint's spellings become canonical names, and options that the
 // rule does not read are left out, as markdownlint ignores them. For a
-// rule that markdownlint has, one with an ID of markdownlint's shape, MD
-// and digits, an option's only spelling is markdownlint's, its first
+// rule that markdownlint has (see IsMarkdownlintRule), an option's only
+// spelling is markdownlint's, its first
 // alias, else its name, so gomdlint's names for options that markdownlint
 // spells otherwise, and options marked GomdlintOnly, are left out too, as
 // markdownlint does not read them. The options of other rules, gomdlint's
@@ -521,11 +521,11 @@ func (t *optionTable) claim(name string, spelling optionSpelling) {
 // So gomdlint's names for such options, and the options that only gomdlint
 // has (OptionSpec.GomdlintOnly), name no option there, as in markdownlint,
 // and no option has two spellings. The options of a rule that markdownlint
-// lacks (see markdownlintHasRule), such as gomdlint's own rules and custom
+// lacks (see IsMarkdownlintRule), such as gomdlint's own rules and custom
 // rules, keep every spelling. Either way, normalizing leaves out the keys
 // that spell no option.
 func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
-	if !markdownlintHasRule(id) {
+	if !IsMarkdownlintRule(id) {
 		table := newOptionTable(specs)
 		table.dropUnknown = true
 		return table
@@ -546,19 +546,6 @@ func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
 		}
 	}
 	return table
-}
-
-// markdownlintHasRule reports whether markdownlint 0.41.1 may have the rule
-// with the given ID: whether the ID has the shape of the IDs of
-// markdownlint's own rules, MD followed by digits, such as MD013.
-// gomdlint's own rules (see IsGomdlintOnlyRule), and custom rules under IDs
-// of other shapes, are rules that markdownlint lacks.
-func markdownlintHasRule(id string) bool {
-	digits, found := strings.CutPrefix(id, "MD")
-	if !found || digits == "" {
-		return false
-	}
-	return !strings.ContainsFunc(digits, func(char rune) bool { return char < '0' || char > '9' })
 }
 
 // markdownlintValue returns value as the rule that spec, one of the

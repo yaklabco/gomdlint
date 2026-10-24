@@ -1105,7 +1105,7 @@ options that the key sets and its defaults for the others, as in
 markdownlint. `markdownlint-configure-file` keys reset them the same way.
 Markdownlint configs and configure-file comments read options through a
 second table of each rule's options (`ruleIndex.markdownlintOptions`),
-which, for a rule with an ID of markdownlint's shape (MD and digits),
+which, for one of markdownlint's rules (`lint.IsMarkdownlintRule`),
 knows markdownlint's spelling of each option and no other, so gomdlint's
 names and its own options are unknown options there, as in markdownlint.
 The options of gomdlint's own rules and custom rules keep every spelling.

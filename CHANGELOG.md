@@ -163,8 +163,8 @@ formats change. The first entries under Changed may need action.
   `RuleConfig` literals no longer compile, and `config.RuleSettingKeys`
   lists `reset_options`. `config.MarkdownlintRuleConfig` sets
   `ResetOptions` for a value that turns the rule on, and
-  `Registry.MarkdownlintRuleConfig` then writes no defaults. For a rule
-  with an ID of markdownlint's shape, MD and digits,
+  `Registry.MarkdownlintRuleConfig` then writes no defaults. For one of
+  markdownlint's rules (`lint.IsMarkdownlintRule`, new),
   `Registry.MarkdownlintRuleConfig` reads an option under its first alias,
   or else its name, and not at all when it is marked `GomdlintOnly`.
   `lint.OptionSpec` gains `Limit`, `ZeroIsDefault`, `MarkdownlintZero` and
