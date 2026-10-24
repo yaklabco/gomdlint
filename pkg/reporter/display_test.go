@@ -73,7 +73,7 @@ func mixedResult(path string) *runner.Result {
 	}
 }
 
-// caretLine is the context caret the text reporter prints under display cell
+// caretLine is the context caret the text reporter prints under a display
 // cell of the source line, counted from 0.
 func caretLine(cell int) string {
 	return contextIndent + strings.Repeat(" ", cell) + "^"
