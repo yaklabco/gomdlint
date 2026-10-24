@@ -78,17 +78,19 @@ type JSONNotice struct {
 	Name string `json:"name,omitempty"`
 
 	// Suggestions are, for an unknown word, the rules and tags it most
-	// likely means, any one of which may be meant, and, for an unknown
-	// option of one rule, the option names it most likely means. The key is
-	// absent when none is close enough. Rules are named as markdownlint
+	// likely means, any one of which may be meant, for an unknown option of
+	// one rule, the option names it most likely means, and, for an
+	// "invalid-option" notice about a string that the option does not
+	// allow, the allowed values it most likely means. The key is absent
+	// when none is close enough. Rules are named as markdownlint
 	// names them, such as ul-style for unordered-list-style.
 	Suggestions []string `json:"suggestions,omitempty"`
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
 	// which the comment can name instead, for an unknown option, the rules
-	// whose setting holds it, none of which reads it, and, for an option
-	// conflict, the rule whose option it is, named as markdownlint names
-	// them. The key is absent otherwise.
+	// whose setting holds it, none of which reads it, and, for an
+	// "invalid-option" notice, the rule whose option it is, named as
+	// markdownlint names them. The key is absent otherwise.
 	Rules []string `json:"rules,omitempty"`
 
 	// Message describes the problem, starting with the kind of comment.

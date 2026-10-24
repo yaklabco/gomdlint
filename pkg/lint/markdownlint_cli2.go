@@ -15,9 +15,10 @@ import (
 // that holds a markdownlint configuration.
 const MarkdownlintCLI2ConfigKey = "config"
 
-// ErrNoDocument reports an options file that holds no document, which
-// markdownlint-cli2 rejects: empty text, or nothing but comments.
-var ErrNoDocument = errors.New("expected a document, but the input is empty")
+// errNoDocument reports an options file in YAML that holds no document,
+// which markdownlint-cli2 rejects: empty text, or nothing but comments.
+// JSON without a value fails json.Unmarshal's check instead.
+var errNoDocument = errors.New("expected a document, but the input is empty")
 
 // MarkdownlintCLI2Options is a markdownlint-cli2 options file, such as
 // .markdownlint-cli2.jsonc, that ReadMarkdownlintCLI2Options read.
@@ -130,7 +131,7 @@ func readMarkdownlintCLI2YAML(text []byte) (*MarkdownlintCLI2Options, error) {
 	case err != nil:
 		return nil, err
 	case doc == nil:
-		return nil, ErrNoDocument
+		return nil, errNoDocument
 	}
 	options := &MarkdownlintCLI2Options{Syntax: MarkdownlintYAML}
 	if len(doc.Content) == 0 {

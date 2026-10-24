@@ -69,8 +69,8 @@ type Notice struct {
 	// markdownlint-disable.
 	Directive string
 
-	// Name is the word, the configure-file key or, for an unknown option,
-	// the option, as the comment writes it. It is empty for a
+	// Name is the word, the configure-file key or, for an unknown or
+	// invalid option, the option, as the comment writes it. It is empty for a
 	// configure-file comment that holds no settings
 	// (NoticeInvalidConfiguration), or that gomdlint does not read
 	// (NoticeUnreadConfiguration).
@@ -90,9 +90,10 @@ type Notice struct {
 	Suggestions []string
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
-	// which the comment can name instead, and, for an unknown option, the
-	// rules whose setting holds it, none of which reads it, in rule ID
-	// order, named as markdownlint names them.
+	// which the comment can name instead, for an unknown option, the rules
+	// whose setting holds it, none of which reads it, in rule ID order, and,
+	// for an invalid option, the one rule whose option it is, named as
+	// markdownlint names them.
 	Rules []string
 
 	// Message describes the problem in a sentence that starts with
