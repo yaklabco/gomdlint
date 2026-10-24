@@ -21,7 +21,7 @@
     "rule": "MD026",
     "name": "no-trailing-punctuation",
     "line": 15,
-    "column": 16,
+    "column": 15,
     "message": "Heading ends with trailing punctuation \".\"",
     "severity": "warning",
     "fixable": true

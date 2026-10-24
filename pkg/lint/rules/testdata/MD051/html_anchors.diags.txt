@@ -1,0 +1,3 @@
+html_anchors.input.md:26:1 warning Link fragment '#in-code' does not match any heading (MD051/link-fragments)
+html_anchors.input.md:26:26 warning Link fragment '#div-name' does not match any heading (MD051/link-fragments)
+html_anchors.input.md:27:1 warning Link fragment '#name-first' does not match any heading (MD051/link-fragments)

@@ -348,6 +348,42 @@ func TestInlineHTMLRule_MathAndTablesInHTMLBlocks(t *testing.T) {
 	}
 }
 
+// TestInlineHTMLRule_CommentShapedHTMLBlocks checks MD033 against
+// markdownlint 0.41.1, which leaves an HTML block unparsed when its text,
+// from the first line's content after the container prefix to the end of
+// its last line, starts with "<!--" and ends with "-->", so tags between
+// two comments there are no HTML. Indentation outside containers is part of
+// that text, so an indented block is parsed.
+func TestInlineHTMLRule_CommentShapedHTMLBlocks(t *testing.T) {
+	input := "# Title\n\n" +
+		"<!--\na\n--> <b>x</b> <!-- z -->\n\n" + // 3
+		"  <!--\na\n--> <i>x</i> <!-- z -->\n\n" + // 7
+		"> <!--\n> a\n> --> <s>x</s> <!-- z -->\n\n" + // 11
+		"<!-- a --> <u>x</u>\n" // 15
+	requireHTMLDiags(t, applyHTMLRule(t, config.FlavorGFM, input, nil), []htmlDiagWant{{9, 5, "i"}, {15, 12, "u"}})
+}
+
+// TestIsHTMLFlowComment checks which HTML block texts markdownlint's
+// isHtmlFlowComment takes for one comment.
+func TestIsHTMLFlowComment(t *testing.T) {
+	for text, want := range map[string]bool{
+		"<!-- a -->":                  true,
+		"<!--\na\n--> <b> <!-- z -->": true,
+		"<!--\na\n--> <b> <!---->":    false,
+		"<!-->":                       true,
+		"<!--->":                      true,
+		"<!---->":                     true,
+		"<!-- a --> <b>":              false,
+		"  <!-- a -->":                false,
+		"<!--> a -->":                 false,
+		"<!---> a -->":                false,
+		"<!-- a --->":                 false,
+		"<!-- a ->":                   false,
+	} {
+		assert.Equal(t, want, isHTMLFlowComment([]byte(text)), "%q", text)
+	}
+}
+
 // TestPlainBlockHTMLMatchesTheParsedLines checks that the plain parse of an
 // HTML block's lines, which serves lines without a table, finds the raw
 // HTML that the parse with source spans finds.

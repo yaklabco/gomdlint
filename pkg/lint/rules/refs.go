@@ -38,12 +38,29 @@ func NewLinkFragmentsRule() *LinkFragmentsRule {
 }
 
 // Apply checks that link fragments reference valid document anchors.
+//
+// Headings, custom heading anchors and HTML tags name anchors. Like
+// markdownlint, MD051 reads the tags of an HTML block from its lines parsed
+// again as Markdown, as MD033 does (see htmlBlockInlineHTML), so a tag on
+// any line of the block counts and a tag in a code span does not. A tag
+// names the value of its first id attribute, or an "a" tag without one the
+// value of its first name attribute (see refs.HTMLAnchor).
 func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
-	if ctx.Root == nil || ctx.File == nil {
+	if ctx.Root == nil || ctx.File == nil || !hasFragmentLink(ctx) {
 		return nil, nil
 	}
 
-	refCtx := ctx.RefContext()
+	refCtx := refs.CollectWithOptions(ctx.Root, ctx.File, refs.Options{
+		Prefix: func(node *mdast.Node, line int) int { return len(lint.ContainerPrefix(ctx.File, node, line)) },
+		HTMLBlockTags: func(block *mdast.Node) []mdast.SourceRange {
+			tags := htmlBlockInlineHTML(ctx.File, block)
+			ranges := make([]mdast.SourceRange, len(tags))
+			for idx, tag := range tags {
+				ranges[idx] = tag.span
+			}
+			return ranges
+		},
+	})
 	ignoreCase := ctx.OptionBool("ignore_case", false)
 	ignoredPatternStr := ctx.OptionString("ignored_pattern", "")
 
@@ -100,6 +117,20 @@ func (r *LinkFragmentsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 	}
 
 	return diags, nil
+}
+
+// hasFragmentLink reports whether a link or image in the document has a
+// destination that starts with "#", the only kind MD051 checks, so that a
+// document without one is not read for anchors.
+func hasFragmentLink(ctx *lint.RuleContext) bool {
+	for _, nodes := range [][]*mdast.Node{ctx.Links(), ctx.Images()} {
+		for _, node := range nodes {
+			if strings.HasPrefix(lint.LinkDestination(node), "#") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ReferenceLinkImagesRule validates that reference labels are defined (MD052).
@@ -233,7 +264,14 @@ func footnoteShortcut(
 // a footnote call there, and MD052 does not model which of them it reports.
 func plainFootnoteCall(usage *refs.ReferenceUsage) bool {
 	label, ok := strings.CutPrefix(usage.Label, "^")
-	if !ok || label == "" || usage.IsImage {
+	return ok && !usage.IsImage && plainFootnoteLabel(label)
+}
+
+// plainFootnoteLabel reports whether a footnote label, after its "^", is
+// not empty and holds nothing but ASCII letters, digits and hyphens, which
+// micromark, markdownlint and goldmark all read as written.
+func plainFootnoteLabel(label string) bool {
+	if label == "" {
 		return false
 	}
 	for idx := range len(label) {
@@ -322,8 +360,36 @@ func isASCII(text string) bool {
 
 // certainFootnoteLabels returns the labels, each with its "^" and as
 // labelKey gives them, of the GFM footnote definitions that micromark is
-// certain to read, which goldmark does not parse. A definition counts on a
-// line that starts with "[^label]:" at column 0 at the start of the
+// certain to read (see certainFootnoteDefinitions).
+func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
+	labels := make(map[string]bool)
+	for _, def := range certainFootnoteDefinitions(ctx) {
+		labels[def.key()] = true
+	}
+	return labels
+}
+
+// footnoteDefinition is a GFM footnote definition that micromark is
+// certain to read (see certainFootnoteDefinitions).
+type footnoteDefinition struct {
+	// line is the 1-based line that the definition starts at column 0.
+	line int
+	// label is the label as written, without its "^".
+	label string
+	// caret is the offset of the "^" after the definition's "[".
+	caret int
+}
+
+// key returns the key under which a call matches the definition (see
+// labelKey).
+func (d footnoteDefinition) key() string {
+	return labelKey("^" + d.label)
+}
+
+// certainFootnoteDefinitions returns, in document order, the GFM footnote
+// definitions that micromark is certain to read, which goldmark does not
+// parse. A definition counts on a line that starts with "[^label]:" at
+// column 0 at the start of the
 // document, right after a blank line or right after another definition that
 // counts, since micromark reads two definitions in a row as two. goldmark
 // must read the line at the top level of the document: outside its front
@@ -340,13 +406,14 @@ func isASCII(text string) bool {
 // matter (see markdownlintFrontMatterLines), or where micromark drops a byte
 // order mark that the parser reads as text (see
 // micromarkDropsByteOrderMark). A definition that does not count leaves its
-// calls read as goldmark reads them, as before MD052 read footnotes.
-func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
+// calls read as goldmark reads them, as before MD052 read footnotes, and
+// MD053 does not report it.
+func certainFootnoteDefinitions(ctx *lint.RuleContext) []footnoteDefinition {
 	file := ctx.File
-	labels := make(map[string]bool)
+	var defs []footnoteDefinition
 	if frontMatter, ok := markdownlintFrontMatterLines(file); !ok || frontMatter != file.FrontMatterLines ||
 		micromarkDropsByteOrderMark(file) {
-		return labels
+		return nil
 	}
 	blocks := sharedBlocks{ctx: ctx}
 	var topLevel []bool
@@ -382,11 +449,12 @@ func certainFootnoteLabels(ctx *lint.RuleContext) map[string]bool {
 			counts = topLevel[line]
 		}
 		if counts {
-			labels[labelKey("^"+label)] = true
+			caret := file.Lines[line-1].StartOffset + lint.LineTextOffset(file, line) + len("[")
+			defs = append(defs, footnoteDefinition{line: line, label: label, caret: caret})
 		}
 		afterBlank, afterDefinition = len(bytes.Trim(text, " \t")) == 0, counts
 	}
-	return labels
+	return defs
 }
 
 // sharedBlocks finds the fenced code blocks that micromark reads as
@@ -771,6 +839,10 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 
 	var diags []lint.Diagnostic
 	removal := newDefinitionRemoval(ctx, refCtx.AllDefinitions)
+	footnoteDefs, footnotes := footnoteStates(ctx)
+	// read marks the lines of the footnote definitions that goldmark reads
+	// as link reference definitions too, which the loop below reports.
+	read := make(map[int]bool)
 
 	for _, def := range refCtx.AllDefinitions {
 		if ctx.Cancelled() {
@@ -782,25 +854,179 @@ func (r *LinkImageRefDefsRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, 
 			continue
 		}
 
+		state, footnote := footnotes[def.Lines[0]]
+		read[def.Lines[0]] = footnote
 		var msg, suggestion string
 		switch {
-		case def.IsDuplicate:
-			msg, suggestion = "Duplicate reference definition [%s]", "Remove duplicate definition"
-		case def.UsageCount == 0:
-			msg, suggestion = "Unused reference definition [%s]", "Remove unused definition or add a reference"
+		case def.IsDuplicate || state == footnoteDuplicate:
+			msg, suggestion = duplicateDefinition, "Remove duplicate definition"
+		case def.UsageCount == 0 || state == footnoteUnused:
+			msg, suggestion = unusedDefinition, "Remove unused definition or add a reference"
 		default:
 			continue
 		}
-		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, def.Position, fmt.Sprintf(msg, displayLabel(def.Label))).
+		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, definitionPosition(ctx.File, def.Lines[0]), fmt.Sprintf(msg, displayLabel(def.Label))).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(suggestion)
-		if builder := removal.fix(def); builder != nil {
+		// A definition whose label starts with "^" may be a footnote
+		// definition to GitHub and micromark, whose note goes on in the
+		// indented lines after a blank line, which deleting its first line
+		// would show.
+		if builder := removal.fix(def); builder != nil && !strings.HasPrefix(def.Label, "^") {
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
 	}
+	diags = append(diags, r.unreadFootnotes(ctx, footnoteDefs, footnotes, read, ignoredSet)...)
+	sortDiagnosticsByPosition(diags)
 
 	return verifyFixes(ctx, diags, fixAllowance{}), nil
+}
+
+// definitionPosition returns where MD053 reports a definition that starts on a
+// 1-based line: the whole line, container prefix included, as markdownlint
+// 0.41.1 reports it. A byte order mark before the line's text is left out.
+func definitionPosition(file *mdast.FileSnapshot, line int) mdast.SourcePosition {
+	return mdast.SourcePosition{
+		StartLine:   line,
+		StartColumn: lint.LineTextOffset(file, line) + 1,
+		EndLine:     line,
+		EndColumn:   lint.LineLength(file, line) + 1,
+	}
+}
+
+// The messages of MD053's findings, which take the label.
+const (
+	duplicateDefinition = "Duplicate reference definition [%s]"
+	unusedDefinition    = "Unused reference definition [%s]"
+)
+
+// unreadFootnotes reports the footnote definitions among defs that are
+// duplicates or unused by footnotes, their states, and that goldmark does
+// not read as link reference definitions, which read holds. They get no
+// fix: a footnote's note can go on past its first line.
+func (r *LinkImageRefDefsRule) unreadFootnotes(
+	ctx *lint.RuleContext, defs []footnoteDefinition, footnotes map[int]footnoteState, read map[int]bool, ignoredSet map[string]bool,
+) []lint.Diagnostic {
+	var diags []lint.Diagnostic
+	for _, def := range defs {
+		state, ok := footnotes[def.line]
+		if !ok || read[def.line] || state == footnoteCalled || ignoredSet[refs.NormalizeLabel("^"+def.label)] {
+			continue
+		}
+		msg, suggestion := unusedDefinition, "Remove unused definition or add a reference"
+		if state == footnoteDuplicate {
+			msg, suggestion = duplicateDefinition, "Remove duplicate definition"
+		}
+		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, definitionPosition(ctx.File, def.line), fmt.Sprintf(msg, "^"+def.label)).
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion(suggestion).
+			Build())
+	}
+	return diags
+}
+
+// footnoteState is what MD053 makes of a GFM footnote definition.
+type footnoteState int
+
+const (
+	// footnoteCalled is a definition that the file may call: MD053 does not
+	// report it.
+	footnoteCalled footnoteState = iota
+	// footnoteUnused is a definition that nothing calls.
+	footnoteUnused
+	// footnoteDuplicate is a definition of a label defined before.
+	footnoteDuplicate
+)
+
+// footnoteStates reads the GFM footnote definitions that MD053 can report
+// as markdownlint 0.41.1 does, keyed by the line each starts on: those that
+// micromark is certain to read (see certainFootnoteDefinitions), whose
+// label holds nothing but ASCII letters, digits and hyphens (see
+// plainFootnoteLabel), so that every parser reads it as written. A
+// definition repeats a label when an earlier certain definition has the
+// same key. Otherwise it is unused when "^" and its label appear nowhere
+// else in the file (see footnoteMentions): in a call, in a reference, in
+// code or in a definition MD053 cannot be certain of, all of which count,
+// so that MD053 never reports a definition that markdownlint finds called.
+// It returns the certain definitions too.
+func footnoteStates(ctx *lint.RuleContext) ([]footnoteDefinition, map[int]footnoteState) {
+	if !bytes.Contains(ctx.File.Content, []byte("[^")) {
+		return nil, nil
+	}
+	defs := certainFootnoteDefinitions(ctx)
+	if len(defs) == 0 {
+		return nil, nil
+	}
+	own := make(map[int]bool, len(defs))
+	for _, def := range defs {
+		own[def.caret] = true
+	}
+	mentions := footnoteMentions(ctx.File.Content, own)
+	states := make(map[int]footnoteState, len(defs))
+	seen := make(map[string]bool, len(defs))
+	for _, def := range defs {
+		key := def.key()
+		repeated := seen[key]
+		seen[key] = true
+		switch {
+		case !plainFootnoteLabel(def.label):
+		case repeated:
+			states[def.line] = footnoteDuplicate
+		case mentions[strings.ToLower(def.label)] == 0:
+			states[def.line] = footnoteUnused
+		default:
+			states[def.line] = footnoteCalled
+		}
+	}
+	return defs, states
+}
+
+// kelvinSign is U+212A, which JavaScript lowercases to "k", so
+// markdownlint reads it as that letter in a footnote label.
+const kelvinSign = "\u212a"
+
+// footnoteMentions counts, by label in lowercase, the places in content
+// where "^" is followed by a run of ASCII letters, digits, hyphens and
+// Kelvin signs, read as "k", other than at the offsets in skip. Each may
+// call the footnote with that label, as in "[^label]" or "[text][^label]",
+// written in any case. The run takes no other character, so a mention in
+// code, or one that goes on with another character, counts too, which errs
+// towards a call.
+func footnoteMentions(content []byte, skip map[int]bool) map[string]int {
+	mentions := make(map[string]int)
+	var run []byte
+	for idx := bytes.IndexByte(content, '^'); idx >= 0; {
+		pos := idx + 1
+		if !skip[idx] {
+			run = run[:0]
+			for pos < len(content) {
+				char := content[pos]
+				if char == '-' || isASCIILetter(char) || isASCIIDigit(char) {
+					if 'A' <= char && char <= 'Z' {
+						char += 'a' - 'A'
+					}
+					run = append(run, char)
+					pos++
+					continue
+				}
+				if !bytes.HasPrefix(content[pos:], []byte(kelvinSign)) {
+					break
+				}
+				run = append(run, 'k')
+				pos += len(kelvinSign)
+			}
+			if len(run) > 0 {
+				mentions[string(run)]++
+			}
+		}
+		next := bytes.IndexByte(content[pos:], '^')
+		if next < 0 {
+			break
+		}
+		idx = pos + next
+	}
+	return mentions
 }
 
 // definitionRemoval builds the MD053 fix, which deletes a definition's lines.

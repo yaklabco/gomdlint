@@ -316,11 +316,15 @@ constructs and GFM autolink literals. The HTML rules find the tags of an
 HTML block as markdownlint does, by parsing the block's lines again as
 Markdown without HTML blocks and indented code
 (`pkg/lint/rules/html_block_markdown.go`, with the parser from
-`NewHTMLBlockContent`), and marking tags in tables. goldmark parses no
-math, so no rule skips it. MD052 reads GFM footnotes, which goldmark does
-not parse either, from the lines of the file, and counts only the
-definitions that micromark is certain to read
-(`certainFootnoteLabels` in `pkg/lint/rules/refs.go`): a `[^label]:` line
+`NewHTMLBlockContent`), and marking tags in tables. A block that
+markdownlint takes for one comment, from `<!--` to `-->`, holds no tags.
+MD051 reads HTML anchors from the same tags, through the `HTMLBlockTags`
+option of `refs.CollectWithOptions`, and `refs.HTMLAnchor` reads a tag's
+anchor as markdownlint does: its first id, or an `a` tag's first name.
+goldmark parses no math, so no rule skips it. MD052 and MD053 read GFM
+footnotes, which goldmark does not parse either, from the lines of the
+file, and count only the definitions that micromark is certain to read
+(`certainFootnoteDefinitions` in `pkg/lint/rules/refs.go`): a `[^label]:` line
 at column 0 that goldmark reads at the top level, after a blank line or
 another such definition. Every line before it that may open a block
 holding blank lines must open one that micromark reads as goldmark does:
@@ -334,7 +338,10 @@ written. It calls a definition only when their labels match by `labelKey`:
 the same bytes, or the same ASCII letters in any case, after white space is
 collapsed, never by Unicode case folding, on which goldmark and
 markdownlint disagree. Images and other labels are read as goldmark reads
-them.
+them. MD053 reports such a definition with a plain label when `^` and the
+label appear nowhere else in the file, in any case (`footnoteMentions`),
+or when an earlier one has its label, and deletes no definition whose label
+starts with `^`, since a footnote's note goes on in later indented lines.
 
 ## Fix Engine
 

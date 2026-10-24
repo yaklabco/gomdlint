@@ -43,7 +43,8 @@ func linksCatalog() []lint.RuleMeta {
 			ID: "MD051", Name: "link-fragments", Tags: []string{"links"},
 			Description: "Links to a #fragment point at a heading or anchor in the same file, or at #top.",
 			Rationale: "A heading's anchor changes when the heading is renamed or removed, " +
-				"and a link to the old anchor goes nowhere. Links to GitHub line numbers, such as #L20, pass too.",
+				"and a link to the old anchor goes nowhere. In HTML, an element's id attribute, " +
+				"or the name attribute of an a element, makes an anchor. Links to GitHub line numbers, such as #L20, pass too.",
 			Fix: "There is no automatic fix. Only the author knows the intended target.",
 		},
 		{
@@ -59,9 +60,12 @@ func linksCatalog() []lint.RuleMeta {
 			Description: "Every reference definition is used and defined once, except [//] comments.",
 			Rationale: "Definitions render nothing, so an unused one is dead text. " +
 				"Only the first of duplicate definitions takes effect, so the others change nothing. " +
-				"A definition labeled //, as in [//]: # (note), is a common way to write a comment, so it is ignored.",
+				"A definition labeled //, as in [//]: # (note), is a common way to write a comment, so it is ignored. " +
+				"A GFM footnote definition such as [^1]: A note. counts too where gomdlint can tell that GitHub reads it as one: " +
+				"at the start of a line outside lists and blockquotes, with a label of letters, digits and hyphens.",
 			Fix: "The fix deletes the unused or duplicate definition. " +
-				"gomdlint reports some definitions without a fix, such as one that other text follows on the next line. " + noFixNearCheckbox,
+				"gomdlint reports some definitions without a fix, such as one that other text follows on the next line, " +
+				"or one whose label starts with ^, which may be a footnote whose text goes on in later lines. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD054", Name: "link-image-style", Tags: []string{"images", "links"},

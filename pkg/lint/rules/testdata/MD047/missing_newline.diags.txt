@@ -1,1 +1,1 @@
-missing_newline.input.md:3:39 warning File should end with a newline (MD047/single-trailing-newline) [fixable]
+missing_newline.input.md:3:38 warning File should end with a newline (MD047/single-trailing-newline) [fixable]

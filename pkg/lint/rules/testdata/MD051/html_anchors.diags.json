@@ -1,0 +1,29 @@
+[
+  {
+    "rule": "MD051",
+    "name": "link-fragments",
+    "line": 26,
+    "column": 1,
+    "message": "Link fragment '#in-code' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD051",
+    "name": "link-fragments",
+    "line": 26,
+    "column": 26,
+    "message": "Link fragment '#div-name' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD051",
+    "name": "link-fragments",
+    "line": 27,
+    "column": 1,
+    "message": "Link fragment '#name-first' does not match any heading",
+    "severity": "warning",
+    "fixable": false
+  }
+]

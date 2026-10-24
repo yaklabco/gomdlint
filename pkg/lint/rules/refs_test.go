@@ -733,6 +733,43 @@ func TestLinkFragmentsRule_CustomAnchorsAndTop(t *testing.T) {
 	assert.Equal(t, []position{{18, 34}, {18, 46}, {19, 1}}, positions(map[string]any{"ignore_case": true}))
 }
 
+// TestLinkFragmentsRule_HTMLAnchors checks MD051 against markdownlint
+// 0.41.1, which reads the tags of an HTML block from its lines parsed again
+// as Markdown, as MD033 does, so a tag on any line of the block names an
+// anchor and one in a code span names none. It leaves a block that starts
+// with "<!--" and ends with "-->" unparsed, as a comment. An opening tag
+// names the value of its first id attribute, quoted or not, or an "a" tag
+// without one the value of its first name attribute.
+func TestLinkFragmentsRule_HTMLAnchors(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"<div>\n<a name=\"later\"></a>\n</div>\n\n" + // 3
+		"<div id=\"first\">\n<span ID=\"second\">text</span>\n</div>\n\n" + // 7
+		"Text <a\nid=\"spread\">over two lines</a>.\n\n" + // 11
+		"<div name=\"div-name\"></div>\n\n" + // 14: name counts only on an a tag
+		"<div>\n`<a id=\"in-code\"></a>`\n</div>\n\n" + // 16
+		"<a name=\"name-first\" id=\"id-second\"></a>\n\n" + // 20: the id wins
+		"<a data-id=\"data\"></a> <a id=unquoted></a> <A NAME='upper'></A>\n\n" + // 22
+		"<a id=\"\" name=\"after-empty\"></a>\n\n" + // 24: an empty id still wins
+		"> <div>\n> <a id=\"quoted\"></a>\n> </div>\n\n" + // 26
+		"- <div>\n  <a id=\"listed\"></a>\n  </div>\n\n" + // 30
+		"<!--\n<a id=\"in-comment\"></a>\n-->\n\n" + // 34
+		"[a](#later) [b](#first) [c](#second) [d](#spread) [e](#div-name)\n" + // 38
+		"[f](#in-code) [g](#name-first) [h](#id-second) [i](#data)\n" + // 39
+		"[j](#unquoted) [k](#upper) [l](#after-empty) [m](#quoted)\n" + // 40
+		"[n](#listed) [o](#in-comment)\n\n" + // 41
+		"<!--\na\n--> <a id=\"comment-end\"></a> <!-- z -->\n\n" + // 43: one comment to markdownlint
+		"  <!--\na\n--> <a id=\"indented-comment\"></a> <!-- z -->\n\n" + // 47: the indentation starts its text
+		"[p](#comment-end) [q](#indented-comment)\n" // 51
+
+	type position struct{ line, column int }
+	diags := applyRuleWithOptions(t, NewLinkFragmentsRule(), markdown, nil)
+	got := make([]position, 0, len(diags))
+	for _, diag := range diags {
+		got = append(got, position{diag.StartLine, diag.StartColumn})
+	}
+	assert.Equal(t, []position{{38, 51}, {39, 1}, {39, 15}, {39, 48}, {40, 28}, {41, 14}, {51, 1}}, got)
+}
+
 func TestDescriptiveLinkTextRule(t *testing.T) {
 	rule := NewDescriptiveLinkTextRule()
 
@@ -2049,6 +2086,92 @@ func TestLinkImageRefDefsRule_MarkerOnlyItem(t *testing.T) {
 			assert.Equal(t, []string{"2: Unused reference definition [unused]"}, diagnosticLines(diags))
 		})
 	}
+}
+
+// TestLinkImageRefDefsRule_Footnotes checks MD053 against markdownlint
+// 0.41.1, which reads GFM footnote definitions as definitions and footnote
+// calls as references. MD053 reports a footnote definition that micromark
+// is certain to read (see certainFootnoteDefinitions), whose label holds
+// nothing but ASCII letters, digits and hyphens, when "^" and its label
+// appear nowhere else in the file, in any case, and a second definition of
+// such a label as a duplicate. markdownlint also reports lines 21, 23, 27
+// and 34, which MD053 cannot be certain of. No footnote definition gets a
+// fix: its note can go on past its first line.
+func TestLinkImageRefDefsRule_Footnotes(t *testing.T) {
+	markdown := "# Title\n\n" +
+		"Text that calls[^used], [^Upper] and [^\u212aelvin].\n\n" + // 3: a Kelvin sign lowercases to k
+		"[^unused]: Some note.\n\n" + // 5
+		"[^used]: A note the text calls.\n\n" + // 7
+		"[^upper]: Called in another case.\n\n" + // 9
+		"[^kelvin]: Called with a Kelvin sign.\n\n" + // 11
+		"[^single]: /url\n\n" + // 13: also a link reference definition to goldmark
+		"[^long]: First line.\n    More of the note.\n\n" + // 15
+		"[^first]: Two in a row.\n[^second]: Right after it.\n\n" + // 18, 19
+		"[^my_note]: An underscore in the label.\n\n" + // 21
+		"> [^quoted]: In a blockquote.\n\n" + // 23
+		"Code mentions `[^coded]` and the definition follows.\n\n" + // 25
+		"[^coded]: Mentioned only in code.\n\n" + // 27
+		"[^twice]: First.\n\n" + // 29: goldmark reads line 31 as a link to it
+		"[^twice]: Second note here.\n\n" + // 31
+		"Paragraph text\n[^after-text]: Right after a paragraph line.\n" // 33, 34
+
+	diags := testHelper(t, NewLinkImageRefDefsRule(), markdown)
+	assert.Equal(t, []string{
+		"5: Unused reference definition [^unused]",
+		"13: Unused reference definition [^single]",
+		"15: Unused reference definition [^long]",
+		"18: Unused reference definition [^first]",
+		"19: Unused reference definition [^second]",
+		"29: Unused reference definition [^twice]",
+		"31: Duplicate reference definition [^twice]",
+	}, diagnosticLines(diags))
+	for _, diag := range diags {
+		assert.False(t, diag.HasFix(), "line %d: a footnote definition gets no fix", diag.StartLine)
+	}
+
+	ignored := testHelperWithOptions(t, NewLinkImageRefDefsRule(), "Text.\n\n[^note]: A note.\n",
+		map[string]any{"ignored_definitions": []any{"^note"}})
+	assert.Empty(t, ignored, "ignored_definitions holds the label with its ^")
+
+	self := testHelper(t, NewLinkImageRefDefsRule(), "Text.\n\n[^note]: A note that calls[^note] itself.\n")
+	assert.Empty(t, self, "a call in the note's own text is a call")
+}
+
+// TestLinkImageRefDefsRule_MarkdownlintColumns checks that MD053 reports a
+// definition from the start of its line, container prefix included, to the
+// end of the line, as markdownlint 0.41.1 does.
+func TestLinkImageRefDefsRule_MarkdownlintColumns(t *testing.T) {
+	markdown := "# Title\n\nUses [used].\n\n" +
+		"> [quoted]: /q\n\n" + // 5
+		"- [listed]: /l\n\n" + // 7
+		"   [indented]: /i\n\n" + // 9
+		"[used]: /u\n\n" +
+		"[spread]:\n  /s\n  \"Title\"\n" // 13
+	diags := testHelper(t, NewLinkImageRefDefsRule(), markdown)
+	assert.Equal(t, [][2]int{{5, 1}, {7, 1}, {9, 1}, {13, 1}}, diagPositions(diags))
+	if assert.Len(t, diags, 4) {
+		assert.Equal(t, [2]int{5, 15}, [2]int{diags[0].EndLine, diags[0].EndColumn}, "the finding ends with its line")
+		assert.Equal(t, [2]int{13, 10}, [2]int{diags[3].EndLine, diags[3].EndColumn}, "and with its first line")
+	}
+
+	bom := testHelper(t, NewLinkImageRefDefsRule(), "\uFEFF[bom]: /b\n")
+	assert.Equal(t, [][2]int{{1, 4}}, diagPositions(bom), "a byte order mark keeps its bytes before the column")
+}
+
+// TestLinkImageRefDefsRule_FootnoteFixWithheld checks that MD053 deletes no
+// definition whose label starts with "^". GitHub and micromark read it as
+// a footnote, whose note goes on in the indented lines after a blank line,
+// so deleting its first line would show those lines as a code block.
+func TestLinkImageRefDefsRule_FootnoteFixWithheld(t *testing.T) {
+	const input = "# Title\n\nSome text.\n\n[^b]: /url\n\n    Indented footnote content.\n"
+	diags := testHelper(t, NewLinkImageRefDefsRule(), input)
+	assert.Equal(t, []string{"5: Unused reference definition [^b]"}, diagnosticLines(diags))
+	require.Len(t, diags, 1)
+	assert.False(t, diags[0].HasFix())
+
+	plain := testHelper(t, NewLinkImageRefDefsRule(), "# Title\n\nSome text.\n\n[b]: /url\n")
+	require.Len(t, plain, 1)
+	assert.True(t, plain[0].HasFix(), "other unused definitions keep their fix")
 }
 
 // TestMultiLineLabelLengthLimit checks the limit on a label that spans two

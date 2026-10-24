@@ -445,6 +445,27 @@ formats change. The first entries under Changed may need action.
   holds code or HTML directly, so it reports ``[*`here`*](x)``. Code in a
   strikethrough counts as direct. Findings point at the link text, one
   column after the bracket, and autolinks are never checked.
+- **MD051**: Reads HTML anchors on every line of an HTML block, and over
+  every line of a tag, as markdownlint does, so `<a name="x"></a>` on the
+  second line of a `<div>` block is an anchor. A tag names the value of its
+  first `id` attribute, quoted or not, or an `a` tag without one the value
+  of its first `name` attribute, so a `name` on a `div`, a `data-id`
+  attribute and a `name` beside an `id` no longer make anchors.
+- **MD033**, **MD045**, **MD051**: Leave an HTML block that markdownlint
+  reads as one comment, from `<!--` to `-->`, unparsed, so a tag between two
+  comments on its last line, as in `--> <b>x</b> <!-- z -->`, is no HTML.
+- **MD053**: Reports unused GFM footnote definitions, such as `[^a]: Some
+  note.` with no `[^a]` in the file, and a second definition of one footnote
+  label, where MD052 counts the definitions as certain. It deletes no
+  definition whose label starts with `^`, since GitHub reads it as a
+  footnote, whose note goes on in indented lines after a blank line, and
+  deleting the first line showed those lines as a code block. Findings start
+  at the start of the definition's line, as in markdownlint.
+- **MD019**, **MD020**, **MD026**, **MD047**: Report at markdownlint's
+  columns: MD019 at the first extra space, MD020 at the character before the
+  closing hashes when only the closing space is missing, MD026 at the white
+  space before the punctuation, and MD047 at the last character. MD026's fix
+  deletes the white space it reports, such as a no-break space.
 - No fix changes or makes a task list checkbox. micromark and GitHub's
   cmark-gfm read checkboxes in different places, so any line that holds a
   `[`, one character or a line ending, and `]`, wherever on the line, keeps
