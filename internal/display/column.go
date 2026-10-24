@@ -11,8 +11,8 @@ import (
 )
 
 // markSpacing is the distance in bytes between the marks a Columns keeps on
-// a long line. A lookup decodes at most about two spacings of text it has
-// decoded before, and a line no longer than one spacing gets no marks.
+// a long line. A lookup decodes at most one spacing and one character of text
+// it has decoded before, and a line no longer than one spacing gets no marks.
 const markSpacing = 256
 
 // BOMLength returns the length in bytes of the byte order mark at the start
@@ -102,12 +102,14 @@ func (c *Columns) Column(pos mdast.Position) int {
 	skipped := len(c.snapshot.LineContent(pos.Line)) - len(text)
 	offset := max(pos.Column-1-skipped, 0)
 
-	var units int
+	var units, decoded int
 	if len(text) <= markSpacing {
-		units = c.decode(text, mark{}, offset).units
+		reached := decode(text, mark{}, offset)
+		units, decoded = reached.units, reached.offset
 	} else {
-		units = c.lineIndex(pos.Line, text).unitsBefore(c, offset)
+		units, decoded = c.longLine(pos.Line, text).unitsBefore(offset)
 	}
+	c.decoded += decoded
 
 	if offset > len(text) {
 		units += offset - len(text)
@@ -116,9 +118,9 @@ func (c *Columns) Column(pos mdast.Position) int {
 	return units + 1
 }
 
-// lineIndex returns the index of a long line, whose text is text, creating
-// it on first use.
-func (c *Columns) lineIndex(line int, text []byte) *lineIndex {
+// longLine returns the index of a long line, whose text is text, creating it
+// on first use.
+func (c *Columns) longLine(line int, text []byte) *lineIndex {
 	if index, ok := c.long[line]; ok {
 		return index
 	}
@@ -133,34 +135,37 @@ func (c *Columns) lineIndex(line int, text []byte) *lineIndex {
 }
 
 // unitsBefore returns the UTF-16 code units of the line text before byte
-// offset, or of the whole text when offset is past its end, decoding with c.
-func (l *lineIndex) unitsBefore(c *Columns, offset int) int {
+// offset, or of the whole text when offset is past its end, and the number of
+// bytes it decoded to find them.
+func (l *lineIndex) unitsBefore(offset int) (int, int) {
 	if offset < l.reach.offset {
 		// A mark after offset is the end of a character that starts before
 		// the mark's multiple of markSpacing and contains offset. That
 		// character counts in full, so decode returns the mark as it is.
-		return c.decode(l.text, l.marks[offset/markSpacing], offset).units
+		from := l.marks[offset/markSpacing]
+		reached := decode(l.text, from, offset)
+		return reached.units, reached.offset - from.offset
 	}
 
+	start := l.reach.offset
 	for l.reach.offset < len(l.text) && l.reach.offset < offset {
-		l.reach = c.decode(l.text, l.reach, min(offset, (l.reach.offset/markSpacing+1)*markSpacing))
+		l.reach = decode(l.text, l.reach, min(offset, (l.reach.offset/markSpacing+1)*markSpacing))
 		if l.reach.offset >= len(l.marks)*markSpacing {
 			l.marks = append(l.marks, l.reach)
 		}
 	}
 
-	return l.reach.units
+	return l.reach.units, l.reach.offset - start
 }
 
 // decode decodes text from the character boundary from until it reaches or
 // passes byte offset or the end of text, and returns where it stopped. A
 // character that offset points inside counts in full.
-func (c *Columns) decode(text []byte, from mark, offset int) mark {
+func decode(text []byte, from mark, offset int) mark {
 	for from.offset < len(text) && from.offset < offset {
 		size, units := nextCharacter(text[from.offset:])
 		from.offset += size
 		from.units += units
-		c.decoded += size
 	}
 
 	return from
