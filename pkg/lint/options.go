@@ -130,15 +130,24 @@ var jsNonDecimal = regexp.MustCompile(`^0(?:[xX]([0-9a-fA-F]+)|[oO]([0-7]+)|[bB]
 // text, and whether it reads one: after the whitespace that Number trims at
 // either end (see isJSWhitespace), a decimal literal such as -1.5e3, .5 or
 // 7., Infinity with an optional sign, or an integer in hexadecimal, octal
-// or binary, such as 0x1F. Number reads empty text, and nothing but
-// whitespace, as 0, which counts as no number here, and anything else as
-// NaN. A number beyond float64's range is an infinity, and one too small to
-// tell from zero is zero, as in JavaScript.
+// or binary, such as 0x1F. Number reads nothing but whitespace as 0, and
+// anything else as NaN. It reads empty text as 0 too, which counts as no
+// number here: a rule that reads an option as Number(value || default)
+// uses its default for the empty string, which is false to ||, and so does
+// gomdlint for a value of the wrong type. The rules that read an option as
+// value === undefined ? default : Number(value), no-trailing-spaces'
+// br_spaces, no-hard-tabs' spaces_per_tab and blanks-around-headings'
+// lines_above and lines_below, read it as 0, which the README lists as a
+// difference. A number beyond float64's range is an infinity, and one too
+// small to tell from zero is zero, as in JavaScript.
 func jsStringNumber(text string) (float64, bool) {
+	if text == "" {
+		return 0, false
+	}
 	text = strings.TrimFunc(text, isJSWhitespace)
 	switch text {
 	case "":
-		return 0, false
+		return 0, true
 	case "Infinity", "+Infinity":
 		return math.Inf(1), true
 	case "-Infinity":
@@ -279,6 +288,12 @@ type OptionIssue struct {
 	// markdownlint has, such as single-trailing-newline, whose only option
 	// is gomdlint's.
 	NoOptions bool
+
+	// ReadsAsZero reports, for OptionIssueWrongType, that Value is a string
+	// that markdownlint 0.41.1 reads as 0, which the option's rule reads
+	// only as its default (OptionSpec.ZeroIsDefault), so that gomdlint
+	// cannot use it as markdownlint does.
+	ReadsAsZero bool
 }
 
 // Text describes the issue for a warning or an error about the options of
@@ -287,6 +302,7 @@ type OptionIssue struct {
 //	unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored
 //	line-length option "max" must be an integer, not "100px"; it is ignored
 //	heading-blank-lines option "lines_above" item 2 must be an integer, not 2.5; the option is ignored
+//	list-marker-space option "ul_single" is "0", which markdownlint reads as 0 and gomdlint only as the default; it is ignored
 //	ul-style option "style" must be one of "consistent", "dash" or "plus", not "dashes" (did you mean "dash"?)
 //	"line_length" and "max" both set line-length option "max"; keep one of them
 func (issue OptionIssue) Text(ruleName string) string {
@@ -301,6 +317,10 @@ func (issue OptionIssue) Text(ruleName string) string {
 		}
 		return text + "; it is ignored"
 	case OptionIssueWrongType:
+		if issue.ReadsAsZero {
+			return fmt.Sprintf("%s option %q is %s, which markdownlint reads as 0 and gomdlint only as the default; "+
+				"it is ignored", ruleName, issue.Key, describeOptionValue(issue.Value))
+		}
 		if issue.Item > 0 {
 			return fmt.Sprintf("%s option %q item %d must be %s, not %s; the option is ignored",
 				ruleName, issue.Key, issue.Item, issue.Option.Type.itemTypeText(), describeOptionValue(issue.Value))
@@ -553,14 +573,34 @@ func markdownlintHasRule(id string) bool {
 // range of an int, such as an infinite one, reads as the nearest int,
 // math.MaxInt or math.MinInt, which compares with every count as the value
 // does: no count reaches the one, and every count exceeds the other.
-func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, bool) {
+//
+// For an option that markdownlint reads as Number(value || default) and
+// the rule reads 0 as the default (OptionSpec.ZeroIsDefault), the empty
+// string, which is false to ||, reads as 0, and a string that reads as 0,
+// which is not, as OptionSpec.MarkdownlintZero. When the option has no
+// such value, the string stays as it is, and the reading is
+// markdownlintZeroUnusable. For an option that only markdownlint reads so
+// (OptionSpec.MarkdownlintZeroIsDefault), 0 and the empty string leave the
+// option unset, while a string that reads as 0 reads as 0.
+func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, markdownlintReading) {
 	if !t.markdownlintValues || (spec.Type != OptionInteger && spec.Type != OptionIntegerOrList) {
-		return value, false
+		return value, markdownlintAsIs
 	}
-	read, differs := value, false
+	if spec.MarkdownlintZeroIsDefault && (value == "" || isZeroNumber(value)) {
+		return nil, markdownlintUnset
+	}
+	read, reading := value, markdownlintAsIs
 	if text, isText := value.(string); isText {
-		if number, ok := jsStringNumber(text); ok {
-			read, differs = number, true
+		number, ok := jsStringNumber(text)
+		switch {
+		case spec.ZeroIsDefault && text == "":
+			return 0, markdownlintRead
+		case spec.ZeroIsDefault && ok && number == 0 && spec.MarkdownlintZero == nil:
+			return value, markdownlintZeroUnusable
+		case spec.ZeroIsDefault && ok && number == 0:
+			return spec.MarkdownlintZero, markdownlintRead
+		case ok:
+			read, reading = number, markdownlintRead
 		}
 	}
 	if number, isNumber := read.(float64); isNumber && spec.Limit {
@@ -568,12 +608,40 @@ func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, bool) 
 		// -2^63 is one.
 		switch {
 		case number >= math.MaxInt64:
-			read, differs = math.MaxInt, true
+			read, reading = math.MaxInt, markdownlintRead
 		case number < math.MinInt64:
-			read, differs = math.MinInt, true
+			read, reading = math.MinInt, markdownlintRead
 		}
 	}
-	return read, differs
+	return read, reading
+}
+
+// markdownlintReading says how markdownlintValue read a value.
+type markdownlintReading int
+
+const (
+	// markdownlintAsIs reads the value as it is.
+	markdownlintAsIs markdownlintReading = iota
+	// markdownlintRead reads the value as another.
+	markdownlintRead
+	// markdownlintUnset leaves the option unset, as markdownlint reads the
+	// value as the default.
+	markdownlintUnset
+	// markdownlintZeroUnusable marks a string that reads as 0, which the
+	// rule cannot read as markdownlint does (see OptionIssue.ReadsAsZero).
+	markdownlintZeroUnusable
+)
+
+// isZeroNumber reports whether value is the number 0, as an int or a
+// float64, negative zero included.
+func isZeroNumber(value any) bool {
+	switch typed := value.(type) {
+	case int:
+		return typed == 0
+	case float64:
+		return typed == 0
+	}
+	return false
 }
 
 // suggest returns the spellings that key, which spells no option of the
@@ -653,8 +721,20 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 				value = !enabled
 			}
 		}
-		if read, differs := t.markdownlintValue(spec, value); differs {
+		read, reading := t.markdownlintValue(spec, value)
+		switch reading {
+		case markdownlintAsIs:
+		case markdownlintRead:
 			value, changed = read, true
+		case markdownlintUnset:
+			changed = true
+			continue
+		case markdownlintZeroUnusable:
+			issues = append(issues, OptionIssue{
+				Kind: OptionIssueWrongType, Key: key, Value: value, Option: spec, ReadsAsZero: true,
+			})
+			changed = true
+			continue
 		}
 		if !spec.Type.Accepts(value) {
 			issues = append(issues, wrongTypeIssues(key, options[key], spec)...)
@@ -725,6 +805,9 @@ func (t *optionTable) canonical(options map[string]any) bool {
 		}
 		spec := t.specs[spelling.index]
 		if !spec.Type.Accepts(value) {
+			return false
+		}
+		if _, reading := t.markdownlintValue(spec, value); reading != markdownlintAsIs {
 			return false
 		}
 		switch typed := value.(type) {

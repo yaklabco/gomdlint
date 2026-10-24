@@ -958,9 +958,15 @@ Some of its fix checks are also stricter than they need to be.
 - Most of markdownlint's rules read the number 0 for an option such as
   `line_length` or `maximum` as unset, and a numeric string that reads as
   0, such as `"0"`, as 0 itself. In a markdownlint config, gomdlint reads
-  such a string as the number 0, which those rules read as unset, so
-  `"line_length": "0"`, which turns off markdownlint's length check,
-  applies the default of 80 in gomdlint.
+  such a string for `line-length` as -1, which turns the length check off
+  as 0 does in markdownlint. For `maximum` and the spacings of
+  `list-marker-space`, where markdownlint then reports every blank line or
+  every list item, gomdlint has no such value, so it ignores the string
+  with a warning and uses the default.
+- markdownlint reads an empty string for `no-trailing-spaces`'
+  `br_spaces`, `no-hard-tabs`' `spaces_per_tab` and
+  `blanks-around-headings`' `lines_above` and `lines_below` as 0. gomdlint
+  ignores it with a warning and uses the default.
 - markdownlint's rules read options of other types with JavaScript's
   conversions too, such as `"strict": "false"`, which reads as true, and a
   number in a list of strings, which reads as its text. gomdlint reads only

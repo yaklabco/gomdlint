@@ -167,6 +167,9 @@ formats change. The first entries under Changed may need action.
   with an ID of markdownlint's shape, MD and digits,
   `Registry.MarkdownlintRuleConfig` reads an option under its first alias,
   or else its name, and not at all when it is marked `GomdlintOnly`.
+  `lint.OptionSpec` gains `Limit`, `ZeroIsDefault`, `MarkdownlintZero` and
+  `MarkdownlintZeroIsDefault`, `lint.OptionIssue` gains `ReadsAsZero`, and
+  `lint.MarkdownlintCLI2Options` holds a markdownlint-cli2 options file.
 
 ### Added
 
@@ -590,7 +593,15 @@ formats change. The first entries under Changed may need action.
   `markdownlint-configure-file` comment reads a numeric string, such as
   `"line_length": "100"` or `"0x64"`, as its number, as markdownlint's
   rules do. gomdlint ignored such a value with a warning, and without one
-  in a comment. gomdlint's own config files still take numbers only.
+  in a comment. A string that reads as 0, such as `"0"`, turns
+  `line-length`'s check off, as in markdownlint, and gets a warning for
+  `no-multiple-blanks` and `list-marker-space`, which gomdlint cannot read
+  as markdownlint does. An empty string for an option that markdownlint
+  reads as `value || default` means the default, without a warning, and so
+  does the number 0 for `ul-indent`'s `indent` and `start_indent` and the
+  `level` of `single-title` and `first-line-heading`, where gomdlint used
+  0.
+  gomdlint's own config files still take numbers only.
 - An infinite `line_length`, `heading_line_length`,
   `code_block_line_length` or `maximum` in a markdownlint config, such as
   YAML's `.inf`, or one of 2^63 or more, lifts the limit, as in

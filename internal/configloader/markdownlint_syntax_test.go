@@ -307,7 +307,8 @@ func TestConvertMarkdownlintConfig_NumbersBeyondFloat64(t *testing.T) {
 // heading_line_length, markdownlint checks no heading's length, and
 // gomdlint, which reads the value as the smallest int, checks none either,
 // as for any length below 1, while the paragraph's line still gets the
-// line_length of 20.
+// line_length of 20. A length that reads as 0, such as "0", turns the
+// check off in both, and the empty string means the default.
 func TestLoad_MarkdownlintLimitsBeyondInt(t *testing.T) {
 	t.Parallel()
 
@@ -328,6 +329,16 @@ func TestLoad_MarkdownlintLimitsBeyondInt(t *testing.T) {
 				"A paragraph line longer than twenty characters.\n\n\n\n" +
 				"    a code block line longer than twenty characters\n",
 			want: []string{"MD013:3"},
+		},
+		{
+			// "0" is not false to ||, so markdownlint checks code blocks
+			// against a length of 0, which turns the check off, as -1 does
+			// in gomdlint. The empty string is, so the line length is the
+			// default, 80. markdownlint-cli2 reports the paragraph's line.
+			name: "a length that reads as 0", file: ".markdownlint.json",
+			text:     `{"MD013": {"line_length": "", "code_block_line_length": "0"}}`,
+			document: "# Title\n\n" + strings.Repeat("word ", 40) + "end\n\n    " + strings.Repeat("code ", 20) + "\n",
+			want:     []string{"MD013:3"},
 		},
 	}
 	for _, tt := range tests {

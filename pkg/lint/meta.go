@@ -205,9 +205,38 @@ type OptionSpec struct {
 	// or a number of 2^63 or more, lifts the limit, since no count reaches
 	// it. gomdlint reads such a value there as math.MaxInt, which no count
 	// reaches either, and one below -2^63, such as -Infinity, as
-	// math.MinInt, which every count exceeds. A value beyond int's range of
-	// any other option is of the wrong type.
+	// math.MinInt, which every count exceeds. line-length then checks no
+	// line, as markdownlint does, while no-multiple-blanks reads any
+	// maximum below 1 as 1, where markdownlint reports every line of the
+	// document for a maximum below 0. A value beyond int's range of any
+	// other option is of the wrong type.
 	Limit bool
+
+	// ZeroIsDefault reports that the rule reads 0 as the option's default,
+	// as markdownlint 0.41.1 does, which reads the option as
+	// Number(value || default). A string that JavaScript's Number reads as
+	// 0, such as "0" or " ", is not false to ||, so markdownlint uses 0
+	// itself, while the empty string, which is, means the default. A
+	// markdownlint configuration's empty string reads as 0, and such a
+	// string as MarkdownlintZero, or, when the option has none, as of the
+	// wrong type, with a warning.
+	ZeroIsDefault bool
+
+	// MarkdownlintZero is, for an option whose rule reads 0 as the default
+	// (ZeroIsDefault), the value with which the rule does what
+	// markdownlint 0.41.1 does with 0 itself, such as -1 for line-length's
+	// lengths, with which neither checks a line. It is nil when the rule
+	// has no such value, as no-multiple-blanks has none for a maximum of
+	// 0, of which markdownlint reports every blank line.
+	MarkdownlintZero any
+
+	// MarkdownlintZeroIsDefault reports that markdownlint 0.41.1 reads 0 as
+	// the option's default, as it reads the option as
+	// Number(value || default), while the rule reads 0 as it is, such as
+	// ul-indent's indent. A markdownlint configuration's 0, or empty
+	// string, leaves the option unset, while a string that reads as 0,
+	// such as "0", which is not false to ||, reads as 0.
+	MarkdownlintZeroIsDefault bool
 
 	// MarkdownlintPinned reports that a markdownlint configuration sets the
 	// option to Default explicitly in each setting of the rule that resets
