@@ -26,6 +26,44 @@ Set them under `rules.code-block-style.options`.
 
 There is no automatic fix.
 
+## Example
+
+This document breaks the rule:
+
+````markdown
+# Install
+
+```sh
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
+```
+
+Then check the version:
+
+    gomdlint --version
+````
+
+gomdlint reports:
+
+```text
+9:1 Code block style 'indented' does not match expected 'fenced'
+```
+
+This document follows the rule:
+
+````markdown
+# Install
+
+```sh
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
+```
+
+Then check the version:
+
+```sh
+gomdlint --version
+```
+````
+
 ## Configure
 
 ```yaml

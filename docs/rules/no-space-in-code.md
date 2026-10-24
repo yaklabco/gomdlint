@@ -27,6 +27,30 @@ when the fix would change a line with one character in brackets, such as \[x\]
 or \[1\], or the lines around it up to a blank line, because it could add or
 remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Usage
+
+Run `gomdlint lint ` in the project root.
+```
+
+gomdlint reports:
+
+```text
+3:19 Excessive trailing space inside code span
+```
+
+The fix changes it to:
+
+```markdown
+# Usage
+
+Run `gomdlint lint` in the project root.
+```
+
 ## Configure
 
 Under `rules`, `no-space-in-code: false` turns the rule off and

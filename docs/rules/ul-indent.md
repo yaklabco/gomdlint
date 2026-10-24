@@ -35,6 +35,34 @@ blank line, because it could add or remove a task list checkbox. In a document
 with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint
 reports every finding without a fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Requirements
+
+- Go
+    - Version 1.24 or later
+- Make
+```
+
+gomdlint reports:
+
+```text
+4:1 Unordered list indentation 4 does not match expected 2
+```
+
+The fix changes it to:
+
+```markdown
+# Requirements
+
+- Go
+  - Version 1.24 or later
+- Make
+```
+
 ## Configure
 
 ```yaml

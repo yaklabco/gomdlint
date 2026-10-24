@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD038",
+    "name": "no-space-in-code",
+    "line": 3,
+    "column": 19,
+    "message": "Excessive trailing space inside code span",
+    "severity": "warning",
+    "fixable": true
+  }
+]

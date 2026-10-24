@@ -32,6 +32,42 @@ a finding without a fix when the fix would change a line with one character in
 brackets, such as \[x\] or \[1\], or the lines around it up to a blank line,
 because it could add or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+````markdown
+# Scripts
+
+```
+{
+  "scripts": {
+    "lint": "gomdlint lint docs"
+  }
+}
+```
+````
+
+gomdlint reports:
+
+```text
+3:1 Fenced code block has no language specified
+```
+
+The fix changes it to:
+
+````markdown
+# Scripts
+
+```json
+{
+  "scripts": {
+    "lint": "gomdlint lint docs"
+  }
+}
+```
+````
+
 ## Configure
 
 ```yaml

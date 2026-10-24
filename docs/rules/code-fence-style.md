@@ -31,6 +31,46 @@ would change a line with one character in brackets, such as \[x\] or \[1\], or
 the lines around it up to a blank line, because it could add or remove a task
 list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+````markdown
+# Install
+
+```sh
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
+```
+
+Then check the version:
+
+~~~sh
+gomdlint --version
+~~~
+````
+
+gomdlint reports:
+
+```text
+9:1 Code fence style 'tilde' does not match expected 'backtick'
+```
+
+The fix changes it to:
+
+````markdown
+# Install
+
+```sh
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
+```
+
+Then check the version:
+
+```sh
+gomdlint --version
+```
+````
+
 ## Configure
 
 ```yaml

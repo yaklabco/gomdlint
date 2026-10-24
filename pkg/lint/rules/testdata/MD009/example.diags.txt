@@ -1,0 +1,1 @@
+example.input.md:3:18 warning Trailing whitespace (MD009/no-trailing-spaces) [fixable]

@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD010",
+    "name": "no-hard-tabs",
+    "line": 3,
+    "column": 24,
+    "message": "Hard tab character found",
+    "severity": "warning",
+    "fixable": true
+  }
+]

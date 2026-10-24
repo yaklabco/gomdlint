@@ -37,6 +37,30 @@ blank line, because it could add or remove a task list checkbox. In a document
 with raw HTML other than comments and plain br, wbr, hr or img tags, gomdlint
 reports every finding without a fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+The tool needs Go 1.24.	It builds on Linux and macOS.
+```
+
+gomdlint reports:
+
+```text
+3:24 Hard tab character found
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+The tool needs Go 1.24. It builds on Linux and macOS.
+```
+
 ## Configure
 
 ```yaml

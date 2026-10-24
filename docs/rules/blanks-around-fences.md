@@ -31,6 +31,41 @@ fix when the fix would change a line with one character in brackets, such as
 \[x\] or \[1\], or the lines around it up to a blank line, because it could add
 or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+````markdown
+# Install
+
+Run this command:
+```sh
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
+```
+Then run gomdlint in your project.
+````
+
+gomdlint reports:
+
+```text
+4:1 Missing blank line before fenced code block
+6:1 Missing blank line after fenced code block
+```
+
+The fix changes it to:
+
+````markdown
+# Install
+
+Run this command:
+
+```sh
+go install github.com/yaklabco/gomdlint/cmd/gomdlint@latest
+```
+
+Then run gomdlint in your project.
+````
+
 ## Configure
 
 ```yaml
