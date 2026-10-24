@@ -2,6 +2,7 @@ package ruledocs
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -93,6 +94,7 @@ func ReferenceFiles(entries []Entry) (map[string][]byte, error) {
 // linked to their pages, IDs, fix support and descriptions. The block's
 // headings are of level 3, under the README's section on rules. Each
 // marker must stand on a line of its own, once, the begin marker first.
+// The block's lines end as the begin marker's line does, in LF or CRLF.
 func UpdateReadme(readme []byte, entries []Entry) ([]byte, error) {
 	text := string(readme)
 	begin, beginErr := markerLine(text, ReadmeBlockBegin)
@@ -100,7 +102,7 @@ func UpdateReadme(readme []byte, entries []Entry) ([]byte, error) {
 	if err := errors.Join(beginErr, endErr); err != nil {
 		return nil, err
 	}
-	if end < begin {
+	if end.start < begin.start {
 		return nil, fmt.Errorf("the README's %s comes before its %s", ReadmeBlockEnd, ReadmeBlockBegin)
 	}
 
@@ -108,25 +110,44 @@ func UpdateReadme(readme []byte, entries []Entry) ([]byte, error) {
 	block.add(generatedNotice, markdownProse(countsText(entries)))
 	addRuleTables(&block, entries, 3, func(entry Entry) string { return rulesDir + "/" + entry.Name + ".md" })
 
-	start := begin + len(ReadmeBlockBegin) + 1 // After the begin marker's line.
-	return []byte(text[:start] + "\n" + block.String() + "\n" + text[end:]), nil
+	newline := cmp.Or(begin.ending, "\n")
+	lines := strings.ReplaceAll("\n"+block.String()+"\n", "\n", newline)
+	return []byte(text[:begin.next] + lines + text[end.start:]), nil
 }
 
-// markerLine returns where marker starts in text, on a line of its own.
-// It fails when marker is not there, or there more than once.
-func markerLine(text, marker string) (int, error) {
-	line := "\n" + marker + "\n"
-	padded := "\n" + text
-	if !strings.HasSuffix(padded, "\n") {
-		padded += "\n"
+// readmeLine is where a line of a README starts, where the next line
+// starts, and how the line ends: "\n", "\r\n", or "" for a last line
+// without a line ending.
+type readmeLine struct {
+	start, next int
+	ending      string
+}
+
+// markerLine returns the line of text that holds marker and nothing else,
+// apart from its line ending. It fails when no line, or more than one,
+// holds marker.
+func markerLine(text, marker string) (readmeLine, error) {
+	var found []readmeLine
+	for start := 0; start < len(text); {
+		next := len(text)
+		if idx := strings.IndexByte(text[start:], '\n'); idx >= 0 {
+			next = start + idx + 1
+		}
+		content := text[start:next]
+		withoutEnding := strings.TrimSuffix(strings.TrimSuffix(content, "\n"), "\r")
+		if withoutEnding == marker {
+			found = append(found, readmeLine{start: start, next: next, ending: content[len(withoutEnding):]})
+		}
+		start = next
 	}
-	switch strings.Count(padded, line) {
+
+	switch len(found) {
 	case 0:
-		return 0, fmt.Errorf("the README has no line %s", marker)
+		return readmeLine{}, fmt.Errorf("the README has no line %s", marker)
 	case 1:
-		return strings.Index(padded, line), nil
+		return found[0], nil
 	default:
-		return 0, fmt.Errorf("the README has more than one line %s", marker)
+		return readmeLine{}, fmt.Errorf("the README has %d lines %s, and needs one", len(found), marker)
 	}
 }
 

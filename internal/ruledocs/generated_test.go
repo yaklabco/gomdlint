@@ -227,10 +227,34 @@ func TestUpdateReadme(t *testing.T) {
 		ruledocs.ReadmeBlockBegin + "\n",
 		ruledocs.ReadmeBlockEnd + "\n" + ruledocs.ReadmeBlockBegin + "\n",
 		ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n" + ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n",
+		ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n" + ruledocs.ReadmeBlockEnd + "\n",
+		ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n",
+		"Intro " + ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n",
 	} {
 		_, err := ruledocs.UpdateReadme([]byte(broken), entries)
 		assert.Error(t, err, "%q", broken)
 	}
+}
+
+// TestUpdateReadmeKeepsLineEndings covers a README with CRLF line endings
+// and one whose end marker is its last line, without a newline: the block
+// takes the README's line endings, and the rest stays as it was.
+func TestUpdateReadmeKeepsLineEndings(t *testing.T) {
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)[:2]
+
+	crlf := "# Project\r\n\r\n" + ruledocs.ReadmeBlockBegin + "\r\nold\r\n" + ruledocs.ReadmeBlockEnd + "\r\n\r\nAfter.\r\n"
+	updated, err := ruledocs.UpdateReadme([]byte(crlf), entries)
+	require.NoError(t, err)
+	text := string(updated)
+	assert.True(t, strings.HasPrefix(text, "# Project\r\n\r\n"+ruledocs.ReadmeBlockBegin+"\r\n\r\n"), text)
+	assert.True(t, strings.HasSuffix(text, "|\r\n\r\n"+ruledocs.ReadmeBlockEnd+"\r\n\r\nAfter.\r\n"), text)
+	assert.Equal(t, strings.Count(text, "\n"), strings.Count(text, "\r\n"), "every line ends in CRLF")
+	assert.NotContains(t, text, "old")
+
+	unterminated := ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd
+	updated, err = ruledocs.UpdateReadme([]byte(unterminated), entries)
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(string(updated), "|\n\n"+ruledocs.ReadmeBlockEnd), string(updated))
 }
 
 // TestIsGenerated covers the notice that marks a generated file.
