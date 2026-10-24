@@ -39,7 +39,8 @@ func fixWithRegistry(t *testing.T, content string, registry *lint.Registry) (str
 // MD022 after a heading, not MD031 after a fence, and not MD058 before the
 // table. Each case runs with only the rule that wants the blank line and with
 // every default rule. In a list that is loose already, the blank line changes
-// nothing, and the fixes still apply.
+// nothing, and the fixes still apply, unless the line would move the table
+// out of the list.
 func TestFix_BlankLineBeforeATableKeepsTheListTight(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -78,6 +79,40 @@ func TestFix_BlankLineBeforeATableKeepsTheListTight(t *testing.T) {
 			input:     "# Title\n\n- item\n  ```sh\n  code\n  ```\n  | a | b |\n  | --- | --- |\n\n- next\n",
 			ruleID:    "MD031",
 			wantFixed: "# Title\n\n- item\n\n  ```sh\n  code\n  ```\n\n  | a | b |\n  | --- | --- |\n\n- next\n",
+		},
+		{
+			name:      "table after text in a loose list",
+			input:     "# Title\n\n- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n",
+			ruleID:    "MD058",
+			wantFixed: "# Title\n\n- item\n\n  text\n\n  | a | b |\n  | --- | --- |\n\n- next\n",
+		},
+		{
+			// A blank line before the header row, which continues the item's
+			// paragraph without the item's indent, would end the list.
+			name:   "lazy table rows in a loose list",
+			input:  "# Title\n\n- item\n\n  text\n| a | b |\n| --- | --- |\n\n- next\n",
+			ruleID: "MD058",
+		},
+		{
+			// A second blank line ends an item that starts with an empty line.
+			name:   "table after the empty first line of an item in a loose list",
+			input:  "# Title\n\n- first\n\n-\n  | a | b |\n  | --- | --- |\n",
+			ruleID: "MD058",
+		},
+		{
+			// CommonMark takes the blank line into the unclosed fence, so the
+			// list is tight, though goldmark reads it as loose. The fence
+			// starts its item, so MD031 has no blank line to add.
+			name:   "table in a tight list with an unclosed fence",
+			input:  "# Title\n\n1. ```sh\n   make\n\n2. Next\n   text\n   | a | b |\n   | --- | --- |\n3. Done\n",
+			ruleID: "MD058",
+		},
+		{
+			// The fix check reads an edit in a long top-level list region by
+			// region.
+			name:   "table in a long tight list",
+			input:  "# Title\n\n- a\n- item\n  | x | y |\n  | --- | --- |\n- b\n- c\n",
+			ruleID: "MD058",
 		},
 		{
 			// goldmark makes a table and a setext heading of the item's first

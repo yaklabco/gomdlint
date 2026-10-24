@@ -3,7 +3,7 @@ exit code 0
 NAME                    ID      FIX  STATUS   DESCRIPTION
 
 Tables
-  blanks-around-tables  MD058   yes  info     Tables have a blank or comment line above and below.
+  blanks-around-tables  MD058   yes  warning  Tables have a blank or comment line above and below.
   table-alignment       MDL003  yes  warning  Each cell of a table's delimiter row has at least 3 dashes.
   table-column-count    MD056   no   warning  Every table row has as many cells as the header row.
   table-column-style    MD060   no   warning  Each table follows one style: aligned pipes, one space of padding, or none.

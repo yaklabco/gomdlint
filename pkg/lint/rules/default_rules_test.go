@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,54 @@ func TestDefaultRuleSet(t *testing.T) {
 		resolved = append(resolved, rr.Rule.ID())
 	}
 	assert.Equal(t, lint.DefaultRegistry.IDs(), resolved, "the rules that run without configuration")
+}
+
+// TestDefaultSeverities checks that every registered rule reports warnings
+// without configuration. markdownlint reports every finding as an error,
+// and gomdlint reports every one as a warning, which fails a run with
+// --strict. An info finding never fails a run, so no rule defaults to it.
+func TestDefaultSeverities(t *testing.T) {
+	notWarning := make(map[string]config.Severity)
+	for _, rule := range lint.DefaultRegistry.Rules() {
+		if severity := rule.DefaultSeverity(); severity != config.SeverityWarning {
+			notWarning[rule.ID()] = severity
+		}
+	}
+	assert.Empty(t, notWarning, "rules whose default severity is not warning")
+
+	for _, rr := range lint.ResolveRules(lint.DefaultRegistry, config.NewConfig()) {
+		assert.Equal(t, config.SeverityWarning, rr.Severity, "%s without configuration", rr.Rule.ID())
+	}
+}
+
+// TestRulesBuildFindingsAtDefaultSeverity applies each rule directly, as a
+// library caller does, to the inputs of its golden cases, and checks that
+// every finding has the rule's default severity. The engine replaces each
+// finding's severity with the resolved one, so the goldens cannot see a
+// rule that builds its findings at another severity.
+func TestRulesBuildFindingsAtDefaultSeverity(t *testing.T) {
+	for _, tc := range discoverTestCases(t, testdataDir(t)) {
+		if tc.IsRealWorld || tc.RuleID == "" {
+			continue
+		}
+		t.Run(tc.Name, func(t *testing.T) {
+			rule, ok := lint.DefaultRegistry.GetByID(tc.RuleID)
+			require.True(t, ok, "rule %s", tc.RuleID)
+			input, err := os.ReadFile(tc.InputPath)
+			require.NoError(t, err)
+			// Parse with the case's flavor and apply its options, as the
+			// golden case does.
+			run := mustGoldenRun(t, tc)
+			file, err := run.parser.Parse(context.Background(), tc.InputPath, input)
+			require.NoError(t, err)
+			ruleCfg := &config.RuleConfig{Options: engineOptions(rule.ID(), run.cfg.Rules[tc.RuleID].Options)}
+			diags, err := rule.Apply(lint.NewRuleContext(context.Background(), file, run.cfg, ruleCfg))
+			require.NoError(t, err)
+			for _, diag := range diags {
+				assert.Equal(t, rule.DefaultSeverity(), diag.Severity, "line %d", diag.StartLine)
+			}
+		})
+	}
 }
 
 // lintWithDefaultRules lints input the way the CLI does: with the default
@@ -78,9 +127,11 @@ func TestFormerlyOptInRulesReportWithoutConfig(t *testing.T) {
 			lines: []int{4, 4, 5},
 		},
 		{
+			// A link to another host sets no style, so the relative link
+			// to the guide does, and the file: URL breaks it.
 			id:    "MDL001",
-			input: "# Title\n\nSee [the site](https://example.com) and [the guide](docs/guide.md).\n",
-			lines: []int{3},
+			input: "# Title\n\nSee [the site](https://example.com) and [the guide](docs/guide.md).\n\nOr [the copy](file:///tmp/guide.md).\n",
+			lines: []int{5},
 		},
 	}
 

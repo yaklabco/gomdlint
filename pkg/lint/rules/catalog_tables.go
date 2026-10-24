@@ -23,8 +23,8 @@ func tablesCatalog() []lint.RuleMeta {
 			Description: "Tables have a blank or comment line above and below.",
 			Rationale:   "Some parsers misread a table that has no blank lines around it.",
 			Fix: "The fix inserts the missing blank line, keeping any blockquote markers. " +
-				"gomdlint reports a table inside a list without a fix when the blank line would fall between two items " +
-				"or two blocks of one item. " + noFixNearCheckbox,
+				"gomdlint reports some tables without a fix, such as a table in a tight list " +
+				"when the blank line would make the list loose. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD060", Name: "table-column-style", Tags: []string{"table"},

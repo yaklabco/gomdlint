@@ -584,6 +584,13 @@ func TestImageAltTextRule_HTMLImages(t *testing.T) {
 	}
 }
 
+// TestLinkDestinationStyleRule checks which links MDL001 compares and how
+// each style option reports them. A link counts only when it could be
+// written in the other kind: a relative link, which an absolute URL could
+// replace, or a file: URL that names no other host, which a relative link
+// could replace. A link to another host, a URI such as mailto:, an autolink
+// and a link to a fragment have one form, so they never set the consistent
+// style and are never reported.
 func TestLinkDestinationStyleRule(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -591,120 +598,92 @@ func TestLinkDestinationStyleRule(t *testing.T) {
 		style string
 		wantN int
 	}{
+		// A link to another host cannot be relative, so it sets no style,
+		// and neither the consistent nor the relative style reports it.
+		{name: "links to other hosts under the relative style", input: "[a](http://example.com) and [b](https://example.org)", style: "relative"},
+		{name: "link to another host before a relative link", input: "[a](http://example.com) and [b](relative.md)", style: "consistent"},
+		{name: "link to another host after a relative link", input: "[a](relative.md) and [b](http://example.com)", style: "consistent"},
+		{name: "link to another host under the relative style", input: "[a](relative.md) and [b](http://example.com)", style: "relative"},
+		// Any relative link could be an absolute URL, so the absolute style
+		// reports each one, an absolute path or a query alike.
+		{name: "relative link under the absolute style", input: "[a](http://example.com) and [b](relative.md)", style: "absolute", wantN: 1},
+		{name: "absolute path under the absolute style", input: "[a](https://example.com) and [b](/docs/guide.md)", style: "absolute", wantN: 1},
+		{name: "query under the absolute style", input: "[a](?tab=readme)", style: "absolute", wantN: 1},
+		{name: "all relative", input: "[a](a.md) and [b](b.md)", style: "relative"},
+		// A file: URL that names no other host names a local file, which a
+		// relative link could name too.
+		{name: "file URL after a relative link", input: "[a](docs/a.md) and [b](file:///home/user/b.md)", style: "consistent", wantN: 1},
+		{name: "relative link after a file URL", input: "[b](file:///home/user/b.md) and [a](docs/a.md)", style: "consistent", wantN: 1},
+		{name: "file URL under the relative style", input: "[b](file:///home/user/b.md)", style: "relative", wantN: 1},
+		{name: "file URL for localhost", input: "[b](file://localhost/home/user/b.md)", style: "relative", wantN: 1},
+		{name: "file URL with one slash", input: "[b](file:/home/user/b.md)", style: "relative", wantN: 1},
+		{name: "file scheme in capitals", input: "[b](FILE:///home/user/b.md)", style: "relative", wantN: 1},
+		{name: "localhost in capitals", input: "[b](file://LOCALHOST/home/user/b.md)", style: "relative", wantN: 1},
+		{name: "file URL with a drive", input: "[b](file:///C:/docs/b.md)", style: "relative", wantN: 1},
+		{name: "file URL on another host", input: "[b](file://server/share/b.md)", style: "relative"},
+		{name: "UNC file URL", input: "[b](file:////server/share/b.md)", style: "relative"},
+		{name: "file URL under the absolute style", input: "[b](file:///home/user/b.md)", style: "absolute"},
+		{name: "file URL in a definition", input: "[a](docs/a.md) and [b][ref]\n\n[ref]: file:///home/user/b.md", style: "consistent", wantN: 1},
+		// Percent-encoded unreserved characters name the same host
+		// (RFC 3986, section 2.3).
+		{name: "percent-encoded localhost", input: "[a](a.md) [b](file://%6Cocalhost/tmp/b.md)", style: "consistent", wantN: 1},
+		{name: "percent-encoded localhost in a definition", input: "[a](a.md) and [b][ref]\n\n[ref]: file://%6cOCALHOS%74/tmp/b.md", style: "consistent", wantN: 1},
+		// A fragment link points into this document, so it sets no style
+		// and is never reported.
+		{name: "fragment after a file URL", input: "[a](file:///home/user/a.md) and [b](#anchor)", style: "consistent"},
+		{name: "fragment under the absolute style", input: "[b](#anchor)", style: "absolute"},
+		// An autolink shows its URI as its text, so it has no relative form.
+		// Email autolinks, which the parser gives without their mailto:
+		// scheme, are URIs too, though the destination reads as relative.
+		{name: "email autolink after a file URL", input: "[b](file:///home/user/b.md) and <user@example.com>", style: "consistent"},
+		{name: "email autolink before a file URL", input: "<user@example.com> and [b](file:///home/user/b.md)", style: "consistent"},
+		{name: "file autolink after a relative link", input: "[a](a.md) and <file:///home/user/b.md>", style: "consistent"},
+		{name: "file autolink under the relative style", input: "[a](a.md) and <file:///home/user/b.md>", style: "relative"},
+		{name: "autolinks under the absolute style", input: "<https://example.com> and <user@example.com>", style: "absolute"},
+		// A URI with another scheme names no file that a relative link could
+		// name, whatever the link syntax.
+		{name: "mailto link after a relative link", input: "[a](docs/a.md) and [mail us](mailto:team@example.com)", style: "consistent"},
 		{
-			name:  "consistent style absolute first",
-			input: "[a](http://example.com) and [b](https://example.org)",
-			style: "consistent",
-			wantN: 0,
-		},
-		{
-			name:  "consistent style mixed",
-			input: "[a](http://example.com) and [b](relative.md)",
-			style: "consistent",
-			wantN: 1,
-		},
-		{
-			name:  "relative style enforced",
-			input: "[a](relative.md) and [b](http://example.com)",
+			name: "URIs under the relative style",
+			input: "[mail us](mailto:team@example.com), [text us](sms:+15551234567), [book](urn:isbn:0451450523) and " +
+				"[extension](vscode:extension/ms-python.python)",
 			style: "relative",
-			wantN: 1,
 		},
 		{
-			name:  "absolute style enforced",
-			input: "[a](http://example.com) and [b](relative.md)",
+			name: "URIs under the absolute style",
+			input: "[mail us](mailto:team@example.com), [text us](sms:+15551234567), [book](urn:isbn:0451450523) and " +
+				"[extension](vscode:extension/ms-python.python)",
 			style: "absolute",
-			wantN: 1,
 		},
-		{
-			name:  "fragment only skipped",
-			input: "[a](http://example.com) and [b](#anchor)",
-			style: "consistent",
-			wantN: 0,
-		},
-		{
-			name:  "all relative",
-			input: "[a](a.md) and [b](b.md)",
-			style: "relative",
-			wantN: 0,
-		},
-		{
-			// An email autolink is a mailto: URI, which is absolute.
-			name:  "email autolink is absolute",
-			input: "[a](https://example.com) and <user@example.com>",
-			style: "consistent",
-			wantN: 0,
-		},
-		{
-			name:  "email autolink sets the absolute style",
-			input: "<user@example.com> and [b](docs/guide.md)",
-			style: "consistent",
-			wantN: 1,
-		},
-		{
-			name:  "autolink under relative style",
-			input: "[a](a.md) and <https://example.com>",
-			style: "relative",
-			wantN: 1,
-		},
-		// A destination with a URI scheme is absolute whatever the link
-		// syntax, so an autolink and an inline link to it agree, in either
-		// order.
-		{name: "sms autolink then inline link", input: "<sms:+15551234567> and [text us](sms:+15551234567)", style: "consistent"},
-		{name: "sms inline link then autolink", input: "[text us](sms:+15551234567) and <sms:+15551234567>", style: "consistent"},
-		{name: "urn autolink then inline link", input: "<urn:isbn:0451450523> and [book](urn:isbn:0451450523)", style: "consistent"},
-		{name: "urn inline link then autolink", input: "[book](urn:isbn:0451450523) and <urn:isbn:0451450523>", style: "consistent"},
-		{
-			name:  "vscode autolink then inline link",
-			input: "<vscode:extension/ms-python.python> and [extension](vscode:extension/ms-python.python)",
-			style: "consistent",
-		},
-		{
-			name:  "vscode inline link then autolink",
-			input: "[extension](vscode:extension/ms-python.python) and <vscode:extension/ms-python.python>",
-			style: "consistent",
-		},
-		{name: "mailto autolink then inline link", input: "<mailto:team@example.com> and [mail us](mailto:team@example.com)", style: "consistent"},
-		{name: "mailto inline link then autolink", input: "[mail us](mailto:team@example.com) and <mailto:team@example.com>", style: "consistent"},
-		// A single letter before the colon is a Windows drive, so the
-		// destination is a relative path.
-		{name: "drive letter after an autolink", input: "<https://example.com> and [file](C:/docs/a.md)", style: "consistent", wantN: 1},
-		{name: "drive letter before an autolink", input: "[file](C:/docs/a.md) and <https://example.com>", style: "consistent", wantN: 1},
-		{name: "backslash drive letter after an autolink", input: "<https://example.com> and [file](C:\\docs\\a.md)", style: "consistent", wantN: 1},
-		{name: "relative path after an autolink", input: "<https://example.com> and [guide](docs/guide.md)", style: "consistent", wantN: 1},
-		{name: "relative path before an autolink", input: "[guide](docs/guide.md) and <https://example.com>", style: "consistent", wantN: 1},
-		{name: "url in the query of a relative path", input: "<https://example.com> and [go](./a?u=https://b.example)", style: "consistent", wantN: 1},
-		// A network-path reference names its own host, so it is absolute.
-		{name: "protocol-relative after an autolink", input: "<https://example.com> and [cdn](//cdn.example.com/a.js)", style: "consistent"},
-		{name: "protocol-relative before an autolink", input: "[cdn](//cdn.example.com/a.js) and <https://example.com>", style: "consistent"},
 		// localhost:8080 starts with the scheme "localhost", as browsers and
 		// CommonMark autolinks read it.
-		{name: "host and port read as a scheme", input: "<https://example.com> and [dev](localhost:8080)", style: "consistent"},
+		{name: "host and port read as a scheme", input: "[a](docs/a.md) and [dev](localhost:8080)", style: "relative"},
+		{name: "host and port under the absolute style", input: "[dev](localhost:8080)", style: "absolute"},
+		// A network-path reference names its own host, so it is absolute and
+		// cannot be relative.
+		{name: "protocol-relative link after a relative link", input: "[a](docs/a.md) and [cdn](//cdn.example.com/a.js)", style: "consistent"},
+		{name: "protocol-relative link under the relative style", input: "[cdn](//cdn.example.com/a.js)", style: "relative"},
+		{name: "protocol-relative link under the absolute style", input: "[cdn](//cdn.example.com/a.js)", style: "absolute"},
+		// A single letter before the colon is a Windows drive, so the
+		// destination is a relative path.
+		{name: "drive letter under the absolute style", input: "[file](C:/docs/a.md)", style: "absolute", wantN: 1},
+		{name: "backslash drive letter under the absolute style", input: "[file](C:\\docs\\a.md)", style: "absolute", wantN: 1},
+		{name: "drive letter after a file URL", input: "[b](file:///home/user/b.md) and [file](C:/docs/a.md)", style: "consistent", wantN: 1},
+		{name: "url in the query of a relative path", input: "[go](./a?u=https://b.example)", style: "absolute", wantN: 1},
 		// The destination is classified as the renderer reads it, with
 		// backslash escapes and character references resolved, in inline
 		// links and in reference definitions alike.
-		{name: "escaped colon after an autolink", input: "<https://example.com> and [site](https\\://example.com)", style: "consistent"},
-		{name: "escaped colon before an autolink", input: "[site](https\\://example.com) and <https://example.com>", style: "consistent"},
-		{name: "named reference after an autolink", input: "<sms:+15551234567> and [text us](sms&colon;+15551234567)", style: "consistent"},
-		{name: "named reference before an autolink", input: "[text us](sms&colon;+15551234567) and <sms:+15551234567>", style: "consistent"},
-		{name: "numeric reference after an autolink", input: "<sms:+15551234567> and [text us](sms&#58;+15551234567)", style: "consistent"},
-		{name: "numeric reference before an autolink", input: "[text us](sms&#58;+15551234567) and <sms:+15551234567>", style: "consistent"},
-		{
-			name:  "escaped definition after an autolink",
-			input: "<https://example.com> and [site][ref]\n\n[ref]: https\\://example.com",
-			style: "consistent",
-		},
-		{
-			name:  "escaped definition before an autolink",
-			input: "[site][ref] and <https://example.com>\n\n[ref]: https\\://example.com",
-			style: "consistent",
-		},
+		{name: "escaped colon", input: "[site](https\\://example.com)", style: "absolute"},
+		{name: "named reference", input: "[text us](sms&colon;+15551234567)", style: "absolute"},
+		{name: "numeric reference", input: "[text us](sms&#58;+15551234567)", style: "absolute"},
+		{name: "escaped definition", input: "[site][ref]\n\n[ref]: https\\://example.com", style: "absolute"},
+		{name: "escaped file URL", input: "[a](docs/a.md) and [b](file\\:///home/user/b.md)", style: "consistent", wantN: 1},
 		// Percent-encoding stays as written, so an encoded colon starts no
 		// scheme.
-		{name: "percent-encoded colon after an autolink", input: "<https://example.com> and [x](https%3A//example.com)", style: "consistent", wantN: 1},
-		{name: "percent-encoded colon before an autolink", input: "[x](https%3A//example.com) and <https://example.com>", style: "consistent", wantN: 1},
-		// A resolved "#" makes a fragment-only link, which sets no style.
-		{name: "escaped fragment before an autolink", input: "[top](\\#top) and <https://example.com>", style: "consistent"},
-		{name: "numeric fragment before an autolink", input: "[top](&#35;top) and <https://example.com>", style: "consistent"},
+		{name: "percent-encoded colon", input: "[x](https%3A//example.com)", style: "absolute", wantN: 1},
+		// A resolved "#" makes a fragment-only link, which is never reported.
+		{name: "escaped fragment", input: "[top](\\#top)", style: "absolute"},
+		{name: "numeric fragment", input: "[top](&#35;top)", style: "absolute"},
 	}
 
 	for _, tt := range tests {
@@ -755,12 +734,14 @@ func TestImageAltTextRule_HTMLImagesKeepMaskedTags(t *testing.T) {
 }
 
 // TestLinkDestinationStyleRule_GFMAutolinkLiterals checks that GFM autolink
-// literals count as absolute links. The parser gives a bare email address
-// without its mailto: scheme, but it renders as a mailto: link.
+// literals, which are autolinks, never count, so they break no style that a
+// file: URL sets. The parser gives a bare email address without its mailto:
+// scheme, so its destination reads as relative, but it renders as a mailto:
+// link.
 func TestLinkDestinationStyleRule_GFMAutolinkLiterals(t *testing.T) {
 	for _, input := range []string{
-		"See [docs](https://example.com) or mail user@example.com today.\n",
-		"See [docs](https://example.com) or visit www.example.com today.\n",
+		"See [docs](file:///home/user/docs.md) or mail user@example.com today.\n",
+		"See [docs](file:///home/user/docs.md) or visit www.example.com today.\n",
 	} {
 		t.Run(input, func(t *testing.T) {
 			snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(input))
@@ -773,6 +754,62 @@ func TestLinkDestinationStyleRule_GFMAutolinkLiterals(t *testing.T) {
 			require.NoError(t, err)
 			assert.Empty(t, diags)
 		})
+	}
+}
+
+// TestLinkDestinationStyleRule_RepositoryDocuments lints excerpts that keep,
+// in order, a sample of the links of the repository's README and of
+// docs/golden-test-methodology.md. Both link to other sites and to files of
+// the repository. A link to another host cannot be relative, so it sets no
+// consistent style and the relative style allows it. Only the absolute style
+// reports anything: each relative link, which an absolute URL could replace.
+func TestLinkDestinationStyleRule_RepositoryDocuments(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantAbsolute []int // Lines that the absolute style reports.
+	}{
+		{
+			name: "README",
+			input: "# gomdlint\n\n" +
+				"Inspired by [markdownlint](https://github.com/DavidAnson/markdownlint).\n\n" +
+				"See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for benchmarks.\n\n" +
+				"Download from [GitHub Releases](https://github.com/yaklabco/gomdlint/releases).\n\n" +
+				"See [Known Limitations](#known-limitations).\n\n" +
+				"This project uses [stave](https://github.com/yaklabco/stave) for builds.\n\n" +
+				"[CI_CD.md](CI_CD.md) describes the CI workflows.\n\n" +
+				"See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.\n\n" +
+				"MIT License, see [LICENSE](LICENSE) for details.\n\n" +
+				"## Known Limitations\n",
+			wantAbsolute: []int{5, 13, 15, 17},
+		},
+		{
+			name: "golden test methodology",
+			input: "# Golden Tests\n\n" +
+				"Agents load [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) skills.\n\n" +
+				"The [gap analysis skill](../.claude/skills/golden-test-gap-analysis.md) audits coverage.\n\n" +
+				"The [authoring skill](../.claude/skills/golden-test-authoring.md) writes inputs.\n\n" +
+				"The [verification skill](../.claude/skills/golden-test-verification.md) checks them.\n\n" +
+				"Five [sub-agents](https://docs.anthropic.com/en/docs/claude-code/sub-agents) run in parallel.\n\n" +
+				"See [markdownlint](https://github.com/DavidAnson/markdownlint) and " +
+				"[#11](https://github.com/yaklabco/gomdlint/issues/11).\n\n" +
+				"A new [bug-fixing skill](../.claude/skills/golden-test-bug-fixing.md) guides fixes.\n",
+			wantAbsolute: []int{5, 7, 9, 15},
+		},
+	}
+
+	for _, tt := range tests {
+		for _, style := range []string{"consistent", "relative", "absolute"} {
+			t.Run(tt.name+"/"+style, func(t *testing.T) {
+				diags := applyRuleWithOptions(t, NewLinkDestinationStyleRule(), tt.input, map[string]any{"style": style})
+
+				want := []int{}
+				if style == "absolute" {
+					want = tt.wantAbsolute
+				}
+				assert.Equal(t, want, diagLines(diags))
+			})
+		}
 	}
 }
 
@@ -868,5 +905,72 @@ func TestIsAbsoluteDestination(t *testing.T) {
 	}
 	for dest, want := range tests {
 		assert.Equal(t, want, isAbsoluteDestination(dest), dest)
+	}
+}
+
+// TestDestinationKind checks whether MDL001 compares a link with a
+// destination, that is, whether the destination could be written in the
+// other kind, and the kind it then reads the destination as. Every relative
+// link could, and so could a file: URL that names no other host. A link to
+// another host, a URI with another scheme, an empty destination and a
+// fragment could not, so they have no kind.
+func TestDestinationKind(t *testing.T) {
+	type kind struct {
+		style  LinkDestStyle
+		counts bool
+	}
+	relative := kind{LinkDestRelative, true}
+	localFile := kind{LinkDestAbsolute, true}
+	oneForm := kind{}
+	tests := map[string]kind{
+		"docs/guide.md":                     relative,
+		"./guide.md":                        relative,
+		"../up.md":                          relative,
+		"/docs/guide.md":                    relative,
+		"a.md#section":                      relative,
+		"?tab=readme":                       relative,
+		"C:/docs/a.md":                      relative,
+		"file":                              relative,
+		"":                                  oneForm,
+		"#section":                          oneForm,
+		"https://example.com/a":             oneForm,
+		"HTTP://EXAMPLE.COM":                oneForm,
+		"//cdn.example.com/a.js":            oneForm,
+		"mailto:team@example.com":           oneForm,
+		"urn:isbn:0451450523":               oneForm,
+		"localhost:8080":                    oneForm,
+		"files:///home/user/a.md":           oneForm,
+		"file:///home/user/a.md":            localFile,
+		"file:/home/user/a.md":              localFile,
+		"file:///C:/docs/a.md":              localFile,
+		"file://localhost/home/user/a.md":   localFile,
+		"FILE://LOCALHOST/HOME/A.MD":        localFile,
+		"file://localhost":                  localFile,
+		"file://localhost?x#y":              localFile,
+		"file://server/share/a.md":          oneForm,
+		"file://localhost.example.com/a.md": oneForm,
+		"file://localhost:8080/a.md":        oneForm,
+		"file://user@localhost/a.md":        oneForm,
+		"file://%6Cocalhost/a.md":           localFile,
+		"file://%6c%6F%63alhost/a.md":       localFile,
+		"file://localhost%3A8080/a.md":      oneForm,
+		"file://user%40localhost/a.md":      oneForm,
+		"file://local%2Ehost/a.md":          oneForm,
+		"file://%zzlocalhost/a.md":          oneForm,
+		"file://localhost%/a.md":            oneForm,
+		"file://localhos%74/a.md":           localFile,
+		"file://localhos%7/a.md":            oneForm,
+		"file://%256Cocalhost/a.md":         oneForm,
+		"file://%6Cocalhost//server/a.md":   localFile,
+		// An empty host followed by "//" starts a UNC path, which names the
+		// server after it (RFC 8089, Appendix E.3.2).
+		"file:////server/share/a.md":  oneForm,
+		"file://///server/share/a.md": oneForm,
+		// RFC 3986 reads the drive here as a host, as gomdlint does.
+		"file://C:/docs/a.md": oneForm,
+	}
+	for dest, want := range tests {
+		style, counts := destinationKind(dest)
+		assert.Equal(t, want, kind{style, counts}, dest)
 	}
 }

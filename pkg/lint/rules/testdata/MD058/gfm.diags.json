@@ -5,7 +5,7 @@
     "line": 4,
     "column": 1,
     "message": "Missing blank line before table",
-    "severity": "info",
+    "severity": "warning",
     "fixable": true
   },
   {
@@ -14,7 +14,7 @@
     "line": 6,
     "column": 1,
     "message": "Missing blank line after table",
-    "severity": "info",
+    "severity": "warning",
     "fixable": true
   },
   {
@@ -23,7 +23,7 @@
     "line": 11,
     "column": 1,
     "message": "Missing blank line after table",
-    "severity": "info",
+    "severity": "warning",
     "fixable": true
   }
 ]

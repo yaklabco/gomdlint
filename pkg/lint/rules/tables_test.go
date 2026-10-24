@@ -297,10 +297,13 @@ Text after.`,
 }
 
 // TestTableBlankLinesRule_FixKeepsListsTight verifies that MD058 reports a
-// table in a list without a fix when the blank line it needs would separate
-// two items of a list or two blocks of an item, which makes a tight list
-// loose, and keeps the fix where the blank line falls outside every list or
-// inside a blockquote within the item.
+// table in a tight list without a fix when the blank line it needs would
+// separate two items of the list or two blocks of an item, which makes the
+// list loose. It keeps the fix where the blank line falls outside every
+// list, inside a blockquote within the item, or inside a loose list, which
+// stays loose. Only the innermost list that would take the blank line
+// between two of its items or blocks decides. The fix check withholds a fix
+// that would move the table out of a loose list.
 func TestTableBlankLinesRule_FixKeepsListsTight(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -344,12 +347,95 @@ func TestTableBlankLinesRule_FixKeepsListsTight(t *testing.T) {
 			wantLines: []int{5, 6},
 		},
 		{
-			// A loose list stays loose, but the fix is withheld in every list:
-			// the check that guards fixes cannot tell a loose list from a tight
-			// one that the blank line before a table would loosen.
+			// A loose list stays loose, so the blank line changes nothing.
 			name:      "table after text in a loose list",
 			input:     "- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n",
 			wantLines: []int{4},
+			wantFixed: "- item\n\n  text\n\n  | a | b |\n  | --- | --- |\n\n- next\n",
+		},
+		{
+			name:      "table that ends an item of a loose list",
+			input:     "- item\n\n  | a | b |\n  | --- | --- |\n- next\n",
+			wantLines: []int{4},
+			wantFixed: "- item\n\n  | a | b |\n  | --- | --- |\n\n- next\n",
+		},
+		{
+			name:      "table that starts a later item of a loose list",
+			input:     "- first\n\n- second\n- | a | b |\n  | --- | --- |\n",
+			wantLines: []int{4},
+			wantFixed: "- first\n\n- second\n\n- | a | b |\n  | --- | --- |\n",
+		},
+		{
+			name:      "loose list in a blockquote",
+			input:     "> - item\n>\n>   text\n>   | a | b |\n>   | --- | --- |\n>\n> - next\n",
+			wantLines: []int{4},
+			wantFixed: "> - item\n>\n>   text\n>\n>   | a | b |\n>   | --- | --- |\n>\n> - next\n",
+		},
+		{
+			// Both blank lines fall inside the tight inner list.
+			name:      "tight list in a loose list",
+			input:     "- outer\n\n  - inner\n    | a | b |\n    | --- | --- |\n  - next\n\n- outer2\n",
+			wantLines: []int{4, 5},
+		},
+		{
+			// Both blank lines fall inside the loose inner list, between
+			// blocks of its item and between its items. The tight outer list
+			// holds them inside one block of its item, so it stays tight.
+			name:      "loose list in a tight list",
+			input:     "- outer\n  - inner\n\n    text\n    | a | b |\n    | --- | --- |\n  - next\n- outer2\n",
+			wantLines: []int{5, 6},
+			wantFixed: "- outer\n  - inner\n\n    text\n\n    | a | b |\n    | --- | --- |\n\n  - next\n- outer2\n",
+		},
+		{
+			// The header row continues the item's paragraph lazily, without
+			// the item's indent. After a blank line it would start a table
+			// outside the list, so the fix check withholds the fix.
+			name:      "lazy table rows in a loose list",
+			input:     "- item\n\n  text\n| a | b |\n| --- | --- |\n\n- next\n",
+			wantLines: []int{4},
+		},
+		{
+			// An item that starts with an empty line ends at a second blank
+			// line, which would move the table out of the list, so the fix
+			// check withholds the fix.
+			name:      "table after the empty first line of an item in a loose list",
+			input:     "- first\n\n-\n  | a | b |\n  | --- | --- |\n",
+			wantLines: []int{4},
+		},
+		{
+			// CommonMark takes the blank line into the unclosed fence, so the
+			// list is tight, while goldmark gives the line to the next item
+			// and reads the list as loose. The fix check reads it as goldmark
+			// does, so only the guard keeps this list tight.
+			name:      "tight list with an unclosed fence",
+			input:     "1. Run:\n   ```sh\n   make\n\n2. Next\n   text\n   | a | b |\n   | --- | --- |\n3. Done\n",
+			wantLines: []int{7, 8},
+		},
+		{
+			// A blank line ends the blockquote first, so the list is loose.
+			name:      "unclosed fence in a blockquote of a loose list",
+			input:     "- a\n  > ```sh\n  > code\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n",
+			wantLines: []int{7, 8},
+			wantFixed: "- a\n  > ```sh\n  > code\n\n- item\n  text\n\n  | x | y |\n  | --- | --- |\n\n- c\n",
+		},
+		{
+			// The fix check reads an edit in a long top-level list region by
+			// region, and the region checks cannot see a blank line before a
+			// table, so only the guard keeps this list tight.
+			name:      "long tight list",
+			input:     "- a\n- item\n  | x | y |\n  | --- | --- |\n- b\n- c\n",
+			wantLines: []int{3, 4},
+		},
+		{
+			name:      "long loose list",
+			input:     "- a\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- b\n- c\n- d\n",
+			wantLines: []int{5, 6},
+			wantFixed: "- a\n\n- item\n  text\n\n  | x | y |\n  | --- | --- |\n\n- b\n- c\n- d\n",
+		},
+		{
+			name:      "lazy table rows in a long loose list",
+			input:     "- a\n\n- item\n  text\n| x | y |\n| --- | --- |\n\n- b\n- c\n- d\n",
+			wantLines: []int{5},
 		},
 		{
 			// The inserted lines hold the blockquote marker, so they stay in
@@ -384,6 +470,71 @@ func TestTableBlankLinesRule_FixKeepsListsTight(t *testing.T) {
 				want = tt.input
 			}
 			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
+// TestBlankLineLoosensList checks the guard that keeps MD058's fix out of
+// tight lists. The fix check cannot always see a list loosened by a blank
+// line before a table, so the guard has to. A blank line before or after a
+// table loosens the innermost list that would take it between two of its
+// items or two blocks of an item, when that list is tight, and no list in
+// any other case. A list that goldmark reads as loose counts as tight when
+// an item holds an unclosed fence or an HTML block outside a blockquote.
+func TestBlankLineLoosensList(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		before, after bool // Whether a blank line before or after the table loosens a list.
+	}{
+		{name: "tight item", input: "- item\n  | a | b |\n  | --- | --- |\n- next\n", before: true, after: true},
+		{name: "loose item", input: "- item\n\n  text\n  | a | b |\n  | --- | --- |\n- next\n"},
+		{
+			name:   "tight list in a loose list",
+			input:  "- outer\n\n  - inner\n    | a | b |\n    | --- | --- |\n  - next\n\n- outer2\n",
+			before: true, after: true,
+		},
+		{name: "loose list in a tight list", input: "- outer\n  - inner\n\n    text\n    | a | b |\n    | --- | --- |\n  - next\n- outer2\n"},
+		{name: "blockquote in a tight item", input: "- item\n  > | a | b |\n  > | --- | --- |\n- next\n"},
+		{name: "first item after a paragraph", input: "Text\n- | a | b |\n  | --- | --- |\n- next\n", after: true},
+		{name: "last item before a heading", input: "- first\n- item\n  | a | b |\n  | --- | --- |\n# Heading\n", before: true},
+		// CommonMark takes a blank line into an unclosed fence or HTML block
+		// that ends an item, so these lists are tight, but goldmark reads
+		// the blank line as one before the next item or block.
+		{
+			name:   "unclosed fence before the item",
+			input:  "1. Run:\n   ```sh\n   make\n\n2. Next\n   text\n   | a | b |\n   | --- | --- |\n3. Done\n",
+			before: true, after: true,
+		},
+		{
+			name:   "unclosed comment before the item",
+			input:  "- a\n  <!--\n\n- item\n  text\n  | a | b |\n  | --- | --- |\n- c\n",
+			before: true, after: true,
+		},
+		{
+			name:   "unclosed fence in a nested item",
+			input:  "- outer\n  - inner\n    ```sh\n    code\n\n  text\n  | a | b |\n  | --- | --- |\n- next\n",
+			before: true, after: true,
+		},
+		// A blank line ends a blockquote first, so a fence in it takes in
+		// no blank line, and the list is loose.
+		{name: "unclosed fence in a blockquote", input: "- a\n  > ```sh\n  > code\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n"},
+		// A closed fence and an indented code block end before the blank
+		// line, so the list is loose.
+		{name: "closed fence before the item", input: "- a\n  ```sh\n  x\n  ```\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n"},
+		{name: "indented code before the item", input: "- a\n\n      code\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+			tables := lint.NewRuleContext(context.Background(), file, config.NewConfig(), nil).Tables()
+			require.Len(t, tables, 1)
+			pos := tables[0].SourcePosition()
+
+			tightness := listTightness{}
+			assert.Equal(t, tt.before, blankLineLoosensList(tables[0], pos.StartLine, tightness), "a blank line before the table")
+			assert.Equal(t, tt.after, blankLineLoosensList(tables[0], pos.EndLine+1, tightness), "a blank line after the table")
 		})
 	}
 }

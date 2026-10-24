@@ -78,9 +78,13 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MDL001", Name: "link-destination-style", Tags: []string{"links", "url"},
-			Description: "Links in a file, other than #fragment links, are all relative or all absolute.",
+			Description: "Relative links and local file: URLs are not mixed in one document.",
 			Rationale: "Relative and absolute links behave differently when a file moves or a repository is forked. " +
-				"One kind keeps that behavior the same for every link.",
+				"One kind keeps that behavior the same for every link that could take either form. " +
+				"A link to another host, such as https://example.com, cannot be relative, so it never counts. " +
+				"gomdlint cannot tell a URL of the document's own site from one of another host, " +
+				"so the only absolute links that count are file: URLs that name no other host. " +
+				"URIs such as mailto:, autolinks and links to a #fragment never count either.",
 			Fix: "There is no automatic fix.",
 		},
 	}

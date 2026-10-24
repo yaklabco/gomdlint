@@ -298,7 +298,7 @@ func TestCatalogSaysWhetherEachRuleFixes(t *testing.T) {
 		"MD049": true, // A new marker that could pair with nearby characters, or a reference label.
 		"MD050": true, // A new marker that could pair with nearby characters, or a reference label.
 		"MD053": true, // Text on the line after the definition.
-		"MD058": true, // A blank line between two items or two blocks of one item.
+		"MD058": true, // A blank line that would loosen a tight list.
 	}
 
 	fixing := make(map[string]bool)
@@ -493,12 +493,21 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	{id: "MD038", name: "allowed padding", phrase: "except one each side or by a backtick", input: "# Title\n\nUse `` `foo`` and `   ` and ` code ` here.\n"},
 	{id: "MD038", name: "one-sided space", phrase: "deletes the extra spaces", input: "# Title\n\nUse ` code` here.\n", want: []catalogFinding{{3, true}}},
 
-	// MDL001 ignores fragment links.
-	{id: "MDL001", name: "fragment link", phrase: "other than #fragment links", input: "# Title\n\nSee [a](docs/a.md) and [top](#title).\n"},
+	// MDL001 compares only links that could take either form: relative
+	// links, and file: URLs that name no other host.
 	{
-		id: "MDL001", name: "mixed kinds", phrase: "all relative or all absolute", want: []catalogFinding{{3, false}},
-		input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n",
+		id: "MDL001", name: "mixed kinds", phrase: "are not mixed", want: []catalogFinding{{3, false}},
+		input: "# Title\n\nSee [a](docs/a.md) and [b](file:///home/user/b.md).\n",
 	},
+	{
+		id: "MDL001", name: "file URL", phrase: "file: URLs that name no other host", want: []catalogFinding{{3, false}},
+		input: "# Title\n\nSee [b](file://localhost/home/user/b.md) and [a](docs/a.md).\n",
+	},
+	{id: "MDL001", name: "file URL on another host", phrase: "name no other host", input: "# Title\n\nSee [a](docs/a.md) and [b](file://server/share/b.md).\n"},
+	{id: "MDL001", name: "link to another host", phrase: "link to another host", input: "# Title\n\nSee [a](docs/a.md) and [b](https://example.com).\n"},
+	{id: "MDL001", name: "mailto link", phrase: "mailto:", input: "# Title\n\nSee [a](docs/a.md) and [mail us](mailto:team@example.com).\n"},
+	{id: "MDL001", name: "autolink", phrase: "autolinks", input: "# Title\n\nSee [a](docs/a.md) and <file:///home/user/b.md>.\n"},
+	{id: "MDL001", name: "fragment link", phrase: "a #fragment", input: "# Title\n\nSee [b](file:///home/user/b.md) and [top](#title).\n"},
 
 	// MD049 and MD050 allow asterisks inside a word, which underscores
 	// cannot replace, and hold back fixes in reference labels.
@@ -543,9 +552,8 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\n*Italic line*\n\nText.\n", want: []catalogFinding{{3, false}},
 	},
 
-	// MD022 and MD031 add no blank line that would make a tight list
-	// loose, and MD058 adds none between two items or two blocks of an
-	// item, in any list.
+	// MD022, MD031 and MD058 add no blank line that would make a tight list
+	// loose, and can add them in loose lists.
 	{
 		id: "MD022", name: "heading in a tight list", phrase: "a heading in a tight list without a fix",
 		input: "# Title\n\n- # Heading\n  text\n- item\n", want: []catalogFinding{{3, false}},
@@ -567,12 +575,12 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 		input: "# Title\n\n1. Run:\n   ```sh\n   make\n   ```\n\n2. Next\n", want: []catalogFinding{{4, true}},
 	},
 	{
-		id: "MD058", name: "table between blocks and items", phrase: "between two items or two blocks of one item",
+		id: "MD058", name: "table in a tight list", phrase: "a table in a tight list when the blank line would make the list loose",
 		input: "# Title\n\n- item\n  | a | b |\n  | --- | --- |\n- next\n", want: []catalogFinding{{4, false}, {5, false}},
 	},
 	{
-		id: "MD058", name: "table in a loose item", phrase: "a table inside a list without a fix",
-		input: "# Title\n\n- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n", want: []catalogFinding{{6, false}},
+		id: "MD058", name: "table in a loose list", phrase: "inserts the missing blank line",
+		input: "# Title\n\n- item\n\n  text\n  | a | b |\n  | --- | --- |\n\n- next\n", want: []catalogFinding{{6, true}},
 	},
 	{
 		id: "MD058", name: "table in a quote inside an item", phrase: "keeping any blockquote markers",

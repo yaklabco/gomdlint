@@ -13,10 +13,12 @@ import (
 // formerlyOptInDoc breaks the rules that used to be off by default and
 // report with their default options: no-inline-html (MD033),
 // first-line-heading (MD041), descriptive-link-text (MD059),
-// table-column-style (MD060) and link-destination-style (MDL001).
+// table-column-style (MD060) and link-destination-style (MDL001), which
+// reports the file: URL after a relative link.
 const formerlyOptInDoc = "Introduction with <b>bold</b> text.\n\n" +
 	"# Title\n\n" +
 	"Read the guide [here](https://example.com/guide) or [the docs](docs/guide.md).\n\n" +
+	"Open [the local copy](file:///tmp/guide.md) offline.\n\n" +
 	"| Name | Description |\n|---|---|\n| item | a longer description |\n"
 
 // formerlyOptIn holds the IDs and names of the rules formerlyOptInDoc breaks.

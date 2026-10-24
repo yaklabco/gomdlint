@@ -152,9 +152,12 @@ the same case.
 empty links, missing image alt text, broken link fragments, undefined and
 unused reference definitions, inconsistent link and image style, and
 non-descriptive link text such as "click here". gomdlint's own
-`link-destination-style` (MDL001) keeps link destinations consistently
-relative or absolute. Reversed links, spaces in link text, unused
-definitions and bare URLs auto-fix.
+`link-destination-style` (MDL001) keeps relative links and local `file:`
+URLs from being mixed. It never reports a link to another host, which
+cannot be relative. gomdlint cannot tell an absolute URL of the document's
+own site from one of another host, so it never reports those either.
+Reversed links, spaces in link text, unused definitions and bare URLs
+auto-fix.
 
 **Tables** (GFM) - Validate table structure including consistent column
 counts, pipe style, column spacing and surrounding blank lines. gomdlint's
@@ -425,8 +428,7 @@ consistent style, `ol-prefix` (MD029) accepts `one_or_ordered` numbering,
 (MD013) allows 80 characters. Where a rule has an option that markdownlint
 lacks, its default keeps markdownlint's behaviour.
 
-Every rule reports warnings, except `blanks-around-tables` (MD058), which
-reports info. Warnings fail a run only with `--strict`. Set
+Every rule reports warnings. Warnings fail a run only with `--strict`. Set
 `severity_default: error`, or a rule's `severity`, to fail on findings
 without it.
 
@@ -791,9 +793,9 @@ Some of its fix checks are also stricter than they need to be.
   `list-marker-space` (MD030), `blanks-around-lists` (MD032) and
   `single-trailing-newline` (MD047). Their findings are still reported.
 - `blanks-around-tables` (MD058) reports a table in a list without a fix
-  whenever the blank line it needs would fall between two items or between
-  two blocks of an item. That keeps a tight list tight, but it also
-  withholds the fix in loose lists, where the blank line would be safe.
+  when an item of the list holds an HTML block, or a fenced code block
+  without a closing fence, outside a blockquote. goldmark can then read a
+  tight list as loose, so the fix is withheld even in a list that is loose.
 - goldmark reads `> -  first item` followed by `> <tab>- second item`, where
   `<tab>` is a tab character, as one list item that continues with the text
   `- second item`. CommonMark reads two items, so the list rules see one

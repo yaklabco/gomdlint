@@ -1,10 +1,16 @@
-lists.input.md:6:3 info Missing blank line before table (MD058/blanks-around-tables)
-lists.input.md:8:3 info Missing blank line after table (MD058/blanks-around-tables)
-lists.input.md:15:5 info Missing blank line before table (MD058/blanks-around-tables)
-lists.input.md:16:5 info Missing blank line after table (MD058/blanks-around-tables)
-lists.input.md:22:5 info Missing blank line before table (MD058/blanks-around-tables)
-lists.input.md:23:5 info Missing blank line after table (MD058/blanks-around-tables)
-lists.input.md:29:5 info Missing blank line before table (MD058/blanks-around-tables) [fixable]
-lists.input.md:30:5 info Missing blank line after table (MD058/blanks-around-tables) [fixable]
-lists.input.md:37:3 info Missing blank line before table (MD058/blanks-around-tables)
-lists.input.md:38:3 info Missing blank line after table (MD058/blanks-around-tables) [fixable]
+lists.input.md:6:3 warning Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:8:3 warning Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:15:5 warning Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:16:5 warning Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:22:5 warning Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:23:5 warning Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:29:5 warning Missing blank line before table (MD058/blanks-around-tables) [fixable]
+lists.input.md:30:5 warning Missing blank line after table (MD058/blanks-around-tables) [fixable]
+lists.input.md:38:3 warning Missing blank line before table (MD058/blanks-around-tables) [fixable]
+lists.input.md:48:3 warning Missing blank line after table (MD058/blanks-around-tables) [fixable]
+lists.input.md:56:5 warning Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:57:5 warning Missing blank line after table (MD058/blanks-around-tables)
+lists.input.md:68:5 warning Missing blank line before table (MD058/blanks-around-tables) [fixable]
+lists.input.md:69:5 warning Missing blank line after table (MD058/blanks-around-tables) [fixable]
+lists.input.md:77:3 warning Missing blank line before table (MD058/blanks-around-tables)
+lists.input.md:78:3 warning Missing blank line after table (MD058/blanks-around-tables) [fixable]

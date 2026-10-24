@@ -1,0 +1,38 @@
+[
+  {
+    "rule": "MD054",
+    "name": "link-image-style",
+    "line": 8,
+    "column": 3,
+    "message": "Shortcut reference syntax is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD054",
+    "name": "link-image-style",
+    "line": 8,
+    "column": 30,
+    "message": "Shortcut reference syntax is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD054",
+    "name": "link-image-style",
+    "line": 13,
+    "column": 10,
+    "message": "Shortcut reference syntax is not allowed",
+    "severity": "warning",
+    "fixable": false
+  },
+  {
+    "rule": "MD054",
+    "name": "link-image-style",
+    "line": 16,
+    "column": 12,
+    "message": "Shortcut reference syntax is not allowed",
+    "severity": "warning",
+    "fixable": false
+  }
+]

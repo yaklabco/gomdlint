@@ -43,7 +43,7 @@ Links and images
   no-space-in-links                 MD039   yes  warning  Link text has no spaces just inside its brackets.
 
 Tables
-  blanks-around-tables              MD058   yes  info     Tables have a blank or comment line above and below.
+  blanks-around-tables              MD058   yes  warning  Tables have a blank or comment line above and below.
   table-alignment                   MDL003  yes  warning  Each cell of a table's delimiter row has at least 3 dashes.
 
 Emphasis
