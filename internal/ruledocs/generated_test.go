@@ -207,7 +207,7 @@ func loadRepoConfig(t *testing.T, path string) *config.Config {
 // once, in order.
 func TestUpdateReadme(t *testing.T) {
 	entries := ruledocs.Entries(lint.DefaultRegistry, nil)[:2]
-	before := "# Project\n\nIntro.\n\n" + ruledocs.ReadmeBlockBegin + "\nold text\n" + ruledocs.ReadmeBlockEnd + "\n\nAfter.\n"
+	before := "# Project\n\nIntro.\n\n" + ruledocs.ReadmeBlockBegin + "\nSTALE-BLOCK\n" + ruledocs.ReadmeBlockEnd + "\n\nAfter.\n"
 
 	updated, err := ruledocs.UpdateReadme([]byte(before), entries)
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestUpdateReadme(t *testing.T) {
 	text := string(updated)
 	assert.True(t, strings.HasPrefix(text, "# Project\n\nIntro.\n\n"+ruledocs.ReadmeBlockBegin+"\n"), text)
 	assert.True(t, strings.HasSuffix(text, "\n"+ruledocs.ReadmeBlockEnd+"\n\nAfter.\n"), text)
-	assert.NotContains(t, text, "old text")
+	assert.NotContains(t, text, "STALE-BLOCK")
 	assert.Contains(t, text, "(docs/rules/heading-increment.md)")
 
 	again, err := ruledocs.UpdateReadme(updated, entries)
@@ -245,13 +245,13 @@ func TestUpdateReadmeSkipsCodeBlocks(t *testing.T) {
 	sample := "```markdown\n" + ruledocs.ReadmeBlockBegin + "\nsample\n" + ruledocs.ReadmeBlockEnd + "\n```\n"
 	tildes := "  ~~~~\n" + ruledocs.ReadmeBlockBegin + "\n```\n" + ruledocs.ReadmeBlockEnd + "\n~~~~~\n"
 	readme := "# Project\n\n" + sample + "\n" + tildes + "\n" +
-		ruledocs.ReadmeBlockBegin + "\nold\n" + ruledocs.ReadmeBlockEnd + "\n\nAfter.\n"
+		ruledocs.ReadmeBlockBegin + "\nSTALE-BLOCK\n" + ruledocs.ReadmeBlockEnd + "\n\nAfter.\n"
 
 	updated, err := ruledocs.UpdateReadme([]byte(readme), entries)
 	require.NoError(t, err)
 	text := string(updated)
 	assert.True(t, strings.HasPrefix(text, "# Project\n\n"+sample+"\n"+tildes+"\n"+ruledocs.ReadmeBlockBegin+"\n\n"), text)
-	assert.NotContains(t, text, "old")
+	assert.NotContains(t, text, "STALE-BLOCK")
 	assert.Contains(t, text, "(docs/rules/heading-increment.md)")
 
 	_, err = ruledocs.UpdateReadme([]byte("# Project\n\n"+sample), entries)
@@ -262,20 +262,48 @@ func TestUpdateReadmeSkipsCodeBlocks(t *testing.T) {
 	assert.Error(t, err, "a fence that is never closed runs to the end of the README")
 }
 
+// TestUpdateReadmeReadsTheREADMEAsMarkdown covers fence lines and markers
+// that Markdown does not read as fences or markers: a fence line inside an
+// HTML comment opens no code block, so the real markers after it count,
+// and markers inside a list item or a blockquote mark nothing.
+func TestUpdateReadmeReadsTheREADMEAsMarkdown(t *testing.T) {
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)[:2]
+	block := ruledocs.ReadmeBlockBegin + "\nSTALE-BLOCK\n" + ruledocs.ReadmeBlockEnd + "\n"
+	sample := "```\n" + ruledocs.ReadmeBlockBegin + "\nSAMPLE\n" + ruledocs.ReadmeBlockEnd + "\n```\n"
+
+	for name, readme := range map[string]string{
+		"a fence line in a comment": "<!-- example:\n```\n-->\n\n" + block + "\n" + sample,
+		"markers in a list item":    "- item\n\n  " + ruledocs.ReadmeBlockBegin + "\n  " + ruledocs.ReadmeBlockEnd + "\n\n" + block,
+		"markers in a blockquote":   "> " + ruledocs.ReadmeBlockBegin + "\n> " + ruledocs.ReadmeBlockEnd + "\n\n" + block,
+		"a fence in a list item":    "- item\n\n  ```\n  code\n  ```\n\n" + block + "\n" + sample,
+	} {
+		updated, err := ruledocs.UpdateReadme([]byte(readme), entries)
+		if !assert.NoError(t, err, name) {
+			continue
+		}
+		text := string(updated)
+		assert.NotContains(t, text, "STALE-BLOCK", name)
+		if strings.Contains(readme, "SAMPLE") {
+			assert.Contains(t, text, sample, "%s: the sample stays as it is", name)
+		}
+		assert.Contains(t, text, "(docs/rules/heading-increment.md)", name)
+	}
+}
+
 // TestUpdateReadmeKeepsLineEndings covers a README with CRLF line endings
 // and one whose end marker is its last line, without a newline: the block
 // takes the README's line endings, and the rest stays as it was.
 func TestUpdateReadmeKeepsLineEndings(t *testing.T) {
 	entries := ruledocs.Entries(lint.DefaultRegistry, nil)[:2]
 
-	crlf := "# Project\r\n\r\n" + ruledocs.ReadmeBlockBegin + "\r\nold\r\n" + ruledocs.ReadmeBlockEnd + "\r\n\r\nAfter.\r\n"
+	crlf := "# Project\r\n\r\n" + ruledocs.ReadmeBlockBegin + "\r\nSTALE-BLOCK\r\n" + ruledocs.ReadmeBlockEnd + "\r\n\r\nAfter.\r\n"
 	updated, err := ruledocs.UpdateReadme([]byte(crlf), entries)
 	require.NoError(t, err)
 	text := string(updated)
 	assert.True(t, strings.HasPrefix(text, "# Project\r\n\r\n"+ruledocs.ReadmeBlockBegin+"\r\n\r\n"), text)
 	assert.True(t, strings.HasSuffix(text, "|\r\n\r\n"+ruledocs.ReadmeBlockEnd+"\r\n\r\nAfter.\r\n"), text)
 	assert.Equal(t, strings.Count(text, "\n"), strings.Count(text, "\r\n"), "every line ends in CRLF")
-	assert.NotContains(t, text, "old")
+	assert.NotContains(t, text, "STALE-BLOCK")
 
 	unterminated := ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd
 	updated, err = ruledocs.UpdateReadme([]byte(unterminated), entries)

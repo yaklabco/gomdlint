@@ -7,6 +7,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	gmtext "github.com/yuin/goldmark/text"
+
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
@@ -123,31 +129,34 @@ type readmeLine struct {
 	ending      string
 }
 
-// markerLine returns the line of text that holds marker and nothing else,
-// apart from its line ending, outside fenced code blocks, where a README
-// may show the markers. It fails when no line, or more than one, holds
-// marker.
+// markerLine returns the line of text, a README, that holds marker and
+// nothing else, apart from its line ending, as an HTML block of its own at
+// the top level of the README, which GitHub Flavored Markdown reads it as.
+// So a marker inside a code block, a longer HTML comment, a list item or a
+// blockquote, where a README may show the markers, marks nothing. It fails
+// when no line, or more than one, holds marker.
 func markerLine(text, marker string) (readmeLine, error) {
+	doc := readmeParser().Parse(gmtext.NewReader([]byte(text)))
+
 	var found []readmeLine
-	var open codeFence
-	for start := 0; start < len(text); {
+	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
+		html, isHTML := node.(*ast.HTMLBlock)
+		if !isHTML || html.Lines().Len() != 1 || html.HasClosure() {
+			continue
+		}
+		start := html.Lines().At(0).Start
+		if start > 0 && text[start-1] != '\n' {
+			continue // The block starts after indentation.
+		}
 		next := len(text)
 		if idx := strings.IndexByte(text[start:], '\n'); idx >= 0 {
 			next = start + idx + 1
 		}
 		content := text[start:next]
 		withoutEnding := strings.TrimSuffix(strings.TrimSuffix(content, "\n"), "\r")
-		switch {
-		case open.length > 0:
-			if open.closedBy(withoutEnding) {
-				open = codeFence{}
-			}
-		case withoutEnding == marker:
+		if withoutEnding == marker {
 			found = append(found, readmeLine{start: start, next: next, ending: content[len(withoutEnding):]})
-		default:
-			open = openingFence(withoutEnding)
 		}
-		start = next
 	}
 
 	switch len(found) {
@@ -160,43 +169,10 @@ func markerLine(text, marker string) (readmeLine, error) {
 	}
 }
 
-// maxFenceIndent is the most spaces that may come before a code fence.
-const maxFenceIndent = 3
-
-// codeFence is the opening fence of a fenced code block: its character, a
-// backtick or a tilde, and how many of them it has. A length of 0 means no
-// fence.
-type codeFence struct {
-	char   byte
-	length int
-}
-
-// openingFence returns the code fence that line opens, as CommonMark reads
-// one: at most 3 spaces, then 3 or more backticks or tildes, and for
-// backticks an info string without backticks. It returns no fence for
-// another line.
-func openingFence(line string) codeFence {
-	rest := strings.TrimLeft(line, " ")
-	if len(line)-len(rest) > maxFenceIndent || rest == "" || (rest[0] != '`' && rest[0] != '~') {
-		return codeFence{}
-	}
-	fence := codeFence{char: rest[0], length: len(rest) - len(strings.TrimLeft(rest, rest[:1]))}
-	if fence.length < minFenceLength || (fence.char == '`' && strings.Contains(rest[fence.length:], "`")) {
-		return codeFence{}
-	}
-	return fence
-}
-
-// closedBy reports whether line closes the code block that f opens: at
-// most 3 spaces, then at least as many of f's characters, then only spaces
-// and tabs.
-func (f codeFence) closedBy(line string) bool {
-	rest := strings.TrimLeft(line, " ")
-	if len(line)-len(rest) > maxFenceIndent {
-		return false
-	}
-	run := len(rest) - len(strings.TrimLeft(rest, string(f.char)))
-	return run >= f.length && strings.Trim(rest[run:], " \t") == ""
+// readmeParser returns a parser of GitHub Flavored Markdown, as GitHub
+// reads a README.
+func readmeParser() parser.Parser {
+	return goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
 }
 
 // countsText says how many rules entries holds, and how many fix what
