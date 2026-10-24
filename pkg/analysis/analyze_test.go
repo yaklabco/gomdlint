@@ -284,10 +284,11 @@ func TestAnalyze_ExcludeViews(t *testing.T) {
 	assert.Equal(t, 1, report.Totals.Issues, "totals always computed")
 }
 
-func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
+func TestAnalyze_ReportsUTF16Columns(t *testing.T) {
 	t.Parallel()
 
-	content := []byte("# Title\n\nÄÖÜ trail   \n")
+	// The emoji is four bytes, one character and two UTF-16 code units.
+	content := []byte("# Title\n\nÄÖÜ \U0001F600 trail   \n")
 	result := &runner.Result{
 		Files: []runner.FileOutcome{{
 			Path: "doc.md",
@@ -298,10 +299,10 @@ func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
 						RuleID:      "MD009",
 						Severity:    config.SeverityWarning,
 						StartLine:   3,
-						StartColumn: 13,
+						StartColumn: 18,
 						EndLine:     3,
-						EndColumn:   16,
-						FixEdits:    []fix.TextEdit{{StartOffset: 21, EndOffset: 24}},
+						EndColumn:   21,
+						FixEdits:    []fix.TextEdit{{StartOffset: 26, EndOffset: 29}},
 					}},
 				},
 			},
@@ -312,11 +313,11 @@ func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
 
 	require.Len(t, report.Diagnostics, 1)
 	entry := report.Diagnostics[0]
-	assert.Equal(t, 10, entry.StartColumn, "start column counts characters, not bytes")
-	assert.Equal(t, 13, entry.EndColumn, "end column counts characters, not bytes")
+	assert.Equal(t, 13, entry.StartColumn, "start column counts UTF-16 code units, not bytes or characters")
+	assert.Equal(t, 16, entry.EndColumn, "end column counts UTF-16 code units, not bytes or characters")
 	require.Len(t, entry.Fixes, 1)
-	assert.Equal(t, 21, entry.Fixes[0].StartOffset, "fix offsets stay byte offsets into the file")
-	assert.Equal(t, 24, entry.Fixes[0].EndOffset)
+	assert.Equal(t, 26, entry.Fixes[0].StartOffset, "fix offsets stay byte offsets into the file")
+	assert.Equal(t, 29, entry.Fixes[0].EndOffset)
 }
 
 func TestAnalyze_PathsRelativeOnlyInsideWorkingDir(t *testing.T) {
@@ -383,4 +384,38 @@ func TestAnalyze_CountsFilesThatCouldNotBeLintedAndRuleFailures(t *testing.T) {
 	assert.Equal(t, 1, report.Totals.FilesErrored)
 	assert.Equal(t, 2, report.Totals.RuleErrors, "rules recorded without an error do not count")
 	assert.Zero(t, report.Totals.Issues)
+}
+
+// TestAnalyze_ColumnInsideACharacter covers a finding that starts one UTF-16
+// code unit into an emoji, as markdownlint's line length rule reports it:
+// the reported start column is the second half of the surrogate pair.
+func TestAnalyze_ColumnInsideACharacter(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("aa\U0001F600 more\n")
+	result := &runner.Result{
+		Files: []runner.FileOutcome{{
+			Path: "doc.md",
+			Result: &lint.PipelineResult{
+				FileResult: &lint.FileResult{
+					Snapshot: mdast.NewFileSnapshot("doc.md", content),
+					Diagnostics: []lint.Diagnostic{{
+						RuleID:                 "MD013",
+						Severity:               config.SeverityWarning,
+						StartLine:              1,
+						StartColumn:            3,
+						StartColumnUTF16Offset: 1,
+						EndLine:                1,
+						EndColumn:              len(content),
+					}},
+				},
+			},
+		}},
+	}
+
+	report := Analyze(result, DefaultOptions())
+
+	require.Len(t, report.Diagnostics, 1)
+	assert.Equal(t, 4, report.Diagnostics[0].StartColumn)
+	assert.Equal(t, 10, report.Diagnostics[0].EndColumn)
 }

@@ -87,8 +87,15 @@ formats change. The first entries under Changed may need action.
 - Table rows start with an `E`, `W` or `I` severity marker, and the legend
   lists only the markers that the rows show, so a table reads the same
   without colour.
-- Columns count characters instead of bytes in text, table and JSON output,
-  so a finding after multibyte text points at its target. JSON fix offsets
+- Columns count UTF-16 code units instead of bytes in text, table and JSON
+  output and in the report of the `analysis` package. markdownlint and
+  markdownlint-cli2 report this unit, and SARIF output already used it. A
+  finding after multibyte text points at its target, and an emoji or another
+  character outside the Basic Multilingual Plane counts two columns, as in
+  markdownlint. Ill-formed UTF-8 counts as markdownlint reads it, one column
+  for each sequence that decodes to a replacement character. The caret under
+  a source line in text output still sits under the target, and the line
+  shows each ill-formed sequence as that replacement character. JSON fix offsets
   stay byte offsets. Every human-readable format shows a path relative to the
   working directory when the file lies inside it.
 - Fixes are checked before they are applied. Each fixing rule parses the
@@ -322,12 +329,16 @@ formats change. The first entries under Changed may need action.
 - **MD012**: No longer counts or deletes blank lines in code. At the end of
   a file it removes the extra blank lines, where it used to offer an empty
   edit that MD047 reported again.
-- **MD013**: Measures characters instead of bytes, so 48 CJK characters
-  measure 48, not 144. Its wrap fix wraps only paragraph text, carries
-  blockquote and list prefixes onto new lines, keeps code spans, inline
-  HTML, link destinations and task checkboxes whole, and no longer starts a
-  line with a list marker, heading marker or fence. Lines that hold only a
-  link, and reference definitions, are exempt, as in markdownlint.
+- **MD013**: Measures UTF-16 code units instead of bytes, as markdownlint
+  does, so 48 CJK characters measure 48, not 144, an emoji measures 2 and
+  each ill-formed UTF-8 sequence 1. When the limit falls inside an emoji,
+  the finding starts at the second half of its surrogate pair, as in
+  markdownlint. Its wrap fix wraps only paragraph text, carries blockquote
+  and list prefixes onto new lines, keeps code spans, inline HTML, link
+  destinations and task checkboxes whole, and no longer starts a line with
+  a list marker, heading marker or fence. Lines that hold only a link, and
+  reference definitions, are exempt, as in markdownlint. The 999 limit on a
+  definition's label counts UTF-16 code units, as micromark does.
 - **MD027**: No longer reports the content indentation of list items in
   blockquotes, or pulls paragraphs out of them.
 - **MD032**: Checks nested lists, and its fix adds the container's own blank

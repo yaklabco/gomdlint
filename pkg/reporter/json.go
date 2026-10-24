@@ -106,8 +106,9 @@ type JSONRuleError struct {
 }
 
 // JSONDiagnostic represents a single diagnostic.
-// Lines are 1-based. Columns are 1-based character columns (Unicode code
-// points), as markdownlint reports them, and EndColumn is exclusive.
+// Lines are 1-based. Columns are 1-based and count UTF-16 code units, as
+// markdownlint reports them, and EndColumn is exclusive. Fix offsets are
+// byte offsets into the file.
 type JSONDiagnostic struct {
 	RuleID      string    `json:"ruleId"`
 	RuleName    string    `json:"ruleName"`

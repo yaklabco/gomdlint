@@ -278,10 +278,13 @@ README.md (3 issues)
 Run 'gomdlint explain <rule>' to see what a rule checks and how to configure it.
 ```
 
-Columns count characters, so a finding after multibyte text points at its
-target. JSON output reports the same character columns, while the offsets of
-its fixes are byte offsets. Every format except SARIF shows a path relative
-to the working directory when the file lies inside it.
+Columns count UTF-16 code units, as markdownlint and markdownlint-cli2 count
+them, so a finding after multibyte text points at its target and an emoji
+counts two columns. The caret under the source line sits under the target
+whatever the width of the text before it. JSON and SARIF output report the
+same columns, while the offsets of JSON fixes are byte offsets. Every format
+except SARIF shows a path relative to the working directory when the file
+lies inside it.
 
 Findings that one change fixes carry the same fix. `no-space-in-emphasis`
 (MD037), `emphasis-style` (MD049) and `strong-style` (MD050) report each side
@@ -1076,7 +1079,8 @@ gomdlint/
   internal/
     cli/               # Cobra commands and flag handling
     configloader/      # Config discovery, loading, merging and migration
-    display/           # Character columns and paths for reporters
+    display/           # UTF-16 columns and paths for reporters
+    jstext/            # UTF-16 lengths of text, as markdownlint measures them
     editdistance/      # Edit distance for rule name suggestions
     ignore/            # gitignore matching for directory walks
     logging/           # Structured logging setup

@@ -6,9 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf16"
-	"unicode/utf8"
 
+	"github.com/yaklabco/gomdlint/internal/jstext"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -124,9 +123,13 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 			continue
 		}
 
+		// markdownlint reports the code unit after the limit, which can be the
+		// second half of a surrogate pair. The byte column then points at the
+		// character and the offset into it is kept for reporters.
+		limitOffset, intoCharacter := jstext.Limit(line, maxLength)
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
-			StartColumn: textOffset + markdownlintByteLimit(line, maxLength) + 1,
+			StartColumn: textOffset + limitOffset + 1,
 			EndLine:     lineNum,
 			EndColumn:   textOffset + len(line) + 1,
 		}
@@ -134,7 +137,8 @@ func (r *MaxLineLengthRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, err
 		diagBuilder := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
 			fmt.Sprintf("Line length %d exceeds maximum %d", length, maxLength)).
 			WithSeverity(config.SeverityWarning).
-			WithSuggestion(fmt.Sprintf("Shorten the line to at most %d characters", maxLength))
+			WithSuggestion(fmt.Sprintf("Shorten the line to at most %d characters", maxLength)).
+			WithStartColumnUTF16Offset(intoCharacter)
 		if fixer := scan.wrapFix(lineNum, maxLength); fixer != nil {
 			diagBuilder = diagBuilder.WithFix(fixer)
 		}
@@ -233,23 +237,10 @@ func markdownlintMeasuredLength(opts lineLengthOptions, line string, linkOnly bo
 	return markdownlintTextLength(prefix) + 1, false
 }
 
+// markdownlintTextLength returns the length markdownlint gives text: its
+// UTF-16 code units once decoded as Node decodes UTF-8 (see jstext).
 func markdownlintTextLength(text string) int {
-	length := 0
-	for _, char := range text {
-		length += utf16.RuneLen(char)
-	}
-	return length
-}
-
-func markdownlintByteLimit(text string, limit int) int {
-	length := 0
-	for offset, char := range text {
-		length += utf16.RuneLen(char)
-		if length > limit {
-			return offset
-		}
-	}
-	return len(text)
+	return jstext.Length(text)
 }
 
 // markdownlintCodeLines returns the lines of code blocks, including the fence
@@ -349,7 +340,8 @@ func markdownlintDefinitionLines(ctx *lint.RuleContext) map[int]bool {
 }
 
 // maxLinkLabelLength is the CommonMark limit on the characters between the
-// brackets of a link label.
+// brackets of a link label, counted in UTF-16 code units as micromark counts
+// them.
 const maxLinkLabelLength = 999
 
 // definitionLabelCloses reports whether the label that opens on the first of
@@ -370,9 +362,11 @@ func definitionLabelCloses(rests [][]byte) bool {
 		} else {
 			length++
 		}
-		for pos := 0; pos < len(text); pos++ {
+		for pos := 0; pos < len(text); {
 			switch char := text[pos]; {
 			case char == '\\' && pos+1 < len(text):
+				// The backslash counts, and the character it escapes counts
+				// below without closing or opening the label.
 				pos++
 				length++
 				blank = false
@@ -383,9 +377,10 @@ func definitionLabelCloses(rests [][]byte) bool {
 			case char != ' ' && char != '\t':
 				blank = false
 			}
-			if utf8.RuneStart(text[pos]) {
-				length++
-			}
+			// micromark counts the label in UTF-16 code units.
+			size, units := jstext.Next(text[pos:])
+			pos += size
+			length += units
 		}
 		if length > maxLinkLabelLength {
 			return false
