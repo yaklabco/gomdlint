@@ -284,10 +284,11 @@ func TestAnalyze_ExcludeViews(t *testing.T) {
 	assert.Equal(t, 1, report.Totals.Issues, "totals always computed")
 }
 
-func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
+func TestAnalyze_ReportsUTF16Columns(t *testing.T) {
 	t.Parallel()
 
-	content := []byte("# Title\n\nÄÖÜ trail   \n")
+	// The emoji is four bytes, one character and two UTF-16 code units.
+	content := []byte("# Title\n\nÄÖÜ \U0001F600 trail   \n")
 	result := &runner.Result{
 		Files: []runner.FileOutcome{{
 			Path: "doc.md",
@@ -298,10 +299,10 @@ func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
 						RuleID:      "MD009",
 						Severity:    config.SeverityWarning,
 						StartLine:   3,
-						StartColumn: 13,
+						StartColumn: 18,
 						EndLine:     3,
-						EndColumn:   16,
-						FixEdits:    []fix.TextEdit{{StartOffset: 21, EndOffset: 24}},
+						EndColumn:   21,
+						FixEdits:    []fix.TextEdit{{StartOffset: 26, EndOffset: 29}},
 					}},
 				},
 			},
@@ -312,11 +313,11 @@ func TestAnalyze_ReportsCharacterColumns(t *testing.T) {
 
 	require.Len(t, report.Diagnostics, 1)
 	entry := report.Diagnostics[0]
-	assert.Equal(t, 10, entry.StartColumn, "start column counts characters, not bytes")
-	assert.Equal(t, 13, entry.EndColumn, "end column counts characters, not bytes")
+	assert.Equal(t, 13, entry.StartColumn, "start column counts UTF-16 code units, not bytes or characters")
+	assert.Equal(t, 16, entry.EndColumn, "end column counts UTF-16 code units, not bytes or characters")
 	require.Len(t, entry.Fixes, 1)
-	assert.Equal(t, 21, entry.Fixes[0].StartOffset, "fix offsets stay byte offsets into the file")
-	assert.Equal(t, 24, entry.Fixes[0].EndOffset)
+	assert.Equal(t, 26, entry.Fixes[0].StartOffset, "fix offsets stay byte offsets into the file")
+	assert.Equal(t, 29, entry.Fixes[0].EndOffset)
 }
 
 func TestAnalyze_PathsRelativeOnlyInsideWorkingDir(t *testing.T) {

@@ -36,7 +36,7 @@ const (
 	sarifSourceRootID = "%SRCROOT%"
 
 	// sarifColumnKind declares the unit of every column in the log, matching
-	// the display.UTF16CodeUnits conversion the regions use. SARIF requires it
+	// the display.Columns conversion the regions use. SARIF requires it
 	// whenever a run reports results on text files.
 	sarifColumnKind = "utf16CodeUnits"
 
@@ -297,8 +297,9 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 			if file.Result == nil || file.Result.FileResult == nil {
 				continue
 			}
+			points := newSARIFPoints(file.Result.Snapshot)
 			for idx := range file.Result.Diagnostics {
-				builder.addResult(file, &file.Result.Diagnostics[idx])
+				builder.addResult(file, points, &file.Result.Diagnostics[idx])
 			}
 			builder.addRuleFailures(file.Path, file.Result.RuleErrors)
 			builder.addNotices(file.Path, file.Notices)
@@ -435,8 +436,8 @@ func (b *sarifRunBuilder) addNotices(path string, notices []lint.Notice) {
 }
 
 // addResult appends the result for diag, which refers to its rule's
-// descriptor by index.
-func (b *sarifRunBuilder) addResult(file runner.FileOutcome, diag *lint.Diagnostic) {
+// descriptor by index. points locates positions in the file's snapshot.
+func (b *sarifRunBuilder) addResult(file runner.FileOutcome, points *sarifPoints, diag *lint.Diagnostic) {
 	ruleIndex := b.ruleReference(diag.RuleID, diag.RuleName)
 
 	path := diag.FilePath
@@ -444,7 +445,6 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, diag *lint.Diagnost
 		path = file.Path
 	}
 	location := b.locator.locate(path)
-	snapshot := file.Result.Snapshot
 
 	result := SARIFResult{
 		RuleID:    diag.RuleID,
@@ -454,12 +454,12 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, diag *lint.Diagnost
 		Locations: []SARIFLocation{{
 			PhysicalLocation: SARIFPhysicalLocation{
 				ArtifactLocation: location,
-				Region:           diagnosticRegion(snapshot, diag),
+				Region:           diagnosticRegion(points, diag),
 			},
 		}},
 	}
 
-	if fix, ok := buildFix(location, snapshot, diag); ok {
+	if fix, ok := buildFix(location, points, diag); ok {
 		result.Fixes = []SARIFFix{fix}
 	}
 
@@ -543,22 +543,46 @@ func endsBefore(end, start sarifPoint) bool {
 	return end.column != 0 && end.column < max(start.column, 1)
 }
 
+// sarifPoints converts the byte positions of one file to SARIF points,
+// counting columns in UTF-16 code units. It keeps a column converter for each
+// kind of position: the starts and ends of finding regions, and the starts
+// and ends of fix regions. The runner sorts findings by position, so each
+// converter mostly moves forward along a line and decodes the line once (see
+// display.Columns).
+type sarifPoints struct {
+	snapshot *mdast.FileSnapshot
+
+	starts, ends       *display.Columns
+	fixStarts, fixEnds *display.Columns
+}
+
+// newSARIFPoints returns the point converter for snapshot, which may be nil.
+func newSARIFPoints(snapshot *mdast.FileSnapshot) *sarifPoints {
+	return &sarifPoints{
+		snapshot:  snapshot,
+		starts:    display.NewColumns(snapshot),
+		ends:      display.NewColumns(snapshot),
+		fixStarts: display.NewColumns(snapshot),
+		fixEnds:   display.NewColumns(snapshot),
+	}
+}
+
 // diagnosticRegion converts the byte-based position of diag into a SARIF text
 // region. It returns nil when the diagnostic has no line, so the result
 // refers to the whole file. An end before the start is collapsed onto the
 // start.
-func diagnosticRegion(snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) *SARIFRegion {
+func diagnosticRegion(points *sarifPoints, diag *lint.Diagnostic) *SARIFRegion {
 	if diag.StartLine < 1 {
 		return nil
 	}
 
-	start := toSARIFPoint(snapshot, diag.StartLine, diag.StartColumn)
+	start := points.point(points.starts, diag.StartLine, diag.StartColumn)
 	region := &SARIFRegion{StartLine: start.line, StartColumn: start.column}
 	if diag.EndLine < 1 {
 		return region
 	}
 
-	end := toSARIFPoint(snapshot, diag.EndLine, diag.EndColumn)
+	end := points.point(points.ends, diag.EndLine, diag.EndColumn)
 	if endsBefore(end, start) {
 		end = sarifPoint{line: start.line, column: max(start.column, 1)}
 	}
@@ -568,24 +592,24 @@ func diagnosticRegion(snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) *SARI
 	return region
 }
 
-// toSARIFPoint converts a 1-based line and byte column to SARIF's text model,
-// counting columns in UTF-16 code units. SARIF has no empty line after a
-// final newline, so a position on that line moves to the end of the last
-// line, past its newline. Without a snapshot the column cannot be converted
-// and is left out, as is a column below 1.
-func toSARIFPoint(snapshot *mdast.FileSnapshot, line, byteColumn int) sarifPoint {
-	if snapshot == nil {
+// point converts a 1-based line and byte column to SARIF's text model,
+// counting the column in UTF-16 code units with columns. SARIF has no empty
+// line after a final newline, so a position on that line moves to the end of
+// the last line, past its newline. Without a snapshot the column cannot be
+// converted and is left out, as is a column below 1.
+func (p *sarifPoints) point(columns *display.Columns, line, byteColumn int) sarifPoint {
+	if p.snapshot == nil {
 		return sarifPoint{line: line}
 	}
 
-	if isTrailingEmptyLine(snapshot, line) {
+	if isTrailingEmptyLine(p.snapshot, line) {
 		last := line - 1
-		info := snapshot.Lines[last-1]
+		info := p.snapshot.Lines[last-1]
 		pastNewline := info.EndOffset - info.StartOffset + 1
-		return sarifPoint{line: last, column: display.Column(snapshot, mdast.Position{Line: last, Column: pastNewline}, display.UTF16CodeUnits)}
+		return sarifPoint{line: last, column: columns.Column(mdast.Position{Line: last, Column: pastNewline})}
 	}
 
-	return sarifPoint{line: line, column: display.Column(snapshot, mdast.Position{Line: line, Column: byteColumn}, display.UTF16CodeUnits)}
+	return sarifPoint{line: line, column: columns.Column(mdast.Position{Line: line, Column: byteColumn})}
 }
 
 // isTrailingEmptyLine reports whether line is the empty line that follows the
@@ -602,7 +626,8 @@ func isTrailingEmptyLine(snapshot *mdast.FileSnapshot, line int) bool {
 // the edits in, when any edit falls outside the file, or when any edit starts
 // in or before a byte order mark: text regions ignore the mark, so a consumer
 // would apply a different change.
-func buildFix(location SARIFArtifactLocation, snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) (SARIFFix, bool) {
+func buildFix(location SARIFArtifactLocation, points *sarifPoints, diag *lint.Diagnostic) (SARIFFix, bool) {
+	snapshot := points.snapshot
 	if snapshot == nil || len(diag.FixEdits) == 0 {
 		return SARIFFix{}, false
 	}
@@ -618,7 +643,7 @@ func buildFix(location SARIFArtifactLocation, snapshot *mdast.FileSnapshot, diag
 		}
 
 		replacements = append(replacements, SARIFReplacement{
-			DeletedRegion:   offsetRegion(snapshot, edit.StartOffset, edit.EndOffset),
+			DeletedRegion:   points.offsetRegion(edit.StartOffset, edit.EndOffset),
 			InsertedContent: &SARIFInsertedContent{Text: edit.NewText},
 		})
 	}
@@ -638,23 +663,24 @@ func buildFix(location SARIFArtifactLocation, snapshot *mdast.FileSnapshot, diag
 }
 
 // offsetRegion returns the SARIF text region for the byte range [start, end)
-// of snapshot.
-func offsetRegion(snapshot *mdast.FileSnapshot, start, end int) SARIFRegion {
-	from := offsetPoint(snapshot, start)
-	to := offsetPoint(snapshot, end)
+// of the snapshot, which must not be nil.
+func (p *sarifPoints) offsetRegion(start, end int) SARIFRegion {
+	from := p.offsetPoint(p.fixStarts, start)
+	to := p.offsetPoint(p.fixEnds, end)
 
 	return SARIFRegion{StartLine: from.line, StartColumn: from.column, EndLine: to.line, EndColumn: to.column}
 }
 
-// offsetPoint converts a byte offset of snapshot to a SARIF point. An empty
-// file has a single insertion point, at line 1, column 1.
-func offsetPoint(snapshot *mdast.FileSnapshot, offset int) sarifPoint {
-	line, column := snapshot.LineAt(offset)
+// offsetPoint converts a byte offset of the snapshot to a SARIF point, with
+// columns converting the column. An empty file has a single insertion point,
+// at line 1, column 1.
+func (p *sarifPoints) offsetPoint(columns *display.Columns, offset int) sarifPoint {
+	line, column := p.snapshot.LineAt(offset)
 	if line < 1 {
 		return sarifPoint{line: 1, column: 1}
 	}
 
-	return toSARIFPoint(snapshot, line, column)
+	return p.point(columns, line, column)
 }
 
 // artifactLocator turns file paths into SARIF artifact locations. Files under

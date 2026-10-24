@@ -96,8 +96,9 @@ func (ctx *analysisContext) getOrCreateRuleAnalysis(ruleID, ruleName string) *Ru
 }
 
 // createDiagnosticEntry builds a DiagnosticEntry from a lint diagnostic.
-// Columns are converted from bytes to characters using the file snapshot.
-func createDiagnosticEntry(path, severity string, snapshot *mdast.FileSnapshot, diag *lint.Diagnostic) DiagnosticEntry {
+// Its start column is converted from bytes to UTF-16 code units by starts and
+// its end column by ends, converters for the snapshot of the file.
+func createDiagnosticEntry(path, severity string, starts, ends *display.Columns, diag *lint.Diagnostic) DiagnosticEntry {
 	entry := DiagnosticEntry{
 		FilePath:    path,
 		RuleID:      diag.RuleID,
@@ -105,9 +106,9 @@ func createDiagnosticEntry(path, severity string, snapshot *mdast.FileSnapshot, 
 		Severity:    severity,
 		Message:     diag.Message,
 		StartLine:   diag.StartLine,
-		StartColumn: display.Column(snapshot, mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}, display.CodePoints),
+		StartColumn: starts.Column(mdast.Position{Line: diag.StartLine, Column: diag.StartColumn}),
 		EndLine:     diag.EndLine,
-		EndColumn:   display.Column(snapshot, mdast.Position{Line: diag.EndLine, Column: diag.EndColumn}, display.CodePoints),
+		EndColumn:   ends.Column(mdast.Position{Line: diag.EndLine, Column: diag.EndColumn}),
 		Suggestion:  diag.Suggestion,
 		Fixable:     len(diag.FixEdits) > 0,
 	}
@@ -182,6 +183,11 @@ func Analyze(result *runner.Result, opts Options) *Report {
 		displayPath := display.Path(file.Path, opts.WorkingDir)
 		fa := ctx.getOrCreateFileAnalysis(displayPath)
 
+		// The runner sorts findings by position, so separate converters for
+		// start and end columns each decode a line once.
+		starts := display.NewColumns(file.Result.Snapshot)
+		ends := display.NewColumns(file.Result.Snapshot)
+
 		for _, diag := range file.Result.Diagnostics {
 			report.Totals.Issues++
 			severity := normalizeSeverity(string(diag.Severity))
@@ -205,7 +211,7 @@ func Analyze(result *runner.Result, opts Options) *Report {
 
 			if opts.IncludeDiagnostics {
 				report.Diagnostics = append(report.Diagnostics,
-					createDiagnosticEntry(displayPath, severity, file.Result.Snapshot, &diag))
+					createDiagnosticEntry(displayPath, severity, starts, ends, &diag))
 			}
 		}
 	}

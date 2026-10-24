@@ -3,6 +3,7 @@ package pretty
 import (
 	"fmt"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/clipperhouse/displaywidth"
 
@@ -113,19 +114,19 @@ func (s *Styles) FormatSeverity(sev config.Severity) string {
 const contextTabWidth = 4
 
 // FormatSourceContext formats the source line with a caret marker under
-// column, a 1-based character column. The line is printed with its tabs
-// expanded, and the caret is padded by the display width of the text
-// before the column, so it lines up after wide characters and tabs.
+// column, a 1-based column counted in UTF-16 code units as reported columns
+// are. The line is printed with its tabs expanded, and the caret is padded
+// by the display width of the text before the column, so it lines up after
+// wide characters, characters outside the Basic Multilingual Plane and tabs.
 func (s *Styles) FormatSourceContext(line string, column int) string {
 	var builder strings.Builder
 
 	// Indent to align with diagnostic output
 	const indent = "        "
 
-	runes := []rune(line)
-	split := min(max(column-1, 0), len(runes))
-	before, caretOffset := expandTabs(string(runes[:split]), 0)
-	after, _ := expandTabs(string(runes[split:]), caretOffset)
+	split := utf16Offset(line, column-1)
+	before, caretOffset := expandTabs(line[:split], 0)
+	after, _ := expandTabs(line[split:], caretOffset)
 
 	// Source line
 	builder.WriteString(indent + s.SourceLine.Render(before+after) + "\n")
@@ -137,6 +138,22 @@ func (s *Styles) FormatSourceContext(line string, column int) string {
 	}
 
 	return builder.String()
+}
+
+// utf16Offset returns the byte offset in line after its first units UTF-16
+// code units. A count that ends inside a character outside the Basic
+// Multilingual Plane covers that character, and a count past the end of line
+// returns its length. Invalid bytes count one unit each.
+func utf16Offset(line string, units int) int {
+	counted := 0
+	for idx, char := range line {
+		if counted >= units {
+			return idx
+		}
+		counted += utf16.RuneLen(char)
+	}
+
+	return len(line)
 }
 
 // expandTabs replaces the tabs in text with spaces up to the next tab stop,
