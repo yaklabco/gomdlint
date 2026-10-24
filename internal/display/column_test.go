@@ -215,30 +215,6 @@ func TestColumns_CharacterAcrossAMark(t *testing.T) {
 	}
 }
 
-func TestByteOffset(t *testing.T) {
-	t.Parallel()
-
-	text := []byte("a\U0001F600Ä\xe2\x82x")
-	tests := []struct {
-		units int
-		want  int
-	}{
-		{units: 0, want: 0},
-		{units: 1, want: 1},
-		{units: 2, want: 5}, // inside the emoji: the emoji is covered
-		{units: 3, want: 5},
-		{units: 4, want: 7},
-		{units: 5, want: 9}, // the truncated character is one unit
-		{units: 6, want: 10},
-		{units: 99, want: 10},
-		{units: -1, want: 0},
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.want, ByteOffset(text, tt.units), "units %d", tt.units)
-	}
-}
-
 func TestLineText(t *testing.T) {
 	t.Parallel()
 
@@ -295,4 +271,17 @@ func gcd(a, b int) int {
 		a, b = b, a%b
 	}
 	return a
+}
+
+func TestColumns_ColumnWithin(t *testing.T) {
+	t.Parallel()
+
+	snapshot := mdast.NewFileSnapshot("doc.md", []byte("aa\U0001F600b\n"))
+	columns := NewColumns(snapshot)
+	emoji := mdast.Position{Line: 1, Column: 3}
+
+	assert.Equal(t, 3, columns.ColumnWithin(emoji, 0), "the start of the emoji")
+	assert.Equal(t, 4, columns.ColumnWithin(emoji, 1), "the second half of its surrogate pair")
+	assert.Equal(t, 3, columns.ColumnWithin(emoji, -1), "a negative offset counts as 0")
+	assert.Zero(t, columns.ColumnWithin(mdast.Position{Line: 1, Column: 0}, 1), "an unknown column stays unknown")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -333,6 +334,61 @@ func TestMaxLineLengthRule_CharacterLength(t *testing.T) {
 	diags = applyMaxLineLength(t, goldmark.FlavorCommonMark, strings.Repeat("😀 ", 30)+"\n", nonCompatible)
 	require.Len(t, diags, 1)
 	assert.Equal(t, "Line length 90 exceeds maximum 80", diags[0].Message, "an emoji counts as two UTF-16 code units")
+}
+
+// TestMaxLineLengthRule_IllFormedUTF8 measures lines with ill-formed UTF-8
+// as markdownlint does: Node decodes each maximal ill-formed sequence to one
+// U+FFFD, one UTF-16 code unit.
+func TestMaxLineLengthRule_IllFormedUTF8(t *testing.T) {
+	// A truncated three-byte character is one code unit, so this line is 80.
+	fits := "\xe2\x82" + strings.Repeat("a", 77) + " x"
+	assert.Empty(t, applyMaxLineLength(t, goldmark.FlavorCommonMark, fits+"\n", nil),
+		"markdownlint measures 80 code units and reports nothing")
+
+	long := "\xe2\x82" + strings.Repeat("a", 79) + " x"
+	diags := applyMaxLineLength(t, goldmark.FlavorCommonMark, long+"\n", nil)
+	require.Len(t, diags, 1)
+	assert.Equal(t, "Line length 82 exceeds maximum 80", diags[0].Message)
+	assert.Equal(t, len("\xe2\x82")+79+1, diags[0].StartColumn,
+		"the finding starts at code unit 80 from 0, the space after the a characters")
+	assert.Zero(t, diags[0].StartColumnUTF16Offset)
+}
+
+// TestMaxLineLengthRule_LimitInsideASurrogatePair covers a limit that falls
+// in the middle of an emoji. markdownlint reports the code unit after the
+// limit, the second half of the emoji's surrogate pair. A byte column cannot
+// point there, so the finding starts at the emoji and records one code unit
+// into it.
+func TestMaxLineLengthRule_LimitInsideASurrogatePair(t *testing.T) {
+	for name, ending := range map[string]string{"LF": "\n", "CRLF": "\r\n", "CR": "\r"} {
+		line := strings.Repeat("a", 79) + "\U0001F600 more"
+		diags := applyMaxLineLength(t, goldmark.FlavorCommonMark, line+ending, nil)
+		require.Len(t, diags, 1, name)
+		assert.Equal(t, "Line length 86 exceeds maximum 80", diags[0].Message, name)
+		assert.Equal(t, 80, diags[0].StartColumn, "%s: byte column of the emoji", name)
+		assert.Equal(t, 1, diags[0].StartColumnUTF16Offset, "%s: one code unit into the emoji", name)
+		assert.Equal(t, len(line)+1, diags[0].EndColumn, name)
+	}
+
+	// The wrap fix still breaks at whitespace, never inside the emoji.
+	wrapped := strings.Repeat("abc ", 19) + "abc\U0001F600 more words here"
+	diags := applyMaxLineLength(t, goldmark.FlavorCommonMark, wrapped+"\n", nil)
+	require.Len(t, diags, 1)
+	assert.Equal(t, 1, diags[0].StartColumnUTF16Offset)
+	require.NotEmpty(t, diags[0].FixEdits, "the paragraph line wraps")
+	for _, edit := range diags[0].FixEdits {
+		for _, offset := range []int{edit.StartOffset, edit.EndOffset} {
+			assert.True(t, offset == len(wrapped) || utf8.RuneStart(wrapped[offset]),
+				"fix offset %d starts a character", offset)
+		}
+	}
+
+	// The limit at the start of the emoji needs no offset.
+	line := strings.Repeat("a", 80) + "\U0001F600 more"
+	diags = applyMaxLineLength(t, goldmark.FlavorCommonMark, line+"\n", nil)
+	require.Len(t, diags, 1)
+	assert.Equal(t, 81, diags[0].StartColumn)
+	assert.Zero(t, diags[0].StartColumnUTF16Offset)
 }
 
 func TestMaxLineLengthRule_Metadata(t *testing.T) {

@@ -110,6 +110,14 @@ func (b *DiagnosticBuilder) WithEdit(edit fix.TextEdit) *DiagnosticBuilder {
 	return b
 }
 
+// WithStartColumnUTF16Offset records that the issue starts units UTF-16 code
+// units into the character at the start column (see
+// Diagnostic.StartColumnUTF16Offset).
+func (b *DiagnosticBuilder) WithStartColumnUTF16Offset(units int) *DiagnosticBuilder {
+	b.diag.StartColumnUTF16Offset = units
+	return b
+}
+
 // Build returns the constructed Diagnostic.
 func (b *DiagnosticBuilder) Build() Diagnostic {
 	return b.diag

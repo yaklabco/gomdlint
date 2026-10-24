@@ -71,6 +71,25 @@ var markdownlintInvalidUTF8Findings = []string{
 	"MD009 7:4-7",
 }
 
+// lineLengthDocument has long lines measured in UTF-16 code units. Line 3 is
+// 80 code units, as a truncated character is one, so markdownlint reports
+// nothing. Line 5 is 82. On line 7 the limit falls inside the emoji, and
+// markdownlint reports the second half of its surrogate pair, column 81.
+var lineLengthDocument = "# Title\n" +
+	"\n" +
+	"\xe2\x82" + strings.Repeat("a", 77) + " x\n" +
+	"\n" +
+	"\xe2\x82" + strings.Repeat("a", 79) + " x\n" +
+	"\n" +
+	strings.Repeat("a", 79) + "\U0001F600 more\n"
+
+// markdownlintLineLengthFindings are the findings markdownlint 0.41.1
+// reports for lineLengthDocument, in the form of markdownlintUTF16Findings.
+var markdownlintLineLengthFindings = []string{
+	"MD013 5:81-83",
+	"MD013 7:81-87",
+}
+
 // TestLint_ColumnsCountUTF16CodeUnitsAsMarkdownlintDoes checks the JSON,
 // SARIF, text and table columns of findings after multibyte text, emoji,
 // combining marks and ill-formed UTF-8 against markdownlint's, for each line
@@ -82,8 +101,9 @@ func TestLint_ColumnsCountUTF16CodeUnitsAsMarkdownlintDoes(t *testing.T) {
 		content  string
 		findings []string
 	}{
-		"multibyte": {content: utf16ColumnsDocument, findings: markdownlintUTF16Findings},
-		"invalid":   {content: invalidUTF8Document, findings: markdownlintInvalidUTF8Findings},
+		"multibyte":   {content: utf16ColumnsDocument, findings: markdownlintUTF16Findings},
+		"invalid":     {content: invalidUTF8Document, findings: markdownlintInvalidUTF8Findings},
+		"line length": {content: lineLengthDocument, findings: markdownlintLineLengthFindings},
 	}
 	endings := map[string]string{"LF": "\n", "CRLF": "\r\n", "CR": "\r"}
 	for docName, doc := range documents {
@@ -111,7 +131,7 @@ func TestLint_ColumnsCountUTF16CodeUnitsAsMarkdownlintDoes(t *testing.T) {
 }
 
 // comparedRules are the rules whose findings the UTF-16 column test compares.
-var comparedRules = []string{"MD009", "MD010", "MD011", "MD034", "MD037", "MD049"}
+var comparedRules = []string{"MD009", "MD010", "MD011", "MD013", "MD034", "MD037", "MD049"}
 
 // jsonFindings returns the findings of the compared rules in a JSON report.
 func jsonFindings(t *testing.T, report string) []string {
