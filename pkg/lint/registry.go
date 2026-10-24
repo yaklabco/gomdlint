@@ -88,6 +88,11 @@ type ruleIndex struct {
 	// declares its options (RuleMeta.OptionsDeclared), or that declares
 	// them itself (OptionDeclarer), to those options.
 	options map[string]*optionTable
+
+	// markdownlintOptions maps the ID of each rule in options to its
+	// options as a markdownlint configuration spells them (see
+	// newMarkdownlintOptionTable).
+	markdownlintOptions map[string]*optionTable
 }
 
 // directiveWord says what a word of a markdownlint comment, or a key of a
@@ -130,6 +135,17 @@ func NewRegistry() *Registry {
 // Register adds a rule to the registry.
 // If a rule with the same ID already exists, it is replaced, and the name
 // of the replaced rule no longer resolves unless the new rule uses it too.
+//
+// markdownlint 0.41.1 rejects a set of custom rules in which a name equals
+// another name, or a tag equals a name, in upper case (validateRuleList in
+// lib/markdownlint.mjs). The registry accepts such rules. Of two rules with
+// the same name, the one registered last keeps it. Otherwise an identifier
+// that two rules claim names the rule of the first claim: IDs claim before
+// names and names before aliases, names in sorted order, and aliases in
+// the order of their rules' IDs. A word of a markdownlint comment that is
+// both a rule's identifier and a tag names that rule and the rules of the
+// tag. The built-in rules share no identifier, and no tag spells one,
+// which a catalog test checks.
 func (r *Registry) Register(rule Rule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -457,10 +473,11 @@ func (r *Registry) buildIndex() *ruleIndex {
 		tags:  make(map[string][]Rule),
 		rules: make([]indexedRule, 0, len(ids)),
 
-		tagSpellings:      make(map[string]string),
-		words:             make(map[string]*directiveWord),
-		markdownlintNames: make(map[string]string),
-		options:           make(map[string]*optionTable),
+		tagSpellings:        make(map[string]string),
+		words:               make(map[string]*directiveWord),
+		markdownlintNames:   make(map[string]string),
+		options:             make(map[string]*optionTable),
+		markdownlintOptions: make(map[string]*optionTable),
 	}}
 
 	// The catalog's words come from every entry, registered or not, so that
@@ -486,12 +503,17 @@ func (r *Registry) buildIndex() *ruleIndex {
 		}
 		build.rules = append(build.rules, indexed)
 		build.addTags(rule, meta)
+		var specs []OptionSpec
 		switch declarer, declares := rule.(OptionDeclarer); {
 		case meta.OptionsDeclared:
-			build.options[id] = newOptionTable(meta.Options)
+			specs = meta.Options
 		case declares:
-			build.options[id] = newOptionTable(declarer.DeclaredOptions())
+			specs = declarer.DeclaredOptions()
+		default:
+			continue
 		}
+		build.options[id] = newOptionTable(specs)
+		build.markdownlintOptions[id] = newMarkdownlintOptionTable(id, specs)
 	}
 
 	build.tagNames = slices.Sorted(maps.Keys(build.tags))

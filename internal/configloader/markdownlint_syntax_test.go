@@ -1,13 +1,22 @@
 package configloader
 
 import (
+	"context"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
+	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
 // The tests in this file cover the syntax of markdownlint config files,
@@ -269,20 +278,109 @@ func TestConvertMarkdownlintConfig_ValuesOtherThanAnObject(t *testing.T) {
 // TestConvertMarkdownlintConfig_NumbersBeyondFloat64 covers a number too
 // large for a float64, which markdownlint-cli2's JSONC parser reads as
 // Infinity, so the config loads. gomdlint used to fail it. Infinity turns a
-// rule on, as any number but zero does, and is no integer for an option,
-// which is ignored with a warning.
+// rule on, as any number but zero does. As line-length's line_length, it is
+// a limit that no line reaches, as in markdownlint, which reads as the
+// largest int, and as ul-indent's indent, on which markdownlint fails, it
+// is ignored with a warning.
 func TestConvertMarkdownlintConfig_NumbersBeyondFloat64(t *testing.T) {
 	t.Parallel()
 
-	result := convertFile(t, ".markdownlint.json", `{"MD009": 1e400, "MD013": {"line_length": 1e400}}`)
+	result := convertFile(t, ".markdownlint.json", `{"MD009": 1e400, "MD013": {"line_length": 1e400}, "MD007": {"indent": 1e400}}`)
 
 	for _, id := range []string{"MD009", "MD013"} {
 		rule := result.Config.Rules[id]
 		require.NotNil(t, rule.Enabled, id)
 		assert.True(t, *rule.Enabled, id)
 	}
-	assert.EqualValues(t, 80, result.Config.Rules["MD013"].Options["max"], "markdownlint's default line length")
-	assert.Equal(t, []string{`line-length option "line_length" must be an integer, not +Inf; it is ignored`}, result.Warnings)
+	assert.Equal(t, map[string]any{"max": math.MaxInt}, result.Config.Rules["MD013"].Options)
+	assert.Nil(t, result.Config.Rules["MD007"].Options)
+	assert.Equal(t, []string{`ul-indent option "indent" must be an integer, not Infinity; it is ignored`}, result.Warnings)
+}
+
+// TestLoad_MarkdownlintLimitsBeyondInt covers limits beyond the range of
+// an int in a markdownlint config, for the config loaded for a run and for
+// the config that migrate writes, which apply with no warning. Infinity,
+// which YAML writes as .inf and a JSON number beyond float64's range reads
+// as, and a number of 2^63 or more, are limits that no count reaches:
+// markdownlint-cli2 0.23.3 reports neither the long lines nor the three
+// blank lines with them, and neither does gomdlint. With -Infinity as
+// heading_line_length, markdownlint checks no heading's length, and
+// gomdlint, which reads the value as the smallest int, checks none either,
+// as for any length below 1, while the paragraph's line still gets the
+// line_length of 20. A length that reads as 0, such as "0", turns the
+// check off in both, and the empty string means the default.
+func TestLoad_MarkdownlintLimitsBeyondInt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, file, text, document string
+		want                       []string
+	}{
+		{
+			name: "infinite in YAML", file: ".markdownlint.yaml",
+			text:     "MD013:\n  line_length: .inf\nMD012:\n  maximum: .inf\n",
+			document: "# Title\n\n" + strings.Repeat("word ", 40) + "end\n\n\n\nText.\n",
+		},
+		{
+			name: "beyond int in JSON", file: ".markdownlint.json",
+			text: `{"MD013": {"line_length": 20, "heading_line_length": -1e400, "code_block_line_length": 1e19}, ` +
+				`"MD012": {"maximum": "9223372036854775808"}}`,
+			document: "# A heading longer than twenty characters\n\n" +
+				"A paragraph line longer than twenty characters.\n\n\n\n" +
+				"    a code block line longer than twenty characters\n",
+			want: []string{"MD013:3"},
+		},
+		{
+			// "0" is not false to ||, so markdownlint checks code blocks
+			// against a length of 0, which turns the check off, as -1 does
+			// in gomdlint. The empty string is, so the line length is the
+			// default, 80. markdownlint-cli2 reports the paragraph's line.
+			name: "a length that reads as 0", file: ".markdownlint.json",
+			text:     `{"MD013": {"line_length": "", "code_block_line_length": "0"}}`,
+			document: "# Title\n\n" + strings.Repeat("word ", 40) + "end\n\n    " + strings.Repeat("code ", 20) + "\n",
+			want:     []string{"MD013:3"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			source := writeMarkdownlint(t, dir, tt.file, tt.text)
+			findings := func(t *testing.T, cfg *config.Config) []string {
+				t.Helper()
+				registry := lint.NewRegistry()
+				rules.RegisterAll(registry)
+				result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(
+					context.Background(), "doc.md", []byte(tt.document), cfg)
+				require.NoError(t, err)
+				var found []string
+				for _, diag := range result.Diagnostics {
+					found = append(found, fmt.Sprintf("%s:%d", diag.RuleID, diag.StartLine))
+				}
+				return found
+			}
+
+			result, err := Load(t.Context(), markdownlintOptions(dir, false, "", nil))
+			require.NoError(t, err)
+			assert.Empty(t, result.Warnings)
+			assert.Equal(t, tt.want, findings(t, result.Config), "the config loaded for a run")
+
+			converted, err := ConvertMarkdownlintConfig(source)
+			require.NoError(t, err)
+			migrated := filepath.Join(t.TempDir(), ".gomdlint.yml")
+			content, err := converted.FileContent(migrated)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(migrated, content, 0o600))
+			loaded, err := Load(t.Context(), LoadOptions{
+				WorkingDir: filepath.Dir(migrated), ExplicitPath: migrated, IgnoreEnv: true,
+				IgnoreUserConfig: true, IgnoreSystemConfig: true, IgnoreMarkdownlint: true, NonInteractive: true,
+			})
+			require.NoError(t, err)
+			assert.Empty(t, loaded.Warnings)
+			assert.Equal(t, tt.want, findings(t, loaded.Config), "the migrated config")
+		})
+	}
 }
 
 // TestLoad_MarkdownlintJSONCComesFirst covers a directory that holds both

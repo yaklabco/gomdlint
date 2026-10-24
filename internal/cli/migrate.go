@@ -27,14 +27,18 @@ func newMigrateCommand() *cobra.Command {
 		Use:   "migrate [input]",
 		Short: "Convert a markdownlint configuration to gomdlint format",
 		Long: `Convert an existing markdownlint configuration file (.markdownlint.json,
-.markdownlint.yaml, etc.) to gomdlint format (.gomdlint.yml). An --output
-name ending in .json gets JSON, since lint reads such a file as JSON.
+.markdownlint.yaml, etc.), or the config key of a markdownlint-cli2 options
+file (.markdownlint-cli2.jsonc or .markdownlint-cli2.yaml), to gomdlint
+format (.gomdlint.yml). An --output name ending in .json gets JSON, since
+lint reads such a file as JSON.
 
 If no input file is specified, the command will search for markdownlint
-configuration files in the current directory.
+configuration files in the current directory, then for markdownlint-cli2
+options files.
 
-JavaScript configuration files (.markdownlint.cjs, .markdownlint.mjs) cannot
-be converted automatically and require manual migration.
+JavaScript configuration files (.markdownlint.cjs, .markdownlint.mjs,
+.markdownlint-cli2.cjs, .markdownlint-cli2.mjs) cannot be converted
+automatically and require manual migration.
 
 Examples:
   gomdlint migrate                       Auto-detect and convert markdownlint config
@@ -135,7 +139,7 @@ func runMigrate(out io.Writer, flags *migrateFlags) error {
 		logger.Warn("review warnings above and verify the migrated configuration")
 	}
 
-	logger.Info("you can now delete the old markdownlint configuration file")
+	logger.Info(configloader.MigratedSourceAdvice(inputPath))
 
 	return nil
 }

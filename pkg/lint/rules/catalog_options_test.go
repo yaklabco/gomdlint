@@ -3,9 +3,11 @@ package rules
 import (
 	"context"
 	"maps"
+	"math"
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -346,6 +348,147 @@ func TestCatalogDeclaresEveryOptionRead(t *testing.T) {
 		}
 		for _, key := range slices.Sorted(maps.Keys(declared)) {
 			assert.True(t, read[key], "%s declares option %q, which it never read", meta.ID, key)
+		}
+	}
+}
+
+// TestCatalogLimits pins the options marked Limit: the integers that
+// markdownlint 0.41.1 compares counts with, so that an infinite value
+// lifts the limit, MD012's maximum and MD013's three line lengths. Each
+// rule reads the option as a most that a count may reach, so math.MaxInt,
+// which a markdownlint configuration's infinity reads as, lifts it too
+// (see TestCatalogLimitsAtTheEdgesOfInt). markdownlint fails, never
+// finishes or reads in a way of its own an infinite value of the other
+// integers, such as MD007's indent or MD022's lines_above.
+func TestCatalogLimits(t *testing.T) {
+	var limits []string
+	for _, meta := range Catalog() {
+		for _, spec := range meta.Options {
+			if spec.Limit {
+				assert.Equal(t, lint.OptionInteger, spec.Type, "%s %s", meta.ID, spec.Name)
+				limits = append(limits, meta.ID+" "+spec.Name)
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{"MD012 max_consecutive", "MD013 max", "MD013 heading_max", "MD013 code_block_max"}, limits)
+}
+
+// TestCatalogZeroIsDefault pins the options marked ZeroIsDefault, which
+// markdownlint 0.41.1 reads as Number(value || default), and checks that
+// each rule reads 0 as it reads the option unset. An option with a
+// MarkdownlintZero must do with it what markdownlint does with 0 itself:
+// for line-length's lengths, check no line, so the rule must find only
+// what it finds with the length under test turned off another way. It also
+// pins the options marked MarkdownlintZeroIsDefault, which markdownlint
+// reads so too, but whose rules read 0 as it is.
+func TestCatalogZeroIsDefault(t *testing.T) {
+	document := []byte("# A heading line that is longer than the limit of twenty\n\n" +
+		"A paragraph line that is longer than the limit of twenty.\n\n\n\n\n" +
+		"- a\n-  b\n\n" +
+		"    a code block line that is longer than the limit of twenty\n")
+	registry := catalogRegistry(t)
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "doc.md", document)
+	require.NoError(t, err)
+
+	var zeroIsDefault, markdownlintZeroIsDefault []string
+	for _, meta := range Catalog() {
+		for _, spec := range meta.Options {
+			if spec.MarkdownlintZeroIsDefault {
+				// markdownlint reads these as Number(value || default) too,
+				// while the rule reads 0 as it is.
+				assert.False(t, spec.ZeroIsDefault, "%s %s", meta.ID, spec.Name)
+				markdownlintZeroIsDefault = append(markdownlintZeroIsDefault, meta.ID+" "+spec.Name)
+			}
+			if !spec.ZeroIsDefault {
+				assert.Nil(t, spec.MarkdownlintZero, "%s %s", meta.ID, spec.Name)
+				continue
+			}
+			zeroIsDefault = append(zeroIsDefault, meta.ID+" "+spec.Name)
+			rule, ok := registry.GetByID(meta.ID)
+			require.True(t, ok, meta.ID)
+			findings := func(t *testing.T, set map[string]any) []string {
+				t.Helper()
+				// The other limits are 20, so that each line has a limit
+				// it exceeds apart from the one under test.
+				options := map[string]any{}
+				for _, other := range meta.Options {
+					if other.Limit && other.Name != spec.Name {
+						options[other.Name] = 20
+					}
+				}
+				maps.Copy(options, set)
+				diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(),
+					&config.RuleConfig{Options: options}))
+				require.NoError(t, err)
+				var found []string
+				for _, diag := range diags {
+					found = append(found, diag.RuleID+" line "+strconv.Itoa(diag.StartLine))
+				}
+				return found
+			}
+			t.Run(meta.ID+" "+spec.Name, func(t *testing.T) {
+				assert.Equal(t, findings(t, nil), findings(t, map[string]any{spec.Name: 0}), "0 reads as the default")
+				if spec.MarkdownlintZero != nil {
+					// A length above every line's turns the check off another way.
+					assert.Equal(t, findings(t, map[string]any{spec.Name: 1 << 20}),
+						findings(t, map[string]any{spec.Name: spec.MarkdownlintZero}), "MarkdownlintZero")
+				}
+			})
+		}
+	}
+	assert.ElementsMatch(t, []string{
+		"MD012 max_consecutive", "MD013 max", "MD013 heading_max", "MD013 code_block_max",
+		"MD030 ul_single", "MD030 ol_single", "MD030 ul_multi", "MD030 ol_multi",
+	}, zeroIsDefault)
+	assert.ElementsMatch(t, []string{"MD007 indent", "MD007 start_indent", "MD025 level", "MD041 level"},
+		markdownlintZeroIsDefault)
+}
+
+// TestCatalogLimitsAtTheEdgesOfInt runs each rule with each of its limits
+// at math.MaxInt and at math.MinInt, which a markdownlint configuration's
+// values beyond int's range read as. A limit at math.MaxInt must find what
+// a limit beyond every count in the document finds, and one at
+// math.MinInt what a limit of -1 finds, so that no rule adds to or
+// subtracts from a limit in a way that overflows.
+func TestCatalogLimitsAtTheEdgesOfInt(t *testing.T) {
+	document := []byte("# A heading line that is longer than the limit of twenty\n\n" +
+		"A paragraph line that is longer than the limit of twenty.\n\n\n\n\n" +
+		"    a code block line that is longer than the limit of twenty\n")
+	registry := catalogRegistry(t)
+	snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "doc.md", document)
+	require.NoError(t, err)
+
+	for _, meta := range Catalog() {
+		for _, spec := range meta.Options {
+			if !spec.Limit {
+				continue
+			}
+			rule, ok := registry.GetByID(meta.ID)
+			require.True(t, ok, meta.ID)
+			findings := func(t *testing.T, value int) []string {
+				t.Helper()
+				// The other limits are 20, so that each line has a limit
+				// it exceeds apart from the one under test.
+				options := map[string]any{}
+				for _, other := range meta.Options {
+					if other.Limit {
+						options[other.Name] = 20
+					}
+				}
+				options[spec.Name] = value
+				ruleCfg := &config.RuleConfig{Options: options}
+				diags, err := rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
+				require.NoError(t, err)
+				var found []string
+				for _, diag := range diags {
+					found = append(found, diag.RuleID+" line "+strconv.Itoa(diag.StartLine))
+				}
+				return found
+			}
+			t.Run(meta.ID+" "+spec.Name, func(t *testing.T) {
+				assert.Equal(t, findings(t, 1<<20), findings(t, math.MaxInt), "math.MaxInt")
+				assert.Equal(t, findings(t, -1), findings(t, math.MinInt), "math.MinInt")
+			})
 		}
 	}
 }

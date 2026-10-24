@@ -2,8 +2,6 @@ package configloader
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,35 +25,48 @@ func TestConvertMarkdownlintConfig_OptionSpellings(t *testing.T) {
 	}`)
 
 	assert.Empty(t, result.Warnings)
-	assert.Equal(t, map[string]any{"ignore_code_blocks": false, "br_spaces": 2}, result.Config.Rules["MD009"].Options)
+	assert.Equal(t, map[string]any{"ignore_code_blocks": false}, result.Config.Rules["MD009"].Options)
 	assert.Equal(t, map[string]any{
 		"max": float64(100), "heading_max": float64(90), "code_block_max": float64(120),
 		"ignore_tables": true, "ignore_headings": false,
-		"ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true,
 	}, result.Config.Rules["MD013"].Options)
 	assert.Equal(t, map[string]any{"max_consecutive": float64(2)}, result.Config.Rules["MD012"].Options)
-	assert.Equal(t, map[string]any{"patterns": []any{"details"}, "markdownlint_compatible": true},
-		result.Config.Rules["MD059"].Options)
+	assert.Equal(t, map[string]any{"patterns": []any{"details"}}, result.Config.Rules["MD059"].Options)
+	for _, id := range []string{"MD009", "MD012", "MD013", "MD059"} {
+		assert.True(t, result.Config.Rules[id].ResetOptions, id)
+	}
 }
 
-// TestConvertMarkdownlintConfig_OptionsWrittenOut checks that, as #42's
-// migration did, every setting of some rules writes out markdownlint's
-// defaults for some of their options, in rules and in rule_defaults, so
-// that the setting replaces them in a lower configuration layer, and that
-// a setting of any other rule writes no option that the source leaves out.
+// TestConvertMarkdownlintConfig_OptionsWrittenOut checks the options that
+// migration writes out for options that the source leaves out. A rule key
+// that turns the rule on resets its options, so that every option it does
+// not set takes its default, as in markdownlint 0.41.1, and writes none. As
+// #42's migration did, a key that turns the rule off, and the default key,
+// write out markdownlint's defaults for some options of some rules, in
+// rules and in rule_defaults, so that they replace those of a lower
+// configuration layer, and a setting of any other rule writes no option
+// that the source leaves out.
 func TestConvertMarkdownlintConfig_OptionsWrittenOut(t *testing.T) {
 	t.Parallel()
 
-	result := convertSettings(t, `{"MD013": true, "MD009": {"enabled": true}, "MD003": true}`)
+	result := convertSettings(t, `{"MD013": true, "MD009": {"enabled": true}, "MD003": true, "MD004": false, "MD010": false}`)
 
+	for _, id := range []string{"MD013", "MD009", "MD003"} {
+		assert.True(t, result.Config.Rules[id].ResetOptions, id)
+		assert.Nil(t, result.Config.Rules[id].Options, id)
+	}
+	assert.False(t, result.Config.Rules["MD004"].ResetOptions)
+	assert.Equal(t, map[string]any{"style": "consistent"}, result.Config.Rules["MD004"].Options)
+	assert.False(t, result.Config.Rules["MD010"].ResetOptions)
+	assert.Nil(t, result.Config.Rules["MD010"].Options)
 	md013 := map[string]any{"max": 80, "ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true}
 	md009 := map[string]any{"ignore_code_blocks": true, "br_spaces": 2}
-	assert.Equal(t, md013, result.Config.Rules["MD013"].Options)
-	assert.Equal(t, md009, result.Config.Rules["MD009"].Options)
-	assert.Nil(t, result.Config.Rules["MD003"].Options)
 	assert.Equal(t, md013, result.Config.RuleDefaults["MD013"].Options)
 	assert.Equal(t, md009, result.Config.RuleDefaults["MD009"].Options)
 	assert.Nil(t, result.Config.RuleDefaults["MD003"].Options)
+	for id, defaults := range result.Config.RuleDefaults {
+		assert.False(t, defaults.ResetOptions, "the default key resets nothing: %s", id)
+	}
 }
 
 // TestConvertMarkdownlintConfig_OptionWarnings checks the warnings about
@@ -78,9 +89,8 @@ func TestConvertMarkdownlintConfig_OptionWarnings(t *testing.T) {
 			`not "dashes" (did you mean "dash"?)`,
 		`unknown option "indent" for list-indent (it has no options); it is ignored`,
 	}, result.Warnings, "in the order the keys are written")
-	assert.Equal(t, map[string]any{
-		"max": 80, "ignore_code_blocks": false, "ignore_urls": false, "markdownlint_compatible": true,
-	}, result.Config.Rules["MD013"].Options, "the options that every setting of the rule writes out")
+	assert.Nil(t, result.Config.Rules["MD013"].Options, "every option is left out")
+	assert.True(t, result.Config.Rules["MD013"].ResetOptions, "so every option takes its default")
 	assert.Nil(t, result.Config.Rules["MD005"].Options)
 	assert.Equal(t, map[string]any{"style": "dashes"}, result.Config.Rules["MD004"].Options)
 }
@@ -97,8 +107,10 @@ func TestConvertMarkdownlintConfig_TagOptions(t *testing.T) {
 	assert.Equal(t, []string{
 		`unknown option "br_spcaes" for the rules of the tag "whitespace"; it is ignored`,
 	}, result.Warnings)
-	assert.Equal(t, map[string]any{"br_spaces": float64(3), "ignore_code_blocks": true}, result.Config.Rules["MD009"].Options)
+	assert.Equal(t, map[string]any{"br_spaces": float64(3)}, result.Config.Rules["MD009"].Options)
 	assert.Nil(t, result.Config.Rules["MD010"].Options, "an option of another rule configures nothing")
+	assert.True(t, result.Config.Rules["MD009"].ResetOptions)
+	assert.True(t, result.Config.Rules["MD010"].ResetOptions)
 }
 
 // TestConvertMarkdownlintConfig_OptionWarningLines checks that a warning
@@ -240,15 +252,33 @@ func TestSourceLocatorReadsEachEntryOnce(t *testing.T) {
 	}
 }
 
-// TestConvertMarkdownlintConfig_OptionConflict checks that two spellings
-// of one option fail the migration, as in a gomdlint config file.
-func TestConvertMarkdownlintConfig_OptionConflict(t *testing.T) {
+// TestConvertMarkdownlintConfig_GomdlintSpellings covers options in
+// gomdlint's spelling in a markdownlint config. markdownlint 0.41.1 reads
+// each option of its rules under its own spelling only, so it ignores
+// gomdlint's names, such as max for line_length and ignore_code_blocks for
+// MD009's inverted code_blocks, and gomdlint's own options, such as
+// ignore_urls. So does gomdlint, with a warning that offers markdownlint's
+// spelling, where it used to apply them, and to fail the migration over
+// two spellings of one option. The options of gomdlint's own rules, which
+// markdownlint lacks, keep their spellings.
+func TestConvertMarkdownlintConfig_GomdlintSpellings(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), ".markdownlint.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"MD013": {"line_length": 100, "max": 90}}`), 0o600))
+	result := convertSettings(t, `{
+		"MD013": {"line_length": 100, "max": 90, "ignore_urls": true},
+		"MD009": {"ignore_code_blocks": false},
+		"MD012": {"max_consecutive": 2},
+		"MDL003": {"min_dashes": 4}
+	}`)
 
-	_, err := ConvertMarkdownlintConfig(path)
-
-	require.EqualError(t, err, `MD013: "line_length" and "max" both set line-length option "max"; keep one of them`)
+	assert.Equal(t, []string{
+		`unknown option "ignore_urls" for line-length; it is ignored`,
+		`unknown option "max" for line-length (did you mean "line_length"?); it is ignored`,
+		`unknown option "ignore_code_blocks" for no-trailing-spaces (did you mean "code_blocks"?); it is ignored`,
+		`unknown option "max_consecutive" for no-multiple-blank-lines (did you mean "maximum"?); it is ignored`,
+	}, result.Warnings)
+	assert.Equal(t, map[string]any{"max": float64(100)}, result.Config.Rules["MD013"].Options)
+	assert.Nil(t, result.Config.Rules["MD009"].Options)
+	assert.Nil(t, result.Config.Rules["MD012"].Options)
+	assert.Equal(t, map[string]any{"min_dashes": float64(4)}, result.Config.Rules["MDL003"].Options)
 }

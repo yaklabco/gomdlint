@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,8 +89,10 @@ func TestRuleOptionMessagesGolden(t *testing.T) {
 
 // TestMigrateWritesCanonicalOptionNames checks the config that migrate
 // writes: options under gomdlint's canonical names, an inverted spelling
-// with the opposite value, markdownlint's defaults for the options that
-// every setting of the rule writes out, as #42's migration did, and no
+// with the opposite value, reset_options for each rule that a rule key
+// turns on, which then takes markdownlint's default for every option it
+// does not set, markdownlint's defaults under rule_defaults for the
+// options that the default key writes out, as #42's migration did, and no
 // option that no rule reads.
 func TestMigrateWritesCanonicalOptionNames(t *testing.T) {
 	inProject(t, map[string]string{".markdownlint.json": optionMarkdownlintConfig})
@@ -102,8 +105,13 @@ func TestMigrateWritesCanonicalOptionNames(t *testing.T) {
 	content := string(written)
 	assert.Contains(t, content, "max: 40")
 	assert.Contains(t, content, "ignore_tables: true")
-	assert.Contains(t, content, "ignore_urls: false")
-	assert.Contains(t, content, "markdownlint_compatible: true")
+	assert.Contains(t, content, "reset_options: true")
+	rules, ruleDefaults, found := strings.Cut(content, "rule_defaults:")
+	require.True(t, found, content)
+	assert.NotContains(t, rules, "ignore_urls", "a rule key that resets the options writes none of the defaults")
+	assert.Contains(t, ruleDefaults, "ignore_urls: false")
+	assert.Contains(t, ruleDefaults, "markdownlint_compatible: true")
+	assert.NotContains(t, ruleDefaults, "reset_options", "the default key resets nothing")
 	for _, absent := range []string{"line_length", "tables: false", "stirct", "br_spcaes"} {
 		assert.NotContains(t, content, absent)
 	}

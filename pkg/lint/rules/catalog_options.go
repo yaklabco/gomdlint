@@ -28,8 +28,9 @@ const (
 // keep markdownlint's behaviour. The options that gomdlint's translation of
 // markdownlint settings has always written out, for MD001, MD004, MD009,
 // MD013, MD022, MD025, MD029, MD033, MD046, MD048, MD059 and MD060, are
-// marked MarkdownlintPinned, so that a markdownlint setting still replaces
-// them in a lower configuration layer.
+// marked MarkdownlintPinned, so that a markdownlint setting that resets no
+// options, such as the default key, still replaces them in a lower
+// configuration layer.
 //
 //nolint:funlen,maintidx // One entry per rule: a table, not logic.
 func catalogOptions() map[string][]lint.OptionSpec {
@@ -56,7 +57,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD005": {},
 		"MD007": {
 			{
-				Name: "indent", Type: lint.OptionInteger, Default: defaultSpacesPerLevel,
+				Name: "indent", Type: lint.OptionInteger, Default: defaultSpacesPerLevel, MarkdownlintZeroIsDefault: true,
 				Description: "Spaces of indentation for each level of a nested list.",
 			},
 			{
@@ -64,7 +65,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 				Description: "Indent the first level of a list too.",
 			},
 			{
-				Name: "start_indent", Type: lint.OptionInteger, Default: defaultSpacesPerLevel, DefaultFrom: "indent",
+				Name: "start_indent", Type: lint.OptionInteger, Default: defaultSpacesPerLevel, DefaultFrom: "indent", MarkdownlintZeroIsDefault: true,
 				Description: "Spaces of indentation for the first level when start_indented is set.",
 			},
 		},
@@ -105,22 +106,23 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		"MD011": {},
 		"MD012": {{
 			Name: "max_consecutive", Aliases: []lint.OptionAlias{{Name: "maximum"}}, Type: lint.OptionInteger, Default: 1,
+			Limit: true, ZeroIsDefault: true,
 			Description: "Most blank lines allowed in a row. Values below 1 count as 1.",
 		}},
 		"MD013": {
 			{
 				Name: "max", Aliases: []lint.OptionAlias{{Name: "line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, MarkdownlintPinned: true,
+				Default: defaultMaxLineLength, Limit: true, ZeroIsDefault: true, MarkdownlintZero: -1, MarkdownlintPinned: true,
 				Description: "Most characters allowed on a line. 0 counts as 80, as in markdownlint.",
 			},
 			{
 				Name: "heading_max", Aliases: []lint.OptionAlias{{Name: "heading_line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, DefaultFrom: "max",
+				Default: defaultMaxLineLength, DefaultFrom: "max", Limit: true, ZeroIsDefault: true, MarkdownlintZero: -1,
 				Description: "Most characters allowed on a heading line. 0 counts as max.",
 			},
 			{
 				Name: "code_block_max", Aliases: []lint.OptionAlias{{Name: "code_block_line_length"}}, Type: lint.OptionInteger,
-				Default: defaultMaxLineLength, DefaultFrom: "max",
+				Default: defaultMaxLineLength, DefaultFrom: "max", Limit: true, ZeroIsDefault: true, MarkdownlintZero: -1,
 				Description: "Most characters allowed on a line of a code block. 0 counts as max.",
 			},
 			{
@@ -188,7 +190,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		}},
 		"MD025": {
 			{
-				Name: "level", Type: lint.OptionInteger, Default: 1,
+				Name: "level", Type: lint.OptionInteger, Default: 1, MarkdownlintZeroIsDefault: true,
 				Description: "Level of the title heading.",
 			},
 			frontMatterTitleOption("counts as the title, so every heading of the title's level is reported"),
@@ -268,7 +270,7 @@ func catalogOptions() map[string][]lint.OptionSpec {
 		},
 		"MD041": {
 			{
-				Name: "level", Type: lint.OptionInteger, Default: 1,
+				Name: "level", Type: lint.OptionInteger, Default: 1, MarkdownlintZeroIsDefault: true,
 				Description: "Level that the first heading must have.",
 			},
 			frontMatterTitleOption("counts as the first heading"),
@@ -404,8 +406,9 @@ func catalogOptions() map[string][]lint.OptionSpec {
 	}
 }
 
-// markdownlintPinned marks spec as an option that every markdownlint setting
-// of its rule writes out (see lint.OptionSpec.MarkdownlintPinned).
+// markdownlintPinned marks spec as an option that the markdownlint settings
+// of its rule that reset no options write out (see
+// lint.OptionSpec.MarkdownlintPinned).
 func markdownlintPinned(spec lint.OptionSpec) lint.OptionSpec {
 	spec.MarkdownlintPinned = true
 	return spec
@@ -425,7 +428,7 @@ func frontMatterTitleOption(role string) lint.OptionSpec {
 // markers of a list.
 func listMarkerSpaceOption(name, list string) lint.OptionSpec {
 	return lint.OptionSpec{
-		Name: name, Type: lint.OptionInteger, Default: 1,
+		Name: name, Type: lint.OptionInteger, Default: 1, ZeroIsDefault: true,
 		Description: "Spaces after the marker of each item of a " + list + ". 0 counts as 1, as in markdownlint.",
 	}
 }

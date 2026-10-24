@@ -3,7 +3,6 @@ package lint
 import (
 	"cmp"
 	"errors"
-	"fmt"
 	"iter"
 	"maps"
 	"regexp"
@@ -241,7 +240,10 @@ func collectDirectives(file *mdast.FileSnapshot, registry *Registry) []inlineDir
 // to cfg. Its default key, the first key named default in any case, gives
 // every rule a baseline under RuleDefaults. Its other keys apply in order,
 // each replacing the settings under Rules of the rules it names, so a later
-// key wins over an earlier one for the rules both name.
+// key wins over an earlier one for the rules both name. A key that turns a
+// rule on resets the rule's options (see config.RuleConfig.ResetOptions),
+// so that those under RuleDefaults do not apply either, as markdownlint
+// gives such a rule the options of the key's value and no others.
 //
 // markdownlint spreads the comments over its own configuration object, in
 // which a key that its configuration holds already keeps the
@@ -344,7 +346,10 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 		}
 		rules, _ := lookupWord(setting.Key, registry)
 		for _, id := range sortedIDs(rules) {
-			converted := configureFileRule(registry, id, setting.Value)
+			// Options that markdownlint does not read for the rule, or
+			// whose values have the wrong type, change nothing, as in
+			// markdownlint.
+			converted, _ := registry.MarkdownlintRuleConfig(id, setting.Value)
 			converted.AutoFix = result.Rules[id].AutoFix
 			result.Rules[id] = converted
 		}
@@ -354,17 +359,22 @@ func configureFile(directives []inlineDirective, registry *Registry, cfg *config
 
 // optionNotices returns the notices for the options in value, the setting
 // of key in directive, a markdownlint-configure-file comment, that the rules
-// that key names do not read (see Registry.MarkdownlintRuleConfig), or that
-// the setting writes in two spellings. markdownlint ignores an option that
-// it does not know, as gomdlint does, so the notices change nothing.
+// that key names do not read, or whose values they cannot use (see
+// Registry.MarkdownlintRuleConfig), as configuration files warn about them.
+// markdownlint ignores an option that it does not know, as gomdlint does,
+// so those notices change nothing. gomdlint's own spelling of an option
+// that markdownlint spells otherwise, such as max for line_length, is such
+// an option.
 //
 // For a key that names one rule there is one for each option that the rule
-// does not read, which offers the closest option names, and for a key that
-// names several, a tag, one for each option that none of its rules reads,
-// as configuration files warn about them. An option written in both
-// spellings gets one for each rule that reads it, which says that
-// gomdlint's spelling is ignored (see configureFileRule). Each names the
-// rules as markdownlint names them, in ID order.
+// does not read, which offers the closest option names, or markdownlint's
+// spelling of a name of gomdlint's, and for a key that names several, a
+// tag, one for each option that none of its rules reads. Each rule also
+// gets one for each value of the wrong type, or item of the wrong type in a
+// list, which the comment ignores, and for each string that the option
+// does not allow, with the closest allowed values. Each notice names the
+// rules as markdownlint names them, in ID order: the notices of each rule
+// in turn, in order of option, and then those for a tag.
 func optionNotices(registry *Registry, directive *inlineDirective, key string, rules []Rule, value any) []Notice {
 	if options, ok := value.(map[string]any); !ok || len(options) == 0 {
 		return nil
@@ -383,49 +393,32 @@ func optionNotices(registry *Registry, directive *inlineDirective, key string, r
 
 	names := make([]string, len(sorted))
 	unread := make(map[string]int) // option -> the rules that do not read it
-	var issues []OptionIssue       // The unknown options of the one rule.
-	var conflicts []Notice
+	var notices []Notice
 	for idx, rule := range sorted {
 		names[idx] = registry.markdownlintName(rule)
 		_, found := registry.MarkdownlintRuleConfig(rule.ID(), value)
 		for _, issue := range found {
-			switch issue.Kind {
-			case OptionIssueUnknown:
+			switch {
+			case issue.Kind == OptionIssueUnknown && len(sorted) > 1:
 				unread[issue.Key]++
-				issues = append(issues, issue)
-			case OptionIssueConflict:
-				conflicts = append(conflicts, notice(NoticeOptionConflict, issue.Option.Name, nil,
-					[]string{names[idx]}, conflictText(issue, names[idx])))
+			case issue.Kind == OptionIssueUnknown:
+				notices = append(notices, notice(NoticeUnknownOption, issue.Key, issue.Suggestions,
+					[]string{names[idx]}, issue.Text(names[idx])))
+			default:
+				// A value of the wrong type, an item of the wrong type in a
+				// list, a string that the option does not allow, or two
+				// spellings of one option of a rule that markdownlint lacks.
+				notices = append(notices, notice(NoticeInvalidOption, issue.Key, issue.Suggestions,
+					[]string{names[idx]}, issue.Text(names[idx])))
 			}
 		}
-	}
-
-	var notices []Notice
-	if len(sorted) == 1 {
-		for _, issue := range issues {
-			notices = append(notices, notice(NoticeUnknownOption, issue.Key, issue.Suggestions, names, issue.Text(names[0])))
-		}
-		return append(notices, conflicts...)
 	}
 	for _, option := range slices.Sorted(maps.Keys(unread)) {
 		if unread[option] == len(sorted) {
 			notices = append(notices, notice(NoticeUnknownOption, option, nil, names, UnknownTagOptionText(option, key)))
 		}
 	}
-	return append(notices, conflicts...)
-}
-
-// conflictText describes issue, two spellings of one option of the rule
-// named ruleName in a markdownlint-configure-file setting
-// (OptionIssueConflict), of which markdownlint reads its own spelling and
-// gomdlint's canonical one is ignored (see configureFileRule).
-func conflictText(issue OptionIssue, ruleName string) string {
-	markdownlintSpelling := issue.Key
-	if markdownlintSpelling == issue.Option.Name {
-		markdownlintSpelling = issue.Other
-	}
-	return fmt.Sprintf("%q and %q both set %s option %q; markdownlint reads %q, so %q is ignored",
-		issue.Key, issue.Other, ruleName, issue.Option.Name, markdownlintSpelling, issue.Option.Name)
+	return notices
 }
 
 // The text of configure-file comments that run on that configureFile reads
@@ -484,38 +477,6 @@ func readConfigureFile(directive *inlineDirective) (*MarkdownlintSource, bool) {
 	return nil, false
 }
 
-// configureFileRule converts value, the setting of the rule with the given
-// ID in a markdownlint-configure-file comment, as a markdownlint
-// configuration file's is converted. Options that the rule does not read,
-// or whose values have the wrong type, change nothing, as in markdownlint.
-// Two spellings of one option, which a config file rejects, read as
-// markdownlint reads them: markdownlint knows an option by its own
-// spelling only, an alias of the option's canonical name, such as
-// line_length for max, so that spelling applies and the canonical one is
-// left out.
-func configureFileRule(registry *Registry, id string, value any) config.RuleConfig {
-	converted, issues := registry.MarkdownlintRuleConfig(id, value)
-	var canonical []string // The canonical spellings that conflict with markdownlint's.
-	for _, issue := range issues {
-		if issue.Kind == OptionIssueConflict {
-			canonical = append(canonical, issue.Option.Name)
-		}
-	}
-	if len(canonical) == 0 {
-		return converted
-	}
-	options, ok := value.(map[string]any)
-	if !ok {
-		return converted // Only an object holds options, which can conflict.
-	}
-	options = maps.Clone(options)
-	for _, name := range canonical {
-		delete(options, name)
-	}
-	converted, _ = registry.MarkdownlintRuleConfig(id, options)
-	return converted
-}
-
 // markdownlintKey returns the key by which markdownlint knows word, a word
 // of a markdownlint comment or a key of a markdownlint configuration object,
 // in a configuration file or a markdownlint-configure-file comment.
@@ -523,20 +484,21 @@ func configureFileRule(registry *Registry, id string, value any) config.RuleConf
 // toUpperCase before it compares them, so two words mean the same exactly
 // when their upper case is the same. The key is that upper case with its
 // ASCII letters written in lower case, as the registry keeps identifiers.
-// Beyond ASCII, toUpperCase turns ten characters into ASCII letters (see
-// asciiUpperCase) and leaves others, such as the Kelvin sign and the dotted
-// capital I, as they are, where strings.ToLower, which the registry's
-// foldKey uses, turns them into k and i. The key writes every other
-// character in its simple upper case, as toUpperCase does, except for the
-// few characters whose full upper case is longer than one character and not
-// ASCII, such as U+0149, which toUpperCase expands. Go's Unicode tables can
-// also lag the JavaScript engine's, so a character that only a newer
-// version of Unicode gives an upper case, such as U+0264, keeps its own. In
-// both cases two spellings can have different keys where markdownlint reads
-// one word. Such a character is beyond ASCII, so this matters only for a
-// custom rule whose name or tag holds one: a word written as the rule
-// writes it still names the rule, as does any spelling that differs from it
-// only in the case of characters that Go and JavaScript upper-case alike.
+// Beyond ASCII, toUpperCase turns ten characters into ASCII letters, such
+// as the sharp s and the long s, and leaves others, such as the Kelvin sign
+// and the dotted capital I, as they are, where strings.ToLower, which the
+// registry's foldKey uses, turns them into k and i. It turns the
+// characters of Unicode's SpecialCasing.txt into more than one character,
+// such as U+0149 into U+02BC and N. The key writes those characters as
+// toUpperCase does (see jsUpperCases), and every other character in its
+// simple upper case, as toUpperCase does too. Go's Unicode tables can lag
+// the JavaScript engine's, so a character that only a newer version of
+// Unicode gives an upper case, such as U+0264, keeps its own, and two
+// spellings can have different keys where markdownlint reads one word.
+// Such a character is beyond ASCII, so this matters only for a custom rule
+// whose name or tag holds one: a word written as the rule writes it still
+// names the rule, as does any spelling that differs from it only in the
+// case of characters that Go and JavaScript upper-case alike.
 //
 // Everything that compares the words of comments or the keys of
 // markdownlint configuration objects goes through this key: their
@@ -558,12 +520,12 @@ func markdownlintKey(word string) string {
 
 	var key strings.Builder
 	for _, char := range word {
-		letters, special := asciiUpperCase(char)
+		upper, special := jsUpperCase(char)
 		switch {
 		case char < utf8.RuneSelf:
 			key.WriteRune(unicode.ToLower(char))
 		case special:
-			key.WriteString(letters)
+			key.WriteString(upper)
 		default:
 			key.WriteRune(unicode.ToUpper(char))
 		}
@@ -611,33 +573,132 @@ func lookupWord(word string, registry *Registry) ([]Rule, wordMeaning) {
 	return directiveRules(markdownlintKey(word), registry)
 }
 
-// asciiUpperCase returns, in lower case, the ASCII letters that JavaScript's
-// toUpperCase turns char into, for the ten characters beyond ASCII that it
-// turns into nothing but ASCII letters: the sharp s, the dotless i, the long
-// s and the Latin ligatures U+FB00 to U+FB06.
-func asciiUpperCase(char rune) (string, bool) {
-	switch char {
-	case '\u00df':
-		return "ss", true
-	case '\u0131':
-		return "i", true
-	case '\u017f':
-		return "s", true
-	case '\ufb00':
-		return "ff", true
-	case '\ufb01':
-		return "fi", true
-	case '\ufb02':
-		return "fl", true
-	case '\ufb03':
-		return "ffi", true
-	case '\ufb04':
-		return "ffl", true
-	case '\ufb05', '\ufb06':
-		return "st", true
-	default:
-		return "", false
-	}
+// jsUpperCases maps each character beyond ASCII whose upper case under
+// JavaScript's toUpperCase markdownlintKey cannot write as unicode.ToUpper
+// gives it to that upper case, with its ASCII letters in lower case, as
+// markdownlintKey writes keys. These are the characters that toUpperCase
+// turns into more than one character, the unconditional mappings of
+// Unicode's SpecialCasing.txt, such as the sharp s, whose upper case is
+// SS, and U+0149, whose upper case is U+02BC and N, and the dotless i and
+// the long s, whose upper cases are the ASCII letters I and S. The table
+// is Node 22's toUpperCase (ICU 78, Unicode 17) of every code point whose
+// upper case is longer than one code point, which SpecialCasing.txt has
+// kept the same since Unicode 4.1, and the two others.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var jsUpperCases = map[rune]string{
+	'\u00df': "ss",
+	'\u0131': "i",
+	'\u0149': "\u02bcn",
+	'\u017f': "s",
+	'\u01f0': "j\u030c",
+	'\u0390': "\u0399\u0308\u0301",
+	'\u03b0': "\u03a5\u0308\u0301",
+	'\u0587': "\u0535\u0552",
+	'\u1e96': "h\u0331",
+	'\u1e97': "t\u0308",
+	'\u1e98': "w\u030a",
+	'\u1e99': "y\u030a",
+	'\u1e9a': "a\u02be",
+	'\u1f50': "\u03a5\u0313",
+	'\u1f52': "\u03a5\u0313\u0300",
+	'\u1f54': "\u03a5\u0313\u0301",
+	'\u1f56': "\u03a5\u0313\u0342",
+	'\u1f80': "\u1f08\u0399",
+	'\u1f81': "\u1f09\u0399",
+	'\u1f82': "\u1f0a\u0399",
+	'\u1f83': "\u1f0b\u0399",
+	'\u1f84': "\u1f0c\u0399",
+	'\u1f85': "\u1f0d\u0399",
+	'\u1f86': "\u1f0e\u0399",
+	'\u1f87': "\u1f0f\u0399",
+	'\u1f88': "\u1f08\u0399",
+	'\u1f89': "\u1f09\u0399",
+	'\u1f8a': "\u1f0a\u0399",
+	'\u1f8b': "\u1f0b\u0399",
+	'\u1f8c': "\u1f0c\u0399",
+	'\u1f8d': "\u1f0d\u0399",
+	'\u1f8e': "\u1f0e\u0399",
+	'\u1f8f': "\u1f0f\u0399",
+	'\u1f90': "\u1f28\u0399",
+	'\u1f91': "\u1f29\u0399",
+	'\u1f92': "\u1f2a\u0399",
+	'\u1f93': "\u1f2b\u0399",
+	'\u1f94': "\u1f2c\u0399",
+	'\u1f95': "\u1f2d\u0399",
+	'\u1f96': "\u1f2e\u0399",
+	'\u1f97': "\u1f2f\u0399",
+	'\u1f98': "\u1f28\u0399",
+	'\u1f99': "\u1f29\u0399",
+	'\u1f9a': "\u1f2a\u0399",
+	'\u1f9b': "\u1f2b\u0399",
+	'\u1f9c': "\u1f2c\u0399",
+	'\u1f9d': "\u1f2d\u0399",
+	'\u1f9e': "\u1f2e\u0399",
+	'\u1f9f': "\u1f2f\u0399",
+	'\u1fa0': "\u1f68\u0399",
+	'\u1fa1': "\u1f69\u0399",
+	'\u1fa2': "\u1f6a\u0399",
+	'\u1fa3': "\u1f6b\u0399",
+	'\u1fa4': "\u1f6c\u0399",
+	'\u1fa5': "\u1f6d\u0399",
+	'\u1fa6': "\u1f6e\u0399",
+	'\u1fa7': "\u1f6f\u0399",
+	'\u1fa8': "\u1f68\u0399",
+	'\u1fa9': "\u1f69\u0399",
+	'\u1faa': "\u1f6a\u0399",
+	'\u1fab': "\u1f6b\u0399",
+	'\u1fac': "\u1f6c\u0399",
+	'\u1fad': "\u1f6d\u0399",
+	'\u1fae': "\u1f6e\u0399",
+	'\u1faf': "\u1f6f\u0399",
+	'\u1fb2': "\u1fba\u0399",
+	'\u1fb3': "\u0391\u0399",
+	'\u1fb4': "\u0386\u0399",
+	'\u1fb6': "\u0391\u0342",
+	'\u1fb7': "\u0391\u0342\u0399",
+	'\u1fbc': "\u0391\u0399",
+	'\u1fc2': "\u1fca\u0399",
+	'\u1fc3': "\u0397\u0399",
+	'\u1fc4': "\u0389\u0399",
+	'\u1fc6': "\u0397\u0342",
+	'\u1fc7': "\u0397\u0342\u0399",
+	'\u1fcc': "\u0397\u0399",
+	'\u1fd2': "\u0399\u0308\u0300",
+	'\u1fd3': "\u0399\u0308\u0301",
+	'\u1fd6': "\u0399\u0342",
+	'\u1fd7': "\u0399\u0308\u0342",
+	'\u1fe2': "\u03a5\u0308\u0300",
+	'\u1fe3': "\u03a5\u0308\u0301",
+	'\u1fe4': "\u03a1\u0313",
+	'\u1fe6': "\u03a5\u0342",
+	'\u1fe7': "\u03a5\u0308\u0342",
+	'\u1ff2': "\u1ffa\u0399",
+	'\u1ff3': "\u03a9\u0399",
+	'\u1ff4': "\u038f\u0399",
+	'\u1ff6': "\u03a9\u0342",
+	'\u1ff7': "\u03a9\u0342\u0399",
+	'\u1ffc': "\u03a9\u0399",
+	'\ufb00': "ff",
+	'\ufb01': "fi",
+	'\ufb02': "fl",
+	'\ufb03': "ffi",
+	'\ufb04': "ffl",
+	'\ufb05': "st",
+	'\ufb06': "st",
+	'\ufb13': "\u0544\u0546",
+	'\ufb14': "\u0544\u0535",
+	'\ufb15': "\u0544\u053b",
+	'\ufb16': "\u054e\u0546",
+	'\ufb17': "\u0544\u053d",
+}
+
+// jsUpperCase returns, with its ASCII letters in lower case, the upper case
+// that JavaScript's toUpperCase gives char, a character beyond ASCII, when
+// it is one of jsUpperCases, and reports whether it is.
+func jsUpperCase(char rune) (string, bool) {
+	upper, ok := jsUpperCases[char]
+	return upper, ok
 }
 
 // wordMeaning says how a word of a markdownlint comment names rules.
@@ -730,11 +791,14 @@ func (r *Registry) markdownlintTerm(word string) string {
 // markdownlintRuleName returns the name that a markdownlint comment should
 // use for the registered rule with the given ID and name: the name that
 // markdownlint lists first for that ID (RuleMeta.MarkdownlintName), or else
-// its name as markdownlintTerm writes it, without surrounding whitespace,
-// which no comment word can hold, or its ID when it has no name.
-// Both ways give the same name for a built-in rule, whose name is its
-// catalog entry's. The ID comes first for a library's rule registered under
-// a built-in ID with a name of its own, which markdownlint does not know.
+// its name as markdownlintTerm writes it, or its ID when it has no name or
+// one that holds whitespace anywhere. markdownlint splits a comment's words
+// at whitespace, so no comment word can hold any, and it compares a word
+// with the whole name, so none names a rule with whitespace around its
+// name either. Both ways give the same name for a built-in rule,
+// whose name is its catalog entry's. The ID comes first for a library's
+// rule registered under a built-in ID with a name of its own, which
+// markdownlint does not know.
 func (r *Registry) markdownlintRuleName(id, name string) string {
 	r.mu.RLock()
 	term := r.meta[id].MarkdownlintName
@@ -742,7 +806,10 @@ func (r *Registry) markdownlintRuleName(id, name string) string {
 	if term != "" {
 		return term
 	}
-	return cmp.Or(r.markdownlintTerm(strings.TrimSpace(name)), id)
+	if name == "" || strings.ContainsFunc(name, isJSWhitespace) {
+		return id
+	}
+	return r.markdownlintTerm(name)
 }
 
 // markdownlintName is markdownlintRuleName for rule.
@@ -919,7 +986,7 @@ func (w *wordResolver) notices(directive *inlineDirective, segment []resolvedWor
 			notices = append(notices, deprecatedTagNotice(w.registry, directive, word.word, word.rules))
 			return
 		}
-		notices = append(notices, unknownRuleNotice(directive, word.word, w.suggestions(word.word)))
+		notices = append(notices, unknownRuleNotice(directive, word.word, commentWords(w.suggestions(word.word))))
 	}
 	for _, word := range segment {
 		add(word)
@@ -930,6 +997,27 @@ func (w *wordResolver) notices(directive *inlineDirective, segment []resolvedWor
 		}
 	}
 	return notices
+}
+
+// commentWords returns the suggestions that a word of a markdownlint
+// comment can write: those without whitespace, which markdownlint splits
+// the words of a comment at. Rules are named without any (see
+// Registry.markdownlintRuleName), so only a tag with whitespace, which a
+// configure-file key can still name, is left out. It returns suggestions
+// itself when it leaves out none.
+func commentWords(suggestions []Suggestion) []Suggestion {
+	if !slices.ContainsFunc(suggestions, func(suggestion Suggestion) bool {
+		return strings.ContainsFunc(suggestion.Name, isJSWhitespace)
+	}) {
+		return suggestions
+	}
+	var words []Suggestion
+	for _, suggestion := range suggestions {
+		if !strings.ContainsFunc(suggestion.Name, isJSWhitespace) {
+			words = append(words, suggestion)
+		}
+	}
+	return words
 }
 
 // suggestions returns the rules and tags that word, an unknown word, most

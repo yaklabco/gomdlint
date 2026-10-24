@@ -3,8 +3,12 @@ package lint
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"math/big"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -111,6 +115,70 @@ func (t OptionType) itemTypeText() string {
 	return OptionInteger.typeText()
 }
 
+// jsDecimal matches a decimal literal as JavaScript's Number reads one from
+// a string: an optional sign, digits with an optional point, or a point and
+// digits, and an optional exponent. Number reads no underscores and no
+// hexadecimal fractions, which Go's ParseFloat may, so they do not match.
+var jsDecimal = regexp.MustCompile(`^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+
+// jsNonDecimal matches an integer that JavaScript's Number reads from a
+// string in hexadecimal, octal or binary, after 0x, 0o or 0b in either
+// case, without a sign. Its groups hold the digits of each base.
+var jsNonDecimal = regexp.MustCompile(`^0(?:[xX]([0-9a-fA-F]+)|[oO]([0-7]+)|[bB]([01]+))$`)
+
+// jsStringNumber returns the number that JavaScript's Number reads from
+// text, and whether it reads one: after the whitespace that Number trims at
+// either end (see isJSWhitespace), a decimal literal such as -1.5e3, .5 or
+// 7., Infinity with an optional sign, or an integer in hexadecimal, octal
+// or binary, such as 0x1F. Number reads nothing but whitespace as 0, and
+// anything else as NaN. It reads empty text as 0 too, which counts as no
+// number here: a rule that reads an option as Number(value || default)
+// uses its default for the empty string, which is false to ||, and so does
+// gomdlint for a value of the wrong type. The rules that read an option as
+// value === undefined ? default : Number(value), no-trailing-spaces'
+// br_spaces, no-hard-tabs' spaces_per_tab and blanks-around-headings'
+// lines_above and lines_below, read it as 0, which the README lists as a
+// difference. A number beyond float64's range is an infinity, and one too
+// small to tell from zero is zero, as in JavaScript.
+func jsStringNumber(text string) (float64, bool) {
+	if text == "" {
+		return 0, false
+	}
+	text = strings.TrimFunc(text, isJSWhitespace)
+	switch text {
+	case "":
+		return 0, true
+	case "Infinity", "+Infinity":
+		return math.Inf(1), true
+	case "-Infinity":
+		return math.Inf(-1), true
+	}
+	if jsDecimal.MatchString(text) {
+		number, err := strconv.ParseFloat(text, 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
+			return 0, false // A decimal literal always parses; this is unreachable.
+		}
+		return number, true
+	}
+	match := jsNonDecimal.FindStringSubmatch(text)
+	if match == nil {
+		return 0, false
+	}
+	for idx, base := range []int{16, 8, 2} {
+		digits := match[idx+1]
+		if digits == "" {
+			continue
+		}
+		integer, ok := new(big.Int).SetString(digits, base)
+		if !ok {
+			return 0, false // The pattern admits only digits of the base; this is unreachable.
+		}
+		number, _ := new(big.Float).SetInt(integer).Float64()
+		return number, true
+	}
+	return 0, false
+}
+
 // isWholeNumber reports whether value is a whole number that rules read as
 // an int: an int, or a float64 with no fraction within int's range.
 func isWholeNumber(value any) bool {
@@ -147,7 +215,9 @@ func (t OptionType) typeText() string {
 // every built-in rule does. A registry uses the declaration when the rule
 // has no catalog entry that declares its options (RuleMeta.OptionsDeclared),
 // so that a rule registered on its own, without its entry, still reads its
-// options under every spelling that the declaration accepts.
+// options under every spelling that the declaration accepts, and under
+// markdownlint's spellings in a markdownlint configuration (see
+// Registry.MarkdownlintRuleConfig).
 type OptionDeclarer interface {
 	Rule
 
@@ -214,8 +284,16 @@ type OptionIssue struct {
 	Suggestions []string
 
 	// NoOptions reports, for OptionIssueUnknown, that the rule reads no
-	// options at all.
+	// options at all, or, in a markdownlint configuration, none that
+	// markdownlint has, such as single-trailing-newline, whose only option
+	// is gomdlint's.
 	NoOptions bool
+
+	// ReadsAsZero reports, for OptionIssueWrongType, that Value is a string
+	// that markdownlint 0.41.1 reads as 0, which the option's rule reads
+	// only as its default (OptionSpec.ZeroIsDefault), so that gomdlint
+	// cannot use it as markdownlint does.
+	ReadsAsZero bool
 }
 
 // Text describes the issue for a warning or an error about the options of
@@ -224,6 +302,7 @@ type OptionIssue struct {
 //	unknown option "lin_length" for line-length (did you mean "line_length"?); it is ignored
 //	line-length option "max" must be an integer, not "100px"; it is ignored
 //	heading-blank-lines option "lines_above" item 2 must be an integer, not 2.5; the option is ignored
+//	list-marker-space option "ul_single" is "0", which markdownlint reads as 0 and gomdlint only as the default; it is ignored
 //	ul-style option "style" must be one of "consistent", "dash" or "plus", not "dashes" (did you mean "dash"?)
 //	"line_length" and "max" both set line-length option "max"; keep one of them
 func (issue OptionIssue) Text(ruleName string) string {
@@ -238,6 +317,10 @@ func (issue OptionIssue) Text(ruleName string) string {
 		}
 		return text + "; it is ignored"
 	case OptionIssueWrongType:
+		if issue.ReadsAsZero {
+			return fmt.Sprintf("%s option %q is %s, which markdownlint reads as 0 and gomdlint only as the default; "+
+				"it is ignored", ruleName, issue.Key, describeOptionValue(issue.Value))
+		}
 		if issue.Item > 0 {
 			return fmt.Sprintf("%s option %q item %d must be %s, not %s; the option is ignored",
 				ruleName, issue.Key, issue.Item, issue.Option.Type.itemTypeText(), describeOptionValue(issue.Value))
@@ -278,13 +361,18 @@ func quotedChoices(words []string, conjunction string) string {
 }
 
 // describeOptionValue writes an option's value for a message: a string
-// quoted, null for nil, and anything else as JSON writes it.
+// quoted, null for nil, an infinity or NaN as JavaScript writes it, such as
+// Infinity, and anything else as JSON writes it.
 func describeOptionValue(value any) string {
 	switch typed := value.(type) {
 	case nil:
 		return jsNull
 	case string:
 		return strconv.Quote(typed)
+	case float64:
+		if math.IsInf(typed, 0) || math.IsNaN(typed) {
+			return jsNumberString(typed)
+		}
 	}
 	if encoded, err := json.Marshal(value); err == nil {
 		return string(encoded)
@@ -318,35 +406,39 @@ func NormalizeOptions(specs []OptionSpec, options map[string]any) (map[string]an
 // for the rule (see config.MarkdownlintRuleConfig). Its options are
 // rewritten through the rule's declared options, as NormalizeOptions does:
 // markdownlint's spellings become canonical names, and options that the
-// rule does not read are left out, as markdownlint ignores them. The
-// options marked MarkdownlintPinned are set to their defaults under the
-// options that value writes, whatever value is, so that the setting
-// replaces them in a lower configuration layer. The issues report each
-// option left out or kept in doubt, and two spellings of one option. A
-// rule that declares no options keeps them as written.
+// rule does not read are left out, as markdownlint ignores them. For a
+// rule that markdownlint has (see IsMarkdownlintRule), an option's only
+// spelling is markdownlint's, its first
+// alias, else its name, so gomdlint's names for options that markdownlint
+// spells otherwise, and options marked GomdlintOnly, are left out too, as
+// markdownlint does not read them. The options of other rules, gomdlint's
+// own and custom ones, keep every spelling. A value that turns the rule on
+// resets the options that lower configuration layers give the rule (see
+// config.RuleConfig.ResetOptions), so its settings hold the options that
+// it writes and no others. A value that turns the rule off writes out the
+// options marked MarkdownlintPinned, set to their defaults under the
+// options that it writes, so that it replaces them in a lower
+// configuration layer, as gomdlint's translation always has. The issues
+// report each option left out or kept in doubt. A rule without a
+// declaration of its options keeps them as written.
 func (r *Registry) MarkdownlintRuleConfig(id string, value any) (config.RuleConfig, []OptionIssue) {
 	var issues []OptionIssue
-	cfg := config.MarkdownlintRuleConfig(id, value, func(ruleID string, options map[string]any) map[string]any {
-		table := r.lookups().options[ruleID]
+	table := r.lookups().markdownlintOptions[id]
+	cfg := config.MarkdownlintRuleConfig(id, value, func(_ string, options map[string]any) map[string]any {
 		if table == nil {
 			return options
 		}
 		normalized, found := table.normalize(options)
 		issues = found
-		unknown := make(map[string]bool)
-		for _, issue := range found {
-			if issue.Kind == OptionIssueUnknown {
-				unknown[issue.Key] = true
-			}
-		}
-		translated := table.pinned()
-		for key, option := range normalized {
-			if !unknown[key] {
-				translated[key] = option
-			}
-		}
-		return translated
+		return normalized
 	})
+	if table != nil && !cfg.ResetOptions {
+		options := table.pinned()
+		maps.Copy(options, cfg.Options)
+		if len(options) > 0 {
+			cfg.Options = options
+		}
+	}
 	return cfg, issues
 }
 
@@ -354,10 +446,11 @@ func (r *Registry) MarkdownlintRuleConfig(id string, value any) (config.RuleConf
 // of a markdownlint configuration, to the settings that it gives the
 // registered rule with the given ID (see config.MarkdownlintDefaultRuleConfig):
 // the rule's state and severity, and the options marked MarkdownlintPinned,
-// set to their defaults. The value itself writes no options.
+// set to their defaults. The value itself writes no options, and the
+// settings reset none.
 func (r *Registry) MarkdownlintDefaultRuleConfig(id string, value any) config.RuleConfig {
 	return config.MarkdownlintDefaultRuleConfig(id, value, func(ruleID string, options map[string]any) map[string]any {
-		table := r.lookups().options[ruleID]
+		table := r.lookups().markdownlintOptions[ruleID]
 		if table == nil {
 			return options
 		}
@@ -369,6 +462,25 @@ func (r *Registry) MarkdownlintDefaultRuleConfig(id string, value any) config.Ru
 type optionTable struct {
 	specs     []OptionSpec
 	spellings map[string]optionSpelling
+
+	// renamed maps, in a table of the spellings that a markdownlint
+	// configuration gives the options (see newMarkdownlintOptionTable),
+	// gomdlint's name of each option that markdownlint spells otherwise to
+	// markdownlint's spelling, which an issue about the name suggests. It
+	// is nil in a table of gomdlint's spellings.
+	renamed map[string]string
+
+	// dropUnknown makes normalize leave out the keys that spell no option,
+	// as markdownlint ignores them, where NormalizeOptions keeps them. In a
+	// table of markdownlint's spellings, such a key can be the canonical
+	// name of an option that another key spells, such as max beside
+	// line_length.
+	dropUnknown bool
+
+	// markdownlintValues makes normalize read values as the rules of
+	// markdownlint 0.41.1 read them (see markdownlintValue), in a table of
+	// the spellings of a rule that markdownlint has.
+	markdownlintValues bool
 }
 
 // optionSpelling is a name or alias of the option specs[index].
@@ -382,23 +494,169 @@ type optionSpelling struct {
 // first; the catalog's tests rule that out for the built-in rules.
 func newOptionTable(specs []OptionSpec) *optionTable {
 	table := &optionTable{specs: specs, spellings: make(map[string]optionSpelling, len(specs))}
-	claim := func(name string, spelling optionSpelling) {
-		if _, taken := table.spellings[name]; !taken {
-			table.spellings[name] = spelling
-		}
-	}
 	for idx, spec := range specs {
-		claim(spec.Name, optionSpelling{index: idx})
+		table.claim(spec.Name, optionSpelling{index: idx})
 	}
 	for idx, spec := range specs {
 		for _, alias := range spec.Aliases {
-			claim(alias.Name, optionSpelling{index: idx, alias: true, inverted: alias.Inverted})
+			table.claim(alias.Name, optionSpelling{index: idx, alias: true, inverted: alias.Inverted})
 		}
 	}
 	return table
 }
 
-// normalize implements NormalizeOptions for the table's options.
+// claim makes name a spelling of the option that spelling describes, unless
+// another option has claimed it already.
+func (t *optionTable) claim(name string, spelling optionSpelling) {
+	if _, taken := t.spellings[name]; !taken {
+		t.spellings[name] = spelling
+	}
+}
+
+// newMarkdownlintOptionTable indexes specs, the options that the rule with
+// the given ID declares, by the spellings that a markdownlint configuration
+// gives them. markdownlint 0.41.1 reads each option of its rules under its
+// own spelling only: the option's first alias, where gomdlint names the
+// option differently, such as line_length for max, and its name otherwise.
+// So gomdlint's names for such options, and the options that only gomdlint
+// has (OptionSpec.GomdlintOnly), name no option there, as in markdownlint,
+// and no option has two spellings. The options of a rule that markdownlint
+// lacks (see IsMarkdownlintRule), such as gomdlint's own rules and custom
+// rules, keep every spelling. Either way, normalizing leaves out the keys
+// that spell no option.
+func newMarkdownlintOptionTable(id string, specs []OptionSpec) *optionTable {
+	if !IsMarkdownlintRule(id) {
+		table := newOptionTable(specs)
+		table.dropUnknown = true
+		return table
+	}
+	table := &optionTable{
+		specs: specs, spellings: make(map[string]optionSpelling, len(specs)),
+		renamed: make(map[string]string), dropUnknown: true, markdownlintValues: true,
+	}
+	for idx, spec := range specs {
+		switch {
+		case spec.GomdlintOnly:
+		case len(spec.Aliases) > 0:
+			alias := spec.Aliases[0]
+			table.claim(alias.Name, optionSpelling{index: idx, alias: true, inverted: alias.Inverted})
+			table.renamed[spec.Name] = alias.Name
+		default:
+			table.claim(spec.Name, optionSpelling{index: idx})
+		}
+	}
+	return table
+}
+
+// markdownlintValue returns value as the rule that spec, one of the
+// table's options, reads it in markdownlint 0.41.1, and whether that
+// differs from value, for a table that reads values so
+// (optionTable.markdownlintValues). Each rule of markdownlint reads its
+// numeric options with JavaScript's Number, as Number(value || default) or
+// as value === undefined ? default : Number(value), so a numeric string,
+// such as "10" or " 0x0A ", reads as its number (see jsStringNumber). The
+// items of a list stay as they are, as MD022, the one rule whose numeric
+// option takes a list, uses them. A limit (OptionSpec.Limit) beyond the
+// range of an int, such as an infinite one, reads as the nearest int,
+// math.MaxInt or math.MinInt, which compares with every count as the value
+// does: no count reaches the one, and every count exceeds the other.
+//
+// For an option that markdownlint reads as Number(value || default) and
+// the rule reads 0 as the default (OptionSpec.ZeroIsDefault), the empty
+// string, which is false to ||, reads as 0, and a string that reads as 0,
+// which is not, as OptionSpec.MarkdownlintZero. When the option has no
+// such value, the string stays as it is, and the reading is
+// markdownlintZeroUnusable. For an option that only markdownlint reads so
+// (OptionSpec.MarkdownlintZeroIsDefault), 0 and the empty string leave the
+// option unset, while a string that reads as 0 reads as 0.
+func (t *optionTable) markdownlintValue(spec OptionSpec, value any) (any, markdownlintReading) {
+	if !t.markdownlintValues || (spec.Type != OptionInteger && spec.Type != OptionIntegerOrList) {
+		return value, markdownlintAsIs
+	}
+	if spec.MarkdownlintZeroIsDefault && (value == "" || isZeroNumber(value)) {
+		return nil, markdownlintUnset
+	}
+	read, reading := value, markdownlintAsIs
+	if text, isText := value.(string); isText {
+		number, ok := jsStringNumber(text)
+		switch {
+		case spec.ZeroIsDefault && text == "":
+			return 0, markdownlintRead
+		case spec.ZeroIsDefault && ok && number == 0 && spec.MarkdownlintZero == nil:
+			return value, markdownlintZeroUnusable
+		case spec.ZeroIsDefault && ok && number == 0:
+			return spec.MarkdownlintZero, markdownlintRead
+		case ok:
+			read, reading = number, markdownlintRead
+		}
+	}
+	if number, isNumber := read.(float64); isNumber && spec.Limit {
+		// The bounds are those of isWholeNumber: 2^63 is beyond an int, and
+		// -2^63 is one.
+		switch {
+		case number >= math.MaxInt64:
+			read, reading = math.MaxInt, markdownlintRead
+		case number < math.MinInt64:
+			read, reading = math.MinInt, markdownlintRead
+		}
+	}
+	return read, reading
+}
+
+// markdownlintReading says how markdownlintValue read a value.
+type markdownlintReading int
+
+const (
+	// markdownlintAsIs reads the value as it is.
+	markdownlintAsIs markdownlintReading = iota
+	// markdownlintRead reads the value as another.
+	markdownlintRead
+	// markdownlintUnset leaves the option unset, as markdownlint reads the
+	// value as the default.
+	markdownlintUnset
+	// markdownlintZeroUnusable marks a string that reads as 0, which the
+	// rule cannot read as markdownlint does (see OptionIssue.ReadsAsZero).
+	markdownlintZeroUnusable
+)
+
+// isZeroNumber reports whether value is the number 0, as an int or a
+// float64, negative zero included.
+func isZeroNumber(value any) bool {
+	switch typed := value.(type) {
+	case int:
+		return typed == 0
+	case float64:
+		return typed == 0
+	}
+	return false
+}
+
+// suggest returns the spellings that key, which spells no option of the
+// table, most likely means: markdownlint's spelling of the option that key
+// is gomdlint's name for, in a table of a markdownlint configuration's
+// spellings, and otherwise the closest spellings (see closestWords). In
+// such a table, a key close to none of them that misspells one of
+// gomdlint's names, such as ignore_tabels, gets markdownlint's spelling of
+// that option.
+func (t *optionTable) suggest(key string) []string {
+	if spelling, ok := t.renamed[key]; ok {
+		return []string{spelling}
+	}
+	suggestions := closestWords(key, t.allSpellings())
+	if len(suggestions) > 0 || len(t.renamed) == 0 {
+		return suggestions
+	}
+	for _, name := range closestWords(key, slices.Sorted(maps.Keys(t.renamed))) {
+		suggestions = append(suggestions, t.renamed[name])
+	}
+	slices.Sort(suggestions)
+	return slices.Compact(suggestions)
+}
+
+// normalize implements NormalizeOptions for the table's options, except
+// that a table with dropUnknown leaves out the keys that spell no option,
+// and one with markdownlintValues reads values as markdownlint's rules do
+// (see markdownlintValue).
 func (t *optionTable) normalize(options map[string]any) (map[string]any, []OptionIssue) {
 	if len(options) == 0 || t.canonical(options) {
 		return options, nil
@@ -418,8 +676,9 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 		if !known {
 			issues = append(issues, OptionIssue{
 				Kind: OptionIssueUnknown, Key: key, Value: options[key],
-				Suggestions: closestWords(key, t.allSpellings()), NoOptions: len(t.specs) == 0,
+				Suggestions: t.suggest(key), NoOptions: len(t.spellings) == 0,
 			})
+			changed = changed || t.dropUnknown
 			continue
 		}
 		previous, conflict := chosen[spelling.index]
@@ -448,6 +707,21 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 			if enabled, ok := value.(bool); ok {
 				value = !enabled
 			}
+		}
+		read, reading := t.markdownlintValue(spec, value)
+		switch reading {
+		case markdownlintAsIs:
+		case markdownlintRead:
+			value, changed = read, true
+		case markdownlintUnset:
+			changed = true
+			continue
+		case markdownlintZeroUnusable:
+			issues = append(issues, OptionIssue{
+				Kind: OptionIssueWrongType, Key: key, Value: value, Option: spec, ReadsAsZero: true,
+			})
+			changed = true
+			continue
 		}
 		if !spec.Type.Accepts(value) {
 			issues = append(issues, wrongTypeIssues(key, options[key], spec)...)
@@ -478,7 +752,7 @@ func (t *optionTable) normalize(options map[string]any) (map[string]any, []Optio
 	}
 	normalized := make(map[string]any, len(options))
 	for _, key := range keys {
-		if _, known := t.spellings[key]; !known {
+		if _, known := t.spellings[key]; !known && !t.dropUnknown {
 			normalized[key] = options[key]
 		}
 	}
@@ -520,6 +794,9 @@ func (t *optionTable) canonical(options map[string]any) bool {
 		if !spec.Type.Accepts(value) {
 			return false
 		}
+		if _, reading := t.markdownlintValue(spec, value); reading != markdownlintAsIs {
+			return false
+		}
 		switch typed := value.(type) {
 		case []string, []int:
 			return false
@@ -532,9 +809,9 @@ func (t *optionTable) canonical(options map[string]any) bool {
 	return true
 }
 
-// pinned returns a new map of the table's options that every markdownlint
-// setting of the rule writes out (OptionSpec.MarkdownlintPinned), each set
-// to a copy of its default.
+// pinned returns a new map of the table's options that the markdownlint
+// settings of the rule that reset no options write out
+// (OptionSpec.MarkdownlintPinned), each set to a copy of its default.
 func (t *optionTable) pinned() map[string]any {
 	pinned := make(map[string]any)
 	for _, spec := range t.specs {

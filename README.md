@@ -360,7 +360,8 @@ user, and system directories, merging configurations hierarchically.
 For the project config, gomdlint looks in the current directory and then in
 each parent directory, up to the repository root or your home directory. It
 uses the first directory that holds one of these files. In that directory it
-reads the first name in this list and ignores the others:
+reads the first name in this list and ignores the others, each with a
+warning that names the file it reads:
 
 1. `.gomdlint.yml`
 2. `.gomdlint.yaml`
@@ -376,7 +377,8 @@ reads the first name in this list and ignores the others:
 The user config is `config.yaml`, `config.yml` or `config.json`, in that
 order of preference, in `$XDG_CONFIG_HOME/gomdlint` (by default
 `~/.config/gomdlint`). The system config uses the same names in
-`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows.
+`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows. A file that
+another name there shadows gets a warning too.
 
 ```yaml
 # .gomdlint.yaml
@@ -458,10 +460,10 @@ one-line description. It completes categories and tags for the
 ### Rule Settings
 
 A rule's value is a mapping of its settings, `enabled`, `severity`,
-`auto_fix` and `options`, or one of markdownlint's shorthands. `true` and
-`false` turn the rule on and off. A severity turns the rule on at that
-severity, as in markdownlint: `error` or `warning`, or gomdlint's `info`.
-So `line-length: warning` means
+`auto_fix`, `reset_options` and `options`, or one of markdownlint's
+shorthands. `true` and `false` turn the rule on and off. A severity turns
+the rule on at that severity, as in markdownlint: `error` or `warning`, or
+gomdlint's `info`. So `line-length: warning` means
 `line-length: {enabled: true, severity: warning}`. Any other string is an
 invalid severity, which fails as it does under `severity`.
 
@@ -472,6 +474,15 @@ and `auto_fix` setting that they give the rule. The long form differs:
 `rule_defaults` or a lower layer turns off stays off. Under `rule_defaults`,
 the shorthand is a default like any other there, so a rule that `rules`
 turns off, in any layer, stays off.
+
+Under `rules`, `reset_options: true` drops the options that lower layers
+give the rule under `rules`, and those under `rule_defaults` in every
+layer, so every option that the rule's own settings do not set takes its
+default. Migration writes it for each rule that a markdownlint config turns
+on, since there a rule key gives the rule its own options and no others.
+Under `rule_defaults`, it drops only the options that lower layers give the
+rule under `rule_defaults`. `reset_options: false` is the same as leaving
+the setting out, so it cannot undo the reset of a lower layer.
 
 A key written twice in one mapping is an error in any part of a config
 file that gomdlint reads, such as a rule under `rules`, a setting under a
@@ -508,16 +519,16 @@ rules:
     tables: false
 ```
 
-Under a rule key, `enabled`, `severity`, `auto_fix` and `options` are the
-rule's settings, and every other key is an option. A rule can mix settings,
-options under the rule key and options under `options`, and all of them
-apply. Setting one option in both places is an error. `init` and `migrate`
-write options under `options`.
+Under a rule key, `enabled`, `severity`, `auto_fix`, `reset_options` and
+`options` are the rule's settings, and every other key is an option. A
+rule can mix settings, options under the rule key and options under
+`options`, and all of them apply. Setting one option in both places is an
+error. `init` and `migrate` write options under `options`.
 
 Every option that markdownlint documents works under markdownlint's name, so
 markdownlint's documentation of a rule's parameters holds for gomdlint too.
-Nine options have a gomdlint name that differs, and gomdlint accepts both
-spellings:
+Nine options have a gomdlint name that differs, and gomdlint's own config
+files accept both spellings:
 
 | Rule | gomdlint name | markdownlint name |
 | --- | --- | --- |
@@ -533,10 +544,18 @@ spellings:
 
 An inverted name holds the opposite value, so `tables: false` means
 `ignore_tables: true`. Setting both spellings of one option for a rule is
-an error in a config file. A `markdownlint-configure-file` comment that
-sets both reads markdownlint's spelling, as markdownlint does, and warns
-that gomdlint's spelling is ignored. Options that markdownlint lacks keep
+an error in a gomdlint config file. Options that markdownlint lacks keep
 markdownlint's behaviour by default.
+
+A markdownlint config, and a `markdownlint-configure-file` comment, read
+options as markdownlint does, under markdownlint's names only. gomdlint's
+name for one of the options above, such as `max`, and an option that only
+gomdlint has, such as `ignore_urls`, are options that the rule does not
+read there. They change nothing, and get a warning, which under a rule's
+own key offers markdownlint's name where there is one. Set them in a
+gomdlint config file. The options of gomdlint's own rules,
+`link-destination-style` (MDL001) and `table-alignment` (MDL003), which
+markdownlint lacks, keep their names.
 
 A config file gets a warning, with its path and line, for an option that
 the rule does not read, with the closest names, such as `unknown option
@@ -589,7 +608,10 @@ writes no other setting, so `ignore`, `flavor`, `backups` and the other
 settings of a user or system config still apply after migration, as they do
 while gomdlint translates the markdownlint config for each run. Options are
 written under gomdlint's names, such as `max` for `line_length`, and an
-option that the rule does not read is left out with a warning. As in
+option that the rule does not read is left out with a warning. A rule that
+the source turns on gets `reset_options: true` (see
+[Rule Settings](#rule-settings)), so that it takes markdownlint's defaults
+for the options that the source does not set. As in
 markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
@@ -598,13 +620,38 @@ Migration does not evaluate JavaScript configuration or resolve `extends`.
 gomdlint reads a markdownlint config file as markdownlint-cli2 0.23 reads
 one that it finds. In a directory with several, it uses the first of
 `.markdownlint.jsonc`, `.markdownlint.json`, `.markdownlint.yaml` and
-`.markdownlint.yml`. Whatever the file's name, gomdlint skips a leading
-byte order mark, reads the file as JSON with comments and trailing commas,
-and reads it as YAML when that fails. So a `.markdownlint.yaml` file that
-holds JSON loads, and a key that the JSON writes twice takes its last value
-in its first place. A file that holds a list, a string, a number or nothing
-loads as an empty config, so every rule keeps markdownlint's defaults. A
-value other than an object gets a warning.
+`.markdownlint.yml`, and warns about the others. Whatever the file's name,
+gomdlint skips a leading byte order mark, reads the file as JSON with
+comments and trailing commas, and reads it as YAML when that fails. So a
+`.markdownlint.yaml` file that holds JSON loads, and a key that the JSON
+writes twice takes its last value in its first place. A file that holds a
+list, a string, a number or nothing loads as an empty config, so every rule
+keeps markdownlint's defaults. A value other than an object gets a warning.
+
+gomdlint also reads the `config` key of a markdownlint-cli2 options file,
+`.markdownlint-cli2.jsonc` or `.markdownlint-cli2.yaml`, as a markdownlint
+config. It looks for both kinds of file upward from the working directory
+and uses the nearest directory that holds a markdownlint config file or an
+options file that sets `config`. As in markdownlint-cli2, an options file
+without `config` passes the search on to the directories above, and one
+that sets it to `null`, `false`, `0` or an empty string does too. Without
+such a directory, gomdlint reads the nearest options file, so that
+markdownlint's defaults apply. In a directory with both kinds of file, a
+markdownlint config file wins over the options file's `config` key, with
+a warning, as in markdownlint-cli2, except in a parent directory of an
+options file that the search passed, where markdownlint-cli2 merges the
+options first, so their `config` key wins. `.markdownlint-cli2.jsonc` wins
+over `.markdownlint-cli2.yaml`. An options file is read as its name says,
+JSON with comments and trailing commas or YAML, and markdownlint-cli2
+fails on one that its parser rejects, so it fails the run when it holds
+the configuration. Its other keys, such as `globs`, `ignores` and
+`customRules`, configure markdownlint-cli2 itself, which gomdlint does not
+read, so each gets a warning, in the options file that applies and in a
+nearer one that the search passed. gomdlint cannot run a JavaScript options
+file, `.markdownlint-cli2.cjs` or `.markdownlint-cli2.mjs`, which gets a
+warning too. markdownlint-cli2 merges the options files of the directories
+between the working directory and each file, `config` keys included, and
+gomdlint reads the `config` key of only one of them.
 
 YAML reads as js-yaml 5 reads it for markdownlint-cli2, with the core
 schema of YAML 1.2. So `yes`, `off` and `0b1` are strings, which turn a
@@ -629,6 +676,24 @@ only when its `enabled` key holds such a value, and an object as the
 default always turns the rules on. A rule's `severity` gives warnings when
 it is `warning` and errors for any other value. So gomdlint's `info` gives
 errors in a markdownlint config, while gomdlint's own config files keep it.
+
+A numeric option reads a numeric string, such as `"20"`, `"2e1"` or
+`"0x14"`, as the number that JavaScript's `Number` reads from it, as
+markdownlint's rules read their numeric options. The items of a list, such
+as `lines_above: ["2"]`, stay strings, which count as of the wrong type,
+and options of other types read no numbers. An infinite `line_length`,
+`heading_line_length`, `code_block_line_length` or `maximum`, such as
+YAML's `.inf`, lifts the limit, as in markdownlint. Any other option
+ignores an infinite value with a warning, where markdownlint fails or
+never finishes.
+
+A key that turns a rule on, with `true`, a severity or an object, gives the
+rule the options that it sets and markdownlint's defaults for the others,
+as in markdownlint. So `{"MD013": true}` over a user config that sets
+`line-length` options gives the rule markdownlint's defaults, where `true`
+in a gomdlint config keeps them. A key that turns a rule off, and the
+`default` key, leave the options of a user or system config in place,
+apart from a few that gomdlint has always set to markdownlint's defaults.
 
 ### markdownlint Comments
 
@@ -661,16 +726,21 @@ written as JSON with comments and trailing commas, or as YAML, which reads
 as in a markdownlint config file. Like markdownlint, gomdlint never fails a
 file over such a comment. A comment that holds no object changes nothing. A
 key that names no rule configures nothing, and the other keys still apply.
-An option that the rule does not read changes nothing. Of two spellings of
-one option, markdownlint's applies. Each of these gets a warning on stderr,
-in JSON `notices` and in SARIF `toolConfigurationNotifications`, and none
-changes the findings or the exit code. As in markdownlint, the keys apply
-in the order they are written, and the first `default` key, in any case,
-sets every rule's baseline. The configure-file comments of one file act as
-one object. A key that a later comment writes again keeps its first place
-and takes the later value. A comment without a `-->` of its own runs on to
-the `-->` of a later one, as in markdownlint, so it holds the comments
-after it.
+An option that the rule does not read changes nothing, and that includes
+gomdlint's spelling of an option, as in a markdownlint config. A value of
+the wrong type, such as `"yes"` for a boolean or a list with a number
+among strings, counts as unset, and a string that the option does not
+allow applies as markdownlint applies it, as in a config file. Each of
+these gets a warning on stderr, in JSON `notices` and in SARIF
+`toolConfigurationNotifications`, and none changes the findings or the exit
+code. As in markdownlint, the keys apply in the order they are written, and
+the first `default` key, in any case, sets every rule's baseline. A key
+that turns a rule on gives it the options that it sets and markdownlint's
+defaults for the others, whatever the config gives the rule. The
+configure-file comments of one file act as one object. A key that a later
+comment writes again keeps its first place and takes the later value. A
+comment without a `-->` of its own runs on to the `-->` of a later one, as
+in markdownlint, so it holds the comments after it.
 
 ## Markdown Support
 
@@ -883,11 +953,49 @@ Some of its fix checks are also stricter than they need to be.
   markdownlint config or a `markdownlint-configure-file` comment. gomdlint
   does not read TOML. A config written in TOML gets a warning or a config
   error, and a comment written in TOML configures nothing, with a warning.
+- markdownlint-cli2 reads markdownlint config files and options files only
+  in the directory it runs from and the directories below it. gomdlint
+  also looks for them upward from the working directory, so a
+  `.markdownlint-cli2.jsonc` file in a parent directory configures a run
+  from a subdirectory in gomdlint but not in markdownlint-cli2.
 - markdownlint-cli2 reads a `.markdownlint.json` or `.jsonc` file that
   starts with a byte order mark as YAML, because its JSON parser rejects the
   mark. YAML reads each comment in such a file together with the key after
   it as one key that names nothing, so that setting does not apply there.
   gomdlint skips the mark and reads the file as JSON with comments.
+- Most of markdownlint's rules read the number 0 for an option such as
+  `line_length` or `maximum` as unset, and a numeric string that reads as
+  0, such as `"0"`, as 0 itself. In a markdownlint config, gomdlint reads
+  such a string for `line-length` as -1, which turns the length check off
+  as 0 does in markdownlint. For `maximum` and the spacings of
+  `list-marker-space`, where markdownlint then reports every blank line or
+  every list item, gomdlint has no such value, so it ignores the string
+  with a warning and uses the default.
+- markdownlint reads an empty string for `no-trailing-spaces`'
+  `br_spaces`, `no-hard-tabs`' `spaces_per_tab` and
+  `blanks-around-headings`' `lines_above` and `lines_below` as 0. gomdlint
+  ignores it with a warning and uses the default.
+- markdownlint's `no-multiple-blanks` reports every line of a document for
+  a `maximum` below 0, such as -1 or `-Infinity`. gomdlint reads any
+  maximum below 1 as 1. markdownlint compares lengths and counts with a
+  fractional limit, such as `"line_length": 100.5`, as it is, and gomdlint
+  ignores it with a warning.
+- markdownlint rejects a set of custom rules in which two IDs or names, or
+  a name and a tag, are equal in upper case. gomdlint's Go API accepts
+  such rules. An ID wins over a name. Of two rules with the same name,
+  the one registered last keeps it, and of two names equal only in upper
+  case, the spelling that sorts first wins. A word that is a rule's name
+  and a tag of a catalog entry names the rule and the tag's rules, while a
+  tag that a rule reports itself yields to the name.
+- markdownlint compares a comment's word with a custom rule's whole name,
+  so no word names a rule registered with whitespace around its name.
+  gomdlint ignores that whitespace, as its config files do, and suggests
+  the rule's ID, which both read.
+- markdownlint's rules read options of other types with JavaScript's
+  conversions too, such as `"strict": "false"`, which reads as true, and a
+  number in a list of strings, which reads as its text. gomdlint reads only
+  numeric strings for numeric options this way, and ignores other values of
+  the wrong type with a warning.
 
 ## Development
 

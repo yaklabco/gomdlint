@@ -893,7 +893,7 @@ func (c *Config) deepCopy() *Config {
 
 // clone creates a deep copy of a RuleConfig.
 func (rc RuleConfig) clone() RuleConfig {
-	clone := RuleConfig{}
+	clone := RuleConfig{ResetOptions: rc.ResetOptions}
 
 	if rc.Enabled != nil {
 		enabled := *rc.Enabled

@@ -21,15 +21,22 @@ const (
 	// markdownlint-configure-file key that the rule the key names does not
 	// read, or, for a tag, that none of its rules reads. The comment does
 	// nothing with the option, as in markdownlint, and applies the rest of
-	// the setting.
+	// the setting. gomdlint's own spelling of an option that markdownlint
+	// spells otherwise, such as max for line_length, and an option that
+	// only gomdlint has are such options, since markdownlint does not read
+	// them.
 	NoticeUnknownOption NoticeKind = "unknown-option"
 
-	// NoticeOptionConflict marks an option that a
-	// markdownlint-configure-file setting writes in gomdlint's spelling as
-	// well as in markdownlint's, such as max beside line_length. markdownlint
-	// knows its own spelling only, so the comment reads that one and ignores
-	// gomdlint's, as markdownlint does, where a config file rejects the two.
-	NoticeOptionConflict NoticeKind = "option-conflict"
+	// NoticeInvalidOption marks an option in the setting of a
+	// markdownlint-configure-file key whose value the rule cannot use: a
+	// value of the wrong type, or a list with an item of the wrong type,
+	// which the comment ignores, as if it did not set the option, or a
+	// string that the option does not allow, which the rule treats as
+	// markdownlint does. A config file gets a warning for the same values.
+	// It also marks two spellings of one option of a rule that markdownlint
+	// lacks, such as a custom rule's name and alias, both set, of which the
+	// canonical one applies.
+	NoticeInvalidOption NoticeKind = "invalid-option"
 
 	// NoticeInvalidConfiguration marks a markdownlint-configure-file
 	// comment whose parameter holds no object of settings: text that is
@@ -62,9 +69,8 @@ type Notice struct {
 	// markdownlint-disable.
 	Directive string
 
-	// Name is the word, the configure-file key or, for an unknown option,
-	// the option, as the comment writes it. For an option conflict it is
-	// gomdlint's spelling, which is ignored. It is empty for a
+	// Name is the word, the configure-file key or, for an unknown or
+	// invalid option, the option, as the comment writes it. It is empty for a
 	// configure-file comment that holds no settings
 	// (NoticeInvalidConfiguration), or that gomdlint does not read
 	// (NoticeUnreadConfiguration).
@@ -76,13 +82,17 @@ type Notice struct {
 	// Rules are named as markdownlint names them (RuleMeta.MarkdownlintName),
 	// so that a comment written from them works in markdownlint too. For an
 	// unknown option of one rule, they are the option names it most likely
+	// means: for a rule that markdownlint has, markdownlint's spelling of a
+	// name of gomdlint's, or else the closest of markdownlint's spellings,
+	// and for another rule, the closest of its spellings. For a string that
+	// an option does not allow, they are the allowed values it most likely
 	// means.
 	Suggestions []string
 
 	// Rules are, for a deprecated tag, the names of the rules it covers,
 	// which the comment can name instead, for an unknown option, the rules
-	// whose setting holds it, none of which reads it, and, for an option
-	// conflict, the rule whose option it is, in rule ID order, named as
+	// whose setting holds it, none of which reads it, in rule ID order, and,
+	// for an invalid option, the one rule whose option it is, named as
 	// markdownlint names them.
 	Rules []string
 

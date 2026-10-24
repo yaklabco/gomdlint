@@ -267,13 +267,17 @@ func TestEngineConfigureFileUnknownOptionsChangeNothing(t *testing.T) {
 }
 
 // TestEngineConfigureFileReadsMarkdownlintsSpelling covers a setting that
-// writes an option in markdownlint's spelling and in gomdlint's, which a
-// config file rejects. markdownlint knows its own spelling only, so it
-// reads that and ignores the other, and gomdlint does the same, with a
-// notice. gomdlint used to fail the file. markdownlint reports the long
-// lines with a line length of 20, and the table row only in the first
-// document, where gomdlint's ignore_tables is ignored in favour of
-// markdownlint's inverted tables.
+// writes options in gomdlint's spelling, beside markdownlint's or alone.
+// markdownlint knows its own spelling only, so it reads that and ignores
+// gomdlint's, and so does gomdlint, with a notice that offers
+// markdownlint's spelling, as for any option that markdownlint does not
+// read. gomdlint used to fail the file over two spellings, and later read
+// gomdlint's spelling where it stood alone. markdownlint reports the long
+// lines with a line length of 20, the table row among them, except where
+// markdownlint's tables is false and gomdlint's ignore_tables beside it is
+// ignored. With max alone, it applies its line length of 80, which no line
+// here passes, and an option that only gomdlint has, ignore_urls, changes
+// nothing either.
 func TestEngineConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 	document := func(parameter string) string {
 		return "<!-- markdownlint-configure-file " + parameter + " -->\n\n# Title\n\n" +
@@ -282,18 +286,26 @@ func TestEngineConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 	}
 	tests := []struct {
 		parameter, ignored, message string
+		suggestions                 []string
 		lines                       []int
 	}{
 		{
 			parameter: `{"MD013": {"line_length": 20, "max": 100}}`, ignored: "max", lines: []int{1, 7, 9},
-			message: `"line_length" and "max" both set line-length option "max"; ` +
-				`markdownlint reads "line_length", so "max" is ignored`,
+			suggestions: []string{"line_length"},
+			message:     `unknown option "max" for line-length (did you mean "line_length"?); it is ignored`,
 		},
 		{
 			parameter: `{"MD013": {"line_length": 20, "tables": false, "ignore_tables": false}}`,
-			ignored:   "ignore_tables", lines: []int{1, 9},
-			message: `"ignore_tables" and "tables" both set line-length option "ignore_tables"; ` +
-				`markdownlint reads "tables", so "ignore_tables" is ignored`,
+			ignored:   "ignore_tables", lines: []int{1, 9}, suggestions: []string{"tables"},
+			message: `unknown option "ignore_tables" for line-length (did you mean "tables"?); it is ignored`,
+		},
+		{
+			parameter: `{"MD013": {"max": 20}}`, ignored: "max", suggestions: []string{"line_length"},
+			message: `unknown option "max" for line-length (did you mean "line_length"?); it is ignored`,
+		},
+		{
+			parameter: `{"MD013": {"line_length": 20, "ignore_urls": true}}`, ignored: "ignore_urls", lines: []int{1, 7, 9},
+			message: `unknown option "ignore_urls" for line-length; it is ignored`,
 		},
 	}
 
@@ -303,12 +315,13 @@ func TestEngineConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 
 			assert.Equal(t, tt.lines, reportedLines(t, document(tt.parameter), "MD013"))
 			assert.Equal(t, []lint.Notice{{
-				Kind:      lint.NoticeOptionConflict,
-				Line:      1,
-				Directive: "markdownlint-configure-file",
-				Name:      tt.ignored,
-				Rules:     []string{"line-length"},
-				Message:   "markdownlint-configure-file: " + tt.message,
+				Kind:        lint.NoticeUnknownOption,
+				Line:        1,
+				Directive:   "markdownlint-configure-file",
+				Name:        tt.ignored,
+				Suggestions: tt.suggestions,
+				Rules:       []string{"line-length"},
+				Message:     "markdownlint-configure-file: " + tt.message,
 			}}, result.Notices)
 		})
 	}
@@ -339,6 +352,7 @@ func TestEngineConfigureFileNoticesChangeNoFindings(t *testing.T) {
 		{noticed: `{"MD009": false`, quiet: `{}`},
 		{noticed: `[1]`, quiet: `{}`},
 		{noticed: `{"MD999": false, "MD013": false}`, quiet: `{"MD013": false}`},
+		{noticed: `{"MD009": {"br_spaces": "x", "strict": true}}`, quiet: `{"MD009": {"strict": true}}`},
 	} {
 		t.Run(tt.noticed, func(t *testing.T) {
 			noticed := lintDefault(t, configuredDoc(tt.noticed))

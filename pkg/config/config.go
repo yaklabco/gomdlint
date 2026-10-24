@@ -14,7 +14,8 @@ const (
 )
 
 // RuleConfig holds the settings of one rule: whether it runs, its severity,
-// whether --fix applies its fixes, and its options.
+// whether --fix applies its fixes, its options, and whether its options
+// replace those of lower configuration layers.
 //
 // A configuration file may give a rule markdownlint's shorthand instead of
 // a mapping: true or false, which sets enabled, or a string, which turns
@@ -28,22 +29,39 @@ const (
 // ReadFlatOptions reads the others from the parsed document, as FromYAML
 // and the configuration loader do before the configuration is used.
 type RuleConfig struct {
-	Enabled  *bool          `mapstructure:"enabled" yaml:"enabled"`
-	Severity *string        `mapstructure:"severity" yaml:"severity"`
-	AutoFix  *bool          `mapstructure:"auto_fix" yaml:"auto_fix"`
-	Options  map[string]any `mapstructure:"options" yaml:"options"`
+	Enabled  *bool   `mapstructure:"enabled" yaml:"enabled"`
+	Severity *string `mapstructure:"severity" yaml:"severity"`
+	AutoFix  *bool   `mapstructure:"auto_fix" yaml:"auto_fix"`
+
+	// ResetOptions reports, for settings under rules, that the rule's
+	// options are those of these settings, and of the settings under
+	// rules of higher layers, alone: the options that lower configuration
+	// layers give the rule under rules do not apply, nor do those under
+	// rule_defaults in any layer, so every other option takes its default.
+	// Under rule_defaults, it drops only the options that lower layers give
+	// the rule under rule_defaults. A markdownlint setting that turns a
+	// rule on, such as MD013: true, resets the rule's options, since
+	// markdownlint gives such a rule the options of the setting and no
+	// others (see MarkdownlintRuleConfig), and a migrated markdownlint
+	// configuration writes reset_options: true for it. The shorthands of
+	// gomdlint's own config files never set it, so true there keeps the
+	// options of lower layers. False is the same as leaving it out, so a
+	// higher layer cannot undo the reset of a lower one.
+	ResetOptions bool `mapstructure:"reset_options" yaml:"reset_options,omitempty"`
+
+	Options map[string]any `mapstructure:"options" yaml:"options"`
 }
 
 // ruleSettingKeys are the keys that RuleConfig's fields read; see
 // RuleSettingKeys.
 //
 //nolint:gochecknoglobals // Read-only lookup table.
-var ruleSettingKeys = [...]string{"enabled", "severity", "auto_fix", "options"}
+var ruleSettingKeys = [...]string{"enabled", "severity", "auto_fix", "reset_options", "options"}
 
 // RuleSettingKeys returns the keys of a rule's settings that RuleConfig's
-// fields read, in their order: enabled, severity, auto_fix and options.
-// Every other key under a rule is one of its options. The caller may keep
-// the list.
+// fields read, in their order: enabled, severity, auto_fix, reset_options
+// and options. Every other key under a rule is one of its options. The
+// caller may keep the list.
 func RuleSettingKeys() []string {
 	return slices.Clone(ruleSettingKeys[:])
 }

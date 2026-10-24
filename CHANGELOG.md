@@ -58,13 +58,13 @@ formats change. The first entries under Changed may need action.
 - A config file whose name ends in `.json` must hold JSON. Older versions of
   `init` and `migrate` could write YAML into such a file. It now fails to
   load, and the error says to rename it to `.yml`.
-- Every key under a rule other than `enabled`, `severity`, `auto_fix` and
-  `options` is one of the rule's options, as in markdownlint. Such keys used
-  to be ignored, with a warning that rule options belong under `options`, so
-  a config file that has them may now report findings it did not. Setting
-  one option both there and under `options` is an error. A key that names no
-  option of the rule is still ignored with a warning, and its value is not
-  read.
+- Every key under a rule other than `enabled`, `severity`, `auto_fix`,
+  `options` and `reset_options` is one of the rule's options, as in
+  markdownlint. Such keys used to be ignored, with a warning that rule
+  options belong under `options`, so a config file that has them may now
+  report findings it did not. Setting one option both there and under
+  `options` is an error. A key that names no option of the rule is still
+  ignored with a warning, and its value is not read.
 - A key that a YAML alias writes a second time is an error in any part of a
   gomdlint config file that gomdlint reads, the same one that the key
   written out twice gets, such as `mapping key "MD013" already defined at
@@ -134,6 +134,24 @@ formats change. The first entries under Changed may need action.
   applies for a run, match rule names and tags in any case, accept gomdlint's
   rule names, and skip unknown rule IDs with a warning instead of copying
   them.
+- A key of a markdownlint config or a `markdownlint-configure-file` comment
+  that turns a rule on, with `true`, a severity or an object, gives the rule
+  the options that it sets and markdownlint's defaults for the others, as
+  markdownlint does. The options that a user or system config, or
+  `rule_defaults`, gave the rule used to apply, except for the few that
+  gomdlint wrote out. Migration writes the new rule setting
+  `reset_options: true` for such rules, and no longer writes those defaults
+  under `rules`. `true` in a gomdlint config still keeps the options of
+  lower layers.
+- A markdownlint config, and a `markdownlint-configure-file` comment, read
+  rule options under markdownlint's names only, as markdownlint does.
+  gomdlint's names for options that markdownlint spells otherwise, such as
+  `max` for `line_length`, and options that only gomdlint has, such as
+  `ignore_urls`, change nothing there, with a warning, which under a rule's
+  own key offers markdownlint's name where there is one. They used to
+  apply, and a config file that wrote both spellings of an option failed to
+  load. gomdlint's own config files still accept either name, and the
+  options of gomdlint's own rules and custom rules keep every name.
 - Go API: `lint.LookupRuleID`, `Registry.RegisterAlias`,
   `rules.RegisterLegacyAliases`, `RuleContext.Builder` and
   `analysis.Options.RuleFormat` are removed. `Registry.Lookup` resolves rule
@@ -141,12 +159,45 @@ formats change. The first entries under Changed may need action.
   surrounding whitespace too. The SARIF types in `pkg/reporter` changed shape
   to produce valid SARIF 2.1.0. `PipelineOptions.ReParseAfterFix` is
   deprecated and has no effect, and `pkg/lint` no longer builds for wasip1.
+  `config.RuleConfig` gains the field `ResetOptions`, so unkeyed
+  `RuleConfig` literals no longer compile, and `config.RuleSettingKeys`
+  lists `reset_options`. `config.MarkdownlintRuleConfig` sets
+  `ResetOptions` for a value that turns the rule on, and
+  `Registry.MarkdownlintRuleConfig` then writes no defaults. For one of
+  markdownlint's rules (`lint.IsMarkdownlintRule`, new),
+  `Registry.MarkdownlintRuleConfig` reads an option under its first alias,
+  or else its name, and not at all when it is marked `GomdlintOnly`.
+  `lint.OptionSpec` gains `Limit`, `ZeroIsDefault`, `MarkdownlintZero` and
+  `MarkdownlintZeroIsDefault`, `lint.OptionIssue` gains `ReadsAsZero`, and
+  `lint.MarkdownlintCLI2Options` holds a markdownlint-cli2 options file.
+  `lint.IsGomdlintOnlyRule` now reports only gomdlint's own rules, MDL001
+  and MDL003, so a custom rule under an ID such as MDL900 takes
+  markdownlint's `default` key and tags as other custom rules do.
 
 ### Added
 
 - Config discovery finds `.gomdlint.json` and `gomdlint.json` after the YAML
   names, and `config.json` in the user and system config directories. `init`
   and `migrate` write JSON for an output name that ends in `.json`.
+- markdownlint-cli2 options files, `.markdownlint-cli2.jsonc` and
+  `.markdownlint-cli2.yaml`: gomdlint reads their `config` key as a
+  markdownlint config, applies it for a run and migrates it, with
+  markdownlint-cli2's order of names and its preference for a markdownlint
+  config file in the same directory. An options file without a `config`
+  key leaves the search for a markdownlint config to the directories
+  above, as in markdownlint-cli2, where an options file that sets `config`
+  wins over the markdownlint config file beside it. Their other keys, such
+  as `globs` and `ignores`, also in an options file that the search
+  passes, and JavaScript options files, which gomdlint cannot read, get
+  warnings. A gomdlint config beside an options file without `config`
+  gets no warning about it.
+- A warning for each config file that another one in its directory
+  shadows, naming both, such as `.gomdlint.json` beside `.gomdlint.yml`,
+  which `gomdlint init --format json` can leave behind. gomdlint reads one
+  config file of each kind per directory, YAML names before JSON ones and
+  `.yml` before `.yaml`, and used to ignore the others without a word. It
+  warns only about the files it reads, so a markdownlint config beside a
+  gomdlint config gets the one warning that names both.
 - A bare `true` or `false` turns a rule on or off, as in markdownlint, such
   as `line-length: false` in YAML or `"MD013": false` in JSON.
 - A bare severity turns a rule on at that severity, as in markdownlint, such
@@ -207,11 +258,13 @@ formats change. The first entries under Changed may need action.
   finding or exit code.
 - The same warnings for `markdownlint-configure-file` comments that
   markdownlint ignores in whole or in part. A comment that holds no object
-  of settings, a key that names no rule, an option that its rule does not
-  read, and gomdlint's spelling of an option beside markdownlint's each get
-  one. JSON output gives them the kinds `invalid-configuration`,
-  `unknown-rule`, `unknown-option` and `option-conflict`, and
-  `unread-configuration` for a comment that gomdlint does not read.
+  of settings, a key that names no rule, an option that markdownlint does
+  not read for its rule, gomdlint's spelling of an option among them, and
+  an option value that the rule cannot use, such as a list with an item of
+  the wrong type, each get one. JSON output gives them the kinds
+  `invalid-configuration`, `unknown-rule`, `unknown-option` and
+  `invalid-option`, and `unread-configuration` for a comment that gomdlint
+  does not read.
 - JSON output reports rules that failed, under `summary.ruleErrors` and each
   file's `ruleErrors`.
 - `--format diff` previews the fixes without writing them, and
@@ -501,6 +554,12 @@ formats change. The first entries under Changed may need action.
   JavaScript upper case, as markdownlint does and as markdownlint comments
   already did. A key with the long s, such as `no-trailing-ſpaces`, names
   MD009, while `NO-TRAİLING-SPACES`, with a dotted capital I, names no rule.
+  The words of markdownlint comments and keys also fold the characters
+  whose upper case is longer than one character, such as `ŉ`, whose upper
+  case is `ʼN`, as JavaScript's `toUpperCase` does, which matters for a
+  custom rule whose name holds one. A suggestion for a markdownlint
+  comment names a custom rule whose name holds whitespace by its ID, and
+  leaves out such a tag, since no word of a comment can hold whitespace.
 - Markdownlint configs load as markdownlint-cli2 0.23 loads them.
   `.markdownlint.json` and `.jsonc` files accept comments and trailing
   commas, and a leading byte order mark is skipped in every format. Each file
@@ -538,6 +597,27 @@ formats change. The first entries under Changed may need action.
   and `0x10`, are errors, which gomdlint ignored or accepted. A merge key
   (`<<`) is an ordinary key, which names no rule, so the settings it would
   merge no longer apply, as in markdownlint-cli2 0.23.
+- A numeric option in a markdownlint config or a
+  `markdownlint-configure-file` comment reads a numeric string, such as
+  `"line_length": "100"` or `"0x64"`, as its number, as markdownlint's
+  rules do. gomdlint ignored such a value with a warning, and without one
+  in a comment. A string that reads as 0, such as `"0"`, turns
+  `line-length`'s check off, as in markdownlint, and gets a warning for
+  `no-multiple-blanks` and `list-marker-space`, which gomdlint cannot read
+  as markdownlint does. An empty string for an option that markdownlint
+  reads as `value || default` means the default, without a warning, and so
+  does the number 0 for `ul-indent`'s `indent` and `start_indent` and the
+  `level` of `single-title` and `first-line-heading`, where gomdlint used
+  0.
+  gomdlint's own config files still take numbers only.
+- An infinite `line_length`, `heading_line_length`,
+  `code_block_line_length` or `maximum` in a markdownlint config, such as
+  YAML's `.inf`, or one of 2^63 or more, lifts the limit, as in
+  markdownlint, where gomdlint ignored it with a warning. A length of
+  `-Infinity` checks no line, as in markdownlint, and a `maximum` of
+  `-Infinity` counts as 1, as any `maximum` below 1 does in gomdlint.
+  Warnings write an infinite or NaN value as
+  JavaScript does, such as `Infinity`, where they wrote `+Inf`.
 - `GOMDLINT_FORMAT` sets the output format.
 - `rules` and `version` print plain text, and the context caret lines up
   after wide characters and tabs.

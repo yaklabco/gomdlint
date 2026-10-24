@@ -148,7 +148,9 @@ environment variables (`GOMDLINT_*`) and command-line flags. The project
 config is the first of `.gomdlint.yml`, `.gomdlint.yaml`, `gomdlint.yml`,
 `gomdlint.yaml`, `.gomdlint.json` and `gomdlint.json` found in the nearest
 directory that holds one, searching upward to a VCS root or the home
-directory. A `.json` file is parsed as JSON and turned into the YAML node
+directory. Each config file that a file with an earlier name shadows in
+its directory gets a warning (`ConfigPaths.Shadowed`), for the files that
+gomdlint reads. A `.json` file is parsed as JSON and turned into the YAML node
 tree that the loader decodes, so rule shorthands, rule options written
 directly under the rule key, and warnings for unknown keys work the same way
 in both formats. Each layer's rule keys are
@@ -612,10 +614,11 @@ markdownlint comment that names no rule or tag (`NoticeUnknownRule`, with
 the closest suggestions), and for each use of one of gomdlint's former tags
 (`NoticeDeprecatedTag`, with the rules it covers). A
 `markdownlint-configure-file` comment never fails the file. It gets a
-notice for each key that names no rule, for each option that its rules do
-not read (`NoticeUnknownOption`), for each option written in gomdlint's
-spelling beside markdownlint's (`NoticeOptionConflict`), and for holding no
-object of settings (`NoticeInvalidConfiguration`). A configure-file comment
+notice for each key that names no rule, for each option that markdownlint
+does not read for its rules, gomdlint's spellings among them
+(`NoticeUnknownOption`), for each option value that its rule cannot use
+(`NoticeInvalidOption`), as a config file gets a warning for each, and for
+holding no object of settings (`NoticeInvalidConfiguration`). A configure-file comment
 without a `-->` of its own runs on to that of a later comment, so the
 engine reads such comments only while their text comes to at most four
 times the file's length and 1 MiB more, and gives each of the rest a notice
@@ -1058,7 +1061,13 @@ The system config (`/etc/gomdlint`, or `%ProgramData%\gomdlint` on Windows)
 and the user config (`$XDG_CONFIG_HOME/gomdlint`) are looked up on their
 own, as `config.yaml`, `config.yml` or `config.json`, and merged under the
 project config. The markdownlint config is searched upward the same way,
-and stands in for the project config only when there is none. `--config`
+and stands in for the project config only when there is none. It is a
+markdownlint config file, or the `config` key of a markdownlint-cli2
+options file in a directory without one (`ConfigPaths.MarkdownlintCLI2`,
+read by `lint.ReadMarkdownlintCLI2Options` with the one parser its name
+selects), and the options file's other keys get warnings. An options
+file whose `config` key is absent or false to JavaScript does not stop
+the search (`MarkdownlintCLI2Options.ConfigSet`). `--config`
 replaces project discovery. A markdownlint config is read as
 markdownlint-cli2 reads one that it finds, whatever its name
 (`lint.ReadMarkdownlintConfig`). The reader tries JSON with comments and
@@ -1088,7 +1097,22 @@ For each rule, the final configuration is computed:
 Migrated configs also write a `rule_defaults` layer, which applies after
 `severity_default` and before `rules`. A migrated config holds nothing but
 `rules` and `rule_defaults`, so the layers below it keep their other
-settings.
+settings. A markdownlint rule key that turns a rule on resets the rule's
+options (`config.RuleConfig.ResetOptions`, written as `reset_options` in a
+migrated config): the merge drops the options of the layers below, and
+resolution leaves out those of `rule_defaults`, so the rule reads the
+options that the key sets and its defaults for the others, as in
+markdownlint. `markdownlint-configure-file` keys reset them the same way.
+Markdownlint configs and configure-file comments read options through a
+second table of each rule's options (`ruleIndex.markdownlintOptions`),
+which, for one of markdownlint's rules (`lint.IsMarkdownlintRule`),
+knows markdownlint's spelling of each option and no other, so gomdlint's
+names and its own options are unknown options there, as in markdownlint.
+The options of gomdlint's own rules and custom rules keep every spelling.
+For markdownlint's rules, that table also reads a numeric string for a
+numeric option as JavaScript's `Number` reads it (`jsStringNumber`), as
+markdownlint's rules do, and an infinite value of an option marked `Limit`
+as `math.MaxInt`, which no count reaches.
 
 **Rule Identification:** Config files accept a rule's ID (`MD001`), name
 (`heading-increment`), or markdownlint alias (`ul-style` for MD004)
@@ -1100,8 +1124,10 @@ gets a warning or error that suggests the closest rules. Inline markdownlint
 comments, `markdownlint-configure-file` keys and the keys of markdownlint
 configs resolve their words as markdownlint reads them, upper-cased as
 JavaScript's `toUpperCase` does, with markdownlint's tags. One key per word
-(`markdownlintKey` in `pkg/lint/directives.go`) serves those lookups, the
-default key and the deduplication of notices. The lookup goes through an
+(`markdownlintKey` in `pkg/lint/directives.go`), which writes the
+characters that `toUpperCase` expands, such as U+0149, as it does
+(`jsUpperCases`), serves those lookups, the default key and the
+deduplication of notices. The lookup goes through an
 index of every registered identifier and tag, and every catalog word, by
 that key, so it compares letters beyond ASCII as markdownlint does. The keys
 of a markdownlint configuration object apply in the order they are written,

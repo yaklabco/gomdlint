@@ -618,10 +618,11 @@ func TestLint_ConfigureFileReadsAsMarkdownlintCLI2Does(t *testing.T) {
 
 // TestLint_ConfigureFileReadsMarkdownlintsSpelling covers a configure-file
 // setting that writes an option in markdownlint's spelling and gomdlint's.
-// markdownlint reads its own, line_length, so markdownlint-cli2 reports the
-// comment's own line as longer than 10 characters, and the trailing space.
-// gomdlint used to fail the file. It now reads line_length too, with a
-// notice that max is ignored.
+// markdownlint reads its own, line_length, and knows no other, so
+// markdownlint-cli2 reports the comment's own line as longer than 10
+// characters, and the trailing space. gomdlint used to fail the file. It
+// now reads line_length too, with a notice that max is an option that
+// markdownlint does not read, which offers markdownlint's spelling.
 func TestLint_ConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 	doc := "<!-- markdownlint-configure-file {\"MD013\": {\"line_length\": 10, \"max\": 100}} -->\n\n" + trailingSpaceDoc
 	inProject(t, map[string]string{"doc.md": doc})
@@ -629,8 +630,62 @@ func TestLint_ConfigureFileReadsMarkdownlintsSpelling(t *testing.T) {
 	got := execute(t, "lint", "--format", "json", "doc.md")
 
 	assert.Equal(t, map[string][]string{"doc.md": {"MD009", "MD013"}}, reportedFiles(t, got.stdout))
-	assert.Equal(t, `WARN doc.md:1: markdownlint-configure-file: "line_length" and "max" both set line-length option "max"; `+
-		`markdownlint reads "line_length", so "max" is ignored`+"\n", got.stderr)
+	assert.Equal(t, `WARN doc.md:1: markdownlint-configure-file: unknown option "max" for line-length `+
+		`(did you mean "line_length"?); it is ignored`+"\n", got.stderr)
+}
+
+// TestMarkdownlintConfig_MarkdownlintCLI2OptionsFile covers a project whose
+// markdownlint configuration is the config key of a markdownlint-cli2
+// options file, as markdownlint-cli2 0.23.3 reads it. Its config turns
+// MD009 off, so markdownlint-cli2 reports nothing in doc.md, and its globs
+// configure markdownlint-cli2 itself, which gomdlint does not read and
+// warns about, both when it applies the file for a run and when it
+// migrates it. gomdlint used to ignore such a file.
+func TestMarkdownlintConfig_MarkdownlintCLI2OptionsFile(t *testing.T) {
+	const options = "{\n  \"globs\": [\"*.md\"],\n  \"config\": {\"MD009\": false}\n}\n"
+	for _, mode := range markdownlintModes {
+		t.Run(mode, func(t *testing.T) {
+			reported, warnings := lintWithMarkdownlintConfig(t, mode, ".markdownlint-cli2.jsonc", options)
+
+			assert.Equal(t, map[string][]string{"doc.md": nil}, reported)
+			assert.Contains(t, warnings,
+				`.markdownlint-cli2.jsonc:2: unsupported markdownlint-cli2 option "globs" (name the files on the command line instead); it is ignored`)
+		})
+	}
+}
+
+// TestMigrate_FindsMarkdownlintCLI2OptionsFile covers migrate without an
+// input file in a directory whose only markdownlint configuration is an
+// options file: migrate finds it and converts its config key. Its other
+// keys still configure markdownlint-cli2, so migrate advises deleting the
+// config key, not the file.
+func TestMigrate_FindsMarkdownlintCLI2OptionsFile(t *testing.T) {
+	inProject(t, map[string]string{".markdownlint-cli2.yaml": "config:\n  MD013: false\n"})
+
+	got := execute(t, "migrate")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stdout+got.stderr)
+	assert.Contains(t, got.stdout, "found markdownlint config")
+	assert.Contains(t, got.stdout, ".markdownlint-cli2.yaml")
+	assert.Contains(t, got.stdout, "you can now delete the config key of the markdownlint-cli2 options file")
+	assert.NotContains(t, got.stdout, "delete the old markdownlint configuration file")
+	written, err := os.ReadFile(".gomdlint.yml")
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "MD013:\n    enabled: false")
+}
+
+// TestMigrate_OptionsFileWithoutConfig covers migrate in a directory whose
+// only markdownlint file is an options file without the config key. It
+// holds no markdownlint configuration, so migrate writes one with
+// markdownlint's defaults, and has no config key to advise deleting.
+func TestMigrate_OptionsFileWithoutConfig(t *testing.T) {
+	inProject(t, map[string]string{".markdownlint-cli2.jsonc": `{"globs": ["**/*.md"]}`})
+
+	got := execute(t, "migrate")
+
+	require.Equal(t, cli.ExitSuccess, got.code, got.stdout+got.stderr)
+	assert.NotContains(t, got.stdout, "delete")
+	assert.Contains(t, got.stdout, "the markdownlint-cli2 options file sets no config key")
 }
 
 // TestMigrate_KeepsInheritedSettings covers the settings that a user config

@@ -53,6 +53,16 @@ func (s *MarkdownlintSettings) Settings() []MarkdownlintSetting {
 	return slices.Clone(s.settings)
 }
 
+// Value returns the value of key, written exactly so, and whether the
+// settings hold key.
+func (s *MarkdownlintSettings) Value(key string) (any, bool) {
+	place, ok := s.places[key]
+	if !ok {
+		return nil, false
+	}
+	return s.settings[place].Value, true
+}
+
 // Default returns the value of the default key of the settings, and whether
 // they have one: the first key that IsMarkdownlintDefaultKey accepts.
 // getEffectiveConfig takes the first such key and ignores any later one,

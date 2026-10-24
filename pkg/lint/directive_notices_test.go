@@ -295,8 +295,10 @@ func TestEngineDirectivesNameCustomRulesBeyondASCII(t *testing.T) {
 // TestEngineDirectivesIgnoreWhitespaceAroundCustomNames covers a custom rule
 // registered with whitespace around its name, which no comment word can
 // hold. Words and configure-file keys name it without the whitespace, as
-// configuration files do through Registry.Lookup and as on main, and
-// suggestions offer the name without it.
+// configuration files do through Registry.Lookup and as on main. In
+// markdownlint 0.41.1 no comment word names such a rule, as it compares
+// words with the whole name, so suggestions offer the rule's ID, which
+// both read, as they do for a name with whitespace between its words.
 func TestEngineDirectivesIgnoreWhitespaceAroundCustomNames(t *testing.T) {
 	registry := lint.NewRegistry()
 	registry.Register(&taggedRule{BaseRule: lint.NewBaseRule("X007", " spaced ", "", nil, false)})
@@ -320,7 +322,7 @@ func TestEngineDirectivesIgnoreWhitespaceAroundCustomNames(t *testing.T) {
 
 	result := lintWith(t, "<!-- markdownlint-disable spaced-x -->\n\nText.\n")
 	require.Len(t, result.Notices, 1)
-	assert.Equal(t, []string{"spaced"}, result.Notices[0].Suggestions)
+	assert.Equal(t, []string{"X007"}, result.Notices[0].Suggestions)
 }
 
 // catalogWords returns every rule ID, name and alias and every tag of the

@@ -2,7 +2,6 @@ package lint
 
 import (
 	"slices"
-	"strings"
 )
 
 // Category groups rules by the Markdown construct they check. Each rule
@@ -165,7 +164,10 @@ type OptionSpec struct {
 	Name string
 
 	// Aliases are other spellings of the option, such as markdownlint's
-	// spelling where gomdlint names an option differently.
+	// spelling where gomdlint names an option differently. For one of
+	// markdownlint's rules (see IsMarkdownlintRule), a markdownlint
+	// configuration reads the option under its first alias only (see
+	// Registry.MarkdownlintRuleConfig).
 	Aliases []OptionAlias
 
 	// Type is the type of the option's value.
@@ -188,14 +190,61 @@ type OptionSpec struct {
 	Values []string
 
 	// GomdlintOnly reports that markdownlint has no such option. Every
-	// option of a rule that markdownlint lacks is one.
+	// option of a rule that markdownlint lacks is one. A markdownlint
+	// configuration cannot set such an option of one of markdownlint's rules
+	// (see IsMarkdownlintRule), as markdownlint does not read it
+	// (see Registry.MarkdownlintRuleConfig).
 	GomdlintOnly bool
 
-	// MarkdownlintPinned reports that every setting of the rule in a
-	// markdownlint configuration sets the option to Default explicitly, so
+	// Limit reports that the option, an integer, is a most that a count
+	// may reach, such as line-length's max, which markdownlint 0.41.1
+	// compares counts with. So a value beyond every count, such as
+	// Infinity, which a markdownlint configuration may write as YAML's
+	// .inf, a JSON number beyond float64's range or the string "Infinity",
+	// or a number of 2^63 or more, lifts the limit, since no count reaches
+	// it. gomdlint reads such a value there as math.MaxInt, which no count
+	// reaches either, and one below -2^63, such as -Infinity, as
+	// math.MinInt, which every count exceeds. line-length then checks no
+	// line, as markdownlint does, while no-multiple-blanks reads any
+	// maximum below 1 as 1, where markdownlint reports every line of the
+	// document for a maximum below 0. A value beyond int's range of any
+	// other option is of the wrong type.
+	Limit bool
+
+	// ZeroIsDefault reports that the rule reads 0 as the option's default,
+	// as markdownlint 0.41.1 does, which reads the option as
+	// Number(value || default). A string that JavaScript's Number reads as
+	// 0, such as "0" or " ", is not false to ||, so markdownlint uses 0
+	// itself, while the empty string, which is, means the default. A
+	// markdownlint configuration's empty string reads as 0, and such a
+	// string as MarkdownlintZero, or, when the option has none, as of the
+	// wrong type, with a warning.
+	ZeroIsDefault bool
+
+	// MarkdownlintZero is, for an option whose rule reads 0 as the default
+	// (ZeroIsDefault), the value with which the rule does what
+	// markdownlint 0.41.1 does with 0 itself, such as -1 for line-length's
+	// lengths, with which neither checks a line. It is nil when the rule
+	// has no such value, as no-multiple-blanks has none for a maximum of
+	// 0, of which markdownlint reports every blank line.
+	MarkdownlintZero any
+
+	// MarkdownlintZeroIsDefault reports that markdownlint 0.41.1 reads 0 as
+	// the option's default, as it reads the option as
+	// Number(value || default), while the rule reads 0 as it is, such as
+	// ul-indent's indent. A markdownlint configuration's 0, or empty
+	// string, leaves the option unset, while a string that reads as 0,
+	// such as "0", which is not false to ||, reads as 0.
+	MarkdownlintZeroIsDefault bool
+
+	// MarkdownlintPinned reports that a markdownlint configuration sets the
+	// option to Default explicitly in each setting of the rule that resets
+	// no options, the default key and a rule key that turns the rule off, so
 	// that the setting replaces the option of a lower configuration layer.
 	// gomdlint's translation of markdownlint settings has always written
-	// these options out (see Registry.MarkdownlintRuleConfig).
+	// these options out (see Registry.MarkdownlintRuleConfig). A rule key
+	// that turns the rule on resets every option instead (see
+	// config.RuleConfig.ResetOptions).
 	MarkdownlintPinned bool
 
 	// Description says what the option controls, in plain text.
@@ -212,12 +261,44 @@ type OptionAlias struct {
 	Inverted bool
 }
 
+// gomdlintRuleIDs are the IDs of gomdlint's own rules, which its catalog
+// describes, as a catalog test checks.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var gomdlintRuleIDs = map[string]bool{"MDL001": true, "MDL003": true}
+
 // IsGomdlintOnlyRule reports whether the rule with the given ID is one of
 // gomdlint's own rules, which markdownlint does not have. gomdlint gives
 // its own rules IDs in the MDL namespace, such as MDL001, and the rules it
-// shares with markdownlint their markdownlint IDs, such as MD009.
+// shares with markdownlint their markdownlint IDs, such as MD009. A custom
+// rule is neither, even under an ID such as MDL900 in that namespace.
 func IsGomdlintOnlyRule(id string) bool {
-	return strings.HasPrefix(id, "MDL")
+	return gomdlintRuleIDs[id]
+}
+
+// markdownlintRuleIDs are the IDs of markdownlint 0.41.1's rules, each of
+// which gomdlint's catalog describes under the same ID, as a catalog test
+// checks.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var markdownlintRuleIDs = map[string]bool{
+	"MD001": true, "MD003": true, "MD004": true, "MD005": true, "MD007": true, "MD009": true,
+	"MD010": true, "MD011": true, "MD012": true, "MD013": true, "MD014": true, "MD018": true,
+	"MD019": true, "MD020": true, "MD021": true, "MD022": true, "MD023": true, "MD024": true,
+	"MD025": true, "MD026": true, "MD027": true, "MD028": true, "MD029": true, "MD030": true,
+	"MD031": true, "MD032": true, "MD033": true, "MD034": true, "MD035": true, "MD036": true,
+	"MD037": true, "MD038": true, "MD039": true, "MD040": true, "MD041": true, "MD042": true,
+	"MD043": true, "MD044": true, "MD045": true, "MD046": true, "MD047": true, "MD048": true,
+	"MD049": true, "MD050": true, "MD051": true, "MD052": true, "MD053": true, "MD054": true,
+	"MD055": true, "MD056": true, "MD058": true, "MD059": true, "MD060": true,
+}
+
+// IsMarkdownlintRule reports whether the rule with the given ID is one of
+// markdownlint 0.41.1's rules, which gomdlint reimplements under the same
+// ID. A custom rule is not, even under an ID such as MD900 that has the
+// shape of markdownlint's, as markdownlint lacks it too.
+func IsMarkdownlintRule(id string) bool {
+	return markdownlintRuleIDs[id]
 }
 
 // clone returns a copy of spec that shares no slice with it: not its

@@ -84,12 +84,18 @@ type markdownlintTranslator struct {
 //
 // Rule options are translated through the rule catalog: markdownlint's
 // spellings become gomdlint's canonical names, such as max for
-// line_length, and options that the rule does not read, or whose values
-// have the wrong type, are left out with a warning, as markdownlint ignores
-// them. Every setting of some rules also writes out markdownlint's
-// defaults for some of their options (see lint.OptionSpec.MarkdownlintPinned),
-// so that it replaces them in a lower configuration layer, as gomdlint's
-// translation always has. Two spellings of one option are an error.
+// line_length, and options that markdownlint does not read for the rule,
+// gomdlint's own names and options among them, or whose values have the
+// wrong type, are left out with a warning, as markdownlint ignores them.
+// The warning for a name of gomdlint's offers markdownlint's spelling. A
+// rule key that turns a rule on resets the options that a lower
+// configuration layer, such as a user config, gives the rule (see
+// config.RuleConfig.ResetOptions), as markdownlint gives the rule the
+// options of the key's value and no others. The default key, and a rule
+// key that turns a rule off, write out markdownlint's defaults for some
+// options of some rules instead (see lint.OptionSpec.MarkdownlintPinned),
+// so that they replace those of a lower layer, as gomdlint's translation
+// always has.
 func ConvertMarkdownlintConfig(path string) (*MigrationResult, error) {
 	return convertMarkdownlintConfig(path, markdownlintTranslator{
 		rule:        (*lint.Registry).MarkdownlintRuleConfig,
@@ -113,21 +119,13 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
-	// markdownlint-cli2 loads a config that starts with a byte order mark
-	// in every format, so the mark is skipped, and lines count from the
-	// text after it.
-	content = bytes.TrimPrefix(content, utf8BOM)
-
-	read, err := lint.ReadMarkdownlintConfig(content)
-	if err != nil {
-		return nil, markdownlintParseError(path, err)
+	read := readMarkdownlintConfigFile
+	if isMarkdownlintCLI2File(path) {
+		read = readMarkdownlintCLI2File
 	}
-	settings := read.Settings
-	locate := newSourceLocator(read, content)
-	if read.NotObject != "" {
-		// markdownlint reads the value as an object without keys, so every
-		// rule keeps its defaults.
-		result.addWarning(0, lint.NotObjectText(read.NotObject))
+	settings, locate, err := read(path, content, result)
+	if err != nil {
+		return nil, err
 	}
 
 	cfg := &config.Config{Rules: make(map[string]config.RuleConfig)}
@@ -154,7 +152,7 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 			continue // The first default key is the baseline, and later ones do nothing.
 		}
 		switch setting.Key {
-		case "$schema":
+		case markdownlintSchemaKey:
 			continue
 		case "extends":
 			if extends, ok := setting.Value.(string); ok {
@@ -163,13 +161,173 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 				continue
 			}
 		}
-		if err := conversion.processRuleKey(setting.Key, setting.Value); err != nil {
-			return nil, fmt.Errorf("%s: %w", setting.Key, err)
-		}
+		conversion.processRuleKey(setting.Key, setting.Value)
 	}
 
 	result.Config = cfg
 	return result, nil
+}
+
+// readMarkdownlintConfigFile reads content, the content of the markdownlint
+// config file at path, as markdownlint-cli2 0.23.3 reads a config file that
+// it finds (see lint.ReadMarkdownlintConfig), and returns its settings with
+// a locator for the lines of its keys. A value other than an object holds
+// no settings, as markdownlint reads it, and gets a warning in result.
+func readMarkdownlintConfigFile(path string, content []byte, result *MigrationResult) (
+	*lint.MarkdownlintSettings, *sourceLocator, error,
+) {
+	// markdownlint-cli2 loads a config that starts with a byte order mark
+	// in every format, so the mark is skipped, and lines count from the
+	// text after it.
+	content = bytes.TrimPrefix(content, utf8BOM)
+
+	read, err := lint.ReadMarkdownlintConfig(content)
+	if err != nil {
+		return nil, nil, markdownlintParseError(path, err)
+	}
+	if read.NotObject != "" {
+		// markdownlint reads the value as an object without keys, so every
+		// rule keeps its defaults.
+		result.addWarning(0, lint.NotObjectText(read.NotObject))
+	}
+	return read.Settings, newSourceLocator(read, content), nil
+}
+
+// readMarkdownlintCLI2File reads content, the content of the
+// markdownlint-cli2 options file at path, such as .markdownlint-cli2.jsonc,
+// as markdownlint-cli2 0.23.3 reads it (see lint.ReadMarkdownlintCLI2Options),
+// and returns the settings of the markdownlint configuration under its
+// config key, with a locator for the lines of their keys. A file without a
+// config key, or whose config key holds no object, holds no settings, so
+// that every rule keeps markdownlint's defaults, as markdownlint-cli2 then
+// lints. The file's other keys configure markdownlint-cli2 itself, which
+// gomdlint does not read, so each gets a warning in result (see
+// markdownlintCLI2Warnings).
+func readMarkdownlintCLI2File(path string, content []byte, result *MigrationResult) (
+	*lint.MarkdownlintSettings, *sourceLocator, error,
+) {
+	options, root, err := readMarkdownlintCLI2Options(path, content)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, warning := range markdownlintCLI2Warnings(options, root) {
+		result.addWarning(warning.line, warning.message)
+	}
+	if options.Config == nil {
+		return &lint.MarkdownlintSettings{}, &sourceLocator{}, nil
+	}
+	return options.Config.Settings, &sourceLocator{root: root.Key(lint.MarkdownlintCLI2ConfigKey)}, nil
+}
+
+// readMarkdownlintCLI2Options reads content, the content of the
+// markdownlint-cli2 options file at path, with the parser that its name
+// selects, JSON with comments for a name that ends in .jsonc and YAML
+// otherwise, and returns it with the positions of its keys.
+func readMarkdownlintCLI2Options(path string, content []byte) (
+	*lint.MarkdownlintCLI2Options, *lint.MarkdownlintPosition, error,
+) {
+	syntax, format := lint.MarkdownlintYAML, "YAML"
+	if IsJSONConfig(path) {
+		syntax, format = lint.MarkdownlintJSONC, "JSON"
+	}
+	options, err := lint.ReadMarkdownlintCLI2Options(content, syntax)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse %s: %w", format, err)
+	}
+	root := options.Positions
+	if syntax == lint.MarkdownlintJSONC {
+		root = jsonRootPositions(content)
+	}
+	return options, root, nil
+}
+
+// lineWarning is a warning about one line of a file, or about no single
+// line when line is 0.
+type lineWarning struct {
+	line    int
+	message string
+}
+
+// markdownlintCLI2Warnings describes the problems of options, a
+// markdownlint-cli2 options file whose keys root places, other than those of
+// the markdownlint configuration under its config key: holding no object,
+// a config key that holds no object, and each other key but $schema, which
+// editors read. Those keys configure markdownlint-cli2 itself, such as its
+// globs and ignores, and gomdlint does not read them.
+func markdownlintCLI2Warnings(options *lint.MarkdownlintCLI2Options, root *lint.MarkdownlintPosition) []lineWarning {
+	var warnings []lineWarning
+	if options.NotObject != "" {
+		warnings = append(warnings, lineWarning{message: lint.NotObjectText(options.NotObject)})
+	}
+	for _, key := range options.Keys {
+		line := positionLine(root.Key(key))
+		switch key {
+		case markdownlintSchemaKey:
+		case lint.MarkdownlintCLI2ConfigKey:
+			if options.Config != nil && options.Config.NotObject != "" {
+				warnings = append(warnings, lineWarning{
+					line: line, message: key + " holds " + lint.NotObjectText(options.Config.NotObject),
+				})
+			}
+		default:
+			warnings = append(warnings, lineWarning{line: line, message: markdownlintCLI2KeyText(key)})
+		}
+	}
+	return warnings
+}
+
+// markdownlintSchemaKey is the key of a markdownlint or markdownlint-cli2
+// configuration that names its JSON schema, which editors read.
+const markdownlintSchemaKey = "$schema"
+
+// markdownlintCLI2Options maps each option of a markdownlint-cli2 options
+// file but config, which holds the markdownlint configuration
+// (cli2SchemaKeys in markdownlint-cli2 0.23.3's constants.mjs), to what to
+// use in gomdlint instead, where gomdlint has a counterpart.
+//
+//nolint:gochecknoglobals // Read-only lookup table.
+var markdownlintCLI2Options = map[string]string{
+	"customRules":       "",
+	"fix":               "use --fix instead",
+	"frontMatter":       "",
+	"gitignore":         "set gitignore in a gomdlint config instead",
+	"globs":             "name the files on the command line instead",
+	"ignores":           "set ignore in a gomdlint config instead",
+	"markdownItPlugins": "",
+	"modulePaths":       "",
+	"noBanner":          "",
+	"noInlineConfig":    "",
+	"noProgress":        "",
+	"outputFormatters":  "",
+	"overrides":         "",
+	"showFound":         "",
+}
+
+// markdownlintCLI2KeyText describes key, a top-level key of a
+// markdownlint-cli2 options file other than config and $schema, for a
+// warning: an option of markdownlint-cli2, which gomdlint does not read,
+// with what to use instead where gomdlint has a counterpart, or a key that
+// markdownlint-cli2 does not know, with the closest key that it knows.
+func markdownlintCLI2KeyText(key string) string {
+	hint, known := markdownlintCLI2Options[key]
+	if !known {
+		keys := append(slices.Collect(maps.Keys(markdownlintCLI2Options)), lint.MarkdownlintCLI2ConfigKey, markdownlintSchemaKey)
+		slices.Sort(keys)
+		return unknownKeyMessage("", key, keys)
+	}
+	text := fmt.Sprintf("unsupported markdownlint-cli2 option %q", key)
+	if hint != "" {
+		text += " (" + hint + ")"
+	}
+	return text + "; it is ignored"
+}
+
+// positionLine returns the line of position, or 0 when it is nil.
+func positionLine(position *lint.MarkdownlintPosition) int {
+	if position == nil {
+		return 0
+	}
+	return position.Line
 }
 
 // markdownlintParseError describes err, the error that reading the
@@ -220,19 +378,6 @@ type markdownlintConversion struct {
 	locate    *sourceLocator
 }
 
-// rule converts value, the setting of the rule with the given ID, and
-// returns the problems its options hold, other than two spellings of one
-// option, which are an error.
-func (c *markdownlintConversion) rule(id string, value any) (config.RuleConfig, []lint.OptionIssue, error) {
-	converted, issues := c.translate.rule(c.registry, id, value)
-	for _, issue := range issues {
-		if issue.Kind == lint.OptionIssueConflict {
-			return config.RuleConfig{}, nil, errors.New(issue.Text(c.ruleName(id)))
-		}
-	}
-	return converted, issues, nil
-}
-
 // ruleName returns the name of the registered rule with the given ID.
 func (c *markdownlintConversion) ruleName(id string) string {
 	if rule, ok := c.registry.GetByID(id); ok {
@@ -266,11 +411,19 @@ func newSourceLocator(read *lint.MarkdownlintSource, content []byte) *sourceLoca
 	if read.Syntax != lint.MarkdownlintJSONC {
 		return &sourceLocator{root: read.Positions}
 	}
+	return &sourceLocator{root: jsonRootPositions(content)}
+}
+
+// jsonRootPositions returns the places of the keys of content, JSON with
+// comments and trailing commas, which jsonDocument reads once jsonc.Strip
+// has blanked them, as the JSON decoder reads each key, or nil for content
+// that it cannot read.
+func jsonRootPositions(content []byte) *lint.MarkdownlintPosition {
 	doc, err := jsonDocument(jsonc.Strip(content))
 	if err != nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return &sourceLocator{}
+		return nil
 	}
-	return &sourceLocator{root: jsonPositions(doc.Content[0])}
+	return jsonPositions(doc.Content[0])
 }
 
 // jsonPositions returns the places of node, a JSON value that jsonDocument
@@ -320,21 +473,19 @@ func (l *sourceLocator) optionLine(key, option string, item int) int {
 //
 // The value's options are translated for each rule (see
 // lint.Registry.MarkdownlintRuleConfig), with a warning for each option
-// that a rule cannot use. A tag gives its options to every rule it covers,
-// as in markdownlint, so an option that one of them does not read is no
-// mistake: only an option that none of them reads gets a warning.
-func (c *markdownlintConversion) processRuleKey(key string, value any) error {
+// that a rule cannot use, gomdlint's own spellings among them, which
+// markdownlint does not read. A tag gives its options to every rule it
+// covers, as in markdownlint, so an option that one of them does not read
+// is no mistake: only an option that none of them reads gets a warning.
+func (c *markdownlintConversion) processRuleKey(key string, value any) {
 	ruleIDs, known := c.registry.MarkdownlintConfigRuleIDs(key)
 	if !known {
 		c.warn(0, c.registry.UnknownKeyText(key)+"; it is ignored")
-		return nil
+		return
 	}
 	unread := make(map[string]int) // option key -> the rules that do not read it
 	for _, id := range ruleIDs {
-		converted, issues, err := c.rule(id, value)
-		if err != nil {
-			return err
-		}
+		converted, issues := c.translate.rule(c.registry, id, value)
 		for _, issue := range issues {
 			if issue.Kind == lint.OptionIssueUnknown && len(ruleIDs) > 1 {
 				unread[issue.Key]++
@@ -349,7 +500,6 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) error {
 			c.warn(c.locate.optionLine(key, option, 0), lint.UnknownTagOptionText(option, key))
 		}
 	}
-	return nil
 }
 
 // GenerateMigrationHeader returns a header comment for migrated configs.
