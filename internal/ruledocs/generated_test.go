@@ -64,7 +64,7 @@ func TestGeneratedDocsAreUpToDate(t *testing.T) {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		if *update {
 			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-			require.NoError(t, os.WriteFile(path, files[name], 0o644)) //nolint:gosec // Documentation is world-readable.
+			require.NoError(t, os.WriteFile(path, files[name], 0o644))
 			continue
 		}
 		onDisk, err := os.ReadFile(path)

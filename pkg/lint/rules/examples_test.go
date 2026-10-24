@@ -22,8 +22,6 @@ import (
 // that each set gets a real review. Remove a category once every rule in
 // it has its examples: TestEveryRuleHasExamples fails while a category
 // here has them all.
-//
-//nolint:gochecknoglobals // Read-only list that later changes shrink.
 var examplesPending = []lint.Category{
 	lint.CategoryLists,
 	lint.CategoryLayout,

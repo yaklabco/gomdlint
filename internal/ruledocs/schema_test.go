@@ -117,7 +117,7 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 		{name: "every other setting", yaml: "flavor: commonmark\nseverity_default: info\nignore: [\"vendor/**\"]\n" +
 			"gitignore: false\ndefault_ignores: true\nbackups:\n  enabled: true\n  mode: sidecar\n", valid: true},
 
-		{name: "a misspelled rule", yaml: "rules:\n  line-lenght: false\n"},
+		{name: "a misspelled rule", yaml: "rules:\n  line-lengt: false\n"},
 		{name: "a tag", yaml: "rules:\n  whitespace: false\n"},
 		{name: "a category", yaml: "rules:\n  layout: false\n"},
 		{name: "an unknown option", yaml: "rules:\n  line-length:\n    options:\n      maxx: 100\n"},

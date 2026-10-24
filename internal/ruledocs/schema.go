@@ -152,9 +152,15 @@ func ruleKeyDescription(entry Entry, key string) string {
 
 // ruleSchema describes the settings of entry's rule: true or false, which
 // turn it on or off, a severity, which turns it on at that severity, or a
-// mapping of its settings and its options.
+// mapping of its settings and its options. A rule that does not declare its
+// options may hold any.
 func ruleSchema(entry Entry) schemaObject {
-	options := optionsSchema(entry)
+	properties := optionProperties(entry)
+	options := schemaObject{
+		"description": "The options of " + entry.Name + ".",
+		"type":        "object",
+		"properties":  properties,
+	}
 	settings := schemaObject{
 		"enabled":       schemaObject{"description": "Run the rule.", "type": "boolean"},
 		"severity":      described("The severity of the rule's findings.", ref(severityDefinition)),
@@ -166,10 +172,11 @@ func ruleSchema(entry Entry) schemaObject {
 	if entry.OptionsDeclared {
 		// Options may stand under the rule's key too, as markdownlint
 		// writes them.
-		for name, option := range options["properties"].(schemaObject) { //nolint:forcetypeassert // optionsSchema writes it.
+		for name, option := range properties {
 			settings[name] = option
 		}
 		mapping["additionalProperties"] = false
+		options["additionalProperties"] = false
 	}
 
 	return schemaObject{
@@ -182,10 +189,9 @@ func ruleSchema(entry Entry) schemaObject {
 	}
 }
 
-// optionsSchema describes the options of entry's rule, by their names and
-// their other spellings. A rule that does not declare its options may hold
-// any.
-func optionsSchema(entry Entry) schemaObject {
+// optionProperties describes the options of entry's rule, by their names and
+// their other spellings.
+func optionProperties(entry Entry) schemaObject {
 	properties := schemaObject{}
 	for _, spec := range entry.Options {
 		properties[spec.Name] = optionSchema(spec, spec.Description, false)
@@ -197,15 +203,7 @@ func optionsSchema(entry Entry) schemaObject {
 			properties[alias.Name] = optionSchema(spec, description, alias.Inverted)
 		}
 	}
-	options := schemaObject{
-		"description": "The options of " + entry.Name + ".",
-		"type":        "object",
-		"properties":  properties,
-	}
-	if entry.OptionsDeclared {
-		options["additionalProperties"] = false
-	}
-	return options
+	return properties
 }
 
 // optionSchema describes the values of an option of type spec.Type, with
