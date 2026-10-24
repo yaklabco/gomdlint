@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/internal/jstext"
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -341,7 +340,8 @@ func markdownlintDefinitionLines(ctx *lint.RuleContext) map[int]bool {
 }
 
 // maxLinkLabelLength is the CommonMark limit on the characters between the
-// brackets of a link label.
+// brackets of a link label, counted in UTF-16 code units as micromark counts
+// them.
 const maxLinkLabelLength = 999
 
 // definitionLabelCloses reports whether the label that opens on the first of
@@ -362,9 +362,11 @@ func definitionLabelCloses(rests [][]byte) bool {
 		} else {
 			length++
 		}
-		for pos := 0; pos < len(text); pos++ {
+		for pos := 0; pos < len(text); {
 			switch char := text[pos]; {
 			case char == '\\' && pos+1 < len(text):
+				// The backslash counts, and the character it escapes counts
+				// below without closing or opening the label.
 				pos++
 				length++
 				blank = false
@@ -375,9 +377,10 @@ func definitionLabelCloses(rests [][]byte) bool {
 			case char != ' ' && char != '\t':
 				blank = false
 			}
-			if utf8.RuneStart(text[pos]) {
-				length++
-			}
+			// micromark counts the label in UTF-16 code units.
+			size, units := jstext.Next(text[pos:])
+			pos += size
+			length += units
 		}
 		if length > maxLinkLabelLength {
 			return false

@@ -569,6 +569,8 @@ func diagnosticRegion(points *sarifPoints, diag *lint.Diagnostic) *SARIFRegion {
 	start := points.point(diag.StartLine, diag.StartColumn)
 	if start.column > 0 && diag.StartColumnUTF16Offset > 0 {
 		// The finding starts inside a character, past the column of its start.
+		// This is display.Columns.ColumnWithin for SARIF points, which also move
+		// a position on the line after a final newline.
 		start.column += diag.StartColumnUTF16Offset
 	}
 	region := &SARIFRegion{StartLine: start.line, StartColumn: start.column}

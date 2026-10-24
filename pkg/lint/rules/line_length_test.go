@@ -391,6 +391,25 @@ func TestMaxLineLengthRule_LimitInsideASurrogatePair(t *testing.T) {
 	assert.Zero(t, diags[0].StartColumnUTF16Offset)
 }
 
+// TestMaxLineLengthRule_DefinitionLabelInUTF16 covers the 999 limit on a
+// reference definition's label, which micromark, and so markdownlint,
+// counts in UTF-16 code units. A label of 500 emoji is 1000 code units, so
+// the line is not a definition and markdownlint reports its length. A label
+// of 499 emoji is a definition, which markdownlint never reports.
+func TestMaxLineLengthRule_DefinitionLabelInUTF16(t *testing.T) {
+	tooLong := "[" + strings.Repeat("\U0001F600", 500) + "]: /url\n"
+	diags := applyMaxLineLength(t, goldmark.FlavorCommonMark, tooLong, nil)
+	require.Len(t, diags, 1, "a 1000 code unit label does not make a definition")
+
+	fits := "[" + strings.Repeat("\U0001F600", 499) + "]: /url\n"
+	assert.Empty(t, applyMaxLineLength(t, goldmark.FlavorCommonMark, fits, nil),
+		"a 998 code unit label makes a definition, which is exempt")
+
+	illFormed := "[" + strings.Repeat("\xe2\x82", 999) + "]: /url\n"
+	assert.Empty(t, applyMaxLineLength(t, goldmark.FlavorCommonMark, illFormed, nil),
+		"each truncated character is one code unit, so 999 of them fit")
+}
+
 func TestMaxLineLengthRule_Metadata(t *testing.T) {
 	rule := NewMaxLineLengthRule()
 
