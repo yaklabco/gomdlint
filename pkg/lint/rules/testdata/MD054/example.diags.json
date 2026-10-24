@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD054",
+    "name": "link-image-style",
+    "line": 3,
+    "column": 8,
+    "message": "Autolinks are not allowed",
+    "severity": "warning",
+    "fixable": false
+  }
+]

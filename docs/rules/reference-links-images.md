@@ -29,6 +29,32 @@ Set them under `rules.reference-links-images.options`.
 
 There is no automatic fix. Only the author knows the missing destination.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+Read the [installation guide][install] first.
+```
+
+gomdlint reports:
+
+```text
+3:10 Reference link uses undefined label [install]
+```
+
+This document follows the rule:
+
+```markdown
+# Guide
+
+Read the [installation guide][install] first.
+
+[install]: docs/install.md
+```
+
 ## Configure
 
 ```yaml

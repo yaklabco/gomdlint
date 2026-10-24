@@ -29,6 +29,30 @@ Set them under `rules.descriptive-link-text.options`.
 
 There is no automatic fix. Only the author knows what the link should say.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+To change the options, see [here](docs/config.md).
+```
+
+gomdlint reports:
+
+```text
+3:29 Link text 'here' is not descriptive
+```
+
+This document follows the rule:
+
+```markdown
+# Guide
+
+To change the options, see the [configuration guide](docs/config.md).
+```
+
 ## Configure
 
 ```yaml

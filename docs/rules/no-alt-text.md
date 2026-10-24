@@ -24,6 +24,30 @@ This rule has no options.
 
 There is no automatic fix. Only the author can describe the image.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+![](docs/report.png)
+```
+
+gomdlint reports:
+
+```text
+3:1 Image is missing alt text
+```
+
+This document follows the rule:
+
+```markdown
+# Guide
+
+![The lint report in a terminal](docs/report.png)
+```
+
 ## Configure
 
 Under `rules`, `no-alt-text: false` turns the rule off and `no-alt-text: error`

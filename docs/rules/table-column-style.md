@@ -32,6 +32,34 @@ Set them under `rules.table-column-style.options`.
 
 There is no automatic fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Rules
+
+| Name | ID |
+| --- | --- |
+|line-length | MD013 |
+```
+
+gomdlint reports:
+
+```text
+5:1 Table pipe spacing does not match style compact
+```
+
+This document follows the rule:
+
+```markdown
+# Rules
+
+| Name | ID |
+| --- | --- |
+| line-length | MD013 |
+```
+
 ## Configure
 
 ```yaml

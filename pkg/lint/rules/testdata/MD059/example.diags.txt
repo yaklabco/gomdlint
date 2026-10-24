@@ -1,0 +1,1 @@
+example.input.md:3:29 warning Link text 'here' is not descriptive (MD059/descriptive-link-text)

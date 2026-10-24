@@ -643,13 +643,10 @@ same content. `pkg/lint/rules` embeds the files, and `RuleExample` reads
 them, so the pages that `explain` prints and the rule reference show tested
 output.
 
-Tests check that every rule has its examples, except the rules of the
-categories in `examplesPending` in `examples_test.go`, which later changes
-cover. They lint each example with every rule on: the document that breaks
-the rule breaks only that rule, with the findings the example lists, and
-the fixed and good documents are clean. A category leaves
-`examplesPending` once every rule in it has examples, and the test fails
-until it does.
+Tests check that every rule has its examples. They lint each example with
+every rule on: the document that breaks the rule breaks only that rule,
+with the findings the example lists, and the fixed and good documents are
+clean.
 
 ### Generated Reference
 

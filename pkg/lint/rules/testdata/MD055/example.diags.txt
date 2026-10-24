@@ -1,0 +1,1 @@
+example.input.md:6:20 warning Missing trailing pipe: expected leading_and_trailing, found leading_only (MD055/table-pipe-style)

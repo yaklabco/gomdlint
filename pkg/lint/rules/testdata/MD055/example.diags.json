@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD055",
+    "name": "table-pipe-style",
+    "line": 6,
+    "column": 20,
+    "message": "Missing trailing pipe: expected leading_and_trailing, found leading_only",
+    "severity": "warning",
+    "fixable": false
+  }
+]

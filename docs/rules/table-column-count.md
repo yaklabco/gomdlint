@@ -24,6 +24,34 @@ This rule has no options.
 There is no automatic fix. Only the author knows which cells are missing or
 extra.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Rules
+
+| Name | ID | Fixable |
+| --- | --- | --- |
+| line-length | MD013 |
+```
+
+gomdlint reports:
+
+```text
+5:23 Too few cells, row will be missing data: expected 3, found 2
+```
+
+This document follows the rule:
+
+```markdown
+# Rules
+
+| Name | ID | Fixable |
+| --- | --- | --- |
+| line-length | MD013 | no |
+```
+
 ## Configure
 
 Under `rules`, `table-column-count: false` turns the rule off and

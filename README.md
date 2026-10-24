@@ -128,7 +128,7 @@ category, with its status under your configuration, and
 `gomdlint explain <rule>` describes one rule in full (see
 [Commands](#commands)). The [rule reference](docs/rules/README.md) has a page
 for each rule: what it checks and why, its options, what its fix does, and an
-example where the rule has one.
+example.
 
 The rule list below and the rule reference are generated from the rule
 catalog. Run `go test ./internal/ruledocs -update` to regenerate them.

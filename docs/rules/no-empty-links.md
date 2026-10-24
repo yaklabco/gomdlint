@@ -22,6 +22,30 @@ This rule has no options.
 
 There is no automatic fix. Only the author knows where the link should go.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+The [changelog](#) lists every release.
+```
+
+gomdlint reports:
+
+```text
+3:5 Link has empty fragment
+```
+
+This document follows the rule:
+
+```markdown
+# Guide
+
+The [changelog](CHANGELOG.md) lists every release.
+```
+
 ## Configure
 
 Under `rules`, `no-empty-links: false` turns the rule off and

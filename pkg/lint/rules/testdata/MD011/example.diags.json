@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD011",
+    "name": "no-reversed-links",
+    "line": 3,
+    "column": 9,
+    "message": "Reversed link syntax detected",
+    "severity": "warning",
+    "fixable": true
+  }
+]

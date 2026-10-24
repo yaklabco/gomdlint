@@ -28,6 +28,36 @@ Set them under `rules.table-pipe-style.options`.
 
 There is no automatic fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Rules
+
+| Name | Fixable |
+| --- | --- |
+| line-length | no |
+| no-hard-tabs | yes
+```
+
+gomdlint reports:
+
+```text
+6:20 Missing trailing pipe: expected leading_and_trailing, found leading_only
+```
+
+This document follows the rule:
+
+```markdown
+# Rules
+
+| Name | Fixable |
+| --- | --- |
+| line-length | no |
+| no-hard-tabs | yes |
+```
+
 ## Configure
 
 ```yaml

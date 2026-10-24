@@ -36,6 +36,39 @@ Set them under `rules.link-image-style.options`.
 
 There is no automatic fix.
 
+## Example
+
+With this configuration:
+
+```yaml
+rules:
+  link-image-style:
+    options:
+      autolink: false
+```
+
+This document breaks the rule:
+
+```markdown
+# Support
+
+Ask in <https://github.com/yaklabco/gomdlint/discussions>.
+```
+
+gomdlint reports:
+
+```text
+3:8 Autolinks are not allowed
+```
+
+This document follows the rule:
+
+```markdown
+# Support
+
+Ask in [GitHub Discussions](https://github.com/yaklabco/gomdlint/discussions).
+```
+
 ## Configure
 
 ```yaml

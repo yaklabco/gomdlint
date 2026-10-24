@@ -1,0 +1,1 @@
+example.input.md:5:1 warning Table pipe spacing does not match style compact (MD060/table-column-style)
