@@ -40,13 +40,10 @@ func displayOutcome(file runner.FileOutcome, workDir string) runner.FileOutcome 
 	pipelineResult := *file.Result
 	fileResult := *file.Result.FileResult
 	if file.Result.Diagnostics != nil {
-		// The runner sorts findings by position, so separate converters for
-		// start and end columns each decode a line once.
-		starts := display.NewColumns(fileResult.Snapshot)
-		ends := display.NewColumns(fileResult.Snapshot)
+		columns := display.NewColumns(fileResult.Snapshot)
 		fileResult.Diagnostics = make([]lint.Diagnostic, len(file.Result.Diagnostics))
 		for idx, diag := range file.Result.Diagnostics {
-			fileResult.Diagnostics[idx] = displayDiagnostic(diag, starts, ends, file.Path, shownPath, workDir)
+			fileResult.Diagnostics[idx] = displayDiagnostic(diag, columns, file.Path, shownPath, workDir)
 		}
 	}
 
@@ -57,13 +54,12 @@ func displayOutcome(file runner.FileOutcome, workDir string) runner.FileOutcome 
 }
 
 // displayDiagnostic returns diag with its path in display form and its
-// columns converted from bytes to UTF-16 code units, the start column by
-// starts and the end column by ends. filePath and shownPath are the
-// outcome's path before and after conversion, reused for the common case of
-// a diagnostic that names its own file.
+// columns converted from bytes to UTF-16 code units by columns. filePath and
+// shownPath are the outcome's path before and after conversion, reused for
+// the common case of a diagnostic that names its own file.
 func displayDiagnostic(
 	diag lint.Diagnostic,
-	starts, ends *display.Columns,
+	columns *display.Columns,
 	filePath, shownPath, workDir string,
 ) lint.Diagnostic {
 	if diag.FilePath == "" || diag.FilePath == filePath {
@@ -72,8 +68,8 @@ func displayDiagnostic(
 		diag.FilePath = display.Path(diag.FilePath, workDir)
 	}
 
-	diag.StartColumn = starts.Column(mdast.Position{Line: diag.StartLine, Column: diag.StartColumn})
-	diag.EndColumn = ends.Column(mdast.Position{Line: diag.EndLine, Column: diag.EndColumn})
+	diag.StartColumn = columns.Column(mdast.Position{Line: diag.StartLine, Column: diag.StartColumn})
+	diag.EndColumn = columns.Column(mdast.Position{Line: diag.EndLine, Column: diag.EndColumn})
 
 	return diag
 }

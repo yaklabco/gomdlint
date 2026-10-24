@@ -544,27 +544,17 @@ func endsBefore(end, start sarifPoint) bool {
 }
 
 // sarifPoints converts the byte positions of one file to SARIF points,
-// counting columns in UTF-16 code units. It keeps a column converter for each
-// kind of position: the starts and ends of finding regions, and the starts
-// and ends of fix regions. The runner sorts findings by position, so each
-// converter mostly moves forward along a line and decodes the line once (see
-// display.Columns).
+// counting columns in UTF-16 code units with one display.Columns for the
+// whole file, so the regions of all its findings and fixes decode each line
+// about once.
 type sarifPoints struct {
 	snapshot *mdast.FileSnapshot
-
-	starts, ends       *display.Columns
-	fixStarts, fixEnds *display.Columns
+	columns  *display.Columns
 }
 
 // newSARIFPoints returns the point converter for snapshot, which may be nil.
 func newSARIFPoints(snapshot *mdast.FileSnapshot) *sarifPoints {
-	return &sarifPoints{
-		snapshot:  snapshot,
-		starts:    display.NewColumns(snapshot),
-		ends:      display.NewColumns(snapshot),
-		fixStarts: display.NewColumns(snapshot),
-		fixEnds:   display.NewColumns(snapshot),
-	}
+	return &sarifPoints{snapshot: snapshot, columns: display.NewColumns(snapshot)}
 }
 
 // diagnosticRegion converts the byte-based position of diag into a SARIF text
@@ -576,13 +566,13 @@ func diagnosticRegion(points *sarifPoints, diag *lint.Diagnostic) *SARIFRegion {
 		return nil
 	}
 
-	start := points.point(points.starts, diag.StartLine, diag.StartColumn)
+	start := points.point(diag.StartLine, diag.StartColumn)
 	region := &SARIFRegion{StartLine: start.line, StartColumn: start.column}
 	if diag.EndLine < 1 {
 		return region
 	}
 
-	end := points.point(points.ends, diag.EndLine, diag.EndColumn)
+	end := points.point(diag.EndLine, diag.EndColumn)
 	if endsBefore(end, start) {
 		end = sarifPoint{line: start.line, column: max(start.column, 1)}
 	}
@@ -593,11 +583,11 @@ func diagnosticRegion(points *sarifPoints, diag *lint.Diagnostic) *SARIFRegion {
 }
 
 // point converts a 1-based line and byte column to SARIF's text model,
-// counting the column in UTF-16 code units with columns. SARIF has no empty
+// counting the column in UTF-16 code units. SARIF has no empty
 // line after a final newline, so a position on that line moves to the end of
 // the last line, past its newline. Without a snapshot the column cannot be
 // converted and is left out, as is a column below 1.
-func (p *sarifPoints) point(columns *display.Columns, line, byteColumn int) sarifPoint {
+func (p *sarifPoints) point(line, byteColumn int) sarifPoint {
 	if p.snapshot == nil {
 		return sarifPoint{line: line}
 	}
@@ -606,10 +596,10 @@ func (p *sarifPoints) point(columns *display.Columns, line, byteColumn int) sari
 		last := line - 1
 		info := p.snapshot.Lines[last-1]
 		pastNewline := info.EndOffset - info.StartOffset + 1
-		return sarifPoint{line: last, column: columns.Column(mdast.Position{Line: last, Column: pastNewline})}
+		return sarifPoint{line: last, column: p.columns.Column(mdast.Position{Line: last, Column: pastNewline})}
 	}
 
-	return sarifPoint{line: line, column: columns.Column(mdast.Position{Line: line, Column: byteColumn})}
+	return sarifPoint{line: line, column: p.columns.Column(mdast.Position{Line: line, Column: byteColumn})}
 }
 
 // isTrailingEmptyLine reports whether line is the empty line that follows the
@@ -665,22 +655,21 @@ func buildFix(location SARIFArtifactLocation, points *sarifPoints, diag *lint.Di
 // offsetRegion returns the SARIF text region for the byte range [start, end)
 // of the snapshot, which must not be nil.
 func (p *sarifPoints) offsetRegion(start, end int) SARIFRegion {
-	from := p.offsetPoint(p.fixStarts, start)
-	to := p.offsetPoint(p.fixEnds, end)
+	from := p.offsetPoint(start)
+	to := p.offsetPoint(end)
 
 	return SARIFRegion{StartLine: from.line, StartColumn: from.column, EndLine: to.line, EndColumn: to.column}
 }
 
-// offsetPoint converts a byte offset of the snapshot to a SARIF point, with
-// columns converting the column. An empty file has a single insertion point,
-// at line 1, column 1.
-func (p *sarifPoints) offsetPoint(columns *display.Columns, offset int) sarifPoint {
+// offsetPoint converts a byte offset of the snapshot to a SARIF point. An
+// empty file has a single insertion point, at line 1, column 1.
+func (p *sarifPoints) offsetPoint(offset int) sarifPoint {
 	line, column := p.snapshot.LineAt(offset)
 	if line < 1 {
 		return sarifPoint{line: 1, column: 1}
 	}
 
-	return p.point(columns, line, column)
+	return p.point(line, column)
 }
 
 // artifactLocator turns file paths into SARIF artifact locations. Files under
