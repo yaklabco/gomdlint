@@ -440,6 +440,15 @@ MD037, MD049 and MD050 report both sides or markers of an emphasis, as
 markdownlint does, with the fix that changes both. Skipped and deferred
 fixes are proposed again in the next pass.
 
+A finding on a line where its rule is disabled is dropped, and a fix that
+changes the text of such a line is withheld from the findings that remain
+(`disabledLines` in `pkg/lint/engine.go`). Whole lines inserted at the
+start or end of a line's text leave that line as it was, so the blank line
+that a rule asks for next to a disabled line stays, and so does a deletion
+from the end of a disabled line's text through later lines, as MD012
+removes a blank line below a disabled one. Front matter counts as enabled
+here.
+
 `fix.GenerateDiff` builds the unified diff for `--format diff`. It compares
 lines with their line endings, using Myers' algorithm in linear space with a
 work budget for pathological inputs. Where a file lacks a final newline, it

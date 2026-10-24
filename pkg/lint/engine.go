@@ -270,6 +270,7 @@ func (e *Engine) lintFile(
 		}
 
 		var invalid []error
+		disabled := newDisabledLines(snapshot, ruleStates)
 		for _, diag := range diags {
 			line := diag.StartLine
 			if line > 0 && line < len(ruleStates) && !ruleStates[line] {
@@ -304,7 +305,7 @@ func (e *Engine) lintFile(
 				} else {
 					// A withheld fix leaves its finding without a fix.
 					diag.FixEdits = edits
-					if !offers.offer(diag.FixEdits) {
+					if !offers.offer(diag.FixEdits, disabled) {
 						diag.FixEdits = nil
 					}
 					// Collect the fix if auto-fix is enabled for this rule.
@@ -341,10 +342,14 @@ type fixOffers struct {
 // offer writes the newlines of a valid fix, edits, in the file's line
 // endings, in place, and reports whether the engine offers the fix. A fix
 // that would join a carriage return that ends a line to a line feed after
-// it is withheld, and so is one that changes or makes a possible task list
-// checkbox.
-func (o *fixOffers) offer(edits []fix.TextEdit) bool {
+// it is withheld, and so is one that changes the text of a line where its
+// rule is disabled, such as one that a finding on that line shares, or that
+// changes or makes a possible task list checkbox.
+func (o *fixOffers) offer(edits []fix.TextEdit, disabled disabledLines) bool {
 	if !o.endings.WriteNewlines(edits) {
+		return false
+	}
+	if disabled.changed(edits) {
 		return false
 	}
 	if o.checkboxes == nil {
@@ -588,6 +593,104 @@ func resolveFixes(fixes []pendingFix, content []byte, apart bool) ([]fix.TextEdi
 		skipped = append(skipped, fixes[idx])
 	}
 	return accepted, appendEditsOf(nil, skipped), fixed
+}
+
+// disabledLines answers whether fix edits change a line where one rule is
+// disabled by an inline directive.
+type disabledLines struct {
+	file *mdast.FileSnapshot
+	// before[n] is the number of disabled lines among lines 1 to n; nil when
+	// the rule is enabled on every line.
+	before []int
+}
+
+// newDisabledLines reads states, indexed by 1-based line number as
+// directiveStates builds them. Front matter lines count as enabled: no rule
+// reports in front matter, but a fix may still change it, as before.
+func newDisabledLines(file *mdast.FileSnapshot, states []bool) disabledLines {
+	first := max(file.FrontMatterLines+1, 1)
+	if first >= len(states) || !slices.Contains(states[first:], false) {
+		return disabledLines{file: file}
+	}
+	before := make([]int, len(states))
+	for line := 1; line < len(states); line++ {
+		before[line] = before[line-1]
+		if line >= first && !states[line] {
+			before[line]++
+		}
+	}
+	return disabledLines{file: file, before: before}
+}
+
+// changed reports whether edits change the text of a disabled line. A
+// deletion or replacement changes every line it touches, except that a
+// deletion from the end of one line's text to the end of a later one's
+// removes only the later lines, as MD012 deletes a blank line below a
+// disabled one. An insertion changes the line it lands in, except that whole
+// lines inserted at the start or the end of a line's text leave that line
+// as it was, as the blank line that MD022 adds below a disabled heading.
+func (d disabledLines) changed(edits []fix.TextEdit) bool {
+	if d.before == nil {
+		return false
+	}
+	for _, edit := range edits {
+		first, last, ok := d.changedLines(edit)
+		if ok && d.count(first, last) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// changedLines returns the lines whose text edit changes, if any.
+func (d disabledLines) changedLines(edit fix.TextEdit) (int, int, bool) {
+	first, _ := d.file.LineAt(edit.StartOffset)
+	if first < 1 || first > len(d.file.Lines) {
+		return 0, 0, false
+	}
+	info := d.file.Lines[first-1]
+	if edit.StartOffset == edit.EndOffset {
+		atStart := edit.StartOffset == info.StartOffset && endsWithLineEnding(edit.NewText)
+		atEnd := edit.StartOffset == info.NewlineStart && startsWithLineEnding(edit.NewText)
+		return first, first, !atStart && !atEnd
+	}
+	if edit.NewText == "" && edit.StartOffset == info.NewlineStart {
+		// A deletion of the first line's line ending and the text of later
+		// lines, up to the end of a line's text, deletes those later lines.
+		end, _ := d.file.LineAt(edit.EndOffset)
+		if end > first && end <= len(d.file.Lines) && edit.EndOffset == d.file.Lines[end-1].NewlineStart {
+			return first + 1, end, true
+		}
+	}
+	last, _ := d.file.LineAt(edit.EndOffset - 1)
+	return first, last, true
+}
+
+// startsWithLineEnding reports whether text starts with a line ending: a
+// line feed, or a carriage return, alone or before a line feed.
+func startsWithLineEnding(text string) bool {
+	return strings.HasPrefix(text, "\n") || strings.HasPrefix(text, "\r")
+}
+
+// endsWithLineEnding reports whether text ends with a line ending: a line
+// feed, or a carriage return alone, as the engine writes a fix's line feeds
+// in a file whose lines end with one.
+func endsWithLineEnding(text string) bool {
+	return strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
+}
+
+// count returns the number of disabled lines among lines first to last.
+func (d disabledLines) count(first, last int) int {
+	if first < 1 {
+		first = 1
+	}
+	if last >= len(d.before) {
+		last = len(d.before) - 1
+	}
+	if first > last {
+		return 0
+	}
+	return d.before[last] - d.before[first-1]
 }
 
 // resolveApart takes fixes out of the resolution of groups, accepted and

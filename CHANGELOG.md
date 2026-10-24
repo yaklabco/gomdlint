@@ -476,7 +476,12 @@ formats change. The first entries under Changed may need action.
   emphasis, as markdownlint does. Both findings carry the fix that changes
   both, which `--fix` applies once.
 - A fix that several findings of one rule carry is applied once and counts
-  for each of them, and the rule checks it once.
+  for each of them, and the rule checks it once. JSON and SARIF reports show
+  it on each finding, so a consumer that applies every reported fix must
+  apply such a fix once.
+- A fix that would change the text of a line where its rule is disabled by
+  an inline comment is withheld, and the finding stays. A blank line
+  inserted next to such a line leaves it as it was, so that fix stays.
 - No fix changes or makes a task list checkbox. micromark and GitHub's
   cmark-gfm read checkboxes in different places, so any line that holds a
   `[`, one character or a line ending, and `]`, wherever on the line, keeps

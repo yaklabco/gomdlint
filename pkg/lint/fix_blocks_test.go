@@ -350,6 +350,95 @@ func TestEngine_DefersARulesFixesTogetherAcrossTheBlocksTheyConnect(t *testing.T
 	}, result.DeferredEdits)
 }
 
+// In a file whose lines end with a carriage return alone, the engine writes
+// a fix's line feeds as carriage returns, and whole lines inserted next to a
+// disabled line still leave it as it was.
+func TestEngine_KeepsLinesInsertedNextToADisabledLineWithCarriageReturns(t *testing.T) {
+	t.Parallel()
+
+	const content = "ab <!-- markdownlint-disable-line TEST001 -->\rcd\r"
+	lineEnd := strings.Index(content, "\r")
+	tests := []struct {
+		name string
+		edit fix.TextEdit
+		want string
+	}{
+		{
+			name: "line inserted at the end of the disabled line",
+			edit: fix.TextEdit{StartOffset: lineEnd, EndOffset: lineEnd, NewText: "\n"},
+			want: "ab <!-- markdownlint-disable-line TEST001 -->\r\rcd\r",
+		},
+		{
+			name: "line inserted at the start of the disabled line",
+			edit: fix.TextEdit{StartOffset: 0, EndOffset: 0, NewText: "x\n"},
+			want: "x\rab <!-- markdownlint-disable-line TEST001 -->\rcd\r",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+				diag := fixDiag("TEST001", tt.edit)
+				diag.StartLine = 2
+				return []lint.Diagnostic{diag}, nil
+			})
+
+			result := lintMarkdown(t, content, rule)
+
+			require.Len(t, result.Diagnostics, 1)
+			require.Empty(t, result.RuleErrors, "the fix is valid")
+			assert.True(t, result.Diagnostics[0].HasFix(), "the inserted line leaves the disabled line as it was")
+			assert.Equal(t, tt.want, string(fix.ApplyEdits([]byte(content), result.Edits)))
+		})
+	}
+}
+
+func TestEngine_WithholdsFixThatChangesALineWhereTheRuleIsDisabled(t *testing.T) {
+	t.Parallel()
+
+	const content = "ab <!-- markdownlint-disable-line TEST001 -->\ncd\n"
+	lineEnd := strings.Index(content, "\n")
+	tests := []struct {
+		name  string
+		edit  fix.TextEdit
+		keeps bool
+	}{
+		{"replacement on the disabled line", edit(t, content, "b", "x"), false},
+		{"insertion inside the disabled line", fix.TextEdit{StartOffset: 1, EndOffset: 1, NewText: "x"}, false},
+		{"deletion of the disabled line's newline", fix.TextEdit{StartOffset: lineEnd, EndOffset: lineEnd + 1}, false},
+		{"replacement across both lines", fix.TextEdit{StartOffset: lineEnd - 1, EndOffset: lineEnd + 2, NewText: "x"}, false},
+		{"line inserted at the end of the disabled line", fix.TextEdit{StartOffset: lineEnd, EndOffset: lineEnd, NewText: "\n"}, true},
+		{"text inserted at the end of the disabled line", fix.TextEdit{StartOffset: lineEnd, EndOffset: lineEnd, NewText: "x"}, false},
+		{"line inserted at the start of the disabled line", fix.TextEdit{StartOffset: 0, EndOffset: 0, NewText: "x\n"}, true},
+		{"text inserted at the start of the disabled line", fix.TextEdit{StartOffset: 0, EndOffset: 0, NewText: "x"}, false},
+		{"line inserted at the start of the enabled line", fix.TextEdit{StartOffset: lineEnd + 1, EndOffset: lineEnd + 1, NewText: "\n"}, true},
+		{"text inserted at the start of the enabled line", fix.TextEdit{StartOffset: lineEnd + 1, EndOffset: lineEnd + 1, NewText: "x"}, true},
+		{"replacement on the enabled line", edit(t, content, "cd", "x"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+				diag := fixDiag("TEST001", tt.edit)
+				diag.StartLine = 2
+				return []lint.Diagnostic{diag}, nil
+			})
+
+			result := lintMarkdown(t, content, rule)
+
+			require.Len(t, result.Diagnostics, 1, "the finding stays either way")
+			assert.Equal(t, tt.keeps, result.Diagnostics[0].HasFix())
+			if tt.keeps {
+				assert.Equal(t, []fix.TextEdit{tt.edit}, result.Edits)
+			} else {
+				assert.Empty(t, result.Edits)
+			}
+		})
+	}
+}
+
 func TestEngine_TreatsFrontMatterAsItsOwnBlock(t *testing.T) {
 	t.Parallel()
 

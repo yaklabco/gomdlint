@@ -287,8 +287,9 @@ Findings that one change fixes carry the same fix. `no-space-in-emphasis`
 (MD037), `emphasis-style` (MD049) and `strong-style` (MD050) report each side
 or marker of an emphasis, as markdownlint does, with the fix that changes
 both, and the blank line that a rule asks for on both sides of one boundary
-is one insertion. A consumer that applies every fix in a JSON or SARIF report
-applies such a fix once.
+is one insertion. JSON and SARIF reports show such a fix on each finding,
+so a consumer that applies every reported fix must apply it once, as
+markdownlint's own fix application does.
 
 The summary format shows aggregated statistics:
 
@@ -707,11 +708,16 @@ apart from a few that gomdlint has always set to markdownlint's defaults.
 Markdownlint HTML comments support `disable`, `enable`, `disable-line`,
 `disable-next-line`, `disable-file`, `enable-file`, `capture`, and
 `restore`, with rule IDs, aliases, or tags. Suppressed findings produce no
-fixes. Comments inside code or frontmatter do not change lint settings,
-while markdownlint also reads comments inside code blocks. As in
-markdownlint, whitespace or `-->` must follow the comment's kind, so a
-comment such as `<!-- markdownlint-disable-next-lines MD009 -->` is plain
-text and does nothing. Unlike markdownlint, gomdlint also reads a comment
+fixes, and a finding on another line keeps no fix that would change the
+text of a line where its rule is disabled, such as the fix that MD049 gives
+both markers of an emphasis that spans two lines. markdownlint fixes the
+enabled marker alone there and leaves the emphasis unbalanced. A blank line
+inserted next to such a line leaves it as it was and stays. Comments inside
+code or frontmatter do not change lint settings, while markdownlint also
+reads comments inside code blocks. As in markdownlint, whitespace or `-->`
+must follow the comment's kind, so a comment such as
+`<!-- markdownlint-disable-next-lines MD009 -->` is plain text and does
+nothing. Unlike markdownlint, gomdlint also reads a comment
 split over several lines, and it reads every comment after one that lacks
 its closing `-->`, where markdownlint can skip some.
 
