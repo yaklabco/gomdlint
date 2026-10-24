@@ -135,7 +135,9 @@ func TestColumns_LookupsOnALongLineDecodeItOnce(t *testing.T) {
 	line := strings.Repeat(unit, repeats)
 	snapshot := mdast.NewFileSnapshot("doc.md", []byte(line+"\nnext\n"))
 	unitsPerRepeat := 2 + 1 + 1 + 1
-	perLookup := 2*markSpacing + utf8.UTFMax
+	// A lookup behind the furthest one decodes from the mark at or before its
+	// multiple of markSpacing: at most one spacing and one character.
+	perLookup := markSpacing + utf8.UTFMax
 
 	t.Run("in column order", func(t *testing.T) {
 		t.Parallel()
@@ -176,6 +178,41 @@ func TestColumns_LookupsOnALongLineDecodeItOnce(t *testing.T) {
 		assert.LessOrEqual(t, columns.decoded, len(line)+repeats*perLookup,
 			"the line is decoded once, plus a bounded amount per lookup")
 	})
+}
+
+// TestColumns_CharacterAcrossAMark covers a character that straddles a
+// multiple of markSpacing on a long line, so the mark for that multiple is
+// the end of the character. Lookups behind the furthest one that point
+// inside the character must still count it in full.
+func TestColumns_CharacterAcrossAMark(t *testing.T) {
+	t.Parallel()
+
+	// The emoji takes bytes 254 to 257, across offset 256.
+	line := strings.Repeat("a", markSpacing-2) + "\U0001F600" + strings.Repeat("b", markSpacing)
+	snapshot := mdast.NewFileSnapshot("doc.md", []byte(line+"\n"))
+
+	columns := NewColumns(snapshot)
+	require.Equal(t, (markSpacing-2)+2+markSpacing+1, columns.Column(mdast.Position{Line: 1, Column: len(line) + 1}),
+		"the first lookup decodes the whole line and marks it")
+
+	tests := []struct {
+		offset int
+		want   int
+	}{
+		{offset: 253, want: 254},
+		{offset: 254, want: 255}, // the start of the emoji
+		{offset: 255, want: 257}, // inside: the emoji counts in full
+		{offset: 256, want: 257}, // inside, at the multiple of markSpacing
+		{offset: 257, want: 257},
+		{offset: 258, want: 257}, // just after the emoji, two units
+		{offset: 259, want: 258},
+	}
+	for _, tt := range tests {
+		got := columns.Column(mdast.Position{Line: 1, Column: tt.offset + 1})
+		assert.Equal(t, tt.want, got, "byte offset %d", tt.offset)
+		assert.Equal(t, tt.want, NewColumns(snapshot).Column(mdast.Position{Line: 1, Column: tt.offset + 1}),
+			"a fresh converter agrees at byte offset %d", tt.offset)
+	}
 }
 
 func TestByteOffset(t *testing.T) {
