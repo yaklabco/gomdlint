@@ -72,11 +72,15 @@ func footnoteMarkdown() goldmark.Markdown {
 // reads, such as one with a "[" in a code span, reads an escaped "]" in a
 // label that ends it for cmark-gfm, and keeps the spaces after the label
 // that cmark-gfm skips, which moves the columns of a block that starts
-// there (see blockAfterLabel). Where goldmark does not read a definition as
-// GitHub does, its raw HTML may look like code or text, so the fix check
-// cannot see it. A line with more than maxFootnoteNesting definitions
-// counts as unread without a parse, and the document it returns is then
-// nil.
+// there (see blockAfterLabel). After a tab that a container takes in part,
+// goldmark starts the text of a definition columns early, so a definition
+// with a tab before its label on its line counts as unread. Where goldmark
+// does not read a definition as GitHub does, its raw HTML may look like
+// code or text, so the fix check cannot see it. It also reports true when
+// an HTML block in a definition spans a blank line that holds spaces or a
+// container marker (see splitByBlankLine). A line with more than
+// maxFootnoteNesting definitions counts as unread without a parse, and the
+// document it returns is then nil.
 func parseFootnotes(source []byte) (gmast.Node, bool) {
 	candidates := footnoteStartCandidates(source)
 	if deepestFootnoteNesting(source, candidates) > maxFootnoteNesting {
@@ -84,26 +88,81 @@ func parseFootnotes(source []byte) (gmast.Node, bool) {
 	}
 	doc := footnoteMarkdown().Parser().Parse(gmtext.NewReader(source))
 	read := make(map[int]bool)
+	split := false
 	//nolint:errcheck // The visitor never returns an error.
 	_ = gmast.Walk(doc, func(node gmast.Node, entering bool) (gmast.WalkStatus, error) {
-		footnote, ok := node.(*gmextast.Footnote)
-		if !ok || !entering || bytes.IndexByte(footnote.Ref, ']') >= 0 {
+		if !entering {
 			return gmast.WalkContinue, nil
 		}
-		// goldmark puts a definition after the columns left of a tab that a
-		// container takes in part, which are no "[".
-		start := bytes.LastIndexByte(source[:min(node.Pos()+1, len(source))], '[')
-		if start >= 0 && !blockAfterLabel(source, start) {
-			read[start] = true
+		switch node := node.(type) {
+		case *gmextast.Footnote:
+			if bytes.IndexByte(node.Ref, ']') >= 0 {
+				break
+			}
+			// goldmark puts a definition after the columns left of a tab that
+			// a container takes in part, which are no "[".
+			start := bytes.LastIndexByte(source[:min(node.Pos()+1, len(source))], '[')
+			if start >= 0 && !tabBefore(source, start) && !blockAfterLabel(source, start) {
+				read[start] = true
+			}
+		case *gmast.HTMLBlock:
+			if inFootnote(node) && splitByBlankLine(node, source) {
+				split = true
+				return gmast.WalkStop, nil
+			}
 		}
 		return gmast.WalkContinue, nil
 	})
+	if split {
+		return doc, true
+	}
 	for _, offset := range candidates {
 		if !read[offset] {
 			return doc, true
 		}
 	}
 	return doc, false
+}
+
+// tabBefore reports whether a tab precedes pos on its line.
+func tabBefore(source []byte, pos int) bool {
+	lineStart := bytes.LastIndexAny(source[:pos], "\r\n") + 1
+	return bytes.IndexByte(source[lineStart:pos], '\t') >= 0
+}
+
+// inFootnote reports whether node lies in a footnote definition.
+func inFootnote(node gmast.Node) bool {
+	for parent := node.Parent(); parent != nil; parent = parent.Parent() {
+		if _, ok := parent.(*gmextast.Footnote); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// splitByBlankLine reports whether an HTML block holds a line that is blank
+// for goldmark but not empty in the source, such as a line of spaces or a
+// blockquote marker alone. cmark-gfm continues a footnote definition only
+// over an empty line, so it ends the definition there, and the HTML block
+// with it, while goldmark reads on: a comment that goldmark reads whole is
+// then left open for cmark-gfm.
+func splitByBlankLine(block *gmast.HTMLBlock, source []byte) bool {
+	lines := block.Lines()
+	for idx := range lines.Len() {
+		segment := lines.At(idx)
+		if len(bytes.Trim(segment.Value(source), " \t\r\n")) > 0 {
+			continue
+		}
+		lineStart := bytes.LastIndexAny(source[:segment.Start], "\r\n") + 1
+		lineEnd := len(source)
+		if end := bytes.IndexAny(source[segment.Start:], "\r\n"); end >= 0 {
+			lineEnd = segment.Start + end
+		}
+		if lineEnd > lineStart {
+			return true
+		}
+	}
+	return false
 }
 
 // blockAfterLabel reports whether, on the line of start, the "]:" that ends

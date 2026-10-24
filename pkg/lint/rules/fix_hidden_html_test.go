@@ -193,6 +193,36 @@ func TestFixCheckKeepsNoFixBesideUnreadFootnotes(t *testing.T) {
 			input: strings.ReplaceAll("Intro a<br>b.\n\nSee [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open"+
 				later, "\n", "\r\n"),
 		},
+		{
+			// A container takes part of the tab, and goldmark starts the
+			// definition's text that many columns early, in "]: <![CDATA[",
+			// a paragraph. cmark-gfm reads an HTML block.
+			name:  "definition after a tab in a blockquote",
+			input: "See [^a] and [^b].\n\n>\t[^a]: <![CDATA[" + later,
+		},
+		{
+			name:  "definition after a tab in a list item",
+			input: "See [^a] and [^b].\n\n- item\n\t[^a]: <div title=\"x" + later,
+		},
+		{
+			name: "definition after a tab in a list item, beside benign HTML",
+			input: "See [^a] and [^b].\n\n- item\n\t[^a]: <br>\n\t    \\<style>p { white-space: pre }\\</style>\n\n" +
+				"Intro a<br>b." + later,
+		},
+		{
+			// cmark-gfm ends a definition at a line of spaces, which ends
+			// the comment in it. goldmark reads one comment.
+			name:  "comment in a definition split by a line of spaces",
+			input: "See [^a] and [^b].\n\n[^a]: <!--\n  \n    -->" + later,
+		},
+		{
+			name:  "comment in a definition's second block split by a line of spaces",
+			input: "See [^a] and [^b].\n\n[^a]: x\n    <!--\n \n    -->" + later,
+		},
+		{
+			name:  "comment in a definition in a blockquote split by an empty quote line",
+			input: "See [^a] and [^b].\n\n> [^a]: x\n>     <!--\n>\n>     -->" + later,
+		},
 	}
 	for idx := range cases {
 		cases[idx].old, cases[idx].new = "beta gamma", "beta\ngamma"
@@ -203,10 +233,15 @@ func TestFixCheckKeepsNoFixBesideUnreadFootnotes(t *testing.T) {
 		old:   "beta gamma", new: "beta\ngamma",
 		want: true,
 	}, fixCheckCase{
-		// goldmark puts the definition after the spaces a tab leaves in the
-		// list item, which still counts as reading it.
-		name:  "definition after a tab in a list item, beside benign HTML",
-		input: "See [^b].\n\n- a\n\n\t[^b]: Note.\n\na<br>b end.\n\nalpha beta gamma\n",
+		// A line of spaces ends the definition for cmark-gfm, and only the
+		// paragraphs around it differ, which hold no raw HTML.
+		name:  "definition with paragraphs split by a line of spaces, beside benign HTML",
+		input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: x\n  \n    more text" + later,
+		old:   "beta gamma", new: "beta\ngamma",
+		want: true,
+	}, fixCheckCase{
+		name:  "comment in a definition split by an empty line, beside benign HTML",
+		input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: <!--\n\n    -->" + later,
 		old:   "beta gamma", new: "beta\ngamma",
 		want: true,
 	}, fixCheckCase{

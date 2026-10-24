@@ -502,8 +502,10 @@ rule's `"\n"` is a line ending of its own there, as the engine writes it.
   and footnotes, which they do not read. Such a document with a `[^` is
   parsed once more with goldmark's footnote block parser
   (`fix_footnotes.go`), and keeps no fix when that parse finds raw HTML
-  that is not benign, or when a `[^` where a definition may start is one
-  that goldmark does not read as cmark-gfm does (`blockAfterLabel`).
+  that is not benign, when a `[^` where a definition may start is one that
+  goldmark does not read as cmark-gfm does (`blockAfterLabel`, a tab before
+  the label), or when an HTML block in a definition spans a line of spaces,
+  which ends the definition for cmark-gfm (`splitByBlankLine`).
   `list_fix_safety.go` plans list item moves together, so that moves which
   are only safe together form one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through
