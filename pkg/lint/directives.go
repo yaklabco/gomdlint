@@ -791,10 +791,11 @@ func (r *Registry) markdownlintTerm(word string) string {
 // markdownlintRuleName returns the name that a markdownlint comment should
 // use for the registered rule with the given ID and name: the name that
 // markdownlint lists first for that ID (RuleMeta.MarkdownlintName), or else
-// its name as markdownlintTerm writes it, without surrounding whitespace,
-// or its ID when it has no name or one that holds whitespace between its
-// words. markdownlint splits a comment's words at whitespace, so no comment
-// word can hold any. Both ways give the same name for a built-in rule,
+// its name as markdownlintTerm writes it, or its ID when it has no name or
+// one that holds whitespace anywhere. markdownlint splits a comment's words
+// at whitespace, so no comment word can hold any, and it compares a word
+// with the whole name, so none names a rule with whitespace around its
+// name either. Both ways give the same name for a built-in rule,
 // whose name is its catalog entry's. The ID comes first for a library's
 // rule registered under a built-in ID with a name of its own, which
 // markdownlint does not know.
@@ -805,7 +806,6 @@ func (r *Registry) markdownlintRuleName(id, name string) string {
 	if term != "" {
 		return term
 	}
-	name = strings.TrimFunc(name, isJSWhitespace)
 	if name == "" || strings.ContainsFunc(name, isJSWhitespace) {
 		return id
 	}
