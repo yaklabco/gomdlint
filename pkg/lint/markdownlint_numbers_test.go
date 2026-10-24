@@ -1,6 +1,7 @@
 package lint_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,18 +56,26 @@ func TestRegistryMarkdownlintRuleConfigReadsNumericStrings(t *testing.T) {
 		{id: "MDL003", value: map[string]any{"min_dashes": "4"}, wrong: []string{"min_dashes"}},
 	}
 	for _, tt := range tests {
-		cfg, issues := registry.MarkdownlintRuleConfig(tt.id, tt.value)
+		t.Run(fmt.Sprintf("%s %v", tt.id, tt.value), func(t *testing.T) {
+			t.Parallel()
 
-		assert.Equal(t, tt.options, cfg.Options, "%s %v", tt.id, tt.value)
-		var wrong []string
-		for _, issue := range issues {
-			require.Equal(t, lint.OptionIssueWrongType, issue.Kind, "%s %v", tt.id, tt.value)
-			wrong = append(wrong, issue.Key)
-		}
-		assert.Equal(t, tt.wrong, wrong, "%s %v", tt.id, tt.value)
+			cfg, issues := registry.MarkdownlintRuleConfig(tt.id, tt.value)
+
+			assert.Equal(t, tt.options, cfg.Options)
+			var wrong []string
+			for _, issue := range issues {
+				require.Equal(t, lint.OptionIssueWrongType, issue.Kind)
+				wrong = append(wrong, issue.Key)
+			}
+			assert.Equal(t, tt.wrong, wrong)
+		})
 	}
 
-	_, issues, _ := registry.NormalizeOptions("MD013", map[string]any{"max": "100"})
-	require.Len(t, issues, 1, "gomdlint's own config files read numbers only")
-	assert.Equal(t, lint.OptionIssueWrongType, issues[0].Kind)
+	t.Run("gomdlint config", func(t *testing.T) {
+		t.Parallel()
+
+		_, issues, _ := registry.NormalizeOptions("MD013", map[string]any{"max": "100"})
+		require.Len(t, issues, 1, "gomdlint's own config files read numbers only")
+		assert.Equal(t, lint.OptionIssueWrongType, issues[0].Kind)
+	})
 }

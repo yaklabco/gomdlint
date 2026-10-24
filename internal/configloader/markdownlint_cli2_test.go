@@ -20,8 +20,8 @@ import (
 // with markdownlint 0.41.1, does with each directory.
 
 // ruleEnabled reports whether cfg's settings under rules turn the rule with
-// the given ID on, and whether they set it at all.
-func ruleEnabled(cfg *config.Config, id string) (enabled, set bool) {
+// the given ID on, and then whether they set it at all.
+func ruleEnabled(cfg *config.Config, id string) (bool, bool) {
 	rule, ok := cfg.Rules[id]
 	if !ok || rule.Enabled == nil {
 		return false, false
