@@ -3,6 +3,7 @@ package rules
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -69,13 +70,13 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 		lineContent := lint.LineText(ctx.File, lineNum)
 		lineStart := ctx.File.Lines[lineNum-1].StartOffset + lint.LineTextOffset(ctx.File, lineNum)
 		for pos := 0; pos < len(lineContent); pos++ {
-			end, text, url, ok := reversedLinkAt(lineContent, pos)
+			end, text, dest, ok := reversedLinkAt(lineContent, pos)
 			if !ok {
 				continue
 			}
 			start := pos
 			pos = end - 1 // Like a global regexp, the next match starts after this one.
-			if strings.HasSuffix(text, "\\") || strings.HasSuffix(url, "\\") {
+			if strings.HasSuffix(text, "\\") || strings.HasSuffix(dest, "\\") {
 				continue
 			}
 			startOffset, endOffset := lineStart+start, lineStart+end
@@ -85,7 +86,7 @@ func (r *ReversedLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, erro
 
 			// Build fix: convert (text)[url] to [text](url)
 			builder := fix.NewEditBuilder()
-			newText := fmt.Sprintf("[%s](%s)", text, url)
+			newText := fmt.Sprintf("[%s](%s)", text, dest)
 			builder.ReplaceRange(startOffset, endOffset, newText)
 
 			startLine, startColumn := ctx.File.LineAt(startOffset)
@@ -609,7 +610,11 @@ const fileScheme = "file:"
 // RFC 3986 reads as a host. So does an authority with a port or userinfo,
 // which RFC 8089 does not allow, and an empty host followed by a second
 // "//", as in file:////server/share/a.md, which RFC 8089 (Appendix E.3.2)
-// reads as a UNC path that names the server after it.
+// reads as a UNC path that names the server after it. The host is compared
+// after percent-decoding, since percent-encoded unreserved characters name
+// the same host (RFC 3986, section 2.3), so file://%6Cocalhost/a.md is
+// local. An encoded port or userinfo decodes to more than localhost, and a
+// malformed escape fails to decode, so both still count as another host.
 func isLocalFileURL(dest string) bool {
 	if len(dest) < len(fileScheme) || !strings.EqualFold(dest[:len(fileScheme)], fileScheme) {
 		return false
@@ -625,7 +630,8 @@ func isLocalFileURL(dest string) bool {
 	if authority == "" {
 		return !strings.HasPrefix(path, "//")
 	}
-	return strings.EqualFold(authority, "localhost")
+	host, err := url.PathUnescape(authority)
+	return err == nil && strings.EqualFold(host, "localhost")
 }
 
 // resolvedDestination returns a link's destination as the renderer reads

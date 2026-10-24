@@ -624,6 +624,10 @@ func TestLinkDestinationStyleRule(t *testing.T) {
 		{name: "UNC file URL", input: "[b](file:////server/share/b.md)", style: "relative"},
 		{name: "file URL under the absolute style", input: "[b](file:///home/user/b.md)", style: "absolute"},
 		{name: "file URL in a definition", input: "[a](docs/a.md) and [b][ref]\n\n[ref]: file:///home/user/b.md", style: "consistent", wantN: 1},
+		// Percent-encoded unreserved characters name the same host
+		// (RFC 3986, section 2.3).
+		{name: "percent-encoded localhost", input: "[a](a.md) [b](file://%6Cocalhost/tmp/b.md)", style: "consistent", wantN: 1},
+		{name: "percent-encoded localhost in a definition", input: "[a](a.md) and [b][ref]\n\n[ref]: file://%6cOCALHOS%74/tmp/b.md", style: "consistent", wantN: 1},
 		// A fragment link points into this document, so it sets no style
 		// and is never reported.
 		{name: "fragment after a file URL", input: "[a](file:///home/user/a.md) and [b](#anchor)", style: "consistent"},
@@ -947,6 +951,17 @@ func TestDestinationKind(t *testing.T) {
 		"file://localhost.example.com/a.md": oneForm,
 		"file://localhost:8080/a.md":        oneForm,
 		"file://user@localhost/a.md":        oneForm,
+		"file://%6Cocalhost/a.md":           localFile,
+		"file://%6c%6F%63alhost/a.md":       localFile,
+		"file://localhost%3A8080/a.md":      oneForm,
+		"file://user%40localhost/a.md":      oneForm,
+		"file://local%2Ehost/a.md":          oneForm,
+		"file://%zzlocalhost/a.md":          oneForm,
+		"file://localhost%/a.md":            oneForm,
+		"file://localhos%74/a.md":           localFile,
+		"file://localhos%7/a.md":            oneForm,
+		"file://%256Cocalhost/a.md":         oneForm,
+		"file://%6Cocalhost//server/a.md":   localFile,
 		// An empty host followed by "//" starts a UNC path, which names the
 		// server after it (RFC 8089, Appendix E.3.2).
 		"file:////server/share/a.md":  oneForm,
