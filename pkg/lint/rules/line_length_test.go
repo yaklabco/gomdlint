@@ -819,6 +819,22 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta gamma\ndelta epsilon\n",
 		},
 		{
+			// GitHub renders TOML front matter as Markdown, where the code
+			// element holds the rest of the page.
+			name:     "no fix after TOML front matter with raw HTML",
+			input:    "+++\ntitle = \"<code>open\"\n+++\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "+++\ntitle = \"<code>open\"\n+++\n\nalpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "wraps after TOML front matter without HTML",
+			input:    "+++\ntitle = \"open\"\n+++\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  true,
+			wantText: "+++\ntitle = \"open\"\n+++\n\nalpha beta gamma\ndelta epsilon\n",
+		},
+		{
 			name:     "no fix inside code",
 			input:    "```\nthis is code that is long and must not wrap at all\n```\n",
 			maxLen:   30,

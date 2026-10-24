@@ -561,10 +561,13 @@ func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
 }
 
 // ensureBaseline parses the original content once, for its render
-// signatures and whether its raw HTML is benign.
+// signatures and whether its raw HTML is benign. Raw HTML that the
+// signature's parsers do not see, but GitHub renders, counts as not benign
+// (see htmlHiddenFromCheck).
 func (c *fixCheck) ensureBaseline() {
 	if c.baseline == nil {
 		c.baseline, c.benign = c.signatures(c.content)
+		c.benign = c.benign && !htmlHiddenFromCheck(c.content)
 	}
 }
 
@@ -587,14 +590,7 @@ func (c *fixCheck) unchanged(changed []byte) bool {
 // leaves it out, and the front matter lines are blanked before parsing. It
 // also reports whether every raw HTML region is benign for every parser.
 func (c *fixCheck) signatures(content []byte) ([]string, bool) {
-	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
-	frontMatter := frontMatterLength(content)
-	source := bytes.Clone(content)
-	for idx := range frontMatter {
-		if source[idx] != '\n' && source[idx] != '\r' {
-			source[idx] = ' '
-		}
-	}
+	content, source, frontMatter := signatureSource(content)
 	signatures := make([]string, len(c.markdowns))
 	benign := true
 	for idx, markdown := range c.markdowns {
@@ -603,6 +599,21 @@ func (c *fixCheck) signatures(content []byte) ([]string, bool) {
 		benign = benign && htmlRegionsBenign(doc, source)
 	}
 	return signatures, benign
+}
+
+// signatureSource returns content without a byte order mark, the source
+// the signature's parsers read, which is that content with the lines of its
+// front matter blanked, and the length of the front matter.
+func signatureSource(content []byte) ([]byte, []byte, int) {
+	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
+	frontMatter := frontMatterLength(content)
+	source := bytes.Clone(content)
+	for idx := range frontMatter {
+		if source[idx] != '\n' && source[idx] != '\r' {
+			source[idx] = ' '
+		}
+	}
+	return content, source, frontMatter
 }
 
 // The lines that open and close YAML and TOML front matter.
@@ -724,6 +735,22 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 		return gmast.WalkSkipChildren, nil
 	})
 	return benign
+}
+
+// htmlHiddenFromCheck reports whether content may hold raw HTML that is not
+// benign where the signature's parsers read none, though GitHub renders it.
+// Such a document keeps no fix, like one whose raw HTML is not benign (see
+// keepSafeFixes). It finds TOML and JSON front matter in content with a
+// "<", which starts all raw HTML. The parsers blank front matter, but GitHub
+// renders "+++" and "{" front matter as Markdown, where raw HTML may open an
+// element that holds the rest of the page, and a block the front matter
+// leaves open, such as a paragraph or a list item, may take in raw HTML
+// after it, such as an indented line that the parsers read as code. GitHub
+// shows YAML front matter as a table, so it is left to the check.
+func htmlHiddenFromCheck(content []byte) bool {
+	content, _, frontMatter := signatureSource(content)
+	return bytes.IndexByte(content, '<') >= 0 && frontMatter > 0 &&
+		!bytes.HasPrefix(content, []byte(yamlFrontMatterFence))
 }
 
 // benignHTML reports whether raw HTML can show nothing that the render
