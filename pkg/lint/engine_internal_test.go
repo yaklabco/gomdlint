@@ -92,3 +92,19 @@ func TestChangesContent(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveApart_SkipsEveryFixWhenNoAcceptedFixHoldsTheJoin(t *testing.T) {
+	t.Parallel()
+
+	// The accepted edits join the carriage return to the line feed, but no
+	// fix has an edit there, as fix.ResolveFixes never leaves it. Rather
+	// than write the joined line endings, every fix waits.
+	content := []byte("a\rxy\nb")
+	groups := [][]fix.TextEdit{{{StartOffset: 6, EndOffset: 7, NewText: "c"}}}
+	accepted := []fix.TextEdit{{StartOffset: 2, EndOffset: 4}, {StartOffset: 6, EndOffset: 7, NewText: "c"}}
+
+	gotAccepted, gotSkipped := resolveApart(groups, content, accepted, nil)
+
+	assert.Empty(t, gotAccepted)
+	assert.Equal(t, []int{0}, gotSkipped)
+}

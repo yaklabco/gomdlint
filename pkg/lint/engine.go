@@ -611,13 +611,13 @@ func resolveApart(groups [][]fix.TextEdit, content []byte, accepted []fix.TextEd
 			break
 		}
 		// The fix to take out has an edit in [from, to] and was accepted.
-		conflicting := make([]bool, len(taken))
+		wasSkipped := make([]bool, len(taken))
 		for _, idx := range skipped {
-			conflicting[idx] = true
+			wasSkipped[idx] = true
 		}
 		last := -1
 		for idx, edits := range taken {
-			if len(edits) == 0 || conflicting[idx] || !editsTouch(edits, from, to) {
+			if len(edits) == 0 || wasSkipped[idx] || !editsTouch(edits, from, to) {
 				continue
 			}
 			if last < 0 || cmp.Or(compareEditRanges(firsts[idx], firsts[last]), cmp.Compare(idx, last)) > 0 {
@@ -625,7 +625,10 @@ func resolveApart(groups [][]fix.TextEdit, content []byte, accepted []fix.TextEd
 			}
 		}
 		if last < 0 {
-			break // Unreachable: the edits between the two pieces belong to accepted fixes.
+			// The edits between the two pieces belong to accepted fixes, so
+			// this does not happen. If it did, every fix waits for the next
+			// pass rather than write the joined line endings.
+			return nil, allFixes(len(groups))
 		}
 		taken[last] = nil
 		out = append(out, last)
@@ -634,6 +637,15 @@ func resolveApart(groups [][]fix.TextEdit, content []byte, accepted []fix.TextEd
 	skipped = append(skipped, out...)
 	slices.Sort(skipped)
 	return accepted, skipped
+}
+
+// allFixes returns the indexes of count fixes in ascending order.
+func allFixes(count int) []int {
+	indexes := make([]int, count)
+	for idx := range indexes {
+		indexes[idx] = idx
+	}
+	return indexes
 }
 
 // editsTouch reports whether an edit of edits lies in [from, to] or touches
