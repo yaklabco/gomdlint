@@ -124,10 +124,12 @@ type readmeLine struct {
 }
 
 // markerLine returns the line of text that holds marker and nothing else,
-// apart from its line ending. It fails when no line, or more than one,
-// holds marker.
+// apart from its line ending, outside fenced code blocks, where a README
+// may show the markers. It fails when no line, or more than one, holds
+// marker.
 func markerLine(text, marker string) (readmeLine, error) {
 	var found []readmeLine
+	var open codeFence
 	for start := 0; start < len(text); {
 		next := len(text)
 		if idx := strings.IndexByte(text[start:], '\n'); idx >= 0 {
@@ -135,8 +137,15 @@ func markerLine(text, marker string) (readmeLine, error) {
 		}
 		content := text[start:next]
 		withoutEnding := strings.TrimSuffix(strings.TrimSuffix(content, "\n"), "\r")
-		if withoutEnding == marker {
+		switch {
+		case open.length > 0:
+			if open.closedBy(withoutEnding) {
+				open = codeFence{}
+			}
+		case withoutEnding == marker:
 			found = append(found, readmeLine{start: start, next: next, ending: content[len(withoutEnding):]})
+		default:
+			open = openingFence(withoutEnding)
 		}
 		start = next
 	}
@@ -149,6 +158,45 @@ func markerLine(text, marker string) (readmeLine, error) {
 	default:
 		return readmeLine{}, fmt.Errorf("the README has %d lines %s, and needs one", len(found), marker)
 	}
+}
+
+// maxFenceIndent is the most spaces that may come before a code fence.
+const maxFenceIndent = 3
+
+// codeFence is the opening fence of a fenced code block: its character, a
+// backtick or a tilde, and how many of them it has. A length of 0 means no
+// fence.
+type codeFence struct {
+	char   byte
+	length int
+}
+
+// openingFence returns the code fence that line opens, as CommonMark reads
+// one: at most 3 spaces, then 3 or more backticks or tildes, and for
+// backticks an info string without backticks. It returns no fence for
+// another line.
+func openingFence(line string) codeFence {
+	rest := strings.TrimLeft(line, " ")
+	if len(line)-len(rest) > maxFenceIndent || rest == "" || (rest[0] != '`' && rest[0] != '~') {
+		return codeFence{}
+	}
+	fence := codeFence{char: rest[0], length: len(rest) - len(strings.TrimLeft(rest, rest[:1]))}
+	if fence.length < minFenceLength || (fence.char == '`' && strings.Contains(rest[fence.length:], "`")) {
+		return codeFence{}
+	}
+	return fence
+}
+
+// closedBy reports whether line closes the code block that f opens: at
+// most 3 spaces, then at least as many of f's characters, then only spaces
+// and tabs.
+func (f codeFence) closedBy(line string) bool {
+	rest := strings.TrimLeft(line, " ")
+	if len(line)-len(rest) > maxFenceIndent {
+		return false
+	}
+	run := len(rest) - len(strings.TrimLeft(rest, string(f.char)))
+	return run >= f.length && strings.Trim(rest[run:], " \t") == ""
 }
 
 // countsText says how many rules entries holds, and how many fix what

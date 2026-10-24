@@ -236,6 +236,32 @@ func TestUpdateReadme(t *testing.T) {
 	}
 }
 
+// TestUpdateReadmeSkipsCodeBlocks covers a README that shows the markers in
+// fenced code blocks: they mark nothing, so the block between the real
+// markers is replaced and the samples stay as they are, and a README with
+// markers only in code has no block.
+func TestUpdateReadmeSkipsCodeBlocks(t *testing.T) {
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)[:2]
+	sample := "```markdown\n" + ruledocs.ReadmeBlockBegin + "\nsample\n" + ruledocs.ReadmeBlockEnd + "\n```\n"
+	tildes := "  ~~~~\n" + ruledocs.ReadmeBlockBegin + "\n```\n" + ruledocs.ReadmeBlockEnd + "\n~~~~~\n"
+	readme := "# Project\n\n" + sample + "\n" + tildes + "\n" +
+		ruledocs.ReadmeBlockBegin + "\nold\n" + ruledocs.ReadmeBlockEnd + "\n\nAfter.\n"
+
+	updated, err := ruledocs.UpdateReadme([]byte(readme), entries)
+	require.NoError(t, err)
+	text := string(updated)
+	assert.True(t, strings.HasPrefix(text, "# Project\n\n"+sample+"\n"+tildes+"\n"+ruledocs.ReadmeBlockBegin+"\n\n"), text)
+	assert.NotContains(t, text, "old")
+	assert.Contains(t, text, "(docs/rules/heading-increment.md)")
+
+	_, err = ruledocs.UpdateReadme([]byte("# Project\n\n"+sample), entries)
+	assert.Error(t, err, "markers only in code mark no block")
+
+	unclosed := "# Project\n\n```\n" + ruledocs.ReadmeBlockBegin + "\n" + ruledocs.ReadmeBlockEnd + "\n"
+	_, err = ruledocs.UpdateReadme([]byte(unclosed), entries)
+	assert.Error(t, err, "a fence that is never closed runs to the end of the README")
+}
+
 // TestUpdateReadmeKeepsLineEndings covers a README with CRLF line endings
 // and one whose end marker is its last line, without a newline: the block
 // takes the README's line endings, and the rest stays as it was.
