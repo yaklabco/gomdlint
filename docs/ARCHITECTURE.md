@@ -683,10 +683,11 @@ rule settings, and so may the whole file. The schema also takes what
 yaml.v3 reads into the settings: an empty `flavor`, `severity_default` or
 backup `mode`, the YAML 1.1 spellings of true and false, such as `yes` and
 `off`, for the boolean settings but not for rule options, and any scalar
-as an ignore pattern. A test sets each setting to many values in YAML and
-JSON files and checks that the schema and the loader agree on every one.
-Tests validate the repository's configuration, every
-fixture configuration, the `init` templates and a migrated configuration
+but the empty string as an ignore pattern. Editors do not suggest the
+empty string or those spellings. A test sets each setting to many values
+in YAML and JSON files and checks that the schema and the loader agree on
+every one. Tests validate the repository's configuration, every fixture
+configuration, the `init` templates and a migrated configuration
 against the schema. They check that it accepts exactly what the loader
 loads without an error or a warning, except for mistakes that a schema
 cannot see: two keys that name one rule, two spellings of one option, and

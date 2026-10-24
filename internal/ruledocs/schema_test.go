@@ -97,7 +97,7 @@ func TestSchemaAcceptsTheConfigsGomdlintWrites(t *testing.T) {
 	require.NoError(t, os.WriteFile(source, []byte(`{"default": true, "MD013": {"line_length": 100}, "MD033": false, "no-hard-tabs": "error"}`), 0o600))
 	migrated, err := configloader.ConvertMarkdownlintConfig(source)
 	require.NoError(t, err)
-	for _, target := range []string{".gomdlint.yml", ".gomdlint.json"} {
+	for _, target := range configNames {
 		content, err := migrated.FileContent(target)
 		require.NoError(t, err)
 		assert.NoError(t, validateYAML(t, schema, content), "migrate to %s:\n%s", target, content)
@@ -159,6 +159,7 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 		{name: "an option and its other spelling", yaml: "rules:\n  line-length:\n    options:\n      max: 90\n      line_length: 100\n", schemaValid: true},
 		{name: "an option flat and under options", yaml: "rules:\n  line-length:\n    max: 90\n    options:\n      max: 100\n", schemaValid: true},
 		{name: "an invalid glob", yaml: "ignore: [\"[\"]\n", schemaValid: true},
+		{name: "an empty ignore pattern", yaml: "ignore: [\"\"]\n"},
 
 		// yaml.v3 reads a null as the zero value, so gomdlint loads every
 		// setting as unset, and gomdlint migrate writes unset rule settings
@@ -184,12 +185,18 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 	}
 }
 
+// configNames are the names of a YAML and a JSON configuration file.
+var configNames = []string{".gomdlint.yml", ".gomdlint.json"}
+
 // TestSchemaAgreesWithTheLoaderOnEverySetting sets each setting that a
-// configuration file reads, at the top level, under backups, and for a rule
-// and one of its options, to each of many values, in a YAML and a JSON
-// file: null, empty strings, the spellings of true and false that yaml.v3
-// reads into a boolean setting, strings that look like booleans, numbers,
-// lists, mappings, and the values of the enumerated settings. The schema
+// configuration file reads, at the top level, under backups, and for rules,
+// named by ID, name and markdownlint name, under rules and rule_defaults,
+// with their settings and some options, to each of many values, in a YAML
+// and a JSON file: null, empty strings, the spellings of true and false
+// that yaml.v3 reads into a boolean setting, strings that look like
+// booleans, numbers, lists, mappings, and the values of the enumerated
+// settings. Whole files that are no mapping, and plain and tagged YAML
+// scalars, which a JSON document cannot write, are checked too. The schema
 // accepts each file that gomdlint loads without an error or a warning, and
 // rejects the others.
 func TestSchemaAgreesWithTheLoaderOnEverySetting(t *testing.T) {
@@ -198,42 +205,61 @@ func TestSchemaAgreesWithTheLoaderOnEverySetting(t *testing.T) {
 	paths := [][]string{
 		{"flavor"}, {"severity_default"}, {"rules"}, {"rule_defaults"}, {"ignore"},
 		{"gitignore"}, {"default_ignores"}, {"backups"}, {"backups", "enabled"}, {"backups", "mode"},
-		{"rules", "MD013"}, {"rules", "MD013", "enabled"}, {"rules", "MD013", "severity"},
+		{"rules", "MD013"}, {"rules", "line-length"}, {"rules", "ul-style"},
+		{"rules", "MD013", "enabled"}, {"rules", "MD013", "severity"},
 		{"rules", "MD013", "auto_fix"}, {"rules", "MD013", "reset_options"}, {"rules", "MD013", "options"},
-		{"rule_defaults", "MD013", "enabled"}, {"rule_defaults", "MD013", "severity"},
+		{"rules", "line-length", "enabled"}, {"rules", "ul-style", "severity"},
+		{"rule_defaults", "MD013"}, {"rule_defaults", "MD013", "enabled"}, {"rule_defaults", "MD013", "severity"},
+		{"rule_defaults", "MD013", "auto_fix"}, {"rule_defaults", "MD013", "reset_options"},
+		{"rule_defaults", "MD013", "options"},
 		{"rules", "MD013", "options", "max"}, {"rules", "MD013", "options", "ignore_tables"},
 		{"rules", "MD013", "strict"}, {"rules", "MD003", "options", "style"},
+		{"rules", "MD044", "options", "names"}, {"rules", "MD044", "names"},
 	}
 	values := []any{
 		nil, "", " ", "yes", "Yes", "YES", "y", "Y", "on", "On", "ON", "no", "No", "NO", "n", "N", "off", "Off", "OFF",
 		"yES", "true", "false", "True", "1", "0", true, false, 0, 1, 80, -1, 2.5,
 		"error", "warning", "info", "Error", "gfm", "commonmark", "GFM", "sidecar", "none", "consistent", "atx",
-		[]any{}, []any{"a"}, []any{1}, []any{true}, []any{nil}, map[string]any{},
+		[]any{}, []any{"a"}, []any{""}, []any{1}, []any{true}, []any{nil}, map[string]any{}, map[string]any{"a": 1},
 	}
 
+	var docs []string
 	for _, path := range paths {
 		for _, value := range values {
-			doc := any(value)
+			doc := value
 			for idx := len(path) - 1; idx >= 0; idx-- {
 				doc = map[string]any{path[idx]: doc}
 			}
 			content, err := json.Marshal(doc)
 			require.NoError(t, err)
+			docs = append(docs, string(content))
+		}
+	}
+	docs = append(docs, "null", "[]", "0", `""`, "true")
 
-			for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
-				schemaErr := validateYAML(t, schema, content)
-				loaded := loadsCleanly(t, name, string(content))
-				if loaded != (schemaErr == nil) {
-					t.Errorf("%s %s: gomdlint loads it cleanly: %t, the schema accepts it: %t (%v)",
-						name, content, loaded, schemaErr == nil, schemaErr)
-				}
+	for _, content := range docs {
+		schemaErr := validateYAML(t, schema, []byte(content))
+		for _, name := range configNames {
+			if loaded := loadsCleanly(t, name, content); loaded != (schemaErr == nil) {
+				t.Errorf("%s %s: gomdlint loads it cleanly: %t, the schema accepts it: %t (%v)",
+					name, content, loaded, schemaErr == nil, schemaErr)
 			}
 		}
 	}
 
-	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
-		assert.True(t, loadsCleanly(t, name, "null"), "%s holding only null", name)
-		assert.NoError(t, validateYAML(t, schema, []byte("null")), "%s holding only null", name)
+	for _, content := range []string{
+		"gitignore: yes\n", "gitignore: on\n", "gitignore: Off\n", "gitignore: ~\n", "gitignore: !!str on\n",
+		"gitignore: True\n", "gitignore: 1\n", "flavor: ~\n", "flavor: GFM\n", "severity_default: ~\n",
+		"ignore: [0x10, ~, 1.5]\n", "ignore: ['']\n", "backups:\n  enabled: NO\n  mode: ''\n",
+		"rules:\n  MD013:\n    enabled: Y\n    auto_fix: off\n    reset_options: !!str yes\n",
+		"rules:\n  MD013:\n    options:\n      ignore_tables: yes\n", "rules:\n  MD013: on\n", "rules:\n  MD013: ~\n",
+		"rules:\n  MD013:\n    severity: ''\n",
+	} {
+		schemaErr := validateYAML(t, schema, []byte(content))
+		if loaded := loadsCleanly(t, ".gomdlint.yml", content); loaded != (schemaErr == nil) {
+			t.Errorf("%q: gomdlint loads it cleanly: %t, the schema accepts it: %t (%v)",
+				content, loaded, schemaErr == nil, schemaErr)
+		}
 	}
 }
 

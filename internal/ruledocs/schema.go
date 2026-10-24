@@ -48,10 +48,11 @@ type schemaObject map[string]any
 // whole file. The schema takes what yaml.v3 reads into gomdlint's settings
 // too: the empty string for the string settings with a list of values,
 // which leaves them unset, the YAML 1.1 spellings of true and false for
-// boolean settings (see flagValues), and any scalar as an ignore pattern.
-// The schema cannot see some mistakes that gomdlint rejects, such as two
-// keys for one
-// rule, two spellings of one option, and a glob that does not parse.
+// boolean settings (see flagValues), and any scalar but the empty string
+// as an ignore pattern. Editors do not suggest the empty string or those
+// spellings. The schema cannot see some mistakes that gomdlint rejects,
+// such as two keys for one rule, two spellings of one option, a glob that
+// does not parse, and a pattern that matches nothing, such as /.
 func WriteSchema(writer io.Writer, entries []Entry) error {
 	definitions := schemaObject{
 		severityDefinition: schemaObject{
@@ -77,11 +78,11 @@ func WriteSchema(writer io.Writer, entries []Entry) error {
 			"flavor": schemaObject{
 				"description": "The Markdown flavor that gomdlint parses: gfm, GitHub Flavored Markdown, " +
 					"or commonmark, in which tables and autolink literals are plain text.",
-				"enum":    []any{string(config.FlavorCommonMark), string(config.FlavorGFM), "", nil},
+				"anyOf":   unsetOr(schemaObject{"enum": []string{string(config.FlavorCommonMark), string(config.FlavorGFM)}}),
 				"default": string(config.FlavorGFM),
 			},
 			"severity_default": described("The severity of every rule's findings, "+
-				"unless the rule's own settings give it another.", unsetOr(ref(severityDefinition))),
+				"unless the rule's own settings give it another.", schemaObject{"anyOf": unsetOr(ref(severityDefinition))}),
 			"rules": described("The settings of each rule, keyed by its name, its ID or "+
 				"one of markdownlint's names for it.", ref(rulesDefinition)),
 			"rule_defaults": described("Settings of rules that the settings under rules override, "+
@@ -89,7 +90,7 @@ func WriteSchema(writer io.Writer, entries []Entry) error {
 			"ignore": schemaObject{
 				"description": "Glob patterns of files not to lint, relative to the configuration file's directory.",
 				"type":        nullable("array"),
-				"items":       schemaObject{"type": []string{"string", "number", "boolean", "null"}}, // yaml.v3 reads any scalar into a string.
+				"items":       ignorePattern(),
 			},
 			"gitignore": schemaObject{
 				"description": "Skip the files that .gitignore files ignore when walking directories.",
@@ -109,7 +110,7 @@ func WriteSchema(writer io.Writer, entries []Entry) error {
 					"enabled": schemaObject{"description": "Back up each file before fixing it.", "anyOf": flagValues(), "default": true},
 					"mode": schemaObject{
 						"description": "Where backups go: sidecar, next to the file, or none.",
-						"enum":        []any{"sidecar", "none", "", nil},
+						"anyOf":       unsetOr(schemaObject{"enum": []string{"sidecar", "none"}}),
 						"default":     "sidecar",
 					},
 				},
@@ -272,10 +273,21 @@ func orNull(schema schemaObject) schemaObject {
 	return schemaObject{"anyOf": []any{schema, schemaObject{"type": "null"}}}
 }
 
-// unsetOr returns a schema that takes what schema takes, null or the empty
-// string, which leave a string setting such as severity_default unset.
-func unsetOr(schema schemaObject) schemaObject {
-	return schemaObject{"anyOf": []any{schema, schemaObject{"enum": []any{"", nil}}}}
+// ignorePattern describes an ignore pattern: a string that is not empty,
+// as an empty pattern matches nothing and gomdlint rejects it, or another
+// scalar, which yaml.v3 reads as a string, or null, which it drops.
+func ignorePattern() schemaObject {
+	return schemaObject{"anyOf": []any{
+		schemaObject{"type": "string", "minLength": 1},
+		schemaObject{"type": []string{"number", "boolean", "null"}},
+	}}
+}
+
+// unsetOr returns the alternatives of an anyOf that takes what schema
+// takes, null or the empty string, which leave a string setting such as
+// severity_default unset. Editors do not suggest the empty string.
+func unsetOr(schema schemaObject) []any {
+	return []any{schema, schemaObject{"enum": []any{"", nil}, "doNotSuggest": true}}
 }
 
 // flagValues returns the values of a setting that gomdlint decodes into a
@@ -289,7 +301,7 @@ func flagValues() []any {
 		schemaObject{"enum": []string{
 			"y", "Y", "yes", "Yes", "YES", "on", "On", "ON",
 			"n", "N", "no", "No", "NO", "off", "Off", "OFF",
-		}},
+		}, "doNotSuggest": true},
 	}
 }
 

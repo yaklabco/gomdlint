@@ -30,6 +30,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -61,6 +62,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -132,6 +134,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -205,6 +208,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -236,6 +240,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -312,6 +317,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -404,6 +410,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -435,6 +442,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -494,6 +502,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -585,6 +594,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -616,6 +626,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -656,6 +667,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -729,6 +741,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -760,6 +773,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -832,6 +846,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -920,6 +935,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -967,6 +983,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1064,6 +1081,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1145,6 +1163,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1184,6 +1203,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1271,6 +1291,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1352,6 +1373,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1383,6 +1405,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1423,6 +1446,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1496,6 +1520,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1527,6 +1552,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1600,6 +1626,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1673,6 +1700,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1726,6 +1754,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -1969,6 +1998,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2066,6 +2096,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2097,6 +2128,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2137,6 +2169,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2210,6 +2243,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2241,6 +2275,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2281,6 +2316,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2354,6 +2390,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2385,6 +2422,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2425,6 +2463,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2498,6 +2537,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2529,6 +2569,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2569,6 +2610,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2642,6 +2684,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2673,6 +2716,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2713,6 +2757,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2786,6 +2831,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2817,6 +2863,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -2962,6 +3009,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3035,6 +3083,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3066,6 +3115,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3106,6 +3156,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3179,6 +3230,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3210,6 +3262,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3259,6 +3312,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3348,6 +3402,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3379,6 +3434,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3482,6 +3538,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3563,6 +3620,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3594,6 +3652,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3659,6 +3718,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3732,6 +3792,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3763,6 +3824,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3820,6 +3882,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3893,6 +3956,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3924,6 +3988,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -3964,6 +4029,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4045,6 +4111,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4076,6 +4143,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4142,6 +4210,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4232,6 +4301,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4263,6 +4333,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4352,6 +4423,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4441,6 +4513,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4472,6 +4545,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4529,6 +4603,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4602,6 +4677,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4633,6 +4709,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4673,6 +4750,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4761,6 +4839,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4792,6 +4871,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4862,6 +4942,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4949,6 +5030,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -4980,6 +5062,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5020,6 +5103,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5093,6 +5177,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5124,6 +5209,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5177,6 +5263,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5262,6 +5349,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5293,6 +5381,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5358,6 +5447,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5431,6 +5521,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5462,6 +5553,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5502,6 +5594,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5575,6 +5668,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5606,6 +5700,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5646,6 +5741,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5719,6 +5815,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5750,6 +5847,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5790,6 +5888,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5878,6 +5977,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5909,6 +6009,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -5981,6 +6082,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6062,6 +6164,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6093,6 +6196,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6188,6 +6292,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6261,6 +6366,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6292,6 +6398,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6332,6 +6439,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6405,6 +6513,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6436,6 +6545,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6523,6 +6633,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6596,6 +6707,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6635,6 +6747,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6730,6 +6843,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6803,6 +6917,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6834,6 +6949,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6874,6 +6990,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6947,6 +7064,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -6978,6 +7096,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7035,6 +7154,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7124,6 +7244,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7155,6 +7276,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7210,6 +7332,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7283,6 +7406,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7314,6 +7438,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7371,6 +7496,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7460,6 +7586,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7491,6 +7618,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7548,6 +7676,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7637,6 +7766,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7668,6 +7798,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7725,6 +7856,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7814,6 +7946,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7845,6 +7978,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7926,6 +8060,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -7999,6 +8134,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8030,6 +8166,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8113,6 +8250,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8194,6 +8332,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8225,6 +8364,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8300,6 +8440,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8373,6 +8514,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8420,6 +8562,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8525,6 +8668,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8614,6 +8758,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8645,6 +8790,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8704,6 +8850,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8795,6 +8942,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8826,6 +8974,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8866,6 +9015,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8939,6 +9089,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -8970,6 +9121,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9010,6 +9162,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9083,6 +9236,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9114,6 +9268,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9251,6 +9406,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9332,6 +9488,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9363,6 +9520,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9445,6 +9603,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9535,6 +9694,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9566,6 +9726,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9623,6 +9784,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9712,6 +9874,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9743,6 +9906,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -9800,6 +9964,7 @@
                   ]
                 },
                 {
+                  "doNotSuggest": true,
                   "enum": [
                     "y",
                     "Y",
@@ -10968,6 +11133,7 @@
               ]
             },
             {
+              "doNotSuggest": true,
               "enum": [
                 "y",
                 "Y",
@@ -10992,14 +11158,23 @@
           "description": "Back up each file before fixing it."
         },
         "mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "sidecar",
+                "none"
+              ]
+            },
+            {
+              "doNotSuggest": true,
+              "enum": [
+                "",
+                null
+              ]
+            }
+          ],
           "default": "sidecar",
-          "description": "Where backups go: sidecar, next to the file, or none.",
-          "enum": [
-            "sidecar",
-            "none",
-            "",
-            null
-          ]
+          "description": "Where backups go: sidecar, next to the file, or none."
         }
       },
       "type": [
@@ -11016,6 +11191,7 @@
           ]
         },
         {
+          "doNotSuggest": true,
           "enum": [
             "y",
             "Y",
@@ -11040,14 +11216,23 @@
       "description": "Skip node_modules and vendor directories when walking directories."
     },
     "flavor": {
+      "anyOf": [
+        {
+          "enum": [
+            "commonmark",
+            "gfm"
+          ]
+        },
+        {
+          "doNotSuggest": true,
+          "enum": [
+            "",
+            null
+          ]
+        }
+      ],
       "default": "gfm",
-      "description": "The Markdown flavor that gomdlint parses: gfm, GitHub Flavored Markdown, or commonmark, in which tables and autolink literals are plain text.",
-      "enum": [
-        "commonmark",
-        "gfm",
-        "",
-        null
-      ]
+      "description": "The Markdown flavor that gomdlint parses: gfm, GitHub Flavored Markdown, or commonmark, in which tables and autolink literals are plain text."
     },
     "gitignore": {
       "anyOf": [
@@ -11058,6 +11243,7 @@
           ]
         },
         {
+          "doNotSuggest": true,
           "enum": [
             "y",
             "Y",
@@ -11084,11 +11270,18 @@
     "ignore": {
       "description": "Glob patterns of files not to lint, relative to the configuration file's directory.",
       "items": {
-        "type": [
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": [
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
         ]
       },
       "type": [
@@ -11120,6 +11313,7 @@
               "$ref": "#/definitions/severity"
             },
             {
+              "doNotSuggest": true,
               "enum": [
                 "",
                 null
