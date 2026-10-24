@@ -320,7 +320,9 @@ formats change. The first entries under Changed may need action.
   becomes a paragraph.
 - **MD022**, **MD031**: A fix no longer inserts a blank line before a table
   inside a tight list item, which made the list loose. Such findings are
-  reported without a fix.
+  reported without a fix. Some lists of four or more items, and lists that
+  hold a fenced code block without a closing fence, can still be made
+  loose.
 - **MD058**: No longer adds a blank line before or after a table in a tight
   list where the line would separate two items or two blocks of an item,
   which made the list loose. Such tables are reported without a fix. In a
