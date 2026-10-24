@@ -19,7 +19,7 @@ const caretDocument = "\ufeff# Title \n" + // 1: MD009 after a byte order mark
 	"\n" +
 	"a\tb   \n" + // 7: MD010 at the tab, MD009 after it
 	"\n" +
-	"😀 emoji   \n" + // 9: MD009 after a wide emoji
+	"😀 emoji   \n" + // 9: MD009 after a wide emoji of two UTF-16 code units
 	"\n" +
 	"e\u0301 trail   \n" + // 11: MD009 after a combining mark
 	"\n" +
@@ -50,9 +50,9 @@ func contextLines(t *testing.T, output, location string) (string, string) {
 
 // TestLint_CaretLinesUpUnderTheColumn checks, end to end, that the caret
 // under each source line sits below the character at the reported column.
-// The reported columns count characters; the caret is padded by the display
-// cells of the text before the column, with tabs expanded to the next
-// multiple of four.
+// The reported columns count UTF-16 code units, as markdownlint does, so the
+// emoji counts two. The caret is padded by the display cells of the text
+// before the column, with tabs expanded to the next multiple of four.
 func TestLint_CaretLinesUpUnderTheColumn(t *testing.T) {
 	inProject(t, map[string]string{"doc.md": caretDocument})
 
@@ -68,7 +68,7 @@ func TestLint_CaretLinesUpUnderTheColumn(t *testing.T) {
 		{location: "doc.md:5:9", source: "中文 trail   ", caret: "          ^"},
 		{location: "doc.md:7:2", source: "a   b   ", caret: " ^"},
 		{location: "doc.md:7:4", source: "a   b   ", caret: "     ^"},
-		{location: "doc.md:9:8", source: "😀 emoji   ", caret: "        ^"},
+		{location: "doc.md:9:9", source: "😀 emoji   ", caret: "        ^"},
 		{location: "doc.md:11:9", source: "e\u0301 trail   ", caret: "       ^"},
 		{location: "doc.md:13:2", source: "中  文   ", caret: "  ^"},
 		{location: "doc.md:13:4", source: "中  文   ", caret: "      ^"},

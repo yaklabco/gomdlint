@@ -125,8 +125,9 @@ func TestFormatSourceContext_WithCaret(t *testing.T) {
 }
 
 // TestFormatSourceContext_CaretAlignment checks that the caret sits under
-// the character at the (1-based, character) column even after wide
-// characters and tabs, by comparing display cells of the printed lines.
+// the character at the 1-based column, counted in UTF-16 code units, even
+// after wide characters, characters outside the Basic Multilingual Plane and
+// tabs, by comparing display cells of the printed lines.
 func TestFormatSourceContext_CaretAlignment(t *testing.T) {
 	styles := pretty.NewStyles(false)
 
@@ -138,7 +139,11 @@ func TestFormatSourceContext_CaretAlignment(t *testing.T) {
 		under  string // the text from the caret's cell onward
 	}{
 		{name: "ascii", line: "# Title  ", column: 8, want: "# Title  ", under: "  "},
-		{name: "wide emoji", line: "\U0001F600 emoji   ", column: 8, want: "\U0001F600 emoji   ", under: "   "},
+		{name: "wide emoji", line: "\U0001F600 emoji   ", column: 9, want: "\U0001F600 emoji   ", under: "   "},
+		{name: "emoji then tab", line: "\U0001F600\U0001F600 tab\there", column: 9, want: "\U0001F600\U0001F600 tab    here", under: "    here"},
+		{name: "column inside an emoji", line: "\U0001F600x", column: 2, want: "\U0001F600x", under: "x"},
+		{name: "combining mark", line: "e\u0301 combining   ", column: 13, want: "e\u0301 combining   ", under: "   "},
+		{name: "bmp letters", line: "ÄÖÜ trail   ", column: 10, want: "ÄÖÜ trail   ", under: "   "},
 		{name: "cjk", line: "中文 trailing ", column: 12, want: "中文 trailing ", under: " "},
 		{name: "tab", line: "\tcode", column: 2, want: "    code", under: "code"},
 		{name: "text then tab", line: "a\tb", column: 3, want: "a   b", under: "b"},

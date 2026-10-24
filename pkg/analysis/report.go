@@ -27,7 +27,8 @@ type Report struct {
 // DiagnosticEntry represents a single diagnostic in the report.
 // FilePath is relative to the working directory when the file lies inside
 // it, and absolute otherwise. Lines are 1-based and columns are 1-based
-// character columns (Unicode code points); EndColumn is exclusive.
+// columns counted in UTF-16 code units, as markdownlint reports them, and
+// EndColumn is exclusive.
 type DiagnosticEntry struct {
 	FilePath    string     `json:"filePath"`
 	RuleID      string     `json:"ruleId"`
