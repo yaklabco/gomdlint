@@ -283,6 +283,13 @@ target. JSON output reports the same character columns, while the offsets of
 its fixes are byte offsets. Every format except SARIF shows a path relative
 to the working directory when the file lies inside it.
 
+Findings that one change fixes carry the same fix. `no-space-in-emphasis`
+(MD037), `emphasis-style` (MD049) and `strong-style` (MD050) report each side
+or marker of an emphasis, as markdownlint does, with the fix that changes
+both, and the blank line that a rule asks for on both sides of one boundary
+is one insertion. A consumer that applies every fix in a JSON or SARIF report
+applies such a fix once.
+
 The summary format shows aggregated statistics:
 
 ```text

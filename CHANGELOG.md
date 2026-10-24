@@ -461,11 +461,22 @@ formats change. The first entries under Changed may need action.
   footnote, whose note goes on in indented lines after a blank line, and
   deleting the first line showed those lines as a code block. Findings start
   at the start of the definition's line, as in markdownlint.
-- **MD019**, **MD020**, **MD026**, **MD047**: Report at markdownlint's
-  columns: MD019 at the first extra space, MD020 at the character before the
-  closing hashes when only the closing space is missing, MD026 at the white
-  space before the punctuation, and MD047 at the last character. MD026's fix
+- **MD019**, **MD020**, **MD021**, **MD026**, **MD047**: Report at
+  markdownlint's columns: MD019 and MD021 at the first extra space, MD020 at
+  the character before the closing hashes when only the closing space is
+  missing, MD026 at the white space before the punctuation, and MD047 at the
+  last character. MD021 reports each side of a closed heading on its own,
+  both sides of an empty one included. The fixes of MD019 and MD021 delete
+  the extra characters, so a tab that comes first stays, and MD026's fix
   deletes the white space it reports, such as a no-break space.
+- **MD032**: Reports a missing blank line after a list on the list's last
+  line, and one before a list right after another list, as markdownlint
+  does. The two findings at such a boundary share one blank line.
+- **MD037**, **MD049**, **MD050**: Report each side or marker of an
+  emphasis, as markdownlint does. Both findings carry the fix that changes
+  both, which `--fix` applies once.
+- A fix that several findings of one rule carry is applied once and counts
+  for each of them, and the rule checks it once.
 - No fix changes or makes a task list checkbox. micromark and GitHub's
   cmark-gfm read checkboxes in different places, so any line that holds a
   `[`, one character or a line ending, and `]`, wherever on the line, keeps
