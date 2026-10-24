@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,6 +47,29 @@ func TestDefaultSeverities(t *testing.T) {
 
 	for _, rr := range lint.ResolveRules(lint.DefaultRegistry, config.NewConfig()) {
 		assert.Equal(t, config.SeverityWarning, rr.Severity, "%s without configuration", rr.Rule.ID())
+	}
+}
+
+// TestRulesBuildFindingsAtDefaultSeverity applies each rule directly, as a
+// library caller does, to the inputs of its golden cases, and checks that
+// every finding has the rule's default severity. The engine replaces each
+// finding's severity with the resolved one, so the goldens cannot see a
+// rule that builds its findings at another severity.
+func TestRulesBuildFindingsAtDefaultSeverity(t *testing.T) {
+	for _, tc := range discoverTestCases(t, testdataDir(t)) {
+		if tc.IsRealWorld || tc.RuleID == "" {
+			continue
+		}
+		t.Run(tc.Name, func(t *testing.T) {
+			rule, ok := lint.DefaultRegistry.GetByID(tc.RuleID)
+			require.True(t, ok, "rule %s", tc.RuleID)
+			input, err := os.ReadFile(tc.InputPath)
+			require.NoError(t, err)
+			options := mustGoldenRun(t, tc).cfg.Rules[tc.RuleID].Options
+			for _, diag := range applyRuleWithOptions(t, rule, string(input), options) {
+				assert.Equal(t, rule.DefaultSeverity(), diag.Severity, "line %d", diag.StartLine)
+			}
+		})
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/clipperhouse/displaywidth"
+	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -87,7 +88,9 @@ func (r *TableColumnStyleRule) dividerSpacingDiagnostic(
 	ctx *lint.RuleContext, line, column int, style ColumnStyle,
 ) lint.Diagnostic {
 	pos := mdast.SourcePosition{StartLine: line, EndLine: line, StartColumn: column + 1, EndColumn: column + 2}
-	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Table pipe spacing does not match style "+string(style)).Build()
+	return lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, "Table pipe spacing does not match style "+string(style)).
+		WithSeverity(config.SeverityWarning).
+		Build()
 }
 
 func (r *TableColumnStyleRule) checkDividerAlignment(ctx *lint.RuleContext, headerLine, rowLine int) []lint.Diagnostic {
@@ -109,7 +112,9 @@ func (r *TableColumnStyleRule) checkDividerAlignment(ctx *lint.RuleContext, head
 		}
 		pos := mdast.SourcePosition{StartLine: rowLine, EndLine: rowLine, StartColumn: column + 1, EndColumn: column + 2}
 		diags = append(diags, lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos,
-			"Table pipe does not align with header").Build())
+			"Table pipe does not align with header").
+			WithSeverity(config.SeverityWarning).
+			Build())
 	}
 	return diags
 }

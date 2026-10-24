@@ -296,18 +296,6 @@ Text after.`,
 	}
 }
 
-// TestTableBlankLinesRule_ReportsWarnings checks that MD058 builds its
-// findings as warnings, the severity that every rule resolves to without
-// configuration.
-func TestTableBlankLinesRule_ReportsWarnings(t *testing.T) {
-	diags := applyRuleWithOptions(t, NewTableBlankLinesRule(), "Text\n| a | b |\n| - | - |\n# Heading\n", nil)
-
-	require.Len(t, diags, 2)
-	for _, diag := range diags {
-		assert.Equal(t, config.SeverityWarning, diag.Severity, "line %d", diag.StartLine)
-	}
-}
-
 // TestTableBlankLinesRule_FixKeepsListsTight verifies that MD058 reports a
 // table in a tight list without a fix when the blank line it needs would
 // separate two items of the list or two blocks of an item, which makes the
