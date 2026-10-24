@@ -682,15 +682,17 @@ lists them under each file's `notices`, and SARIF output records them as
 Positions stay byte offsets inside the linter. Reporters convert them at the
 boundary, from the file snapshot the diagnostics were computed against.
 `internal/display` turns byte columns into 1-based columns counted in UTF-16
-code units, the unit of markdownlint and of SARIF's default `columnKind`,
-skipping a leading byte order mark, and paths into paths relative to the
-working directory. The runner sorts each file's findings before any reporter
-sees them, so a `display.Columns` converter that continues along a line
-decodes each line once for the start columns and once for the end columns.
-The text reporter places its caret by the display cells of the text before
-the column, so it stays under the target after wide characters and tabs.
-`--rule-format` names rules by name, ID or both in text, table and summary
-output.
+code units, the unit of markdownlint and the one SARIF logs declare as
+`columnKind: utf16CodeUnits`, skipping a leading byte order mark, and paths
+into paths relative to the working directory. Ill-formed UTF-8 counts as
+Node decodes it, one column for each maximal ill-formed sequence. A
+`display.Columns` converter serves all the findings of one file in any
+order: it decodes a short line for each lookup and a long line once, keeping
+a mark every 256 bytes that later lookups resume from. The text reporter
+places its caret by the display cells of the text before the column, so it
+stays under the target after wide characters and tabs. The runner sorts each
+file's findings before any reporter sees them. `--rule-format` names rules
+by name, ID or both in text, table and summary output.
 
 ## Design Patterns
 
