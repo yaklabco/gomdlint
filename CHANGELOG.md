@@ -87,10 +87,14 @@ formats change. The first entries under Changed may need action.
 - Table rows start with an `E`, `W` or `I` severity marker, and the legend
   lists only the markers that the rows show, so a table reads the same
   without colour.
-- Columns count characters instead of bytes in text, table and JSON output,
-  so a finding after multibyte text points at its target. JSON fix offsets
-  stay byte offsets. Every human-readable format shows a path relative to the
-  working directory when the file lies inside it.
+- Columns count UTF-16 code units instead of bytes in text, table, JSON and
+  SARIF output, the unit markdownlint and markdownlint-cli2 report. A finding
+  after multibyte text points at its target, and an emoji or another
+  character outside the Basic Multilingual Plane counts two columns, as in
+  markdownlint. The caret under a source line in text output still sits
+  under the target. JSON fix offsets stay byte offsets. Every human-readable
+  format shows a path relative to the working directory when the file lies
+  inside it.
 - Fixes are checked before they are applied. Each fixing rule parses the
   document again with its fixes and withholds any fix that would change how
   the document renders in a way the rule does not intend. The finding is
