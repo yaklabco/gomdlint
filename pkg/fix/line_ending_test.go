@@ -157,6 +157,26 @@ func TestLineEndingWriter(t *testing.T) {
 			edits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "x\ny\nz"}}, want: []string{"x\ry\nz"}, wantOK: true,
 		},
 		{
+			// Writing the replaced endings in order would put a carriage
+			// return right before a line feed of the text, one CRLF line
+			// ending where the text has two, so the text takes the dominant
+			// ending.
+			name: "kept endings that would join inside the text", content: "a\rb\nc\rd\r",
+			edits: []fix.TextEdit{{StartOffset: 0, EndOffset: 5, NewText: "x\n\ny"}}, want: []string{"x\r\ry"}, wantOK: true,
+		},
+		{
+			name: "kept endings that would join a blank line of a list", content: "  - a\r   \n  - b\rc\r",
+			edits: []fix.TextEdit{{StartOffset: 0, EndOffset: 15, NewText: "- a\n\n- b"}}, want: []string{"- a\r\r- b"}, wantOK: true,
+		},
+		{
+			name: "newline added at the end of a line feed file after a final carriage return", content: "a\nb\nc\r",
+			edits: []fix.TextEdit{insert(6, "\n")}, want: []string{"\r"}, wantOK: true,
+		},
+		{
+			name: "carriage return file with a byte order mark", content: "\ufeffa\rb\r",
+			edits: []fix.TextEdit{insert(5, "\n")}, want: []string{"\r"}, wantOK: true,
+		},
+		{
 			name: "lines added take the dominant ending", content: "a\rb\r",
 			edits: []fix.TextEdit{{StartOffset: 0, EndOffset: 3, NewText: "x\ny\nz"}}, want: []string{"x\ry\rz"}, wantOK: true,
 		},

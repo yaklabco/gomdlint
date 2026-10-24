@@ -370,15 +370,15 @@ nothing more, as before. In a file with one, or in a pass that writes such
 carriage returns, a carriage return and a line feed after it would make one
 CRLF line ending, so the writer keeps them apart. An edit that rewrites
 lines, holding as many line endings as the text it replaces, writes the
-line endings it replaces, in order, unless that would join a line ending
-at either end of the edit. Where the dominant ending would make one CRLF
-line ending with a carriage return before the edit or a line feed after
-it, the edit's newlines are written as a carriage return or a line feed
-instead. A fix that would still put a carriage return that ends a line
-right before a line feed, as a deletion between the two does, is withheld.
-Fixes that would do it together are resolved apart (`resolveApart`): the
-one that comes last is skipped, like a fix in conflict, and waits for the
-next pass.
+line endings it replaces, in order, unless that would join two line
+endings, inside the edit or at either end of it. Where the dominant ending
+would make one CRLF line ending with a carriage return before the edit or
+a line feed after it, the edit's newlines are written as a carriage return
+or a line feed instead. A fix that would still put a carriage return that
+ends a line right before a line feed, as a deletion between the two does,
+is withheld. Fixes that would do it together are resolved apart
+(`resolveApart`): the one that comes last is skipped, like a fix in
+conflict, and waits for the next pass.
 
 The engine then withholds every fix that changes or makes a possible task
 list checkbox (`pkg/lint/checkbox_guard.go`), whatever rule offers it, and

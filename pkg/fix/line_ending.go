@@ -118,12 +118,14 @@ func (w *LineEndingWriter) KeepsApart() bool {
 // them apart. An edit whose text holds as many line endings as the content
 // it replaces, as an edit that rewrites lines does, writes them as the line
 // endings it replaces, in order, so that each line it rewrites keeps its own
-// ending, unless that would join a line ending at either end of the edit.
-// Otherwise, when the dominant ending is LF and the text starts with a
+// ending, unless that would join two line endings, inside the edit or at
+// either end of it. Otherwise, when the dominant ending is LF and the text starts with a
 // newline right after a carriage return, or the dominant ending is CR and
 // the text ends with a newline right before a line feed, the text's
-// newlines are written as carriage returns or as line feeds instead.
-// WriteNewlines reports false when the edits still put a carriage return
+// newlines are written as carriage returns or as line feeds instead. All of
+// one text's newlines get the same ending, so a text that would need a
+// carriage return at its start and a line feed at its end still joins at
+// one of them. WriteNewlines reports false when the edits still put a carriage return
 // that ends a line right before a line feed, as a deletion of the text
 // between the two does: applied, such edits would join two line endings
 // into one. Where KeepsApart reports false, the edits get the dominant
@@ -173,7 +175,9 @@ func (w *LineEndingWriter) beforeLineFeed(edit TextEdit) bool {
 
 // keepLineEndings returns text with its line endings written as those of
 // replaced, in order, when both hold the same number of line endings, one or
-// more. ok is false otherwise.
+// more, and the result keeps them apart. ok is false otherwise, as when a
+// carriage return written for one line ending would come right before a line
+// feed written for the next, making one CRLF line ending of two.
 func keepLineEndings(text string, replaced []byte) (string, bool) {
 	want := lineEndingsOf(replaced)
 	have := lineEndingsOf([]byte(text))
@@ -189,7 +193,11 @@ func keepLineEndings(text string, replaced []byte) (string, bool) {
 		pos = ending.start + len(ending.text)
 	}
 	builder.WriteString(text[pos:])
-	return builder.String(), true
+	kept := builder.String()
+	if len(lineEndingsOf([]byte(kept))) != len(want) {
+		return "", false
+	}
+	return kept, true
 }
 
 // endingAt is a line ending of a text, LineEndingLF, LineEndingCRLF or
