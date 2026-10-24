@@ -650,8 +650,8 @@ read, so each gets a warning, in the options file that applies and in a
 nearer one that the search passed. gomdlint cannot run a JavaScript options
 file, `.markdownlint-cli2.cjs` or `.markdownlint-cli2.mjs`, which gets a
 warning too. markdownlint-cli2 merges the options files of the directories
-between the working directory and each file, and gomdlint reads only the
-nearest one.
+between the working directory and each file, `config` keys included, and
+gomdlint reads the `config` key of only one of them.
 
 YAML reads as js-yaml 5 reads it for markdownlint-cli2, with the core
 schema of YAML 1.2. So `yes`, `off` and `0b1` are strings, which turn a
@@ -980,6 +980,11 @@ Some of its fix checks are also stricter than they need to be.
   maximum below 1 as 1. markdownlint compares lengths and counts with a
   fractional limit, such as `"line_length": 100.5`, as it is, and gomdlint
   ignores it with a warning.
+- markdownlint rejects a set of custom rules in which two names, or a
+  name and a tag, are equal in upper case. gomdlint's Go API accepts such
+  rules: of two rules with the same name, the one registered last keeps
+  it, and a word that is both a name and a tag names the rule and the
+  tag's rules.
 - markdownlint's rules read options of other types with JavaScript's
   conversions too, such as `"strict": "false"`, which reads as true, and a
   number in a list of strings, which reads as its text. gomdlint reads only
