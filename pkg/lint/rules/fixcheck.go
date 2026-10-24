@@ -114,6 +114,8 @@ type fixChecker struct {
 	// checkedContent).
 	content []byte
 	pending []pendingFix
+	// offered holds the edits of the pending fixes, by editsKey.
+	offered map[string]bool
 	// before is the outline of the document as it is, parsed when first
 	// needed; ready reports whether that parse worked.
 	before *docOutline
@@ -144,11 +146,21 @@ func newFixChecker(ctx *lint.RuleContext) *fixChecker {
 }
 
 // offer records a fix and returns builder, so that a diagnostic carries its
-// edits until filter checks them.
+// edits until filter checks them. A fix offered again with the same edits,
+// as for several findings that one change fixes, is checked once: filter
+// keeps or drops it for every diagnostic that carries it.
 func (c *fixChecker) offer(builder *fix.EditBuilder, intent fixIntent) *fix.EditBuilder {
 	if builder == nil || len(builder.Edits) == 0 {
 		return nil
 	}
+	key := editsKey(builder.Edits)
+	if c.offered[key] {
+		return builder
+	}
+	if c.offered == nil {
+		c.offered = make(map[string]bool)
+	}
+	c.offered[key] = true
 	c.pending = append(c.pending, pendingFix{edits: slices.Clone(builder.Edits), intent: intent})
 	return builder
 }

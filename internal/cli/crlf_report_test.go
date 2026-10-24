@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,11 +18,37 @@ import (
 // crlfFixDocument has findings for each kind of fix, all fixed in one pass
 // without conflicts: a blank line inserted below the heading, trailing
 // spaces deleted, two extra blank lines deleted by a fix each, an emphasis
-// style rewritten with two edits, and the final newline added.
+// style rewritten with two edits, which both of its findings carry, and
+// the final newline added.
 const crlfFixDocument = "# Title\r\nSome text   \r\n\r\n\r\n\r\nText *one* and _two_.\r\nEnd"
 
-// jsonReportedEdits returns the fix edits of every diagnostic in a JSON
-// report.
+// distinctFixes collects the edits of reported fixes, each fix once.
+// Findings that one change fixes, such as both markers of an emphasis,
+// carry the same fix, which a consumer applies once.
+type distinctFixes struct {
+	edits []fix.TextEdit
+	seen  map[string]bool
+}
+
+// add collects the edits of one finding's fix, unless an earlier finding
+// carried the same fix.
+func (d *distinctFixes) add(edits []fix.TextEdit) {
+	if len(edits) == 0 {
+		return
+	}
+	key := fmt.Sprint(edits)
+	if d.seen[key] {
+		return
+	}
+	if d.seen == nil {
+		d.seen = make(map[string]bool)
+	}
+	d.seen[key] = true
+	d.edits = append(d.edits, edits...)
+}
+
+// jsonReportedEdits returns the edits of the distinct fixes that the
+// diagnostics in a JSON report carry.
 func jsonReportedEdits(t *testing.T, report string) []fix.TextEdit {
 	t.Helper()
 
@@ -38,21 +65,23 @@ func jsonReportedEdits(t *testing.T, report string) []fix.TextEdit {
 	}
 	require.NoError(t, json.Unmarshal([]byte(report), &parsed), report)
 
-	var edits []fix.TextEdit
+	var fixes distinctFixes
 	for _, file := range parsed.Files {
 		for _, diag := range file.Diagnostics {
+			var edits []fix.TextEdit
 			for _, edit := range diag.Fixes {
 				edits = append(edits, fix.TextEdit{StartOffset: edit.StartOffset, EndOffset: edit.EndOffset, NewText: edit.NewText})
 			}
+			fixes.add(edits)
 		}
 	}
-	return edits
+	return fixes.edits
 }
 
-// sarifReportedEdits returns the replacements of every fix in a SARIF log
-// as byte edits of content. Columns count UTF-16 code units, and content is
-// ASCII here, so a column is a byte offset into its line, line terminator
-// included.
+// sarifReportedEdits returns the replacements of the distinct fixes in a
+// SARIF log as byte edits of content. Columns count UTF-16 code units, and
+// content is ASCII here, so a column is a byte offset into its line, line
+// terminator included.
 func sarifReportedEdits(t *testing.T, log string, content []byte) []fix.TextEdit {
 	t.Helper()
 
@@ -90,9 +119,10 @@ func sarifReportedEdits(t *testing.T, log string, content []byte) []fix.TextEdit
 		return lines[line-1].StartOffset + column - 1
 	}
 
-	var edits []fix.TextEdit
+	var fixes distinctFixes
 	for _, result := range parsed.Runs[0].Results {
 		for _, proposed := range result.Fixes {
+			var edits []fix.TextEdit
 			for _, change := range proposed.ArtifactChanges {
 				for _, replacement := range change.Replacements {
 					region := replacement.DeletedRegion
@@ -103,9 +133,10 @@ func sarifReportedEdits(t *testing.T, log string, content []byte) []fix.TextEdit
 					})
 				}
 			}
+			fixes.add(edits)
 		}
 	}
-	return edits
+	return fixes.edits
 }
 
 // applyReported applies reported edits to content, as a consumer of the

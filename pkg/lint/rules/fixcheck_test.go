@@ -309,6 +309,28 @@ func TestFixChecker(t *testing.T) {
 	assert.Equal(t, "# A\n\nText\n\n- a\n- # B\n\n# C\n\nMore\n", applyAllEdits(t, input, diags))
 }
 
+// TestFixCheckerChecksASharedFixOnce checks that a fix offered for several
+// findings, as MD049 offers the fix that changes both markers of an
+// emphasis for each marker, is checked once and kept for every finding.
+func TestFixCheckerChecksASharedFixOnce(t *testing.T) {
+	input := "# Title\n\n*a* and _b_ here.\n"
+	ctx := fixCheckContext(t, input)
+	checker := newFixChecker(ctx)
+	builder := fix.NewEditBuilder()
+	builder.ReplaceRange(17, 18, "*")
+	builder.ReplaceRange(19, 20, "*")
+	diags := make([]lint.Diagnostic, 2)
+	for idx := range diags {
+		diags[idx] = lint.NewDiagnosticAt("MD049", ctx.File.Path, mdast.SourcePosition{StartLine: 3, StartColumn: 1}, "x").
+			WithFix(checker.offer(builder, fixIntent{local: true})).
+			Build()
+	}
+	assert.Len(t, checker.pending, 1, "the fix is checked once")
+	diags = checker.filter(diags)
+	assert.True(t, diags[0].HasFix())
+	assert.True(t, diags[1].HasFix())
+}
+
 // TestDocumentKept verifies the whole document check: front matter, links
 // that resolve through distant reference definitions, and fragment links.
 func TestDocumentKept(t *testing.T) {

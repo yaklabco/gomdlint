@@ -326,7 +326,7 @@ func TestNoMultipleSpaceClosedATXRule(t *testing.T) {
 		{
 			name:      "multiple spaces both sides",
 			input:     "#  Heading  #\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "# Heading #\n",
 		},
 		{
@@ -344,7 +344,7 @@ func TestNoMultipleSpaceClosedATXRule(t *testing.T) {
 		{
 			name:      "level 2 multiple spaces",
 			input:     "##  Heading  ##\n",
-			wantDiags: 1,
+			wantDiags: 2,
 			wantFix:   "## Heading ##\n",
 		},
 		{
@@ -465,7 +465,7 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			name:      "MD021 reports closed headings",
 			rule:      NewNoMultipleSpaceClosedATXRule(),
 			input:     "##  Spaced heading  ##\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFixed: "## Spaced heading ##\n",
 		},
 		{
@@ -486,7 +486,7 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			name:      "MD021 in a blockquote",
 			rule:      NewNoMultipleSpaceClosedATXRule(),
 			input:     "> #  Quoted  #\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFixed: "> # Quoted #\n",
 		},
 		{name: "MD019 skips HTML comments", rule: NewNoMultipleSpaceATXRule(), input: "<!--\n##  x\n-->\n", wantLines: []int{}},
@@ -499,11 +499,20 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			wantFixed: "## Learn C\\#\n",
 		},
 		{
+			// Like markdownlint, the fix deletes the characters after the
+			// first, which may be a tab.
 			name:      "MD019 with tabs",
 			rule:      NewNoMultipleSpaceATXRule(),
-			input:     "#\t\tTabbed\n",
-			wantLines: []int{1},
-			wantFixed: "# Tabbed\n",
+			input:     "#\t\tTabbed\n\n##  \tMixed\n",
+			wantLines: []int{1, 3},
+			wantFixed: "#\tTabbed\n\n## Mixed\n",
+		},
+		{
+			name:      "MD021 with tabs",
+			rule:      NewNoMultipleSpaceClosedATXRule(),
+			input:     "#\t\tTabbed heading\t\t#\n",
+			wantLines: []int{1, 1},
+			wantFixed: "#\tTabbed heading\t#\n",
 		},
 		{
 			name:      "MD021 only right side",
@@ -521,10 +530,12 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			wantFixed: "## \n",
 		},
 		{
+			// The spaces of an empty closed heading are on both sides, so
+			// markdownlint reports them twice, and both findings share a fix.
 			name:      "MD021 empty closed heading",
 			rule:      NewNoMultipleSpaceClosedATXRule(),
 			input:     "##  ##\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFixed: "## ##\n",
 		},
 		{name: "MD019 skips an empty closed heading", rule: NewNoMultipleSpaceATXRule(), input: "##  ##\n", wantLines: []int{}},
@@ -539,7 +550,7 @@ func TestMultipleSpaceATXRules_MarkdownlintParity(t *testing.T) {
 			name:      "MD021 after a byte order mark",
 			rule:      NewNoMultipleSpaceClosedATXRule(),
 			input:     "\uFEFF#  Closed  #\n",
-			wantLines: []int{1},
+			wantLines: []int{1, 1},
 			wantFixed: "\uFEFF# Closed #\n",
 		},
 	}
@@ -605,6 +616,31 @@ func TestNoMissingSpaceClosedATXRule_MarkdownlintColumns(t *testing.T) {
 	other := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), "\uFEFF# Right#\n\n# Caf\u00e9#\n", nil)
 	assert.Equal(t, [][2]int{{1, 10}, {3, 6}}, diagPositions(other),
 		"a byte order mark keeps its bytes before the column, and the column starts a character")
+
+	// A finding for a missing opening space covers the opening hashes and
+	// the character after them, and one for a closing space runs through
+	// the closing hashes.
+	ends := applyRuleWithOptions(t, NewNoMissingSpaceClosedATXRule(), "#Text #\n\n##Two ##\n\n## Right##\n", nil)
+	require.Len(t, ends, 3)
+	assert.Equal(t, []int{3, 4, 11}, []int{ends[0].EndColumn, ends[1].EndColumn, ends[2].EndColumn})
+}
+
+// TestNoMultipleSpaceClosedATXRule_MarkdownlintSides checks MD021 against
+// markdownlint 0.41.1, which reports each side of a closed heading that has
+// extra spaces on its own, at the first extra space, and fixes each side on
+// its own.
+func TestNoMultipleSpaceClosedATXRule_MarkdownlintSides(t *testing.T) {
+	diags := applyRuleWithOptions(t, NewNoMultipleSpaceClosedATXRule(), headingSpacesMarkdown, nil)
+	assert.Equal(t, [][2]int{{21, 3}, {21, 15}, {23, 4}, {25, 15}, {27, 6}, {27, 21}}, diagPositions(diags))
+
+	const both = "#  Both sides  #\n"
+	diags = applyRuleWithOptions(t, NewNoMultipleSpaceClosedATXRule(), both, nil)
+	require.Len(t, diags, 2)
+	assert.Equal(t, "Multiple spaces after opening hashes on closed ATX style heading", diags[0].Message)
+	assert.Equal(t, "Multiple spaces before closing hashes on closed ATX style heading", diags[1].Message)
+	assert.Equal(t, "# Both sides  #\n", applyAllEdits(t, both, diags[:1]), "the first finding fixes its side only")
+	assert.Equal(t, "#  Both sides #\n", applyAllEdits(t, both, diags[1:]), "the second finding fixes its side only")
+	assert.Equal(t, "# Both sides #\n", applyAllEdits(t, both, diags))
 }
 
 // TestNoTrailingPunctuationRule_MarkdownlintColumns checks that MD026

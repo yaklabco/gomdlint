@@ -280,9 +280,7 @@ func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 		for _, marker := range markers {
 			runs := byMarker[marker]
 			for i := 0; i+1 < len(runs); i += 2 {
-				if diag, ok := r.checkPair(ctx, checker, node, runs[i], runs[i+1]); ok {
-					diags = append(diags, diag)
-				}
+				diags = append(diags, r.checkPair(ctx, checker, node, runs[i], runs[i+1])...)
 			}
 		}
 		return nil
@@ -301,45 +299,56 @@ func (r *NoSpaceInEmphasisRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic,
 }
 
 // checkPair reports a pair of runs in block with whitespace just inside them.
+// Like markdownlint, the spaces on each side are a finding of their own,
+// which covers them. Spaces deleted on one side alone would leave the runs
+// literal, so each finding carries the fix that deletes the spaces on both.
 func (r *NoSpaceInEmphasisRule) checkPair(
 	ctx *lint.RuleContext,
 	checker *fixChecker,
 	block *mdast.Node,
 	open, closing delimiterRun,
-) (lint.Diagnostic, bool) {
+) []lint.Diagnostic {
 	file := ctx.File
 	openSpaces, openBad := spacesAfterRun(file, open)
 	closeSpaces, closeBad := spacesBeforeRun(file, closing)
 	if !openBad && !closeBad {
-		return lint.Diagnostic{}, false
+		return nil
 	}
 
 	// The fix turns the runs into emphasis around the text between them.
 	builder := fix.NewEditBuilder()
 	subs := []textSub{{rng: open.rng(), text: emphasisTokens(len(open.marker), false)}}
-	reported := closing
+	var reported []mdast.SourceRange
 	if openBad {
 		builder.Delete(openSpaces.StartOffset, openSpaces.EndOffset)
 		subs = append(subs, textSub{rng: openSpaces})
-		reported = open
+		reported = append(reported, openSpaces)
 	}
 	if closeBad {
 		builder.Delete(closeSpaces.StartOffset, closeSpaces.EndOffset)
 		subs = append(subs, textSub{rng: closeSpaces})
+		reported = append(reported, closeSpaces)
 	}
 	subs = append(subs, textSub{rng: closing.rng(), text: emphasisTokens(len(closing.marker), true)})
 
-	pos := rangePosition(file, mdast.SourceRange{StartOffset: reported.start, EndOffset: reported.end})
-	diag := lint.NewDiagnosticAt(r.ID(), file.Path, pos, "Spaces inside emphasis markers").
-		WithSeverity(config.SeverityWarning).
-		WithSuggestion("Remove spaces from inside emphasis markers")
 	// Inside square brackets the new emphasis could change a link label, so
 	// that the text would match a definition it did not match before.
+	var offered *fix.EditBuilder
 	if containsLetter(file.Content[open.end:closing.start]) && !spacedSingleAsterisks(file, open, closing) &&
 		!insideBrackets(file, block, open.start, closing.end) {
-		diag = diag.WithFix(checker.offer(builder, changeText(block, subs...).withLocal(true)))
+		offered = checker.offer(builder, changeText(block, subs...).withLocal(true))
 	}
-	return diag.Build(), true
+	diags := make([]lint.Diagnostic, 0, len(reported))
+	for _, spaces := range reported {
+		diag := lint.NewDiagnosticAt(r.ID(), file.Path, rangePosition(file, spaces), "Spaces inside emphasis markers").
+			WithSeverity(config.SeverityWarning).
+			WithSuggestion("Remove spaces from inside emphasis markers")
+		if offered != nil {
+			diag = diag.WithFix(offered)
+		}
+		diags = append(diags, diag.Build())
+	}
+	return diags
 }
 
 // inLinkLabel reports whether inline node could be part of a link label: it
@@ -611,9 +620,11 @@ func (r *StrongStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error
 // (markerLength 2) like markdownlint: the style option is asterisk,
 // underscore or consistent (the style of the first emphasis), and emphasis
 // inside a word is never reported for the underscore style, because
-// underscores cannot mark emphasis there.
+// underscores cannot mark emphasis there. Each delimiter run of an emphasis
+// in the wrong style is a finding of its own.
 //
-// The fix replaces both delimiter runs. It is withheld when the new markers
+// The fix replaces both delimiter runs, and both findings of an emphasis
+// carry it, so the engine applies it once. It is withheld when the new markers
 // could pair differently: when the emphasized text holds the target marker,
 // when a target marker is adjacent outside, or when an underscore would sit
 // next to a letter or digit.
@@ -655,22 +666,27 @@ func checkEmphasisStyle(
 			continue
 		}
 
-		diagBuilder := lint.NewDiagnostic(ruleID, node,
-			fmt.Sprintf("%s style %q does not match expected %q", label, actual, style)).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion(fmt.Sprintf("Use %q for all %s", style, suggestionNoun))
 		// New markers in a link label would change the label, so no fix is
 		// offered for emphasis that could be part of one.
 		var builder *fix.EditBuilder
 		if !inLinkLabel(ctx, node) {
 			builder = checker.offer(emphasisStyleFix(ctx.File, node, open, closing, style), fixIntent{local: true})
 		}
-		if builder != nil {
-			diagBuilder = diagBuilder.WithFix(builder)
+		// Like markdownlint, each marker is reported on its own. Neither can
+		// change alone, so both findings carry the fix that changes both.
+		for _, marker := range []mdast.SourceRange{open, closing} {
+			diagBuilder := lint.NewDiagnosticAt(ruleID, ctx.File.Path, rangePosition(ctx.File, marker),
+				fmt.Sprintf("%s style %q does not match expected %q", label, actual, style)).
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion(fmt.Sprintf("Use %q for all %s", style, suggestionNoun))
+			if builder != nil {
+				diagBuilder = diagBuilder.WithFix(builder)
+			}
+			diags = append(diags, diagBuilder.Build())
 		}
-		diags = append(diags, diagBuilder.Build())
 	}
 
+	sortDiagnosticsByPosition(diags)
 	return checker.filter(diags), nil
 }
 

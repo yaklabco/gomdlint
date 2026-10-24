@@ -251,12 +251,19 @@ func TestHeadingStyleRule(t *testing.T) {
 	}
 }
 
-// applyAllEdits applies every fix edit from diags to input.
+// applyAllEdits applies the fixes of diags to input, a fix that several
+// diagnostics share once.
 func applyAllEdits(t *testing.T, input string, diags []lint.Diagnostic) string {
 	t.Helper()
 	var edits []fix.TextEdit
+	// Findings that share a fix carry the same edits, which the engine
+	// applies once.
+	shared := make(map[string]bool)
 	for _, diag := range diags {
-		edits = append(edits, diag.FixEdits...)
+		if key := editsKey(diag.FixEdits); !shared[key] {
+			shared[key] = true
+			edits = append(edits, diag.FixEdits...)
+		}
 	}
 	prepared, err := fix.PrepareEdits(edits, len(input))
 	require.NoError(t, err)

@@ -539,11 +539,10 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 	list *mdast.Node,
 	pos mdast.SourcePosition,
 ) *lint.Diagnostic {
+	// Like markdownlint, a list right after another list is reported too,
+	// and both findings' fixes insert the same blank line, which the engine
+	// inserts once.
 	if pos.StartLine <= 1 || isBlankAroundList(ctx.File, list, pos.StartLine-1) {
-		return nil
-	}
-	// A preceding list reports this same boundary from its trailing edge.
-	if list.Prev != nil && list.Prev.Kind == mdast.NodeList {
 		return nil
 	}
 
@@ -570,28 +569,21 @@ func (r *BlanksAroundListsRule) checkBlankBefore(
 // checkBlankAfter checks for a missing blank line after the list. The list
 // span ends at the end of its last line, so the line after it is the first
 // line that follows the list, whether or not the list is the last block of
-// its container.
+// its container. Like markdownlint, the finding is on that last line, which
+// may be a lazy continuation line or a closing fence.
 func (r *BlanksAroundListsRule) checkBlankAfter(ctx *lint.RuleContext, list *mdast.Node) *lint.Diagnostic {
 	lastLine := nodeLastLine(list)
 	if lastLine >= len(ctx.File.Lines) || isBlankAroundList(ctx.File, list, lastLine+1) {
 		return nil
 	}
 
-	// Report on the last list item's marker line.
-	diagLine := lastLine
-	if lastItem := list.LastChild; lastItem != nil {
-		if itemPos := lastItem.SourcePosition(); itemPos.IsValid() {
-			diagLine = itemPos.StartLine
-		}
-	}
-
 	builder := fix.NewEditBuilder()
 	builder.Insert(ctx.File.Lines[lastLine-1].EndOffset, lint.BlankLineText(ctx.File, list))
 
 	diagPos := mdast.SourcePosition{
-		StartLine:   diagLine,
+		StartLine:   lastLine,
 		StartColumn: 1,
-		EndLine:     diagLine,
+		EndLine:     lastLine,
 		EndColumn:   1,
 	}
 

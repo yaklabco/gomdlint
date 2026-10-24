@@ -708,3 +708,98 @@ func TestEngineHeadingFixHonorsSuppressedBoundaryRequirement(t *testing.T) {
 	require.Len(t, result.Diagnostics, 1)
 	require.Equal(t, "<!-- markdownlint-disable-next-line MD022 -->\n# Title\n\n## Section\n", string(fix.ApplyEdits([]byte(input), result.Edits)))
 }
+
+// A fix that several findings share changes the text of each of their
+// lines, so a finding on an enabled line keeps no fix that would change a
+// line where the rule is disabled. markdownlint never changes such a line.
+func TestEngineWithholdsFixThatChangesDisabledLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		rule     lint.Rule
+		input    string
+		wantLine int
+	}{
+		{
+			name:     "MD049 opening marker disabled",
+			rule:     rules.NewEmphasisStyleRule(),
+			input:    "Text *x* and _a <!-- markdownlint-disable-line MD049 -->\nb_ more.\n",
+			wantLine: 2,
+		},
+		{
+			name:     "MD049 closing marker disabled",
+			rule:     rules.NewEmphasisStyleRule(),
+			input:    "Text *x* and _a\nb_ more. <!-- markdownlint-disable-line MD049 -->\n",
+			wantLine: 1,
+		},
+		{
+			name:     "MD037 opening side disabled",
+			rule:     rules.NewNoSpaceInEmphasisRule(),
+			input:    "More _ a <!-- markdownlint-disable-line MD037 -->\nb _ x.\n",
+			wantLine: 2,
+		},
+		{
+			name:     "MD037 closing side disabled",
+			rule:     rules.NewNoSpaceInEmphasisRule(),
+			input:    "More _ a\nb _ x. <!-- markdownlint-disable-line MD037 -->\n",
+			wantLine: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := lint.NewRegistry()
+			registry.Register(tt.rule)
+			cfg := config.NewConfig()
+			cfg.Fix = true
+			result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(tt.input), cfg)
+			require.NoError(t, err)
+			require.Len(t, result.Diagnostics, 1)
+			assert.Equal(t, tt.wantLine, result.Diagnostics[0].StartLine)
+			assert.False(t, result.Diagnostics[0].HasFix(), "the fix would change the disabled line")
+			assert.Empty(t, result.Edits)
+		})
+	}
+}
+
+// A fix next to a line where its rule is disabled keeps the finding's fix
+// when it changes no text of that line.
+func TestEngineKeepsFixNextToDisabledLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		rule  lint.Rule
+		input string
+		want  string
+	}{
+		{
+			// The blank line goes between the disabled heading and the next.
+			name:  "MD022 blank line below a disabled heading",
+			rule:  rules.NewHeadingBlankLinesRule(),
+			input: "<!-- markdownlint-disable-next-line MD022 -->\n# Title\n## Section\n",
+			want:  "<!-- markdownlint-disable-next-line MD022 -->\n# Title\n\n## Section\n",
+		},
+		{
+			// MD012 deletes line 5 from the end of line 4, the disabled
+			// blank line, which keeps its text. markdownlint fixes it too.
+			name:  "MD012 blank line below a disabled blank line",
+			rule:  rules.NewMultipleBlankLinesRule(),
+			input: "# Title\n\n<!-- markdownlint-disable-next-line MD012 -->\n\n\nText.\n",
+			want:  "# Title\n\n<!-- markdownlint-disable-next-line MD012 -->\n\nText.\n",
+		},
+	}
+	endings := []struct{ name, ending string }{{"LF", "\n"}, {"CRLF", "\r\n"}, {"CR", "\r"}}
+	for _, tt := range tests {
+		for _, le := range endings {
+			t.Run(tt.name+" "+le.name, func(t *testing.T) {
+				input := strings.ReplaceAll(tt.input, "\n", le.ending)
+				want := strings.ReplaceAll(tt.want, "\n", le.ending)
+				registry := lint.NewRegistry()
+				registry.Register(tt.rule)
+				cfg := config.NewConfig()
+				cfg.Fix = true
+				result, err := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry).LintFile(context.Background(), "test.md", []byte(input), cfg)
+				require.NoError(t, err)
+				require.Len(t, result.Diagnostics, 1)
+				require.Equal(t, want, string(fix.ApplyEdits([]byte(input), result.Edits)))
+			})
+		}
+	}
+}

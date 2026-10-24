@@ -514,11 +514,11 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	{id: "MD049", name: "asterisks inside a word", phrase: "except * inside a word", input: "# Title\n\n_one_ a*two*b\n"},
 	{id: "MD050", name: "asterisks inside a word", phrase: "except ** inside a word", input: "# Title\n\n__one__ a**two**b\n"},
 	{
-		id: "MD049", name: "italic in a reference label", phrase: "the label of a reference link", want: []catalogFinding{{3, false}},
+		id: "MD049", name: "italic in a reference label", phrase: "the label of a reference link", want: []catalogFinding{{3, false}, {3, false}},
 		input: "# Title\n\n_first_ [*second*]\n\n[*second*]: /target\n",
 	},
 	{
-		id: "MD050", name: "bold in a reference label", phrase: "the label of a reference link", want: []catalogFinding{{3, false}},
+		id: "MD050", name: "bold in a reference label", phrase: "the label of a reference link", want: []catalogFinding{{3, false}, {3, false}},
 		input: "# Title\n\n__first__ [**second**]\n\n[**second**]: /target\n",
 	},
 
@@ -789,7 +789,7 @@ var catalogBehaviourCases = []catalogBehaviourCase{
 	},
 	{
 		id: "MD037", name: "markers inside square brackets", phrase: "It does the same inside square brackets",
-		input: "# Title\n\nNote [a ** b ** c] here.\n", want: []catalogFinding{{3, false}},
+		input: "# Title\n\nNote [a ** b ** c] here.\n", want: []catalogFinding{{3, false}, {3, false}},
 	},
 	{
 		id: "MD044", name: "name in a URL", phrase: "Outside URLs", options: map[string]any{"names": []any{"GitHub"}},

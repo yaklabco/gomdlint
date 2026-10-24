@@ -152,7 +152,7 @@ func NewNoMultipleSpaceATXRule() *NoMultipleSpaceATXRule {
 //
 // Like markdownlint, it checks parsed open ATX headings, including headings
 // in blockquotes and lists; closed headings are left to MD021. A finding
-// covers the spaces after the first, which the fix removes.
+// covers the spaces and tabs after the first, which the fix deletes.
 func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
@@ -171,11 +171,12 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 		spaces := parts.openSpace
 
-		// Build fix: replace multiple spaces with single space.
+		// Like markdownlint, the fix deletes the characters after the first.
+		extra := extraSpaces(spaces)
 		builder := fix.NewEditBuilder()
-		builder.ReplaceRange(spaces.StartOffset, spaces.EndOffset, " ")
+		builder.Delete(extra.StartOffset, extra.EndOffset)
 
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, extraSpaces(spaces)),
+		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, extra),
 			fmt.Sprintf("Multiple spaces (%d) after hash on ATX style heading", spaces.Len())).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion("Use a single space after the hash characters").
@@ -188,8 +189,9 @@ func (r *NoMultipleSpaceATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 }
 
 // extraSpaces returns the part of a run of spaces and tabs after its first
-// character, which markdownlint's MD019 and MD021 report: the characters
-// that one space would not need. The run holds one byte per character.
+// character, which markdownlint's MD019 and MD021 report and delete: the
+// characters that the first does not need. The run holds one byte per
+// character.
 func extraSpaces(run mdast.SourceRange) mdast.SourceRange {
 	return mdast.SourceRange{StartOffset: min(run.StartOffset+1, run.EndOffset), EndOffset: run.EndOffset}
 }
@@ -309,20 +311,20 @@ func (r *NoMissingSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagn
 			offered = checker.offer(builder, intent.withLocal(true))
 		}
 
-		// Like markdownlint, a finding points at the opening hashes when the
-		// space after them is missing, and otherwise at the character before
-		// the closing hashes.
-		start := 0
+		// Like markdownlint, a finding covers the opening hashes and the
+		// character after them when the space after them is missing, and
+		// otherwise the character before the closing hashes and those hashes.
+		_, after := utf8.DecodeRune(lineContent[len(openHashes):])
+		start, end := 0, len(openHashes)+after
 		if !missingOpenSpace {
 			_, size := utf8.DecodeLastRune(lineContent[:loc[2*closedATXClose]])
-			start = loc[2*closedATXClose] - size
+			start, end = loc[2*closedATXClose]-size, loc[2*closedATXClose+1]
 		}
-		closeEnd := bom + len(lineContent) - len(match[closedATXTrail])
 		pos := mdast.SourcePosition{
 			StartLine:   lineNum,
 			StartColumn: bom + start + 1,
 			EndLine:     lineNum,
-			EndColumn:   closeEnd + 1,
+			EndColumn:   bom + end + 1,
 		}
 
 		var msg string
@@ -367,7 +369,9 @@ func NewNoMultipleSpaceClosedATXRule() *NoMultipleSpaceClosedATXRule {
 // Apply checks for multiple spaces inside hashes on closed ATX headings.
 //
 // Like markdownlint, it checks parsed closed ATX headings, including headings
-// in blockquotes and lists.
+// in blockquotes and lists, and reports each side with extra spaces on its
+// own: a finding covers the spaces and tabs after the first on its side,
+// and its fix deletes them.
 func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.File == nil || ctx.Root == nil {
 		return nil, nil
@@ -384,41 +388,33 @@ func (r *NoMultipleSpaceClosedATXRule) Apply(ctx *lint.RuleContext) ([]lint.Diag
 		if !ok || parts.close.IsEmpty() {
 			continue
 		}
-		openSpaces, closeSpaces := parts.openSpace, parts.closeSpace
-
-		multipleOpenSpaces := openSpaces.Len() > 1
-		multipleCloseSpaces := closeSpaces.Len() > 1
-		if !multipleOpenSpaces && !multipleCloseSpaces {
-			continue
+		// The spaces of an empty heading are on both sides, so markdownlint
+		// reports them twice, and both findings share their fix.
+		closeSpace := parts.closeSpace
+		if parts.content.IsEmpty() {
+			closeSpace = parts.openSpace
 		}
-
-		// Build fix: normalize to single space on each side.
-		builder := fix.NewEditBuilder()
-		if multipleOpenSpaces {
-			builder.ReplaceRange(openSpaces.StartOffset, openSpaces.EndOffset, " ")
+		sides := []struct {
+			spaces mdast.SourceRange
+			msg    string
+		}{
+			{parts.openSpace, "Multiple spaces after opening hashes on closed ATX style heading"},
+			{closeSpace, "Multiple spaces before closing hashes on closed ATX style heading"},
 		}
-		if multipleCloseSpaces {
-			builder.ReplaceRange(closeSpaces.StartOffset, closeSpaces.EndOffset, " ")
+		for _, side := range sides {
+			if side.spaces.Len() < 2 {
+				continue
+			}
+			extra := extraSpaces(side.spaces)
+			builder := fix.NewEditBuilder()
+			builder.Delete(extra.StartOffset, extra.EndOffset)
+			diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, rangePosition(ctx.File, extra), side.msg).
+				WithSeverity(config.SeverityWarning).
+				WithSuggestion("Use a single space inside the hash characters").
+				WithFix(checker.offer(builder, fixIntent{local: true})).
+				Build()
+			diags = append(diags, diag)
 		}
-
-		pos := rangePosition(ctx.File, mdast.SourceRange{StartOffset: parts.open.StartOffset, EndOffset: parts.close.EndOffset})
-
-		var msg string
-		switch {
-		case multipleOpenSpaces && multipleCloseSpaces:
-			msg = "Multiple spaces inside hashes on closed ATX style heading (both sides)"
-		case multipleOpenSpaces:
-			msg = "Multiple spaces after opening hashes on closed ATX style heading"
-		default:
-			msg = "Multiple spaces before closing hashes on closed ATX style heading"
-		}
-
-		diag := lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg).
-			WithSeverity(config.SeverityWarning).
-			WithSuggestion("Use a single space inside the hash characters").
-			WithFix(checker.offer(builder, fixIntent{local: true})).
-			Build()
-		diags = append(diags, diag)
 	}
 
 	return checker.filter(diags), nil

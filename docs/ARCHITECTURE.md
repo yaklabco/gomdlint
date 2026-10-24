@@ -431,10 +431,23 @@ while other fixes wait.
 
 `fix.ResolveFixes` resolves the chosen fixes against each other. A fix is
 accepted whole or skipped whole, the earlier fix wins a conflict, and
-overlapping pure deletions merge. Before that, a rule's own blank-line
-insertions at one boundary merge into one edit that keeps a container
-prefix such as `>`. Skipped and deferred fixes are proposed again in the
-next pass.
+overlapping pure deletions merge. Before that, a rule's fixes with the same
+edits merge into one fix that fixes each of their findings
+(`mergeSharedFixes`), and a rule's own blank-line insertions at one
+boundary merge into one edit that keeps a container prefix such as `>`.
+Several findings carry the same fix when neither can be fixed alone, as
+MD037, MD049 and MD050 report both sides or markers of an emphasis, as
+markdownlint does, with the fix that changes both. Skipped and deferred
+fixes are proposed again in the next pass.
+
+A finding on a line where its rule is disabled is dropped, and a fix that
+changes the text of such a line is withheld from the findings that remain
+(`disabledLines` in `pkg/lint/engine.go`). Whole lines inserted at the
+start or end of a line's text leave that line as it was, so the blank line
+that a rule asks for next to a disabled line stays, and so does a deletion
+from the end of a disabled line's text through later lines, as MD012
+removes a blank line below a disabled one. Front matter counts as enabled
+here.
 
 `fix.GenerateDiff` builds the unified diff for `--format diff`. It compares
 lines with their line endings, using Myers' algorithm in linear space with a
@@ -466,7 +479,9 @@ rule's `"\n"` is a line ending of its own there, as the engine writes it.
   nesting, and its rendered text with inline markup, resolved link
   destinations and titles, and raw HTML byte for byte. It does not emulate
   heading anchors. In a document that may refer to them, no fix may change
-  the rendered text of a heading or add, remove or reorder headings.
+  the rendered text of a heading or add, remove or reorder headings. A fix
+  that several findings carry is checked once and kept or withheld for all
+  of them.
 - `fix_check.go` serves the list and whitespace rules, through
   `keepSafeFixes`: MD004, MD005, MD007, MD009, MD010, MD012, MD013, MD027,
   MD029, MD030, MD032 and MD047. It compares render signatures: the front

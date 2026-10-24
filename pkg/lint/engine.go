@@ -9,6 +9,7 @@ import (
 	"maps"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/yaklabco/gomdlint/internal/logging"
@@ -83,9 +84,9 @@ type FileResult struct {
 	Edits []fix.TextEdit
 
 	// AcceptedFixes is the number of diagnostics whose fixes Edits holds. It
-	// can differ from len(Edits): one fix may take several edits, and the
-	// blank-line fixes of several diagnostics of one rule at one boundary
-	// share one.
+	// can differ from len(Edits): one fix may take several edits, several
+	// diagnostics of one rule may share one fix, and the blank-line fixes of
+	// several diagnostics of one rule at one boundary share one.
 	AcceptedFixes int
 
 	// SkippedEdits contains the edits of fixes that were not applied because
@@ -269,6 +270,7 @@ func (e *Engine) lintFile(
 		}
 
 		var invalid []error
+		disabled := newDisabledLines(snapshot, ruleStates)
 		for _, diag := range diags {
 			line := diag.StartLine
 			if line > 0 && line < len(ruleStates) && !ruleStates[line] {
@@ -303,7 +305,7 @@ func (e *Engine) lintFile(
 				} else {
 					// A withheld fix leaves its finding without a fix.
 					diag.FixEdits = edits
-					if !offers.offer(diag.FixEdits) {
+					if !offers.offer(diag.FixEdits, disabled) {
 						diag.FixEdits = nil
 					}
 					// Collect the fix if auto-fix is enabled for this rule.
@@ -340,10 +342,14 @@ type fixOffers struct {
 // offer writes the newlines of a valid fix, edits, in the file's line
 // endings, in place, and reports whether the engine offers the fix. A fix
 // that would join a carriage return that ends a line to a line feed after
-// it is withheld, and so is one that changes or makes a possible task list
-// checkbox.
-func (o *fixOffers) offer(edits []fix.TextEdit) bool {
+// it is withheld, and so is one that changes the text of a line where its
+// rule is disabled, such as one that a finding on that line shares, or that
+// changes or makes a possible task list checkbox.
+func (o *fixOffers) offer(edits []fix.TextEdit, disabled disabledLines) bool {
 	if !o.endings.WriteNewlines(edits) {
+		return false
+	}
+	if disabled.changed(edits) {
 		return false
 	}
 	if o.checkboxes == nil {
@@ -353,8 +359,9 @@ func (o *fixOffers) offer(edits []fix.TextEdit) bool {
 }
 
 // selectEdits decides which fixes this pass applies to content and records
-// the outcome in result. Each rule's blank-line insertions at one boundary
-// are merged first. Then each top-level block keeps the fixes of one rule,
+// the outcome in result. Each rule's fixes with the same edits, and its
+// blank-line insertions at one boundary, are merged first (see
+// mergeSharedFixes). Then each top-level block keeps the fixes of one rule,
 // and the other rules' fixes there are deferred (see selectFixes). Finally
 // the fixes taken are resolved against each other, so a fix that overlaps
 // another fix of the same rule is skipped.
@@ -374,7 +381,7 @@ func (o *fixOffers) offer(edits []fix.TextEdit) bool {
 // apart reports whether fixes must keep the line endings of content apart
 // (see fix.LineEndingWriter.KeepsApart).
 func selectEdits(result *FileResult, fixes []pendingFix, content []byte, blocks *topLevelBlocks, apart bool) {
-	changes, idle := splitNoops(fixes, content)
+	changes, idle := splitNoops(mergeSharedFixes(fixes), content)
 	merged, conflicting := mergeBlankLineInsertions(changes)
 	for idx := range conflicting {
 		conflicting[idx].mergeConflict = true
@@ -549,7 +556,8 @@ type pendingFix struct {
 	edits  []fix.TextEdit
 
 	// diagnostics is the number of diagnostics the fix fixes: one, or more
-	// for one rule's blank-line insertions merged into one fix.
+	// for one rule's fixes with the same edits, or its blank-line insertions
+	// at one boundary, merged into one fix.
 	diagnostics int
 
 	// mergeConflict marks a blank-line insertion for a different container
@@ -585,6 +593,124 @@ func resolveFixes(fixes []pendingFix, content []byte, apart bool) ([]fix.TextEdi
 		skipped = append(skipped, fixes[idx])
 	}
 	return accepted, appendEditsOf(nil, skipped), fixed
+}
+
+// disabledLines answers whether fix edits change a line where one rule is
+// disabled by an inline directive.
+type disabledLines struct {
+	file *mdast.FileSnapshot
+	// before[n] is the number of disabled lines among lines 1 to n; nil when
+	// the rule is enabled on every line.
+	before []int
+}
+
+// newDisabledLines reads states, indexed by 1-based line number as
+// directiveStates builds them. Front matter lines count as enabled: no rule
+// reports in front matter, but a fix may still change it, as before.
+func newDisabledLines(file *mdast.FileSnapshot, states []bool) disabledLines {
+	first := max(file.FrontMatterLines+1, 1)
+	if first >= len(states) || !slices.Contains(states[first:], false) {
+		return disabledLines{file: file}
+	}
+	before := make([]int, len(states))
+	for line := 1; line < len(states); line++ {
+		before[line] = before[line-1]
+		if line >= first && !states[line] {
+			before[line]++
+		}
+	}
+	return disabledLines{file: file, before: before}
+}
+
+// changed reports whether edits change the text of a disabled line.
+//
+// A deletion or replacement changes every line it touches. It also changes
+// the line after it when it ends where that line starts and joins text onto
+// it. A deletion from the end of one line's text to the end of a later
+// one's is the exception: it removes only the later lines, as MD012 deletes
+// a blank line below a disabled one.
+//
+// An insertion changes the line it lands in, except that whole lines
+// inserted at the start or the end of a line's text leave that line as it
+// was, as the blank line that MD022 adds below a disabled heading.
+func (d disabledLines) changed(edits []fix.TextEdit) bool {
+	if d.before == nil {
+		return false
+	}
+	for _, edit := range edits {
+		first, last, ok := d.changedLines(edit)
+		if ok && d.count(first, last) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// changedLines returns the lines whose text edit changes, if any.
+func (d disabledLines) changedLines(edit fix.TextEdit) (int, int, bool) {
+	first, _ := d.file.LineAt(edit.StartOffset)
+	if first < 1 || first > len(d.file.Lines) {
+		return 0, 0, false
+	}
+	info := d.file.Lines[first-1]
+	if edit.StartOffset == edit.EndOffset {
+		atStart := edit.StartOffset == info.StartOffset && d.endsWithLineEnding(edit.NewText, edit.EndOffset)
+		atEnd := edit.StartOffset == info.NewlineStart && startsWithLineEnding(edit.NewText)
+		return first, first, !atStart && !atEnd
+	}
+	if edit.NewText == "" && edit.StartOffset == info.NewlineStart {
+		// A deletion of the first line's line ending and the text of later
+		// lines, up to the end of a line's text, deletes those later lines.
+		end, _ := d.file.LineAt(edit.EndOffset)
+		if end > first && end <= len(d.file.Lines) && edit.EndOffset == d.file.Lines[end-1].NewlineStart {
+			return first + 1, end, true
+		}
+	}
+	last, _ := d.file.LineAt(edit.EndOffset - 1)
+	// An edit that ends where the next line starts joins text onto that line
+	// unless it leaves a line break before it: its text ends with one, or it
+	// deletes whole lines from a line start.
+	if next := last + 1; next <= len(d.file.Lines) && edit.EndOffset == d.file.Lines[next-1].StartOffset {
+		keepsBreak := d.endsWithLineEnding(edit.NewText, edit.EndOffset) ||
+			(edit.NewText == "" && edit.StartOffset == info.StartOffset)
+		if !keepsBreak {
+			last = next
+		}
+	}
+	return first, last, true
+}
+
+// startsWithLineEnding reports whether text starts with a line ending: a
+// line feed, or a carriage return, alone or before a line feed.
+func startsWithLineEnding(text string) bool {
+	return strings.HasPrefix(text, "\n") || strings.HasPrefix(text, "\r")
+}
+
+// endsWithLineEnding reports whether text, written into the content right
+// before offset, ends with a line ending: a line feed, or a carriage return
+// alone, as the engine writes a fix's line feeds in a file whose lines end
+// with one. A carriage return that a line feed at offset follows makes one
+// line ending with it, which ends the line after offset instead.
+func (d disabledLines) endsWithLineEnding(text string, offset int) bool {
+	if strings.HasSuffix(text, "\n") {
+		return true
+	}
+	content := d.file.Content
+	return strings.HasSuffix(text, "\r") && (offset >= len(content) || content[offset] != '\n')
+}
+
+// count returns the number of disabled lines among lines first to last.
+func (d disabledLines) count(first, last int) int {
+	if first < 1 {
+		first = 1
+	}
+	if last >= len(d.before) {
+		last = len(d.before) - 1
+	}
+	if first > last {
+		return 0
+	}
+	return d.before[last] - d.before[first-1]
 }
 
 // resolveApart takes fixes out of the resolution of groups, accepted and
@@ -662,6 +788,47 @@ func editsTouch(edits []fix.TextEdit, from, to int) bool {
 // fix.ResolveFixes orders fixes by their first edits.
 func compareEditRanges(left, right fix.TextEdit) int {
 	return cmp.Or(cmp.Compare(left.StartOffset, right.StartOffset), cmp.Compare(left.EndOffset, right.EndOffset))
+}
+
+// mergeSharedFixes makes the fixes of one rule that hold the same edits one
+// fix, which fixes each of their diagnostics. A rule gives several findings
+// one fix when one change resolves them all, as MD049 reports both markers
+// of an emphasis with the fix that replaces both. Applied once, the edits
+// fix every such finding. Resolved against each other, a second copy of a
+// replacement would conflict with the first and be skipped, and one of an
+// insertion would insert its text again; copies of a deletion merged
+// already. Fixes of different rules are never merged.
+func mergeSharedFixes(fixes []pendingFix) []pendingFix {
+	type sharedFix struct {
+		ruleID string
+		edits  string
+	}
+	merged := make([]pendingFix, 0, len(fixes))
+	seen := make(map[sharedFix]int, len(fixes))
+	for _, pending := range fixes {
+		key := sharedFix{ruleID: pending.ruleID, edits: editsKey(pending.edits)}
+		if idx, ok := seen[key]; ok {
+			merged[idx].diagnostics += pending.diagnostics
+			continue
+		}
+		seen[key] = len(merged)
+		merged = append(merged, pending)
+	}
+	return merged
+}
+
+// editsKey identifies a fix by its edits, in order.
+func editsKey(edits []fix.TextEdit) string {
+	var key strings.Builder
+	for _, edit := range edits {
+		key.WriteString(strconv.Itoa(edit.StartOffset))
+		key.WriteByte(':')
+		key.WriteString(strconv.Itoa(edit.EndOffset))
+		key.WriteByte(':')
+		key.WriteString(strconv.Quote(edit.NewText))
+		key.WriteByte(';')
+	}
+	return key.String()
 }
 
 // mergeBlankLineInsertions combines one rule's formatting requirements at

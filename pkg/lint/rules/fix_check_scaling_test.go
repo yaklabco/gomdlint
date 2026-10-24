@@ -45,6 +45,19 @@ func longListDocument(items int) []byte {
 	return []byte(doc.String())
 }
 
+// adjacentListsDocument returns a document of pairs of lists that touch,
+// whose bullets differ, so that MD032 reports the missing blank line after
+// the first list and the one before the second, both fixed by one shared
+// insertion.
+func adjacentListsDocument(pairs int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n")
+	for idx := range pairs {
+		fmt.Fprintf(&doc, "- item %d\n* other %d\n\n", idx, idx)
+	}
+	return []byte(doc.String())
+}
+
 // codeListDocument returns a document with one loose list of items, each
 // holding a fenced shell block whose commands carry a dollar prompt and no
 // output, a finding that MD014 fixes at the start of a line of code. A fix
@@ -215,6 +228,12 @@ func TestLintTimeWithManyFixes(t *testing.T) {
 	})
 	t.Run("code list", func(t *testing.T) {
 		lintDuration(t, codeListDocument(items), limit)
+	})
+	// Each pair of findings shares one fix, which the check must take once:
+	// with both copies, the check of all fixes together failed and fell
+	// back to checking them one by one, and 2,000 pairs took 30 seconds.
+	t.Run("adjacent lists", func(t *testing.T) {
+		lintDuration(t, adjacentListsDocument(items), limit)
 	})
 }
 

@@ -1,1 +1,2 @@
 basic.input.md:5:10 warning Strong style "underscore" does not match expected "asterisk" (MD050/strong-style) [fixable]
+basic.input.md:5:27 warning Strong style "underscore" does not match expected "asterisk" (MD050/strong-style) [fixable]

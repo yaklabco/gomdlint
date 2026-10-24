@@ -56,24 +56,54 @@ const individualFixChecks = 16
 // way the fix engine applies them; if they change the document together,
 // they are kept one at a time in document order, each only when the fixes
 // kept before it and it still leave the document unchanged.
+//
+// Findings that share a fix carry the same edits, such as the blank line
+// that MD032 reports after one list and before the next. The fix is checked
+// once, with the first of them, and kept or withheld for all: checked
+// together, its copies would conflict, and every check would fall back to
+// taking the fixes one at a time.
 func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagnostic {
 	if !slices.ContainsFunc(diags, func(diag lint.Diagnostic) bool { return len(diag.FixEdits) > 0 }) {
 		return diags
 	}
 	content := checkedContent(ctx.File.Content)
 	var candidates []int
+	sharers := make(map[int][]int)
+	first := make(map[string]int)
 	for idx := range diags {
 		switch {
 		case len(diags[idx].FixEdits) == 0:
 		case !changesContent(content, checkedEdits(diags[idx].FixEdits)):
 			diags[idx].FixEdits = nil
 		default:
+			key := editsKey(diags[idx].FixEdits)
+			if owner, ok := first[key]; ok {
+				sharers[owner] = append(sharers[owner], idx)
+				continue
+			}
+			first[key] = idx
 			candidates = append(candidates, idx)
 		}
 	}
-	if len(candidates) == 0 {
-		return diags
+	if len(candidates) > 0 {
+		keepCandidateFixes(ctx, content, diags, candidates)
 	}
+	for owner, others := range sharers {
+		if diags[owner].HasFix() {
+			continue
+		}
+		for _, idx := range others {
+			diags[idx].FixEdits = nil
+		}
+	}
+	return diags
+}
+
+// keepCandidateFixes withholds the fix of each diagnostic in candidates,
+// indexes into diags of fixes that differ from each other, that keepSafeFixes
+// does not keep. content is the file's content as the checks read it (see
+// checkedContent).
+func keepCandidateFixes(ctx *lint.RuleContext, content []byte, diags []lint.Diagnostic, candidates []int) {
 	flavor := config.FlavorCommonMark
 	if ctx.Config != nil && ctx.Config.Flavor != "" {
 		flavor = ctx.Config.Flavor
@@ -83,7 +113,7 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 		for _, idx := range candidates {
 			diags[idx].FixEdits = nil
 		}
-		return diags
+		return
 	}
 
 	shared := check.sharedFixes(diags, candidates)
@@ -113,7 +143,6 @@ func keepSafeFixes(ctx *lint.RuleContext, diags []lint.Diagnostic) []lint.Diagno
 			diags[idx].FixEdits = nil
 		}
 	}
-	return diags
 }
 
 // changesContent reports whether applying the edits of one fix changes the

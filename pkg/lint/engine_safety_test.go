@@ -584,6 +584,69 @@ func TestEngine_DoesNotMergeInsertionsWithContent(t *testing.T) {
 	}}, result.DeferredEdits, "the insertion with content is another rule's fix in the same block")
 }
 
+func TestEngine_AppliesASharedFixOfOneRuleOnce(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		shared []fix.TextEdit
+	}{
+		{
+			// MD049 reports each marker of "_text_" with the fix that
+			// replaces both, so a second copy would conflict with the first.
+			name:   "replacements",
+			shared: []fix.TextEdit{{StartOffset: 2, EndOffset: 3, NewText: "*"}, {StartOffset: 7, EndOffset: 8, NewText: "*"}},
+		},
+		{
+			// A second copy of an insertion would insert its text twice.
+			name:   "insertion",
+			shared: []fix.TextEdit{{StartOffset: 2, EndOffset: 2, NewText: "x"}},
+		},
+		{
+			// Deletions merged before, and still do.
+			name:   "deletion",
+			shared: []fix.TextEdit{{StartOffset: 1, EndOffset: 2}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rule := newFuncRule("TEST001", func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+				return []lint.Diagnostic{fixDiag("TEST001", tt.shared...), fixDiag("TEST001", tt.shared...)}, nil
+			})
+
+			result := lintWithRules(t, "A _text_ b\n", true, rule)
+
+			assert.Equal(t, tt.shared, result.Edits, "the shared fix is applied once")
+			assert.Equal(t, 2, result.AcceptedFixes, "the shared fix fixes both findings")
+			assert.Empty(t, result.SkippedEdits)
+			assert.False(t, result.EditConflicts)
+		})
+	}
+}
+
+func TestEngine_DoesNotMergeTwoRulesSameFix(t *testing.T) {
+	t.Parallel()
+
+	same := func(id string) *funcRule {
+		return newFuncRule(id, func(*lint.RuleContext) ([]lint.Diagnostic, error) {
+			return []lint.Diagnostic{fixDiag(id, fix.TextEdit{StartOffset: 2, EndOffset: 3, NewText: "*"})}, nil
+		})
+	}
+
+	// The second rule's fix touches the block the first rule fixes, so it
+	// waits for the next pass, as any two rules' fixes there do.
+	result := lintWithRules(t, "A _text_ b\n", true, same("TEST001"), same("TEST002"))
+
+	assert.Equal(t, []fix.TextEdit{{StartOffset: 2, EndOffset: 3, NewText: "*"}}, result.Edits)
+	assert.Equal(t, 1, result.AcceptedFixes)
+	assert.Equal(t, []lint.SkippedEdit{{
+		RuleID: "TEST002",
+		Edit:   fix.TextEdit{StartOffset: 2, EndOffset: 3, NewText: "*"},
+	}}, result.DeferredEdits)
+}
+
 func TestEngine_RejectsFixThatSplitsCRLF(t *testing.T) {
 	t.Parallel()
 

@@ -1,4 +1,8 @@
 unsafe_fixes.input.md:5:6 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
+unsafe_fixes.input.md:5:10 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
 unsafe_fixes.input.md:7:10 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
+unsafe_fixes.input.md:7:14 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style)
 unsafe_fixes.input.md:9:5 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style) [fixable]
+unsafe_fixes.input.md:9:17 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style) [fixable]
 unsafe_fixes.input.md:11:8 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style) [fixable]
+unsafe_fixes.input.md:11:28 warning Emphasis style "underscore" does not match expected "asterisk" (MD049/emphasis-style) [fixable]
