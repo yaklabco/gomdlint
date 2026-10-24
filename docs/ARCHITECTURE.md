@@ -497,13 +497,13 @@ rule's `"\n"` is a line ending of its own there, as the engine writes it.
   keeps none of these rules' fixes, because no signature models how a style
   sheet, an event handler or an element left open changes the page.
   `htmlHiddenFromCheck` adds the raw HTML that the signature's parsers
-  cannot see but GitHub renders: in a document with a `<`, TOML or JSON
-  front matter, which the parsers blank, and footnotes, which they do not
-  read. A document with a `<` and a `[^` is parsed once more with
-  goldmark's footnote block parser (`fix_footnotes.go`), and keeps no fix
-  when that parse finds raw HTML that is not benign, or when a `[^` where a
-  definition may start is one that goldmark does not read as cmark-gfm
-  does.
+  cannot see but GitHub renders: in a document with a `<` that may start a
+  tag (`hasTagStart`), TOML or JSON front matter, which the parsers blank,
+  and footnotes, which they do not read. Such a document with a `[^` is
+  parsed once more with goldmark's footnote block parser
+  (`fix_footnotes.go`), and keeps no fix when that parse finds raw HTML
+  that is not benign, or when a `[^` where a definition may start is one
+  that goldmark does not read as cmark-gfm does (`blockAfterLabel`).
   `list_fix_safety.go` plans list item moves together, so that moves which
   are only safe together form one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through

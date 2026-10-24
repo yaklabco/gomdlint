@@ -49,9 +49,10 @@ func (footnoteInPlace) Close(gmast.Node, gmtext.Reader, goldparser.Context) {}
 // matches its label or not. Only the fix check's HTML scan uses it: it
 // finds the raw HTML of a footnote, which the signature's parsers may read
 // as a link reference definition or as code, so that the check sees it (see
-// htmlHiddenFromCheck). goldmark's footnote extension would drop a definition that no reference
-// matches exactly, but GitHub folds the case of labels, so this parser
-// leaves out the extension's step that matches them.
+// htmlHiddenFromCheck). goldmark's footnote extension would drop a
+// definition that no reference matches exactly, but GitHub folds the case
+// of labels, so this parser leaves out the extension's step that matches
+// them.
 func footnoteMarkdown() goldmark.Markdown {
 	footnoteOnce.Do(func() {
 		footnoteParser = goldmark.New(
@@ -67,17 +68,17 @@ func footnoteMarkdown() goldmark.Markdown {
 // parseFootnotes parses source with footnoteMarkdown and reports whether a
 // footnote definition may start where the document it returns holds none
 // that goldmark reads as cmark-gfm, which GitHub uses, does (see
-// mayStartFootnotes). goldmark rejects some labels that cmark-gfm reads,
-// such as one with a "[" in a code span, reads an escaped "]" in a label
-// that ends it for cmark-gfm, and keeps the spaces after the label that
-// cmark-gfm skips, which moves the columns of a block that starts there
-// (see blockAfterLabel). Where goldmark does not read a definition as
+// footnoteStartCandidates). goldmark rejects some labels that cmark-gfm
+// reads, such as one with a "[" in a code span, reads an escaped "]" in a
+// label that ends it for cmark-gfm, and keeps the spaces after the label
+// that cmark-gfm skips, which moves the columns of a block that starts
+// there (see blockAfterLabel). Where goldmark does not read a definition as
 // GitHub does, its raw HTML may look like code or text, so the fix check
 // cannot see it. A line with more than maxFootnoteNesting definitions
 // counts as unread without a parse, and the document it returns is then
 // nil.
 func parseFootnotes(source []byte) (gmast.Node, bool) {
-	candidates := mayStartFootnotes(source)
+	candidates := footnoteStartCandidates(source)
 	if deepestFootnoteNesting(source, candidates) > maxFootnoteNesting {
 		return nil, true
 	}
@@ -105,39 +106,60 @@ func parseFootnotes(source []byte) (gmast.Node, bool) {
 	return doc, false
 }
 
-// blockAfterLabel reports whether, on the line of start, a "]:" after start
-// is followed by a tab, by four spaces or more, or by up to three spaces and
-// a character that may start a block other than a paragraph. cmark-gfm
-// skips the spaces and tabs before a definition's text, and goldmark does
-// not, so a list item there takes other columns, and goldmark may read an
-// indented code block where cmark-gfm reads text. A paragraph reads the same.
+// blockAfterLabel reports whether, on the line of start, the "]:" that ends
+// the label at start is followed by a tab, by four spaces or more, or by up
+// to three spaces and a blockquote or list marker. cmark-gfm skips the
+// spaces and tabs before a definition's text, and goldmark does not, which
+// moves the columns of the first line only. A list item takes its content
+// column from them, and a tab in a blockquote expands by them, so goldmark
+// may read a later line as code that cmark-gfm reads as text in the item,
+// and goldmark reads an indented code block where cmark-gfm reads text.
+// Any other block reads the same from either column: a paragraph, a
+// heading, a thematic break, a fence, an HTML block, which the footnote
+// parse sees, or another definition, whose own label is tested on its own.
 func blockAfterLabel(source []byte, start int) bool {
 	line := source[start:]
 	if end := bytes.IndexAny(line, "\r\n"); end >= 0 {
 		line = line[:end]
 	}
-	for {
-		idx := bytes.Index(line, []byte("]:"))
-		if idx < 0 {
-			return false
-		}
-		line = line[idx+2:]
-		spaces := 0
-		for spaces < len(line) && line[spaces] == ' ' {
-			spaces++
-		}
-		switch {
-		case spaces >= codeBlockIndent:
-			return true
-		case spaces < len(line) && (isASCIIDigit(line[spaces]) || strings.IndexByte(blockStarts, line[spaces]) >= 0):
-			return true
-		}
+	idx := bytes.Index(line, []byte("]:"))
+	if idx < 0 {
+		return false
 	}
+	line = line[idx+len("]:"):]
+	spaces := 0
+	for spaces < len(line) && line[spaces] == ' ' {
+		spaces++
+	}
+	if spaces >= codeBlockIndent {
+		return true
+	}
+	text := line[spaces:]
+	return len(text) > 0 && (text[0] == '\t' || text[0] == '>' || startsListMarker(text))
 }
 
-// blockStarts holds the characters that may start a block other than a
-// paragraph, and a tab, which may make an indented code block.
-const blockStarts = "\t-+*_>#`~<|=[\\"
+// startsListMarker reports whether text starts with a list marker that may
+// open a list item: "-", "+" or "*", or one to nine digits and "." or ")",
+// followed by a space, a tab or the end of text.
+func startsListMarker(text []byte) bool {
+	marker := 0
+	switch {
+	case len(text) > 0 && strings.IndexByte("-+*", text[0]) >= 0:
+		marker = 1
+	default:
+		for marker < len(text) && isASCIIDigit(text[marker]) {
+			marker++
+		}
+		if marker == 0 || marker > maxOrderedMarkerDigits || marker == len(text) {
+			return false
+		}
+		if text[marker] != '.' && text[marker] != ')' {
+			return false
+		}
+		marker++
+	}
+	return marker == len(text) || text[marker] == ' ' || text[marker] == '\t'
+}
 
 // deepestFootnoteNesting returns the most offsets of offsets, which are
 // sorted, that one line holds.
@@ -153,13 +175,13 @@ func deepestFootnoteNesting(source []byte, offsets []int) int {
 	return deepest
 }
 
-// mayStartFootnotes returns the offsets of every "[^" where a footnote
+// footnoteStartCandidates returns the offsets of every "[^" where a footnote
 // definition may start in some renderer, by a loose test that finds more
 // than any renderer reads: only whitespace, blockquote and list markers,
 // and the "]:" that ends the label of another definition precede it on its
 // line, and "]:" follows it before the next empty line. A line ends at a
 // line feed or a carriage return.
-func mayStartFootnotes(source []byte) []int {
+func footnoteStartCandidates(source []byte) []int {
 	var offsets []int
 	blankLF, blankCRLF, blankCR, colon := -1, -1, -1, -1
 	for pos := 0; pos+1 < len(source); pos++ {

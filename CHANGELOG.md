@@ -713,12 +713,13 @@ formats change. The first entries under Changed may need action.
   now see the raw HTML that GitHub renders in footnotes and in TOML or JSON
   front matter. Their fix check read `[^1]: <code>` as a link reference
   definition and blanked front matter, so it kept a wrap or a whitespace
-  fix that GitHub shows inside the code element. A document with a `<` now
-  keeps no fix of these rules when a footnote holds such HTML, when a line
-  may start a footnote definition that gomdlint does not read as GitHub
-  does, such as ``[^a`[`]:``, or when it has TOML or JSON front matter.
-  Documents without a `<`, and documents whose footnotes hold only comments
-  and those plain tags, keep their fixes.
+  fix that GitHub shows inside the code element. A document with a `<`
+  that may start a tag now keeps no fix of these rules when a footnote
+  holds such HTML, when a line may start a footnote definition that
+  gomdlint does not read as GitHub does, such as ``[^a`[`]:``, or when it
+  has TOML or JSON front matter. Documents without such a `<`, and
+  documents whose footnotes hold only comments and those plain tags, keep
+  their fixes.
 - goldmark moves to v1.8.6, past GO-2026-5320, a flaw in its HTML renderer
   that gomdlint never calls. Releases build with Go 1.26.9, which govulncheck
   finds free of GO-2026-4602, reachable through `filepath.WalkDir` with Go

@@ -103,6 +103,8 @@ func TestFixCheckKeepsNoFixBesideUnreadFootnotes(t *testing.T) {
 			name:  "label with a bracket in backticks, with no other HTML",
 			input: "See [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open" + later,
 		},
+		// cmark-gfm may read none of the next three labels either. The
+		// loose test withholds the fixes all the same.
 		{
 			name:  "label with an escaped bracket",
 			input: "See [^a\\]] and [^b].\n\n[^a\\]]: First.\n\n    Second <code>open" + later,
@@ -112,16 +114,16 @@ func TestFixCheckKeepsNoFixBesideUnreadFootnotes(t *testing.T) {
 			input: "See [^a b] and [^b].\n\n[^a b]: First.\n\n    Second <code>open" + later,
 		},
 		{
+			name:  "label that spans two lines",
+			input: "See [^b].\n\n[^a\nc]: First.\n\n    Second <code>open" + later,
+		},
+		{
 			name:  "definition in a blockquote",
 			input: "See [^a`[`] and [^b].\n\n> [^a`[`]: First.\n>\n>     Second <code>open" + later,
 		},
 		{
 			name:  "definition in a list item",
 			input: "See [^a`[`] and [^b].\n\n- [^a`[`]: First.\n\n      Second <code>open" + later,
-		},
-		{
-			name:  "label that spans two lines",
-			input: "See [^b].\n\n[^a\nc]: First.\n\n    Second <code>open" + later,
 		},
 		{
 			// cmark-gfm opens the second definition inside the first.
@@ -207,17 +209,69 @@ func TestFixCheckKeepsNoFixBesideUnreadFootnotes(t *testing.T) {
 		input: "See [^b].\n\n- a\n\n\t[^b]: Note.\n\na<br>b end.\n\nalpha beta gamma\n",
 		old:   "beta gamma", new: "beta\ngamma",
 		want: true,
+	}, fixCheckCase{
+		// No "<" starts a tag, so no renderer reads raw HTML anywhere.
+		name:  "unread definition in a document whose only < starts no tag",
+		input: "See [^a`[`], where 1 < 2 and {{< x >}}.\n\n[^a`[`]: First.\n\n    Second code" + later,
+		old:   "beta gamma", new: "beta\ngamma",
+		want: true,
+	}, fixCheckCase{
+		// The test for places where a definition may start is loose: it
+		// finds the one in the code block, which no renderer reads.
+		name:  "definition shown in a code block, beside benign HTML",
+		input: "Intro a<br>b.\n\n```markdown\n[^a`[`]: Note.\n```" + later,
+		old:   "beta gamma", new: "beta\ngamma",
+		want: false,
 	})
+	runFixCheckCases(t, cases)
+}
+
+// TestFixCheckKeepsFixesBesideFootnotesThatStartAParagraph checks that a
+// footnote whose text starts a paragraph, a heading or another block whose
+// later lines do not depend on the column the text starts at keeps the
+// fixes of a document with benign HTML. cmark-gfm skips the spaces after
+// the label and goldmark keeps them, which moves only the columns of the
+// first line: they matter for a list item, a blockquote and code indented
+// by a tab or four spaces, and for nothing else.
+func TestFixCheckKeepsFixesBesideFootnotesThatStartAParagraph(t *testing.T) {
+	starts := map[string]string{
+		"an autolink":                 "<https://example.com>",
+		"a link":                      "[Source](https://example.com)",
+		"a link reference definition": "[x]: https://example.com",
+		"an image":                    "![a](x.png)",
+		"a number":                    "2019 study",
+		"a decimal number":            "2019.5 percent",
+		"emphasis":                    "*Emphasis* here",
+		"strong emphasis":             "__Strong__ here",
+		"a code span":                 "`code` here",
+		"an escape":                   "\\- not a list",
+		"a heading":                   "# Heading",
+		"a thematic break":            "___",
+		"a table row":                 "a | b",
+		"an equals sign":              "= x",
+		"a fence":                     "```go",
+		"a tilde fence":               "~~~",
+		"two spaces and a paragraph":  "  text",
+	}
+	var cases []fixCheckCase
+	for name, start := range starts {
+		cases = append(cases, fixCheckCase{
+			name:  "footnote that starts with " + name,
+			input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: " + start + "\n\n[^b]: alpha beta gamma\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: true,
+		})
+	}
 	runFixCheckCases(t, cases)
 }
 
 // TestFixCheckKeepsNoFixBesideHTMLInFrontMatter checks front matter that
 // the check's parsers blank but GitHub renders as Markdown: a document with
-// TOML or JSON front matter and a "<" anywhere keeps no fix, since raw HTML
-// in the front matter may open an element that holds the rest of the page,
-// and a block the front matter leaves open may take in raw HTML after it.
-// GitHub shows YAML front matter as a table, so a "<" there leaves the fixes
-// to the check.
+// TOML or JSON front matter and a "<" that may start a tag anywhere keeps
+// no fix, since raw HTML in the front matter may open an element that holds
+// the rest of the page, and a block the front matter leaves open may take
+// in raw HTML after it. GitHub shows YAML front matter as a table, so a "<"
+// there leaves the fixes to the check.
 func TestFixCheckKeepsNoFixBesideHTMLInFrontMatter(t *testing.T) {
 	const body = "\nalpha beta gamma\n"
 	cases := []fixCheckCase{
@@ -231,6 +285,12 @@ func TestFixCheckKeepsNoFixBesideHTMLInFrontMatter(t *testing.T) {
 		{name: "JSON front matter before an indented line", input: "{\n\"a\": 1\n}\n    <code>\n" + body},
 		{name: "TOML front matter that opens a list", input: "+++\n- x\n+++\n\n    <code>\n" + body},
 		{name: "TOML front matter that defines a footnote", input: "+++\n[^a]: x\n+++\n\n    <code>\n\nSee [^a].\n" + body},
+		{name: "TOML front matter with an end tag", input: "+++\ntitle = \"a</b>\"\n+++\n" + body},
+		{name: "TOML front matter with a comment", input: "+++\n+++\n\n<!-- x -->\n" + body},
+		{name: "TOML front matter with a processing instruction", input: "+++\n+++\n\n<?x?>\n" + body},
+		// No "<" starts a tag, so no renderer reads raw HTML anywhere.
+		{name: "TOML front matter before a Hugo shortcode", input: "+++\ntitle = \"x\"\n+++\n\n{{< figure src=\"a.png\" >}}\n" + body, want: true},
+		{name: "TOML front matter with a comparison", input: "+++\ntitle = \"1 < 2\"\n+++\n\nWhen 1 <= 2 or a <- b.\n" + body, want: true},
 		{name: "YAML front matter", input: "---\ntitle: a <code> b\n---\n" + body, want: true},
 		{name: "TOML front matter without HTML", input: "+++\ntitle = \"a\"\n+++\n" + body, want: true},
 		{name: "JSON front matter without HTML", input: "{\n\"a\": 1\n}\n" + body, want: true},

@@ -740,8 +740,8 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 // htmlHiddenFromCheck reports whether content may hold raw HTML that is not
 // benign where the signature's parsers read none, though GitHub renders it.
 // Such a document keeps no fix, like one whose raw HTML is not benign (see
-// keepSafeFixes). It finds three places, each only in content with a "<",
-// which starts all raw HTML:
+// keepSafeFixes). It looks only at content where a "<" may start a tag (see
+// hasTagStart), as all raw HTML starts so, and finds three places:
 //
 //   - TOML and JSON front matter. The parsers blank front matter, but GitHub
 //     renders "+++" and "{" front matter as Markdown, where raw HTML may open
@@ -761,20 +761,41 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 //     read as cmark-gfm, which GitHub uses, does (see parseFootnotes). Its
 //     raw HTML may look like code or text to goldmark. The test for such
 //     places finds more than any renderer reads, such as a definition shown
-//     in a code block, which costs fixes in documents that also hold a "<".
+//     in a code block, which costs fixes in documents that also hold a "<"
+//     that may start a tag.
 func htmlHiddenFromCheck(content []byte) bool {
-	if bytes.IndexByte(content, '<') < 0 {
+	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
+	if !hasTagStart(content) {
 		return false
 	}
-	content, source, frontMatter := signatureSource(content)
+	frontMatter := frontMatterLength(content)
 	if frontMatter > 0 && !bytes.HasPrefix(content, []byte(yamlFrontMatterFence)) {
 		return true
 	}
-	if bytes.IndexByte(source, '<') < 0 || !bytes.Contains(source, []byte("[^")) {
+	if !hasTagStart(content[frontMatter:]) || !bytes.Contains(content[frontMatter:], []byte("[^")) {
 		return false
 	}
+	_, source, _ := signatureSource(content)
 	doc, unread := parseFootnotes(source)
 	return unread || !htmlRegionsBenign(doc, source)
+}
+
+// hasTagStart reports whether text holds a "<" that may start raw HTML for
+// some renderer: one that an ASCII letter, "/", "!" or "?" follows, as in a
+// start or end tag, a comment, a declaration, CDATA or a processing
+// instruction. Any other "<", as in "1 < 2" or "{{< x >}}", is text.
+func hasTagStart(text []byte) bool {
+	for pos := 0; pos < len(text); {
+		idx := bytes.IndexByte(text[pos:], '<')
+		if idx < 0 {
+			return false
+		}
+		pos += idx + 1
+		if pos < len(text) && (isASCIILetter(text[pos]) || strings.IndexByte("/!?", text[pos]) >= 0) {
+			return true
+		}
+	}
+	return false
 }
 
 // benignHTML reports whether raw HTML can show nothing that the render

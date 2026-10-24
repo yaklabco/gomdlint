@@ -890,13 +890,14 @@ Some of its fix checks are also stricter than they need to be.
   `<br>` keeps the fixes, while `<br onclick="noop()">`, an end tag such as
   `</br>`, a comment with `--` inside it, or one inline `<kbd>` withholds
   them. This counts raw HTML in footnotes, which GitHub writes after the
-  document. A document with a `<` and a line that may start a footnote
-  definition that gomdlint does not read as GitHub does, such as
-  ``[^a`[`]:``, gets no fix either. The test for such lines is loose, so it
-  also matches a definition shown in a code block. The same holds for a
-  document with TOML or JSON front matter, which GitHub renders as
-  Markdown, and a `<` anywhere. The rules are `unordered-list-style`
-  (MD004), `list-indent` (MD005), `ul-indent` (MD007),
+  document. A document with a `<` that may start a tag, one followed by a
+  letter, `/`, `!` or `?`, and a line that may start a footnote definition
+  that gomdlint does not read as GitHub does, such as ``[^a`[`]:`` or a
+  definition whose text starts a list, gets no fix either. The test for
+  such lines is loose, so it also matches a definition shown in a code
+  block. The same holds for a document with TOML or JSON front matter,
+  which GitHub renders as Markdown, and such a `<` anywhere. The rules are
+  `unordered-list-style` (MD004), `list-indent` (MD005), `ul-indent` (MD007),
   `no-trailing-spaces` (MD009), `no-hard-tabs` (MD010),
   `no-multiple-blank-lines` (MD012), `line-length` (MD013),
   `no-multiple-space-blockquote` (MD027), `ol-prefix` (MD029),
