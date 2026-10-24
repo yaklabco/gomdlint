@@ -43,9 +43,11 @@ formats change. The first entries under Changed may need action.
   reported, and neither do autolinks and URIs such as `mailto:`. gomdlint
   cannot tell a URL of the document's own site from one of another host, so
   the only absolute links that count are `file:` URLs that name no other
-  host, and only those break the `relative` style. A README whose first
-  link pointed at another site used to get a finding for each of its
-  relative links.
+  host, and only those break the `relative` style. It reads a
+  destination's scheme after resolving escapes and character references.
+  A README whose first link pointed at another site used to get a finding
+  for each of its relative links, and links to `sms:`, `urn:` or `vscode:`
+  URIs and email autolinks used to read as relative.
 - Rule options default to markdownlint 0.41's values: consistent styles for
   MD003, MD004, MD035, MD046, MD048, MD049 and MD050, `one_or_ordered` for
   MD029, `br_spaces: 2` for MD009, 80 characters for MD013, and no allowed
@@ -321,16 +323,12 @@ formats change. The first entries under Changed may need action.
 - **MD022**, **MD031**: A fix no longer inserts a blank line before a table
   inside a tight list item, which made the list loose. Such findings are
   reported without a fix. Some lists of four or more items, and lists that
-  hold a fenced code block without a closing fence, can still be made
-  loose.
+  hold an HTML block or a fenced code block without a closing fence, can
+  still be made loose.
 - **MD058**: No longer adds a blank line before or after a table in a tight
   list where the line would separate two items or two blocks of an item,
   which made the list loose. Such tables are reported without a fix. In a
   loose list, the blank line can still be added.
-- **MDL001**: Reads a destination as absolute when it starts with a URI
-  scheme, after escapes and character references are resolved, or with
-  `//`. Links to `sms:`, `urn:` or `vscode:` URIs and email autolinks used to
-  read as relative.
 - **MD010**: Reports each run of tabs, as markdownlint does, instead of one
   finding per line. With `ignore_code_languages` set, it skips fences that
   name no language.

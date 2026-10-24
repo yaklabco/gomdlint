@@ -740,13 +740,13 @@ Coverage varies by rule. Every rule except MD040 and MD047 has a `basic`
 case, and those two have other cases that report findings. Every rule has a
 case with findings. MD054 reports nothing until an option disallows a style,
 so its `shortcut_disallowed` case has a sidecar that disallows shortcut
-references. Every rule except MD003 and MD013 has a case without findings. The edge-case
-categories are spread unevenly: 44 rules have a `frontmatter` case, 24 a
-`multiple` case, 13 a `code_block_immunity` case, 12 a `nested` case, 12 a
-`containers` case, 3 an `adjacent` case, and only 5 a `unicode` case (MD009,
-MD013, MD026, MD037 and MD038). Nine fixable rules have no `frontmatter`
-case (MD020, MD021, MD035, MD044, MD047, MD049, MD050, MD058 and MDL003),
-and MD050 has only `basic` and `clean`.
+references. Every rule except MD003 and MD013 has a case without findings.
+The edge-case categories are spread unevenly: 44 rules have a `frontmatter`
+case, 24 a `multiple` case, 13 a `code_block_immunity` case, 12 a `nested`
+case, 12 a `containers` case, 3 an `adjacent` case, and only 5 a `unicode`
+case (MD009, MD013, MD026, MD037 and MD038). Nine fixable rules have no
+`frontmatter` case (MD020, MD021, MD035, MD044, MD047, MD049, MD050, MD058
+and MDL003), and MD050 has only `basic` and `clean`.
 
 ```bash
 # Run all golden tests
