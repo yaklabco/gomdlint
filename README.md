@@ -922,6 +922,29 @@ Some of its fix checks are also stricter than they need to be.
   or where the text markdownlint gives micromark starts with a byte order
   mark, as with two at the start of the file or one right after front
   matter.
+- `link-image-reference-definitions` (MD053) reads GFM footnote definitions,
+  such as `[^1]: A note.`, only where `reference-links-images` (MD052) counts
+  them, and only when the label holds nothing but ASCII letters, digits and
+  hyphens. It reports such a definition as unused only when `^` and its label
+  appear nowhere else in the file, in any case and not even in code, so it
+  never reports a footnote that markdownlint finds called. It reports the
+  second definition of one label as a duplicate. So it misses unused
+  footnotes defined in a list item or a blockquote, with a label such as
+  `[^my_note]`, or mentioned only in code, which markdownlint reports. MD053
+  deletes no definition whose label starts with `^`, which GitHub reads as a
+  footnote whose note may go on in indented lines after a blank line, and
+  reports it without a fix.
+- `link-fragments` (MD051) accepts the anchors that GitHub gives repeated
+  headings by github-slugger's rules. After `## Release`, `## Release` and
+  `## Release 1`, GitHub's anchors are `#release`, `#release-1` and
+  `#release-1-1`, because the second heading takes `#release-1` first.
+  markdownlint gives the third heading `#release-1` as well, so it reports a
+  link to `#release-1-1`.
+- `reference-links-images` (MD052) and `link-image-reference-definitions`
+  (MD053) match a reference with its definition by CommonMark's Unicode case
+  folding, as GitHub and goldmark do, so `[Straße][]` uses
+  `[STRASSE]: /url`. markdownlint lowercases labels instead, so it reports
+  `[Straße][]` as undefined and the definition as unused.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.
