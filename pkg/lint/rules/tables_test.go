@@ -519,6 +519,10 @@ func TestBlankLineLoosensList(t *testing.T) {
 		// A blank line ends a blockquote first, so a fence in it takes in
 		// no blank line, and the list is loose.
 		{name: "unclosed fence in a blockquote", input: "- a\n  > ```sh\n  > code\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n"},
+		// A closed fence and an indented code block end before the blank
+		// line, so the list is loose.
+		{name: "closed fence before the item", input: "- a\n  ```sh\n  x\n  ```\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n"},
+		{name: "indented code before the item", input: "- a\n\n      code\n\n- item\n  text\n  | x | y |\n  | --- | --- |\n- c\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
