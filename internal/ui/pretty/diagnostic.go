@@ -3,10 +3,10 @@ package pretty
 import (
 	"fmt"
 	"strings"
-	"unicode/utf16"
 
 	"github.com/clipperhouse/displaywidth"
 
+	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -124,7 +124,7 @@ func (s *Styles) FormatSourceContext(line string, column int) string {
 	// Indent to align with diagnostic output
 	const indent = "        "
 
-	split := utf16Offset(line, column-1)
+	split := display.ByteOffset([]byte(line), column-1)
 	before, caretOffset := expandTabs(line[:split], 0)
 	after, _ := expandTabs(line[split:], caretOffset)
 
@@ -138,22 +138,6 @@ func (s *Styles) FormatSourceContext(line string, column int) string {
 	}
 
 	return builder.String()
-}
-
-// utf16Offset returns the byte offset in line after its first units UTF-16
-// code units. A count that ends inside a character outside the Basic
-// Multilingual Plane covers that character, and a count past the end of line
-// returns its length. Invalid bytes count one unit each.
-func utf16Offset(line string, units int) int {
-	counted := 0
-	for idx, char := range line {
-		if counted >= units {
-			return idx
-		}
-		counted += utf16.RuneLen(char)
-	}
-
-	return len(line)
 }
 
 // expandTabs replaces the tabs in text with spaces up to the next tab stop,

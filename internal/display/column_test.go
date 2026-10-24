@@ -1,10 +1,13 @@
 package display
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
@@ -36,7 +39,15 @@ func TestColumns(t *testing.T) {
 		{name: "zero width no-break space on later line counts", content: "a\n\xef\xbb\xbfb\n", line: 2, column: 4, want: 2},
 		{name: "column inside a character covers it", content: "中x\n", line: 1, column: 2, want: 2},
 		{name: "column inside an astral character covers both units", content: "\U0001F600x\n", line: 1, column: 3, want: 3},
+		// Node decodes each maximal ill-formed sequence to one U+FFFD.
 		{name: "invalid bytes count one each", content: "\xff\xfex\n", line: 1, column: 3, want: 3},
+		{name: "truncated three-byte character is one unit", content: "\xe2\x82x\n", line: 1, column: 3, want: 2},
+		{name: "truncated four-byte character is one unit", content: "\xf0\x9f\x98x\n", line: 1, column: 4, want: 2},
+		{name: "encoded surrogate is three units", content: "\xed\xa0\x80x\n", line: 1, column: 4, want: 4},
+		{name: "overlong encoding is two units", content: "\xc0\xafx\n", line: 1, column: 3, want: 3},
+		{name: "out of range four-byte lead is units of its own", content: "\xf4\x90\x80x\n", line: 1, column: 4, want: 4},
+		{name: "replacement character itself is one unit", content: "�x\n", line: 1, column: 4, want: 2},
+		{name: "column past a CRLF terminator", content: "\U0001F600\r\nx\n", line: 1, column: 8, want: 6},
 		{name: "zero column means unknown", content: "abc\n", line: 1, column: 0, want: 0},
 		{name: "negative column means unknown", content: "abc\n", line: 1, column: -2, want: 0},
 		{name: "negative column on unknown line means unknown", content: "abc\n", line: 9, column: -2, want: 0},
@@ -63,59 +74,132 @@ func TestColumns_NilSnapshot(t *testing.T) {
 	assert.Zero(t, columns.Column(mdast.Position{Line: 3, Column: -1}), "a negative column is unknown")
 }
 
+// lookupOrderContent mixes short lines with a long line (longer than
+// markSpacing) of emoji, two-byte letters, a combining mark and ill-formed
+// UTF-8, after a byte order mark, with CRLF, CR and LF line endings.
+var lookupOrderContent = "\xef\xbb\xbf\U0001F600 Ä\tx\r\n" +
+	strings.Repeat("é \U0001F600Ä\xe2\x82 中 ", 40) + "end   \r" +
+	"plain\n" +
+	"中 \U0001F600 z"
+
 // TestColumns_AnyLookupOrder checks that one converter gives every position
 // the column a fresh converter gives it, whatever order the lookups come in:
 // forwards and backwards on one line, across lines, and back again.
 func TestColumns_AnyLookupOrder(t *testing.T) {
 	t.Parallel()
 
-	content := "\xef\xbb\xbf\U0001F600 Ä\tx\r\né \U0001F600\U0001F600 y\rplain\n中 \U0001F600 z"
-	snapshot := mdast.NewFileSnapshot("doc.md", []byte(content))
+	snapshot := mdast.NewFileSnapshot("doc.md", []byte(lookupOrderContent))
+	require.Greater(t, len(snapshot.LineContent(2)), 2*markSpacing, "the second line is long")
 
 	var positions []mdast.Position
 	for line := 1; line <= len(snapshot.Lines); line++ {
 		info := snapshot.Lines[line-1]
-		for column := 1; column <= info.EndOffset-info.StartOffset+1; column++ {
+		for column := 1; column <= info.EndOffset-info.StartOffset+2; column++ {
 			positions = append(positions, mdast.Position{Line: line, Column: column})
 		}
 	}
 
+	backwards := slices.Clone(positions)
+	slices.Reverse(backwards)
 	orders := map[string][]mdast.Position{
 		"forwards":  positions,
-		"backwards": reversed(positions),
+		"backwards": backwards,
 		"mixed":     interleaved(positions),
+		"strided":   strided(positions, 97),
 	}
 
 	for name, order := range orders {
-		columns := NewColumns(snapshot)
-		for _, pos := range order {
-			want := NewColumns(snapshot).Column(pos)
-			assert.Equal(t, want, columns.Column(pos), "%s: line %d, byte column %d", name, pos.Line, pos.Column)
-		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			columns := NewColumns(snapshot)
+			for _, pos := range order {
+				want := NewColumns(snapshot).Column(pos)
+				assert.Equal(t, want, columns.Column(pos), "line %d, byte column %d", pos.Line, pos.Column)
+			}
+		})
 	}
 }
 
-// TestColumns_SortedLookupsDecodeEachLineOnce guards the work of converting
-// the columns of many findings on one long line: lookups in column order
-// continue from the previous one instead of decoding the line from its
-// start again, so the work grows with the line, not with the line times the
-// findings.
-func TestColumns_SortedLookupsDecodeEachLineOnce(t *testing.T) {
+// TestColumns_LookupsOnALongLineDecodeItOnce guards the work of converting
+// the columns of many findings on one long line. Lookups in column order
+// continue from the previous one, and lookups behind the furthest one so far,
+// such as the ends of short findings after a finding that runs to the end of
+// the line, resume from a nearby mark. The work grows with the line plus a
+// constant per lookup, not with the line times the findings.
+func TestColumns_LookupsOnALongLineDecodeItOnce(t *testing.T) {
 	t.Parallel()
 
 	const repeats = 20000
-	line := strings.Repeat("\U0001F600 Ä ", repeats)
+	unit := "\U0001F600 Ä "
+	line := strings.Repeat(unit, repeats)
 	snapshot := mdast.NewFileSnapshot("doc.md", []byte(line+"\nnext\n"))
-
-	columns := NewColumns(snapshot)
 	unitsPerRepeat := 2 + 1 + 1 + 1
-	bytesPerRepeat := len("\U0001F600 Ä ")
-	for idx := range repeats {
-		got := columns.Column(mdast.Position{Line: 1, Column: idx*bytesPerRepeat + 1})
-		assert.Equal(t, idx*unitsPerRepeat+1, got)
+	perLookup := 2*markSpacing + utf8.UTFMax
+
+	t.Run("in column order", func(t *testing.T) {
+		t.Parallel()
+
+		columns := NewColumns(snapshot)
+		for idx := range repeats {
+			got := columns.Column(mdast.Position{Line: 1, Column: idx*len(unit) + 1})
+			assert.Equal(t, idx*unitsPerRepeat+1, got)
+		}
+		assert.LessOrEqual(t, columns.decoded, len(line), "the line is decoded once")
+	})
+
+	t.Run("alternating long and short findings", func(t *testing.T) {
+		t.Parallel()
+
+		columns := NewColumns(snapshot)
+		for idx := range repeats {
+			from := idx*len(unit) + 1
+			start := columns.Column(mdast.Position{Line: 1, Column: from})
+			end := columns.Column(mdast.Position{Line: 1, Column: len(line) + 1})
+			shortEnd := columns.Column(mdast.Position{Line: 1, Column: from + len("\U0001F600")})
+			assert.Equal(t, idx*unitsPerRepeat+1, start)
+			assert.Equal(t, repeats*unitsPerRepeat+1, end)
+			assert.Equal(t, idx*unitsPerRepeat+3, shortEnd)
+		}
+		assert.LessOrEqual(t, columns.decoded, len(line)+2*repeats*perLookup,
+			"the line is decoded once, plus a bounded amount per lookup")
+	})
+
+	t.Run("in reverse order", func(t *testing.T) {
+		t.Parallel()
+
+		columns := NewColumns(snapshot)
+		for idx := repeats - 1; idx >= 0; idx-- {
+			got := columns.Column(mdast.Position{Line: 1, Column: idx*len(unit) + 1})
+			assert.Equal(t, idx*unitsPerRepeat+1, got)
+		}
+		assert.LessOrEqual(t, columns.decoded, len(line)+repeats*perLookup,
+			"the line is decoded once, plus a bounded amount per lookup")
+	})
+}
+
+func TestByteOffset(t *testing.T) {
+	t.Parallel()
+
+	text := []byte("a\U0001F600Ä\xe2\x82x")
+	tests := []struct {
+		units int
+		want  int
+	}{
+		{units: 0, want: 0},
+		{units: 1, want: 1},
+		{units: 2, want: 5}, // inside the emoji: the emoji is covered
+		{units: 3, want: 5},
+		{units: 4, want: 7},
+		{units: 5, want: 9}, // the truncated character is one unit
+		{units: 6, want: 10},
+		{units: 99, want: 10},
+		{units: -1, want: 0},
 	}
 
-	assert.LessOrEqual(t, columns.decoded, len(line), "the line is decoded once")
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, ByteOffset(text, tt.units), "units %d", tt.units)
+	}
 }
 
 func TestLineText(t *testing.T) {
@@ -140,15 +224,6 @@ func TestBOMLength(t *testing.T) {
 	assert.Zero(t, BOMLength(nil))
 }
 
-// reversed returns a reversed copy of positions.
-func reversed(positions []mdast.Position) []mdast.Position {
-	out := make([]mdast.Position, len(positions))
-	for idx, pos := range positions {
-		out[len(positions)-1-idx] = pos
-	}
-	return out
-}
-
 // interleaved returns positions taken alternately from the front and the
 // back, so consecutive lookups jump between lines and directions.
 func interleaved(positions []mdast.Position) []mdast.Position {
@@ -160,4 +235,27 @@ func interleaved(positions []mdast.Position) []mdast.Position {
 		}
 	}
 	return out
+}
+
+// strided returns positions in the order of a walk that takes every step-th
+// one and wraps around, so consecutive lookups jump far forwards and back.
+// step grows until it is coprime with the number of positions, so the walk
+// visits each position once.
+func strided(positions []mdast.Position, step int) []mdast.Position {
+	for gcd(step, len(positions)) != 1 {
+		step++
+	}
+	out := make([]mdast.Position, 0, len(positions))
+	for idx := range positions {
+		out = append(out, positions[(idx*step)%len(positions)])
+	}
+	return out
+}
+
+// gcd returns the greatest common divisor of a and b.
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }

@@ -51,32 +51,62 @@ var markdownlintUTF16Findings = []string{
 	"MD049 17:14-15",
 }
 
-// TestLint_ColumnsCountUTF16CodeUnitsAsMarkdownlintDoes checks the JSON and
-// SARIF columns of findings after multibyte text, emoji and combining marks
-// against markdownlint's, for each line ending.
+// invalidUTF8Document puts findings after ill-formed UTF-8: a truncated
+// three-byte character, an encoded surrogate and a truncated emoji. Node,
+// and so markdownlint, decodes each maximal ill-formed sequence to one
+// U+FFFD.
+const invalidUTF8Document = "# Title\n" +
+	"\n" +
+	"\xe2\x82 trail   \n" +
+	"\n" +
+	"\xed\xa0\x80 x\there\n" +
+	"\n" +
+	"\xf0\x9f\x98 y   \n"
+
+// markdownlintInvalidUTF8Findings are the findings markdownlint 0.41.1
+// reports for invalidUTF8Document, in the form of markdownlintUTF16Findings.
+var markdownlintInvalidUTF8Findings = []string{
+	"MD009 3:8-11",
+	"MD010 5:6-7",
+	"MD009 7:4-7",
+}
+
+// TestLint_ColumnsCountUTF16CodeUnitsAsMarkdownlintDoes checks the JSON,
+// SARIF, text and table columns of findings after multibyte text, emoji,
+// combining marks and ill-formed UTF-8 against markdownlint's, for each line
+// ending.
 func TestLint_ColumnsCountUTF16CodeUnitsAsMarkdownlintDoes(t *testing.T) {
 	t.Parallel()
 
+	documents := map[string]struct {
+		content  string
+		findings []string
+	}{
+		"multibyte": {content: utf16ColumnsDocument, findings: markdownlintUTF16Findings},
+		"invalid":   {content: invalidUTF8Document, findings: markdownlintInvalidUTF8Findings},
+	}
 	endings := map[string]string{"LF": "\n", "CRLF": "\r\n", "CR": "\r"}
-	for name, ending := range endings {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	for docName, doc := range documents {
+		for name, ending := range endings {
+			t.Run(docName+" "+name, func(t *testing.T) {
+				t.Parallel()
 
-			content := strings.ReplaceAll(utf16ColumnsDocument, "\n", ending)
-			path := filepath.Join(t.TempDir(), "doc.md")
-			require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+				content := strings.ReplaceAll(doc.content, "\n", ending)
+				path := filepath.Join(t.TempDir(), "doc.md")
+				require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-			assert.Equal(t, markdownlintUTF16Findings, jsonFindings(t, runLint(t, "--format", "json", path)),
-				"JSON columns match markdownlint")
-			assert.Equal(t, markdownlintUTF16Findings, sarifFindings(t, runLint(t, "--format", "sarif", path)),
-				"SARIF columns match markdownlint")
-			assert.Equal(t, findingStarts(markdownlintUTF16Findings),
-				textFindings(runLint(t, "--format", "text", "--rule-format", "id", path)),
-				"text columns match markdownlint")
-			assert.Equal(t, findingStarts(markdownlintUTF16Findings),
-				textFindings(runLint(t, "--format", "table", "--rule-format", "id", path)),
-				"table columns match markdownlint")
-		})
+				assert.Equal(t, doc.findings, jsonFindings(t, runLint(t, "--format", "json", path)),
+					"JSON columns match markdownlint")
+				assert.Equal(t, doc.findings, sarifFindings(t, runLint(t, "--format", "sarif", path)),
+					"SARIF columns match markdownlint")
+				assert.Equal(t, findingStarts(doc.findings),
+					textFindings(runLint(t, "--format", "text", "--rule-format", "id", path)),
+					"text columns match markdownlint")
+				assert.Equal(t, findingStarts(doc.findings),
+					textFindings(runLint(t, "--format", "table", "--rule-format", "id", path)),
+					"table columns match markdownlint")
+			})
+		}
 	}
 }
 
