@@ -15,7 +15,7 @@
     "column": 3,
     "message": "Unordered list bullet '-' does not match expected '*'",
     "severity": "warning",
-    "fixable": false
+    "fixable": true
   },
   {
     "rule": "MD004",

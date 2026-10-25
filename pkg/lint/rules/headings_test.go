@@ -251,23 +251,50 @@ func TestHeadingStyleRule(t *testing.T) {
 	}
 }
 
-// applyAllEdits applies the fixes of diags to input, a fix that several
-// diagnostics share once.
+// applyAllEdits applies the fixes of diags to input as the engine does: a
+// fix that several diagnostics share once, and a fix group as one fix.
 func applyAllEdits(t *testing.T, input string, diags []lint.Diagnostic) string {
 	t.Helper()
 	var edits []fix.TextEdit
-	// Findings that share a fix carry the same edits, which the engine
-	// applies once.
-	shared := make(map[string]bool)
-	for _, diag := range diags {
-		if key := editsKey(diag.FixEdits); !shared[key] {
-			shared[key] = true
-			edits = append(edits, diag.FixEdits...)
-		}
+	for _, fixEdits := range ruleFixes(t, input, diags) {
+		edits = append(edits, fixEdits...)
 	}
 	prepared, err := fix.PrepareEdits(edits, len(input))
 	require.NoError(t, err)
 	return string(fix.ApplyEdits([]byte(input), prepared))
+}
+
+// ruleFixes returns the distinct fixes of one rule's diags, each as the
+// engine applies it. Findings that share a fix carry the same edits, which
+// make one fix. The edits of a fix group's members make one edit that also
+// writes the text between them back unchanged (see lint.Diagnostic.FixGroup).
+func ruleFixes(t *testing.T, input string, diags []lint.Diagnostic) [][]fix.TextEdit {
+	t.Helper()
+	var fixes [][]fix.TextEdit
+	shared := make(map[string]bool)
+	groups := make(map[int][]fix.TextEdit)
+	var order []int
+	for _, diag := range diags {
+		switch {
+		case !diag.HasFix():
+		case diag.FixGroup != 0:
+			if _, seen := groups[diag.FixGroup]; !seen {
+				order = append(order, diag.FixGroup)
+			}
+			groups[diag.FixGroup] = append(groups[diag.FixGroup], diag.FixEdits...)
+		default:
+			if key := editsKey(diag.FixEdits); !shared[key] {
+				shared[key] = true
+				fixes = append(fixes, diag.FixEdits)
+			}
+		}
+	}
+	for _, group := range order {
+		combined, ok := fix.CombineEdits([]byte(input), groups[group])
+		require.True(t, ok, "the edits of fix group %d overlap", group)
+		fixes = append(fixes, []fix.TextEdit{combined})
+	}
+	return fixes
 }
 
 // diagLines returns the start line of each diagnostic.

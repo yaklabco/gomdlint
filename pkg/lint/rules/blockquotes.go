@@ -92,6 +92,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 
 	sort.Slice(findings, func(i, j int) bool { return findings[i].start < findings[j].start })
 	diags := make([]lint.Diagnostic, 0, len(findings))
+	items := make([]*mdast.Node, 0, len(findings))
 	for _, finding := range findings {
 		line := ctx.File.Lines[finding.lineNum-1]
 		pos := mdast.SourcePosition{
@@ -106,7 +107,7 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 			WithSuggestion("Use a single space after the blockquote symbol")
 		switch {
 		case finding.item != nil:
-			if edit, ok := fixes[finding.item]; ok {
+			if edit, ok := fixes.checked(finding.item); ok {
 				diagBuilder = diagBuilder.WithFix(editFix(edit))
 			}
 		case !finding.unsafe:
@@ -115,9 +116,12 @@ func (r *NoMultipleSpaceBlockquoteRule) Apply(ctx *lint.RuleContext) ([]lint.Dia
 			diagBuilder = diagBuilder.WithFix(builder)
 		}
 		diags = append(diags, diagBuilder.Build())
+		items = append(items, finding.item)
 	}
 
-	return keepSafeFixes(ctx, diags), nil
+	diags = keepSafeFixes(ctx, diags)
+	fixes.share(diags, items)
+	return diags, nil
 }
 
 // extraQuoteSpace finds the whitespace after a blockquote's prefix on a line.

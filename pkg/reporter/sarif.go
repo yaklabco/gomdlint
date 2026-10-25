@@ -168,6 +168,12 @@ type SARIFResult struct {
 	Message   SARIFMessage    `json:"message"`
 	Locations []SARIFLocation `json:"locations"`
 	Fixes     []SARIFFix      `json:"fixes,omitempty"`
+
+	// Properties holds "fixGroup" when the fix is only safe together with
+	// the fixes of the run's other results of the same rule and artifact
+	// that have the same fixGroup: --fix applies them together or not at
+	// all, and so must a consumer.
+	Properties map[string]any `json:"properties,omitempty"`
 }
 
 // SARIFMessage contains the result message.
@@ -480,6 +486,9 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, points *sarifPoints
 
 	if fix, ok := buildFix(location, points, diag); ok {
 		result.Fixes = []SARIFFix{fix}
+		if diag.FixGroup != 0 {
+			result.Properties = map[string]any{"fixGroup": diag.FixGroup}
+		}
 	}
 
 	b.run.Results = append(b.run.Results, result)

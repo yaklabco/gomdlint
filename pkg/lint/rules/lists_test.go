@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -164,13 +163,7 @@ func TestUnorderedListStyleRule(t *testing.T) {
 
 			// Verify fix application.
 			if tt.wantFix != "" && tt.wantDiags > 0 {
-				var allEdits []fix.TextEdit
-				for _, d := range diags {
-					allEdits = append(allEdits, d.FixEdits...)
-				}
-				prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-				require.NoError(t, err)
-				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+				fixed := []byte(applyAllEdits(t, tt.input, diags))
 				assert.Equal(t, tt.wantFix, string(fixed))
 
 				// Verify idempotency: no fixable diagnostics remain.
@@ -432,13 +425,7 @@ func TestOrderedListIncrementRule(t *testing.T) {
 
 			// Verify fix application.
 			if tt.wantFix != "" && tt.wantDiags > 0 {
-				var allEdits []fix.TextEdit
-				for _, d := range diags {
-					allEdits = append(allEdits, d.FixEdits...)
-				}
-				prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-				require.NoError(t, err)
-				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+				fixed := []byte(applyAllEdits(t, tt.input, diags))
 				assert.Equal(t, tt.wantFix, string(fixed))
 
 				// Verify idempotency: no fixable diagnostics remain.

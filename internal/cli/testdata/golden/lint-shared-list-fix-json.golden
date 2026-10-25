@@ -1,0 +1,106 @@
+{
+  "version": "1.0.0",
+  "files": [
+    {
+      "path": "bullets.md",
+      "diagnostics": [
+        {
+          "ruleId": "MD004",
+          "ruleName": "unordered-list-style",
+          "severity": "warning",
+          "message": "Unordered list bullet '*' does not match expected '-'",
+          "startLine": 4,
+          "startColumn": 3,
+          "endLine": 4,
+          "endColumn": 4,
+          "suggestion": "Use '-' as the bullet marker",
+          "fixable": true,
+          "fixes": [
+            {
+              "startOffset": 11,
+              "endOffset": 12,
+              "newText": "-"
+            }
+          ],
+          "fixGroup": 1
+        },
+        {
+          "ruleId": "MD004",
+          "ruleName": "unordered-list-style",
+          "severity": "warning",
+          "message": "Unordered list bullet '*' does not match expected '-'",
+          "startLine": 5,
+          "startColumn": 3,
+          "endLine": 5,
+          "endColumn": 4,
+          "suggestion": "Use '-' as the bullet marker",
+          "fixable": true,
+          "fixes": [
+            {
+              "startOffset": 17,
+              "endOffset": 18,
+              "newText": "-"
+            }
+          ],
+          "fixGroup": 1
+        }
+      ]
+    },
+    {
+      "path": "indent.md",
+      "diagnostics": [
+        {
+          "ruleId": "MD007",
+          "ruleName": "ul-indent",
+          "severity": "warning",
+          "message": "Unordered list indentation 3 does not match expected 0",
+          "startLine": 3,
+          "startColumn": 1,
+          "endLine": 3,
+          "endColumn": 5,
+          "suggestion": "Indent list item by 0 spaces",
+          "fixable": true,
+          "fixes": [
+            {
+              "startOffset": 5,
+              "endOffset": 9,
+              "newText": "-"
+            }
+          ],
+          "fixGroup": 1
+        },
+        {
+          "ruleId": "MD007",
+          "ruleName": "ul-indent",
+          "severity": "warning",
+          "message": "Unordered list indentation 5 does not match expected 2",
+          "startLine": 4,
+          "startColumn": 1,
+          "endLine": 4,
+          "endColumn": 7,
+          "suggestion": "Indent list item by 2 spaces",
+          "fixable": true,
+          "fixes": [
+            {
+              "startOffset": 12,
+              "endOffset": 18,
+              "newText": "  -"
+            }
+          ],
+          "fixGroup": 1
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "filesChecked": 2,
+    "filesWithIssues": 2,
+    "filesModified": 0,
+    "filesErrored": 0,
+    "ruleErrors": 0,
+    "totalIssues": 4,
+    "bySeverity": {
+      "warning": 4
+    }
+  }
+}

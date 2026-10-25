@@ -300,6 +300,25 @@ is one insertion. JSON and SARIF reports show such a fix on each finding,
 so a consumer that applies every reported fix must apply it once, as
 markdownlint's own fix application does.
 
+Some list fixes change several items together, because changing one alone
+would break the list: a different bullet starts a new list, so
+`unordered-list-style` (MD004) replaces the bullets of a list together,
+and `list-indent` (MD005), `ul-indent` (MD007) and
+`no-multiple-space-blockquote` (MD027) move items together when one cannot
+move without the others. Each finding of such a group carries the edit of
+its own line, as markdownlint's do, and `--fix` applies the edits of the
+group together or not at all. In a file with mixed line endings, `--fix`
+can write a line ending between the items of a group in another ending,
+and the finding before such a line ending carries that change too, so the
+edits of a group together give what `--fix` writes, with insertions at one
+offset in the order of the report. Where the edits of single findings
+cannot show what `--fix` writes there, every finding of the group carries
+the group's whole edit, which a consumer applies once. A consumer that
+applies the edits of only some findings of a group can split or merge
+lists. JSON reports give such a finding a `fixGroup` number, and SARIF
+reports give its result a `fixGroup` property: the findings of one rule
+in one file with the same number form one group.
+
 The summary format shows aggregated statistics:
 
 ```text

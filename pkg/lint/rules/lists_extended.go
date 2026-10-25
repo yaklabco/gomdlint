@@ -50,12 +50,16 @@ func (r *ListIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	fixes := plan.fixes(indentEdits(ctx.File, mismatches, plan.resolve()))
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	items := make([]*mdast.Node, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		msg := fmt.Sprintf("List item indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
 		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
 		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
+		items = append(items, mismatch.item)
 	}
-	return keepSafeFixes(ctx, diags), nil
+	diags = keepSafeFixes(ctx, diags)
+	fixes.share(diags, items)
+	return diags, nil
 }
 
 // indentMismatch is a list item whose marker is not in the expected column.
@@ -184,7 +188,7 @@ func indentDiagnostic(
 	ctx *lint.RuleContext,
 	ruleID string,
 	mismatch indentMismatch,
-	fixes map[*mdast.Node]fix.TextEdit,
+	fixes *listFixes,
 	msg, suggestion string,
 ) lint.Diagnostic {
 	marker := mismatch.marker
@@ -197,7 +201,7 @@ func indentDiagnostic(
 	diagBuilder := lint.NewDiagnosticAt(ruleID, ctx.File.Path, pos, msg).
 		WithSeverity(config.SeverityWarning).
 		WithSuggestion(suggestion)
-	if edit, ok := fixes[mismatch.item]; ok {
+	if edit, ok := fixes.checked(mismatch.item); ok {
 		diagBuilder = diagBuilder.WithFix(editFix(edit))
 	}
 	return diagBuilder.Build()
@@ -270,12 +274,16 @@ func (r *ULIndentRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		return mismatches[i].marker.Start < mismatches[j].marker.Start
 	})
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	items := make([]*mdast.Node, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		msg := fmt.Sprintf("Unordered list indentation %d does not match expected %d", mismatch.actual, mismatch.expected)
 		suggestion := fmt.Sprintf("Indent list item by %d spaces", mismatch.expected)
 		diags = append(diags, indentDiagnostic(ctx, r.ID(), mismatch, fixes, msg, suggestion))
+		items = append(items, mismatch.item)
 	}
-	return keepSafeFixes(ctx, diags), nil
+	diags = keepSafeFixes(ctx, diags)
+	fixes.share(diags, items)
+	return diags, nil
 }
 
 // unorderedListNesting counts the lists enclosing a list up to the nearest
@@ -398,6 +406,7 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 	fixes := plan.fixes(edits)
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	items := make([]*mdast.Node, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		// Like markdownlint, the finding covers the marker and the spaces
 		// after it.
@@ -412,13 +421,16 @@ func (r *ListMarkerSpaceRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, e
 			fmt.Sprintf("List marker space %d does not match expected %d", mismatch.actual, mismatch.expected)).
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(fmt.Sprintf("Use %d space(s) after the list marker", mismatch.expected))
-		if edit, ok := fixes[mismatch.item]; ok {
+		if edit, ok := fixes.checked(mismatch.item); ok {
 			diagBuilder = diagBuilder.WithFix(editFix(edit))
 		}
 		diags = append(diags, diagBuilder.Build())
+		items = append(items, mismatch.item)
 	}
 
-	return keepSafeFixes(ctx, diags), nil
+	diags = keepSafeFixes(ctx, diags)
+	fixes.share(diags, items)
+	return diags, nil
 }
 
 // markerSpacingOption reads one of MD030's spacing options. Like markdownlint,

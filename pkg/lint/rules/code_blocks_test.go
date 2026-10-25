@@ -1014,7 +1014,7 @@ func TestCommandsShowOutputRule_PromptThatLooksLikeAFence(t *testing.T) {
 				require.Len(t, diags, 2)
 				assert.Equal(t, []int{2, 3}, []int{diags[0].StartLine, diags[1].StartLine})
 				assert.False(t, diags[0].HasFix(), "removing the prompt would close the fence")
-				assert.Equal(t, tt.fixed, applyAllFixEdits(t, tt.input, diags))
+				assert.Equal(t, tt.fixed, applyAllEdits(t, tt.input, diags))
 			})
 		}
 	}
