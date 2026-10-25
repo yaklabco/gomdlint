@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/yaklabco/gomdlint/internal/display"
+	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -123,21 +124,32 @@ type SARIFDriver struct {
 	Rules          []SARIFRule `json:"rules"`
 }
 
-// SARIFRule describes a rule (linter check). Descriptions, the default
-// configuration and tags come from the rule registry; they are absent for a
-// rule the registry does not know.
+// SARIFRule describes a rule (linter check). Descriptions, help, the default
+// configuration and tags come from the rule registry and the rule's catalog
+// entry; they are absent for a rule the registry does not know.
 type SARIFRule struct {
 	ID               string                `json:"id"`
 	Name             string                `json:"name,omitempty"`
 	ShortDescription *SARIFMultiformatText `json:"shortDescription,omitempty"`
 	FullDescription  *SARIFMultiformatText `json:"fullDescription,omitempty"`
 	DefaultConfig    *SARIFRuleConfig      `json:"defaultConfiguration,omitempty"`
-	Properties       map[string]any        `json:"properties,omitempty"`
+
+	// HelpURI is the address of the rule's generated page under docs/rules.
+	// Only built-in rules have one.
+	HelpURI string `json:"helpUri,omitempty"`
+
+	// Help is the page that gomdlint explain prints for the rule, as text
+	// and as Markdown.
+	Help *SARIFMultiformatText `json:"help,omitempty"`
+
+	Properties map[string]any `json:"properties,omitempty"`
 }
 
-// SARIFMultiformatText contains text in multiple formats.
+// SARIFMultiformatText contains text in multiple formats: plain text, and
+// Markdown where the text has a Markdown form.
 type SARIFMultiformatText struct {
-	Text string `json:"text"`
+	Text     string `json:"text"`
+	Markdown string `json:"markdown,omitempty"`
 }
 
 // SARIFRuleConfig contains rule configuration.
@@ -466,9 +478,15 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, points *sarifPoints
 	b.run.Results = append(b.run.Results, result)
 }
 
+// sarifTagLimit is the most tags a rule descriptor carries: GitHub code
+// scanning keeps only the first 10.
+const sarifTagLimit = 10
+
 // describeRule returns the SARIF description of a rule, taking its metadata
-// from the registry. A rule the registry does not know is identified by its
-// ID and fallbackName only.
+// from the registry and the rule's catalog entry: its name, descriptions,
+// default severity, tags, the page that explain prints for it as help, and,
+// for a built-in rule, the address of its generated page. A rule the
+// registry does not know is identified by its ID and fallbackName only.
 func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	rule := SARIFRule{ID: ruleID, Name: fallbackName}
 
@@ -477,26 +495,48 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 		return rule
 	}
 
+	meta, hasMeta := b.registry.Meta(ruleID) // A rule without an entry gets the zero entry.
 	rule.Name = registered.Name()
-	if short, full := b.ruleDescriptions(registered); short != "" {
+	if short, full := ruleDescriptions(registered, meta); short != "" {
 		rule.ShortDescription = &SARIFMultiformatText{Text: short}
 		rule.FullDescription = &SARIFMultiformatText{Text: full}
 	}
 	rule.DefaultConfig = &SARIFRuleConfig{Level: severityToSARIFLevel(registered.DefaultSeverity())}
-	if tags := uniqueTags(registered.Tags()); len(tags) > 0 {
+
+	entry := ruledocs.NewEntry(registered, meta)
+	rule.HelpURI = ruledocs.PageURL(entry)
+	rule.Help = ruleHelp(entry)
+
+	tags := registered.Tags()
+	if hasMeta {
+		tags = append([]string{string(meta.Category)}, meta.Tags...)
+	}
+	if tags := uniqueTags(tags, sarifTagLimit); len(tags) > 0 {
 		rule.Properties = map[string]any{"tags": tags}
 	}
 
 	return rule
 }
 
-// ruleDescriptions returns the short and the full SARIF description of rule.
-// When the registry holds a catalog entry with a description for the rule,
-// the short description is the entry's one line, and the full description
-// follows it with the entry's rationale and the sentences on its fix.
-// Otherwise both are the rule's own description.
-func (b *sarifRunBuilder) ruleDescriptions(rule lint.Rule) (string, string) {
-	meta, _ := b.registry.Meta(rule.ID()) // A rule without an entry gets the zero entry.
+// ruleHelp returns the page of entry's rule that gomdlint explain prints, as
+// text, and that explain --format markdown prints, as Markdown, both without
+// a configuration. It returns nil when a page cannot be written, as when
+// the rule's embedded example does not parse, which the rule documentation
+// tests rule out for the built-in rules.
+func ruleHelp(entry ruledocs.Entry) *SARIFMultiformatText {
+	var text, markdown strings.Builder
+	if ruledocs.WriteTextPage(&text, entry, "") != nil || ruledocs.WriteMarkdownPage(&markdown, entry) != nil {
+		return nil
+	}
+	return &SARIFMultiformatText{Text: text.String(), Markdown: markdown.String()}
+}
+
+// ruleDescriptions returns the short and the full SARIF description of rule,
+// whose catalog entry is meta, or the zero entry when it has none. When the
+// entry has a description, the short description is the entry's one line,
+// and the full description follows it with the entry's rationale and the
+// sentences on its fix. Otherwise both are the rule's own description.
+func ruleDescriptions(rule lint.Rule, meta lint.RuleMeta) (string, string) {
 	short := lint.RuleDescription(rule, meta)
 	if meta.Description == "" {
 		return short, short
@@ -511,12 +551,15 @@ func (b *sarifRunBuilder) ruleDescriptions(rule lint.Rule) (string, string) {
 	return short, strings.Join(full, " ")
 }
 
-// uniqueTags returns the non-empty tags in order without duplicates, as SARIF
-// requires of a tags property.
-func uniqueTags(tags []string) []string {
+// uniqueTags returns the first limit non-empty tags in order without
+// duplicates, as SARIF requires of a tags property.
+func uniqueTags(tags []string, limit int) []string {
 	seen := make(map[string]bool, len(tags))
-	unique := make([]string, 0, len(tags))
+	unique := make([]string, 0, min(len(tags), limit))
 	for _, tag := range tags {
+		if len(unique) == limit {
+			break
+		}
 		if tag == "" || seen[tag] {
 			continue
 		}

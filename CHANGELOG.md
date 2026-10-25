@@ -321,6 +321,11 @@ formats change. The first entries under Changed may need action.
   catalog entry, and `lint.RuleMeta` gains `Summary` and `RuleTags`, the
   description and tags that the rule reports itself. Every built-in rule is
   built from its entry, so the catalog is the only copy of its metadata.
+- SARIF rule descriptors carry the page that `gomdlint explain` prints for
+  the rule as `help`, in text and Markdown, and a built-in rule's generated
+  page under `docs/rules` on the main branch as `helpUri`. Their tags are
+  the rule's category followed by its markdownlint tags from the catalog,
+  at most 10, the number GitHub code scanning keeps.
 
 ### Fixed
 

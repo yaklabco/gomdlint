@@ -651,7 +651,7 @@ func TestSARIFReporter_DescribesRulesFromRegistry(t *testing.T) {
 		"the catalog description, rationale and fix")
 	require.NotNil(t, described.DefaultConfig)
 	assert.Equal(t, "warning", described.DefaultConfig.Level, "the default severity of the rule, not the configured one")
-	assert.Equal(t, []any{"whitespace"}, described.Properties["tags"])
+	assert.Equal(t, []any{"layout", "whitespace"}, described.Properties["tags"], "the category, then markdownlint's tags")
 
 	assert.Equal(t, reporter.SARIFRule{ID: "XX999", Name: "custom-rule"}, driver.Rules[1],
 		"an unregistered rule is identified without invented metadata")

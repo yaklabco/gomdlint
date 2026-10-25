@@ -761,7 +761,12 @@ lists them under each file's `notices`, and SARIF output records them as
   units, one artifact change per fix, rule descriptors from the registry,
   and notifications for unreadable files and failing rules. A descriptor's
   `shortDescription` is the catalog description, and its `fullDescription`
-  adds the rationale and the fix text.
+  adds the rationale and the fix text. Its `help` is the page that
+  `gomdlint explain` prints, in text and Markdown, rendered by
+  `internal/ruledocs`. A built-in rule's `helpUri` is its generated page,
+  `ruledocs.RulePagesURL` plus `<name>.md`, on the main branch as the JSON
+  Schema's `$id` is. Its tags are the rule's category, then its catalog
+  tags, at most 10, since GitHub code scanning keeps no more.
 - `diff` (`DiffReporter`): the unified diff the pipeline recorded, of the
   fixes `--fix` would make or, with `--fix`, made.
 
