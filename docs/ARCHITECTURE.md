@@ -761,7 +761,24 @@ lists them under each file's `notices`, and SARIF output records them as
   units, one artifact change per fix, rule descriptors from the registry,
   and notifications for unreadable files and failing rules. A descriptor's
   `shortDescription` is the catalog description, and its `fullDescription`
-  adds the rationale and the fix text.
+  adds the rationale and the fix text. Its tags are the rule's category,
+  then its catalog tags, at most 10, since GitHub code scanning keeps no
+  more. Help is opt-in through `reporter.Options.RuleHelp`, which
+  `gomdlint lint` sets to `ruledocs.RuleHelp(registry)`. Then `help` is the
+  page that `gomdlint explain` prints, in text and Markdown, with the rule
+  keyed as generated configurations key it, and a built-in rule's
+  `helpUri` is its generated page, `ruledocs.RulePagesURL` plus
+  `<name>.md`, on the main branch as the JSON Schema's `$id` is. Without
+  it, descriptors carry neither. `pkg/reporter` does not import
+  `internal/ruledocs` or the built-in rules, whose package registers them
+  in `lint.DefaultRegistry` as it initializes: a program's own rules
+  registered there under built-in IDs would be replaced. A test checks the
+  reporter's import graph. `reporter.Options.BuiltInRule`, which
+  `gomdlint lint` sets to `ruledocs.IsBuiltInRule`, tells the built-in rules
+  from custom rules under built-in IDs, which a matching Go type and name
+  identify. A custom rule under a built-in ID is described from the rule
+  itself, with no help, as the registry may still hold the built-in rule's
+  catalog entry for its ID.
 - `diff` (`DiffReporter`): the unified diff the pipeline recorded, of the
   fixes `--fix` would make or, with `--fix`, made.
 

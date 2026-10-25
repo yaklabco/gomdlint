@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -14,6 +15,7 @@ import (
 	gmtext "github.com/yuin/goldmark/text"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // The rule reference is the documentation that the catalog and the rules'
@@ -49,6 +51,48 @@ const (
 	// schemaName is the name of the configuration's JSON Schema.
 	schemaName = "gomdlint.schema.json"
 )
+
+// RulePagesURL is where the rule pages of docs/rules are published: on main
+// of gomdlint's repository, where the JSON Schema's $id (SchemaURL) points
+// too. A page there describes the rule as the latest gomdlint has it, and
+// its address holds only while the rule keeps its name.
+const RulePagesURL = "https://github.com/yaklabco/gomdlint/blob/main/" + rulesDir + "/"
+
+// PageURL returns the published address of the page of entry's rule (see
+// RulePagesURL), or "" when the rule has no generated page: when it is not
+// a built-in rule, such as a custom rule, even one that takes a built-in
+// rule's ID and name.
+func PageURL(entry Entry) string {
+	if !entry.builtIn() {
+		return ""
+	}
+	return RulePagesURL + url.PathEscape(entry.Name) + ".md"
+}
+
+// RuleHelp returns the function that documents a rule of registry for a
+// SARIF rule descriptor, with the signature of reporter.Options.RuleHelp.
+// The function takes the rule and its catalog entry, or the zero entry
+// when it has none. It returns the page that explain prints, as text, and
+// the page that explain --format markdown prints, both for the rule's
+// built-in state and keyed as generated configurations key the rule in
+// registry (see ConfigKey), or in lint.DefaultRegistry when registry is
+// nil, as the SARIF reporter falls back to it too. Pass the registry given
+// as reporter.Options.Registry. The function also returns the address of
+// the rule's generated page (see PageURL), or "" for a rule without one. It
+// reports false when a page cannot be written, as when the rule's embedded
+// example does not parse, which the tests of this package rule out for the
+// built-in rules.
+func RuleHelp(registry *lint.Registry) func(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
+	return func(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
+		entry := NewEntry(rule, meta)
+		entry.ConfigKey = ConfigKey(cmp.Or(registry, lint.DefaultRegistry), rule.ID())
+		var text, markdown strings.Builder
+		if WriteTextPage(&text, entry, "") != nil || WriteMarkdownPage(&markdown, entry) != nil {
+			return "", "", "", false
+		}
+		return text.String(), markdown.String(), PageURL(entry), true
+	}
+}
 
 // ReferenceDirs returns the directories that hold the files of the rule
 // reference, relative to the repository's root, which hold nothing else.

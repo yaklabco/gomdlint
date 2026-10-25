@@ -123,21 +123,32 @@ type SARIFDriver struct {
 	Rules          []SARIFRule `json:"rules"`
 }
 
-// SARIFRule describes a rule (linter check). Descriptions, the default
-// configuration and tags come from the rule registry; they are absent for a
-// rule the registry does not know.
+// SARIFRule describes a rule (linter check). Descriptions, help, the default
+// configuration and tags come from the rule registry and the rule's catalog
+// entry; they are absent for a rule the registry does not know.
 type SARIFRule struct {
 	ID               string                `json:"id"`
 	Name             string                `json:"name,omitempty"`
 	ShortDescription *SARIFMultiformatText `json:"shortDescription,omitempty"`
 	FullDescription  *SARIFMultiformatText `json:"fullDescription,omitempty"`
 	DefaultConfig    *SARIFRuleConfig      `json:"defaultConfiguration,omitempty"`
-	Properties       map[string]any        `json:"properties,omitempty"`
+
+	// HelpURI is the address of the rule's generated page under docs/rules.
+	// Only built-in rules have one.
+	HelpURI string `json:"helpUri,omitempty"`
+
+	// Help is the page that gomdlint explain prints for the rule, as text
+	// and as Markdown.
+	Help *SARIFMultiformatText `json:"help,omitempty"`
+
+	Properties map[string]any `json:"properties,omitempty"`
 }
 
-// SARIFMultiformatText contains text in multiple formats.
+// SARIFMultiformatText contains text in multiple formats: plain text, and
+// Markdown where the text has a Markdown form.
 type SARIFMultiformatText struct {
-	Text string `json:"text"`
+	Text     string `json:"text"`
+	Markdown string `json:"markdown,omitempty"`
 }
 
 // SARIFRuleConfig contains rule configuration.
@@ -284,10 +295,12 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 
 	if result != nil {
 		builder := &sarifRunBuilder{
-			run:       &run,
-			registry:  r.registry,
-			locator:   locator,
-			ruleIndex: make(map[string]int),
+			run:         &run,
+			registry:    r.registry,
+			locator:     locator,
+			ruleHelp:    r.opts.RuleHelp,
+			builtInRule: r.opts.BuiltInRule,
+			ruleIndex:   make(map[string]int),
 		}
 		for _, file := range result.Files {
 			if file.Error != nil {
@@ -344,6 +357,12 @@ type sarifRunBuilder struct {
 	run      *SARIFRun
 	registry RuleLookup
 	locator  *artifactLocator
+
+	// ruleHelp documents rules for their descriptors, or is nil.
+	ruleHelp RuleHelpFunc
+
+	// builtInRule recognizes the built-in rules, or is nil.
+	builtInRule func(rule lint.Rule) bool
 
 	// ruleIndex maps each described rule ID to its position in
 	// tool.driver.rules.
@@ -466,9 +485,18 @@ func (b *sarifRunBuilder) addResult(file runner.FileOutcome, points *sarifPoints
 	b.run.Results = append(b.run.Results, result)
 }
 
+// sarifTagLimit is the most tags a rule descriptor carries: GitHub code
+// scanning keeps only the first 10.
+const sarifTagLimit = 10
+
 // describeRule returns the SARIF description of a rule, taking its metadata
-// from the registry. A rule the registry does not know is identified by its
-// ID and fallbackName only.
+// from the registry and the rule's catalog entry: its name, descriptions,
+// default severity and tags, and, from Options.RuleHelp when it is set,
+// its help and the address of a page about it. A custom rule under a
+// built-in rule's ID (see replacesBuiltIn) is described from the rule
+// itself, with no help, ignoring the registry's catalog entry for the ID,
+// even one described for that rule itself. A rule the registry does not
+// know is identified by its ID and fallbackName only.
 func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	rule := SARIFRule{ID: ruleID, Name: fallbackName}
 
@@ -477,26 +505,51 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 		return rule
 	}
 
+	meta, _ := b.registry.Meta(ruleID) // A rule without an entry gets the zero entry.
+	replacement := b.replacesBuiltIn(registered)
+	if replacement {
+		meta = lint.RuleMeta{} // The entry describes the built-in rule.
+	}
 	rule.Name = registered.Name()
-	if short, full := b.ruleDescriptions(registered); short != "" {
+	if short, full := ruleDescriptions(registered, meta); short != "" {
 		rule.ShortDescription = &SARIFMultiformatText{Text: short}
 		rule.FullDescription = &SARIFMultiformatText{Text: full}
 	}
 	rule.DefaultConfig = &SARIFRuleConfig{Level: severityToSARIFLevel(registered.DefaultSeverity())}
-	if tags := uniqueTags(registered.Tags()); len(tags) > 0 {
+
+	if b.ruleHelp != nil && !replacement {
+		if text, markdown, uri, documented := b.ruleHelp(registered, meta); documented {
+			rule.Help = &SARIFMultiformatText{Text: text, Markdown: markdown}
+			rule.HelpURI = uri
+		}
+	}
+
+	candidates := append([]string{string(meta.Category)}, lint.TagsFor(registered, meta)...)
+	if tags := uniqueTags(candidates, sarifTagLimit); len(tags) > 0 {
 		rule.Properties = map[string]any{"tags": tags}
 	}
 
 	return rule
 }
 
-// ruleDescriptions returns the short and the full SARIF description of rule.
-// When the registry holds a catalog entry with a description for the rule,
-// the short description is the entry's one line, and the full description
-// follows it with the entry's rationale and the sentences on its fix.
-// Otherwise both are the rule's own description.
-func (b *sarifRunBuilder) ruleDescriptions(rule lint.Rule) (string, string) {
-	meta, _ := b.registry.Meta(rule.ID()) // A rule without an entry gets the zero entry.
+// replacesBuiltIn reports whether rule, a registered rule, is a custom rule
+// under a built-in rule's ID: a rule with one of markdownlint's or
+// gomdlint's own IDs that Options.BuiltInRule does not recognize as the
+// built-in rule, such as another rule under another name, another
+// implementation or a wrapper. The registry may still hold the built-in
+// rule's catalog entry for its ID, which does not describe it. Without
+// Options.BuiltInRule, no rule counts as one.
+func (b *sarifRunBuilder) replacesBuiltIn(rule lint.Rule) bool {
+	id := rule.ID()
+	return b.builtInRule != nil && (lint.IsMarkdownlintRule(id) || lint.IsGomdlintOnlyRule(id)) && !b.builtInRule(rule)
+}
+
+// ruleDescriptions returns the short and the full SARIF description of rule,
+// whose catalog entry is meta, or the zero entry when it has none. When the
+// entry has a description, the short description is the entry's one line,
+// and the full description follows it with the entry's rationale and the
+// sentences on its fix. Otherwise both are the rule's own description.
+func ruleDescriptions(rule lint.Rule, meta lint.RuleMeta) (string, string) {
 	short := lint.RuleDescription(rule, meta)
 	if meta.Description == "" {
 		return short, short
@@ -511,12 +564,15 @@ func (b *sarifRunBuilder) ruleDescriptions(rule lint.Rule) (string, string) {
 	return short, strings.Join(full, " ")
 }
 
-// uniqueTags returns the non-empty tags in order without duplicates, as SARIF
-// requires of a tags property.
-func uniqueTags(tags []string) []string {
+// uniqueTags returns the first limit non-empty tags in order without
+// duplicates, as SARIF requires of a tags property.
+func uniqueTags(tags []string, limit int) []string {
 	seen := make(map[string]bool, len(tags))
-	unique := make([]string, 0, len(tags))
+	unique := make([]string, 0, min(len(tags), limit))
 	for _, tag := range tags {
+		if len(unique) == limit {
+			break
+		}
 		if tag == "" || seen[tag] {
 			continue
 		}

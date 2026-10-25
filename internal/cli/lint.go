@@ -16,6 +16,7 @@ import (
 	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -144,6 +145,16 @@ func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
 	return cleanup, nil
 }
 
+// colorFlag returns the value of the persistent --color flag, or auto when
+// the flag cannot be read.
+func colorFlag(cmd *cobra.Command) string {
+	colorMode, err := cmd.Flags().GetString("color")
+	if err != nil {
+		return colorModeAuto
+	}
+	return colorMode
+}
+
 func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags, registry *lint.Registry) error {
 	logger := logging.FromContext(cmd.Context())
 
@@ -266,13 +277,8 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		return failure(ctx, ExitIOError, err)
 	}
 
-	// Get color mode from persistent flag.
-	colorMode, err := cmd.Flags().GetString("color")
-	if err != nil {
-		colorMode = colorModeAuto // Default to auto if flag retrieval fails
-	}
-
 	// Create reporter.
+	colorMode := colorFlag(cmd)
 	rep, err := reporter.New(reporter.Options{
 		Writer:       cmd.OutOrStdout(),
 		ErrorWriter:  cmd.ErrOrStderr(),
@@ -288,6 +294,8 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		WorkingDir:   workDir,
 		ToolVersion:  flags.toolVersion,
 		Registry:     registry,
+		RuleHelp:     ruledocs.RuleHelp(registry), // SARIF rule help: the pages that explain prints.
+		BuiltInRule:  ruledocs.IsBuiltInRule,
 	})
 	if err != nil {
 		return withExitCode(ExitInternalError, fmt.Errorf("create reporter: %w", err))

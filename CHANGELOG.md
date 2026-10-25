@@ -321,6 +321,17 @@ formats change. The first entries under Changed may need action.
   catalog entry, and `lint.RuleMeta` gains `Summary` and `RuleTags`, the
   description and tags that the rule reports itself. Every built-in rule is
   built from its entry, so the catalog is the only copy of its metadata.
+- SARIF rule descriptors carry the page that `gomdlint explain` prints for
+  the rule as `help`, in text and Markdown, and a built-in rule's generated
+  page under `docs/rules` on the main branch as `helpUri`. Their tags are
+  the rule's category followed by its markdownlint tags from the catalog,
+  at most 10, the number GitHub code scanning keeps. Go API: programs that
+  use `pkg/reporter` directly get help only by setting the new
+  `reporter.Options.RuleHelp`, and tell custom rules under built-in IDs
+  from the built-in rules only by setting `reporter.Options.BuiltInRule`.
+  `lint.TagsFor` gives a rule's catalog tags. `pkg/reporter` does not
+  register the built-in rules, so such a program imports `pkg/lint/rules`
+  or sets `reporter.Options.Registry` for descriptors to describe them.
 
 ### Fixed
 
@@ -600,6 +611,12 @@ formats change. The first entries under Changed may need action.
 - The summary lists rules and files with equal counts in rule ID and path
   order, where the order used to change from run to run.
 - Help output follows `--color`.
+- A custom rule that replaces a built-in rule under its ID, under another
+  name, as another implementation under the same name, or as a wrapper, is
+  no longer documented as the built-in rule: `explain` shows no example,
+  generated page or markdownlint link for it, and its SARIF descriptor
+  takes its description, tags and default severity from the rule itself,
+  with no help or help URI.
 - Config files can turn backups off, `severity_default` applies, and the
   rule flags accept rule names.
 - A rule configured under both its ID and a name is an error that names both

@@ -22,6 +22,7 @@ import (
 	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // update regenerates the rule reference instead of comparing it:
@@ -167,6 +168,176 @@ func TestReferenceFiles(t *testing.T) {
 	assert.Contains(t, index, "\n| [`heading-increment`](heading-increment.md) | MD001 | no | ")
 	assert.Contains(t, index, "\ngomdlint has 55 rules, and 37 of them can fix what they find.")
 	assert.True(t, ruledocs.IsGenerated(files["docs/schema/gomdlint.schema.json"]))
+}
+
+// TestRuleHelpKeysRulesAsExplainDoes covers the key that RuleHelp's pages
+// write for a rule: its config key in the registry, as explain writes it,
+// with lint.DefaultRegistry for a nil registry.
+func TestRuleHelpKeysRulesAsExplainDoes(t *testing.T) {
+	rule, found := lint.DefaultRegistry.GetByID("MD009")
+	require.True(t, found)
+	meta, found := lint.DefaultRegistry.Meta("MD009")
+	require.True(t, found)
+
+	for _, registry := range []*lint.Registry{lint.DefaultRegistry, nil} {
+		text, markdown, uri, ok := ruledocs.RuleHelp(registry)(rule, meta)
+		require.True(t, ok)
+		assert.Contains(t, text, "Options, under rules.no-trailing-spaces.options:", "a nil registry is the default one")
+		assert.Contains(t, markdown, "rules.no-trailing-spaces.options")
+		assert.Equal(t, ruledocs.RulePagesURL+"no-trailing-spaces.md", uri)
+	}
+}
+
+// TestPageURL covers the published address of each rule's page: the page
+// that ReferenceFiles writes, on main of the repository, as the JSON
+// Schema's $id is. A rule without a generated page has no address.
+func TestPageURL(t *testing.T) {
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)
+	files, err := ruledocs.ReferenceFiles(entries)
+	require.NoError(t, err)
+
+	const base = "https://github.com/yaklabco/gomdlint/blob/main/"
+	assert.Equal(t, base+"docs/rules/", ruledocs.RulePagesURL)
+	for _, entry := range entries {
+		url := ruledocs.PageURL(entry)
+		path, found := strings.CutPrefix(url, base)
+		if assert.True(t, found, "%s: %q", entry.ID, url) {
+			assert.Contains(t, files, path, "%s: a page that ReferenceFiles writes", entry.ID)
+		}
+	}
+
+	custom := lint.NewBaseRule("ZZ001", "custom-rule", "A custom rule.", nil, false)
+	impostor := lint.NewBaseRule("MD009", "my-trailing-spaces", "Another rule under MD009.", nil, false)
+	assert.Empty(t, ruledocs.PageURL(ruledocs.NewEntry(&custom, lint.RuleMeta{ID: "ZZ001", Name: "custom-rule"})),
+		"a custom rule")
+	assert.Empty(t, ruledocs.PageURL(ruledocs.NewEntry(&impostor, lint.RuleMeta{})),
+		"a custom rule under a built-in rule's ID")
+}
+
+// TestPagesOfACustomRuleUnderABuiltinID covers a custom rule that takes a
+// built-in rule's ID under another name: its pages show none of the
+// built-in rule's example, and say that markdownlint does not have it.
+func TestPagesOfACustomRuleUnderABuiltinID(t *testing.T) {
+	impostor := lint.NewBaseRule("MD009", "my-trailing-spaces", "Another rule under MD009.", nil, false)
+	entry := ruledocs.NewEntry(&impostor, lint.RuleMeta{})
+
+	var text, markdown bytes.Buffer
+	require.NoError(t, ruledocs.WriteTextPage(&text, entry, ""))
+	require.NoError(t, ruledocs.WriteMarkdownPage(&markdown, entry))
+	for _, page := range []string{text.String(), markdown.String()} {
+		assert.Contains(t, page, "markdownlint does not have this rule.")
+		assert.NotContains(t, page, "md009.md")
+		assert.NotContains(t, page, "This document breaks the rule")
+	}
+}
+
+// replacementRule is a custom rule that replaces a built-in one.
+type replacementRule struct {
+	lint.BaseRule
+}
+
+// TestPagesOfARuleThatReplacesABuiltinOne covers a registry with the
+// built-in rules, in which a custom rule then replaces MD009, under
+// another name or under the built-in rule's own, and a wrapper around the
+// built-in rule. None of them is the built-in rule, so their pages name the
+// rule but show no example, no published page address and no link to
+// markdownlint's documentation. Only those are suppressed: the registry
+// keeps the built-in rule's catalog entry for MD009, so the pages still
+// show its description, tags and options, as on main (plan item 89).
+func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
+	builtIn, found := lint.DefaultRegistry.GetByID("MD009")
+	require.True(t, found)
+	for _, tt := range []struct {
+		name string
+		rule lint.Rule
+	}{
+		{"another name", &replacementRule{lint.NewBaseRule("MD009", "company-policy", "Company policy.", nil, false)}},
+		{"the built-in name", &replacementRule{lint.NewBaseRule("MD009", "no-trailing-spaces", "Company policy.", nil, false)}},
+		{"a wrapper", struct{ lint.Rule }{builtIn}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := lint.NewRegistry()
+			rules.RegisterAll(registry)
+			registry.Register(tt.rule)
+			assert.False(t, ruledocs.IsBuiltInRule(tt.rule))
+
+			var entry ruledocs.Entry
+			for _, candidate := range ruledocs.Entries(registry, nil) {
+				if candidate.ID == "MD009" {
+					entry = candidate
+				}
+			}
+			require.Equal(t, tt.rule.Name(), entry.Name)
+			assert.Empty(t, ruledocs.PageURL(entry), "not the built-in rule")
+
+			var text, markdown bytes.Buffer
+			require.NoError(t, ruledocs.WriteTextPage(&text, entry, ""))
+			require.NoError(t, ruledocs.WriteMarkdownPage(&markdown, entry))
+			for _, page := range []string{text.String(), markdown.String()} {
+				assert.Contains(t, page, tt.rule.Name(), "the page names the rule")
+				assert.NotContains(t, page, "This document breaks the rule", "no built-in example")
+				assert.NotContains(t, page, "md009.md", "no markdownlint link")
+			}
+		})
+	}
+}
+
+// TestIsBuiltInRule covers which rules count as built in: the rules that
+// RegisterAll registers, in the default registry and in a fresh one, but
+// not a custom rule under a built-in ID, under its name or another, a
+// wrapper around a built-in rule, or a rule under an ID of its own.
+func TestIsBuiltInRule(t *testing.T) {
+	builtIn, found := lint.DefaultRegistry.GetByID("MD009")
+	require.True(t, found)
+	custom := func(id, name string) lint.Rule {
+		return &replacementRule{lint.NewBaseRule(id, name, "Company policy.", nil, false)}
+	}
+	for _, tt := range []struct {
+		name string
+		rule lint.Rule
+		want bool
+	}{
+		{"the default registry's rule", builtIn, true},
+		{"a new instance of the built-in rule", rules.NewTrailingWhitespaceRule(), true},
+		{"gomdlint's own rule", rules.NewTableAlignmentRule(), true},
+		{"another name under a built-in ID", custom("MD009", "company-policy"), false},
+		{"the built-in name, another type", custom("MD009", "no-trailing-spaces"), false},
+		{"a wrapper", struct{ lint.Rule }{builtIn}, false},
+		{"an ID of its own", custom("ZZ001", "custom-rule"), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ruledocs.IsBuiltInRule(tt.rule))
+		})
+	}
+
+	fresh := lint.NewRegistry()
+	rules.RegisterAll(fresh)
+	for _, registry := range []*lint.Registry{lint.DefaultRegistry, fresh} {
+		for _, rule := range registry.Rules() {
+			assert.True(t, ruledocs.IsBuiltInRule(rule), rule.ID())
+		}
+	}
+}
+
+// TestNewEntry covers the entry of one rule in its built-in state, which
+// matches the entry that Entries gives it without a configuration, except
+// for the config key, which takes a registry.
+func TestNewEntry(t *testing.T) {
+	for _, want := range ruledocs.Entries(lint.DefaultRegistry, nil) {
+		rule, found := lint.DefaultRegistry.GetByID(want.ID)
+		require.True(t, found)
+		meta, found := lint.DefaultRegistry.Meta(want.ID)
+		require.True(t, found)
+		want.ConfigKey = ""
+		assert.Equal(t, want, ruledocs.NewEntry(rule, meta), want.ID)
+	}
+
+	custom := lint.NewBaseRule("ZZ001", "custom-rule", "The rule's own words.", []string{"own"}, true)
+	assert.Equal(t, ruledocs.Entry{
+		RuleMeta: lint.RuleMeta{ID: "ZZ001", Name: "custom-rule", Fixable: true, Description: "The rule's own words."},
+		Default:  ruledocs.State{Enabled: true, Severity: config.SeverityWarning},
+		State:    ruledocs.State{Enabled: true, Severity: config.SeverityWarning},
+	}, ruledocs.NewEntry(&custom, lint.RuleMeta{}), "a rule without a catalog entry")
 }
 
 // TestGeneratedMarkdownLintsClean lints the index and the pages of the
