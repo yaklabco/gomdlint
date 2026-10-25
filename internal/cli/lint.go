@@ -145,6 +145,16 @@ func setupProfiling(flags *lintFlags) (*profileCleanup, error) {
 	return cleanup, nil
 }
 
+// colorFlag returns the value of the persistent --color flag, or auto when
+// the flag cannot be read.
+func colorFlag(cmd *cobra.Command) string {
+	colorMode, err := cmd.Flags().GetString("color")
+	if err != nil {
+		return colorModeAuto
+	}
+	return colorMode
+}
+
 func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintFlags, registry *lint.Registry) error {
 	logger := logging.FromContext(cmd.Context())
 
@@ -267,13 +277,8 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		return failure(ctx, ExitIOError, err)
 	}
 
-	// Get color mode from persistent flag.
-	colorMode, err := cmd.Flags().GetString("color")
-	if err != nil {
-		colorMode = colorModeAuto // Default to auto if flag retrieval fails
-	}
-
 	// Create reporter.
+	colorMode := colorFlag(cmd)
 	rep, err := reporter.New(reporter.Options{
 		Writer:       cmd.OutOrStdout(),
 		ErrorWriter:  cmd.ErrOrStderr(),
