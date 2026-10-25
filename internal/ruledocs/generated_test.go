@@ -195,6 +195,23 @@ func TestPageURL(t *testing.T) {
 		"a custom rule under a built-in rule's ID")
 }
 
+// TestPagesOfACustomRuleUnderABuiltinID covers a custom rule that takes a
+// built-in rule's ID under another name: its pages show none of the
+// built-in rule's example, and say that markdownlint does not have it.
+func TestPagesOfACustomRuleUnderABuiltinID(t *testing.T) {
+	impostor := lint.NewBaseRule("MD009", "my-trailing-spaces", "Another rule under MD009.", nil, false)
+	entry := ruledocs.NewEntry(&impostor, lint.RuleMeta{})
+
+	var text, markdown bytes.Buffer
+	require.NoError(t, ruledocs.WriteTextPage(&text, entry, ""))
+	require.NoError(t, ruledocs.WriteMarkdownPage(&markdown, entry))
+	for _, page := range []string{text.String(), markdown.String()} {
+		assert.Contains(t, page, "markdownlint does not have this rule.")
+		assert.NotContains(t, page, "md009.md")
+		assert.NotContains(t, page, "This document breaks the rule")
+	}
+}
+
 // TestNewEntry covers the entry of one rule in its built-in state, which
 // matches the entry that Entries gives it without a configuration, except
 // for the config key, which takes a registry.

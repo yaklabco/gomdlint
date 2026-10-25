@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // markdownlintVersion is the version of markdownlint whose rules gomdlint
@@ -93,10 +95,33 @@ func (e *Entry) configKey() string {
 	return cmp.Or(e.ConfigKey, e.ID)
 }
 
-// inMarkdownlint reports whether markdownlint has the rule: whether its ID
-// is one of markdownlint's rules (see lint.IsMarkdownlintRule).
+// builtInNames maps the ID of each built-in rule to its name, from the
+// rule catalog.
+//
+//nolint:gochecknoglobals // Built once from the catalog, then only read.
+var builtInNames = sync.OnceValue(func() map[string]string {
+	catalog := rules.Catalog()
+	names := make(map[string]string, len(catalog))
+	for _, meta := range catalog {
+		names[meta.ID] = meta.Name
+	}
+	return names
+})
+
+// builtIn reports whether the rule is the built-in rule with its ID, by
+// its name, since a custom rule may take a built-in rule's ID under
+// another name. Only a built-in rule has an example, a generated page and,
+// for one of markdownlint's rules, markdownlint's documentation.
+func (e *Entry) builtIn() bool {
+	name, found := builtInNames()[e.ID]
+	return found && name == e.Name
+}
+
+// inMarkdownlint reports whether markdownlint has the rule: whether it is
+// a built-in rule whose ID is one of markdownlint's rules (see
+// lint.IsMarkdownlintRule).
 func (e *Entry) inMarkdownlint() bool {
-	return lint.IsMarkdownlintRule(e.ID)
+	return e.builtIn() && lint.IsMarkdownlintRule(e.ID)
 }
 
 // markdownlintRuleName returns the name that markdownlint gives the rule

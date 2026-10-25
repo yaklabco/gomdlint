@@ -44,8 +44,12 @@ type examplePart struct {
 // in the order that its pages show them: the configuration that the
 // example needs, the document that breaks the rule, what the rule reports
 // there, the fixed document and a document that follows the rule. It
-// returns none for a rule without an example.
+// returns none for a rule without an example, and for a custom rule, even
+// one under a built-in rule's ID.
 func exampleParts(entry Entry) ([]examplePart, error) {
+	if !entry.builtIn() {
+		return nil, nil
+	}
 	example, found, err := rules.RuleExample(entry.ID)
 	if err != nil {
 		return nil, fmt.Errorf("example of %s: %w", entry.ID, err)
