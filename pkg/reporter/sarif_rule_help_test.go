@@ -338,3 +338,46 @@ func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 		})
 	}
 }
+
+// TestSARIFReporter_CustomIDsKeepTheirCatalogEntries covers a custom rule
+// under an ID of its own, which Options.BuiltInRule does not recognize as a
+// built-in rule either: as no built-in rule has its ID, the registry's
+// catalog entry for it is its own, and its descriptor takes descriptions,
+// tags and help from that entry.
+func TestSARIFReporter_CustomIDsKeepTheirCatalogEntries(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	custom := lint.NewBaseRule("ZZ001", "custom-rule", "The rule's own words.", []string{"own"}, false)
+	registry.Register(&custom)
+	registry.Describe(lint.RuleMeta{
+		ID: "ZZ001", Name: "custom-rule", Category: lint.CategoryLayout, Tags: []string{"custom"},
+		Description: "Custom lines are fine.", Rationale: "Custom reasons.", Fix: "There is no automatic fix.",
+	})
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "ZZ001", StartLine: 1}),
+	}}
+	opts := reporter.Options{
+		WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp,
+		BuiltInRule: func(lint.Rule) bool { return false },
+	}
+	descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
+
+	require.Len(t, descriptors, 1)
+	descriptor := descriptors[0]
+	require.NotNil(t, descriptor.Help, "the catalog entry's page")
+	assert.Contains(t, descriptor.Help.Text, "Custom reasons.")
+	descriptor.Help = nil
+	assert.Equal(t, reporter.SARIFRule{
+		ID:               "ZZ001",
+		Name:             "custom-rule",
+		ShortDescription: &reporter.SARIFMultiformatText{Text: "Custom lines are fine."},
+		FullDescription: &reporter.SARIFMultiformatText{
+			Text: "Custom lines are fine. Custom reasons. There is no automatic fix.",
+		},
+		DefaultConfig: &reporter.SARIFRuleConfig{Level: "warning"},
+		Properties:    map[string]any{"tags": []any{"layout", "custom"}},
+	}, descriptor)
+}

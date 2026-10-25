@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/internal/cli"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 	"github.com/yaklabco/gomdlint/pkg/reporter"
 )
 
@@ -45,4 +48,51 @@ func TestLint_SARIFDescribesRulesWithHelp(t *testing.T) {
 	assert.True(t, strings.HasPrefix(descriptors[0].Help.Text, "no-trailing-spaces (MD009)"), descriptors[0].Help.Text)
 	assert.True(t, strings.HasPrefix(descriptors[0].Help.Markdown, "# no-trailing-spaces\n"), descriptors[0].Help.Markdown)
 	assert.Equal(t, "https://github.com/yaklabco/gomdlint/blob/main/docs/rules/no-trailing-spaces.md", descriptors[0].HelpURI)
+}
+
+// companyPolicyRule is a custom rule that reports the first line of every
+// file.
+type companyPolicyRule struct {
+	lint.BaseRule
+}
+
+// Apply reports the first line.
+func (r *companyPolicyRule) Apply(*lint.RuleContext) ([]lint.Diagnostic, error) {
+	return []lint.Diagnostic{{RuleID: r.ID(), RuleName: r.Name(), Message: "Policy finding", StartLine: 1, StartColumn: 1}}, nil
+}
+
+// TestLint_SARIFDescribesACustomRuleUnderABuiltinID covers gomdlint lint
+// with a custom rule that replaces MD009 in a registry of the built-in
+// rules: its SARIF descriptor describes the custom rule, not the built-in
+// one whose catalog entry the registry still holds for MD009.
+func TestLint_SARIFDescribesACustomRuleUnderABuiltinID(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	registry.Register(&companyPolicyRule{
+		BaseRule: lint.NewBaseRule("MD009", "company-policy", "Company policy.", []string{"policy"}, false),
+	})
+
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "test.md")
+	require.NoError(t, os.WriteFile(mdFile, []byte("# Title\n\nText.\n"), 0o644))
+	cfgFile := filepath.Join(tmpDir, ".gomdlint.yml")
+	require.NoError(t, os.WriteFile(cfgFile, []byte("flavor: gfm\n"), 0o644))
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"lint", "--config", cfgFile, "--format", "sarif", "--color", "never", mdFile}
+	cli.ExecuteWithRegistry(context.Background(), registry, args, &stdout, &stderr)
+
+	var log reporter.SARIFOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &log), "stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	require.Len(t, log.Runs, 1)
+	descriptors := log.Runs[0].Tool.Driver.Rules
+	require.Len(t, descriptors, 1, "stdout: %s", stdout.String())
+	descriptor := descriptors[0]
+	assert.Equal(t, "company-policy", descriptor.Name)
+	require.NotNil(t, descriptor.ShortDescription)
+	assert.Equal(t, "Company policy.", descriptor.ShortDescription.Text)
+	assert.Nil(t, descriptor.Help)
+	assert.Empty(t, descriptor.HelpURI)
 }
