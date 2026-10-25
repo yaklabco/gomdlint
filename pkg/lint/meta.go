@@ -103,8 +103,9 @@ type RuleMeta struct {
 	Tags []string
 
 	// RuleTags are the tags that the rule reports itself (Rule.Tags), where
-	// they differ from Tags: gomdlint's own classification of the rule,
-	// which configuration templates and SARIF rule properties show. A rule
+	// they differ from Tags: gomdlint's own former classification of the
+	// rule. Configuration templates and SARIF rule properties show Tags
+	// instead (see TagsFor). A rule
 	// built from an entry without them (nil) reports Tags (see
 	// NewBaseRuleFromMeta). An empty, non-nil RuleTags gives the rule no
 	// tags.
@@ -161,11 +162,11 @@ func RuleDescription(rule Rule, meta RuleMeta) string {
 	return rule.Description()
 }
 
-// RuleTags returns the tags that describe rule: the tags in meta, its
+// TagsFor returns the tags that describe rule: the tags in meta, its
 // catalog entry, or the rule's own tags when meta lists none, as the zero
 // entry of a rule without one lists none. The result may share its array
 // with meta or the rule.
-func RuleTags(rule Rule, meta RuleMeta) []string {
+func TagsFor(rule Rule, meta RuleMeta) []string {
 	if len(meta.Tags) > 0 {
 		return meta.Tags
 	}
