@@ -206,6 +206,9 @@ formats change. The first entries under Changed may need action.
 - Library: `lint.Registry.ConfigKey` returns the key under which generated
   configs name a rule: its name, or its ID when another registered rule
   shares the name.
+- Library: `config.YAMLPrintable` reports whether YAML allows a character
+  in a stream, and `config.EscapeJSONForYAML` escapes the characters of
+  JSON strings that YAML would read otherwise, such as NEL and DEL.
 - Config discovery finds `.gomdlint.json` and `gomdlint.json` after the YAML
   names, and `config.json` in the user and system config directories. `init`
   and `migrate` write JSON for an output name that ends in `.json`.
