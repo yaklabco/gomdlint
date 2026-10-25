@@ -25,7 +25,8 @@ flavor: gfm
 #   - "CHANGELOG.md"
 
 # Rule settings, keyed by rule name. 'gomdlint explain <rule>' describes a
-# rule and its options. false turns a rule off, and a severity turns it on.
+# rule and its options. false as a rule's value turns it off, and a
+# severity as its value, such as line-length: warning, turns it on.
 # rules:
 #   heading-increment:
 #     severity: error

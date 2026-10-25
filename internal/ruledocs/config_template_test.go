@@ -119,6 +119,7 @@ func TestConfigTemplateFull(t *testing.T) {
 			continue
 		}
 		assert.Equal(t, entry.Description, commentAbove(lines, at), "%s is described from the catalog", entry.Name)
+		require.Less(t, at+2, len(lines), entry.Name)
 		assert.Equal(t, "    # severity: "+string(entry.Default.Severity), lines[at+2], entry.Name)
 		for _, spec := range entry.Options {
 			assert.Contains(t, content, "\n    #   "+spec.Name+":", "%s documents option %s", entry.Name, spec.Name)
@@ -144,7 +145,8 @@ func TestConfigTemplateFull(t *testing.T) {
 		`    # options:\n`+
 		`    #   style: consistent  # consistent, atx, atx_closed, setext, setext_with_atx, setext_with_atx_closed\n`+
 		`    #   require_closing_atx: false\n`, content)
-	assert.Contains(t, content, "    #   heading_max: 80  # defaults to the value of max\n")
+	assert.Contains(t, content, "    #   heading_max:  # defaults to the value of max\n",
+		"an option that follows another shows no value, which would stop it following")
 }
 
 // commentAbove returns the text of the comment lines that end just above

@@ -142,10 +142,14 @@ func TestMigratedConfigLintsAsItsSource(t *testing.T) {
 // TestGeneratedConfigGoldenNamesNoRuleByID guards the golden files of
 // TestGeneratedConfigGolden: none keys a rule by its ID.
 func TestGeneratedConfigGoldenNamesNoRuleByID(t *testing.T) {
-	for _, name := range []string{
-		"init", "init-full", "init-json", "init-full-json", "migrate-named", "migrate-named-json", "migrate-cli2-yaml",
-	} {
-		content := readFile(t, testdataPath("golden", name+".golden"))
-		assert.NotRegexp(t, `(?m)^\s*"?MDL?\d{3}"?:`, content, name)
+	var paths []string
+	for _, pattern := range []string{"init*.golden", "migrate-*.golden"} {
+		matches, err := filepath.Glob(testdataPath("golden", pattern))
+		require.NoError(t, err)
+		paths = append(paths, matches...)
+	}
+	require.GreaterOrEqual(t, len(paths), 7, "the goldens of TestGeneratedConfigGolden")
+	for _, path := range paths {
+		assert.NotRegexp(t, `(?m)^\s*"?MDL?\d{3}"?:`, readFile(t, path), filepath.Base(path))
 	}
 }

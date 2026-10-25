@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -17,21 +17,16 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
-// GenerateMigrationHeader returns the header of a migrated config in YAML:
-// the line that points editors at the configuration's JSON Schema, the
-// source file, and how rules are keyed.
-func GenerateMigrationHeader(sourcePath string) string {
-	return "# yaml-language-server: $schema=" + ruledocs.SchemaURL + "\n" +
-		"# gomdlint configuration\n" +
-		"# Migrated from: " + filepath.Base(sourcePath) + "\n" +
-		"# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.\n" +
-		"# See: https://github.com/yaklabco/gomdlint\n"
+// migrationHeader returns the header of a migrated config in YAML, which
+// names the source file (see ruledocs.ConfigHeader).
+func migrationHeader(sourcePath string) string {
+	return ruledocs.ConfigHeader("Migrated from: " + filepath.Base(sourcePath))
 }
 
 // FileContent returns the content of a gomdlint config file at path that
 // holds the converted settings: JSON for a name that ends in .json, which
 // lint reads as JSON, and otherwise YAML under a header that names the
-// source file (see GenerateMigrationHeader). The file holds the rule
+// source file (see migrationHeader). The file holds the rule
 // settings alone, under rules and rule_defaults, so a user or system config
 // still sets everything else, such as ignore patterns and the flavor.
 //
@@ -51,7 +46,7 @@ func (r *MigrationResult) FileContent(path string) ([]byte, error) {
 		}
 		return content, nil
 	}
-	return append([]byte(GenerateMigrationHeader(r.SourcePath)+"\n"), content...), nil
+	return append([]byte(migrationHeader(r.SourcePath)+"\n"), content...), nil
 }
 
 // writtenRule is one rule in a section of a migrated config.
@@ -104,30 +99,42 @@ func (r *MigrationResult) ruleSettingsYAML() ([]byte, error) {
 // sourceRules returns the rules under Config.Rules in the order of the
 // keys of the source file that set them, and by name for one key. The
 // first rule that a markdownlint tag set says so in its comment, and blank
-// lines set the tag's rules apart.
+// lines set the tag's rules apart. A rule that no key of the source file
+// set, which a caller may add to Config.Rules, comes last.
 func (r *MigrationResult) sourceRules() []writtenRule {
 	ids := make([]string, 0, len(r.Config.Rules))
 	for id := range r.Config.Rules {
 		ids = append(ids, id)
 	}
 	slices.SortFunc(ids, func(left, right string) int {
-		return cmp.Or(cmp.Compare(r.sources[left].order, r.sources[right].order),
+		return cmp.Or(cmp.Compare(r.sourceOf(left).order, r.sourceOf(right).order),
 			cmp.Compare(r.ruleName(left), r.ruleName(right)), cmp.Compare(left, right))
 	})
 
 	written := make([]writtenRule, 0, len(ids))
+	var previous ruleSource
 	for idx, id := range ids {
 		rule := writtenRule{id: id, name: r.ruleName(id), settings: r.Config.Rules[id]}
-		source := r.sources[id]
-		if idx > 0 && r.sources[ids[idx-1]].order != source.order {
-			rule.gap = source.tag || r.sources[ids[idx-1]].tag
-		}
-		if source.tag && (idx == 0 || r.sources[ids[idx-1]].order != source.order) {
+		source := r.sourceOf(id)
+		startsGroup := idx == 0 || previous.order != source.order
+		rule.gap = idx > 0 && startsGroup && (source.tag || previous.tag)
+		if source.tag && startsGroup {
 			rule.comment = strconv.Quote(source.key) + ", a markdownlint tag, sets these rules:"
 		}
 		written = append(written, rule)
+		previous = source
 	}
 	return written
+}
+
+// sourceOf returns the key of the source file that set the rule with the
+// given ID under Config.Rules, or, for a rule that no key set, a source
+// after every key.
+func (r *MigrationResult) sourceOf(id string) ruleSource {
+	if source, ok := r.sources[id]; ok {
+		return source
+	}
+	return ruleSource{order: math.MaxInt}
 }
 
 // defaultRules returns the rules under Config.RuleDefaults in ID order.
@@ -168,10 +175,11 @@ func (r *MigrationResult) ruleName(id string) string {
 // name, with its ID in a comment after the key, aligned across the
 // section.
 func writeRuleSection(buf *bytes.Buffer, section string, rules []writtenRule) error {
-	keyWidth := 0
-	for _, rule := range rules {
-		keyWidth = max(keyWidth, utf8.RuneCountInString(rule.name)+len(":"))
+	names := make([]string, len(rules))
+	for idx, rule := range rules {
+		names[idx] = rule.name
 	}
+	keyWidth := ruledocs.RuleKeyWidth(names)
 
 	buf.WriteString(section + ":\n")
 	for _, rule := range rules {
@@ -181,8 +189,7 @@ func writeRuleSection(buf *bytes.Buffer, section string, rules []writtenRule) er
 		if rule.comment != "" {
 			buf.WriteString("  # " + rule.comment + "\n")
 		}
-		key := rule.name + ":"
-		buf.WriteString("  " + key + strings.Repeat(" ", keyWidth-utf8.RuneCountInString(key)) + "  # " + rule.id + "\n")
+		buf.WriteString(ruledocs.RuleKeyLine(rule.name, rule.id, keyWidth))
 		settings, err := encodeRuleSettings(rule.settings)
 		if err != nil {
 			return fmt.Errorf("write %s: %w", rule.name, err)

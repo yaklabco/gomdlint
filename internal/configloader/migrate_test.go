@@ -372,7 +372,7 @@ func TestMigrationFileHoldsOnlyRuleSettings(t *testing.T) {
 				require.NoError(t, json.Unmarshal(content, &keys), string(content))
 			} else {
 				require.NoError(t, yaml.Unmarshal(content, &keys), string(content))
-				assert.True(t, strings.HasPrefix(string(content), GenerateMigrationHeader(converted.SourcePath)))
+				assert.True(t, strings.HasPrefix(string(content), migrationHeader(converted.SourcePath)))
 			}
 			assert.ElementsMatch(t, []string{"rules", "rule_defaults"}, slices.Collect(maps.Keys(keys)))
 

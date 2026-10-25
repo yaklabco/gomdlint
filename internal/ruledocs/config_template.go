@@ -22,15 +22,43 @@ type TemplateOptions struct {
 	JSON bool
 }
 
-// configHeader starts every configuration template: a title, how rules are
-// keyed, and where to read more.
-const configHeader = "# gomdlint configuration\n" +
-	"# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.\n" +
-	"# See: https://github.com/yaklabco/gomdlint\n"
+// ruleComment starts a comment line under the rules key of a generated
+// configuration.
+const ruleComment = "  # "
 
-// schemaModeline names the JSON Schema of the configuration for editors
-// such as yaml-language-server, which then complete and check the file.
-const schemaModeline = "# yaml-language-server: $schema=" + SchemaURL + "\n"
+// ConfigHeader returns the header of a configuration file that gomdlint
+// writes in YAML: the line that names the configuration's JSON Schema for
+// editors such as yaml-language-server, which then complete and check the
+// file, a title, each of lines as a comment, how rules are keyed, and
+// where to read more.
+func ConfigHeader(lines ...string) string {
+	var header strings.Builder
+	header.WriteString("# yaml-language-server: $schema=" + SchemaURL + "\n# gomdlint configuration\n")
+	for _, line := range lines {
+		header.WriteString("# " + line + "\n")
+	}
+	header.WriteString("# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.\n" +
+		"# See: https://github.com/yaklabco/gomdlint\n")
+	return header.String()
+}
+
+// RuleKeyWidth returns the width of the widest rule key that RuleKeyLine
+// writes for names, so that the comments after the keys line up.
+func RuleKeyWidth(names []string) int {
+	width := 0
+	for _, name := range names {
+		width = max(width, utf8.RuneCountInString(name)+len(":"))
+	}
+	return width
+}
+
+// RuleKeyLine returns the line that keys a rule by name under rules or
+// rule_defaults, padded to width (see RuleKeyWidth), with the rule's ID in
+// a comment after the key.
+func RuleKeyLine(name, id string, width int) string {
+	key := name + ":"
+	return "  " + key + strings.Repeat(" ", max(0, width-utf8.RuneCountInString(key))) + "  # " + id + "\n"
+}
 
 // minimalSettings are the settings of the minimal template, after the
 // header: the flavor, and the others in comments, with an example of rule
@@ -54,7 +82,8 @@ flavor: gfm
 #   - "CHANGELOG.md"
 
 # Rule settings, keyed by rule name. 'gomdlint explain <rule>' describes a
-# rule and its options. false turns a rule off, and a severity turns it on.
+# rule and its options. false as a rule's value turns it off, and a
+# severity as its value, such as line-length: warning, turns it on.
 # rules:
 #   heading-increment:
 #     severity: error
@@ -107,8 +136,7 @@ default_ignores: true
 // for opts. The full template documents the rules of entries.
 func ConfigTemplate(entries []Entry, opts TemplateOptions) ([]byte, error) {
 	var buf strings.Builder
-	buf.WriteString(schemaModeline)
-	buf.WriteString(configHeader)
+	buf.WriteString(ConfigHeader())
 	if opts.Full {
 		buf.WriteString(fullSettings)
 		writeTemplateRules(&buf, entries)
@@ -143,11 +171,12 @@ func writeTemplateRules(buf *strings.Builder, entries []Entry) {
 		if idx > 0 {
 			buf.WriteString("\n")
 		}
-		buf.WriteString("  # " + group.title() + "\n")
-		keyWidth := 0
-		for _, entry := range group.entries {
-			keyWidth = max(keyWidth, utf8.RuneCountInString(entry.Name)+len(":"))
+		buf.WriteString(ruleComment + group.title() + "\n")
+		names := make([]string, len(group.entries))
+		for idx, entry := range group.entries {
+			names[idx] = entry.Name
 		}
+		keyWidth := RuleKeyWidth(names)
 		for _, entry := range group.entries {
 			writeTemplateRule(buf, entry, keyWidth)
 		}
@@ -159,12 +188,11 @@ func writeTemplateRules(buf *strings.Builder, entries []Entry) {
 func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 	buf.WriteString("\n")
 	if entry.Description != "" {
-		for _, line := range wrap(entry.Description, lineWidth, "  # ", "  # ") {
+		for _, line := range wrap(entry.Description, lineWidth, ruleComment, ruleComment) {
 			buf.WriteString(line + "\n")
 		}
 	}
-	key := entry.Name + ":"
-	buf.WriteString("  " + key + strings.Repeat(" ", keyWidth-utf8.RuneCountInString(key)) + "  # " + entry.ID + "\n")
+	buf.WriteString(RuleKeyLine(entry.Name, entry.ID, keyWidth))
 	buf.WriteString("    enabled: " + strconv.FormatBool(entry.Default.Enabled) + "\n")
 	buf.WriteString("    # severity: " + string(entry.Default.Severity) + "\n")
 	if len(entry.Options) == 0 {
@@ -178,10 +206,12 @@ func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 
 // templateOption writes spec, an option, as a commented line of the full
 // template shows it: its name and default, with the values it allows, or
-// where its default comes from, in a trailing comment.
+// where its default comes from, in a trailing comment. An option whose
+// default is another option's value shows no value, which would stop it
+// following that option once the line is uncommented.
 func templateOption(spec lint.OptionSpec) string {
 	line := spec.Name + ":"
-	if spec.Default != nil {
+	if spec.Default != nil && spec.DefaultFrom == "" {
 		line += " " + yamlValue(spec.Default)
 	}
 	switch {

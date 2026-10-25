@@ -185,7 +185,7 @@ rules:
     # options:
     #   indent: 2
     #   start_indented: false
-    #   start_indent: 2  # defaults to the value of indent
+    #   start_indent:  # defaults to the value of indent
 
   # Every bullet uses the same marker as the first bullet in the file.
   unordered-list-style:  # MD004
@@ -210,8 +210,8 @@ rules:
     # severity: warning
     # options:
     #   max: 80
-    #   heading_max: 80  # defaults to the value of max
-    #   code_block_max: 80  # defaults to the value of max
+    #   heading_max:  # defaults to the value of max
+    #   code_block_max:  # defaults to the value of max
     #   ignore_code_blocks: false
     #   ignore_tables: false
     #   ignore_headings: false
@@ -458,7 +458,7 @@ rules:
     # severity: warning
     # options:
     #   allowed_elements: []
-    #   table_allowed_elements: []  # defaults to the value of allowed_elements
+    #   table_allowed_elements:  # defaults to the value of allowed_elements
 
   # Spelling
 

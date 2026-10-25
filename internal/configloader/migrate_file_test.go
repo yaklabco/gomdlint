@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,8 +15,7 @@ import (
 )
 
 // namedSettings is a markdownlint config that names rules by ID, by
-// markdownlint's names and by a tag, as section 4.1 of the rule-name
-// ergonomics plan shows.
+// markdownlint's names and by a tag.
 const namedSettings = `{
   "default": true,
   "MD013": {"line_length": 120, "tables": false},
@@ -38,8 +38,8 @@ func TestMigrationFileKeysRulesByName(t *testing.T) {
 	require.NoError(t, err)
 	text := string(content)
 
-	assert.True(t, strings.HasPrefix(text, GenerateMigrationHeader(converted.SourcePath)), text)
-	assert.Contains(t, GenerateMigrationHeader(converted.SourcePath),
+	assert.True(t, strings.HasPrefix(text, migrationHeader(converted.SourcePath)), text)
+	assert.Contains(t, migrationHeader(converted.SourcePath),
 		"# gomdlint configuration\n# Migrated from: .markdownlint.json\n"+
 			"# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.\n")
 	assert.NotRegexp(t, `(?m)^\s*MDL?\d{3}:`, text, "no rule is keyed by ID")
@@ -92,29 +92,42 @@ func assertLoadsAsConverted(t *testing.T, converted *MigrationResult, path strin
 	loaded, warnings, err := loadConfigFile(path)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
-	assert.Equal(t, withoutEmptyOptions(converted.Config.Rules), withoutEmptyOptions(loaded.Rules))
-	assert.Equal(t, withoutEmptyOptions(converted.Config.RuleDefaults), withoutEmptyOptions(loaded.RuleDefaults))
+	assert.Equal(t, withoutEmptyOptions(t, converted.Config.Rules), withoutEmptyOptions(t, loaded.Rules))
+	assert.Equal(t, withoutEmptyOptions(t, converted.Config.RuleDefaults), withoutEmptyOptions(t, loaded.RuleDefaults))
 }
 
 // withoutEmptyOptions returns a copy of settings in which empty options
 // are none, and numbers are float64, as JSON reads them, so that settings
 // read from YAML and JSON compare equal.
-func withoutEmptyOptions(settings map[string]config.RuleConfig) map[string]config.RuleConfig {
+func withoutEmptyOptions(t *testing.T, settings map[string]config.RuleConfig) map[string]config.RuleConfig {
+	t.Helper()
+
 	copied := make(map[string]config.RuleConfig, len(settings))
 	for id, rule := range settings {
 		if len(rule.Options) == 0 {
 			rule.Options = nil
 		} else {
 			encoded, err := json.Marshal(rule.Options)
-			if err != nil {
-				panic(err)
-			}
+			require.NoError(t, err)
 			rule.Options = nil
-			if err := json.Unmarshal(encoded, &rule.Options); err != nil {
-				panic(err)
-			}
+			require.NoError(t, json.Unmarshal(encoded, &rule.Options))
 		}
 		copied[id] = rule
 	}
 	return copied
+}
+
+// TestWrittenSettingsWriteEveryRuleSetting keeps the settings that a
+// migrated config writes in step with the settings that a rule has: a
+// setting that writtenSettings lacks would be lost on migration.
+func TestWrittenSettingsWriteEveryRuleSetting(t *testing.T) {
+	fields := reflect.TypeFor[writtenSettings]()
+	keys := make([]string, 0, fields.NumField())
+	for idx := range fields.NumField() {
+		field := fields.Field(idx)
+		name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		keys = append(keys, name)
+	}
+
+	assert.Equal(t, config.RuleSettingKeys(), keys)
 }
