@@ -112,7 +112,8 @@ func TestItemPrefixes(t *testing.T) {
 // TestItemOpeners checks the opener of an item region that starts at a group
 // of an item: the rest of the marker line when that is the line before the
 // group, an empty ATX heading before a blank line or a block that closes
-// alone, a fence that the line before closes after a closed fence, and the
+// alone, a fence that the line before closes, with spaces or tabs around its
+// run, after a closed fence, and the
 // opening of an HTML block that the line before closes, of the kind whose
 // opener holds.
 func TestItemOpeners(t *testing.T) {
@@ -127,6 +128,7 @@ func TestItemOpeners(t *testing.T) {
 		{"after a heading", "- a\n\n  # H\n  b\n\n  c\n", 2, "- #\n  # H\n"},
 		{"after a closed fence", "- a\n  ```\n  x\n  ```\n  b\n\n  c\n", 1, "- ```\n  ```\n"},
 		{"after a fence closed before a tab", "- a\n  ~~~~\n  x\n  ~~~~ \t\n  b\n\n  c\n", 1, "- ~~~~\n  ~~~~ \t\n"},
+		{"after a fence closed after a tab", "- a\n  ```\n  x\n  \t```\n  b\n\n  c\n", 1, "- ```\n  \t```\n"},
 		{"in a blockquote", "> - a\n>\n>   b\n>\n>   c\n", 1, "> - #\n>\n"},
 		{"after a comment", "- a\n  <!--\n  x\n  -->\n  b\n\n  c\n", 1, "- <!--\n  -->\n"},
 		{"after a processing instruction", "- a\n  <?\n  x\n  ?>\n  b\n\n  c\n", 1, "- <?\n  ?>\n"},
@@ -193,6 +195,28 @@ func TestKeptInOrderMatchesWholeDocumentInItems(t *testing.T) {
 	}
 	t.Logf("%d steps, %d decided by region states", steps, decided)
 	assert.Greater(t, decided, steps/2, "region states decide most steps")
+}
+
+// TestClosingFence checks which lines closingFence reads as closing a fence,
+// with spaces, tabs and blockquote markers around the run, and that a run
+// broken by a tab or followed by text is none.
+func TestClosingFence(t *testing.T) {
+	tests := []struct {
+		line, want string
+	}{
+		{"```\n", "```"},
+		{"\t```\n", "```"},
+		{"```\t\r\n", "```"},
+		{">\t~~~ \t\n", "~~~"},
+		{"  ````  \n", "````"},
+		{"``\t`\n", ""},
+		{"```\tx\n", ""},
+		{"``\t\n", ""},
+		{"~~`\n", ""},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, string(closingFence([]byte(tt.line))), "%q", tt.line)
+	}
 }
 
 // TestItemRegionChecks checks fixes inside list items with both region

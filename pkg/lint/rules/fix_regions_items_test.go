@@ -65,6 +65,7 @@ var itemParts = []string{
 	"text before\n```sh\necho x  \n```\ntext after\n",
 	"```\nfenced  \n```\n",
 	"text\n~~~\ntilde fence\n~~~ \t\ntext after a tabbed closer\n",
+	"text\n```\nx\n\t```\ntext after a tab-indented closer\n",
 	"~~~\nunclosed fence\n",
 	"## Heading in item\ntext after the heading\n",
 	"text before a heading\n## Heading\n",
@@ -300,25 +301,26 @@ func itemCommentsDocument(comments int) []byte {
 
 // itemTabbedFencesDocument returns a document with one list item that holds
 // fenced code blocks with text right before and right after them, as
-// itemFencesDocument does, but with no blank line between the sections and
-// a tab after each closing fence, which CommonMark allows.
+// itemFencesDocument does, but with a tab after each closing fence, which
+// CommonMark allows, and no blank line between the sections, so that each
+// group after a fence needs a fence opener (see closingFence).
 func itemTabbedFencesDocument(fences int) []byte {
 	var doc strings.Builder
-	doc.WriteString("# Title\n\n- outer\n\n  intro\n")
+	doc.WriteString("# Title\n\n- outer\n\n")
 	for idx := range fences {
 		fmt.Fprintf(&doc, "  text %d\n  ```sh\n  echo %d\n  ```\t\n  after %d\n", idx, idx, idx)
 	}
-	doc.WriteString("\n  end\n")
 	return []byte(doc.String())
 }
 
 // TestRegionParsesGrowInListItems checks that region checks parse text that
 // grows with the document, not with its square, when the fixes of a document
 // sit in one list item: blank lines before tables that follow text in the
-// item or in a loose list nested in it, and around fences and headings that
-// text runs into, also with tabs after the closing fences, and trailing
-// spaces on text right after HTML comments. Each fix is checked on its own; four times the document
-// must take about four times the bytes, not sixteen.
+// item or in a loose list nested in it, around fences and headings that text
+// runs into, and around fences whose closing lines end in a tab, with no
+// blank line between sections, and trailing spaces on text right after HTML
+// comments. Each fix is checked on its own; four times the document must
+// take about four times the bytes, not sixteen.
 func TestRegionParsesGrowInListItems(t *testing.T) {
 	const small, factor = 30, 4
 	both := []config.Flavor{config.FlavorGFM, config.FlavorCommonMark}

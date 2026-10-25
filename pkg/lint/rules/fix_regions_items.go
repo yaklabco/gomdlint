@@ -357,7 +357,9 @@ func closingOpeners(line []byte) [][]byte {
 // nil for a line that does not look like one: the line, without the
 // blockquote markers, spaces and tabs before it and the spaces, tabs and line
 // ending after it, is three or more backticks or tildes. CommonMark lets
-// spaces and tabs follow a closing fence.
+// spaces and tabs follow a closing fence. Indentation is not checked here:
+// the opener puts the line itself after the fence, so the opener's parse
+// decides whether it closes it.
 func closingFence(line []byte) []byte {
 	run := bytes.TrimRight(bytes.TrimLeft(line, " \t>"), " \t\r\n")
 	if len(run) < 3 || (run[0] != '`' && run[0] != '~') || bytes.Count(run, run[:1]) != len(run) {
