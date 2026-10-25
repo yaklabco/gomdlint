@@ -12,8 +12,11 @@ import (
 // itemWindowMin is the size in bytes of a window from which localKept first
 // tries the window of the list item that holds a fix. A smaller window parses
 // quickly, and the item window needs the region layout, a parse of the whole
-// document.
-const itemWindowMin = 4096
+// document. A test sets it to compare item windows with the windows they
+// stand for.
+//
+//nolint:gochecknoglobals // a tuning value that tests change, read only otherwise.
+var itemWindowMin = 1024
 
 // regionLayout returns the region layout of the document as the checks read
 // it, built on first use, or nil when region checks cannot be used for it.
@@ -21,7 +24,6 @@ func (c *fixChecker) regionLayout() *docLayout {
 	if !c.layoutBuilt {
 		c.layoutBuilt = true
 		c.layout = newDocLayoutFlags(recordingMarkdown(parseFlavor(c.ctx)), c.content, true)
-		c.parser = gmparser.New(parseFlavor(c.ctx))
 	}
 	return c.layout
 }
@@ -37,7 +39,7 @@ func (c *fixChecker) regionLayout() *docLayout {
 // changes a list's tightness changes the document, and no intent allows it.
 // decided is false when the item window cannot stand for the document, and
 // checkWindow decides.
-func (c *fixChecker) itemWindow(edits []fix.TextEdit, intents []fixIntent) (windowCheck, bool, bool) {
+func (c *fixChecker) itemWindow(edits []fix.TextEdit, intents []fixIntent) (window windowCheck, decided, ok bool) {
 	layout := c.regionLayout()
 	if layout == nil {
 		return windowCheck{}, false, false
@@ -112,7 +114,7 @@ func (c *fixChecker) itemWindow(edits []fix.TextEdit, intents []fixIntent) (wind
 	if !ok {
 		return windowCheck{}, false, false
 	}
-	window := windowCheck{
+	window = windowCheck{
 		before: summarizeNodes(beforeDoc, beforeNodes, layout.base+from-1-len(opener.text)),
 		after:  summarizeNodes(afterDoc, afterNodes, 0),
 		start:  layout.base + from,
@@ -135,6 +137,9 @@ func (c *fixChecker) windowNodes(
 	parseCtx := c.ctx.Ctx
 	if parseCtx == nil {
 		parseCtx = context.Background()
+	}
+	if c.parser == nil {
+		c.parser = gmparser.New(parseFlavor(c.ctx))
 	}
 	snapshot, err := c.parser.ParseWithReferences(parseCtx, "", text, layout.refIndex)
 	if err != nil || snapshot == nil || snapshot.Root == nil {
