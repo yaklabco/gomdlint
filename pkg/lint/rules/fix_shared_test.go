@@ -87,6 +87,7 @@ type sharedProbe struct {
 }
 
 func newSharedProbe(t *testing.T) *sharedProbe {
+	t.Helper()
 	return &sharedProbe{
 		BaseRule: lint.NewBaseRule("ZZ999", "shared-probe", "", nil, false),
 		t:        t,
@@ -119,8 +120,8 @@ func (p *sharedProbe) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	fresh, err := goldmark.New(flavor).Parse(parseCtx, ctx.File.Path, content)
 	require.NoError(t, err)
 	// Before, fixChecker parsed the original without a path.
-	unnamed, ok := reparse(ctx, content)
-	require.True(t, ok)
+	unnamed, parsed := reparse(ctx, content)
+	require.True(t, parsed)
 	freshOutline := outlineOf(unnamed)
 	assert.Equal(t, freshOutline, outlineOf(fresh), "the path of a parse does not change its outline")
 
@@ -172,10 +173,10 @@ func (p *sharedProbe) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		otherCfg.Flavor = config.FlavorCommonMark
 	}
 	other.Config = otherCfg
-	otherFresh, ok := reparse(&other, content)
-	require.True(t, ok)
-	otherOutline, ok := originalOutline(&other)
-	require.True(t, ok)
+	otherFresh, parsed := reparse(&other, content)
+	require.True(t, parsed)
+	otherOutline, parsed := originalOutline(&other)
+	require.True(t, parsed)
 	assert.True(t, reflect.DeepEqual(outlineOf(otherFresh), otherOutline), "outline under the other flavor")
 	assertSameLayout(t, newDocLayoutFlags(recordingMarkdown(string(otherCfg.Flavor)), content, true), originalLayout(&other))
 	if !reflect.DeepEqual(outlineOf(otherFresh), freshOutline) {
@@ -253,7 +254,7 @@ func assertSameLayout(t *testing.T, want, got *docLayout) {
 		assert.Equal(t, want == nil, got == nil, "layout built")
 		return
 	}
-	assert.True(t, want.markdown == got.markdown, "markdown")
+	assert.Same(t, want.markdown, got.markdown, "markdown")
 	assert.Equal(t, want.source, got.source, "source")
 	assert.Equal(t, [5]any{want.base, want.frontMatter, want.frontLimit, want.firstLineFree, want.tableFlags},
 		[5]any{got.base, got.frontMatter, got.frontLimit, got.firstLineFree, got.tableFlags}, "front matter")

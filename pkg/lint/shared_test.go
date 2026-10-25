@@ -29,15 +29,16 @@ func newSharingRule(id string, apply func(ctx *lint.RuleContext)) *sharingRule {
 	return &sharingRule{BaseRule: lint.NewBaseRule(id, "sharing-"+id, "", nil, false), apply: apply}
 }
 
-// lintWith lints content with an engine that runs rules, in ID order.
-func lintWith(t *testing.T, content string, rules ...lint.Rule) *lint.FileResult {
+// lintWith lints a one-line document with an engine that runs rules, in ID
+// order.
+func lintWith(t *testing.T, rules ...lint.Rule) *lint.FileResult {
 	t.Helper()
 	registry := lint.NewRegistry()
 	for _, rule := range rules {
 		registry.Register(rule)
 	}
 	result, err := lint.NewEngine(&mockParser{}, registry).
-		LintFile(context.Background(), "test.md", []byte(content), config.NewConfig())
+		LintFile(context.Background(), "test.md", []byte("# One\n"), config.NewConfig())
 	if err != nil {
 		t.Fatalf("LintFile error: %v", err)
 	}
@@ -58,13 +59,13 @@ func TestSharedValue_BuiltOncePerLintOfAFile(t *testing.T) {
 	}
 	rules := []lint.Rule{newSharingRule("TEST001", share), newSharingRule("TEST002", share)}
 
-	lintWith(t, "# One\n", rules...)
+	lintWith(t, rules...)
 	if builds != 1 || len(got) != 2 || got[0] != got[1] {
 		t.Fatalf("one lint: %d builds, values %v; want one value built once and shared", builds, got)
 	}
 
 	// Each lint of a file, as each pass of --fix, starts with no values.
-	lintWith(t, "# One\n", rules...)
+	lintWith(t, rules...)
 	if builds != 2 || len(got) != 4 || got[2] != got[3] || got[2] == got[0] || *got[2] != 2 {
 		t.Fatalf("second lint: %d builds; want a value of its own, built once", builds)
 	}
@@ -96,7 +97,7 @@ func TestSharedValue_KeysAreApart(t *testing.T) {
 			t.Errorf("value of gfm after another type = %q", value)
 		}
 	})
-	lintWith(t, "# One\n", rule)
+	lintWith(t, rule)
 
 	want := map[string]int{"gfm": 1, "commonmark": 1, "gfm int": 2}
 	for name, count := range want {
@@ -129,7 +130,7 @@ func TestSharedValue_BuildMayShareAnotherValue(t *testing.T) {
 			t.Errorf("outline = %q", value)
 		}
 	})
-	lintWith(t, "# One\n", first, second)
+	lintWith(t, first, second)
 
 	if builds != 1 {
 		t.Fatalf("builds of the parse = %d, want 1: a value built inside another build is kept", builds)
@@ -153,7 +154,7 @@ func TestSharedValue_PanickingBuildKeepsNothing(t *testing.T) {
 			return "complete"
 		})
 	})
-	result := lintWith(t, "# One\n", panics, reads)
+	result := lintWith(t, panics, reads)
 
 	if !errors.Is(result.RuleErrors["TEST001"], lint.ErrRulePanic) {
 		t.Fatalf("TEST001 error = %v, want a rule panic", result.RuleErrors["TEST001"])
@@ -180,7 +181,7 @@ func TestSharedValue_CancelledBuildIsNotKept(t *testing.T) {
 			t.Errorf("value after a cancelled build = %d, want 2", value)
 		}
 	})
-	lintWith(t, "# One\n", rule)
+	lintWith(t, rule)
 
 	if builds != 2 {
 		t.Fatalf("builds = %d, want 2: a value built while the lint is cancelled may be incomplete", builds)
@@ -207,7 +208,7 @@ func TestSharedValue_OtherFileIsNotServed(t *testing.T) {
 			t.Errorf("value = %q, want the file's content, kept", value)
 		}
 	})
-	lintWith(t, "# One\n", rule)
+	lintWith(t, rule)
 }
 
 func TestSharedValue_WithoutEngineBuildsEachTime(t *testing.T) {
