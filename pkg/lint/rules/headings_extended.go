@@ -780,10 +780,12 @@ func trailingPunctuationFix(
 // block as a task checkbox even when that block is a heading, where GFM
 // reads text or a link (see goldmarkHeadingCheckbox). goldmark's reading
 // must then show content after the checkbox, which shows nothing itself
-// (see showsContentAfter). A heading left showing nothing renders
-// differently and gets another anchor.
+// (see showsContentAfter), and the deletion must not reach into the
+// checkbox, as it does when "]" is configured punctuation. A heading left
+// showing nothing renders differently and gets another anchor.
 func headingShowsContent(file *mdast.FileSnapshot, heading *mdast.Node, offset int) bool {
-	if end, ok := goldmarkHeadingCheckbox(file, heading); ok && !showsContentAfter(file, heading, end, offset) {
+	if end, ok := goldmarkHeadingCheckbox(file, heading); ok &&
+		(offset < end || !showsContentAfter(file, heading, end, offset)) {
 		return false
 	}
 	return showsContent(file, heading, offset)
@@ -827,8 +829,9 @@ func showsContentAfter(file *mdast.FileSnapshot, heading *mdast.Node, end, offse
 		switch {
 		case span.EndOffset <= end:
 		case span.StartOffset < end:
-			if (child.Kind == mdast.NodeText || child.Kind == mdast.NodeLink) &&
-				showsText(file.Content[end:min(span.EndOffset, offset)]) {
+			limit := min(span.EndOffset, offset)
+			if (child.Kind == mdast.NodeText || child.Kind == mdast.NodeLink) && limit > end &&
+				showsText(file.Content[end:limit]) {
 				return true
 			}
 		case showsChild(file, child, offset):

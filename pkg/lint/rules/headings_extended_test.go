@@ -1376,6 +1376,36 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 	}
 }
 
+// TestNoTrailingPunctuationRule_PunctuationInCheckbox checks MD026 when the
+// configured punctuation includes "]" and the run starts inside brackets
+// that goldmark's own task list extension reads as a checkbox at the start
+// of a heading in a list item. Deleting it would take the checkbox's
+// closing bracket, so the finding is reported without a fix.
+func TestNoTrailingPunctuationRule_PunctuationInCheckbox(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantFixed string
+	}{
+		{name: "brackets in a list item", input: "- ## [x]]]\n"},
+		{name: "brackets in a quoted list item", input: "> - ## [ ]]\n"},
+		{name: "brackets and text in a list item", input: "- ## [x] a]\n", wantFixed: "- ## [x] a\n"},
+		{name: "brackets outside a list", input: "## [x]]]\n", wantFixed: "## [x\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewNoTrailingPunctuationRule(), tt.input, map[string]any{"punctuation": "]."})
+			require.Len(t, diags, 1)
+			want := tt.wantFixed
+			if want == "" {
+				want = tt.input
+			}
+			assert.Equal(t, tt.wantFixed != "", diags[0].HasFix())
+			assert.Equal(t, want, applyAllEdits(t, tt.input, diags))
+		})
+	}
+}
+
 // TestDefaultIgnorable checks defaultIgnorable against Unicode's
 // Default_Ignorable_Code_Point property on characters of each part of its
 // derivation. When it was written, defaultIgnorable agreed with ICU 78
