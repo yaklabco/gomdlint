@@ -180,9 +180,10 @@ func blankLineEdit(rng *rand.Rand, text string) fix.TextEdit {
 	return fix.TextEdit{StartOffset: lineStart, EndOffset: lineStart, NewText: ending}
 }
 
-// ruleFixes returns the fixes that the default rules offer for text under
-// flavor, each on its own.
-func ruleFixes(t *testing.T, flavor config.Flavor, text string) [][]fix.TextEdit {
+// defaultRuleFixes returns the fixes that the default rules offer for text
+// under flavor, each on its own and as the engine applies it: the members of
+// a fix group make one fix (see ruleFixes).
+func defaultRuleFixes(t *testing.T, flavor config.Flavor, text string) [][]fix.TextEdit {
 	t.Helper()
 	registry := lint.NewRegistry()
 	RegisterAll(registry)
@@ -191,13 +192,7 @@ func ruleFixes(t *testing.T, flavor config.Flavor, text string) [][]fix.TextEdit
 	engine := lint.NewEngine(goldmark.New(string(flavor)), registry)
 	result, err := engine.LintFile(context.Background(), "doc.md", []byte(text), cfg)
 	require.NoError(t, err)
-	var fixes [][]fix.TextEdit
-	for _, diag := range result.Diagnostics {
-		if len(diag.FixEdits) > 0 {
-			fixes = append(fixes, diag.FixEdits)
-		}
-	}
-	return fixes
+	return ruleFixes(t, text, result.Diagnostics)
 }
 
 // TestItemRegionsDecideAsWholeDocument checks the region checks against the
@@ -232,7 +227,7 @@ func checkItemRegions(t *testing.T, rng *rand.Rand, documents int) {
 			cfg := config.NewConfig()
 			cfg.Flavor = flavor
 			checker := newFixChecker(lint.NewRuleContext(context.Background(), snapshot, cfg, nil))
-			candidates := ruleFixes(t, flavor, text)
+			candidates := defaultRuleFixes(t, flavor, text)
 			for trial := range 10 {
 				switch trial % 3 {
 				case 0:
