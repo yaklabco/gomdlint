@@ -236,9 +236,9 @@ func textOptions(entry Entry) []string {
 		return []string{"This rule has no options."}
 	}
 
-	lines := []string{"Options, under rules." + entry.Name + ".options:"}
+	lines := []string{"Options, under rules." + yamlKey(entry.configKey()) + ".options:"}
 	for _, spec := range entry.Options {
-		lines = append(lines, "  "+spec.Name+" ("+optionFacts(entry, spec, plainWords)+")")
+		lines = append(lines, "  "+yamlKey(spec.Name)+" ("+optionFacts(entry, spec, plainWords)+")")
 		if details := optionDetails(spec, plainWords); details != "" {
 			lines = append(lines, wrap(details, lineWidth, "    ", "    ")...)
 		}

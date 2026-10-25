@@ -125,7 +125,7 @@ func optionFacts(entry Entry, spec lint.OptionSpec, words pageWords) string {
 	facts := []string{words.literal(string(spec.Type))}
 	switch {
 	case spec.DefaultFrom != "":
-		facts = append(facts, "defaults to the value of "+words.literal(spec.DefaultFrom))
+		facts = append(facts, "defaults to the value of "+words.literal(yamlKey(spec.DefaultFrom)))
 	case spec.Default == nil:
 		facts = append(facts, "unset by default")
 	default:
@@ -147,12 +147,12 @@ func optionDetails(spec lint.OptionSpec, words pageWords) string {
 	if len(spec.Values) > 0 {
 		values := make([]string, len(spec.Values))
 		for idx, value := range spec.Values {
-			values[idx] = words.literal(value)
+			values[idx] = words.literal(yamlValue(value))
 		}
 		sentences = append(sentences, "Values: "+strings.Join(values, ", ")+".")
 	}
 	for _, alias := range spec.Aliases {
-		sentence := "Also accepted as " + words.literal(alias.Name)
+		sentence := "Also accepted as " + words.literal(yamlKey(alias.Name))
 		if alias.Inverted {
 			sentence += ", with the opposite value"
 		}
@@ -194,7 +194,7 @@ func exampleConfig(entry Entry) []string {
 // switchText says how a configuration turns the rule off, or on, and
 // changes its severity, and how a flag turns it off or on for one run.
 func switchText(entry Entry, words pageWords) string {
-	name, key := entry.Name, yamlKey(entry.configKey())
+	name, key := entry.configKey(), yamlKey(entry.configKey())
 	other := config.SeverityError
 	if entry.Default.Severity == config.SeverityError {
 		other = config.SeverityWarning

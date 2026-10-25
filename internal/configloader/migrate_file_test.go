@@ -184,7 +184,7 @@ func TestMigrationFileWritesAwkwardNames(t *testing.T) {
 		"null", "~", "true", "yes", "off", "123", "0x1F", "1e3", "2026-10-25", ".inf",
 		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
 		`back\slash`, "ünïcødé", "- item", "[flow]", "&anchor", "", strings.Repeat("a long words ", 20),
-		"\na", "\ta\nb", "a\u2028b", "a\u2029b", "zero\u200bwidth", "nel\u0085x",
+		"\na", "\ta\nb", "a\u2028b", "a\u2029b", "<<", "zero\u200bwidth", "nel\u0085x",
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)

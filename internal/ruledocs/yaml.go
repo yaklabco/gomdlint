@@ -26,19 +26,28 @@ import (
 //
 // The node is built from value itself, so that strings reach the encoder as
 // they are: yaml.Node.Encode reads back what the encoder writes, which drops
-// a leading line break and fails on a tab before one.
+// a leading line break and fails on a tab before one. Pointers and
+// interfaces stand for the values they hold, and a nil one for null.
 func YAMLNode(value any, flow bool) (*yaml.Node, error) {
-	if text, isString := value.(string); isString {
-		return stringNode(text), nil
-	}
+	null := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
 	reflected := reflect.ValueOf(value)
+	for reflected.Kind() == reflect.Pointer || reflected.Kind() == reflect.Interface {
+		if reflected.IsNil() {
+			return null, nil
+		}
+		reflected = reflected.Elem()
+	}
+	if !reflected.IsValid() {
+		return null, nil // value is nil.
+	}
 	style := yaml.Style(0)
 	if flow {
 		style = yaml.FlowStyle
 	}
-	switch {
-	case value == nil:
-	case reflected.Kind() == reflect.Slice || reflected.Kind() == reflect.Array:
+	switch reflected.Kind() {
+	case reflect.String:
+		return stringNode(reflected.String()), nil
+	case reflect.Slice, reflect.Array:
 		node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: style}
 		for idx := range reflected.Len() {
 			item, err := YAMLNode(reflected.Index(idx).Interface(), flow)
@@ -48,21 +57,28 @@ func YAMLNode(value any, flow bool) (*yaml.Node, error) {
 			node.Content = append(node.Content, item)
 		}
 		return node, nil
-	case reflected.Kind() == reflect.Map && reflected.Type().Key().Kind() == reflect.String:
+	case reflect.Map:
 		node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: style}
 		keys := reflected.MapKeys()
-		slices.SortFunc(keys, func(left, right reflect.Value) int { return cmp.Compare(left.String(), right.String()) })
+		slices.SortFunc(keys, func(left, right reflect.Value) int {
+			return cmp.Compare(fmt.Sprint(left.Interface()), fmt.Sprint(right.Interface()))
+		})
 		for _, key := range keys {
+			keyNode, err := YAMLNode(key.Interface(), flow)
+			if err != nil {
+				return nil, err
+			}
 			item, err := YAMLNode(reflected.MapIndex(key).Interface(), flow)
 			if err != nil {
 				return nil, err
 			}
-			node.Content = append(node.Content, stringNode(key.String()), item)
+			node.Content = append(node.Content, keyNode, item)
 		}
 		return node, nil
+	default:
 	}
 	var node yaml.Node
-	if err := node.Encode(value); err != nil {
+	if err := node.Encode(reflected.Interface()); err != nil {
 		return nil, fmt.Errorf("encode %v as YAML: %w", value, err)
 	}
 	return &node, nil
@@ -71,7 +87,8 @@ func YAMLNode(value any, flow bool) (*yaml.Node, error) {
 // stringNode returns the YAML node of text, a string (see YAMLNode).
 func stringNode(text string) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: text}
-	if strings.ContainsFunc(text, needsEscape) {
+	// The encoder writes << as it is, which YAML reads as a merge key.
+	if text == "<<" || strings.ContainsFunc(text, needsEscape) {
 		node.Style = yaml.DoubleQuotedStyle
 	}
 	return node
@@ -80,7 +97,8 @@ func stringNode(text string) *yaml.Node {
 // needsEscape reports whether char cannot stand as it is on a line of YAML
 // that a person reads: a character other than a space that does not print,
 // such as a line break, a tab, a line or paragraph separator or a
-// zero-width space. YAML's double quotes escape it.
+// zero-width space. In YAML's double quotes, the encoder escapes the line
+// breaks and tabs, and the others stand on the one line as they are.
 func needsEscape(char rune) bool {
 	return char != ' ' && !unicode.IsPrint(char)
 }
@@ -100,7 +118,8 @@ func yamlValue(value any) string {
 		}
 	}
 	if encoded, err := json.Marshal(value); err == nil && utf8.Valid(encoded) {
-		return string(encoded)
+		// JSON leaves NEL as it is, which YAML reads as a line break.
+		return strings.ReplaceAll(string(encoded), "\u0085", `\u0085`)
 	}
 	return strconv.Quote(fmt.Sprint(value))
 }

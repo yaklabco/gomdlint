@@ -304,7 +304,7 @@ func awkwardScalars() []string {
 		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
 		`back\slash`, "ünïcødé", "auto_fix: false\nreset_options: true", "- item", "[flow]", "&anchor", "",
 		strings.Repeat("a long words ", 20),
-		"\na", "\ta\nb", "\n", "a\u2028b", "a\u2029b", "zero\u200bwidth", "nel\u0085x",
+		"\na", "\ta\nb", "\n", "a\u2028b", "a\u2029b", "<<", "zero\u200bwidth", "nel\u0085x",
 		strings.Repeat("a long words ", 20) + "\nand a break",
 	}
 }
