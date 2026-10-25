@@ -126,6 +126,7 @@ func TestItemOpeners(t *testing.T) {
 		{"after a blank line", "- a\n\n  b\n\n  c\n", 1, "- #\n\n"},
 		{"after a heading", "- a\n\n  # H\n  b\n\n  c\n", 2, "- #\n  # H\n"},
 		{"after a closed fence", "- a\n  ```\n  x\n  ```\n  b\n\n  c\n", 1, "- ```\n  ```\n"},
+		{"after a fence closed before a tab", "- a\n  ~~~~\n  x\n  ~~~~ \t\n  b\n\n  c\n", 1, "- ~~~~\n  ~~~~ \t\n"},
 		{"in a blockquote", "> - a\n>\n>   b\n>\n>   c\n", 1, "> - #\n>\n"},
 		{"after a comment", "- a\n  <!--\n  x\n  -->\n  b\n\n  c\n", 1, "- <!--\n  -->\n"},
 		{"after a processing instruction", "- a\n  <?\n  x\n  ?>\n  b\n\n  c\n", 1, "- <?\n  ?>\n"},

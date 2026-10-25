@@ -355,10 +355,11 @@ func closingOpeners(line []byte) [][]byte {
 
 // closingFence returns the fence characters of a line that closes a fence, and
 // nil for a line that does not look like one: the line, without the
-// blockquote markers and spaces before it and the spaces and line ending
-// after it, is three or more backticks or tildes.
+// blockquote markers, spaces and tabs before it and the spaces, tabs and line
+// ending after it, is three or more backticks or tildes. CommonMark lets
+// spaces and tabs follow a closing fence.
 func closingFence(line []byte) []byte {
-	run := bytes.TrimRight(bytes.TrimLeft(line, " >"), " \r\n")
+	run := bytes.TrimRight(bytes.TrimLeft(line, " \t>"), " \t\r\n")
 	if len(run) < 3 || (run[0] != '`' && run[0] != '~') || bytes.Count(run, run[:1]) != len(run) {
 		return nil
 	}

@@ -64,6 +64,7 @@ var itemParts = []string{
 	"| h1 | h2 |\n| -- | -- |\n| 1 | 2 |   \n| 3 | 4 |\n",
 	"text before\n```sh\necho x  \n```\ntext after\n",
 	"```\nfenced  \n```\n",
+	"text\n~~~\ntilde fence\n~~~ \t\ntext after a tabbed closer\n",
 	"~~~\nunclosed fence\n",
 	"## Heading in item\ntext after the heading\n",
 	"text before a heading\n## Heading\n",
@@ -297,11 +298,26 @@ func itemCommentsDocument(comments int) []byte {
 	return []byte(doc.String())
 }
 
+// itemTabbedFencesDocument returns a document with one list item that holds
+// fenced code blocks with text right before and right after them, as
+// itemFencesDocument does, but with no blank line between the sections and
+// a tab after each closing fence, which CommonMark allows.
+func itemTabbedFencesDocument(fences int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n- outer\n\n  intro\n")
+	for idx := range fences {
+		fmt.Fprintf(&doc, "  text %d\n  ```sh\n  echo %d\n  ```\t\n  after %d\n", idx, idx, idx)
+	}
+	doc.WriteString("\n  end\n")
+	return []byte(doc.String())
+}
+
 // TestRegionParsesGrowInListItems checks that region checks parse text that
 // grows with the document, not with its square, when the fixes of a document
 // sit in one list item: blank lines before tables that follow text in the
 // item or in a loose list nested in it, and around fences and headings that
-// text runs into, and trailing spaces on text right after HTML comments. Each fix is checked on its own; four times the document
+// text runs into, also with tabs after the closing fences, and trailing
+// spaces on text right after HTML comments. Each fix is checked on its own; four times the document
 // must take about four times the bytes, not sixteen.
 func TestRegionParsesGrowInListItems(t *testing.T) {
 	const small, factor = 30, 4
@@ -322,6 +338,7 @@ func TestRegionParsesGrowInListItems(t *testing.T) {
 		{name: "fences in a list item", generate: itemFencesDocument, edits: blankLines(fenceBlankLines), perBlock: 2, flavors: both},
 		{name: "headings in a list item", generate: itemHeadingsDocument, edits: blankLines(headingBlankLines), perBlock: 2, flavors: both},
 		{name: "comments in a list item", generate: itemCommentsDocument, edits: trailingSpaceEdits, perBlock: 1, flavors: both},
+		{name: "fences with tabbed closers", generate: itemTabbedFencesDocument, edits: blankLines(fenceBlankLines), perBlock: 2, flavors: both},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			parsed := func(n int) int {
