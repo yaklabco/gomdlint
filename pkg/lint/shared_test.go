@@ -73,26 +73,66 @@ func TestSharedValue_BuiltOncePerLintOfAFile(t *testing.T) {
 func TestSharedValue_KeysAreApart(t *testing.T) {
 	t.Parallel()
 
-	var values []string
+	builds := make(map[string]int)
+	share := func(ctx *lint.RuleContext, name string) string {
+		return lint.SharedValue(ctx, sharedKey{name}, func() string {
+			builds[name]++
+			return "built for " + name
+		})
+	}
 	rule := newSharingRule("TEST001", func(ctx *lint.RuleContext) {
-		for _, name := range []string{"gfm", "commonmark", "gfm"} {
-			values = append(values, lint.SharedValue(ctx, sharedKey{name}, func() string { return "built for " + name }))
+		for _, name := range []string{"gfm", "commonmark", "gfm", "commonmark"} {
+			if value := share(ctx, name); value != "built for "+name {
+				t.Errorf("value of %s = %q", name, value)
+			}
 		}
 		// The same key with a value of another type is built and not kept.
-		if other := lint.SharedValue(ctx, sharedKey{"gfm"}, func() int { return 7 }); other != 7 {
-			t.Errorf("value of another type = %d, want 7", other)
+		for range 2 {
+			if other := lint.SharedValue(ctx, sharedKey{"gfm"}, func() int { builds["gfm int"]++; return 7 }); other != 7 {
+				t.Errorf("value of another type = %d, want 7", other)
+			}
+		}
+		if value := share(ctx, "gfm"); value != "built for gfm" {
+			t.Errorf("value of gfm after another type = %q", value)
 		}
 	})
 	lintWith(t, "# One\n", rule)
 
-	want := []string{"built for gfm", "built for commonmark", "built for gfm"}
-	if len(values) != len(want) {
-		t.Fatalf("values = %q, want %q", values, want)
-	}
-	for idx := range want {
-		if values[idx] != want[idx] {
-			t.Errorf("values[%d] = %q, want %q", idx, values[idx], want[idx])
+	want := map[string]int{"gfm": 1, "commonmark": 1, "gfm int": 2}
+	for name, count := range want {
+		if builds[name] != count {
+			t.Errorf("builds of %s = %d, want %d", name, builds[name], count)
 		}
+	}
+}
+
+func TestSharedValue_BuildMayShareAnotherValue(t *testing.T) {
+	t.Parallel()
+
+	builds := 0
+	parse := func(ctx *lint.RuleContext) string {
+		return lint.SharedValue(ctx, sharedKey{"parse"}, func() string { builds++; return "parse" })
+	}
+	outline := func(ctx *lint.RuleContext) string {
+		return lint.SharedValue(ctx, sharedKey{"outline"}, func() string { return "outline of " + parse(ctx) })
+	}
+	first := newSharingRule("TEST001", func(ctx *lint.RuleContext) {
+		if value := outline(ctx); value != "outline of parse" {
+			t.Errorf("outline = %q", value)
+		}
+	})
+	second := newSharingRule("TEST002", func(ctx *lint.RuleContext) {
+		if value := parse(ctx); value != "parse" {
+			t.Errorf("parse = %q", value)
+		}
+		if value := outline(ctx); value != "outline of parse" {
+			t.Errorf("outline = %q", value)
+		}
+	})
+	lintWith(t, "# One\n", first, second)
+
+	if builds != 1 {
+		t.Fatalf("builds of the parse = %d, want 1: a value built inside another build is kept", builds)
 	}
 }
 
