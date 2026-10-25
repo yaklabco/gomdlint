@@ -140,6 +140,9 @@ func NewRegistry() *Registry {
 // Register adds a rule to the registry.
 // If a rule with the same ID already exists, it is replaced, and the name
 // of the replaced rule no longer resolves unless the new rule uses it too.
+// A replacement under another name also drops the replaced rule's catalog
+// entry (see Describe), which describes that rule, not the new one, so its
+// aliases and tags no longer resolve to the new rule either.
 //
 // markdownlint 0.41.1 rejects a set of custom rules in which a name equals
 // another name, or a tag equals a name, in upper case (validateRuleList in
@@ -160,6 +163,9 @@ func (r *Registry) Register(rule Rule) {
 		// another rule may have registered the same name since.
 		if named, ok := r.byName[old.Name()]; ok && named.ID() == old.ID() {
 			delete(r.byName, old.Name())
+		}
+		if old.Name() != rule.Name() {
+			delete(r.meta, rule.ID())
 		}
 	}
 

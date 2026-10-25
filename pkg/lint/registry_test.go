@@ -275,6 +275,34 @@ func TestRegistry_LookupFollowsRegistrationChanges(t *testing.T) {
 	assert.Equal(t, "MD010", rule.ID())
 }
 
+// TestRegistry_ReplacementUnderAnotherNameDropsTheEntry covers a rule that
+// replaces a described rule under the same ID: the entry describes the
+// replaced rule, so a replacement under another name has none, and the
+// entry's aliases and tags no longer resolve to it. A replacement under
+// the same name, such as another implementation of the rule, keeps it.
+func TestRegistry_ReplacementUnderAnotherNameDropsTheEntry(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+	reg.Describe(RuleMeta{
+		ID: "MD009", Name: "no-trailing-spaces", Aliases: []string{"trailing-spaces"},
+		Tags: []string{"whitespace"}, Description: "Lines do not end in spaces.",
+	})
+
+	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+	_, ok := reg.Meta("MD009")
+	assert.True(t, ok, "a replacement under the same name keeps the entry")
+
+	reg.Register(&mockRule{id: "MD009", name: "company-policy"})
+	_, ok = reg.Meta("MD009")
+	assert.False(t, ok, "the entry describes the replaced rule")
+	_, ok = reg.Lookup("trailing-spaces")
+	assert.False(t, ok, "the replaced rule's alias")
+	assert.Empty(t, reg.RulesByTag("whitespace"), "the replaced rule's tag")
+	rule, ok := reg.Lookup("company-policy")
+	require.True(t, ok)
+	assert.Equal(t, "MD009", rule.ID())
+}
+
 func TestRegistry_DescribeReplacesEntry(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockRule{id: "MD004", name: "unordered-list-style"})
