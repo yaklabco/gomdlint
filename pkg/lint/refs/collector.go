@@ -72,8 +72,10 @@ type collector struct {
 	root          *mdast.Node
 	prefix        LinePrefix
 	htmlBlockTags func(block *mdast.Node) []mdast.SourceRange
-	// chain is the last unresolved reference of the container scanned.
-	chain referenceChain
+	// chain is the last unresolved reference of the container scanned, and
+	// closers counts its closing brackets (see closingBrackets).
+	chain   referenceChain
+	closers []int
 }
 
 // collect walks the AST to collect anchors and usages.

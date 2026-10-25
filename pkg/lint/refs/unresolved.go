@@ -143,7 +143,7 @@ type bracketOpener struct {
 // referenceChain is the unresolved reference that the scan of a container
 // recorded last and the index of the character that ends it. As
 // markdownlint does, the scan joins brackets right after it to it (see
-// collector.chainTo).
+// collector.addUnresolved).
 type referenceChain struct {
 	usage *ReferenceUsage
 	end   int
@@ -153,6 +153,7 @@ type referenceChain struct {
 // each reference whose syntax is complete.
 func (c *collector) scanUnresolved(container *mdast.Node, chars []inlineChar) {
 	c.chain = referenceChain{}
+	c.closers = closingBrackets(chars)
 	var openers []bracketOpener
 	for idx := 0; idx < len(chars); idx++ {
 		char := chars[idx]
@@ -190,9 +191,9 @@ func (c *collector) scanUnresolved(container *mdast.Node, chars []inlineChar) {
 // "[y]". Nor does it record a pair followed by brackets of nothing but white
 // space, which markdownlint takes as the label of a full reference that it
 // then drops for its blank label. Brackets right after the last reference
-// join it (see chainTo).
+// join it (see collector.addUnresolved).
 func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, opener bracketOpener, closing int) int {
-	if !recordsText(chars, opener.index+1, closing) {
+	if !c.recordsText(chars, opener.index+1, closing) {
 		if closing == opener.index+1 {
 			c.collapseChained(chars, opener, closing)
 		} else {
@@ -229,32 +230,55 @@ func (c *collector) recordReference(container *mdast.Node, chars []inlineChar, o
 // recordsText reports whether markdownlint records a reference whose text
 // between its brackets is chars[from:to]: the text is not blank (see
 // blankText) and holds no unescaped "]" outside code spans and raw HTML,
-// which only a pair inside that the parse left as text puts there.
-func recordsText(chars []inlineChar, from, to int) bool {
-	if blankText(chars, from, to) {
-		return false
-	}
-	for idx := from; idx < to; idx++ {
-		if isChar(chars, idx, ']') && !isEscapedChar(chars, idx) {
-			return false
+// which only a pair inside that the parse left as text puts there. The
+// closing brackets are counted once per container (see closingBrackets), so
+// nested brackets cost no more than the brackets themselves.
+func (c *collector) recordsText(chars []inlineChar, from, to int) bool {
+	return !blankText(chars, from, to) && c.closers[to] == c.closers[from]
+}
+
+// closingBrackets returns, for each index of chars and its end, the number
+// of "]" before it that are text, not escaped and outside code spans and
+// raw HTML.
+func closingBrackets(chars []inlineChar) []int {
+	counts := make([]int, len(chars)+1)
+	backslashes := 0
+	for idx, char := range chars {
+		counts[idx+1] = counts[idx]
+		text := !char.opaque && !char.literal
+		if text && char.ch == ']' && backslashes%2 == 0 {
+			counts[idx+1]++
+		}
+		if text && char.ch == '\\' {
+			backslashes++
+		} else {
+			backslashes = 0
 		}
 	}
-	return true
+	return counts
 }
 
 // blankText reports whether chars[from:to] is nothing but white space as
 // JavaScript trims it, which includes form feeds, vertical tabs and spaces
 // outside ASCII, or nothing at all. markdownlint records no reference whose
-// text, so trimmed, is empty.
+// text, so trimmed, is empty. It stops at the first other character.
 func blankText(chars []inlineChar, from, to int) bool {
-	text := make([]byte, 0, to-from)
-	for idx := from; idx < to; idx++ {
-		if chars[idx].opaque || chars[idx].literal {
+	var char [utf8.UTFMax]byte
+	for idx := from; idx < to; {
+		size := 0
+		for idx+size < to && size < len(char) && (size == 0 || !utf8.RuneStart(chars[idx+size].ch)) {
+			if chars[idx+size].opaque || chars[idx+size].literal {
+				return false
+			}
+			char[size] = chars[idx+size].ch
+			size++
+		}
+		if r, _ := utf8.DecodeRune(char[:size]); !jstext.IsSpace(r) {
 			return false
 		}
-		text = append(text, chars[idx].ch)
+		idx += size
 	}
-	return jstext.TrimSpace(string(text)) == ""
+	return true
 }
 
 // openerStart returns the index of the character that starts the brackets
@@ -296,7 +320,9 @@ func (c *collector) collapseChained(chars []inlineChar, opener bracketOpener, cl
 	c.extendChained(chars, closing)
 }
 
-// extendChained makes the last reference recorded end at chars[end].
+// extendChained makes the last reference recorded end at chars[end]. When
+// chars[end] has no offset, the position keeps the end it had, as
+// addUnresolved falls back to its node's position then.
 func (c *collector) extendChained(chars []inlineChar, end int) {
 	c.chain.end = end
 	if c.ctx.File != nil && chars[end].offset >= 0 {
