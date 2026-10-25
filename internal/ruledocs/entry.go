@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -47,6 +48,9 @@ type Entry struct {
 	// rule: its name, or its ID when another rule of the registry shares
 	// the name or YAML cannot hold the name as a key (see ConfigKey).
 	ConfigKey string
+
+	// isBuiltIn reports that the rule is a built-in rule (see builtIn).
+	isBuiltIn bool
 }
 
 // Entries documents every rule of registry, in rule ID order, with its
@@ -86,7 +90,7 @@ func NewEntry(rule lint.Rule, meta lint.RuleMeta) Entry {
 	}
 
 	builtIn := State{Enabled: rule.DefaultEnabled(), Severity: rule.DefaultSeverity()}
-	return Entry{RuleMeta: meta, Default: builtIn, State: builtIn}
+	return Entry{RuleMeta: meta, Default: builtIn, State: builtIn, isBuiltIn: isBuiltInRule(rule)}
 }
 
 // configKey returns the key under which generated configurations name the
@@ -95,26 +99,39 @@ func (e *Entry) configKey() string {
 	return cmp.Or(e.ConfigKey, e.ID)
 }
 
-// builtInNames maps the ID of each built-in rule to its name, from the
-// rule catalog.
+// builtInRule identifies a built-in rule: its name and its type.
+type builtInRule struct {
+	name     string
+	ruleType reflect.Type
+}
+
+// builtInRules maps the ID of each built-in rule to its name and type, as
+// RegisterAll registers it.
 //
-//nolint:gochecknoglobals // Built once from the catalog, then only read.
-var builtInNames = sync.OnceValue(func() map[string]string {
-	catalog := rules.Catalog()
-	names := make(map[string]string, len(catalog))
-	for _, meta := range catalog {
-		names[meta.ID] = meta.Name
+//nolint:gochecknoglobals // Built once from the built-in rules, then only read.
+var builtInRules = sync.OnceValue(func() map[string]builtInRule {
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	builtIn := make(map[string]builtInRule)
+	for _, rule := range registry.Rules() {
+		builtIn[rule.ID()] = builtInRule{name: rule.Name(), ruleType: reflect.TypeOf(rule)}
 	}
-	return names
+	return builtIn
 })
 
-// builtIn reports whether the rule is the built-in rule with its ID, by
-// its name, since a custom rule may take a built-in rule's ID under
-// another name. Only a built-in rule has an example, a generated page and,
-// for one of markdownlint's rules, markdownlint's documentation.
+// isBuiltInRule reports whether rule is the built-in rule with its ID: a
+// rule of the built-in rule's type, under its name. A custom rule may take
+// a built-in rule's ID, under another name or under the built-in name.
+func isBuiltInRule(rule lint.Rule) bool {
+	builtIn, found := builtInRules()[rule.ID()]
+	return found && builtIn.name == rule.Name() && builtIn.ruleType == reflect.TypeOf(rule)
+}
+
+// builtIn reports whether the entry documents a built-in rule (see
+// isBuiltInRule). Only a built-in rule has an example, a generated page
+// and, for one of markdownlint's rules, markdownlint's documentation.
 func (e *Entry) builtIn() bool {
-	name, found := builtInNames()[e.ID]
-	return found && name == e.Name
+	return e.isBuiltIn
 }
 
 // inMarkdownlint reports whether markdownlint has the rule: whether it is

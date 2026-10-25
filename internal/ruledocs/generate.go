@@ -59,8 +59,8 @@ const RulePagesURL = "https://github.com/yaklabco/gomdlint/blob/main/" + rulesDi
 
 // PageURL returns the published address of the page of entry's rule (see
 // RulePagesURL), or "" when the rule has no generated page: when it is not
-// a built-in rule, such as a custom rule, or a custom rule that takes a
-// built-in rule's ID under another name.
+// a built-in rule, such as a custom rule, even one that takes a built-in
+// rule's ID and name.
 func PageURL(entry Entry) string {
 	if !entry.builtIn() {
 		return ""

@@ -22,6 +22,7 @@ import (
 	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // update regenerates the rule reference instead of comparing it:
@@ -209,6 +210,58 @@ func TestPagesOfACustomRuleUnderABuiltinID(t *testing.T) {
 		assert.Contains(t, page, "markdownlint does not have this rule.")
 		assert.NotContains(t, page, "md009.md")
 		assert.NotContains(t, page, "This document breaks the rule")
+	}
+}
+
+// replacementRule is a custom rule that replaces a built-in one.
+type replacementRule struct {
+	lint.BaseRule
+}
+
+// TestPagesOfARuleThatReplacesABuiltinOne covers a registry with the
+// built-in rules, in which a custom rule then replaces MD009: under another
+// name, its pages describe it, not the built-in rule, and under the
+// built-in rule's own name they keep the catalog's words but show no
+// example and no published page, as the rule is not the built-in one.
+func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		ruleName string
+		keepMeta bool
+	}{
+		{name: "another name", ruleName: "company-policy"},
+		{name: "the built-in name", ruleName: "no-trailing-spaces", keepMeta: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := lint.NewRegistry()
+			rules.RegisterAll(registry)
+			registry.Register(&replacementRule{
+				BaseRule: lint.NewBaseRule("MD009", tt.ruleName, "Company policy.", []string{"policy"}, false),
+			})
+
+			var entry ruledocs.Entry
+			for _, candidate := range ruledocs.Entries(registry, nil) {
+				if candidate.ID == "MD009" {
+					entry = candidate
+				}
+			}
+			require.Equal(t, tt.ruleName, entry.Name)
+			assert.Empty(t, ruledocs.PageURL(entry), "not the built-in rule")
+
+			var text, markdown bytes.Buffer
+			require.NoError(t, ruledocs.WriteTextPage(&text, entry, ""))
+			require.NoError(t, ruledocs.WriteMarkdownPage(&markdown, entry))
+			for _, page := range []string{text.String(), markdown.String()} {
+				assert.NotContains(t, page, "This document breaks the rule", "no built-in example")
+				assert.NotContains(t, page, "md009.md", "no markdownlint link")
+				if tt.keepMeta {
+					continue
+				}
+				assert.Contains(t, page, "Company policy.")
+				assert.NotContains(t, page, "br_spaces", "no built-in options")
+				assert.NotContains(t, page, "whitespace", "no built-in tags or words")
+			}
+		})
 	}
 }
 
