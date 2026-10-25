@@ -320,6 +320,26 @@ func TestRegistry_Meta(t *testing.T) {
 	assert.False(t, ok, "a rule without an entry has no metadata")
 }
 
+// TestRegistry_MetaCopiesRuleTags checks that an entry from Meta shares the
+// tags that its rule reports itself with neither Describe's caller nor the
+// registry.
+func TestRegistry_MetaCopiesRuleTags(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD004", name: "unordered-list-style"})
+	ruleTags := []string{"lists", "style"}
+	reg.Describe(RuleMeta{ID: "MD004", Tags: []string{"bullet", "ul"}, RuleTags: ruleTags})
+	ruleTags[0] = overwritten // Describe keeps its own copy.
+
+	meta, ok := reg.Meta("MD004")
+	require.True(t, ok)
+	assert.Equal(t, []string{"lists", "style"}, meta.RuleTags)
+
+	meta.RuleTags[0] = overwritten
+	again, ok := reg.Meta("MD004")
+	require.True(t, ok)
+	assert.Equal(t, []string{"lists", "style"}, again.RuleTags, "the entry is a copy")
+}
+
 // TestRegistry_MetaCopiesOptions checks that the options of an entry from
 // Meta share nothing with the registry's: not their aliases, their allowed
 // values or a list default.

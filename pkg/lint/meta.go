@@ -102,9 +102,22 @@ type RuleMeta struct {
 	// resolve tags through these, not through Rule.Tags.
 	Tags []string
 
+	// RuleTags are the tags that the rule reports itself (Rule.Tags), where
+	// they differ from Tags: gomdlint's own classification of the rule,
+	// which configuration templates and SARIF rule properties show. A rule
+	// built from an entry without them reports Tags (see
+	// NewBaseRuleFromMeta).
+	RuleTags []string
+
 	// Fixable reports whether the rule can fix what it finds, as the rule's
 	// own CanFix does.
 	Fixable bool
+
+	// Summary is the short phrase that the rule reports as its own
+	// description (Rule.Description), such as "Horizontal rule style".
+	// Configuration templates show it. Rule listings and documentation show
+	// Description instead.
+	Summary string
 
 	// Description says what correct Markdown looks like under the rule's
 	// default options, such as "Lines do not end in spaces or tabs, except 2
@@ -151,6 +164,7 @@ func RuleDescription(rule Rule, meta RuleMeta) string {
 func (meta RuleMeta) clone() RuleMeta {
 	meta.Aliases = slices.Clone(meta.Aliases)
 	meta.Tags = slices.Clone(meta.Tags)
+	meta.RuleTags = slices.Clone(meta.RuleTags)
 	meta.Options = slices.Clone(meta.Options)
 	for idx := range meta.Options {
 		meta.Options[idx] = meta.Options[idx].clone()
