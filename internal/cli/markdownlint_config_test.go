@@ -671,7 +671,7 @@ func TestMigrate_FindsMarkdownlintCLI2OptionsFile(t *testing.T) {
 	assert.NotContains(t, got.stdout, "delete the old markdownlint configuration file")
 	written, err := os.ReadFile(".gomdlint.yml")
 	require.NoError(t, err)
-	assert.Contains(t, string(written), "MD013:\n    enabled: false")
+	assert.Contains(t, string(written), "line-length:  # MD013\n    enabled: false")
 }
 
 // TestMigrate_OptionsFileWithoutConfig covers migrate in a directory whose

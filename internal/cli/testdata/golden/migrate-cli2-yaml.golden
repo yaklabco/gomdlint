@@ -1,0 +1,251 @@
+exit code 0
+-- stdout --
+WARN .markdownlint-cli2.yaml:1: unsupported markdownlint-cli2 option "globs" (name the files on the command line instead); it is ignored
+INFO migration complete input=.markdownlint-cli2.yaml output=.gomdlint.yml
+WARN review warnings above and verify the migrated configuration
+INFO you can now delete the config key of the markdownlint-cli2 options file; its other keys still configure markdownlint-cli2
+-- stderr --
+-- .gomdlint.yml --
+# yaml-language-server: $schema=https://raw.githubusercontent.com/yaklabco/gomdlint/main/docs/schema/gomdlint.schema.json
+# gomdlint configuration
+# Migrated from: .markdownlint-cli2.yaml
+# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.
+# See: https://github.com/yaklabco/gomdlint
+
+rules:
+  heading-blank-lines:     # MD022
+    enabled: true
+    severity: error
+    reset_options: true
+    options:
+      lines_above: 2
+  first-line-heading:      # MD041
+    enabled: false
+    severity: error
+
+  # "emphasis", a markdownlint tag, sets these rules:
+  emphasis-style:          # MD049
+    enabled: false
+    severity: error
+  no-emphasis-as-heading:  # MD036
+    enabled: false
+    severity: error
+  no-space-in-emphasis:    # MD037
+    enabled: false
+    severity: error
+  strong-style:            # MD050
+    enabled: false
+    severity: error
+
+  no-inline-html:          # MD033
+    enabled: true
+    severity: error
+    reset_options: true
+    options:
+      allowed_elements:
+        - br
+        - details
+
+# The baseline of every rule, as markdownlint gives it. The settings
+# under rules, in this file and in every other, override it.
+rule_defaults:
+  heading-increment:                 # MD001
+    enabled: true
+    severity: error
+    options:
+      front_matter_title: ^\s*"?title"?\s*[:=]
+  heading-style:                     # MD003
+    enabled: true
+    severity: error
+  unordered-list-style:              # MD004
+    enabled: true
+    severity: error
+    options:
+      style: consistent
+  list-indent:                       # MD005
+    enabled: true
+    severity: error
+  ul-indent:                         # MD007
+    enabled: true
+    severity: error
+  no-trailing-spaces:                # MD009
+    enabled: true
+    severity: error
+    options:
+      br_spaces: 2
+      ignore_code_blocks: true
+  no-hard-tabs:                      # MD010
+    enabled: true
+    severity: error
+  no-reversed-links:                 # MD011
+    enabled: true
+    severity: error
+  no-multiple-blank-lines:           # MD012
+    enabled: true
+    severity: error
+  line-length:                       # MD013
+    enabled: true
+    severity: error
+    options:
+      ignore_code_blocks: false
+      ignore_urls: false
+      markdownlint_compatible: true
+      max: 80
+  commands-show-output:              # MD014
+    enabled: true
+    severity: error
+  no-missing-space-atx:              # MD018
+    enabled: true
+    severity: error
+  no-multiple-space-atx:             # MD019
+    enabled: true
+    severity: error
+  no-missing-space-closed-atx:       # MD020
+    enabled: true
+    severity: error
+  no-multiple-space-closed-atx:      # MD021
+    enabled: true
+    severity: error
+  heading-blank-lines:               # MD022
+    enabled: true
+    severity: error
+    options:
+      markdownlint_compatible: true
+  heading-start-left:                # MD023
+    enabled: true
+    severity: error
+  no-duplicate-heading:              # MD024
+    enabled: true
+    severity: error
+  single-h1:                         # MD025
+    enabled: true
+    severity: error
+    options:
+      title_only: true
+  no-trailing-punctuation:           # MD026
+    enabled: true
+    severity: error
+  no-multiple-space-blockquote:      # MD027
+    enabled: true
+    severity: error
+  no-blanks-blockquote:              # MD028
+    enabled: true
+    severity: error
+  ol-prefix:                         # MD029
+    enabled: true
+    severity: error
+    options:
+      style: one_or_ordered
+  list-marker-space:                 # MD030
+    enabled: true
+    severity: error
+  blanks-around-fences:              # MD031
+    enabled: true
+    severity: error
+  blanks-around-lists:               # MD032
+    enabled: true
+    severity: error
+  no-inline-html:                    # MD033
+    enabled: true
+    severity: error
+    options:
+      allowed_elements: []
+  no-bare-urls:                      # MD034
+    enabled: true
+    severity: error
+  hr-style:                          # MD035
+    enabled: true
+    severity: error
+  no-emphasis-as-heading:            # MD036
+    enabled: true
+    severity: error
+  no-space-in-emphasis:              # MD037
+    enabled: true
+    severity: error
+  no-space-in-code:                  # MD038
+    enabled: true
+    severity: error
+  no-space-in-links:                 # MD039
+    enabled: true
+    severity: error
+  fenced-code-language:              # MD040
+    enabled: true
+    severity: error
+  first-line-heading:                # MD041
+    enabled: true
+    severity: error
+  no-empty-links:                    # MD042
+    enabled: true
+    severity: error
+  required-headings:                 # MD043
+    enabled: true
+    severity: error
+  proper-names:                      # MD044
+    enabled: true
+    severity: error
+  no-alt-text:                       # MD045
+    enabled: true
+    severity: error
+  code-block-style:                  # MD046
+    enabled: true
+    severity: error
+    options:
+      style: consistent
+  single-trailing-newline:           # MD047
+    enabled: true
+    severity: error
+  code-fence-style:                  # MD048
+    enabled: true
+    severity: error
+    options:
+      style: consistent
+  emphasis-style:                    # MD049
+    enabled: true
+    severity: error
+  strong-style:                      # MD050
+    enabled: true
+    severity: error
+  link-fragments:                    # MD051
+    enabled: true
+    severity: error
+  reference-links-images:            # MD052
+    enabled: true
+    severity: error
+  link-image-reference-definitions:  # MD053
+    enabled: true
+    severity: error
+  link-image-style:                  # MD054
+    enabled: true
+    severity: error
+  table-pipe-style:                  # MD055
+    enabled: true
+    severity: error
+  table-column-count:                # MD056
+    enabled: true
+    severity: error
+  blanks-around-tables:              # MD058
+    enabled: true
+    severity: error
+  descriptive-link-text:             # MD059
+    enabled: true
+    severity: error
+    options:
+      markdownlint_compatible: true
+      patterns:
+        - click here
+        - here
+        - link
+        - more
+  table-column-style:                # MD060
+    enabled: true
+    severity: error
+    options:
+      markdownlint_compatible: true
+
+  # gomdlint's own rules, which markdownlint does not have:
+  link-destination-style:            # MDL001
+    enabled: false
+    severity: error
+  table-alignment:                   # MDL003
+    enabled: false
+    severity: error
