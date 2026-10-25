@@ -43,13 +43,14 @@ type outlineModel struct {
 	verifier *fixVerifier
 	// body is the outline up to the anchors item. groups holds where the
 	// blocks of each group start in body, counting the headings with an
-	// anchor. listParts, quoteParts and tableParts hold where the parts of
-	// each list, blockquote and table of the layout are.
+	// anchor. listParts, quoteParts, tableParts and itemParts hold where the
+	// parts of each list, blockquote, table and item of the layout are.
 	body       string
 	groups     regionParts
 	listParts  []listOutline
 	quoteParts []regionParts
 	tableParts []regionParts
+	itemParts  []regionParts
 	// slugs holds the slug of each heading with an anchor, in order, history
 	// the anchors GitHub gives them with every count it keeps (see
 	// recordAnchors), and anchors the text of the anchors item: the anchors
@@ -77,9 +78,20 @@ type listOutline struct {
 
 // outlinePlaces finds the lists, blockquotes and tables of the layout by the
 // line where their outlines start: a list's first marker line, a
-// blockquote's first line and a table's header line.
+// blockquote's first line and a table's header line, and lists and tables
+// by what holds them too, since a list in an item can start on the item's
+// marker line.
 type outlinePlaces struct {
-	lists, quotes, tables map[int]int
+	lists, tables map[outlinePlace]int
+	quotes        map[int]int
+}
+
+// outlinePlace is the first line of a list or table of the layout in the
+// document, a top-level blockquote or an item of the layout, by kind and
+// index.
+type outlinePlace struct {
+	kind     scopeKind
+	at, line int
 }
 
 // outlineOutcome is what parsing a region with its edits found.
@@ -95,7 +107,8 @@ type outlineOutcome struct {
 	// edits, when they are not those of the original.
 	slugs     []string
 	slugsSame bool
-	// loosens reports whether a list region makes its list loose.
+	// loosens reports whether a list region makes its list loose, or an
+	// item region holds a block that makes its item's list loose.
 	loosens bool
 }
 
@@ -174,7 +187,7 @@ func listTokens(file *mdast.FileSnapshot, list *mdast.Node, allow fixAllowance) 
 // not the layout's takes no regions of its own: its regions become those of
 // its container.
 func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *outlineModel {
-	layout := newDocLayout(recordingMarkdown(verifier.parser.Flavor()), verifier.content)
+	layout := newDocLayoutFlags(recordingMarkdown(verifier.parser.Flavor()), verifier.content, true)
 	if layout == nil {
 		return nil
 	}
@@ -184,21 +197,22 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 		listParts:  make([]listOutline, len(layout.lists)),
 		quoteParts: make([]regionParts, len(layout.quotes)),
 		tableParts: make([]regionParts, len(layout.tables)),
+		itemParts:  make([]regionParts, len(layout.items)),
 		outcomes:   make(map[string]*outlineOutcome),
 	}
 	places := outlinePlaces{
-		lists:  make(map[int]int, len(layout.lists)),
+		lists:  make(map[outlinePlace]int, len(layout.lists)),
 		quotes: make(map[int]int, len(layout.quotes)),
-		tables: make(map[int]int, len(layout.tables)),
+		tables: make(map[outlinePlace]int, len(layout.tables)),
 	}
 	for idx, list := range layout.lists {
-		places.lists[list.lines[0]] = idx
+		places.lists[outlinePlace{kind: list.parent.kind, at: list.parent.at, line: list.lines[0]}] = idx
 	}
 	for idx, quote := range layout.quotes {
 		places.quotes[quote.line] = idx
 	}
 	for idx, table := range layout.tables {
-		places.tables[table.head] = idx
+		places.tables[outlinePlace{kind: table.parent.kind, at: table.parent.at, line: table.head}] = idx
 	}
 	groups, ok := model.placeBlocks(original.Root, len(layout.bounds)-1, layout.groupOf)
 	if !ok {
@@ -215,12 +229,18 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	for _, nodes := range groups {
 		model.groups.add(out.Len(), len(model.slugs))
 		for _, node := range nodes {
-			model.writeBlock(&out, original, node, places, true)
+			model.writeBlock(&out, original, node, places, docScope, 0)
 		}
 	}
 	model.groups.add(out.Len(), len(model.slugs))
 	out.WriteString(outlineClose)
-	// A list, blockquote or table without parts takes no regions of its own.
+	// A list, blockquote, table or item without parts takes no regions of
+	// its own.
+	for idx, item := range layout.items {
+		if model.itemParts[idx].starts == nil {
+			item.regions = false
+		}
+	}
 	for idx, list := range layout.lists {
 		if list.regions && model.listParts[idx].items.starts == nil {
 			list.regions = false
@@ -268,28 +288,31 @@ func (m *outlineModel) placeBlocks(parent *mdast.Node, count int, groupOf func(i
 	return groups, true
 }
 
-// writeBlock writes the outline of a top-level block of the original, with
-// top, or of a block of a top-level blockquote, and records the slugs of its
-// headings, and where the parts of a list, blockquote or table that the
-// layout knows are. A list, blockquote or table whose parts are not the
-// layout's is written without them.
+// writeBlock writes the outline of a block of the original in the document,
+// a top-level blockquote or an item of the layout, by kind and index, and
+// records the slugs of its headings, and where the parts of a list,
+// blockquote, table or item that the layout knows are. A list, blockquote or
+// table whose parts are not the layout's is written without them, and so
+// are the items of such a list.
 func (m *outlineModel) writeBlock(
-	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, places outlinePlaces, top bool,
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, places outlinePlaces, kind scopeKind, at int,
 ) {
 	line := lineStartIn(m.source, node.SourceRange().StartOffset-m.base)
+	place := outlinePlace{kind: kind, at: at, line: line}
 	switch node.Kind {
 	case mdast.NodeList:
 		// Only a list that list regions may split needs its parts.
-		if index, known := places.lists[line]; known && m.lists[index].regions && m.writeList(out, file, node, index) {
+		if index, known := places.lists[place]; known && m.lists[index].regions &&
+			m.writeList(out, file, node, index, places) {
 			return
 		}
 	case mdast.NodeBlockquote:
 		// A blockquote in a top-level one can start on the same line.
-		if index, known := places.quotes[line]; known && top && m.writeQuote(out, file, node, index, places) {
+		if index, known := places.quotes[line]; known && kind == docScope && m.writeQuote(out, file, node, index, places) {
 			return
 		}
 	case mdast.NodeTable:
-		if index, known := places.tables[line]; known && m.writeTable(out, file, node, index) {
+		if index, known := places.tables[place]; known && m.writeTable(out, file, node, index) {
 			return
 		}
 	}
@@ -298,9 +321,11 @@ func (m *outlineModel) writeBlock(
 }
 
 // writeList writes the outline of a list that list regions may split, with
-// its parts. It writes nothing and returns false when the list's items are
-// not the layout's.
-func (m *outlineModel) writeList(out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int) bool {
+// its parts and those of its items. It writes nothing and returns false when
+// the list's items are not the layout's.
+func (m *outlineModel) writeList(
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int, places outlinePlaces,
+) bool {
 	layoutList := m.lists[index]
 	tokens, ok := listTokens(file, node, m.verifier.allow)
 	if !ok {
@@ -320,15 +345,33 @@ func (m *outlineModel) writeList(out *strings.Builder, file *mdast.FileSnapshot,
 	list := listOutline{tight: node.Block.List.Tight, tokens: tokens, tokenStart: out.Len()}
 	out.WriteString(tokens[list.tight])
 	list.tokenEnd = out.Len()
+	item = 0
 	for child := node.FirstChild; child != nil; child = child.Next {
 		list.items.add(out.Len(), len(m.slugs))
-		writeOutline(out, file, child, m.verifier.allow)
-		m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{child})...)
+		if item >= len(layoutList.items) || !m.writeItem(out, file, child, layoutList.items[item], places) {
+			writeOutline(out, file, child, m.verifier.allow)
+			m.slugs = append(m.slugs, nodeSlugs([]*mdast.Node{child})...)
+		}
+		item++
 	}
 	list.items.add(out.Len(), len(m.slugs))
 	out.WriteString(outlineClose)
 	m.listParts[index] = list
 	return true
+}
+
+// writeItem writes the outline of an item of a list that list regions may
+// split, as writeOutline does, with its parts and those of the lists and
+// tables in it. It writes nothing and returns false when the item's blocks
+// cannot be placed in its groups.
+func (m *outlineModel) writeItem(
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int, places outlinePlaces,
+) bool {
+	parts, ok := m.writeGroups(out, file, node, places, itemScope, index)
+	if ok {
+		m.itemParts[index] = parts
+	}
+	return ok
 }
 
 // writeQuote writes the outline of a top-level blockquote, as writeOutline
@@ -338,23 +381,42 @@ func (m *outlineModel) writeList(out *strings.Builder, file *mdast.FileSnapshot,
 func (m *outlineModel) writeQuote(
 	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int, places outlinePlaces,
 ) bool {
-	quote := m.quotes[index]
-	groups, ok := m.placeBlocks(node, len(quote.bounds), quote.groupOf)
+	parts, ok := m.writeGroups(out, file, node, places, quoteScope, index)
+	if ok {
+		m.quoteParts[index] = parts
+	}
+	return ok
+}
+
+// writeGroups writes the outline of node, the top-level blockquote or the
+// item at index at, by kind, as writeOutline does, and returns where the
+// blocks of each of its groups start, with the end. It writes nothing and
+// returns false when its blocks cannot be placed in its groups.
+func (m *outlineModel) writeGroups(
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, places outlinePlaces, kind scopeKind, at int,
+) (regionParts, bool) {
+	var count int
+	var groupOf func(int) int
+	if kind == itemScope {
+		count, groupOf = len(m.items[at].bounds), m.items[at].groupOf
+	} else {
+		count, groupOf = len(m.quotes[at].bounds), m.quotes[at].groupOf
+	}
+	groups, ok := m.placeBlocks(node, count, groupOf)
 	if !ok {
-		return false
+		return regionParts{}, false
 	}
 	var parts regionParts
 	writeOutlineItem(out, node.Kind.String(), blockOutlineAttrs(file, node, m.verifier.allow))
 	for _, nodes := range groups {
 		parts.add(out.Len(), len(m.slugs))
 		for _, child := range nodes {
-			m.writeBlock(out, file, child, places, false)
+			m.writeBlock(out, file, child, places, kind, at)
 		}
 	}
 	parts.add(out.Len(), len(m.slugs))
 	out.WriteString(outlineClose)
-	m.quoteParts[index] = parts
-	return true
+	return parts, true
 }
 
 // writeTable writes the outline of a table, as writeOutline does, with its
@@ -401,6 +463,8 @@ func (m *outlineModel) outSpan(reg region) (int, int, int, int) {
 		return m.listParts[reg.at].items.partOf(reg)
 	case tableRegion:
 		return m.tableParts[reg.at].partOf(reg)
+	case itemRegion:
+		return m.itemParts[reg.at].partOf(reg)
 	default:
 		return m.groups.partOf(reg)
 	}
@@ -429,9 +493,7 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 	start, end, from, to := m.outSpan(reg)
 	outcome.start, outcome.end = start, end
 	if outcome.holds && !outcome.undecided {
-		if reg.isList() {
-			outcome.loosens = m.docLayout.lists[reg.at].loosens(reg, outcome.tight)
-		}
+		outcome.loosens = m.loosensList(reg, outcome.regionParse)
 		m.outline(outcome, reg, from, to)
 	}
 	outcome.source, outcome.blocks = nil, nil
@@ -455,9 +517,6 @@ func (m *outlineModel) evaluate(reg region, edits []placedEdit) *outlineOutcome 
 // [from, to) of the original.
 func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int) {
 	text := outcome.source
-	// The blank line before the region shifts its offsets by one, and the
-	// region's blocks start before the sentinel.
-	end := 1 + len(text) - len(m.sentinel(reg))
 	verifier := m.verifier
 	m.work.parsed += 1 + len(text)
 	snapshot, err := verifier.parser.ParseWithReferences(verifier.ctx, verifier.file.Path,
@@ -466,7 +525,7 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 		outcome.undecided = true
 		return
 	}
-	nodes, ok := m.regionNodes(reg, snapshot.Root, end)
+	nodes, ok := m.regionNodes(reg, snapshot.Root, outcome.regionParse)
 	if !ok {
 		outcome.undecided = true
 		return
@@ -489,26 +548,37 @@ func (m *outlineModel) outline(outcome *outlineOutcome, reg region, from, to int
 }
 
 // regionNodes returns the nodes of the parse of a region, from its root, whose
-// outlines make up the region's part, for a parse whose region's blocks
-// start before end: the top-level blocks, the blocks of the one blockquote
-// of a quote region, the items of the one list of a list region, or the
-// body rows of the one table of a table region, in one blockquote for a list
-// or table in a blockquote. ok is false when the parse is not of that shape,
-// or a block has no span of its own.
-func (m *outlineModel) regionNodes(reg region, root *mdast.Node, end int) ([]*mdast.Node, bool) {
-	nodes, ok := blocksBefore(root, end)
-	inQuote := reg.kind == quoteRegion ||
-		(reg.kind == listRegion && m.lists[reg.at].quote >= 0) ||
-		(reg.kind == tableRegion && m.tables[reg.at].quote >= 0)
-	if ok && inQuote {
-		if len(nodes) != 1 || nodes[0].Kind != mdast.NodeBlockquote {
-			return nil, false
-		}
-		nodes, ok = blocksBefore(nodes[0], end)
+// outlines make up the region's part, for the region's parse with the
+// recording parser: the blocks, before the line that follows the region,
+// of the document, of the blockquote of a quote region or of the item of an
+// item region, after those of the region's opener, or the items of the one
+// list of a list region or the body rows of the one table of a table
+// region, in the blockquote or item that holds the list or table. ok is
+// false when the parse is not of that shape, or a block has no span of its
+// own.
+func (m *outlineModel) regionNodes(reg region, root *mdast.Node, parse regionParse) ([]*mdast.Node, bool) {
+	// The blank line before the region shifts its offsets by one.
+	end := 1 + parse.end
+	kind, at := docScope, 0
+	switch reg.kind {
+	case quoteRegion:
+		kind, at = quoteScope, reg.at
+	case itemRegion:
+		kind, at = itemScope, reg.at
+	case listRegion:
+		kind, at = m.lists[reg.at].parent.kind, m.lists[reg.at].parent.at
+	case tableRegion:
+		kind, at = m.tables[reg.at].parent.kind, m.tables[reg.at].parent.at
 	}
+	container, ok := m.mdastContainer(root, kind, at, end)
 	if !ok {
 		return nil, false
 	}
+	nodes, ok := blocksBefore(container, end)
+	if !ok || len(nodes) < parse.skip {
+		return nil, false
+	}
+	nodes = nodes[parse.skip:]
 	switch reg.kind {
 	case listRegion:
 		if len(nodes) != 1 || nodes[0].Kind != mdast.NodeList {
@@ -532,6 +602,39 @@ func (m *outlineModel) regionNodes(reg region, root *mdast.Node, end int) ([]*md
 	default:
 		return nodes, true
 	}
+}
+
+// mdastContainer returns the node of a region's parse, from its root, that
+// stands for the document, the top-level blockquote at index at or the item
+// at index at, by kind, as parsedContainer finds it in the recording parse:
+// the root, its one block before end, a blockquote, or the one item of the
+// one list that is the one block before end of what stands for the list's
+// container. ok is false when the parse is not of that shape.
+func (l *docLayout) mdastContainer(root *mdast.Node, kind scopeKind, at, end int) (*mdast.Node, bool) {
+	if kind == docScope {
+		return root, true
+	}
+	parent, want := root, mdast.NodeBlockquote
+	if kind == itemScope {
+		list := l.lists[l.items[at].list]
+		var ok bool
+		if parent, ok = l.mdastContainer(root, list.parent.kind, list.parent.at, end); !ok {
+			return nil, false
+		}
+		want = mdast.NodeList
+	}
+	nodes, ok := blocksBefore(parent, end)
+	if !ok || len(nodes) != 1 || nodes[0].Kind != want {
+		return nil, false
+	}
+	if kind == quoteScope {
+		return nodes[0], true
+	}
+	item := nodes[0].FirstChild
+	if item == nil || item.Next != nil || item.Kind != mdast.NodeListItem {
+		return nil, false
+	}
+	return item, true
 }
 
 // isHeaderRow reports whether a node is the header row of a table.

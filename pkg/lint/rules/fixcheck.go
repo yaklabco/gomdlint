@@ -41,7 +41,9 @@ import (
 // Each fix is first checked on its own. When its rule shows that it leaves
 // link labels alone and the fix cannot reach the front matter, that check
 // parses only the blocks around the fix (fixesKeepDocument), so that a long
-// document with many fixes is not parsed whole for each of them.
+// document with many fixes is not parsed whole for each of them. When those
+// blocks are many, as in one long list item, it parses the groups of the
+// item that hold the fix instead (see itemWindow in fixcheck_items.go).
 // Other fixes are checked on their own against the whole document. Then the
 // fixes that pass are checked together against the whole document, and
 // fixes are dropped until those left pass together.
@@ -122,6 +124,12 @@ type fixChecker struct {
 	ready  bool
 	// children caches the block children of containers for window searches.
 	children blockChildren
+	// layout is the region layout of the document and parser the parser of
+	// its flavor, for item windows, built on first use (see itemWindow);
+	// layoutBuilt reports that the layout was built, or could not be.
+	layout      *docLayout
+	layoutBuilt bool
+	parser      *gmparser.Parser
 }
 
 // blockKey identifies a block by its kind and where it starts.
@@ -200,9 +208,20 @@ func (c *fixChecker) safeAlone(pending pendingFix) bool {
 
 // localKept reports whether a local fix changes the blocks around it only as
 // its intent says, and leaves the headings' anchors alone when the document
-// could refer to them.
+// could refer to them. A fix whose window would be large is checked on the
+// groups of the list item that holds it, when that can be shown to decide
+// as the window does (see itemWindow).
 func (c *fixChecker) localKept(pending pendingFix) bool {
-	window, ok := checkWindow(c.ctx, c.content, pending.edits, []fixIntent{pending.intent}, c.children)
+	intents := []fixIntent{pending.intent}
+	var window windowCheck
+	decided, ok := false, false
+	if start, end, _, found := windowBounds(c.ctx.File, pending.edits, intents, c.children); found &&
+		end-start >= itemWindowMin {
+		window, decided, ok = c.itemWindow(pending.edits, intents)
+	}
+	if !decided {
+		window, ok = checkWindow(c.ctx, c.content, pending.edits, intents, c.children)
+	}
 	if !ok || !slices.EqualFunc(window.want, window.after, sameBlock) {
 		return false
 	}
@@ -337,27 +356,13 @@ func checkWindow(
 	cache blockChildren,
 ) (windowCheck, bool) {
 	file := ctx.File
-	if file == nil || file.Root == nil || len(edits) == 0 {
+	start, end, looseDepth, found := windowBounds(file, edits, intents, cache)
+	if !found {
 		return windowCheck{}, false
 	}
-	low, high := edits[0].StartOffset, edits[0].EndOffset
-	for _, edit := range edits[1:] {
-		low, high = min(low, edit.StartOffset), max(high, edit.EndOffset)
-	}
-	for _, intent := range intents {
-		if intent.target != nil {
-			rng := intent.target.SourceRange()
-			low, high = min(low, rng.StartOffset), max(high, rng.EndOffset)
-		}
-	}
-	if low < 0 || high > len(file.Content) {
-		return windowCheck{}, false
-	}
-
 	// Parsed on their own, the blocks of a window that does not start the
 	// document must not be taken for front matter, so a blank line goes
 	// first.
-	start, end, looseDepth := fixWindow(file, low, high, cache)
 	prefix := ""
 	if start > 0 {
 		prefix = "\n"
@@ -388,6 +393,33 @@ func checkWindow(
 	}
 	window.want, ok = expectedBlocks(window.before, intents)
 	return window, ok
+}
+
+// windowBounds returns the part of the document that checkWindow parses for
+// edits and intents, and the depth of the list whose items it holds when
+// that list is loose, or -1 (see fixWindow). found is false when there are
+// no edits or they fall outside the document.
+func windowBounds(file *mdast.FileSnapshot, edits []fix.TextEdit, intents []fixIntent, cache blockChildren) (
+	int, int, int, bool,
+) {
+	if file == nil || file.Root == nil || len(edits) == 0 {
+		return 0, 0, 0, false
+	}
+	low, high := edits[0].StartOffset, edits[0].EndOffset
+	for _, edit := range edits[1:] {
+		low, high = min(low, edit.StartOffset), max(high, edit.EndOffset)
+	}
+	for _, intent := range intents {
+		if intent.target != nil {
+			rng := intent.target.SourceRange()
+			low, high = min(low, rng.StartOffset), max(high, rng.EndOffset)
+		}
+	}
+	if low < 0 || high > len(file.Content) {
+		return 0, 0, 0, false
+	}
+	start, end, looseDepth := fixWindow(file, low, high, cache)
+	return start, end, looseDepth, true
 }
 
 // touchesFrontMatter reports whether edits could change the document's front
@@ -678,35 +710,48 @@ const hardBreakToken = "\x00br\x00"
 // summarizeBlocks lists the blocks of doc in document order. offset is
 // added to source offsets, to map them to the document a window comes from.
 func summarizeBlocks(doc *mdast.FileSnapshot, offset int) []blockSummary {
+	var nodes []*mdast.Node
+	for node := doc.Root.FirstChild; node != nil; node = node.Next {
+		nodes = append(nodes, node)
+	}
+	return summarizeNodes(doc, nodes, offset)
+}
+
+// summarizeNodes lists the blocks among nodes, which are in document order,
+// and the blocks they hold, as summarizeBlocks lists the document's, the
+// blocks of nodes at depth 0.
+func summarizeNodes(doc *mdast.FileSnapshot, nodes []*mdast.Node, offset int) []blockSummary {
 	var blocks []blockSummary
-	var visit func(parent *mdast.Node, depth int)
-	visit = func(parent *mdast.Node, depth int) {
-		for node := parent.FirstChild; node != nil; node = node.Next {
-			if node.IsInline() {
-				continue
-			}
-			summary := blockSummary{
-				depth:  depth,
-				kind:   node.Kind,
-				attrs:  blockAttrs(doc, node),
-				start:  node.SourceRange().StartOffset + offset,
-				origin: len(blocks),
-			}
-			render := &atomRenderer{doc: doc, offset: offset}
-			switch {
-			case hasInlineContent(node.Kind):
-				render.inlines(node)
-			case node.Kind == mdast.NodeCodeBlock:
-				render.raw(node.ContentRange())
-			case node.Kind == mdast.NodeHTMLBlock:
-				render.raw(node.SourceRange())
-			}
-			summary.atoms = render.atoms
-			blocks = append(blocks, summary)
-			visit(node, depth+1)
+	var visit func(node *mdast.Node, depth int)
+	visit = func(node *mdast.Node, depth int) {
+		if node.IsInline() {
+			return
+		}
+		summary := blockSummary{
+			depth:  depth,
+			kind:   node.Kind,
+			attrs:  blockAttrs(doc, node),
+			start:  node.SourceRange().StartOffset + offset,
+			origin: len(blocks),
+		}
+		render := &atomRenderer{doc: doc, offset: offset}
+		switch {
+		case hasInlineContent(node.Kind):
+			render.inlines(node)
+		case node.Kind == mdast.NodeCodeBlock:
+			render.raw(node.ContentRange())
+		case node.Kind == mdast.NodeHTMLBlock:
+			render.raw(node.SourceRange())
+		}
+		summary.atoms = render.atoms
+		blocks = append(blocks, summary)
+		for child := node.FirstChild; child != nil; child = child.Next {
+			visit(child, depth+1)
 		}
 	}
-	visit(doc.Root, 0)
+	for _, node := range nodes {
+		visit(node, 0)
+	}
 	return blocks
 }
 

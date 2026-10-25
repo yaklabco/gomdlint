@@ -341,7 +341,7 @@ func ListItemLoose(item ast.Node, source []byte) bool {
 	if item.PreviousSibling() != nil && item.HasBlankPreviousLines() {
 		return true
 	}
-	end := firstBlockEnd(item.FirstChild(), source)
+	end := ItemFirstBlockEnd(item, source)
 	if end == nil {
 		return false
 	}
@@ -351,6 +351,16 @@ func ListItemLoose(item ast.Node, source []byte) bool {
 		}
 	}
 	return false
+}
+
+// ItemFirstBlockEnd returns the last node of the first block of a list item
+// that goldmark parsed from source, or nil when the item is empty.
+// ListItemLoose reads the blank-line flags of the blocks after it, so the
+// item makes its list loose exactly when it follows a blank line and is not
+// the list's first item, or one of the blocks after this node follows a
+// blank line.
+func ItemFirstBlockEnd(item ast.Node, source []byte) ast.Node {
+	return firstBlockEnd(item.FirstChild(), source)
 }
 
 // firstBlockEnd returns the last node of an item's first block, which starts

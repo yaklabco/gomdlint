@@ -23,12 +23,13 @@ type regionModel struct {
 	*docLayout
 	sig string
 	// groups holds where the blocks of each group start in sig. listSigs,
-	// quoteSigs and tableSigs hold where the parts of each list, blockquote
-	// and table of the layout are.
+	// quoteSigs, tableSigs and itemSigs hold where the parts of each list,
+	// blockquote, table and item of the layout are.
 	groups    regionParts
 	listSigs  []listSig
 	quoteSigs []regionParts
 	tableSigs []regionParts
+	itemSigs  []regionParts
 	history   anchorHistory
 	// outcomes caches what parsing a region with its edits found, and
 	// cached counts the bytes it holds of its own (see cacheBudget).
@@ -71,6 +72,7 @@ func buildRegionModel(markdown goldmark.Markdown, content []byte, baseline strin
 		listSigs:  make([]listSig, len(layout.lists)),
 		quoteSigs: make([]regionParts, len(layout.quotes)),
 		tableSigs: make([]regionParts, len(layout.tables)),
+		itemSigs:  make([]regionParts, len(layout.items)),
 		outcomes:  make(map[string]*regionOutcome),
 	}
 	var out strings.Builder
@@ -90,13 +92,14 @@ func buildRegionModel(markdown goldmark.Markdown, content []byte, baseline strin
 	return model
 }
 
-// writeBlock writes the signature of a top-level block or a block of a
-// top-level blockquote, as signatureWriter.block does, and records where
-// the parts of a list, blockquote or table that the layout knows are.
+// writeBlock writes the signature of a block of the document, of a
+// top-level blockquote or of an item of a list of the layout, as
+// signatureWriter.block does, and records where the parts of a list,
+// blockquote, table or item that the layout knows are.
 func (m *regionModel) writeBlock(writer *signatureWriter, node gmast.Node) {
 	if index, found := m.listIndex[node]; found {
 		if list, isList := node.(*gmast.List); isList {
-			m.listSigs[index] = writeListSignature(writer, list)
+			m.listSigs[index] = m.writeListSignature(writer, list)
 			return
 		}
 	}
@@ -147,8 +150,9 @@ func writeTableSignature(writer *signatureWriter, table gmast.Node) regionParts 
 }
 
 // writeListSignature writes the signature of a list that the layout knows,
-// as signatureWriter.block does, and returns where its parts are.
-func writeListSignature(writer *signatureWriter, list *gmast.List) listSig {
+// as signatureWriter.block does, and returns where its parts are; it
+// records where the parts of its items are.
+func (m *regionModel) writeListSignature(writer *signatureWriter, list *gmast.List) listSig {
 	tight := gmparser.ListTight(list, writer.source)
 	sig := listSig{ordered: list.IsOrdered(), start: list.Start, tight: tight}
 	sig.tokenStart = writer.out.Len()
@@ -156,11 +160,33 @@ func writeListSignature(writer *signatureWriter, list *gmast.List) listSig {
 	sig.tokenEnd = writer.out.Len()
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		sig.items.add(writer.out.Len(), len(writer.log.slugs))
-		writer.block(item)
+		if index, found := m.itemIndex[item]; found {
+			m.writeItemSignature(writer, item, index)
+		} else {
+			writer.block(item)
+		}
 	}
 	sig.items.add(writer.out.Len(), len(writer.log.slugs))
 	writer.out.WriteString(")")
 	return sig
+}
+
+// writeItemSignature writes the signature of an item of a list that the
+// layout knows, as signatureWriter.block does, and records where the blocks
+// of each of its groups start.
+func (m *regionModel) writeItemSignature(writer *signatureWriter, node gmast.Node, index int) {
+	item := m.items[index]
+	var parts regionParts
+	writer.out.WriteString(node.Kind().String() + "(")
+	for group := range len(item.bounds) {
+		parts.add(writer.out.Len(), len(writer.log.slugs))
+		for _, child := range item.nodes[item.groupNodes[group]:item.groupNodes[group+1]] {
+			m.writeBlock(writer, child)
+		}
+	}
+	parts.add(writer.out.Len(), len(writer.log.slugs))
+	writer.out.WriteString(")")
+	m.itemSigs[index] = parts
 }
 
 // listToken is the signature token that opens a list.
@@ -184,7 +210,8 @@ type regionOutcome struct {
 	// countsSame reports whether the anchor counts after the region are as
 	// before.
 	countsSame bool
-	// loosens reports whether a list region makes its list loose.
+	// loosens reports whether a list region makes its list loose, or an
+	// item region holds a block that makes its item's list loose.
 	loosens bool
 }
 
@@ -198,6 +225,8 @@ func (m *regionModel) sigSpan(reg region) (int, int, int, int) {
 		return m.listSigs[reg.at].items.partOf(reg)
 	case tableRegion:
 		return m.tableSigs[reg.at].partOf(reg)
+	case itemRegion:
+		return m.itemSigs[reg.at].partOf(reg)
 	default:
 		return m.groups.partOf(reg)
 	}
@@ -225,9 +254,7 @@ func (m *regionModel) evaluate(reg region, edits []placedEdit) *regionOutcome {
 	start, end, from, to := m.sigSpan(reg)
 	outcome.start, outcome.end = start, end
 	if outcome.holds && !outcome.undecided {
-		if reg.isList() {
-			outcome.loosens = m.lists[reg.at].loosens(reg, outcome.tight)
-		}
+		outcome.loosens = m.loosensList(reg, outcome.regionParse)
 		m.finish(outcome, from, to)
 	}
 	// The cache keeps what the checks compare, not the parse, and stops
@@ -445,9 +472,12 @@ type regionState struct {
 	regions  []region
 	outcomes []*regionOutcome
 	// inside counts, for each list, the items of the original inside its
-	// list regions that make it loose, and loosening its list regions that
-	// make it loose.
+	// list regions, or with item regions, that make it loose, and loosening
+	// its list regions and its items with item regions that make it loose.
+	// tallies holds what the item regions of each item hold (see
+	// itemTally).
 	inside, loosening []int
+	tallies           []itemTally
 	// firstEnd is where the edited first line ends (see firstLineEnd) when
 	// the edits start before frontLimit, and -1 otherwise. The edits leave a
 	// first line that keeps (see firstLineKeeps).
@@ -458,7 +488,10 @@ type regionState struct {
 // offsets, or nil when some region of theirs does not keep its part of the
 // signature or region checks cannot tell.
 func (m *regionModel) newRegionState(edits []fix.TextEdit) *regionState {
-	state := &regionState{inside: make([]int, len(m.lists)), loosening: make([]int, len(m.lists)), firstEnd: -1}
+	state := &regionState{
+		inside: make([]int, len(m.lists)), loosening: make([]int, len(m.lists)),
+		tallies: make([]itemTally, len(m.items)), firstEnd: -1,
+	}
 	placed, early, ok := m.placeEdits(edits)
 	if !ok || (early && !m.firstLineKeeps(placed, nil)) {
 		return nil
@@ -471,17 +504,29 @@ func (m *regionModel) newRegionState(edits []fix.TextEdit) *regionState {
 		return nil
 	}
 	withRegions := make(map[int]bool)
+	withItems := make(map[int]bool)
 	for idx, outcome := range outcomes {
 		if !outcome.refsSame || !outcome.same || !outcome.countsSame {
 			return nil
 		}
-		if reg := regions[idx]; reg.isList() {
+		switch reg := regions[idx]; reg.kind {
+		case listRegion:
 			withRegions[reg.at] = true
 			state.inside[reg.at] += m.lists[reg.at].looseIn(reg)
 			if outcome.loosens {
 				state.loosening[reg.at]++
 			}
+		case itemRegion:
+			withItems[reg.at] = true
+			state.tallies[reg.at] = state.tallies[reg.at].plus(m.items[reg.at].tallyOf(reg, outcome.loosens))
 		}
+	}
+	for at := range withItems {
+		item := m.items[at]
+		inside, loosening := item.contribution(state.tallies[at])
+		withRegions[item.list] = true
+		state.inside[item.list] += inside
+		state.loosening[item.list] += loosening
 	}
 	for list := range withRegions {
 		if m.tightWith(list, state.inside[list], state.loosening[list]) != m.listSigs[list].tight {
@@ -569,25 +614,43 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 	}
 	type change struct{ inside, loosening int }
 	changes := make(map[int]change)
+	deltas := make(map[int]itemTally)
 	for _, idx := range absorbed {
-		if reg := state.regions[idx]; reg.isList() {
+		switch reg := state.regions[idx]; reg.kind {
+		case listRegion:
 			c := changes[reg.at]
 			c.inside -= m.lists[reg.at].looseIn(reg)
 			if state.outcomes[idx].loosens {
 				c.loosening--
 			}
 			changes[reg.at] = c
+		case itemRegion:
+			deltas[reg.at] = deltas[reg.at].minus(m.items[reg.at].tallyOf(reg, state.outcomes[idx].loosens))
 		}
 	}
 	for idx, reg := range regions {
-		if reg.isList() {
+		switch reg.kind {
+		case listRegion:
 			c := changes[reg.at]
 			c.inside += m.lists[reg.at].looseIn(reg)
 			if outcomes[idx].loosens {
 				c.loosening++
 			}
 			changes[reg.at] = c
+		case itemRegion:
+			deltas[reg.at] = deltas[reg.at].plus(m.items[reg.at].tallyOf(reg, outcomes[idx].loosens))
 		}
+	}
+	// An item counts for its list by all its item regions together, so its
+	// count before and after the edits decides the change.
+	for at, delta := range deltas {
+		item := m.items[at]
+		oldInside, oldLoosening := item.contribution(state.tallies[at])
+		newInside, newLoosening := item.contribution(state.tallies[at].plus(delta))
+		c := changes[item.list]
+		c.inside += newInside - oldInside
+		c.loosening += newLoosening - oldLoosening
+		changes[item.list] = c
 	}
 	// The state's other regions keep their parts, so the signature after the
 	// edits is the original's with the parts of the new regions replaced, and
@@ -634,6 +697,9 @@ func (m *regionModel) tryAdd(state *regionState, edits []fix.TextEdit) (bool, bo
 		for list, c := range changes {
 			state.inside[list] += c.inside
 			state.loosening[list] += c.loosening
+		}
+		for at, delta := range deltas {
+			state.tallies[at] = state.tallies[at].plus(delta)
 		}
 		for _, edit := range placed {
 			pos := sort.Search(len(state.edits), func(i int) bool { return compareEdits(state.edits[i], edit) > 0 })

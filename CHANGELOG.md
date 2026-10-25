@@ -751,6 +751,15 @@ formats change. The first entries under Changed may need action.
   repository's Markdown took 29 seconds to lint and now takes about 8, and
   a list of 800 items, each with an unused definition, went from 9 seconds
   to under one. Findings, fixes and fixed output stay as they were.
+- Many fixes inside one long list item no longer take time that grows with
+  the square of the item's length. A fix check parses the groups of blocks
+  of the item that the fix can affect, or the items around the edited ones
+  of a list nested in it, after one line that opens the item. One item with
+  400 tables right after text, which `blanks-around-tables` (MD058) fixes,
+  took 4.4 seconds to lint, and 5 seconds with the tables in a nested loose
+  list; 400 fences and 400 headings right next to text in one item, which
+  MD031 and MD022 fix, took 8 and 11 seconds. Each now takes a quarter of a
+  second or less. Findings, fixes and fixed output stay as they were.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or

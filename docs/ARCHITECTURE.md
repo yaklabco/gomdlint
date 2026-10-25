@@ -528,11 +528,12 @@ document an edit can affect. A recording parse of the original
 group of blocks whose parse no longer depends on what came before: a line
 where it opens a block with no block open, or a top-level block right after
 a closed thematic break, ATX heading or one-line HTML block. Inside a
-top-level blockquote it notes the same groups, where a block opens in the
-blockquote with no other block of the blockquote open, or right after such
-a closed block. It also notes where each item of a list starts, for the
-lists at the top level and in a top-level blockquote, where each body row
-of a GFM table there starts, which paragraph each link reference
+top-level blockquote, and inside each list item, it notes the same groups,
+where a block opens in the blockquote or item with no other block of it
+open, or right after such a closed block. It also notes where each item of
+a list starts, for the lists at the top level, in a top-level blockquote
+and in the items of such lists at any depth, where each body row of a GFM
+table there starts, which paragraph each link reference
 definition comes from, and which labels links look up.
 
 A check parses the groups that hold its edits, followed by a sentinel line
@@ -541,7 +542,17 @@ long blockquote it parses the blockquote's groups that hold the edits, with
 a sentinel line in the blockquote. Inside a long list it parses the edited
 items with the item before and the item after them, and inside a long
 table the edited rows after the table's header and delimiter rows, with a
-sentinel line that must stay a row. It splices the result into the
+sentinel line that must stay a row. Inside a list item it parses the item's
+groups that hold the edits, or the edited items of a list or rows of a table
+in the item, after an opener: one line that opens the blockquote, lists and
+items around the item with their content offsets, followed by lines that
+leave the item as the document has it there. The opener counts only when
+its parse, with the group's first line, opens those containers and that
+group as the document does. An item region ends at the first line of the
+item's next group, which must start a group as it does in the document. A
+blank line in an item can loosen its list, so the check works out the list's
+tightness from the blocks of the item that follow a blank line. It splices
+the result into the
 original's render signature (`fix_region_model.go`) or outline
 (`fix_safety_regions.go`) and compares exactly. When the edits change the
 definitions, the check works out the labels whose first definition changes
@@ -557,12 +568,15 @@ document.
 The safety argument, why a region check decides exactly as a check of the
 whole document would, is the top comment of
 `pkg/lint/rules/fix_regions.go`. Two shapes still cost a parse per fix.
-One is many fixes inside one large block other than a top-level
-blockquote, or a list or table at the top level or in a top-level
-blockquote: a long paragraph, a table read with the `commonmark` flavor,
-a blockquote nested in another or in a list item, or a long run of
-definitions, which is one paragraph. The other is fixes that change the
-definition of a label that a link looks up.
+One is many fixes inside one large block that region checks do not enter:
+a long paragraph, a table read with the `commonmark` flavor, a blockquote
+nested in another or in a list item, a list item whose marker line holds a
+tab before its content or whose content starts on a later line, or a long
+run of definitions, which is one paragraph. The other is fixes that change
+the definition of a label that a link looks up. The heading, emphasis and
+horizontal-rule rules check a fix on the blocks around it; when those make
+a large window, as one long list item does, they check it on the item's
+groups instead, after the same opener (`fixcheck_items.go`).
 
 Besides its fix checks, each rule that offers fixes parses the whole
 document again for its checker. The code, link, reference and table rules

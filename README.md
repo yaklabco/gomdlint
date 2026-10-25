@@ -933,10 +933,12 @@ Some of its fix checks are also stricter than they need to be.
   reference definitions with `link-image-reference-definitions` (MD053)
   takes time that grows with the square of the run's length. Many fixes
   inside one large block cost a parse of that block each, unless the block
-  is a top-level blockquote, or a list or table at the top level or in a
-  top-level blockquote. Such blocks include a long paragraph, a table read
-  with the `commonmark` flavor, which has no tables, and a blockquote
-  inside another blockquote or a list item.
+  is a top-level blockquote, or a list, list item or table at the top level,
+  in a top-level blockquote or in a list item. Such blocks include a long
+  paragraph, a table read with the `commonmark` flavor, which has no
+  tables, a blockquote inside another blockquote or a list item, and a list
+  item whose marker line holds a tab before its content or whose content
+  starts on the next line.
 - goldmark parses no math, so no rule skips it. `no-reversed-links`
   (MD011), `no-inline-html` (MD033), `no-alt-text` (MD045) and
   `reference-links-images` (MD052) report in a `$$` math block and in
