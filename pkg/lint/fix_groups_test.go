@@ -213,3 +213,63 @@ func TestEngine_KeepsFixGroupsOfDifferentRulesApart(t *testing.T) {
 	assert.Equal(t, 4, result.AcceptedFixes)
 	assert.Equal(t, "- a\n  - b\n  - c\n\ntext\n\n- d\n  - e\n  - f\n", string(fix.ApplyEdits([]byte(content), result.Edits)))
 }
+
+// A rule's groups are fixed or withheld each on its own, and the fixes
+// between them keep their places.
+func TestEngine_DecidesEachFixGroupOfARuleOnItsOwn(t *testing.T) {
+	t.Parallel()
+
+	const content = "- a\n  * b <!-- markdownlint-disable-line TEST001 -->\n  * c\n\nplain\n\n- d\n  + e\n  + f\n"
+	rule := groupRule("TEST001",
+		groupMember("TEST001", 2, 1, edit(t, content, "* b", "- b")),
+		groupMember("TEST001", 3, 1, edit(t, content, "* c", "- c")),
+		fixDiag("TEST001", edit(t, content, "plain", "Plain")),
+		groupMember("TEST001", 8, 2, edit(t, content, "+ e", "- e")),
+		groupMember("TEST001", 9, 2, edit(t, content, "+ f", "- f")))
+
+	result := lintMarkdown(t, content, rule)
+
+	require.Len(t, result.Diagnostics, 4, "the finding on the disabled line is dropped")
+	assert.False(t, result.Diagnostics[0].HasFix(), "group 1 lost a member")
+	assert.Zero(t, result.Diagnostics[0].FixGroup, "a finding without a fix is in no group")
+	assert.Equal(t, 2, result.Diagnostics[2].FixGroup)
+	assert.Equal(t, 3, result.AcceptedFixes)
+	assert.Equal(t, "- a\n  * b <!-- markdownlint-disable-line TEST001 -->\n  * c\n\nPlain\n\n- d\n  - e\n  - f\n",
+		string(fix.ApplyEdits([]byte(content), result.Edits)))
+}
+
+// Members that carry the same edit fix their findings with it once, as
+// findings that share a fix do.
+func TestEngine_AppliesAnEditThatMembersShareOnce(t *testing.T) {
+	t.Parallel()
+
+	insertion := fix.TextEdit{StartOffset: 4, EndOffset: 4, NewText: "X"}
+	rule := groupRule("TEST001",
+		groupMember("TEST001", 2, 1, insertion),
+		groupMember("TEST001", 3, 1, insertion))
+
+	result := lintMarkdown(t, groupContent, rule)
+
+	assert.Equal(t, 2, result.AcceptedFixes)
+	assert.Equal(t, "- a\nX  * b\n  * c\n- d\n", string(fix.ApplyEdits([]byte(groupContent), result.Edits)))
+}
+
+// In a file with carriage returns, the group's edit writes the text between
+// its members back as it is, and each member's own edit is written with the
+// file's line endings.
+func TestEngine_KeepsTheLineEndingsOfAFixGroup(t *testing.T) {
+	t.Parallel()
+
+	const content = "- a\r\n  * b\r\n\r\n  * c\r\n- d\r\n"
+	rule := groupRule("TEST001",
+		groupMember("TEST001", 2, 1, edit(t, content, "* b", "- b\n  ")),
+		groupMember("TEST001", 4, 1, edit(t, content, "* c", "- c")))
+
+	result := lintMarkdown(t, content, rule)
+
+	require.Len(t, result.Diagnostics, 2)
+	require.True(t, result.Diagnostics[0].HasFix())
+	assert.Equal(t, "- b\r\n  ", result.Diagnostics[0].FixEdits[0].NewText)
+	assert.Equal(t, 2, result.AcceptedFixes)
+	assert.Equal(t, "- a\r\n  - b\r\n  \r\n\r\n  - c\r\n- d\r\n", string(fix.ApplyEdits([]byte(content), result.Edits)))
+}

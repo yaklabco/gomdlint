@@ -57,10 +57,12 @@ type Diagnostic struct {
 	// same FixGroup. A rule groups fixes that are only safe together, such
 	// as the bullets of one list, where a different bullet starts a new
 	// list. The engine checks and applies a group as one fix, which fixes
-	// each of its diagnostics, or withholds the fix of every diagnostic in
-	// it: when one of them is suppressed, has no valid fix or overlaps
-	// another, or when the engine withholds the one fix. Each diagnostic
-	// keeps its own edits, so reports show what each of them changes.
+	// each of its diagnostics and makes an edit that several of them carry
+	// once. Or it withholds the fix of every diagnostic in it, and clears
+	// their FixGroup: when one of them is suppressed, has no valid fix or
+	// overlaps another, or when the engine withholds the one fix. Each
+	// diagnostic keeps its own edits, so reports show what each of them
+	// changes, with the group, which a consumer applies together.
 	FixGroup int
 }
 

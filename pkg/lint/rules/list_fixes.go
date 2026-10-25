@@ -66,7 +66,10 @@ func (f *listFixes) add(items []*mdast.Node, edits []fix.TextEdit) {
 // none until share gives them theirs.
 func (f *listFixes) checked(item *mdast.Node) (fix.TextEdit, bool) {
 	if group, ok := f.groups[item]; ok {
-		return group.combined, item == group.leader
+		if item != group.leader {
+			return fix.TextEdit{}, false
+		}
+		return group.combined, true
 	}
 	edit, ok := f.edits[item]
 	return edit, ok

@@ -7,23 +7,30 @@ import (
 )
 
 // fixGroups gathers the fix groups of one rule's diagnostics in a file (see
-// Diagnostic.FixGroup) and makes each group one fix.
+// Diagnostic.FixGroup) and makes each group one fix. Its maps are nil for a
+// rule that reports no group.
 type fixGroups struct {
 	// sizes counts the diagnostics the rule reported in each group.
 	sizes map[int]int
 	// slots holds, for each group, the index among the pending fixes that
-	// its fix takes: the place of its first member with a valid fix.
+	// its fix takes: the place of its first member with a valid fix, when
+	// the run applies fixes.
 	slots map[int]int
 }
 
 // newFixGroups counts the members of each fix group among the diagnostics a
 // rule reported, before any is dropped.
 func newFixGroups(diags []Diagnostic) *fixGroups {
-	groups := &fixGroups{sizes: make(map[int]int), slots: make(map[int]int)}
+	groups := &fixGroups{}
 	for _, diag := range diags {
-		if diag.FixGroup != 0 {
-			groups.sizes[diag.FixGroup]++
+		if diag.FixGroup == 0 {
+			continue
 		}
+		if groups.sizes == nil {
+			groups.sizes = make(map[int]int)
+			groups.slots = make(map[int]int)
+		}
+		groups.sizes[diag.FixGroup]++
 	}
 	return groups
 }
@@ -40,13 +47,14 @@ func (g *fixGroups) reserve(group int, fixes []pendingFix, ruleID string) []pend
 }
 
 // offer decides the fix of each group among diags, the rule's diagnostics
-// that the engine keeps, whose fixes are valid. A group is fixed when every
-// diagnostic the rule reported in it is kept with a fix, and their edits do
-// not overlap: they become one edit that also writes the text between them
-// back unchanged, which is offered like any other fix and takes the place
-// that reserve kept, fixing each member. Each member keeps its own edits,
-// written with the file's line endings. Otherwise every member loses its fix
-// and the group's place among fixes is dropped.
+// that the engine keeps, with their validated fixes, or none where a fix
+// was withheld or invalid. A group is fixed when every diagnostic the rule
+// reported in it is kept with a fix, and their edits do not overlap: they
+// become one edit that also writes the text between them back unchanged,
+// which is offered like any other fix and takes the place that reserve
+// kept, fixing each member. Each member keeps its own edits, written with
+// the file's line endings. Otherwise every member loses its fix and its
+// group, and the group's place among fixes is dropped.
 func (g *fixGroups) offer(
 	diags []Diagnostic,
 	fixes []pendingFix,
@@ -78,6 +86,7 @@ func (g *fixGroups) offer(
 		if !ok {
 			for _, idx := range members[group] {
 				diags[idx].FixEdits = nil
+				diags[idx].FixGroup = 0
 			}
 			continue
 		}
@@ -91,17 +100,24 @@ func (g *fixGroups) offer(
 
 // combine returns the one edit that makes the fixes of a group's members,
 // or false when a member of the group was dropped or has no fix, or two of
-// their edits overlap.
+// their edits overlap. An edit that several members carry is made once, as
+// a fix that several diagnostics share is applied once.
 func (g *fixGroups) combine(diags []Diagnostic, group int, members []int, content []byte) ([]fix.TextEdit, bool) {
 	if len(members) != g.sizes[group] {
 		return nil, false
 	}
 	var edits []fix.TextEdit
+	seen := make(map[fix.TextEdit]bool)
 	for _, idx := range members {
 		if len(diags[idx].FixEdits) == 0 {
 			return nil, false
 		}
-		edits = append(edits, diags[idx].FixEdits...)
+		for _, edit := range diags[idx].FixEdits {
+			if !seen[edit] {
+				seen[edit] = true
+				edits = append(edits, edit)
+			}
+		}
 	}
 	combined, ok := fix.CombineEdits(content, edits)
 	if !ok {
