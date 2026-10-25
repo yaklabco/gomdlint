@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -14,6 +15,8 @@ import (
 	gmtext "github.com/yuin/goldmark/text"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // The rule reference is the documentation that the catalog and the rules'
@@ -49,6 +52,29 @@ const (
 	// schemaName is the name of the configuration's JSON Schema.
 	schemaName = "gomdlint.schema.json"
 )
+
+// RulePagesURL is where the rule pages of docs/rules are published: on main
+// of gomdlint's repository, where the JSON Schema's $id (SchemaURL) points
+// too. A page there describes the rule as the latest gomdlint has it. Rule
+// names do not change, and a renamed rule would leave a page under its old
+// name, so the address of a rule's page stays valid.
+const RulePagesURL = "https://github.com/yaklabco/gomdlint/blob/main/" + rulesDir + "/"
+
+// PageURL returns the published address of the page of entry's rule (see
+// RulePagesURL), or "" when the rule has no generated page: when it is not
+// a built-in rule, such as a custom rule, or a custom rule that takes a
+// built-in rule's ID under another name.
+func PageURL(entry Entry) string {
+	if !lint.IsMarkdownlintRule(entry.ID) && !lint.IsGomdlintOnlyRule(entry.ID) {
+		return ""
+	}
+	for _, meta := range rules.Catalog() {
+		if meta.ID == entry.ID && meta.Name == entry.Name {
+			return RulePagesURL + url.PathEscape(entry.Name) + ".md"
+		}
+	}
+	return ""
+}
 
 // ReferenceDirs returns the directories that hold the files of the rule
 // reference, relative to the repository's root, which hold nothing else.

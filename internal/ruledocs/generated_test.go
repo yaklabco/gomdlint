@@ -169,6 +169,53 @@ func TestReferenceFiles(t *testing.T) {
 	assert.True(t, ruledocs.IsGenerated(files["docs/schema/gomdlint.schema.json"]))
 }
 
+// TestPageURL covers the published address of each rule's page: the page
+// that ReferenceFiles writes, on main of the repository, as the JSON
+// Schema's $id is. A rule without a generated page has no address.
+func TestPageURL(t *testing.T) {
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)
+	files, err := ruledocs.ReferenceFiles(entries)
+	require.NoError(t, err)
+
+	const base = "https://github.com/yaklabco/gomdlint/blob/main/"
+	assert.Equal(t, base+"docs/rules/", ruledocs.RulePagesURL)
+	for _, entry := range entries {
+		url := ruledocs.PageURL(entry)
+		path, found := strings.CutPrefix(url, base)
+		if assert.True(t, found, "%s: %q", entry.ID, url) {
+			assert.Contains(t, files, path, "%s: a page that ReferenceFiles writes", entry.ID)
+		}
+	}
+
+	custom := lint.NewBaseRule("ZZ001", "custom-rule", "A custom rule.", nil, false)
+	impostor := lint.NewBaseRule("MD009", "my-trailing-spaces", "Another rule under MD009.", nil, false)
+	assert.Empty(t, ruledocs.PageURL(ruledocs.NewEntry(&custom, lint.RuleMeta{ID: "ZZ001", Name: "custom-rule"})),
+		"a custom rule")
+	assert.Empty(t, ruledocs.PageURL(ruledocs.NewEntry(&impostor, lint.RuleMeta{})),
+		"a custom rule under a built-in rule's ID")
+}
+
+// TestNewEntry covers the entry of one rule in its built-in state, which
+// matches the entry that Entries gives it without a configuration, except
+// for the config key, which takes a registry.
+func TestNewEntry(t *testing.T) {
+	for _, want := range ruledocs.Entries(lint.DefaultRegistry, nil) {
+		rule, found := lint.DefaultRegistry.GetByID(want.ID)
+		require.True(t, found)
+		meta, found := lint.DefaultRegistry.Meta(want.ID)
+		require.True(t, found)
+		want.ConfigKey = ""
+		assert.Equal(t, want, ruledocs.NewEntry(rule, meta), want.ID)
+	}
+
+	custom := lint.NewBaseRule("ZZ001", "custom-rule", "The rule's own words.", []string{"own"}, true)
+	assert.Equal(t, ruledocs.Entry{
+		RuleMeta: lint.RuleMeta{ID: "ZZ001", Name: "custom-rule", Fixable: true, Description: "The rule's own words."},
+		Default:  ruledocs.State{Enabled: true, Severity: config.SeverityWarning},
+		State:    ruledocs.State{Enabled: true, Severity: config.SeverityWarning},
+	}, ruledocs.NewEntry(&custom, lint.RuleMeta{}), "a rule without a catalog entry")
+}
+
 // TestGeneratedMarkdownLintsClean lints the index and the pages of the
 // rule reference, and the README block, as CI lints the repository's
 // documentation: with gomdlint's own rules and the repository's

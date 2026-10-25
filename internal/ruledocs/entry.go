@@ -3,7 +3,8 @@
 // or as JSON, and writes the page of one rule, as text or Markdown: what
 // the rule checks and why, its options with their defaults, what its fix
 // does, and how to configure it and silence it. The rules and explain
-// commands print its output.
+// commands print its output, and SARIF rule descriptors carry a rule's
+// page as help, with the address of its generated page (see PageURL).
 package ruledocs
 
 import (
@@ -62,8 +63,18 @@ func Entries(registry *lint.Registry, cfg *config.Config) []Entry {
 
 // newEntry documents the rule of rr.
 func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
-	rule := rr.Rule
-	meta, _ := registry.Meta(rule.ID()) // A rule without an entry gets the zero entry.
+	meta, _ := registry.Meta(rr.Rule.ID()) // A rule without an entry gets the zero entry.
+	entry := NewEntry(rr.Rule, meta)
+	entry.State = State{Enabled: rr.Enabled, Severity: rr.Severity}
+	entry.ConfigKey = ConfigKey(registry, rr.Rule.ID())
+	return entry
+}
+
+// NewEntry documents rule, with meta, its catalog entry, in its built-in
+// state, as Entries documents it without a configuration. A rule without a
+// catalog entry takes the zero entry, and its own description and, when it
+// declares them, its own options (see lint.OptionDeclarer).
+func NewEntry(rule lint.Rule, meta lint.RuleMeta) Entry {
 	meta.ID = rule.ID()
 	meta.Name = rule.Name()
 	meta.Fixable = rule.CanFix()
@@ -72,13 +83,8 @@ func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
 		meta.Options, meta.OptionsDeclared = declarer.DeclaredOptions(), true
 	}
 
-	return Entry{
-		RuleMeta: meta,
-		Default:  State{Enabled: rule.DefaultEnabled(), Severity: rule.DefaultSeverity()},
-		State:    State{Enabled: rr.Enabled, Severity: rr.Severity},
-
-		ConfigKey: ConfigKey(registry, rule.ID()),
-	}
+	builtIn := State{Enabled: rule.DefaultEnabled(), Severity: rule.DefaultSeverity()}
+	return Entry{RuleMeta: meta, Default: builtIn, State: builtIn}
 }
 
 // configKey returns the key under which generated configurations name the
