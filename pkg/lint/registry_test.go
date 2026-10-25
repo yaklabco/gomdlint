@@ -329,6 +329,74 @@ func TestRegistry_EntryDescribedBeforeAReplacement(t *testing.T) {
 	assert.Equal(t, "company-policy", rule.Name())
 }
 
+// otherImplementation is a rule of another type than mockRule, such as a
+// custom implementation of a built-in rule.
+type otherImplementation struct {
+	mockRule
+}
+
+// describedMD009 returns a registry in which MD009 is described and then
+// registered, as RegisterAll records the built-in rules.
+func describedMD009() *Registry {
+	reg := NewRegistry()
+	reg.Describe(RuleMeta{
+		ID: "MD009", Name: "no-trailing-spaces", Aliases: []string{"trailing-spaces"},
+		Tags: []string{"whitespace"}, Description: "Lines do not end in spaces.",
+		OptionsDeclared: true, Options: []OptionSpec{{Name: "br_spaces", Type: OptionInteger, Default: 2}},
+	})
+	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+	return reg
+}
+
+// TestRegistry_ReplacementOfAnotherTypeDropsTheEntry covers a rule of
+// another type that replaces a described rule under its ID and name: the
+// entry describes the replaced implementation, so the new rule has none
+// unless an entry is described for it, before or after it registers. A
+// replacement of the same type keeps the entry.
+func TestRegistry_ReplacementOfAnotherTypeDropsTheEntry(t *testing.T) {
+	t.Run("same type", func(t *testing.T) {
+		reg := describedMD009()
+		reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+		_, ok := reg.Meta("MD009")
+		assert.True(t, ok)
+	})
+
+	t.Run("another type", func(t *testing.T) {
+		reg := describedMD009()
+		reg.Register(&otherImplementation{mockRule{id: "MD009", name: "no-trailing-spaces"}})
+		_, ok := reg.Meta("MD009")
+		assert.False(t, ok, "the entry describes the replaced implementation")
+		_, ok = reg.Lookup("trailing-spaces")
+		assert.False(t, ok, "the replaced implementation's alias")
+		_, issues, declared := reg.NormalizeOptions("MD009", map[string]any{"company_mode": true})
+		assert.False(t, declared, "the replaced implementation's options: %v", issues)
+		_, known := reg.MarkdownlintConfigRuleIDs("trailing-spaces")
+		assert.True(t, known, "markdownlint still knows the word")
+	})
+
+	t.Run("described, then registered", func(t *testing.T) {
+		reg := describedMD009()
+		reg.Describe(RuleMeta{ID: "MD009", Name: "no-trailing-spaces", Description: "Company policy."})
+		reg.Register(&otherImplementation{mockRule{id: "MD009", name: "no-trailing-spaces"}})
+		meta, ok := reg.Meta("MD009")
+		require.True(t, ok, "the entry described for the new rule")
+		assert.Equal(t, "Company policy.", meta.Description)
+
+		reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+		_, ok = reg.Meta("MD009")
+		assert.False(t, ok, "a later replacement of another type drops it")
+	})
+
+	t.Run("registered, then described", func(t *testing.T) {
+		reg := describedMD009()
+		reg.Register(&otherImplementation{mockRule{id: "MD009", name: "no-trailing-spaces"}})
+		reg.Describe(RuleMeta{ID: "MD009", Name: "no-trailing-spaces", Description: "Company policy."})
+		meta, ok := reg.Meta("MD009")
+		require.True(t, ok)
+		assert.Equal(t, "Company policy.", meta.Description)
+	})
+}
+
 func TestRegistry_DescribeReplacesEntry(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockRule{id: "MD004", name: "unordered-list-style"})

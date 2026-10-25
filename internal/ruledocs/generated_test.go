@@ -213,30 +213,29 @@ func TestPagesOfACustomRuleUnderABuiltinID(t *testing.T) {
 	}
 }
 
-// replacementRule is a custom rule that replaces a built-in one.
+// replacementRule is a custom rule that replaces a built-in one, and
+// declares an option of its own.
 type replacementRule struct {
 	lint.BaseRule
 }
 
+// DeclaredOptions declares the rule's one option.
+func (r *replacementRule) DeclaredOptions() []lint.OptionSpec {
+	return []lint.OptionSpec{{Name: "company_mode", Type: lint.OptionBoolean, Default: false, Description: "Use the company mode."}}
+}
+
 // TestPagesOfARuleThatReplacesABuiltinOne covers a registry with the
-// built-in rules, in which a custom rule then replaces MD009: under another
-// name, its pages describe it, not the built-in rule, and under the
-// built-in rule's own name they keep the catalog's words but show no
-// example and no published page, as the rule is not the built-in one.
+// built-in rules, in which a custom rule then replaces MD009, under
+// another name or under the built-in rule's own: its pages describe it,
+// with its own description and options, not the built-in rule, and show
+// no example and no published page, as the rule is not the built-in one.
 func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
-	for _, tt := range []struct {
-		name     string
-		ruleName string
-		keepMeta bool
-	}{
-		{name: "another name", ruleName: "company-policy"},
-		{name: "the built-in name", ruleName: "no-trailing-spaces", keepMeta: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, ruleName := range []string{"company-policy", "no-trailing-spaces"} {
+		t.Run(ruleName, func(t *testing.T) {
 			registry := lint.NewRegistry()
 			rules.RegisterAll(registry)
 			registry.Register(&replacementRule{
-				BaseRule: lint.NewBaseRule("MD009", tt.ruleName, "Company policy.", []string{"policy"}, false),
+				BaseRule: lint.NewBaseRule("MD009", ruleName, "Company policy.", []string{"policy"}, false),
 			})
 
 			var entry ruledocs.Entry
@@ -245,7 +244,7 @@ func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 					entry = candidate
 				}
 			}
-			require.Equal(t, tt.ruleName, entry.Name)
+			require.Equal(t, ruleName, entry.Name)
 			assert.Empty(t, ruledocs.PageURL(entry), "not the built-in rule")
 
 			var text, markdown bytes.Buffer
@@ -254,12 +253,8 @@ func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 			for _, page := range []string{text.String(), markdown.String()} {
 				assert.NotContains(t, page, "This document breaks the rule", "no built-in example")
 				assert.NotContains(t, page, "md009.md", "no markdownlint link")
-				if tt.keepMeta {
-					assert.Contains(t, page, "br_spaces", "the catalog's options")
-					assert.Contains(t, page, "whitespace", "the catalog's tags and words")
-					continue
-				}
 				assert.Contains(t, page, "Company policy.")
+				assert.Contains(t, page, "company_mode", "the rule's own option")
 				assert.NotContains(t, page, "br_spaces", "no built-in options")
 				assert.NotContains(t, page, "whitespace", "no built-in tags or words")
 			}

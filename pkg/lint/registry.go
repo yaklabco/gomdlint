@@ -3,6 +3,7 @@ package lint
 import (
 	"cmp"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -42,6 +43,11 @@ type Registry struct {
 	// which Register does not drop, so the words of an entry that no longer
 	// describes its ID's rule stay known (see Register).
 	described map[string]RuleMeta
+
+	// fresh marks the IDs whose entries Describe recorded since a rule last
+	// registered under them, which a rule that registers next keeps even
+	// when it replaces a rule of another type (see Register).
+	fresh map[string]bool
 
 	// index serves every lookup of identifiers, tags and names. Every
 	// change sets it to nil, and the next lookup builds a new one. A built
@@ -141,20 +147,27 @@ func NewRegistry() *Registry {
 		meta:   make(map[string]RuleMeta),
 
 		described: make(map[string]RuleMeta),
+		fresh:     make(map[string]bool),
 	}
 }
 
 // Register adds a rule to the registry.
 // If a rule with the same ID already exists, it is replaced, and the name
 // of the replaced rule no longer resolves unless the new rule uses it too.
-// Registering a rule whose name differs from the name in its ID's catalog
-// entry drops the entry (see Describe), which describes another rule, such
-// as the one it replaces, so the entry's aliases and tags no longer
-// resolve to it. They
-// stay words that markdownlint knows, in markdownlint comments and
-// configs. A replacement under the same name, such as another
-// implementation of the rule, keeps the whole entry: its description and
-// options too.
+//
+// The catalog entry of the ID (see Describe) describes one rule. Register
+// drops it when it describes another rule: when the entry names another
+// rule, or when the new rule replaces a rule of another Go type, such as a
+// custom implementation of a built-in rule, unless Describe recorded the
+// entry since a rule last registered under the ID, for the new rule. A
+// replacement of the same type under the same name keeps the entry. So an
+// entry for a replacement can be described before it registers or after.
+// An entry described after a rule registered counts as described for the
+// next rule too. Once dropped, the entry's aliases and tags no longer
+// resolve to the new rule, its options are no longer the rule's, and the
+// rule's own description, tags and declared options take their place.
+// The entry's words stay words that markdownlint knows, in markdownlint
+// comments and configs.
 //
 // markdownlint 0.41.1 rejects a set of custom rules in which a name equals
 // another name, or a tag equals a name, in upper case (validateRuleList in
@@ -170,15 +183,25 @@ func (r *Registry) Register(rule Rule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if old, ok := r.byID[rule.ID()]; ok {
+	id := rule.ID()
+	fresh := r.fresh[id] // Described since a rule last registered under id.
+	delete(r.fresh, id)
+
+	old, replacing := r.byID[id]
+	if replacing {
 		// Only drop the old name if it still points at the replaced rule;
 		// another rule may have registered the same name since.
 		if named, ok := r.byName[old.Name()]; ok && named.ID() == old.ID() {
 			delete(r.byName, old.Name())
 		}
 	}
-	if meta, ok := r.meta[rule.ID()]; ok && meta.Name != "" && meta.Name != rule.Name() {
-		delete(r.meta, rule.ID()) // The entry names another rule.
+	if meta, ok := r.meta[id]; ok {
+		switch {
+		case meta.Name != "" && meta.Name != rule.Name():
+			delete(r.meta, id) // The entry names another rule.
+		case replacing && !fresh && reflect.TypeOf(old) != reflect.TypeOf(rule):
+			delete(r.meta, id) // The entry describes the replaced implementation.
+		}
 	}
 
 	r.byID[rule.ID()] = rule
@@ -196,6 +219,7 @@ func (r *Registry) Describe(meta RuleMeta) {
 
 	r.meta[meta.ID] = meta.clone()
 	r.described[meta.ID] = r.meta[meta.ID]
+	r.fresh[meta.ID] = true
 	r.index = nil
 }
 

@@ -280,37 +280,59 @@ func TestSARIFReporter_HelpIsOptIn(t *testing.T) {
 	assert.Empty(t, descriptor.HelpURI)
 }
 
+// companyPolicyRule is a custom rule that declares an option of its own.
+type companyPolicyRule struct {
+	lint.BaseRule
+}
+
+// DeclaredOptions declares the rule's one option.
+func (r *companyPolicyRule) DeclaredOptions() []lint.OptionSpec {
+	return []lint.OptionSpec{{Name: "company_mode", Type: lint.OptionBoolean, Default: false}}
+}
+
 // TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne covers a registry
-// with the built-in rules in which a custom rule then replaces MD009 under
-// another name: its descriptor describes it, not the built-in rule.
+// with the built-in rules in which a custom rule then replaces MD009, under
+// another name or under the built-in rule's own: its descriptor describes
+// it, not the built-in rule, and its options are its own.
 func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 	t.Parallel()
 
-	registry := lint.NewRegistry()
-	rules.RegisterAll(registry)
-	custom := lint.NewBaseRule("MD009", "company-policy", "Company policy.", []string{"policy"}, false)
-	registry.Register(&custom)
+	for _, name := range []string{"company-policy", "no-trailing-spaces"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	root := newGitWorkTree(t, false)
-	result := &runner.Result{Files: []runner.FileOutcome{
-		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD009", StartLine: 1}),
-	}}
+			registry := lint.NewRegistry()
+			rules.RegisterAll(registry)
+			registry.Register(&companyPolicyRule{
+				BaseRule: lint.NewBaseRule("MD009", name, "Company policy.", []string{"policy"}, false),
+			})
 
-	opts := reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}
-	descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
+			_, issues, declared := registry.NormalizeOptions("MD009", map[string]any{"company_mode": true})
+			assert.True(t, declared, "the rule declares its options")
+			assert.Empty(t, issues, "company_mode is the rule's own option")
 
-	require.Len(t, descriptors, 1)
-	descriptor := descriptors[0]
-	assert.Equal(t, "company-policy", descriptor.Name)
-	assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.ShortDescription)
-	assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.FullDescription)
-	assert.Equal(t, []any{"policy"}, descriptor.Properties["tags"], "the rule's own tags")
-	assert.Empty(t, descriptor.HelpURI)
-	require.NotNil(t, descriptor.Help)
-	for _, help := range []string{descriptor.Help.Text, descriptor.Help.Markdown} {
-		assert.Contains(t, help, "Company policy.")
-		for _, builtIn := range []string{"br_spaces", "whitespace", "trailing whitespace", "md009.md"} {
-			assert.NotContains(t, help, builtIn, "the built-in rule's words")
-		}
+			root := newGitWorkTree(t, false)
+			result := &runner.Result{Files: []runner.FileOutcome{
+				sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD009", StartLine: 1}),
+			}}
+			opts := reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}
+			descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
+
+			require.Len(t, descriptors, 1)
+			descriptor := descriptors[0]
+			assert.Equal(t, name, descriptor.Name)
+			assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.ShortDescription)
+			assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.FullDescription)
+			assert.Equal(t, []any{"policy"}, descriptor.Properties["tags"], "the rule's own tags")
+			assert.Empty(t, descriptor.HelpURI)
+			require.NotNil(t, descriptor.Help)
+			for _, help := range []string{descriptor.Help.Text, descriptor.Help.Markdown} {
+				assert.Contains(t, help, "Company policy.")
+				assert.Contains(t, help, "company_mode", "the rule's own option")
+				for _, builtIn := range []string{"br_spaces", "whitespace", "trailing whitespace", "md009.md"} {
+					assert.NotContains(t, help, builtIn, "the built-in rule's words")
+				}
+			}
+		})
 	}
 }

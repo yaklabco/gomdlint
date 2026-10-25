@@ -334,6 +334,43 @@ func TestDefaultRegistryDescribesEveryRule(t *testing.T) {
 	}
 }
 
+// TestRegisterAllDescribesEveryRule covers the entries that RegisterAll
+// records: every built-in rule keeps its catalog entry on a fresh
+// registry, when RegisterAll runs twice, and when it replaces a custom
+// rule registered first under a built-in ID, while a custom rule of
+// another type that replaces a built-in rule afterwards gets none.
+func TestRegisterAllDescribesEveryRule(t *testing.T) {
+	assertDescribed := func(t *testing.T, registry *lint.Registry) {
+		t.Helper()
+		for _, meta := range Catalog() {
+			described, ok := registry.Meta(meta.ID)
+			if assert.True(t, ok, meta.ID) {
+				assert.Equal(t, meta, described, meta.ID)
+			}
+		}
+	}
+
+	fresh := lint.NewRegistry()
+	RegisterAll(fresh)
+	assertDescribed(t, fresh)
+
+	RegisterAll(fresh)
+	assertDescribed(t, fresh)
+
+	first := lint.NewRegistry()
+	custom := lint.NewBaseRule("MD009", "company-policy", "Company policy.", nil, false)
+	first.Register(&custom)
+	RegisterAll(first)
+	assertDescribed(t, first)
+
+	replaced := lint.NewRegistry()
+	RegisterAll(replaced)
+	impostor := lint.NewBaseRule("MD009", "no-trailing-spaces", "Company policy.", nil, false)
+	replaced.Register(&impostor)
+	_, ok := replaced.Meta("MD009")
+	assert.False(t, ok, "a custom implementation does not keep the built-in entry")
+}
+
 // TestCatalogDescribesEachRule covers the prose of every catalog entry:
 // what correct Markdown looks like, why it matters, and what the fix does.
 // Each is plain text that any output can show as it is.
