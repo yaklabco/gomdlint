@@ -538,3 +538,71 @@ func TestRegistry_ClosestRulesLeavesOutTags(t *testing.T) {
 	assert.Empty(t, reg.ClosestRules("tables"), "only a tag is close")
 	assert.Empty(t, reg.ClosestRules("bulet"))
 }
+
+// TestRegistry_ConfigKey covers the key under which a generated
+// configuration names a rule: its name while the name identifies the rule
+// alone, and its ID once another registered rule has the same name, uses
+// it as an alias or has it as its ID, so that the key never configures
+// another rule.
+func TestRegistry_ConfigKey(t *testing.T) {
+	reg := NewRegistry()
+	for _, rule := range []*mockRule{
+		{id: "MD009", name: "no-trailing-spaces"},
+		{id: "MD010", name: "no-hard-tabs"},
+		{id: "MD013", name: "line-length"},
+		{id: "MD033", name: "no-inline-html"},
+		{id: "MD900", name: "Line-Length"},
+		{id: "MD901", name: "tabs"},
+		{id: "MD902", name: "md033"},
+		{id: "MD903", name: " spaced "},
+		{id: "MD904", name: "old-name"},
+		{id: "MD905", name: "own-alias"},
+		{id: "MD906", name: "kept"},
+	} {
+		reg.Register(rule)
+	}
+	reg.Describe(RuleMeta{ID: "MD901", Name: "tabs", Aliases: []string{"no-hard-tabs"}})
+	reg.Describe(RuleMeta{ID: "MD905", Name: "own-alias", Aliases: []string{"Own-Alias"}})
+	reg.Describe(RuleMeta{ID: "MD999", Name: "phantom", Aliases: []string{"kept"}})
+	_ = reg.ConfigKey("MD904") // Builds the index, which the next Register must rebuild.
+	reg.Register(&mockRule{id: "MD904", name: "new-name"})
+
+	tests := []struct {
+		name, id, want string
+	}{
+		{name: "a name that one rule has", id: "MD009", want: "no-trailing-spaces"},
+		{name: "a name that another rule has, in another case", id: "MD013", want: "MD013"},
+		{name: "the other rule of that name", id: "MD900", want: "MD900"},
+		{name: "a name that another rule has as an alias", id: "MD010", want: "MD010"},
+		{name: "the rule with that alias", id: "MD901", want: "tabs"},
+		{name: "a name that another rule has as its ID", id: "MD902", want: "MD902"},
+		{name: "the rule with that ID keeps its name", id: "MD033", want: "no-inline-html"},
+		{name: "a name with spaces around it", id: "MD903", want: " spaced "},
+		{name: "a rule registered again under a new name", id: "MD904", want: "new-name"},
+		{name: "a name that is also the rule's own alias", id: "MD905", want: "own-alias"},
+		{name: "an alias of a catalog entry that is not registered", id: "MD906", want: "kept"},
+		{name: "a rule that is not registered", id: "MD999", want: "MD999"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, reg.ConfigKey(tt.id), tt.name)
+	}
+	for _, id := range reg.IDs() {
+		rule, found := reg.Lookup(reg.ConfigKey(id))
+		require.True(t, found, id)
+		assert.Equal(t, id, rule.ID(), "the key of %s names it", id)
+	}
+}
+
+// TestRegistry_ConfigKeyIDsThatDifferInCase pins the limit of ConfigKey:
+// an ID that another registered ID differs from only in case cannot name
+// its rule either, since Lookup ignores case.
+func TestRegistry_ConfigKeyIDsThatDifferInCase(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "X1", name: "b"})
+	reg.Register(&mockRule{id: "x1", name: "b"})
+
+	assert.Equal(t, "x1", reg.ConfigKey("x1"))
+	rule, found := reg.Lookup("x1")
+	require.True(t, found)
+	assert.Equal(t, "X1", rule.ID(), "Lookup finds the first ID")
+}

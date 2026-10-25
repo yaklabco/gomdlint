@@ -439,7 +439,10 @@ ignore:
 ```
 
 Generate a starter configuration with `gomdlint init` or a comprehensive
-template that documents every rule with `gomdlint init --full`.
+template that documents every rule with `gomdlint init --full`. Both key
+rules by name. The full template lists the rules by category, each with
+its ID in a comment, its description, and its severity and options with
+their defaults as comments, so it changes nothing until you edit it.
 
 Ignore patterns are matched like `.gitignore` patterns. Patterns in a
 project config, or in a file named with `--config`, are relative to that
@@ -634,13 +637,14 @@ Migration writes markdownlint's rule defaults and translated options into
 `rule_defaults`, with the settings of the source file under `rules`. It
 writes no other setting, so `ignore`, `flavor`, `backups` and the other
 settings of a user or system config still apply after migration, as they do
-while gomdlint translates the markdownlint config for each run. Options are
-written under gomdlint's names, such as `max` for `line_length`, and an
-option that the rule does not read is left out with a warning. A rule that
-the source turns on gets `reset_options: true` (see
-[Rule Settings](#rule-settings)), so that it takes markdownlint's defaults
-for the options that the source does not set. As in
-markdownlint, a migrated config makes every finding an error, so findings
+while gomdlint translates the markdownlint config for each run. Rules are
+keyed by name, with the ID in a comment, and a comment marks the rules that
+a markdownlint tag sets. Options are written under gomdlint's names, such
+as `max` for `line_length`, and an option that the rule does not read is
+left out with a warning. A rule that the source turns on gets
+`reset_options: true` (see [Rule Settings](#rule-settings)), so that it
+takes markdownlint's defaults for the options that the source does not
+set. As in markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
 Migration does not evaluate JavaScript configuration or resolve `extends`.

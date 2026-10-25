@@ -1,0 +1,37 @@
+exit code 0
+-- stdout --
+-- stderr --
+-- .gomdlint.yml --
+# yaml-language-server: $schema=https://raw.githubusercontent.com/yaklabco/gomdlint/main/docs/schema/gomdlint.schema.json
+# gomdlint configuration
+# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.
+# See: https://github.com/yaklabco/gomdlint
+#
+# Run-time settings such as --fix, --dry-run, --jobs and --format are
+# command-line flags and cannot be set in this file.
+
+# Markdown flavor: commonmark or gfm
+flavor: gfm
+
+# Severity for every rule that does not set one: error, warning, or info.
+# Leave it unset to keep each rule's built-in severity.
+# severity_default: error
+
+# File patterns to ignore (glob patterns, relative to this file). Files that
+# .gitignore ignores and node_modules and vendor directories are skipped by
+# default; see the gitignore and default_ignores settings.
+# ignore:
+#   - "docs/drafts/**"
+#   - "CHANGELOG.md"
+
+# Rule settings, keyed by rule name. 'gomdlint explain <rule>' describes a
+# rule and its options. false as a rule's value turns it off, and a
+# severity as its value, such as line-length: warning, turns it on.
+# rules:
+#   heading-increment:     # MD001
+#     severity: error
+#   line-length:           # MD013
+#     options:
+#       max: 100
+#       ignore_tables: true
+#   no-inline-html: false  # MD033

@@ -39,6 +39,11 @@ type Entry struct {
 	// State is the rule's state under the configuration that Entries was
 	// given, or its built-in state without one.
 	State State
+
+	// ConfigKey is the key under which generated configurations name the
+	// rule: its name, or its ID when another rule of the registry shares
+	// the name or YAML cannot hold the name as a key (see ConfigKey).
+	ConfigKey string
 }
 
 // Entries documents every rule of registry, in rule ID order, with its
@@ -71,7 +76,15 @@ func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
 		RuleMeta: meta,
 		Default:  State{Enabled: rule.DefaultEnabled(), Severity: rule.DefaultSeverity()},
 		State:    State{Enabled: rr.Enabled, Severity: rr.Severity},
+
+		ConfigKey: ConfigKey(registry, rule.ID()),
 	}
+}
+
+// configKey returns the key under which generated configurations name the
+// rule: its ConfigKey, or its ID for an entry without one.
+func (e *Entry) configKey() string {
+	return cmp.Or(e.ConfigKey, e.ID)
 }
 
 // inMarkdownlint reports whether markdownlint has the rule: whether its ID

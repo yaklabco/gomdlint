@@ -180,9 +180,35 @@ formats change. The first entries under Changed may need action.
   `lint.IsGomdlintOnlyRule` now reports only gomdlint's own rules, MDL001
   and MDL003, so a custom rule under an ID such as MDL900 takes
   markdownlint's `default` key and tags as other custom rules do.
+- `gomdlint init` and `gomdlint migrate` key rules by name, such as
+  `line-length`, where they used to write IDs such as `MD013`. IDs still
+  work as keys, and a rule whose name another registered rule shares, such
+  as a custom rule, is keyed by its ID. Each key has the rule's ID in a
+  comment. `init --full` lists the rules by category, with each rule's
+  description from the rule catalog, and each option with its default as a
+  comment. It used to print each rule's older short description. `migrate`
+  leaves out unset settings and empty options, and marks the rules that a
+  markdownlint tag sets and gomdlint's own rules with comments. The YAML
+  files start with the line that points editors at the configuration's
+  JSON Schema.
+- Library: configuration templates moved from `pkg/config` to
+  `internal/ruledocs`, so `config.GenerateTemplate`,
+  `config.TemplateOptions`, `config.RuleInfo`, `config.RuleInfoProvider`,
+  `config.DefaultRuleInfoProvider`, `config.DefaultTemplateHeader` and
+  `lint.RuleInfos` are gone. `config.YAMLToJSON` converts a YAML
+  configuration to JSON. `Config.RuleSettingsToYAML` and
+  `Config.RuleSettingsToJSON` are gone too, since `gomdlint migrate` writes
+  its own files. `Config.ToYAML` and `Config.ToJSON` still write a whole
+  configuration.
 
 ### Added
 
+- Library: `lint.Registry.ConfigKey` returns the key under which generated
+  configs name a rule: its name, or its ID when another registered rule
+  shares the name.
+- Library: `config.YAMLPrintable` reports whether YAML allows a character
+  in a stream, and `config.EscapeJSONForYAML` escapes the characters of
+  JSON strings that YAML would read otherwise, such as NEL and DEL.
 - Config discovery finds `.gomdlint.json` and `gomdlint.json` after the YAML
   names, and `config.json` in the user and system config directories. `init`
   and `migrate` write JSON for an output name that ends in `.json`.

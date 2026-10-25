@@ -36,6 +36,29 @@ type MigrationResult struct {
 	// warningLines maps the index in Warnings of each warning about one
 	// line of the source file to that line.
 	warningLines map[int]int
+
+	// keyRegistry is the registry that loads the file that FileContent
+	// writes, lint.DefaultRegistry, as the configuration loader uses. Its
+	// keys for the rules key them in the file (see ruleKey).
+	keyRegistry *lint.Registry
+
+	// sources maps the ID of each rule under Config.Rules to the key of
+	// the source file that set it last.
+	sources map[string]ruleSource
+}
+
+// ruleSource is the key of a markdownlint config that set a rule.
+type ruleSource struct {
+	// key is the key as the source file writes it.
+	key string
+
+	// order is the place of the key among the keys of the source file
+	// that set rules, counted from 0.
+	order int
+
+	// tag reports that the key is a markdownlint tag, which sets every
+	// rule it covers.
+	tag bool
 }
 
 // WarningLine returns the line of the source file that Warnings[idx] is
@@ -135,6 +158,8 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
+	result.keyRegistry = lint.DefaultRegistry
+	result.sources = make(map[string]ruleSource)
 	cfg.RuleDefaults = make(map[string]config.RuleConfig)
 	for _, id := range registry.IDs() {
 		value := defaultValue
@@ -347,27 +372,6 @@ func markdownlintParseError(path string, err error) error {
 	}
 }
 
-// FileContent returns the content of a gomdlint config file at path that
-// holds the converted settings: JSON for a name that ends in .json, which
-// lint reads as JSON, and otherwise YAML under a header that names the
-// source file. The file holds the rule settings alone, under rules and
-// rule_defaults, so a user or system config still sets everything else,
-// such as ignore patterns and the flavor.
-func (r *MigrationResult) FileContent(path string) ([]byte, error) {
-	if HoldsJSON(path) {
-		content, err := r.Config.RuleSettingsToJSON()
-		if err != nil {
-			return nil, fmt.Errorf("serialize %s: %w", path, err)
-		}
-		return content, nil
-	}
-	content, err := r.Config.RuleSettingsToYAML(GenerateMigrationHeader(r.SourcePath))
-	if err != nil {
-		return nil, fmt.Errorf("serialize %s: %w", path, err)
-	}
-	return content, nil
-}
-
 // markdownlintConversion converts the rule keys of one markdownlint
 // configuration into cfg, recording warnings in result.
 type markdownlintConversion struct {
@@ -376,6 +380,9 @@ type markdownlintConversion struct {
 	cfg       *config.Config
 	result    *MigrationResult
 	locate    *sourceLocator
+
+	// keys counts the keys that have named rules so far.
+	keys int
 }
 
 // ruleName returns the name of the registered rule with the given ID.
@@ -483,6 +490,8 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) {
 		c.warn(0, c.registry.UnknownKeyText(key)+"; it is ignored")
 		return
 	}
+	source := ruleSource{key: key, order: c.keys, tag: c.isTag(key, ruleIDs)}
+	c.keys++
 	unread := make(map[string]int) // option key -> the rules that do not read it
 	for _, id := range ruleIDs {
 		converted, issues := c.translate.rule(c.registry, id, value)
@@ -494,6 +503,7 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) {
 			c.warn(c.locate.optionLine(key, issue.Key, issue.Item), issue.Text(c.ruleName(id)))
 		}
 		c.cfg.Rules[id] = converted
+		c.result.sources[id] = source
 	}
 	for _, option := range slices.Sorted(maps.Keys(unread)) {
 		if unread[option] == len(ruleIDs) {
@@ -502,12 +512,12 @@ func (c *markdownlintConversion) processRuleKey(key string, value any) {
 	}
 }
 
-// GenerateMigrationHeader returns a header comment for migrated configs.
-func GenerateMigrationHeader(sourcePath string) string {
-	return fmt.Sprintf(`# gomdlint configuration
-# Migrated from: %s
-# See: https://github.com/yaklabco/gomdlint
-`, filepath.Base(sourcePath))
+// isTag reports whether key, a key of the markdownlint config that names
+// the rules with the given IDs, is a markdownlint tag rather than one
+// rule's ID, name or alias.
+func (c *markdownlintConversion) isTag(key string, ruleIDs []string) bool {
+	rule, isRule := c.registry.Lookup(key)
+	return !isRule || len(ruleIDs) != 1 || rule.ID() != ruleIDs[0]
 }
 
 // CanMigrate returns true if the config file can be migrated.

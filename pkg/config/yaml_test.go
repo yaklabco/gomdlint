@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
@@ -205,61 +206,6 @@ func TestConfigToJSON(t *testing.T) {
 	})
 }
 
-// TestConfigRuleSettings covers RuleSettingsToYAML and RuleSettingsToJSON,
-// which write a configuration's rule settings and leave out every other
-// setting, set or not, so that a file holding them sets only rules.
-func TestConfigRuleSettings(t *testing.T) {
-	t.Parallel()
-
-	disabled := false
-	cfg := config.NewConfig()
-	cfg.Rules["MD013"] = config.RuleConfig{Enabled: &disabled}
-	cfg.RuleDefaults = map[string]config.RuleConfig{"MD009": {Enabled: &disabled}}
-
-	yamlData, err := cfg.RuleSettingsToYAML("# Header")
-	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(string(yamlData), "# Header\n\n"), string(yamlData))
-	jsonData, err := cfg.RuleSettingsToJSON()
-	require.NoError(t, err)
-	var keys map[string]any
-	require.NoError(t, json.Unmarshal(jsonData, &keys), string(jsonData))
-	assert.Len(t, keys, 2, string(jsonData))
-
-	// JSON is YAML too, so FromYAML reads both.
-	for name, data := range map[string][]byte{"YAML": yamlData, "JSON": jsonData} {
-		parsed, err := config.FromYAML(data)
-		require.NoError(t, err, name)
-		assert.False(t, *parsed.Rules["MD013"].Enabled, name)
-		assert.False(t, *parsed.RuleDefaults["MD009"].Enabled, name)
-		assert.Empty(t, parsed.Flavor, name)
-		assert.Nil(t, parsed.Ignore, name)
-		assert.Equal(t, config.BackupsConfig{}, parsed.Backups, name)
-		assert.Nil(t, parsed.Gitignore, name)
-		assert.Nil(t, parsed.DefaultIgnores, name)
-	}
-
-	t.Run("without a header", func(t *testing.T) {
-		t.Parallel()
-
-		data, err := (&config.Config{Rules: cfg.Rules}).RuleSettingsToYAML("")
-		require.NoError(t, err)
-		assert.True(t, strings.HasPrefix(string(data), "rules:\n"), string(data))
-		assert.NotContains(t, string(data), "rule_defaults", "empty rule defaults are left out")
-	})
-
-	t.Run("nil config", func(t *testing.T) {
-		t.Parallel()
-
-		var empty *config.Config
-		data, err := empty.RuleSettingsToYAML("# Header")
-		require.NoError(t, err)
-		assert.Nil(t, data)
-		data, err = empty.RuleSettingsToJSON()
-		require.NoError(t, err)
-		assert.Nil(t, data)
-	})
-}
-
 func TestFromYAML(t *testing.T) {
 	t.Run("parses valid YAML", func(t *testing.T) {
 		yaml := []byte(`
@@ -283,4 +229,21 @@ rules:
 		require.NoError(t, err)
 		assert.NotNil(t, cfg.Rules)
 	})
+}
+
+// TestYAMLToJSONEscapesWhatYAMLReadsOtherwise covers strings that hold characters
+// that YAML reads as line breaks, NEL and the line and paragraph
+// separators, or does not allow, such as DEL, the C1 controls, U+FFFE and
+// U+FFFF: the JSON escapes them, so that YAML, which reads JSON too, reads
+// it back the same. A character beyond U+FFFF stays as it is.
+func TestYAMLToJSONEscapesWhatYAMLReadsOtherwise(t *testing.T) {
+	t.Parallel()
+
+	content, err := config.YAMLToJSON([]byte("key: \"a\\Lb\\Pc\\Nd\\x7fe\\x9bf\\uFFFEg\\uFFFFh\\U0001F600i\"\n"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(content), `"a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg\uffffh😀i"`)
+	var read map[string]string
+	require.NoError(t, yamlv3.Unmarshal(content, &read), string(content))
+	assert.Equal(t, map[string]string{"key": "a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg\uffffh\U0001F600i"}, read)
 }

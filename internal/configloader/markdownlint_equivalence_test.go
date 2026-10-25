@@ -475,7 +475,7 @@ func TestMarkdownlintTranslationKeepsEffectiveOptions(t *testing.T) {
 // lower configuration layer. A rule key that turns the rule on resets its
 // options instead, which replaces every option of a lower layer, so it
 // writes none of those defaults. Options that are nil and options that are
-// empty count as the same: both write options: {} and set nothing.
+// empty count as the same: both set nothing.
 func TestMarkdownlintTranslationWritesWhat42Wrote(t *testing.T) {
 	t.Parallel()
 

@@ -237,14 +237,14 @@ func markdownOptions(entry Entry) []string {
 
 	items := make([]string, len(entry.Options))
 	for idx, spec := range entry.Options {
-		item := markdownCode(spec.Name) + " (" + optionFacts(entry, spec, markdownWords) + ")"
+		item := markdownCode(yamlKey(spec.Name)) + " (" + optionFacts(entry, spec, markdownWords) + ")"
 		if details := optionDetails(spec, markdownWords); details != "" {
 			item += ": " + details
 		}
 		items[idx] = markdownItem(item)
 	}
 	return []string{
-		"Set them under " + markdownCode("rules."+entry.Name+".options") + ".",
+		"Set them under " + markdownCode("rules."+yamlKey(entry.configKey())+".options") + ".",
 		strings.Join(items, "\n"),
 	}
 }

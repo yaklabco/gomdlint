@@ -93,13 +93,13 @@ func flatShape(t *testing.T, content []byte, markdownlintWords, asJSON bool) []b
 			delete(setting, "options")
 			for name, value := range options {
 				if markdownlintWords {
-					name, value = markdownlintSpelling(t, key, name, value)
+					name, value = markdownlintSpelling(t, ruleIDOf(t, key), name, value)
 				}
 				require.NotContains(t, setting, name, "%s option %s is spelled like a rule setting", key, name)
 				setting[name] = value
 			}
 			if markdownlintWords {
-				key = markdownlintRuleName(t, key)
+				key = markdownlintRuleName(t, ruleIDOf(t, key))
 			}
 			flat[section][key] = setting
 		}
@@ -134,6 +134,16 @@ func markdownlintSpelling(t *testing.T, ruleID, name string, value any) (string,
 		return alias.Name, value
 	}
 	return name, value
+}
+
+// ruleIDOf returns the ID of the built-in rule that key, a rule key of a
+// gomdlint config, names.
+func ruleIDOf(t *testing.T, key string) string {
+	t.Helper()
+
+	rule, ok := lint.DefaultRegistry.Lookup(key)
+	require.True(t, ok, key)
+	return rule.ID()
 }
 
 // markdownlintRuleName returns the name that markdownlint lists first for

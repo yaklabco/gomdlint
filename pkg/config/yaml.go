@@ -3,9 +3,11 @@ package config
 import (
 	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -36,43 +38,6 @@ func encodeYAML(value any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ruleSettings holds the rule settings of a configuration, under the keys
-// that Config gives them.
-type ruleSettings struct {
-	Rules        map[string]RuleConfig `yaml:"rules,omitempty"`
-	RuleDefaults map[string]RuleConfig `yaml:"rule_defaults,omitempty"`
-}
-
-// RuleSettingsToYAML serializes the rule settings of the configuration,
-// rules and rule_defaults, and nothing else, after header unless it is
-// empty. It suits a configuration that sets nothing but rules, such as a
-// migrated markdownlint configuration: a file that holds it leaves every
-// other setting to the layers below it, where ToYAML would write settings
-// it does not set, such as an empty ignore list.
-func (c *Config) RuleSettingsToYAML(header string) ([]byte, error) {
-	if c == nil {
-		return nil, nil
-	}
-	yamlBytes, err := encodeYAML(ruleSettings{Rules: c.Rules, RuleDefaults: c.RuleDefaults})
-	if err != nil {
-		return nil, err
-	}
-	return withHeader(header, yamlBytes), nil
-}
-
-// RuleSettingsToJSON is RuleSettingsToYAML in JSON, which has no comments,
-// and so no header.
-func (c *Config) RuleSettingsToJSON() ([]byte, error) {
-	if c == nil {
-		return nil, nil
-	}
-	yamlBytes, err := c.RuleSettingsToYAML("")
-	if err != nil {
-		return nil, err
-	}
-	return templateToJSON(yamlBytes)
-}
-
 // ToJSON serializes the configuration to indented JSON: the settings ToYAML
 // writes, under the same keys, so a JSON config file reads back the same.
 // JSON has no comments.
@@ -85,7 +50,76 @@ func (c *Config) ToJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return templateToJSON(yamlBytes)
+	return YAMLToJSON(yamlBytes)
+}
+
+// YAMLToJSON converts yamlContent, a configuration file in YAML, to
+// indented JSON. JSON has no comments, so the JSON holds exactly the
+// settings that the YAML sets, and what the YAML documents in comments is
+// left out. Keys come in sorted order.
+func YAMLToJSON(yamlContent []byte) ([]byte, error) {
+	settings := map[string]any{}
+	if err := yaml.Unmarshal(yamlContent, &settings); err != nil {
+		return nil, fmt.Errorf("parse YAML: %w", err)
+	}
+
+	// People edit config files by hand, so <, > and & stay as they are
+	// instead of becoming escapes such as <. Encode ends the file with
+	// a newline.
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(settings); err != nil {
+		return nil, fmt.Errorf("marshal JSON: %w", err)
+	}
+
+	return EscapeJSONForYAML(buf.Bytes()), nil
+}
+
+// EscapeJSONForYAML returns encoded, JSON, with each character of its
+// strings that YAML reads as a line break or does not allow written as a
+// JSON escape, such as \u0085 for NEL. encoding/json escapes the line and
+// paragraph separators and the C0 controls, but not NEL, DEL, the C1
+// controls or U+FFFE and U+FFFF. JSON holds such characters only inside
+// strings, so the escapes keep its meaning, and YAML, which reads JSON
+// too, reads each string back the same. A byte that is no UTF-8, which
+// encoding/json never writes, becomes \ufffd, as encoding/json writes it.
+func EscapeJSONForYAML(encoded []byte) []byte {
+	var out bytes.Buffer
+	for len(encoded) > 0 {
+		char, size := utf8.DecodeRune(encoded)
+		if yamlReadsAsItself(char) && (char != utf8.RuneError || size > 1) {
+			out.Write(encoded[:size])
+		} else {
+			fmt.Fprintf(&out, `\u%04x`, char)
+		}
+		encoded = encoded[size:]
+	}
+	return out.Bytes()
+}
+
+// yamlReadsAsItself reports whether YAML reads char, a character of a JSON
+// string, as itself: whether YAML allows it (see YAMLPrintable) and does
+// not read it as a line break, as it reads NEL and the line and paragraph
+// separators. A tab or a line break of JSON's own layout passes too.
+func yamlReadsAsItself(char rune) bool {
+	return YAMLPrintable(char) && char != '\u0085' && char != '\u2028' && char != '\u2029'
+}
+
+// YAMLPrintable reports whether YAML allows char in a stream, such as in a
+// comment: a tab, a line break, a printable ASCII character, NEL, or a
+// character of U+00A0 to U+D7FF, U+E000 to U+FFFD or beyond U+FFFF, the
+// c-printable characters of YAML 1.2.
+func YAMLPrintable(char rune) bool {
+	switch {
+	case char == '\t' || char == '\n' || char == '\r' || char == '\u0085':
+		return true
+	case char >= 0x20 && char <= 0x7e:
+		return true
+	default:
+		return (char >= 0xa0 && char <= 0xd7ff) || (char >= 0xe000 && char <= 0xfffd) || char >= 0x10000
+	}
 }
 
 // ToYAMLWithHeader serializes the configuration with a header comment.

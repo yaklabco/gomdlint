@@ -98,7 +98,7 @@ rule_defaults:
 	assert.False(t, clone.Rules["MD009"].ResetOptions)
 	assert.True(t, clone.RuleDefaults["MD033"].ResetOptions)
 
-	written, err := cfg.RuleSettingsToYAML("")
+	written, err := cfg.ToYAML()
 	require.NoError(t, err)
 	assert.Equal(t, 2, strings.Count(string(written), "reset_options: true"), string(written))
 	assert.NotContains(t, string(written), "reset_options: false", "an unset reset_options is left out")

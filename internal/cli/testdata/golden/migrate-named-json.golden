@@ -1,0 +1,350 @@
+exit code 0
+-- stdout --
+WARN unknown rule "no-trailling-spaces" (did you mean "no-trailing-spaces"?); it is ignored
+INFO migration complete input=.markdownlint.jsonc output=.gomdlint.json
+WARN review warnings above and verify the migrated configuration
+INFO you can now delete the old markdownlint configuration file
+-- stderr --
+-- .gomdlint.json --
+{
+  "rule_defaults": {
+    "blanks-around-fences": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "blanks-around-lists": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "blanks-around-tables": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "code-block-style": {
+      "enabled": true,
+      "options": {
+        "style": "consistent"
+      },
+      "severity": "error"
+    },
+    "code-fence-style": {
+      "enabled": true,
+      "options": {
+        "style": "consistent"
+      },
+      "severity": "error"
+    },
+    "commands-show-output": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "descriptive-link-text": {
+      "enabled": true,
+      "options": {
+        "markdownlint_compatible": true,
+        "patterns": [
+          "click here",
+          "here",
+          "link",
+          "more"
+        ]
+      },
+      "severity": "error"
+    },
+    "emphasis-style": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "fenced-code-language": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "first-line-heading": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "heading-blank-lines": {
+      "enabled": true,
+      "options": {
+        "markdownlint_compatible": true
+      },
+      "severity": "error"
+    },
+    "heading-increment": {
+      "enabled": true,
+      "options": {
+        "front_matter_title": "^\\s*\"?title\"?\\s*[:=]"
+      },
+      "severity": "error"
+    },
+    "heading-start-left": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "heading-style": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "hr-style": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "line-length": {
+      "enabled": true,
+      "options": {
+        "ignore_code_blocks": false,
+        "ignore_urls": false,
+        "markdownlint_compatible": true,
+        "max": 80
+      },
+      "severity": "error"
+    },
+    "link-destination-style": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "link-fragments": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "link-image-reference-definitions": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "link-image-style": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "list-indent": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "list-marker-space": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-alt-text": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-bare-urls": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-blanks-blockquote": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-duplicate-heading": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-emphasis-as-heading": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-empty-links": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-hard-tabs": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-inline-html": {
+      "enabled": true,
+      "options": {
+        "allowed_elements": []
+      },
+      "severity": "error"
+    },
+    "no-missing-space-atx": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-missing-space-closed-atx": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-multiple-blank-lines": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-multiple-space-atx": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-multiple-space-blockquote": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-multiple-space-closed-atx": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-reversed-links": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-space-in-code": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-space-in-emphasis": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-space-in-links": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-trailing-punctuation": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "no-trailing-spaces": {
+      "enabled": true,
+      "options": {
+        "br_spaces": 2,
+        "ignore_code_blocks": true
+      },
+      "severity": "error"
+    },
+    "ol-prefix": {
+      "enabled": true,
+      "options": {
+        "style": "one_or_ordered"
+      },
+      "severity": "error"
+    },
+    "proper-names": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "reference-links-images": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "required-headings": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "single-h1": {
+      "enabled": true,
+      "options": {
+        "title_only": true
+      },
+      "severity": "error"
+    },
+    "single-trailing-newline": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "strong-style": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "table-alignment": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "table-column-count": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "table-column-style": {
+      "enabled": true,
+      "options": {
+        "markdownlint_compatible": true
+      },
+      "severity": "error"
+    },
+    "table-pipe-style": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "ul-indent": {
+      "enabled": true,
+      "severity": "error"
+    },
+    "unordered-list-style": {
+      "enabled": true,
+      "options": {
+        "style": "consistent"
+      },
+      "severity": "error"
+    }
+  },
+  "rules": {
+    "hr-style": {
+      "enabled": true,
+      "options": {
+        "style": "---"
+      },
+      "reset_options": true,
+      "severity": "error"
+    },
+    "line-length": {
+      "enabled": true,
+      "options": {
+        "ignore_tables": true,
+        "max": 120
+      },
+      "reset_options": true,
+      "severity": "error"
+    },
+    "list-marker-space": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-blanks-blockquote": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-hard-tabs": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-multiple-blank-lines": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-multiple-space-blockquote": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-space-in-code": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-space-in-emphasis": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-space-in-links": {
+      "enabled": false,
+      "severity": "error"
+    },
+    "no-trailing-spaces": {
+      "enabled": true,
+      "options": {
+        "br_spaces": 3
+      },
+      "reset_options": true,
+      "severity": "error"
+    },
+    "single-h1": {
+      "enabled": true,
+      "options": {
+        "level": 1
+      },
+      "reset_options": true,
+      "severity": "error"
+    },
+    "unordered-list-style": {
+      "enabled": true,
+      "reset_options": true,
+      "severity": "warning"
+    }
+  }
+}

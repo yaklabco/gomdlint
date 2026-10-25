@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -127,7 +125,7 @@ func optionFacts(entry Entry, spec lint.OptionSpec, words pageWords) string {
 	facts := []string{words.literal(string(spec.Type))}
 	switch {
 	case spec.DefaultFrom != "":
-		facts = append(facts, "defaults to the value of "+words.literal(spec.DefaultFrom))
+		facts = append(facts, "defaults to the value of "+words.literal(yamlKey(spec.DefaultFrom)))
 	case spec.Default == nil:
 		facts = append(facts, "unset by default")
 	default:
@@ -149,12 +147,12 @@ func optionDetails(spec lint.OptionSpec, words pageWords) string {
 	if len(spec.Values) > 0 {
 		values := make([]string, len(spec.Values))
 		for idx, value := range spec.Values {
-			values[idx] = words.literal(value)
+			values[idx] = words.literal(yamlValue(value))
 		}
 		sentences = append(sentences, "Values: "+strings.Join(values, ", ")+".")
 	}
 	for _, alias := range spec.Aliases {
-		sentence := "Also accepted as " + words.literal(alias.Name)
+		sentence := "Also accepted as " + words.literal(yamlKey(alias.Name))
 		if alias.Inverted {
 			sentence += ", with the opposite value"
 		}
@@ -187,16 +185,16 @@ func exampleConfig(entry Entry) []string {
 	}
 	return []string{
 		"rules:",
-		"  " + entry.Name + ":",
+		"  " + yamlKey(entry.configKey()) + ":",
 		"    options:",
-		"      " + spec.Name + ": " + yamlValue(spec.Default),
+		"      " + yamlKey(spec.Name) + ": " + yamlValue(spec.Default),
 	}
 }
 
 // switchText says how a configuration turns the rule off, or on, and
 // changes its severity, and how a flag turns it off or on for one run.
 func switchText(entry Entry, words pageWords) string {
-	name := entry.Name
+	name, key := entry.configKey(), yamlKey(entry.configKey())
 	other := config.SeverityError
 	if entry.Default.Severity == config.SeverityError {
 		other = config.SeverityWarning
@@ -204,12 +202,12 @@ func switchText(entry Entry, words pageWords) string {
 	if !entry.Default.Enabled {
 		return fmt.Sprintf("Under %s, %s turns the rule on and %s turns it on with severity %s. "+
 			"The flag %s turns it on for one run.",
-			words.literal("rules"), words.literal(name+": true"), words.literal(name+": "+string(other)), other,
+			words.literal("rules"), words.literal(key+": true"), words.literal(key+": "+string(other)), other,
 			words.literal("--enable "+name))
 	}
 	return fmt.Sprintf("Under %s, %s turns the rule off and %s reports its findings as %ss. "+
 		"The flag %s turns it off for one run.",
-		words.literal("rules"), words.literal(name+": false"), words.literal(name+": "+string(other)), other,
+		words.literal("rules"), words.literal(key+": false"), words.literal(key+": "+string(other)), other,
 		words.literal("--disable "+name))
 }
 
@@ -217,32 +215,6 @@ func switchText(entry Entry, words pageWords) string {
 // line after it.
 func directive(entry Entry) string {
 	return "<!-- markdownlint-disable-next-line " + entry.directiveName() + " -->"
-}
-
-// yamlValue writes value as a configuration file holds it, in YAML, with
-// lists on one line, such as [x].
-func yamlValue(value any) string {
-	var node yaml.Node
-	if err := node.Encode(value); err != nil {
-		return fmt.Sprint(value)
-	}
-	flowStyle(&node)
-	encoded, err := yaml.Marshal(&node)
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return strings.TrimSuffix(string(encoded), "\n")
-}
-
-// flowStyle writes the lists and mappings of node, and of its children, on
-// one line.
-func flowStyle(node *yaml.Node) {
-	if node.Kind == yaml.SequenceNode || node.Kind == yaml.MappingNode {
-		node.Style |= yaml.FlowStyle
-	}
-	for _, child := range node.Content {
-		flowStyle(child)
-	}
 }
 
 // joinWords joins words into a list in prose, with conjunction before the
