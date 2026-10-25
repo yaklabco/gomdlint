@@ -255,7 +255,7 @@ func randomDefinitionEdits(rng *rand.Rand, text string) []fix.TextEdit {
 // parse of content adds, in order, reading it as docLayout does.
 func definitionsOf(flavor config.Flavor, content []byte) []recordedRef {
 	source, _, _ := layoutSource(content)
-	return parseRecorded(recordingMarkdown(string(flavor)), source, nil, false).rec.refs
+	return parseRecorded(recordingMarkdown(string(flavor)), source, nil, false, false).rec.refs
 }
 
 // TestDefinitionRegionsDecideAsWholeDocument checks both region checks

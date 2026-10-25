@@ -179,6 +179,86 @@ import (
 // blockquote, or, when that does not fit either, the group region of the
 // blockquote.
 //
+// Item regions. A long list item is one group of the document too, and a
+// list region of its items parses all of it. Inside an item, goldmark reads
+// each line through the containers around the item first. A list's
+// Continue decides from the line, as the containers before it leave it, the
+// content offset of its last item and whether that item is empty, the
+// list's marker and kind, and context flags that each list and item resets
+// when it opens and that only an empty item sets; an item's Continue strips
+// its content offset from the line or closes the item, from the line, the
+// offset and whether the item is empty; a blockquote holds no state. Within
+// the item, the parse is the parse of the item's blocks, so they fall into
+// groups as a blockquote's do: each starts where a block opens in the item
+// while the item is the last open block, or while its only open block is
+// one that closes alone (see Groups). docLayout records these groups, with
+// whether each starts after a closed block and the blank-line flag of its
+// first block, for the items of every list it knows: lists at the top level,
+// in a top-level blockquote, and in the groups of such items, at any depth.
+//
+// An item region is a run of the groups of an item but its first, which
+// holds the marker line, and its last, whose end is not recorded. It is
+// parsed after an opener (see itemOpener). The opener starts with the item's
+// prefix: the marker line of the item, after the containers' own markers,
+// and of each item it lies in, up to where the item's content starts, on one
+// line, which opens the blockquote, lists and items around the item with the
+// document's content offsets. Lines follow that leave the item as the
+// document leaves it before the region's first line, ending with the
+// document's line before it: the rest of the marker line when that is the
+// line before; an empty ATX heading, which closes on the next line whatever
+// it holds, when the line before is blank in the item or holds a block that
+// closes alone; or, after a closed fence, a fence that the line before
+// closes. The opener holds when its parse, with the region's first line
+// after it, has one list in each container of the chain, with the
+// document's marker and kind, holding one item with the document's content
+// offset, and starts a group of the item at that line as the document
+// starts it: after a closed block or not, with the document's blank-line
+// flag. Then the parse reaches the region's first line as the document
+// does: the containers decide each line from the same state, the item has
+// no block open, or only one that closes alone, and the line before is the
+// document's, so its blank-line statistics are the document's, at the same
+// levels. The opener's blocks are the item's first, so no block of a region
+// is an item's first block, as none is in the document; a task checkbox and
+// ListItemLoose read which block is first. The region, edited, follows, and
+// then the first line of the item's next group, unchanged. The region holds
+// when the parse starts a group of the item at that line as the document
+// starts it, as for a quote region, so the lines after the region parse as
+// in the document. Definitions from a paragraph that starts at that line
+// belong to the next group, not to the region. An item region that does not
+// fit becomes one that starts at an earlier group whose opener holds, or
+// else the list region of the item, or what stands for that.
+//
+// An item makes its list loose when it is not the list's first item and
+// follows a blank line, or a block after its first block follows one
+// (gmparser.ListItemLoose). docLayout uses item regions only for an item
+// whose first block lies in its first group, which no item region takes,
+// and counts in each group the blocks after it that follow a blank line.
+// After the edits the item makes its list loose by its own flag, which no
+// item region changes, by a block of the original outside its item regions,
+// or by a block of one of them, and its list's tightness follows (see
+// itemTally). Nothing else a check compares changes outside the regions:
+// the items and lists around the item keep their blocks and their flags.
+//
+// Lists and tables in items. A list or table in a group of an item of the
+// layout has list and table regions, parsed after the item's prefix and an
+// empty ATX heading, which open the chain and leave the item with only a
+// block open that closes alone. So the region's first line opens the list,
+// or the paragraph of the table's header row, in the item as the first line
+// of such a region of the document opens it there. The region holds when
+// its parse has the chain as an opener's does, and the item holds the
+// heading and one list or table that holds as such a region does. A table's
+// sentinel line, without indentation, continues the table's paragraph as a
+// lazy line when the paragraph is open, and opens a block outside the chain
+// otherwise.
+//
+// gomdlint's parser gives a table made from a paragraph's first line the
+// paragraph's blank-line flag, which goldmark leaves out (see
+// pkg/parser/goldmark/spans.go), and so reads the tightness of lists with
+// tables as CommonMark does. The outline and the heading rules' item windows
+// compare with that parser, so their layouts give tables the flag in every
+// parse (see newDocLayoutFlags); the render signature compares goldmark's
+// own parse, and its layout does not.
+//
 // Table regions. GFM makes a table of the lines of a paragraph from a
 // header row and a delimiter row on, when the paragraph closes, and reads
 // each body row from its line alone, given the delimiter row's alignments.
@@ -207,8 +287,8 @@ import (
 //
 // Signatures. The signature of the document is its front matter and the
 // signatures of its top-level blocks in order; that of a list is a token
-// with its tightness and the signatures of its items, and that of a
-// blockquote or a table a token and the signatures of its blocks or rows.
+// with its tightness and the signatures of its items, and that of an item,
+// a blockquote or a table a token and the signatures of its blocks or rows.
 // So the signature of the edited document is the original's with each
 // region's part replaced by the signature of the region's blocks, items or
 // rows, and the token of a list that changes tightness replaced, provided
@@ -261,23 +341,26 @@ import (
 // adds the render signature that fixCheck compares, and outlineModel (see
 // fix_safety_regions.go) the outline that fixVerifier compares.
 // TestRegionChecksDecideAsWholeDocument,
-// TestOutlineRegionsDecideAsWholeDocument and
-// TestDefinitionRegionsDecideAsWholeDocument check the region decisions
+// TestOutlineRegionsDecideAsWholeDocument,
+// TestDefinitionRegionsDecideAsWholeDocument and
+// TestItemRegionsDecideAsWholeDocument check the region decisions
 // against the whole-document checks, and must pass again after a goldmark
 // upgrade.
 //
-// Cost. A region is at least a group of the document or of a top-level
-// blockquote, the items of a list around the edited ones, or the rows of a
-// table with its header, so a check costs a parse of the blocks around its
-// edits. Groups still run long where blocks follow one another with no
-// blank line and none of the closed blocks above between them: paragraphs
-// that a list or an HTML block interrupts, setext headings or indented code
-// blocks followed directly by text, and everything inside one container
-// other than a top-level blockquote. So a document whose fixes sit in one
-// big block, other than a top-level blockquote or a list or table at the
-// top level or in a top-level blockquote, still costs a parse of that block
-// per check: a long paragraph, a table under CommonMark, or a list, table or
-// blockquote in a list item or in another blockquote. Beside its parses, a
+// Cost. A region is at least a group of the document, of a top-level
+// blockquote or of a list item, the items of a list around the edited ones,
+// or the rows of a table with its header, so a check costs a parse of the
+// blocks around its edits, with an opener of a line for each item around
+// them. Groups still run long where blocks follow one another with no blank
+// line and none of the closed blocks above between them: paragraphs that a
+// list or an HTML block interrupts, setext headings or indented code blocks
+// followed directly by text, and everything inside a blockquote nested in
+// another or in a list item. So a document whose fixes sit in one big block
+// of these still costs a parse of that block per check: a long paragraph, a
+// table under CommonMark, a blockquote in a list item or in another
+// blockquote, or an item whose marker line holds a tab before its content,
+// or whose content starts on a later line, which no prefix opens. Beside its
+// parses, a
 // check's work is linear in its regions and edits, in the headings whose
 // anchors change, and in the definitions and lookups of its regions: edits
 // are placed each from the one before it, a region that grows takes in only
@@ -347,12 +430,18 @@ type parseRecord struct {
 	// setext holds the headings that a setext heading parser opened.
 	setext map[gmast.Node]bool
 	// quotes holds where the parser started each group of each top-level
-	// blockquote (see Quote regions).
+	// blockquote (see Quote regions), and items where it started each group
+	// of each list item (see Item regions).
 	quotes map[gmast.Node][]groupStart
+	items  map[gmast.Node][]groupStart
 	// tables holds, for each table, the source offsets of the lines of its
 	// header row, its delimiter row and its body rows; it is nil when the
 	// parse does not record tables (see parseRecorded).
 	tables map[gmast.Node][]int
+	// tableFlags reports that a table made from a paragraph's first line
+	// takes the paragraph's blank-line flag, as gomdlint's parser gives it
+	// (see recordingParagraphTransformer).
+	tableFlags bool
 }
 
 // startsQuoteGroup reports whether a block that opens in parent while blocks
@@ -364,6 +453,24 @@ func (r *parseRecord) startsQuoteGroup(parent gmast.Node, blocks []goldparser.Bl
 		parent.Parent().Kind() != gmast.KindDocument {
 		return false, false
 	}
+	return r.startsContainerGroup(parent, blocks)
+}
+
+// startsItemGroup reports whether a block that opens in parent while blocks
+// are open starts a group of a list item (see Item regions): parent is a
+// list item, and it is the last open block, or its only open block is one
+// that closes alone, in which case afterClosed is true.
+func (r *parseRecord) startsItemGroup(parent gmast.Node, blocks []goldparser.Block) (bool, bool) {
+	if parent.Kind() != gmast.KindListItem {
+		return false, false
+	}
+	return r.startsContainerGroup(parent, blocks)
+}
+
+// startsContainerGroup reports whether a block that opens in parent while
+// blocks are open opens with parent the last open block, or with only a
+// block that closes alone open in it, in which case afterClosed is true.
+func (r *parseRecord) startsContainerGroup(parent gmast.Node, blocks []goldparser.Block) (bool, bool) {
 	count := len(blocks)
 	switch {
 	case count >= 1 && blocks[count-1].Node == parent:
@@ -543,10 +650,11 @@ func (p *recordingBlockParser) Open(
 	rc, recording := pc.(*recordingContext)
 	// The open blocks are read before the block opens, as openBlocks has
 	// them when it decides; the old block closes after.
-	var startsGroup, startsQuote, quoteAfterClosed bool
+	var startsGroup, startsQuote, quoteAfterClosed, startsItem, itemAfterClosed bool
 	if recording {
 		startsGroup = parent.Kind() == gmast.KindDocument && rc.rec.closesAlone(pc.OpenedBlocks())
 		startsQuote, quoteAfterClosed = rc.rec.startsQuoteGroup(parent, pc.OpenedBlocks())
+		startsItem, itemAfterClosed = rc.rec.startsItemGroup(parent, pc.OpenedBlocks())
 	}
 	node, state := p.BlockParser.Open(parent, reader, pc)
 	if !recording || node == nil {
@@ -574,6 +682,14 @@ func (p *recordingBlockParser) Open(
 			opened:      node,
 		})
 	}
+	if startsItem {
+		rc.rec.items[parent] = append(rc.rec.items[parent], groupStart{
+			offset:      lineStartIn(reader.Source(), segment.Start),
+			last:        parent.LastChild(),
+			afterClosed: itemAfterClosed,
+			opened:      node,
+		})
+	}
 	return node, state
 }
 
@@ -595,7 +711,7 @@ func (t *recordingParagraphTransformer) Transform(node *gmast.Paragraph, reader 
 	}
 	outer := rc.rec.paragraph
 	rc.rec.paragraph = node.Lines().At(0).Start
-	if rc.rec.tables == nil {
+	if rc.rec.tables == nil && !rc.rec.tableFlags {
 		t.ParagraphTransformer.Transform(node, reader, pc)
 		rc.rec.paragraph = outer
 		return
@@ -605,6 +721,8 @@ func (t *recordingParagraphTransformer) Transform(node *gmast.Paragraph, reader 
 		lines[idx] = lineStartIn(reader.Source(), node.Lines().At(idx).Start)
 	}
 	parent, prev := node.Parent(), node.PreviousSibling()
+	blank := node.HasBlankPreviousLines()
+	opened, found := rc.rec.opens[node]
 	t.ParagraphTransformer.Transform(node, reader, pc)
 	rc.rec.paragraph = outer
 	// GFM places a table after the paragraph it keeps the lines before the
@@ -620,10 +738,23 @@ func (t *recordingParagraphTransformer) Transform(node *gmast.Paragraph, reader 
 	case parent != nil:
 		next = parent.FirstChild()
 	}
-	if table, isTable := next.(*gmextast.Table); isTable && remaining < len(lines) {
-		if _, seen := rc.rec.tables[table]; !seen {
-			rc.rec.tables[table] = lines[remaining:]
-		}
+	table, isTable := next.(*gmextast.Table)
+	if !isTable || remaining >= len(lines) {
+		return
+	}
+	// gomdlint's parser gives a table that takes the paragraph's first line
+	// the paragraph's flag, unless definitions came off the paragraph's
+	// start, which moves the paragraph's first line past the line it opened
+	// on (see pkg/parser/goldmark/spans.go). Checks that compare with that
+	// parser read lists' tightness as it does.
+	if rc.rec.tableFlags && found && remaining == 0 && lineStartIn(reader.Source(), opened) == lines[0] {
+		table.SetBlankPreviousLines(blank)
+	}
+	if rc.rec.tables == nil {
+		return
+	}
+	if _, seen := rc.rec.tables[table]; !seen {
+		rc.rec.tables[table] = lines[remaining:]
 	}
 }
 
@@ -649,13 +780,15 @@ type recordedParse struct {
 // the record holds the lines of the paragraphs that tables are made of,
 // which only the layout reads.
 func parseRecorded(
-	markdown goldmark.Markdown, source []byte, preset map[string]goldparser.Reference, tables bool,
+	markdown goldmark.Markdown, source []byte, preset map[string]goldparser.Reference, tables, tableFlags bool,
 ) *recordedParse {
 	rec := &parseRecord{
-		opens:     make(map[gmast.Node]int),
-		paragraph: -1,
-		setext:    make(map[gmast.Node]bool),
-		quotes:    make(map[gmast.Node][]groupStart),
+		tableFlags: tableFlags,
+		opens:      make(map[gmast.Node]int),
+		paragraph:  -1,
+		setext:     make(map[gmast.Node]bool),
+		quotes:     make(map[gmast.Node][]groupStart),
+		items:      make(map[gmast.Node][]groupStart),
 	}
 	if tables {
 		rec.tables = make(map[gmast.Node][]int)
@@ -707,24 +840,29 @@ type docLayout struct {
 	bounds      []int
 	afterClosed []bool
 	groupNodes  []int
-	// lists holds the lists with items that are top-level blocks or blocks
-	// of a top-level blockquote, in document order, and listIndex the index
-	// in lists of each list node. searchable holds the lists that may have
-	// list regions.
-	lists      []*layoutList
-	listIndex  map[gmast.Node]int
-	searchable []*layoutList
+	// lists holds the lists with items that are top-level blocks, blocks of
+	// a top-level blockquote or blocks of an item of such a list, at any
+	// depth, in the order the layout meets them, a list before the lists in
+	// its items, and listIndex the index in lists of each list node.
+	lists     []*layoutList
+	listIndex map[gmast.Node]int
 	// quotes holds the top-level blockquotes, in document order, and
 	// quoteIndex the index in quotes of each blockquote node.
-	// searchableQuotes holds those that may have quote regions.
-	quotes           []*layoutQuote
-	quoteIndex       map[gmast.Node]int
-	searchableQuotes []*layoutQuote
-	// tables holds the tables with body rows that are top-level blocks or
-	// blocks of a top-level blockquote, in document order, and tableIndex
-	// the index in tables of each table node.
+	quotes     []*layoutQuote
+	quoteIndex map[gmast.Node]int
+	// items holds the items of the lists, a list's items together in order,
+	// and itemIndex the index in items of each item node.
+	items     []*layoutItem
+	itemIndex map[gmast.Node]int
+	// tables holds the tables with body rows that are top-level blocks,
+	// blocks of a top-level blockquote or blocks of an item, in the order the
+	// layout meets them, and tableIndex the index in tables of each table
+	// node.
 	tables     []*layoutTable
 	tableIndex map[gmast.Node]int
+	// units holds the parts of the lists, tables, blockquotes and items that
+	// regions can take, built on first use (see unitIndex).
+	units []layoutUnit
 	// refs holds the link reference definitions in the order the parser
 	// added them, and refIndex the definition each label resolves to.
 	// lookups holds the labels that links looked up, each once, and labels,
@@ -736,6 +874,9 @@ type docLayout struct {
 	labels   *labelIndex
 	// work counts what region checks have done, which tests bound.
 	work regionWork
+	// tableFlags is passed to every parse of the layout (see
+	// newDocLayoutFlags).
+	tableFlags bool
 }
 
 // labelIndex is what a check whose regions change the definitions needs of
@@ -754,19 +895,46 @@ type labelIndex struct {
 // place edits on their lines, and the regions of each kind they parsed.
 type regionWork struct {
 	parsed, merged, tightVisits, firstLine, placing int
-	kinds                                           [tableRegion + 1]int
+	kinds                                           [regionKinds]int
+}
+
+// scopeKind tells what holds a list or a table of the layout, or the list
+// of an item.
+type scopeKind uint8
+
+const (
+	// docScope is a group of the document.
+	docScope scopeKind = iota
+	// quoteScope is a group of a top-level blockquote.
+	quoteScope
+	// itemScope is a group of a list item.
+	itemScope
+)
+
+// layoutScope is where a list or table of the layout lies: in the group at
+// index group of the document, of the top-level blockquote at index at of
+// quotes, or of the item at index at of items.
+type layoutScope struct {
+	kind      scopeKind
+	at, group int
 }
 
 // layoutList is a list of the original document that is a top-level block,
-// or a block of a top-level blockquote.
+// a block of a top-level blockquote, or a block of an item of such a list,
+// at any depth.
 type layoutList struct {
-	// group is the document group that holds the list; quote is the index
-	// in quotes of the blockquote the list is a block of, or -1, and inner
-	// the group of that blockquote that holds the list.
+	// group is the document group that holds the list, and parent the group
+	// of the document, blockquote or item that the list is a block of.
 	index, group int
-	quote, inner int
+	parent       layoutScope
 	// regions reports whether list regions may be used for this list.
 	regions bool
+	// marker and ordered are the list's marker character and kind, which
+	// decide whether a line continues it.
+	marker  byte
+	ordered bool
+	// items holds the index in the layout's items of each item.
+	items []int
 	// lines holds the source offset of the marker line of each item.
 	lines []int
 	// blank reports whether each item follows a blank line, and loose
@@ -781,8 +949,16 @@ type layoutList struct {
 // no groups, or the groups or the link reference definitions cannot be
 // placed.
 func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
+	return newDocLayoutFlags(markdown, content, false)
+}
+
+// newDocLayoutFlags is newDocLayout for checks that compare with gomdlint's
+// parser, with tableFlags set: then every parse of the layout gives a table
+// made from a paragraph's first line the paragraph's blank-line flag, as
+// that parser does, so that the layout reads lists' tightness as it does.
+func newDocLayoutFlags(markdown goldmark.Markdown, content []byte, tableFlags bool) *docLayout {
 	source, base, frontMatter := layoutSource(content)
-	parsed := parseRecorded(markdown, source, nil, true)
+	parsed := parseRecorded(markdown, source, nil, true, tableFlags)
 	starts := parsed.rec.groups
 	nodes := children(parsed.doc)
 	counts, ok := groupBlocks(nodes, starts)
@@ -809,10 +985,12 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		frontMatter:   frontMatter,
 		frontLimit:    frontMatterLimit(content, base, frontMatter),
 		firstLineFree: frontMatter == 0 && !opensFrontMatter(firstLine),
+		tableFlags:    tableFlags,
 		nodes:         nodes,
 		groupNodes:    append(counts, len(nodes)),
 		listIndex:     make(map[gmast.Node]int),
 		quoteIndex:    make(map[gmast.Node]int),
+		itemIndex:     make(map[gmast.Node]int),
 		tableIndex:    make(map[gmast.Node]int),
 		refs:          parsed.rec.refs,
 		refIndex:      referenceIndex(parsed.rec.refs),
@@ -833,7 +1011,7 @@ func newDocLayout(markdown goldmark.Markdown, content []byte) *docLayout {
 		for group+1 < len(starts) && counts[group+1] <= idx {
 			group++
 		}
-		layout.addBlock(node, parsed.rec, group, -1, 0)
+		layout.addBlock(node, parsed.rec, group, layoutScope{kind: docScope, group: group}, nil)
 		// A block that opens on the line its group starts on opens with no
 		// block open, or only a closed block (see Groups).
 		if quote, isQuote := layout.quoteIndex[node]; isQuote {
@@ -862,47 +1040,43 @@ func layoutSource(content []byte) ([]byte, int, int) {
 }
 
 // addBlock records a block of the original that region checks may enter: a
-// list with items or a table with body rows, and, at the top level, a
-// blockquote with its blocks. The block lies in the document's group at
-// index group; it is a top-level block when quote is -1, and otherwise a
-// block of the top-level blockquote at index quote, in its group inner.
-func (l *docLayout) addBlock(node gmast.Node, rec *parseRecord, group, quote, inner int) {
+// list with items, with the items and what they hold, or a table with body
+// rows, and, at the top level, a blockquote with its blocks. The block lies
+// in the document's group at index group, and in scope. prefix is the
+// opener prefix of the item that scope is a group of (see Item regions),
+// and nil for a scope of the document or of a blockquote.
+func (l *docLayout) addBlock(node gmast.Node, rec *parseRecord, group int, scope layoutScope, prefix []byte) {
 	switch block := node.(type) {
 	case *gmast.List:
 		if block.FirstChild() == nil {
 			return
 		}
 		model := newLayoutList(block, rec, l.source, len(l.lists), group)
-		model.quote, model.inner = quote, inner
+		model.parent = scope
 		l.listIndex[node] = model.index
 		l.lists = append(l.lists, model)
-		if model.regions {
-			l.searchable = append(l.searchable, model)
-		}
+		l.addItems(block, model, rec, prefix)
 	case *gmextast.Table:
 		model := newLayoutTable(block, rec, l.source, len(l.tables), group)
 		if model == nil {
 			return
 		}
-		model.quote, model.inner = quote, inner
+		model.parent = scope
 		l.tableIndex[node] = model.index
 		l.tables = append(l.tables, model)
 	case *gmast.Blockquote:
-		if quote >= 0 {
+		if scope.kind != docScope {
 			return
 		}
 		model := newLayoutQuote(block, rec, l.source, len(l.quotes), group)
 		l.quoteIndex[node] = model.index
 		l.quotes = append(l.quotes, model)
-		if model.regions {
-			l.searchableQuotes = append(l.searchableQuotes, model)
-		}
 		childGroup := 0
 		for idx, child := range model.nodes {
 			for childGroup+1 < len(model.bounds) && model.groupNodes[childGroup+1] <= idx {
 				childGroup++
 			}
-			l.addBlock(child, rec, group, model.index, childGroup)
+			l.addBlock(child, rec, group, layoutScope{kind: quoteScope, at: model.index, group: childGroup}, nil)
 		}
 	}
 }
@@ -964,11 +1138,11 @@ func (q *layoutQuote) groupOf(offset int) int {
 }
 
 // layoutTable is a table with body rows of the original document that is a
-// top-level block, or a block of a top-level blockquote.
+// top-level block, a block of a top-level blockquote, or a block of an item.
 type layoutTable struct {
-	// group, quote and inner place the table as they place a layoutList.
+	// group and parent place the table as they place a layoutList.
 	index, group int
-	quote, inner int
+	parent       layoutScope
 	// regions reports whether table regions may be used for this table.
 	regions bool
 	// head is the source offset of the line of the header row, which the
@@ -1027,7 +1201,9 @@ func nextLineStart(source []byte, offset int) int {
 
 // newLayoutList records the items of a list.
 func newLayoutList(list *gmast.List, rec *parseRecord, source []byte, index, group int) *layoutList {
-	model := &layoutList{index: index, group: group, quote: -1, regions: true, loose: []int{0}}
+	model := &layoutList{
+		index: index, group: group, regions: true, marker: list.Marker, ordered: list.IsOrdered(), loose: []int{0},
+	}
 	loose := 0
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		offset, found := rec.opens[item]
@@ -1215,13 +1391,19 @@ const (
 	// tableRegion is a run of the body rows of a table, parsed after the
 	// table's header and delimiter rows.
 	tableRegion
+	// itemRegion is a run of the groups of a list item, parsed after an
+	// opener that opens the item and the lists and items around it.
+	itemRegion
+	// regionKinds counts the kinds of regions.
+	regionKinds
 )
 
 // region is a part of the document that a region check parses on its own:
-// the groups first to last of the document, or of the blockquote at index
-// at of quotes, the items first to last of the list at index at of lists,
-// or the body rows first to last of the table at index at of tables. The
-// zero region is the document's first group.
+// the groups first to last of the document, of the blockquote at index at
+// of quotes or of the item at index at of items, the items first to last of
+// the list at index at of lists, or the body rows first to last of the
+// table at index at of tables. The zero region is the document's first
+// group.
 type region struct {
 	kind        regionKind
 	at          int
@@ -1245,45 +1427,71 @@ func (l *docLayout) docGroup(reg region) int {
 		return l.lists[reg.at].group
 	case tableRegion:
 		return l.tables[reg.at].group
+	case itemRegion:
+		return l.items[reg.at].group
 	default:
 		return reg.first
 	}
 }
 
-// quoteGroup returns the blockquote and its group that hold a list or table
-// region, or -1 when the list or table is a top-level block, as for a group
-// or quote region, which no blockquote holds.
-func (l *docLayout) quoteGroup(reg region) (int, int) {
-	switch reg.kind {
-	case listRegion:
-		list := l.lists[reg.at]
-		return list.quote, list.inner
-	case tableRegion:
-		table := l.tables[reg.at]
-		return table.quote, table.inner
+// docGroups returns the first and the last document group that a region
+// takes in.
+func (l *docLayout) docGroups(reg region) (int, int) {
+	if reg.kind == groupRegion {
+		return reg.first, reg.last
+	}
+	group := l.docGroup(reg)
+	return group, group
+}
+
+// scopePart returns the region of the one group that a scope is.
+func scopePart(scope layoutScope) region {
+	switch scope.kind {
+	case quoteScope:
+		return region{kind: quoteRegion, at: scope.at, first: scope.group, last: scope.group}
+	case itemScope:
+		return region{kind: itemRegion, at: scope.at, first: scope.group, last: scope.group}
 	default:
-		return -1, 0
+		return groupRegionOf(scope.group)
+	}
+}
+
+// outer returns the region of one part, one level up, that holds a region:
+// the document group of a quote region, the group of the document,
+// blockquote or item that holds a list or table, and the item that an item
+// region lies in. ok is false for a group region, which nothing holds.
+func (l *docLayout) outer(reg region) (region, bool) {
+	switch reg.kind {
+	case quoteRegion:
+		return groupRegionOf(l.quotes[reg.at].group), true
+	case listRegion:
+		return scopePart(l.lists[reg.at].parent), true
+	case tableRegion:
+		return scopePart(l.tables[reg.at].parent), true
+	case itemRegion:
+		item := l.items[reg.at]
+		return region{kind: listRegion, at: item.list, first: item.item, last: item.item}, true
+	default:
+		return region{}, false
 	}
 }
 
 // containerRegion returns the region that stands for a list or table region
-// that does not fit or hold: the quote region of the group of the
-// blockquote that holds the list or table, when that fits, and otherwise
-// the region of its document group.
+// that does not fit or hold: the region of the group of the document,
+// blockquote or item that holds the list or table, or what stands for it
+// when it does not fit.
 func (l *docLayout) containerRegion(reg region) region {
-	if quote, inner := l.quoteGroup(reg); quote >= 0 {
-		if inQuote := (region{kind: quoteRegion, at: quote, first: inner, last: inner}); l.quoteRegionFits(inQuote) {
-			return inQuote
-		}
-	}
-	return groupRegionOf(l.docGroup(reg))
+	up, _ := l.outer(reg)
+	return l.fitted(up)
 }
 
 // fitted returns reg when it fits, and otherwise the region that stands for
 // it: a quote region that ends its blockquote becomes the region of the
-// blockquote's document group, and a list region without an item before it
-// or two after it, or a region of a table that takes none, the region of
-// its container (see containerRegion).
+// blockquote's document group; a list region without an item before it or
+// two after it, or a region of a table that takes none, the region of its
+// container (see containerRegion); and an item region that cannot start or
+// end where it does, one that starts at an earlier group of the item, or
+// else the region of the item in its list, fitted (see fitItemRegion).
 func (l *docLayout) fitted(reg region) region {
 	switch {
 	case reg.kind == quoteRegion && !l.quoteRegionFits(reg):
@@ -1291,8 +1499,58 @@ func (l *docLayout) fitted(reg region) region {
 	case reg.kind == listRegion && !l.listRegionFits(reg),
 		reg.kind == tableRegion && !l.tables[reg.at].regions:
 		return l.containerRegion(reg)
+	case reg.kind == itemRegion:
+		if fit, ok := l.fitItemRegion(reg); ok {
+			return fit
+		}
+		up, _ := l.outer(reg)
+		return l.fitted(up)
 	}
 	return reg
+}
+
+// join returns the region that two regions that meet need together: their
+// union when they are of one list, table, blockquote or item, or both of the
+// document's groups, and otherwise the union of the outer one with its part
+// that holds the inner one. Two regions meet where their spans overlap,
+// which happens only when one lies in the other or both are of one thing.
+// The union may not fit (see fitted).
+func (l *docLayout) join(one, other region) region {
+	if lifted, ok := l.liftInto(other, one); ok {
+		return unionOf(one, lifted)
+	}
+	if lifted, ok := l.liftInto(one, other); ok {
+		return unionOf(other, lifted)
+	}
+	// Regions apart from one another always lie in the document's groups.
+	oneFirst, oneLast := l.docGroups(one)
+	otherFirst, otherLast := l.docGroups(other)
+	return region{first: min(oneFirst, otherFirst), last: max(oneLast, otherLast)}
+}
+
+// liftInto returns inner when it is of the list, table, blockquote or item
+// that outer is of, or of the document when outer is a group region, and
+// otherwise the part of that one that holds inner, found going up from
+// inner. ok is false when it does not hold inner.
+func (l *docLayout) liftInto(inner, outer region) (region, bool) {
+	for {
+		if inner.kind == outer.kind && inner.at == outer.at {
+			return inner, true
+		}
+		up, ok := l.outer(inner)
+		if !ok {
+			return region{}, false
+		}
+		inner = up
+	}
+}
+
+// unionOf returns the region of one thing that runs from the first part of
+// either region to the last part of either.
+func unionOf(one, other region) region {
+	one.first = min(one.first, other.first)
+	one.last = max(one.last, other.last)
+	return one
 }
 
 // placedEdit is an edit in source offsets with the start offsets of the
@@ -1383,70 +1641,24 @@ func (l *layoutList) itemOf(offset int) int {
 	return sort.SearchInts(l.lines, offset+1) - 1
 }
 
-// listOf returns the list, among those that may have list regions, in group
-// whose items hold the lines from first to last, with the items that hold
-// them, or false. The lines from a list's first marker line to its last
-// item's marker line are the list's; where the last item ends is not
-// recorded. The lists are apart and in document order, those in blockquotes
-// among them.
-func (l *docLayout) listOf(group, first, last int) (int, int, int, bool) {
-	idx := sort.Search(len(l.searchable), func(i int) bool { return l.searchable[i].lines[0] > first }) - 1
-	if idx < 0 {
-		return 0, 0, 0, false
-	}
-	list := l.searchable[idx]
-	if list.group != group || last >= list.lines[len(list.lines)-1] {
-		return 0, 0, 0, false
-	}
-	return list.index, list.itemOf(first), list.itemOf(last), true
-}
-
-// tableOf returns the table in group whose body rows hold the lines from
-// first to last, with the rows that hold them, or false.
-func (l *docLayout) tableOf(group, first, last int) (int, int, int, bool) {
-	idx := sort.Search(len(l.tables), func(i int) bool { return l.tables[i].rows[0] > first }) - 1
-	if idx < 0 {
-		return 0, 0, 0, false
-	}
-	table := l.tables[idx]
-	if table.group != group || last >= table.rows[len(table.rows)-1] {
-		return 0, 0, 0, false
-	}
-	return table.index, table.rowOf(first), table.rowOf(last), true
-}
-
-// quoteOf returns the blockquote, among those that may have quote regions,
-// in group whose groups but the last hold the lines from first to last, with
-// the groups that hold them, or false. Where the last group ends is not
-// recorded.
-func (l *docLayout) quoteOf(group, first, last int) (int, int, int, bool) {
-	idx := sort.Search(len(l.searchableQuotes), func(i int) bool { return l.searchableQuotes[i].bounds[0] > first }) - 1
-	if idx < 0 {
-		return 0, 0, 0, false
-	}
-	quote := l.searchableQuotes[idx]
-	if quote.group != group || last >= quote.bounds[len(quote.bounds)-1] {
-		return 0, 0, 0, false
-	}
-	return quote.index, quote.groupOf(first), quote.groupOf(last), true
-}
-
 // regionFor returns the region that a placed edit needs at least: the rows
-// of a table or the items of a list that hold its lines, or else the groups
-// of a top-level blockquote, or else the document's groups.
+// of a table, the items of a list, or the groups of a top-level blockquote
+// or of a list item that hold its lines, the innermost such that the
+// layout knows, or else the document's groups (see unitIndex).
 func (l *docLayout) regionFor(placed placedEdit) region {
 	first, last := l.groupOf(placed.firstLine), l.groupOf(placed.lastLine)
 	if first != last {
 		return region{first: first, last: last}
 	}
-	if list, a, b, ok := l.listOf(first, placed.firstLine, placed.lastLine); ok {
-		return region{kind: listRegion, at: list, first: a, last: b}
-	}
-	if table, a, b, ok := l.tableOf(first, placed.firstLine, placed.lastLine); ok {
-		return region{kind: tableRegion, at: table, first: a, last: b}
-	}
-	if quote, a, b, ok := l.quoteOf(first, placed.firstLine, placed.lastLine); ok {
-		return region{kind: quoteRegion, at: quote, first: a, last: b}
+	units := l.unitIndex()
+	for at := innermostUnit(units, placed.firstLine); at >= 0; at = units[at].parent {
+		unit := units[at]
+		if !unit.holds(placed.firstLine, placed.firstLine+1) || !l.unitUsable(unit) {
+			continue
+		}
+		if end, ok := l.unitHolding(unit.kind, unit.at, placed.lastLine); ok {
+			return region{kind: unit.kind, at: unit.at, first: unit.index, last: end}
+		}
 	}
 	return groupRegionOf(first)
 }
@@ -1482,6 +1694,9 @@ func (l *docLayout) span(reg region) (int, int) {
 	case tableRegion:
 		table := l.tables[reg.at]
 		return table.rows[reg.first], table.rows[reg.last+1]
+	case itemRegion:
+		item := l.items[reg.at]
+		return item.bounds[reg.first], item.bounds[reg.last+1]
 	default:
 		return l.bounds[reg.first], l.bounds[reg.last+1]
 	}
@@ -1522,126 +1737,56 @@ func regionEdits(from, to int, placed []placedEdit) []placedEdit {
 	return placed[first:last]
 }
 
-// meets reports whether two regions must be parsed as one: group regions
-// that share a group; quote regions of one blockquote that share a group;
-// list regions of one list that share an item, counting the item before and
-// the item after each (the spans of two list regions may only touch, where
-// the item after one is the item before the other); table regions of one
-// table that share a row; and a region and a list, table or quote region
-// inside one of its groups. Regions that do not meet are parsed apart, and
-// their spans do not overlap.
+// meets reports whether two regions must be parsed as one: their spans
+// overlap. The spans of two regions of one thing overlap where they share a
+// part, counting the item before and the item after a list region, so that
+// list regions meet when one's first item is at most two after the other's
+// last; a region whose span holds another's holds the part of its own thing
+// that the other lies in. Regions that do not meet are parsed apart.
 func (l *docLayout) meets(one, other region) bool {
-	if one.kind > other.kind {
-		one, other = other, one
-	}
-	switch {
-	case one.kind == groupRegion && other.kind == groupRegion:
-		return one.first <= other.last && other.first <= one.last
-	case one.kind == groupRegion:
-		group := l.docGroup(other)
-		return one.first <= group && group <= one.last
-	case one.kind == quoteRegion && other.kind == quoteRegion:
-		return one.at == other.at && one.first <= other.last && other.first <= one.last
-	case one.kind == quoteRegion:
-		quote, inner := l.quoteGroup(other)
-		return quote == one.at && one.first <= inner && inner <= one.last
-	case one.kind != other.kind:
-		// A list and a table are apart.
-		return false
-	case one.kind == listRegion:
-		return one.at == other.at && one.first <= other.last+2 && other.first <= one.last+2
-	default:
-		return one.at == other.at && one.first <= other.last && other.first <= one.last
-	}
+	oneStart, oneEnd := l.span(one)
+	otherStart, otherEnd := l.span(other)
+	return oneStart < otherEnd && otherStart < oneEnd
 }
 
 // mergeRegions returns regions merged so that no two meet, sorted by span.
 // A region that does not fit becomes the region that stands for it (see
-// fitted); a quote region that a group region covers is dropped, and so is
-// a list or table region that a group region or a quote region covers. Two
-// regions of one kind that fit merge into one that fits, so merging needs
-// one pass: group regions first, then quote regions, then the rest.
+// fitted), and regions that meet become the region that holds both (see
+// join), fitted, which may meet a region before it in turn. The regions are
+// taken by where their spans start, so a merged region can meet only the
+// last one kept, and each region is kept or taken in once.
 func (l *docLayout) mergeRegions(regions []region) []region {
 	l.work.merged += len(regions)
-	var groups, quotes, inner []region
-	for _, reg := range regions {
-		reg = l.fitted(reg)
-		switch reg.kind {
-		case groupRegion:
-			groups = append(groups, reg)
-		case quoteRegion:
-			quotes = append(quotes, reg)
-		default:
-			inner = append(inner, reg)
-		}
+	type spanned struct {
+		reg        region
+		start, end int
 	}
-	slices.SortFunc(groups, func(a, b region) int { return a.first - b.first })
-	var merged []region
-	for _, reg := range groups {
-		if n := len(merged); n > 0 && reg.first <= merged[n-1].last {
-			merged[n-1].last = max(merged[n-1].last, reg.last)
-			continue
+	sorted := make([]spanned, len(regions))
+	for idx, reg := range regions {
+		reg = l.fitted(reg)
+		start, end := l.span(reg)
+		sorted[idx] = spanned{reg: reg, start: start, end: end}
+	}
+	// Outer regions first, so that one that holds another is kept and takes
+	// the other in.
+	slices.SortFunc(sorted, func(a, b spanned) int { return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(b.end, a.end)) })
+	merged := make([]region, 0, len(sorted))
+	for _, next := range sorted {
+		reg := next.reg
+		for len(merged) > 0 && l.meets(merged[len(merged)-1], reg) {
+			reg = l.fitted(l.join(merged[len(merged)-1], reg))
+			merged = merged[:len(merged)-1]
 		}
 		merged = append(merged, reg)
 	}
-	covered := func(group int) bool {
-		idx := sort.Search(len(merged), func(i int) bool { return merged[i].last >= group })
-		return idx < len(merged) && merged[idx].first <= group
-	}
-	byPlace := func(a, b region) int {
-		return cmp.Or(cmp.Compare(a.kind, b.kind), cmp.Compare(a.at, b.at), cmp.Compare(a.first, b.first))
-	}
-	slices.SortFunc(quotes, byPlace)
-	var keptQuotes []region
-	for _, reg := range quotes {
-		if covered(l.quotes[reg.at].group) {
-			continue
-		}
-		if n := len(keptQuotes); n > 0 && keptQuotes[n-1].at == reg.at && reg.first <= keptQuotes[n-1].last {
-			keptQuotes[n-1].last = max(keptQuotes[n-1].last, reg.last)
-			continue
-		}
-		keptQuotes = append(keptQuotes, reg)
-	}
-	inQuote := func(quote, group int) bool {
-		idx := sort.Search(len(keptQuotes), func(i int) bool {
-			return cmp.Or(cmp.Compare(keptQuotes[i].at, quote), cmp.Compare(keptQuotes[i].last, group)) >= 0
-		})
-		return idx < len(keptQuotes) && keptQuotes[idx].at == quote && keptQuotes[idx].first <= group
-	}
-	slices.SortFunc(inner, byPlace)
-	var kept []region
-	for _, reg := range inner {
-		if covered(l.docGroup(reg)) {
-			continue
-		}
-		if quote, group := l.quoteGroup(reg); quote >= 0 && inQuote(quote, group) {
-			continue
-		}
-		reach := 0
-		if reg.kind == listRegion {
-			reach = 2
-		}
-		if n := len(kept); n > 0 && kept[n-1].kind == reg.kind && kept[n-1].at == reg.at &&
-			reg.first <= kept[n-1].last+reach {
-			kept[n-1].last = max(kept[n-1].last, reg.last)
-			continue
-		}
-		kept = append(kept, reg)
-	}
-	regions = slices.Concat(merged, keptQuotes, kept)
-	slices.SortFunc(regions, func(a, b region) int {
-		start, _ := l.span(a)
-		other, _ := l.span(b)
-		return start - other
-	})
-	return regions
+	return merged
 }
 
 // grow returns a region that holds reg and more of what follows it: twice as
-// many groups or items, or the region that stands for a quote or list region
-// that would reach the last group of its blockquote or the last items of its
-// list (see fitted). A table region becomes the region of its container: its
+// many groups or items, or the region that stands for a quote, item or list
+// region that would reach the last group of its blockquote or item or the
+// last items of its list (see fitted). A table region becomes the region of
+// its container: its
 // rows parse as in the document whatever rows come with them, so more rows
 // would not make it hold. A region that ends the document stays.
 func (l *docLayout) grow(reg region) region {
@@ -1683,6 +1828,14 @@ type regionParse struct {
 	// CommonMark reads it (gmparser.ListTight), which decides for its items
 	// but whether its first follows a blank line.
 	tight bool
+	// blankBlock reports whether a block of an item region follows a blank
+	// line, which makes the item's list loose (see Item regions).
+	blankBlock bool
+	// end is where the region's own text ends in source, before the line
+	// that follows it, and skip the number of blocks that the region's
+	// opener puts before the region's blocks in the item it opens (see Item
+	// regions).
+	end, skip int
 }
 
 // verdict reports whether a parsed region holds and whether it cannot be
@@ -1714,14 +1867,17 @@ func (p regionParse) retained() int {
 	return size
 }
 
-// heldParse returns the parse of a region that holds, whose text is source
-// and whose blocks are blocks, from the record of its parse, which it
+// heldParse returns the parse of a region that holds, whose text is source,
+// the region's own text ending at end, and whose blocks are blocks, from the
+// record of its parse, which it
 // consumes: whether it adds the definitions that the original has between
 // from and to, copies of those it adds when it does not, and the labels its
 // links looked up, each once. The copies share no memory with the parse,
 // which a cached outcome drops, so the cache holds what it counts.
-func (l *docLayout) heldParse(from, to int, source []byte, blocks []gmast.Node, rec *parseRecord) regionParse {
-	parse := regionParse{holds: true, source: source, blocks: blocks, refsSame: l.sameRefs(from, to, rec.refs)}
+func (l *docLayout) heldParse(from, to int, source []byte, end int, blocks []gmast.Node, rec *parseRecord) regionParse {
+	parse := regionParse{
+		holds: true, source: source, end: end, blocks: blocks, refsSame: l.sameRefs(from, to, rec.refs),
+	}
 	if !parse.refsSame {
 		parse.refs = make([]recordedRef, len(rec.refs))
 		for idx, ref := range rec.refs {
@@ -1795,58 +1951,74 @@ func decomposeRegions[O regionVerdict](
 // the regions it meets, as mergeRegions merges them: the regions done[lo:]
 // that hold before it and pending[next+1:hi] after it, all sorted by span
 // with no two meeting. It returns lo, hi and the merged regions, sorted by
-// span. Regions meet exactly where their spans overlap: group regions that
-// share a group, quote regions of one blockquote that share a group, list
-// regions of one list where first <= other.last+2, table regions of one
-// table that share a row, and a list, table or quote region and a region of
-// a group that holds it, whose span holds the inner region's. So the regions
-// taken in are those whose spans overlap the grown region's; regions whose
-// spans only touch it stay. One pass finds them all: the spans of the
+// span. Regions meet exactly where their spans overlap (see meets), so the
+// regions taken in are those whose spans overlap the grown region's; regions
+// whose spans only touch it stay. One pass finds them all: the spans of the
 // regions are disjoint and sorted, so the region after the last one taken in
-// starts at or after the end of every span in the window, and the merged
-// region, whose span covers theirs, ends there. grown must be a region that
-// grow returns: a list or quote region that fits, or a group region.
+// starts at or after the end of every span in the window. The merged region
+// covers their spans and may start before the window, when the union of
+// regions that do not fit stands for a region of what holds them, and the
+// merge takes in what that region meets among them in turn (see
+// mergeRegions); grown must be a region that fits, as grow returns it.
 func (l *docLayout) absorbGrown(done, pending []region, next int, grown region) (int, int, []region) {
-	start, end := l.span(grown)
-	lo := len(done)
-	for lo > 0 {
-		if _, prevEnd := l.span(done[lo-1]); prevEnd <= start {
-			break
+	lo, hi := len(done), next+1
+	merged := []region{grown}
+	for {
+		start, _ := l.span(merged[0])
+		_, end := l.span(merged[len(merged)-1])
+		from, to := lo, hi
+		for from > 0 {
+			if _, prevEnd := l.span(done[from-1]); prevEnd <= start {
+				break
+			}
+			from--
 		}
-		lo--
-	}
-	window := append(slices.Clone(done[lo:]), grown)
-	hi := next + 1
-	for hi < len(pending) {
-		if nextStart, _ := l.span(pending[hi]); nextStart >= end {
-			break
+		for to < len(pending) {
+			if nextStart, _ := l.span(pending[to]); nextStart >= end {
+				break
+			}
+			to++
 		}
-		window = append(window, pending[hi])
-		hi++
+		if from == lo && to == hi {
+			return lo, hi, merged
+		}
+		merged = l.mergeRegions(slices.Concat(done[from:lo], merged, pending[hi:to]))
+		lo, hi = from, to
 	}
-	return lo, hi, l.mergeRegions(window)
 }
 
-// listsTightAfter reports, for each list that a list region of regions
-// edits, whether it is tight after the edits: none of its items outside its
-// list regions makes it loose, and none of its list regions does, as loosens
-// reports for the region at an index of regions. One pass over the regions
-// serves every list.
+// listsTightAfter reports, for each list that a list region or an item
+// region of regions edits, whether it is tight after the edits: none of its
+// items outside its list and item regions makes it loose, none of its list
+// regions does, as loosens reports for the region at an index of regions,
+// and none of its items with item regions does (see itemTally). One pass
+// over the regions serves every list.
 func (l *docLayout) listsTightAfter(regions []region, loosens func(int) bool) map[int]bool {
 	type count struct {
 		inside   int
 		loosened bool
 	}
 	counts := make(map[int]count)
+	tallies := make(map[int]itemTally)
 	for idx, reg := range regions {
 		l.work.tightVisits++
-		if !reg.isList() {
-			continue
+		switch reg.kind {
+		case listRegion:
+			c := counts[reg.at]
+			c.inside += l.lists[reg.at].looseIn(reg)
+			c.loosened = c.loosened || loosens(idx)
+			counts[reg.at] = c
+		case itemRegion:
+			tallies[reg.at] = tallies[reg.at].plus(l.items[reg.at].tallyOf(reg, loosens(idx)))
 		}
-		c := counts[reg.at]
-		c.inside += l.lists[reg.at].looseIn(reg)
-		c.loosened = c.loosened || loosens(idx)
-		counts[reg.at] = c
+	}
+	for at, tally := range tallies {
+		item := l.items[at]
+		inside, loosening := item.contribution(tally)
+		c := counts[item.list]
+		c.inside += inside
+		c.loosened = c.loosened || loosening > 0
+		counts[item.list] = c
 	}
 	tight := make(map[int]bool, len(counts))
 	for list, c := range counts {
@@ -1855,9 +2027,10 @@ func (l *docLayout) listsTightAfter(regions []region, loosens func(int) bool) ma
 	return tight
 }
 
-// tightWith reports whether the list is tight when its list regions hold the
-// given number of its loose items, and whether one of them makes it loose.
-// Without list regions, that is the list's tightness in the original.
+// tightWith reports whether the list is tight when its list regions and the
+// items with item regions hold the given number of its loose items of the
+// original, and whether one of them makes it loose. Without such regions,
+// that is the list's tightness in the original.
 func (l *layoutList) tightWith(inside int, loosened bool) bool {
 	return !loosened && l.loose[len(l.loose)-1]-inside == 0
 }
@@ -1865,7 +2038,8 @@ func (l *layoutList) tightWith(inside int, loosened bool) bool {
 // sentinel returns the line that a region's parse adds after it: the
 // sentinel of a group region that does not end the document or of a table
 // region, or the quote sentinel of a quote region or of a table region in a
-// blockquote. A list region needs none.
+// blockquote. A list region needs none, and an item region takes the first
+// line of the group after it (see parseItemRegion).
 func (l *docLayout) sentinel(reg region) string {
 	switch reg.kind {
 	case groupRegion:
@@ -1876,7 +2050,7 @@ func (l *docLayout) sentinel(reg region) string {
 	case quoteRegion:
 		return quoteSentinel
 	case tableRegion:
-		if l.tables[reg.at].quote >= 0 {
+		if l.tables[reg.at].parent.kind == quoteScope {
 			return quoteSentinel
 		}
 		return regionSentinel
@@ -1896,6 +2070,8 @@ func (l *docLayout) parseRegion(reg region, edits []fix.TextEdit) regionParse {
 		return l.parseListRegion(reg, edits)
 	case tableRegion:
 		return l.parseTableRegion(reg, edits)
+	case itemRegion:
+		return l.parseItemRegion(reg, edits)
 	default:
 		return l.parseGroupRegion(reg, edits)
 	}
@@ -1916,7 +2092,7 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 		text = append(text, l.sentinel(reg)...)
 	}
 	l.work.parsed += len(text)
-	parsed := parseRecorded(l.markdown, text, l.refIndex, false)
+	parsed := parseRecorded(l.markdown, text, l.refIndex, false, l.tableFlags)
 	blocks := children(parsed.doc)
 	if !final {
 		groups := parsed.rec.groups
@@ -1933,7 +2109,7 @@ func (l *docLayout) parseGroupRegion(reg region, edits []fix.TextEdit) regionPar
 		}
 		blocks = blocks[:counts[0]]
 	}
-	return l.heldParse(from, to, text, blocks, parsed.rec)
+	return l.heldParse(from, to, text, length, blocks, parsed.rec)
 }
 
 // parseQuoteRegion parses a quote region. The quote sentinel line follows it,
@@ -1953,7 +2129,7 @@ func (l *docLayout) parseQuoteRegion(reg region, edits []fix.TextEdit) regionPar
 	}
 	text = append(text, l.sentinel(reg)...)
 	l.work.parsed += len(text)
-	parsed := parseRecorded(l.markdown, text, l.refIndex, false)
+	parsed := parseRecorded(l.markdown, text, l.refIndex, false, l.tableFlags)
 	quoteNode, ok := soleQuote(children(parsed.doc))
 	if !ok {
 		return regionParse{}
@@ -1972,7 +2148,7 @@ func (l *docLayout) parseQuoteRegion(reg region, edits []fix.TextEdit) regionPar
 	if !ok {
 		return regionParse{undecided: true}
 	}
-	return l.heldParse(from, to, text, blocks[:counts[0]], parsed.rec)
+	return l.heldParse(from, to, text, length, blocks[:counts[0]], parsed.rec)
 }
 
 // soleQuote returns the blockquote that is the one block of blocks.
@@ -1985,78 +2161,68 @@ func soleQuote(blocks []gmast.Node) (*gmast.Blockquote, bool) {
 }
 
 // parseListRegion parses the items of a list region with the item before and
-// the item after them. The region holds when the parse is one list, in one
-// blockquote for a list in a blockquote, whose first item opens on the first
-// line and whose last item opens on the marker line of the item after the
-// region.
+// the item after them, after the opener of the item that holds the list, if
+// one does. The region holds when the parse is one list, in the blockquote
+// or item that holds the list, whose first item opens on the first line
+// after the opener and whose last item opens on the marker line of the item
+// after the region.
 func (l *docLayout) parseListRegion(reg region, edits []fix.TextEdit) regionParse {
 	list := l.lists[reg.at]
 	from, to := l.span(reg)
-	text := applyWithin(l.source, from, to, edits)
+	opener := l.scopeOpener(list.parent)
+	text := slices.Concat(opener, applyWithin(l.source, from, to, edits))
 	l.work.parsed += len(text)
-	parsed := parseRecorded(l.markdown, text, l.refIndex, false)
-	blocks := children(parsed.doc)
-	if list.quote >= 0 {
-		quoteNode, ok := soleQuote(blocks)
-		if !ok {
-			return regionParse{}
-		}
-		blocks = children(quoteNode)
-	}
-	if len(blocks) != 1 {
+	parsed := parseRecorded(l.markdown, text, l.refIndex, false, l.tableFlags)
+	blocks, ok := l.scopeBlocks(parsed.doc, list.parent)
+	if !ok || len(blocks) != 1 {
 		return regionParse{}
 	}
 	parsedList, ok := blocks[0].(*gmast.List)
 	if !ok || parsedList.FirstChild() == nil || parsedList.FirstChild() == parsedList.LastChild() {
 		return regionParse{}
 	}
-	shift := 0
+	shift := len(opener)
 	for _, edit := range edits {
 		shift += len(edit.NewText) - (edit.EndOffset - edit.StartOffset)
 	}
 	firstOpen, firstFound := parsed.rec.opens[parsedList.FirstChild()]
 	lastOpen, lastFound := parsed.rec.opens[parsedList.LastChild()]
-	if !firstFound || !lastFound || lineStartIn(text, firstOpen) != 0 ||
+	if !firstFound || !lastFound || lineStartIn(text, firstOpen) != len(opener) ||
 		lineStartIn(text, lastOpen) != list.lines[reg.last+1]-from+shift {
 		return regionParse{}
 	}
-	held := l.heldParse(from, to, text, children(parsedList), parsed.rec)
+	held := l.heldParse(from, to, text, len(text), children(parsedList), parsed.rec)
 	held.tight = gmparser.ListTight(parsedList, text)
+	held.skip = openerBlocks(list.parent)
 	return held
 }
 
 // parseTableRegion parses the body rows of a table region after the lines
-// of the table's header and delimiter rows, followed by the sentinel line.
-// The region holds when the parse is one table, in one blockquote for a
-// table in a blockquote, whose last row is the sentinel's (see Table
-// regions). A region whose edits take its last line ending away does not
-// hold.
+// of the table's header and delimiter rows, and after the opener of the item
+// that holds the table, if one does, followed by the sentinel line. The
+// region holds when the parse is one table, in the blockquote or item that
+// holds the table, whose last row is the sentinel's (see Table regions). A
+// region whose edits take its last line ending away does not hold.
 func (l *docLayout) parseTableRegion(reg region, edits []fix.TextEdit) regionParse {
 	table := l.tables[reg.at]
 	from, to := l.span(reg)
-	text := slices.Concat(l.source[table.head:table.rows[0]], applyWithin(l.source, from, to, edits))
+	text := slices.Concat(l.scopeOpener(table.parent), l.source[table.head:table.rows[0]],
+		applyWithin(l.source, from, to, edits))
 	length := len(text)
 	if text[length-1] != '\n' {
 		return regionParse{}
 	}
 	text = append(text, l.sentinel(reg)...)
 	l.work.parsed += len(text)
-	parsed := parseRecorded(l.markdown, text, l.refIndex, false)
+	parsed := parseRecorded(l.markdown, text, l.refIndex, false, l.tableFlags)
 	// The table's paragraph adds no definitions after its header row, so a
 	// definition here is the header row read as the start of a paragraph,
 	// which it need not be in the document (see Table regions).
 	if len(parsed.rec.refs) > 0 {
 		return regionParse{}
 	}
-	blocks := children(parsed.doc)
-	if table.quote >= 0 {
-		quoteNode, ok := soleQuote(blocks)
-		if !ok {
-			return regionParse{}
-		}
-		blocks = children(quoteNode)
-	}
-	if len(blocks) != 1 {
+	blocks, ok := l.scopeBlocks(parsed.doc, table.parent)
+	if !ok || len(blocks) != 1 {
 		return regionParse{}
 	}
 	parsedTable, ok := blocks[0].(*gmextast.Table)
@@ -2070,7 +2236,9 @@ func (l *docLayout) parseTableRegion(reg region, edits []fix.TextEdit) regionPar
 	if _, isHeader := rows[0].(*gmextast.TableHeader); !isHeader || lineStartIn(text, rows[len(rows)-1].Pos()) != length {
 		return regionParse{}
 	}
-	return l.heldParse(from, to, text, rows[1:len(rows)-1], parsed.rec)
+	held := l.heldParse(from, to, text, length, rows[1:len(rows)-1], parsed.rec)
+	held.skip = openerBlocks(table.parent)
+	return held
 }
 
 // applyWithin returns a copy of source[from:to] with edits applied; the

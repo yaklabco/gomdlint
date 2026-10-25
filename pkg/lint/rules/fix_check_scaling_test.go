@@ -162,6 +162,56 @@ func definitionQuoteDocument(paragraphs int) []byte {
 	return []byte(doc.String())
 }
 
+// itemTablesDocument returns a document with one list item that holds, after
+// its first paragraph, paragraphs that each run straight into a table, a
+// finding that MD058 fixes with a blank line inside the loose item.
+func itemTablesDocument(tables int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n- outer\n\n")
+	for idx := range tables {
+		fmt.Fprintf(&doc, "  text %d\n  | a | b |\n  | --- | --- |\n\n", idx)
+	}
+	return []byte(doc.String())
+}
+
+// nestedTablesDocument returns a document with one list item that holds a
+// loose list, whose items each run their text straight into a table, a
+// finding that MD058 fixes with a blank line inside the nested item.
+func nestedTablesDocument(items int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n- outer\n\n")
+	for idx := range items {
+		fmt.Fprintf(&doc, "  - text %d\n    | a | b |\n    | --- | --- |\n\n", idx)
+	}
+	return []byte(doc.String())
+}
+
+// itemFencesDocument returns a document with one list item that holds, after
+// its first paragraph, fenced code blocks with text right before and right
+// after them, two findings that MD031 fixes with blank lines inside the
+// loose item.
+func itemFencesDocument(fences int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n- outer\n\n")
+	for idx := range fences {
+		fmt.Fprintf(&doc, "  text %d\n  ```sh\n  echo %d\n  ```\n  after %d\n\n", idx, idx, idx)
+	}
+	return []byte(doc.String())
+}
+
+// itemHeadingsDocument returns a document with one list item that holds,
+// after its first paragraph, headings with text right before and right after
+// them, two findings that MD022 fixes with blank lines inside the loose
+// item.
+func itemHeadingsDocument(headings int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n- outer\n\n")
+	for idx := range headings {
+		fmt.Fprintf(&doc, "  text %d\n  ## Heading %d\n  after %d\n\n", idx, idx, idx)
+	}
+	return []byte(doc.String())
+}
+
 // lintDuration lints content with every default rule through the engine,
 // as the CLI does, and returns how long it took, failing the test when it
 // takes longer than limit.
@@ -310,8 +360,50 @@ func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 	if testing.Short() || raceEnabled {
 		t.Skip("timing")
 	}
+	requireLintTimeLinear(t, 100, []namedDocument{
+		{name: "list in a blockquote", generate: quoteListDocument},
+		{name: "paragraphs in a blockquote", generate: quoteParagraphsDocument},
+		{name: "table", generate: tableRowsDocument},
+		{name: "definitions in a list", generate: definitionListDocument},
+		{name: "definitions in a blockquote", generate: definitionQuoteDocument},
+	})
+}
+
+// TestLintTimeGrowsLinearlyInListItems checks, as
+// TestLintTimeGrowsLinearlyInBlocks does, that linting a document whose
+// fixes all sit in one list item takes about as long as linting an eighth of
+// it eight times: tables right after text, in the item or in a loose list
+// nested in it, which MD058 fixes, and fences and headings right next to
+// text, which MD031 and MD022 fix. A check that parsed the whole item for
+// each fix took 4.4 seconds for 400 tables in the item, 5 seconds with the
+// tables in the nested list, and 8 and 11 seconds for 400 fences and
+// headings. There TestRegionParsesGrowInListItems guards the same documents
+// by the bytes the checks parse.
+func TestLintTimeGrowsLinearlyInListItems(t *testing.T) {
+	if testing.Short() || raceEnabled {
+		t.Skip("timing")
+	}
+	requireLintTimeLinear(t, 50, []namedDocument{
+		{name: "tables in a list item", generate: itemTablesDocument},
+		{name: "tables in a nested list", generate: nestedTablesDocument},
+		{name: "fences in a list item", generate: itemFencesDocument},
+		{name: "headings in a list item", generate: itemHeadingsDocument},
+	})
+}
+
+// namedDocument is a generated test document of a given size.
+type namedDocument struct {
+	name     string
+	generate func(int) []byte
+}
+
+// requireLintTimeLinear checks for each document that one lint of it at
+// eight times small takes less than three times as long as eight lints of it
+// at small, each of which keeps a fix for at least small findings (see
+// TestLintTimeGrowsLinearlyInBlocks).
+func requireLintTimeLinear(t *testing.T, small int, docs []namedDocument) {
+	t.Helper()
 	const (
-		small  = 100
 		factor = 8
 		rounds = 3
 		// A linear check gives a ratio near one, and a check that parses the
@@ -344,16 +436,7 @@ func TestLintTimeGrowsLinearlyInBlocks(t *testing.T) {
 		}
 		return elapsed, fixable
 	}
-	for _, doc := range []struct {
-		name     string
-		generate func(int) []byte
-	}{
-		{name: "list in a blockquote", generate: quoteListDocument},
-		{name: "paragraphs in a blockquote", generate: quoteParagraphsDocument},
-		{name: "table", generate: tableRowsDocument},
-		{name: "definitions in a list", generate: definitionListDocument},
-		{name: "definitions in a blockquote", generate: definitionQuoteDocument},
-	} {
+	for _, doc := range docs {
 		t.Run(doc.name, func(t *testing.T) {
 			short, long := doc.generate(small), doc.generate(factor*small)
 			runtime.GC()

@@ -35,7 +35,9 @@ func newBlockChecks(t *testing.T, flavor config.Flavor, text string, allow fixAl
 	cfg.Flavor = flavor
 	verifier := newFixVerifier(lint.NewRuleContext(context.Background(), snapshot, cfg, nil), allow)
 	return blockChecks{
-		snapshotContent: snapshot.Content,
+		// The checks read a carriage return alone as a line feed, as the
+		// parser does (see checkedContent).
+		snapshotContent: checkedContent(snapshot.Content),
 		check:           newFixCheck(snapshot, flavor),
 		verifier:        verifier,
 		outline:         verifier.regions(),
@@ -65,8 +67,8 @@ func (c blockChecks) decide(t *testing.T, prepared []fix.TextEdit, about string)
 }
 
 // kinds returns the regions of each kind that both region checks parsed.
-func (c blockChecks) kinds() [tableRegion + 1]int {
-	var total [tableRegion + 1]int
+func (c blockChecks) kinds() [regionKinds]int {
+	var total [regionKinds]int
 	add := func(work regionWork) {
 		for kind, count := range work.kinds {
 			total[kind] += count
@@ -462,7 +464,7 @@ func TestRegionChecksInBlocksDecideAsWholeDocument(t *testing.T) {
 	snippets := blockSnippets()
 	rng := rand.New(rand.NewPCG(20261019, 3))
 	total, decided := 0, 0
-	var kinds [tableRegion + 1]int
+	var kinds [regionKinds]int
 	for range documents {
 		var doc strings.Builder
 		for range 2 + rng.IntN(6) {
