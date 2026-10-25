@@ -641,11 +641,10 @@ while gomdlint translates the markdownlint config for each run. Rules are
 keyed by name, with the ID in a comment, and a comment marks the rules that
 a markdownlint tag sets. Options are written under gomdlint's names, such
 as `max` for `line_length`, and an option that the rule does not read is
-left out with a warning. A rule that
-the source turns on gets `reset_options: true` (see
-[Rule Settings](#rule-settings)), so that it takes markdownlint's defaults
-for the options that the source does not set. As in
-markdownlint, a migrated config makes every finding an error, so findings
+left out with a warning. A rule that the source turns on gets
+`reset_options: true` (see [Rule Settings](#rule-settings)), so that it
+takes markdownlint's defaults for the options that the source does not
+set. As in markdownlint, a migrated config makes every finding an error, so findings
 fail the run without `--strict`, and it keeps gomdlint's own rules,
 `link-destination-style` (MDL001) and `table-alignment` (MDL003), off.
 Migration does not evaluate JavaScript configuration or resolve `extends`.
