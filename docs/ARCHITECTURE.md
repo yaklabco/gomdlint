@@ -291,10 +291,23 @@ link's reference style and its label without container prefixes, and gives
 strikethrough, tables and task checkboxes node kinds of their own. Token
 ranges are derived from the spans. Code, HTML block and front matter tokens
 follow the parse, while other markers are recognized line by line, so rules
-use spans for structure. The `gfm` flavor adds goldmark's GFM extension,
-and `commonmark` adds none. Fixes near anything that could be read as a
-task checkbox are withheld by the checkbox guard, which finds such text by
-bytes, not by the parser's checkboxes.
+use spans for structure. The `gfm` flavor adds goldmark's GFM extensions,
+and `commonmark` adds none. In place of goldmark's task list extension, the
+parser reads a task checkbox only where GFM does (`GFM` in
+`pkg/parser/goldmark/tasklist.go`): at the start of a list item's first
+paragraph, followed by a space or tab and more text, or by a line ending
+inside the paragraph. goldmark's own extension also reads one at the start
+of a heading or right before other text, which hid links from the link
+rules. The fix checks parse with the same extension. Fixes near anything
+that could be read as a task checkbox are withheld by the checkbox guard,
+which finds such text by bytes, not by the parser's checkboxes.
+
+markdownlint makes no link of some references that goldmark resolves, and
+looks definitions up by its own key, so the link rules read references as
+markdownlint does (`pkg/lint/refs/markdownlint.go`): MD042, MD052 and MD054
+look a label up as markdownlint does, and MD039, MD042 and MD054 skip a
+reference whose label micromark reads as no label, a shortcut right before
+a `[`, and a call of a GFM footnote.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark

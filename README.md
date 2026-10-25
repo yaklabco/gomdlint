@@ -1012,6 +1012,20 @@ Some of its fix checks are also stricter than they need to be.
   folding, as GitHub and goldmark do, so `[Straße][]` uses
   `[STRASSE]: /url`. markdownlint lowercases labels instead, so it reports
   `[Straße][]` as undefined and the definition as unused.
+- gomdlint reads task list checkboxes where GFM does, and markdownlint reads
+  none. So for `- [x] done` with a `[x]: /url` definition, markdownlint
+  reads a shortcut link, which `link-image-style` (MD054) can report and
+  which uses the definition for `link-image-reference-definitions` (MD053).
+- goldmark reads `[x][ ]` as a collapsed reference to `x`, where micromark
+  reads no link and goes on to read what follows. So in `[x][ ](/url)`
+  with `x` defined, `no-space-in-links` (MD039) misses the link `[ ](/url)`
+  that markdownlint reports.
+- A GFM footnote definition takes the lines after it into its note, so
+  link reference definitions right below `[^1]: A note.` are no definitions
+  to micromark. goldmark reads them as definitions, so the link rules read
+  links to them that markdownlint does not, and `[^1]` is a call to
+  markdownlint only where `reference-links-images` (MD052) counts the
+  footnote definition.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.
