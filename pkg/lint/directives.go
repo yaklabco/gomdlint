@@ -801,7 +801,8 @@ func (r *Registry) markdownlintTerm(word string) string {
 // markdownlint does not know.
 func (r *Registry) markdownlintRuleName(id, name string) string {
 	r.mu.RLock()
-	term := r.meta[id].MarkdownlintName
+	meta, _ := r.visibleMeta(id)
+	term := meta.MarkdownlintName
 	r.mu.RUnlock()
 	if term != "" {
 		return term

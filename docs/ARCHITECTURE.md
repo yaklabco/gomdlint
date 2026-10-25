@@ -601,7 +601,11 @@ descriptors read each description through `lint.RuleDescription`, which
 falls back to the rule's own `Description()` when the entry has none. A tag
 may cover several rules, as in markdownlint. gomdlint's own rules, MDL001
 and MDL003, take tags from markdownlint's vocabulary. `RegisterAll` records
-each entry with `Registry.Describe`. Catalog tests check that every
+each entry with `Registry.Describe` before it registers the rules. An
+entry describes one rule, of one Go type and name, and the registry hides
+it while another rule is registered under its ID, such as a custom
+implementation or a wrapper, until that rule's own entry is described.
+Catalog tests check that every
 registered rule has exactly one entry, that each rule's ID, name,
 description, tags and fix flag match its entry, that each ID, name and
 alias names one rule and no tag spells one of them, and that tags and
@@ -925,9 +929,9 @@ sequenceDiagram
     participant engine as Engine
     participant rule as NewRule
 
+    init->>registry: Describe(catalog entry)
     init->>rule: NewMyRule()
     init->>registry: Register(rule)
-    init->>registry: Describe(catalog entry)
     Note over registry: Stores by ID and name, with aliases and tags from the catalog
 
     engine->>registry: Rules()

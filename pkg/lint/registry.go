@@ -39,14 +39,15 @@ type Registry struct {
 	byName map[string]Rule
 	meta   map[string]RuleMeta // rule ID -> catalog entry
 
-	// described holds the last entry that Describe recorded for each ID,
-	// which Register does not drop, so the words of an entry that no longer
-	// describes its ID's rule stay known (see Register).
-	described map[string]RuleMeta
+	// owners maps an ID to the rule that its entry describes (see
+	// Register). An entry shows only while that rule's type and name are
+	// registered under the ID. An ID without an owner has an entry that no
+	// rule has taken yet.
+	owners map[string]entryOwner
 
 	// fresh marks the IDs whose entries Describe recorded since a rule last
-	// registered under them, which a rule that registers next keeps even
-	// when it replaces a rule of another type (see Register).
+	// registered under them. The next rule to register under such an ID
+	// takes the entry as its own (see Register).
 	fresh map[string]bool
 
 	// index serves every lookup of identifiers, tags and names. Every
@@ -146,8 +147,8 @@ func NewRegistry() *Registry {
 		byName: make(map[string]Rule),
 		meta:   make(map[string]RuleMeta),
 
-		described: make(map[string]RuleMeta),
-		fresh:     make(map[string]bool),
+		owners: make(map[string]entryOwner),
+		fresh:  make(map[string]bool),
 	}
 }
 
@@ -155,19 +156,23 @@ func NewRegistry() *Registry {
 // If a rule with the same ID already exists, it is replaced, and the name
 // of the replaced rule no longer resolves unless the new rule uses it too.
 //
-// The catalog entry of the ID (see Describe) describes one rule. Register
-// drops it when it describes another rule: when the entry names another
-// rule, or when the new rule replaces a rule of another Go type, such as a
-// custom implementation of a built-in rule, unless Describe recorded the
-// entry since a rule last registered under the ID, for the new rule. A
-// replacement of the same type under the same name keeps the entry. So an
-// entry for a replacement can be described before it registers or after.
-// An entry described after a rule registered counts as described for the
-// next rule too. Once dropped, the entry's aliases and tags no longer
-// resolve to the new rule, its options are no longer the rule's, and the
-// rule's own description, tags and declared options take their place.
-// The entry's words stay words that markdownlint knows, in markdownlint
-// comments and configs.
+// The catalog entry of the ID (see Describe) describes one rule, of one Go
+// type and name: its owner. Describe gives the entry to the rule
+// registered under the ID, if there is one. The next rule to register
+// under the ID after Describe takes the entry too, unless the entry names
+// another rule. Every other rule leaves the entry with its owner.
+//
+// While the registered rule is not the entry's owner, the entry is hidden:
+// Meta reports none, the entry's aliases and tags do not resolve to the
+// rule, its options are not the rule's, and the rule's own description,
+// tags and declared options take their place. Such a rule has another
+// name, or another type, such as a custom implementation of a built-in
+// rule or a wrapper around one. Registering the owner's type and name
+// again shows the entry again. To give a wrapper or another
+// implementation an entry, such as a built-in one from rules.Catalog,
+// Describe it before or after the rule registers. A hidden entry's words
+// stay words that markdownlint knows, in markdownlint comments and
+// configs.
 //
 // markdownlint 0.41.1 rejects a set of custom rules in which a name equals
 // another name, or a tag equals a name, in upper case (validateRuleList in
@@ -184,56 +189,85 @@ func (r *Registry) Register(rule Rule) {
 	defer r.mu.Unlock()
 
 	id := rule.ID()
-	fresh := r.fresh[id] // Described since a rule last registered under id.
-	delete(r.fresh, id)
-
-	old, replacing := r.byID[id]
-	if replacing {
+	if old, replacing := r.byID[id]; replacing {
 		// Only drop the old name if it still points at the replaced rule;
 		// another rule may have registered the same name since.
 		if named, ok := r.byName[old.Name()]; ok && named.ID() == old.ID() {
 			delete(r.byName, old.Name())
 		}
 	}
-	if meta, ok := r.meta[id]; ok {
-		switch {
-		case meta.Name != "" && meta.Name != rule.Name():
-			delete(r.meta, id) // The entry names another rule.
-		case replacing && !fresh && reflect.TypeOf(old) != reflect.TypeOf(rule):
-			delete(r.meta, id) // The entry describes the replaced implementation.
+	if r.fresh[id] {
+		// The entry was described for this rule, unless it names another.
+		owner := ownerOf(rule)
+		if meta := r.meta[id]; meta.Name != "" && meta.Name != rule.Name() {
+			owner = entryOwner{name: meta.Name}
 		}
+		r.owners[id] = owner
+		delete(r.fresh, id)
 	}
 
-	r.byID[rule.ID()] = rule
+	r.byID[id] = rule
 	r.byName[rule.Name()] = rule
 	r.index = nil
 }
 
+// entryOwner identifies the rule that a catalog entry describes: its Go
+// type and name. An owner without a type stands for a rule that has not
+// registered.
+type entryOwner struct {
+	ruleType reflect.Type
+	name     string
+}
+
+// ownerOf returns the owner that stands for rule.
+func ownerOf(rule Rule) entryOwner {
+	return entryOwner{ruleType: reflect.TypeOf(rule), name: rule.Name()}
+}
+
+// visibleMeta returns the catalog entry of the rule registered under id,
+// when the entry describes that rule (see Register). The caller holds the
+// lock.
+func (r *Registry) visibleMeta(id string) (RuleMeta, bool) {
+	rule, registered := r.byID[id]
+	meta, described := r.meta[id]
+	if !registered || !described {
+		return RuleMeta{}, false
+	}
+	if owner, owned := r.owners[id]; owned && owner != ownerOf(rule) {
+		return RuleMeta{}, false // The entry describes another rule.
+	}
+	return meta, true
+}
+
 // Describe records meta as the catalog entry of the rule with ID meta.ID,
 // replacing any earlier entry for that rule. Lookup resolves the entry's
-// aliases, and RulesByTag its tags, while a rule with that ID is
-// registered. The registry keeps its own copy of meta.
+// aliases, and RulesByTag its tags, while a rule that the entry describes
+// is registered with that ID. The entry describes the rule registered
+// under the ID now, if there is one, and the next rule to register under
+// it (see Register). The registry keeps its own copy of meta.
 func (r *Registry) Describe(meta RuleMeta) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.meta[meta.ID] = meta.clone()
-	r.described[meta.ID] = r.meta[meta.ID]
+	if rule, registered := r.byID[meta.ID]; registered {
+		r.owners[meta.ID] = ownerOf(rule)
+	} else {
+		delete(r.owners, meta.ID)
+	}
 	r.fresh[meta.ID] = true
 	r.index = nil
 }
 
 // Meta returns a copy of the catalog entry of the registered rule with the
 // given ID. It reports false for an ID that no registered rule has, given
-// exactly as registered, and for a rule without an entry.
+// exactly as registered, and for a rule without an entry, or whose entry
+// describes another rule (see Register).
 func (r *Registry) Meta(id string) (RuleMeta, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if _, registered := r.byID[id]; !registered {
-		return RuleMeta{}, false
-	}
-	meta, ok := r.meta[id]
+	meta, ok := r.visibleMeta(id)
 	if !ok {
 		return RuleMeta{}, false
 	}
@@ -552,8 +586,8 @@ func (r *Registry) buildIndex() *ruleIndex {
 
 	// The catalog's words come from every entry, registered or not, so that
 	// a word means the same in a registry that holds only some of the rules.
-	for _, id := range slices.Sorted(maps.Keys(r.described)) {
-		build.addCatalogEntry(r.described[id])
+	for _, id := range slices.Sorted(maps.Keys(r.meta)) {
+		build.addCatalogEntry(r.meta[id])
 	}
 
 	// The first claim on a key wins, so claim IDs, then names, then aliases.
@@ -565,7 +599,7 @@ func (r *Registry) buildIndex() *ruleIndex {
 	}
 	for _, id := range ids {
 		rule := r.byID[id]
-		meta := r.meta[id]
+		meta, _ := r.visibleMeta(id) // A hidden entry gives the rule no aliases, tags or options.
 		indexed := indexedRule{rule: rule, id: foldKey(id), names: []string{foldKey(rule.Name())}}
 		for _, alias := range meta.Aliases {
 			build.claim(alias, rule)

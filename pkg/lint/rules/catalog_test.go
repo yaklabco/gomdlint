@@ -337,8 +337,10 @@ func TestDefaultRegistryDescribesEveryRule(t *testing.T) {
 // TestRegisterAllDescribesEveryRule covers the entries that RegisterAll
 // records: every built-in rule keeps its catalog entry on a fresh
 // registry, when RegisterAll runs twice, and when it replaces a custom
-// rule registered first under a built-in ID, while a custom rule of
-// another type that replaces a built-in rule afterwards gets none.
+// rule registered first under a built-in ID. A custom implementation or a
+// wrapper that replaces a built-in rule afterwards gets none unless its
+// entry is described, and the built-in rule gets its entry back when it
+// registers again.
 func TestRegisterAllDescribesEveryRule(t *testing.T) {
 	assertDescribed := func(t *testing.T, registry *lint.Registry) {
 		t.Helper()
@@ -350,25 +352,58 @@ func TestRegisterAllDescribesEveryRule(t *testing.T) {
 		}
 	}
 
-	fresh := lint.NewRegistry()
-	RegisterAll(fresh)
-	assertDescribed(t, fresh)
+	t.Run("fresh", func(t *testing.T) {
+		registry := lint.NewRegistry()
+		RegisterAll(registry)
+		assertDescribed(t, registry)
+	})
 
-	RegisterAll(fresh)
-	assertDescribed(t, fresh)
+	t.Run("twice", func(t *testing.T) {
+		registry := lint.NewRegistry()
+		RegisterAll(registry)
+		RegisterAll(registry)
+		assertDescribed(t, registry)
+	})
 
-	first := lint.NewRegistry()
-	custom := lint.NewBaseRule("MD009", "company-policy", "Company policy.", nil, false)
-	first.Register(&custom)
-	RegisterAll(first)
-	assertDescribed(t, first)
+	t.Run("over a custom rule", func(t *testing.T) {
+		registry := lint.NewRegistry()
+		custom := lint.NewBaseRule("MD009", "company-policy", "Company policy.", nil, false)
+		registry.Register(&custom)
+		RegisterAll(registry)
+		assertDescribed(t, registry)
+	})
 
-	replaced := lint.NewRegistry()
-	RegisterAll(replaced)
-	impostor := lint.NewBaseRule("MD009", "no-trailing-spaces", "Company policy.", nil, false)
-	replaced.Register(&impostor)
-	_, ok := replaced.Meta("MD009")
-	assert.False(t, ok, "a custom implementation does not keep the built-in entry")
+	t.Run("replaced and put back", func(t *testing.T) {
+		registry := lint.NewRegistry()
+		RegisterAll(registry)
+		impostor := lint.NewBaseRule("MD009", "no-trailing-spaces", "Company policy.", nil, false)
+		registry.Register(&impostor)
+		_, ok := registry.Meta("MD009")
+		assert.False(t, ok, "a custom implementation does not get the built-in entry")
+
+		registry.Register(NewTrailingWhitespaceRule())
+		assertDescribed(t, registry)
+	})
+
+	t.Run("wrapped", func(t *testing.T) {
+		registry := lint.NewRegistry()
+		RegisterAll(registry)
+		builtIn, ok := registry.GetByID("MD009")
+		require.True(t, ok)
+		registry.Register(inertRule{Rule: builtIn})
+		_, ok = registry.Meta("MD009")
+		assert.False(t, ok, "a wrapper is another type")
+
+		for _, meta := range Catalog() {
+			if meta.ID == "MD009" {
+				registry.Describe(meta)
+			}
+		}
+		assertDescribed(t, registry)
+		_, issues, declared := registry.NormalizeOptions("MD009", map[string]any{"br_spaces": 2, "br_spacez": 2})
+		assert.True(t, declared, "the described wrapper has the built-in options")
+		assert.Len(t, issues, 1, "the misspelled option")
+	})
 }
 
 // TestCatalogDescribesEachRule covers the prose of every catalog entry:

@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -395,6 +396,95 @@ func TestRegistry_ReplacementOfAnotherTypeDropsTheEntry(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "Company policy.", meta.Description)
 	})
+}
+
+// TestRegistry_EntryOwnership covers which rule a catalog entry describes
+// after each order of Describe and Register: rule T is a mockRule, rule U
+// an otherImplementation, both MD009 under the entry's name unless the
+// step names another. want is the entry's description that Meta reports,
+// or "" for none.
+func TestRegistry_EntryOwnership(t *testing.T) {
+	const name = "no-trailing-spaces"
+	entry := func(description string) RuleMeta {
+		return RuleMeta{ID: "MD009", Name: name, Description: description}
+	}
+	ruleT := func(rule string) Rule { return &mockRule{id: "MD009", name: rule} }
+	ruleU := func(rule string) Rule { return &otherImplementation{mockRule{id: "MD009", name: rule}} }
+
+	type step func(*Registry)
+	describe := func(meta RuleMeta) step { return func(reg *Registry) { reg.Describe(meta) } }
+	register := func(rule Rule) step { return func(reg *Registry) { reg.Register(rule) } }
+
+	for _, tt := range []struct {
+		name  string
+		steps []step
+		want  string
+	}{
+		{"described, then registered", []step{describe(entry("a")), register(ruleT(name))}, "a"},
+		{"registered, then described", []step{register(ruleT(name)), describe(entry("a"))}, "a"},
+		{"described for the next rule", []step{register(ruleT(name)), describe(entry("a")), register(ruleU(name))}, "a"},
+		{"twice", []step{describe(entry("a")), register(ruleT(name)), describe(entry("a")), register(ruleT(name))}, "a"},
+		{"over a custom rule", []step{register(ruleU(name)), describe(entry("a")), register(ruleT(name))}, "a"},
+		{"same type and name", []step{describe(entry("a")), register(ruleT(name)), register(ruleT(name))}, "a"},
+		{"another type", []step{describe(entry("a")), register(ruleT(name)), register(ruleU(name))}, ""},
+		{"another name", []step{describe(entry("a")), register(ruleT(name)), register(ruleT("company-policy"))}, ""},
+		{"swapped out and back", []step{
+			describe(entry("a")), register(ruleT(name)), register(ruleU(name)), register(ruleT(name)),
+		}, "a"},
+		{"a fresh entry that names another rule", []step{
+			describe(RuleMeta{ID: "MD009", Name: "company-policy", Description: "a"}), register(ruleT(name)),
+		}, ""},
+		{"a nameless entry, then another type", []step{
+			describe(RuleMeta{ID: "MD009", Description: "a"}), register(ruleT(name)), register(ruleU(name)),
+		}, ""},
+		{"a nameless entry, then the same type", []step{
+			describe(RuleMeta{ID: "MD009", Description: "a"}), register(ruleT(name)), register(ruleT(name)),
+		}, "a"},
+		{"taken, then replaced by another type", []step{
+			register(ruleT(name)), describe(entry("a")), register(ruleT(name)), register(ruleU(name)),
+		}, ""},
+		{"described again for another type", []step{
+			describe(entry("a")), register(ruleT(name)), register(ruleU(name)), describe(entry("b")),
+		}, "b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := NewRegistry()
+			for _, step := range tt.steps {
+				step(reg)
+			}
+			meta, ok := reg.Meta("MD009")
+			assert.Equal(t, tt.want, meta.Description)
+			assert.Equal(t, tt.want != "", ok)
+		})
+	}
+}
+
+// TestRegistry_ConcurrentChanges registers, describes and looks up rules
+// from several goroutines, for the race detector.
+func TestRegistry_ConcurrentChanges(t *testing.T) {
+	reg := NewRegistry()
+	var wg sync.WaitGroup
+	for worker := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				if worker%2 == 0 {
+					reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+					reg.Describe(RuleMeta{ID: "MD009", Name: "no-trailing-spaces", Aliases: []string{"trailing"}})
+				} else {
+					reg.Register(&otherImplementation{mockRule{id: "MD009", name: "no-trailing-spaces"}})
+				}
+				reg.Lookup("trailing")
+				reg.Meta("MD009")
+				reg.RulesByTag("whitespace")
+			}
+		}()
+	}
+	wg.Wait()
+
+	_, ok := reg.Lookup("no-trailing-spaces")
+	assert.True(t, ok)
 }
 
 func TestRegistry_DescribeReplacesEntry(t *testing.T) {
