@@ -262,6 +262,10 @@ func TestHasTagStart(t *testing.T) {
 		"<a-b>":              true,
 		"<![CDATA[x]]>":      true,
 		"<!DOCTYPE html>":    true,
+		"<a\rb>":             true,
+		"</DIV\t>":           true,
+		"<b\u00a0>":          false,
+		"<a\u2028>":          false,
 	}
 	for input, want := range tests {
 		t.Run(strconv.Quote(input), func(t *testing.T) {

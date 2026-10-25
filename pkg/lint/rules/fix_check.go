@@ -778,13 +778,13 @@ func htmlHiddenFromCheck(content []byte) bool {
 }
 
 // hasTagStart reports whether text holds a "<" that may start raw HTML for
-// a Markdown renderer: "<!" or "<?", which may start a comment, a
-// declaration, CDATA or a processing instruction, or "<" or "</" and a tag
-// name, ASCII letters, digits and hyphens after a letter, that whitespace,
-// "/", ">" or the end of text follows, as in a start or end tag. Any other
-// "<" is text for every renderer, as in "1 < 2" or "{{< x >}}", or starts
-// an autolink, such as "<https://example.com>" or "<user@example.com>",
-// whose name a ":" or an "@" ends.
+// a CommonMark or GFM renderer, cmark-gfm included: "<!" or "<?", which may
+// start a comment, a declaration, CDATA or a processing instruction, or "<"
+// or "</" and a tag name, ASCII letters, digits and hyphens after a letter,
+// that whitespace, "/", ">" or the end of text follows, as in a start or end
+// tag. Any other "<" is text for such a renderer, as in "1 < 2" or
+// "{{< x >}}", or starts an autolink, such as "<https://example.com>" or
+// "<user@example.com>", whose name a ":" or an "@" ends.
 func hasTagStart(text []byte) bool {
 	for pos := 0; pos < len(text); {
 		idx := bytes.IndexByte(text[pos:], '<')
