@@ -348,7 +348,9 @@ func touchedSpans(spans []mdast.SourceRange, edit fix.TextEdit) []int {
 // fixVerifier compares the outline of the document with candidate fixes
 // applied against the original document's outline.
 type fixVerifier struct {
-	ctx  context.Context
+	ctx context.Context
+	// rule is the context of the rule whose fixes the verifier checks.
+	rule *lint.RuleContext
 	file *mdast.FileSnapshot
 	// content is the document's content as the checks read it (see
 	// checkedContent).
@@ -357,8 +359,9 @@ type fixVerifier struct {
 	allow    fixAllowance
 	original string
 	parsed   bool // whether the original content parsed
-	// originalFile is the parse of the original content, kept until
-	// regions builds model from it, and model the outline cut into regions
+	// originalFile is the parse of the original content, which the rules of
+	// a lint share and none changes, kept until regions builds model from
+	// it, and model the outline cut into regions
 	// (see outlineModel), built on first use; nil where region checks cannot
 	// be used.
 	originalFile *mdast.FileSnapshot
@@ -379,12 +382,14 @@ func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier 
 		ctx = context.Background()
 	}
 	verifier := &fixVerifier{
-		ctx: ctx, file: ruleCtx.File, content: checkedContent(ruleCtx.File.Content), parser: goldmark.New(flavor), allow: allow,
+		ctx: ctx, rule: ruleCtx, file: ruleCtx.File, content: checkedContent(ruleCtx.File.Content),
+		parser: goldmark.New(flavor), allow: allow,
 	}
-	// The original is parsed again with the same parser as the fixed copies,
-	// so both outlines come from the same flavor.
-	if original, err := verifier.parser.Parse(ctx, ruleCtx.File.Path, verifier.content); err == nil {
-		verifier.original, verifier.parsed = documentOutline(original, allow), true
+	// The original is parsed again with a parser of the same flavor as the
+	// fixed copies, so both outlines come from the same flavor. The rules of
+	// a lint share that parse and its outline (see originalDocument).
+	if original, ok := originalDocument(ruleCtx); ok {
+		verifier.original, verifier.parsed = verifierOutline(ruleCtx, original, allow), true
 		verifier.originalFile = original
 	}
 	return verifier
@@ -451,7 +456,7 @@ func (v *fixVerifier) regions() *outlineModel {
 	if !v.modeled {
 		v.modeled = true
 		if v.originalFile != nil {
-			v.model = buildOutlineModel(v, v.originalFile)
+			v.model = buildOutlineModel(v, v.originalFile, originalLayout(v.rule))
 		}
 		// The model keeps what it compares; the parse can go.
 		v.originalFile = nil

@@ -18,12 +18,13 @@ import (
 //nolint:gochecknoglobals // a tuning value that tests change, read only otherwise.
 var itemWindowMin = 1024
 
-// regionLayout returns the region layout of the document as the checks read
-// it, built on first use, or nil when region checks cannot be used for it.
+// regionLayout returns a view of the region layout of the document as the
+// checks read it, taken on first use, or nil when region checks cannot be
+// used for it.
 func (c *fixChecker) regionLayout() *docLayout {
 	if !c.layoutBuilt {
 		c.layoutBuilt = true
-		c.layout = newDocLayoutFlags(recordingMarkdown(parseFlavor(c.ctx)), c.content, true)
+		c.layout = originalLayout(c.ctx)
 	}
 	return c.layout
 }

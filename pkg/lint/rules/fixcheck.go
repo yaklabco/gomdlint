@@ -124,9 +124,10 @@ type fixChecker struct {
 	ready  bool
 	// children caches the block children of containers for window searches.
 	children blockChildren
-	// layout is the region layout of the document and parser the parser of
-	// its flavor, for item windows, built on first use (see itemWindow);
-	// layoutBuilt reports that the layout was built, or could not be.
+	// layout is a view of the region layout of the document and parser the
+	// parser of its flavor, for item windows, taken on first use (see
+	// itemWindow); layoutBuilt reports that the layout was taken, or could
+	// not be built.
 	layout      *docLayout
 	layoutBuilt bool
 	parser      *gmparser.Parser
@@ -275,14 +276,12 @@ func (c *fixChecker) safeTogether(candidates []int) []int {
 }
 
 // outline returns the outline of the document as it is, parsed again with
-// the flavor the checks use. ok is false when that parse fails.
+// the flavor the checks use, which the rules of a lint share (see
+// originalOutline). ok is false when that parse fails.
 func (c *fixChecker) outline() (docOutline, bool) {
 	if c.before == nil {
-		c.before = &docOutline{}
-		if doc, ok := reparse(c.ctx, c.content); ok {
-			*c.before = outlineOf(doc)
-			c.ready = true
-		}
+		before, ready := originalOutline(c.ctx)
+		c.before, c.ready = &before, ready
 	}
 	return *c.before, c.ready
 }
