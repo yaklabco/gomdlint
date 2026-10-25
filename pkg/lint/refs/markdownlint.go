@@ -2,6 +2,7 @@ package refs
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/internal/jstext"
 )
@@ -65,7 +66,7 @@ func FootnoteText(ctx *Context) map[*ReferenceDefinition]bool {
 // that goldmark reads as a link reference definition, starts a paragraph,
 // which takes the lines below it, rather than another block: an ATX
 // heading such as "[^1]: #", a thematic break, a list item, a fence, a
-// blockquote, HTML, math or a directive, which "::" and a name starts.
+// blockquote, HTML, math or a directive (see mayBeDirective).
 // goldmark reads the text as a destination and an optional title, so the
 // destination is the text's first word. Text that may start another block,
 // such as a "<" or "[" at its start, counts as none, so that the
@@ -82,11 +83,48 @@ func startsParagraph(def *ReferenceDefinition) bool {
 		word == "-" || word == "+" || word == "*",
 		orderedListMarker(word),
 		strings.HasPrefix(word, "```") || strings.HasPrefix(word, "~~~"),
-		strings.HasPrefix(word, "$$") || strings.HasPrefix(word, "::") && len(word) > len("::"),
+		strings.HasPrefix(word, "$$"),
+		def.Title == "" && mayBeDirective(word),
 		strings.ContainsAny(word[:1], "><["):
 		return false
 	}
 	return true
+}
+
+// mayBeDirective reports whether word, a whole line, may be a leaf or
+// container directive to micromark's directive extension: two or more
+// colons, a name, and an optional label in brackets and attributes in
+// braces. A name starts with a character other than ASCII punctuation, goes
+// on with letters, digits, "-" and "_", and does not end with "-" or "_".
+// What follows the name counts when it starts a label or attributes that
+// the word closes, without telling their content apart, so that a line
+// micromark might read as a directive keeps goldmark's reading.
+func mayBeDirective(word string) bool {
+	rest := strings.TrimLeft(word, ":")
+	if len(word)-len(rest) < len("::") {
+		return false
+	}
+	name := 0
+	for name < len(rest) {
+		char := rest[name]
+		if !isASCIIDigit(char) && (char|0x20 < 'a' || char|0x20 > 'z') && char < utf8.RuneSelf &&
+			(name == 0 || (char != '-' && char != '_')) {
+			break
+		}
+		name++
+	}
+	if name == 0 || rest[name-1] == '-' || rest[name-1] == '_' {
+		return false
+	}
+	switch rest = rest[name:]; {
+	case rest == "":
+		return true
+	case rest[0] == '[':
+		return strings.Contains(rest, "]")
+	case rest[0] == '{':
+		return strings.Contains(rest, "}")
+	}
+	return false
 }
 
 // Limits of the blocks startsParagraph tells apart: the deepest ATX
