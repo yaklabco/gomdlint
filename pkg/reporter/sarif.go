@@ -507,8 +507,8 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	rule.HelpURI = ruledocs.PageURL(entry)
 	rule.Help = ruleHelp(entry)
 
-	tags := append([]string{string(meta.Category)}, lint.RuleTags(registered, meta)...)
-	if tags := uniqueTags(tags, sarifTagLimit); len(tags) > 0 {
+	candidates := append([]string{string(meta.Category)}, lint.RuleTags(registered, meta)...)
+	if tags := uniqueTags(candidates, sarifTagLimit); len(tags) > 0 {
 		rule.Properties = map[string]any{"tags": tags}
 	}
 

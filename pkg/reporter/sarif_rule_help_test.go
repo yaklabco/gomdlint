@@ -248,5 +248,7 @@ func TestSARIFReporter_DescriptorsAreDeterministic(t *testing.T) {
 	result := &runner.Result{Files: []runner.FileOutcome{sarifFile(filepath.Join(root, "a.md"), "x\n", diags...)}}
 	opts := reporter.Options{WorkingDir: root, Registry: registry, ToolVersion: "v1.2.3"}
 
-	assert.Equal(t, string(reportSARIF(t, opts, result)), string(reportSARIF(t, opts, result)))
+	first := string(reportSARIF(t, opts, result))
+	second := string(reportSARIF(t, opts, result))
+	assert.Equal(t, first, second)
 }
