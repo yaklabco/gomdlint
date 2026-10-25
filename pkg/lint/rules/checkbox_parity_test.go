@@ -19,17 +19,6 @@ import (
 // MD054 disallowing every reference style). markdownlint reads no
 // checkboxes, so each pair of brackets there is text or a link to it.
 func TestLinkRulesMatchMarkdownlintAtCheckboxes(t *testing.T) {
-	rules := []struct {
-		rule    lint.Rule
-		options map[string]any
-	}{
-		{rule: NewNoBareURLsRule()},
-		{rule: NewLinkSpacesRule()},
-		{rule: NewEmptyLinkRule()},
-		{rule: NewReferenceLinkImagesRule(), options: map[string]any{"shortcut_syntax": true}},
-		{rule: NewLinkImageRefDefsRule()},
-		{rule: NewLinkImageStyleRule(), options: map[string]any{"full": false, "collapsed": false, "shortcut": false}},
-	}
 	tests := []struct {
 		input string
 		want  []string
@@ -57,14 +46,74 @@ func TestLinkRulesMatchMarkdownlintAtCheckboxes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(strconv.Quote(tt.input), func(t *testing.T) {
-			got := []string{}
-			for _, rule := range rules {
-				for _, diag := range applyRuleWithOptions(t, rule.rule, tt.input, rule.options) {
-					got = append(got, fmt.Sprintf("%s %d:%d", diag.RuleID, diag.StartLine, diag.StartColumn))
-				}
-			}
-			slices.Sort(got)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, checkboxLinkFindings(t, tt.input))
 		})
 	}
+}
+
+// TestLinkRulesKnownGapsAtCheckboxes pins the findings of the link rules
+// where they still differ from markdownlint 0.41.1 at brackets that are no
+// longer checkboxes, so that a fix shows up here. In "- [x][ ](#)" with "x"
+// defined, goldmark reads "[x][ ]" as a collapsed reference and the "(#)"
+// after it as text, where micromark reads "[x]" as text and "[ ](#)" as a
+// link, which markdownlint reports under MD039 and MD042 (and MD051 and
+// MD054 where they apply). Before checkboxes were read only where GFM
+// reads them, "[x]" was a checkbox and "[ ](#)" a link to goldmark too.
+// MD053 reports "[x]: /x" unused there, as it did before. In "- [x][^n]",
+// "[x]" is no longer a checkbox either, so MD052 reports the footnote call
+// "[x][^n]" when the footnote definition comes right after a link reference
+// definition, which it does not count as a footnote; before, it reported
+// the shortcut "[^n]" there with shortcut_syntax set, and nothing without.
+func TestLinkRulesKnownGapsAtCheckboxes(t *testing.T) {
+	tests := []struct {
+		input, markdownlint string
+		want                []string
+	}{
+		{
+			input:        "# T\n\n- [x][ ](#)\n\n[x]: /x\n",
+			markdownlint: "MD039 3:7, MD039 3:7, MD042 3:6",
+			want:         []string{"MD053 5:1"},
+		},
+		{
+			input:        "# T\n\n- ## [x][ ](#).\n\n[x]: /x\n",
+			markdownlint: "MD039 3:10, MD039 3:10, MD042 3:9",
+			want:         []string{"MD053 5:1"},
+		},
+		{
+			input:        "# T\n\n- [x][^n]\n\n[c]: /url\n[^n]: Note text.\n",
+			markdownlint: "MD053 5:1",
+			want:         []string{"MD052 3:3", "MD052 6:1", "MD053 5:1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.input), func(t *testing.T) {
+			assert.Equal(t, tt.want, checkboxLinkFindings(t, tt.input), "markdownlint: %s", tt.markdownlint)
+		})
+	}
+}
+
+// checkboxLinkFindings returns the findings of the link rules for input,
+// sorted, as "RULE line:column", with MD052's shortcut_syntax and MD054
+// disallowing every reference style.
+func checkboxLinkFindings(t *testing.T, input string) []string {
+	t.Helper()
+	rules := []struct {
+		rule    lint.Rule
+		options map[string]any
+	}{
+		{rule: NewNoBareURLsRule()},
+		{rule: NewLinkSpacesRule()},
+		{rule: NewEmptyLinkRule()},
+		{rule: NewReferenceLinkImagesRule(), options: map[string]any{"shortcut_syntax": true}},
+		{rule: NewLinkImageRefDefsRule()},
+		{rule: NewLinkImageStyleRule(), options: map[string]any{"full": false, "collapsed": false, "shortcut": false}},
+	}
+	got := []string{}
+	for _, rule := range rules {
+		for _, diag := range applyRuleWithOptions(t, rule.rule, input, rule.options) {
+			got = append(got, fmt.Sprintf("%s %d:%d", diag.RuleID, diag.StartLine, diag.StartColumn))
+		}
+	}
+	slices.Sort(got)
+	return got
 }
