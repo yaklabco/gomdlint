@@ -160,15 +160,15 @@ func (r *MigrationResult) defaultRules() []writtenRule {
 	return written
 }
 
-// ruleName returns the name of the rule with the given ID, or the ID of a
-// rule that the conversion does not know.
+// ruleName returns the key under which the file that FileContent writes
+// names the rule with the given ID: its name in the registry that loads the
+// file, or its ID when another rule there shares the name or the registry
+// does not hold the rule (see lint.Registry.ConfigKey).
 func (r *MigrationResult) ruleName(id string) string {
-	if r.registry != nil {
-		if rule, ok := r.registry.GetByID(id); ok {
-			return rule.Name()
-		}
+	if r.keys == nil {
+		return id
 	}
-	return id
+	return r.keys.ConfigKey(id)
 }
 
 // writeRuleSection writes rules under the key section, each keyed by its

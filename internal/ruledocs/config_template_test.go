@@ -13,6 +13,7 @@ import (
 	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // ruleKeysHeader is the line of a generated configuration that says how
@@ -43,6 +44,9 @@ func TestConfigTemplateMinimal(t *testing.T) {
 
 	assert.True(t, strings.HasPrefix(content, schemaModeline+"# gomdlint configuration\n"+ruleKeysHeader), content)
 	assert.NotRegexp(t, `MD\d{3}:`, content, "the template keys no rule by ID")
+	assert.Regexp(t, `\n#   heading-increment: +# MD001\n#     severity: error\n#   line-length: +# MD013\n`+
+		`#     options:\n#       max: 100\n#       ignore_tables: true\n#   no-inline-html: false +# MD033\n`, content,
+		"each example rule has its ID in a comment")
 
 	var example []string
 	inExample := false
@@ -205,4 +209,59 @@ func nextHeader(lines []string, header int) int {
 		}
 	}
 	return len(lines)
+}
+
+// collidingRegistry returns a registry of the built-in rules and a custom
+// rule, MD900, named line-length, like MD013.
+func collidingRegistry() *lint.Registry {
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	registry.Register(&quietRule{lint.NewBaseRule("MD900", "line-length", "A custom rule.", nil, false)})
+	return registry
+}
+
+// TestConfigTemplateFullKeysCollidingNamesByID covers rules that share a
+// name: the full template keys each of them by ID, in YAML and in JSON, so
+// that no key is written twice and every key configures the rule it
+// documents. Other rules keep their names.
+func TestConfigTemplateFullKeysCollidingNamesByID(t *testing.T) {
+	registry := collidingRegistry()
+	entries := ruledocs.Entries(registry, nil)
+
+	for _, asJSON := range []bool{false, true} {
+		content, err := ruledocs.ConfigTemplate(entries, ruledocs.TemplateOptions{Full: true, JSON: asJSON})
+		require.NoError(t, err, "JSON %t", asJSON)
+
+		var parsed struct {
+			Rules map[string]any `json:"rules" yaml:"rules"`
+		}
+		require.NoError(t, yaml.Unmarshal(content, &parsed), "JSON %t: no key is written twice", asJSON)
+		assert.Len(t, parsed.Rules, len(entries), "JSON %t", asJSON)
+		assert.Contains(t, parsed.Rules, "MD013")
+		assert.Contains(t, parsed.Rules, "MD900")
+		assert.Contains(t, parsed.Rules, "no-trailing-spaces")
+		assert.NotContains(t, parsed.Rules, "line-length")
+		resolved := make(map[string]bool, len(parsed.Rules))
+		for key := range parsed.Rules {
+			rule, found := registry.Lookup(key)
+			require.True(t, found, key)
+			resolved[rule.ID()] = true
+		}
+		assert.Len(t, resolved, len(entries), "JSON %t: each key configures another rule", asJSON)
+		if !asJSON {
+			assert.Regexp(t, `\n  MD013: +# MD013\n`, string(content))
+		}
+	}
+}
+
+// TestConfigTemplateMinimalKeysCollidingNamesByID covers the minimal
+// template's example, which keys a rule whose name another rule shares by
+// ID.
+func TestConfigTemplateMinimalKeysCollidingNamesByID(t *testing.T) {
+	content, err := ruledocs.ConfigTemplate(ruledocs.Entries(collidingRegistry(), nil), ruledocs.TemplateOptions{})
+	require.NoError(t, err)
+
+	assert.Contains(t, string(content), "\n#   MD013:")
+	assert.NotContains(t, string(content), "\n#   line-length:")
+	assert.Contains(t, string(content), "\n#   heading-increment:")
 }

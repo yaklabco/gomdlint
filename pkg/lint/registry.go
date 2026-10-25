@@ -84,6 +84,11 @@ type ruleIndex struct {
 	// rules lists the rules with their identifiers, for Suggest.
 	rules []indexedRule
 
+	// holders counts, for each lower-cased ID, name and alias of the
+	// registered rules, the rules that have it as one of those, for
+	// ConfigKey.
+	holders map[string]int
+
 	// options maps the ID of each registered rule whose catalog entry
 	// declares its options (RuleMeta.OptionsDeclared), or that declares
 	// them itself (OptionDeclarer), to those options.
@@ -233,6 +238,24 @@ func (r *Registry) GetByName(name string) (Rule, bool) {
 func (r *Registry) Lookup(key string) (Rule, bool) {
 	rule, ok := r.lookups().keys[foldKey(key)]
 	return rule, ok
+}
+
+// ConfigKey returns the key under which a generated configuration names
+// the registered rule with the given ID: its name when the name identifies
+// that rule alone, so that Lookup finds the rule under it and no other
+// registered rule has it as its ID, name or alias, in any case, and its ID
+// otherwise. A rule that is not registered gets its ID.
+func (r *Registry) ConfigKey(id string) string {
+	rule, ok := r.GetByID(id)
+	if !ok {
+		return id
+	}
+	index := r.lookups()
+	key := foldKey(rule.Name())
+	if found, ok := index.keys[key]; !ok || found.ID() != id || index.holders[key] != 1 {
+		return id
+	}
+	return rule.Name()
 }
 
 // Resolve returns the ID of the registered rule that key identifies,
@@ -473,6 +496,7 @@ func (r *Registry) buildIndex() *ruleIndex {
 		tags:  make(map[string][]Rule),
 		rules: make([]indexedRule, 0, len(ids)),
 
+		holders:             make(map[string]int),
 		tagSpellings:        make(map[string]string),
 		words:               make(map[string]*directiveWord),
 		markdownlintNames:   make(map[string]string),
@@ -517,6 +541,13 @@ func (r *Registry) buildIndex() *ruleIndex {
 	}
 
 	build.tagNames = slices.Sorted(maps.Keys(build.tags))
+	for _, indexed := range build.rules {
+		words := append([]string{indexed.id}, indexed.names...)
+		slices.Sort(words)
+		for _, word := range slices.Compact(words) {
+			build.holders[word]++
+		}
+	}
 	return build.ruleIndex
 }
 

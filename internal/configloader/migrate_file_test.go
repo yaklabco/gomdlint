@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
+	"github.com/yaklabco/gomdlint/pkg/lint/rules"
 )
 
 // namedSettings is a markdownlint config that names rules by ID, by
@@ -130,4 +132,40 @@ func TestWrittenSettingsWriteEveryRuleSetting(t *testing.T) {
 	}
 
 	assert.Equal(t, config.RuleSettingKeys(), keys)
+}
+
+// lengthRule is a custom rule named line-length, like MD013.
+type lengthRule struct {
+	lint.BaseRule
+}
+
+func (*lengthRule) Apply(*lint.RuleContext) ([]lint.Diagnostic, error) { return nil, nil }
+
+// TestMigrationFileKeysCollidingNamesByID covers a registry in which a
+// custom rule, MD900, is named line-length, like MD013: the file that
+// migrate writes keys MD013 by its ID, in YAML and in JSON, so that the
+// file configures MD013 and not MD900 when the registry loads it.
+func TestMigrationFileKeysCollidingNamesByID(t *testing.T) {
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	registry.Register(&lengthRule{lint.NewBaseRule("MD900", "line-length", "", nil, false)})
+	converted := convertSettings(t, `{"MD013": false}`)
+	converted.keys = registry
+
+	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		content, err := converted.FileContent(filepath.Join(t.TempDir(), name))
+		require.NoError(t, err)
+		assert.NotContains(t, string(content), "line-length", name)
+		if name == ".gomdlint.yml" {
+			assert.Regexp(t, `\nrules:\n  MD013: +# MD013\n    enabled: false\n`, string(content))
+		}
+
+		loaded, err := config.FromYAML(content)
+		require.NoError(t, err, name)
+		require.NoError(t, normalizeRuleKeys(loaded, registry), name)
+		assert.Equal(t, map[string]bool{"MD013": false}, enabledStates(loaded.Rules), name)
+		assert.Contains(t, loaded.RuleDefaults, "MD013", name)
+		assert.NotContains(t, loaded.RuleDefaults, "MD900", name)
+		assert.Len(t, loaded.RuleDefaults, len(converted.Config.RuleDefaults), name)
+	}
 }

@@ -37,9 +37,10 @@ type MigrationResult struct {
 	// line of the source file to that line.
 	warningLines map[int]int
 
-	// registry holds the rules that the conversion knows, which name the
-	// rules in the file that FileContent writes.
-	registry *lint.Registry
+	// keys is the registry that loads the file that FileContent writes,
+	// lint.DefaultRegistry as the configuration loader uses it, which
+	// names the rules in the file (see ruleName).
+	keys *lint.Registry
 
 	// sources maps the ID of each rule under Config.Rules to the key of
 	// the source file that set it last.
@@ -157,7 +158,7 @@ func convertMarkdownlintConfig(path string, translate markdownlintTranslator) (*
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
-	result.registry = registry
+	result.keys = lint.DefaultRegistry
 	result.sources = make(map[string]ruleSource)
 	cfg.RuleDefaults = make(map[string]config.RuleConfig)
 	for _, id := range registry.IDs() {

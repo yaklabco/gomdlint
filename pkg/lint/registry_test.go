@@ -538,3 +538,34 @@ func TestRegistry_ClosestRulesLeavesOutTags(t *testing.T) {
 	assert.Empty(t, reg.ClosestRules("tables"), "only a tag is close")
 	assert.Empty(t, reg.ClosestRules("bulet"))
 }
+
+// TestRegistry_ConfigKey covers the key under which a generated
+// configuration names a rule: its name while the name identifies the rule
+// alone, and its ID once another registered rule has the same name, uses
+// it as an alias or has it as its ID, so that the key never configures
+// another rule.
+func TestRegistry_ConfigKey(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+	reg.Register(&mockRule{id: "MD010", name: "no-hard-tabs"})
+	reg.Register(&mockRule{id: "MD013", name: "line-length"})
+	reg.Register(&mockRule{id: "MD033", name: "no-inline-html"})
+	reg.Register(&mockRule{id: "MD900", name: "Line-Length"})
+	reg.Describe(RuleMeta{ID: "MD901", Name: "tabs", Aliases: []string{"no-hard-tabs"}})
+	reg.Register(&mockRule{id: "MD901", name: "tabs"})
+	reg.Register(&mockRule{id: "MD902", name: "md033"})
+
+	assert.Equal(t, "no-trailing-spaces", reg.ConfigKey("MD009"), "a name that one rule has")
+	assert.Equal(t, "MD013", reg.ConfigKey("MD013"), "a name that another rule has, in another case")
+	assert.Equal(t, "MD900", reg.ConfigKey("MD900"))
+	assert.Equal(t, "MD010", reg.ConfigKey("MD010"), "a name that another rule has as an alias")
+	assert.Equal(t, "tabs", reg.ConfigKey("MD901"))
+	assert.Equal(t, "no-inline-html", reg.ConfigKey("MD033"), "an ID always names its rule")
+	assert.Equal(t, "MD902", reg.ConfigKey("MD902"), "a name that is another rule's ID")
+	assert.Equal(t, "MD999", reg.ConfigKey("MD999"), "a rule that is not registered keeps its ID")
+	for _, id := range reg.IDs() {
+		rule, found := reg.Lookup(reg.ConfigKey(id))
+		require.True(t, found, id)
+		assert.Equal(t, id, rule.ID(), "the key of %s names it", id)
+	}
+}

@@ -28,10 +28,10 @@ flavor: gfm
 # rule and its options. false as a rule's value turns it off, and a
 # severity as its value, such as line-length: warning, turns it on.
 # rules:
-#   heading-increment:
+#   heading-increment:     # MD001
 #     severity: error
-#   line-length:
+#   line-length:           # MD013
 #     options:
 #       max: 100
 #       ignore_tables: true
-#   no-inline-html: false
+#   no-inline-html: false  # MD033

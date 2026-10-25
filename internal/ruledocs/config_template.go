@@ -1,6 +1,7 @@
 package ruledocs
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -85,14 +86,48 @@ flavor: gfm
 # rule and its options. false as a rule's value turns it off, and a
 # severity as its value, such as line-length: warning, turns it on.
 # rules:
-#   heading-increment:
-#     severity: error
-#   line-length:
-#     options:
-#       max: 100
-#       ignore_tables: true
-#   no-inline-html: false
 `
+
+// exampleRule is a rule of the minimal template's example of rule
+// settings: the rule's ID, the value after its key, and the lines under it.
+type exampleRule struct {
+	id, value string
+	lines     []string
+}
+
+// minimalExample returns the rules of the minimal template's example of
+// rule settings, in order.
+func minimalExample() []exampleRule {
+	return []exampleRule{
+		{id: "MD001", lines: []string{"#     severity: error"}},
+		{id: "MD013", lines: []string{"#     options:", "#       max: 100", "#       ignore_tables: true"}},
+		{id: "MD033", value: " false"},
+	}
+}
+
+// writeMinimalExample writes the minimal template's example of rule
+// settings, commented, each rule keyed as entries key it (see
+// Entry.ConfigKey), or by its ID when entries do not hold it, with its ID
+// in a comment after the key.
+func writeMinimalExample(buf *strings.Builder, entries []Entry) {
+	keys := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		keys[entry.ID] = entry.ConfigKey
+	}
+	example := minimalExample()
+	heads := make([]string, len(example))
+	width := 0
+	for idx, rule := range example {
+		heads[idx] = "#   " + cmp.Or(keys[rule.id], rule.id) + ":" + rule.value
+		width = max(width, utf8.RuneCountInString(heads[idx]))
+	}
+	for idx, rule := range example {
+		buf.WriteString(heads[idx] + strings.Repeat(" ", width-utf8.RuneCountInString(heads[idx])) + "  # " + rule.id + "\n")
+		for _, line := range rule.lines {
+			buf.WriteString(line + "\n")
+		}
+	}
+}
 
 // fullSettings are the settings of the full template, after the header and
 // before its rules.
@@ -142,6 +177,7 @@ func ConfigTemplate(entries []Entry, opts TemplateOptions) ([]byte, error) {
 		writeTemplateRules(&buf, entries)
 	} else {
 		buf.WriteString(minimalSettings)
+		writeMinimalExample(&buf, entries)
 	}
 
 	if opts.JSON {
@@ -156,8 +192,8 @@ func ConfigTemplate(entries []Entry, opts TemplateOptions) ([]byte, error) {
 
 // writeTemplateRules writes the rules of entries under the rules key of
 // the full template, by category in the order that rules lists them. Each
-// rule is keyed by its name, with its ID in a comment, after its
-// description. Its built-in state is a setting, and its severity and
+// rule is keyed by its name, or by its ID when another rule shares the name
+// (see Entry.ConfigKey), with its ID in a comment, after its description. Its built-in state is a setting, and its severity and
 // options are comments: a severity would override severity_default, and
 // options would replace those of lower configuration layers.
 func writeTemplateRules(buf *strings.Builder, entries []Entry) {
@@ -174,7 +210,7 @@ func writeTemplateRules(buf *strings.Builder, entries []Entry) {
 		buf.WriteString(ruleComment + group.title() + "\n")
 		names := make([]string, len(group.entries))
 		for idx, entry := range group.entries {
-			names[idx] = entry.Name
+			names[idx] = entry.ConfigKey
 		}
 		keyWidth := RuleKeyWidth(names)
 		for _, entry := range group.entries {
@@ -192,7 +228,7 @@ func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 			buf.WriteString(line + "\n")
 		}
 	}
-	buf.WriteString(RuleKeyLine(entry.Name, entry.ID, keyWidth))
+	buf.WriteString(RuleKeyLine(entry.ConfigKey, entry.ID, keyWidth))
 	buf.WriteString("    enabled: " + strconv.FormatBool(entry.Default.Enabled) + "\n")
 	buf.WriteString("    # severity: " + string(entry.Default.Severity) + "\n")
 	if len(entry.Options) == 0 {
