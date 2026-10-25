@@ -84,8 +84,8 @@ type ruleIndex struct {
 	// rules lists the rules with their identifiers, for Suggest.
 	rules []indexedRule
 
-	// holders counts, for each lower-cased ID, name and alias of the
-	// registered rules, the rules that have it as one of those, for
+	// holders counts, for each folded (see foldKey) ID, name and alias of
+	// the registered rules, the rules that have it as one of those, for
 	// ConfigKey.
 	holders map[string]int
 
@@ -244,7 +244,10 @@ func (r *Registry) Lookup(key string) (Rule, bool) {
 // the registered rule with the given ID: its name when the name identifies
 // that rule alone, so that Lookup finds the rule under it and no other
 // registered rule has it as its ID, name or alias, in any case, and its ID
-// otherwise. A rule that is not registered gets its ID.
+// otherwise. A rule that is not registered gets its ID. The ID identifies
+// the rule unless another registered ID differs from it only in case, which
+// Lookup cannot tell apart. The checks read one snapshot of the index, so a
+// rule registered meanwhile cannot make the returned name another rule's.
 func (r *Registry) ConfigKey(id string) string {
 	rule, ok := r.GetByID(id)
 	if !ok {

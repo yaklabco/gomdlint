@@ -51,7 +51,8 @@ func (r *MigrationResult) FileContent(path string) ([]byte, error) {
 
 // writtenRule is one rule in a section of a migrated config.
 type writtenRule struct {
-	id, name string
+	// id is the rule's ID, and key the key that names it (see ruleKey).
+	id, key string
 
 	// comment is the text of the comment above the rule, or "".
 	comment string
@@ -108,13 +109,13 @@ func (r *MigrationResult) sourceRules() []writtenRule {
 	}
 	slices.SortFunc(ids, func(left, right string) int {
 		return cmp.Or(cmp.Compare(r.sourceOf(left).order, r.sourceOf(right).order),
-			cmp.Compare(r.ruleName(left), r.ruleName(right)), cmp.Compare(left, right))
+			cmp.Compare(r.ruleKey(left), r.ruleKey(right)), cmp.Compare(left, right))
 	})
 
 	written := make([]writtenRule, 0, len(ids))
 	var previous ruleSource
 	for idx, id := range ids {
-		rule := writtenRule{id: id, name: r.ruleName(id), settings: r.Config.Rules[id]}
+		rule := writtenRule{id: id, key: r.ruleKey(id), settings: r.Config.Rules[id]}
 		source := r.sourceOf(id)
 		startsGroup := idx == 0 || previous.order != source.order
 		rule.gap = idx > 0 && startsGroup && (source.tag || previous.tag)
@@ -149,7 +150,7 @@ func (r *MigrationResult) defaultRules() []writtenRule {
 	written := make([]writtenRule, 0, len(ids))
 	ownRules := false
 	for _, id := range ids {
-		rule := writtenRule{id: id, name: r.ruleName(id), settings: r.Config.RuleDefaults[id]}
+		rule := writtenRule{id: id, key: r.ruleKey(id), settings: r.Config.RuleDefaults[id]}
 		if lint.IsGomdlintOnlyRule(id) && !ownRules {
 			rule.comment = "gomdlint's own rules, which markdownlint does not have:"
 			rule.gap = len(written) > 0
@@ -160,24 +161,23 @@ func (r *MigrationResult) defaultRules() []writtenRule {
 	return written
 }
 
-// ruleName returns the key under which the file that FileContent writes
+// ruleKey returns the key under which the file that FileContent writes
 // names the rule with the given ID: its name in the registry that loads the
 // file, or its ID when another rule there shares the name or the registry
 // does not hold the rule (see lint.Registry.ConfigKey).
-func (r *MigrationResult) ruleName(id string) string {
-	if r.keys == nil {
+func (r *MigrationResult) ruleKey(id string) string {
+	if r.keyRegistry == nil {
 		return id
 	}
-	return r.keys.ConfigKey(id)
+	return r.keyRegistry.ConfigKey(id)
 }
 
 // writeRuleSection writes rules under the key section, each keyed by its
-// name, with its ID in a comment after the key, aligned across the
-// section.
+// key, with its ID in a comment after the key, aligned across the section.
 func writeRuleSection(buf *bytes.Buffer, section string, rules []writtenRule) error {
 	names := make([]string, len(rules))
 	for idx, rule := range rules {
-		names[idx] = rule.name
+		names[idx] = rule.key
 	}
 	keyWidth := ruledocs.RuleKeyWidth(names)
 
@@ -189,10 +189,10 @@ func writeRuleSection(buf *bytes.Buffer, section string, rules []writtenRule) er
 		if rule.comment != "" {
 			buf.WriteString("  # " + rule.comment + "\n")
 		}
-		buf.WriteString(ruledocs.RuleKeyLine(rule.name, rule.id, keyWidth))
+		buf.WriteString(ruledocs.RuleKeyLine(rule.key, rule.id, keyWidth))
 		settings, err := encodeRuleSettings(rule.settings)
 		if err != nil {
-			return fmt.Errorf("write %s: %w", rule.name, err)
+			return fmt.Errorf("write %s: %w", rule.key, err)
 		}
 		for line := range strings.Lines(settings) {
 			buf.WriteString("    " + line)

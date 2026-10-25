@@ -3,6 +3,7 @@ package ruledocs
 import (
 	"cmp"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -43,22 +44,37 @@ func ConfigHeader(lines ...string) string {
 	return header.String()
 }
 
-// RuleKeyWidth returns the width of the widest rule key that RuleKeyLine
-// writes for names, so that the comments after the keys line up.
-func RuleKeyWidth(names []string) int {
+// plainKey matches a rule key that YAML reads as written, without quotes.
+var plainKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// yamlKey writes key, a rule key, as a YAML mapping key: as it is, or in
+// double quotes when YAML would read it otherwise, as a custom rule's name
+// with spaces, a colon or a # would be.
+func yamlKey(key string) string {
+	if plainKey.MatchString(key) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+// RuleKeyWidth returns the width of the widest of the lines that
+// RuleKeyLine writes for keys, up to the comment, so that the comments
+// after the keys line up.
+func RuleKeyWidth(keys []string) int {
 	width := 0
-	for _, name := range names {
-		width = max(width, utf8.RuneCountInString(name)+len(":"))
+	for _, key := range keys {
+		width = max(width, utf8.RuneCountInString(yamlKey(key))+len(":"))
 	}
 	return width
 }
 
-// RuleKeyLine returns the line that keys a rule by name under rules or
-// rule_defaults, padded to width (see RuleKeyWidth), with the rule's ID in
-// a comment after the key.
-func RuleKeyLine(name, id string, width int) string {
-	key := name + ":"
-	return "  " + key + strings.Repeat(" ", max(0, width-utf8.RuneCountInString(key))) + "  # " + id + "\n"
+// RuleKeyLine returns the line that keys a rule by key, its name or its ID
+// (see lint.Registry.ConfigKey), under rules or rule_defaults, padded to
+// width (see RuleKeyWidth), with the rule's ID in a comment after the key.
+// A key that YAML would not read as written is quoted.
+func RuleKeyLine(key, id string, width int) string {
+	written := yamlKey(key) + ":"
+	return "  " + written + strings.Repeat(" ", max(0, width-utf8.RuneCountInString(written))) + "  # " + id + "\n"
 }
 
 // minimalSettings are the settings of the minimal template, after the
@@ -112,13 +128,13 @@ func minimalExample() []exampleRule {
 func writeMinimalExample(buf *strings.Builder, entries []Entry) {
 	keys := make(map[string]string, len(entries))
 	for _, entry := range entries {
-		keys[entry.ID] = entry.ConfigKey
+		keys[entry.ID] = entry.configKey()
 	}
 	example := minimalExample()
 	heads := make([]string, len(example))
 	width := 0
 	for idx, rule := range example {
-		heads[idx] = "#   " + cmp.Or(keys[rule.id], rule.id) + ":" + rule.value
+		heads[idx] = "#   " + yamlKey(cmp.Or(keys[rule.id], rule.id)) + ":" + rule.value
 		width = max(width, utf8.RuneCountInString(heads[idx]))
 	}
 	for idx, rule := range example {
@@ -192,8 +208,9 @@ func ConfigTemplate(entries []Entry, opts TemplateOptions) ([]byte, error) {
 
 // writeTemplateRules writes the rules of entries under the rules key of
 // the full template, by category in the order that rules lists them. Each
-// rule is keyed by its name, or by its ID when another rule shares the name
-// (see Entry.ConfigKey), with its ID in a comment, after its description. Its built-in state is a setting, and its severity and
+// rule is keyed by its name, or by its ID when another rule shares the
+// name (see Entry.ConfigKey), with its ID in a comment, after its
+// description. Its built-in state is a setting, and its severity and
 // options are comments: a severity would override severity_default, and
 // options would replace those of lower configuration layers.
 func writeTemplateRules(buf *strings.Builder, entries []Entry) {
@@ -210,7 +227,7 @@ func writeTemplateRules(buf *strings.Builder, entries []Entry) {
 		buf.WriteString(ruleComment + group.title() + "\n")
 		names := make([]string, len(group.entries))
 		for idx, entry := range group.entries {
-			names[idx] = entry.ConfigKey
+			names[idx] = entry.configKey()
 		}
 		keyWidth := RuleKeyWidth(names)
 		for _, entry := range group.entries {
@@ -228,7 +245,7 @@ func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 			buf.WriteString(line + "\n")
 		}
 	}
-	buf.WriteString(RuleKeyLine(entry.ConfigKey, entry.ID, keyWidth))
+	buf.WriteString(RuleKeyLine(entry.configKey(), entry.ID, keyWidth))
 	buf.WriteString("    enabled: " + strconv.FormatBool(entry.Default.Enabled) + "\n")
 	buf.WriteString("    # severity: " + string(entry.Default.Severity) + "\n")
 	if len(entry.Options) == 0 {

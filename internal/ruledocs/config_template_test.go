@@ -2,6 +2,7 @@ package ruledocs_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -169,9 +170,9 @@ func commentAbove(lines []string, at int) string {
 func TestConfigTemplateFullJSON(t *testing.T) {
 	content := configTemplate(t, ruledocs.TemplateOptions{Full: true, JSON: true})
 
-	rules := map[string]any{}
+	wantRules := map[string]any{}
 	for _, entry := range ruledocs.Entries(lint.DefaultRegistry, nil) {
-		rules[entry.Name] = map[string]any{"enabled": entry.Default.Enabled}
+		wantRules[entry.Name] = map[string]any{"enabled": entry.Default.Enabled}
 	}
 	var settings map[string]any
 	require.NoError(t, json.Unmarshal([]byte(content), &settings), content)
@@ -180,7 +181,7 @@ func TestConfigTemplateFullJSON(t *testing.T) {
 		"backups":         map[string]any{"enabled": true, "mode": "sidecar"},
 		"gitignore":       true,
 		"default_ignores": true,
-		"rules":           rules,
+		"rules":           wantRules,
 	}, settings, "the JSON template holds the settings the YAML template sets")
 	assert.True(t, strings.HasSuffix(content, "}\n"), "the file ends with a newline")
 }
@@ -237,10 +238,10 @@ func TestConfigTemplateFullKeysCollidingNamesByID(t *testing.T) {
 		}
 		require.NoError(t, yaml.Unmarshal(content, &parsed), "JSON %t: no key is written twice", asJSON)
 		assert.Len(t, parsed.Rules, len(entries), "JSON %t", asJSON)
-		assert.Contains(t, parsed.Rules, "MD013")
-		assert.Contains(t, parsed.Rules, "MD900")
-		assert.Contains(t, parsed.Rules, "no-trailing-spaces")
-		assert.NotContains(t, parsed.Rules, "line-length")
+		assert.Contains(t, parsed.Rules, "MD013", "JSON %t", asJSON)
+		assert.Contains(t, parsed.Rules, "MD900", "JSON %t", asJSON)
+		assert.Contains(t, parsed.Rules, "no-trailing-spaces", "JSON %t", asJSON)
+		assert.NotContains(t, parsed.Rules, "line-length", "JSON %t", asJSON)
 		resolved := make(map[string]bool, len(parsed.Rules))
 		for key := range parsed.Rules {
 			rule, found := registry.Lookup(key)
@@ -264,4 +265,31 @@ func TestConfigTemplateMinimalKeysCollidingNamesByID(t *testing.T) {
 	assert.Contains(t, string(content), "\n#   MD013:")
 	assert.NotContains(t, string(content), "\n#   line-length:")
 	assert.Contains(t, string(content), "\n#   heading-increment:")
+}
+
+// TestConfigTemplateFullQuotesKeys covers custom rules whose names YAML
+// would not read as written, with a colon, a # or spaces around them: the
+// full template quotes their keys, so that it parses, in YAML and in JSON,
+// and each key configures its rule.
+func TestConfigTemplateFullQuotesKeys(t *testing.T) {
+	registry := lint.NewRegistry()
+	for idx, name := range []string{"has: colon", "#hash", " spaced "} {
+		registry.Register(&quietRule{lint.NewBaseRule(fmt.Sprintf("XX%03d", idx+1), name, "A custom rule.", nil, false)})
+	}
+
+	for _, asJSON := range []bool{false, true} {
+		content, err := ruledocs.ConfigTemplate(ruledocs.Entries(registry, nil), ruledocs.TemplateOptions{Full: true, JSON: asJSON})
+		require.NoError(t, err, "JSON %t", asJSON)
+
+		var parsed struct {
+			Rules map[string]any `json:"rules" yaml:"rules"`
+		}
+		require.NoError(t, yaml.Unmarshal(content, &parsed), "JSON %t:\n%s", asJSON, content)
+		assert.Len(t, parsed.Rules, 3, "JSON %t", asJSON)
+		for key := range parsed.Rules {
+			rule, found := registry.Lookup(key)
+			require.True(t, found, "JSON %t: %q", asJSON, key)
+			assert.Equal(t, strings.TrimSpace(key), strings.TrimSpace(rule.Name()), "JSON %t", asJSON)
+		}
+	}
 }

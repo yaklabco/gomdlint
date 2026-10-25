@@ -81,6 +81,12 @@ func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
 	}
 }
 
+// configKey returns the key under which generated configurations name the
+// rule: its ConfigKey, or its ID for an entry without one.
+func (e *Entry) configKey() string {
+	return cmp.Or(e.ConfigKey, e.ID)
+}
+
 // inMarkdownlint reports whether markdownlint has the rule: whether its ID
 // is one of markdownlint's rules (see lint.IsMarkdownlintRule).
 func (e *Entry) inMarkdownlint() bool {

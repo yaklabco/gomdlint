@@ -200,11 +200,12 @@ formats change. The first entries under Changed may need action.
   `Config.RuleSettingsToJSON` are gone too, since `gomdlint migrate` writes
   its own files. `Config.ToYAML` and `Config.ToJSON` still write a whole
   configuration.
-  `lint.Registry.ConfigKey` returns the key under which generated configs
-  name a rule: its name, or its ID when another rule shares the name.
 
 ### Added
 
+- Library: `lint.Registry.ConfigKey` returns the key under which generated
+  configs name a rule: its name, or its ID when another registered rule
+  shares the name.
 - Config discovery finds `.gomdlint.json` and `gomdlint.json` after the YAML
   names, and `config.json` in the user and system config directories. `init`
   and `migrate` write JSON for an output name that ends in `.json`.

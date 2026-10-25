@@ -150,7 +150,7 @@ func TestMigrationFileKeysCollidingNamesByID(t *testing.T) {
 	rules.RegisterAll(registry)
 	registry.Register(&lengthRule{lint.NewBaseRule("MD900", "line-length", "", nil, false)})
 	converted := convertSettings(t, `{"MD013": false}`)
-	converted.keys = registry
+	converted.keyRegistry = registry
 
 	for _, name := range []string{".gomdlint.yml", ".gomdlint.json"} {
 		content, err := converted.FileContent(filepath.Join(t.TempDir(), name))
