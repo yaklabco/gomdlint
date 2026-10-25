@@ -266,18 +266,9 @@ func plainFootnoteCall(usage *refs.ReferenceUsage) bool {
 }
 
 // plainFootnoteLabel reports whether a footnote label, after its "^", is
-// not empty and holds nothing but ASCII letters, digits and hyphens, which
-// micromark, markdownlint and goldmark all read as written.
+// plain (see refs.PlainFootnoteLabel).
 func plainFootnoteLabel(label string) bool {
-	if label == "" {
-		return false
-	}
-	for idx := range len(label) {
-		if char := label[idx]; char != '-' && !isASCIILetter(char) && !isASCIIDigit(char) {
-			return false
-		}
-	}
-	return true
+	return refs.PlainFootnoteLabel(label)
 }
 
 // shortcutSource returns the source between the brackets of text in a full

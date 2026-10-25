@@ -325,6 +325,49 @@ func TestLinkRulesReadNoLinkWithBlankLabels(t *testing.T) {
 	}
 }
 
+// TestLinkRulesReadMicromarkLinks checks MD039, MD042 and MD054 where
+// goldmark's links differ from micromark's, and so markdownlint 0.41.1's.
+// micromark reads link reference definitions right below a footnote
+// definition as the footnote's text, where goldmark reads them as
+// definitions. Each want is markdownlint's result.
+func TestLinkRulesReadMicromarkLinks(t *testing.T) {
+	refStyles := map[string]any{"full": false, "collapsed": false, "shortcut": false}
+	tests := []struct {
+		rule        lint.Rule
+		input       string
+		options     map[string]any
+		wantColumns []int
+	}{
+		{rule: NewLinkSpacesRule(), input: "- ## [ ][y]\n\n[^n]: note\n[y]: /u\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: note\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: note\n[z]: /z\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: note\n\n[y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: note\n> [y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[y]: #\n[^n]: note\n", wantColumns: []int{6, 8}},
+		{rule: NewEmptyLinkRule(), input: "Use [ y ] here.\n\n[^n]: note\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [ y ] here.\n\n[^n]: note\n\n[y]: #\n", wantColumns: []int{5}},
+		{rule: NewLinkImageStyleRule(), input: "Use [y] here.\n\n[^n]: note\n[y]: /u\n", options: refStyles, wantColumns: []int{}},
+		// Footnote text ends where the footnote's paragraph does, and only
+		// a plain label makes a footnote.
+		{rule: NewLinkSpacesRule(), input: "- ## [ ][y]\n- [^n]: note\n- [y]: /u\n", wantColumns: []int{7, 7}},
+		{rule: NewEmptyLinkRule(), input: "Use [a][y] here.\n\n- [^n]: note\n- [y]: #\n", wantColumns: []int{5}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^a b]: note\n[y]: /u\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: note\n  [y]: #\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [ y ] here.\n\n[^n]: note\n    [y]: #\n", wantColumns: []int{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rule.ID()+" "+strconv.Quote(tt.input), func(t *testing.T) {
+			diags := applyRuleWithOptions(t, tt.rule, tt.input, tt.options)
+			columns := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				require.Equal(t, 1, diag.StartLine)
+				columns = append(columns, diag.StartColumn)
+			}
+			assert.Equal(t, tt.wantColumns, columns)
+		})
+	}
+}
+
 // TestEmptyLinkRule_MarkdownlintLookup checks how MD042 finds the definition
 // of a reference link, as markdownlint 0.41.1 does: it looks the label up as
 // written, trimmed but not lowercased, among definitions keyed by

@@ -70,6 +70,11 @@ type ReferenceDefinition struct {
 	// AngleBrackets reports whether the destination is written in angle
 	// brackets, such as "</url>"; Destination leaves them out.
 	AngleBrackets bool
+
+	// paragraph numbers the run of lines, one paragraph to goldmark, that
+	// the definition was read from, from 1; 0 marks one whose paragraph is
+	// unknown, which FootnoteText never reads as footnote text.
+	paragraph int
 }
 
 // ReferenceUsage represents a link or image in the document.
@@ -130,7 +135,8 @@ type Context struct {
 	// Definitions maps normalized labels to their first definitions.
 	Definitions map[string]*ReferenceDefinition
 
-	// AllDefinitions includes all definitions, including duplicates.
+	// AllDefinitions includes all definitions, including duplicates, in
+	// document order.
 	AllDefinitions []*ReferenceDefinition
 
 	// Usages is all link/image usages in document order.

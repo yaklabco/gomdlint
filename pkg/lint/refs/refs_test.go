@@ -483,6 +483,16 @@ func TestMarkdownlintKey(t *testing.T) {
 	}
 }
 
+// TestFootnoteTextUnknownParagraph checks that a definition whose paragraph
+// is unknown, as in a Context built by hand, is never footnote text.
+func TestFootnoteTextUnknownParagraph(t *testing.T) {
+	ctx := NewContext(nil)
+	ctx.AllDefinitions = []*ReferenceDefinition{{Label: "^1", Lines: [2]int{1, 1}}, {Label: "y", Lines: [2]int{2, 2}}}
+	if text := FootnoteText(ctx); len(text) != 0 {
+		t.Errorf("FootnoteText = %v, want none", text)
+	}
+}
+
 // TestMicromarkLabel checks which labels micromark reads: any that holds a
 // character other than a space, a tab or a line ending.
 func TestMicromarkLabel(t *testing.T) {

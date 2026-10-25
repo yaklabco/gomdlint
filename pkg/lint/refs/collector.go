@@ -76,6 +76,8 @@ type collector struct {
 	// closers counts its closing brackets (see closingBrackets).
 	chain   referenceChain
 	closers []int
+	// paragraphs counts the runs of definition lines read.
+	paragraphs int
 }
 
 // collect walks the AST to collect anchors and usages.

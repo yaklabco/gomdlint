@@ -165,6 +165,7 @@ func isListMarker(text []byte) bool {
 // definition's label, reads on. containers maps lines to their innermost
 // container (see blockLines).
 func (c *collector) parseDefinitionRun(run []definitionLine, containers map[int]*mdast.Node) {
+	c.paragraphs++
 	text, offsets := joinDefinitionLines(c.ctx.File.Content, run)
 	for pos := 0; pos < len(text); {
 		parsed, ok := parseDefinition(text, pos)
@@ -246,6 +247,7 @@ func (c *collector) addDefinition(parsed parsedDefinition, lines []definitionLin
 		Lines:         [2]int{first.number, last.number},
 		Removable:     allNoMarker(lines),
 		AngleBrackets: parsed.angleBrackets,
+		paragraph:     c.paragraphs,
 	}
 	if _, exists := c.ctx.Definitions[normalized]; exists {
 		def.IsDuplicate = true

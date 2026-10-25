@@ -241,17 +241,51 @@ type micromarkLinks struct {
 	// footnotes holds the footnote definitions micromark is certain to
 	// read (see certainFootnoteLabels), built on first use.
 	footnotes map[string]bool
+	// footnoteTextOnly holds the labels, as refs.NormalizeLabel keys them,
+	// whose only definitions micromark reads as footnote text (see
+	// refs.FootnoteText); footnoteTextRead tells whether it is built.
+	footnoteTextOnly map[string]bool
+	footnoteTextRead bool
+}
+
+// inFootnoteTextOnly reports whether every definition goldmark could have
+// resolved label with is one that micromark reads as footnote text, so
+// that micromark makes no link of the reference.
+func (m *micromarkLinks) inFootnoteTextOnly(label string) bool {
+	if !m.footnoteTextRead {
+		m.footnoteTextRead = true
+		if bytes.Contains(m.ctx.File.Content, []byte("[^")) {
+			refCtx := m.ctx.RefContext()
+			if text := refs.FootnoteText(refCtx); len(text) > 0 {
+				read := make(map[string]bool)
+				m.footnoteTextOnly = make(map[string]bool)
+				for _, def := range refCtx.AllDefinitions {
+					if text[def] {
+						m.footnoteTextOnly[def.NormalizedLabel] = true
+					} else {
+						read[def.NormalizedLabel] = true
+					}
+				}
+				for key := range read {
+					delete(m.footnoteTextOnly, key)
+				}
+			}
+		}
+	}
+	return m.footnoteTextOnly[refs.NormalizeLabel(label)]
 }
 
 // reads reports whether micromark reads link, a link or image, as one.
-// Three references are links to goldmark alone: one whose label micromark
+// These references are links to goldmark alone: one whose label micromark
 // reads as no label, such as "[ ]" or "[x][ ]" (see refs.MicromarkLabel); a
 // shortcut reference right before a "[", which goldmark reads when the "["
 // opens no label it can close, as in "[x][y" at the end of a line, and
 // micromark never does; and one whose label calls a GFM footnote, such as
 // "[x][^n]" with "[^n]: note", which goldmark reads as a link reference
 // definition. Only a plain footnote label and a footnote definition that
-// micromark is certain to read count (see plainFootnoteLabel).
+// micromark is certain to read count (see plainFootnoteLabel). Nor does
+// micromark read a reference whose only definitions it reads as the text of
+// a footnote (see refs.FootnoteText).
 func (m *micromarkLinks) reads(link *mdast.Node) bool {
 	if link.Inline == nil || link.Inline.Link == nil {
 		return true
@@ -275,9 +309,11 @@ func (m *micromarkLinks) reads(link *mdast.Node) bool {
 		if m.footnotes == nil {
 			m.footnotes = certainFootnoteLabels(m.ctx)
 		}
-		return !m.footnotes[labelKey(label)]
+		if m.footnotes[labelKey(label)] {
+			return false
+		}
 	}
-	return true
+	return !m.inFootnoteTextOnly(label)
 }
 
 // isAutolinkNode reports whether a link node is an autolink, which has no link text brackets.
