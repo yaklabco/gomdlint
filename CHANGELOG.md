@@ -341,7 +341,10 @@ formats change. The first entries under Changed may need action.
   of a heading and right before other text, which hid links from the link
   rules. So `- ## [ ](/url).` gets the two MD039 findings markdownlint gives
   it, and `- [x](https://example.com)` is a link, not a checkbox before a
-  bare URL that MD034 reported.
+  bare URL that MD034 reported. One case now reports less: in
+  `- [x][ ](#)` with `x` defined, goldmark reads `[x][ ]` as a collapsed
+  reference instead of a checkbox and a link, so MD039 and MD042 miss the
+  link `[ ](#)` that markdownlint reads after `[x]`.
 - **MD039**, **MD042**, **MD054**: Skip references that markdownlint reads
   as no link: one whose label is nothing but spaces, tabs and line endings,
   such as `[ ]` when a definition's label is a form feed, a shortcut right
@@ -350,6 +353,8 @@ formats change. The first entries under Changed may need action.
   as written, so `[X]` with `[x]: #` is not reported. A definition whose
   destination is in angle brackets has none for them. MD054 reads an inline
   link without a destination, such as `[x]()`, as a shortcut reference.
+  They read no link to a definition that micromark reads as the text of a
+  footnote, such as `[y]: /u` right below `[^1]: note`.
 - **MD052**: Records no reference for brackets whose text is blank or holds
   a closing bracket, as markdownlint does, so in `[ ][y]` the reference is
   the shortcut `[y]`, and reads brackets right after a reference with it, so
