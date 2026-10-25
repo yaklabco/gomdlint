@@ -297,24 +297,65 @@ func (r *companyPolicyRule) DefaultSeverity() config.Severity {
 }
 
 // TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne covers a registry
-// with the built-in rules in which a custom rule then replaces MD009, under
-// another name or as another implementation under the built-in rule's own
-// name. The registry still holds the built-in rule's catalog entry for
-// MD009, but the custom rule is not the built-in one, so its descriptor
-// describes the rule itself: its own description, tags and default
-// severity, with no help and no help URI.
+// with the built-in rules in which a custom rule then replaces MD009: under
+// another name, as another implementation under the built-in rule's own
+// name, or as a wrapper around the built-in rule. The registry still holds
+// the built-in rule's catalog entry for MD009, but none of these is the
+// built-in rule, so its descriptor describes the rule itself: its own
+// description, tags and default severity, with no help and no help URI.
 func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"company-policy", "no-trailing-spaces"} {
-		t.Run(name, func(t *testing.T) {
+	builtIn := rules.NewTrailingWhitespaceRule()
+	policy := func(name string) reporter.SARIFRule {
+		return reporter.SARIFRule{
+			ID:               "MD009",
+			Name:             name,
+			ShortDescription: &reporter.SARIFMultiformatText{Text: "Company policy."},
+			FullDescription:  &reporter.SARIFMultiformatText{Text: "Company policy."},
+			DefaultConfig:    &reporter.SARIFRuleConfig{Level: "error"},
+			Properties:       map[string]any{"tags": []any{"policy"}},
+		}
+	}
+	builtInTags := make([]any, 0, len(builtIn.Tags()))
+	for _, tag := range builtIn.Tags() {
+		builtInTags = append(builtInTags, tag)
+	}
+
+	for _, tt := range []struct {
+		name string
+		rule lint.Rule
+		want reporter.SARIFRule
+	}{
+		{
+			name: "another name",
+			rule: &companyPolicyRule{BaseRule: lint.NewBaseRule("MD009", "company-policy", "Company policy.", []string{"policy"}, false)},
+			want: policy("company-policy"),
+		},
+		{
+			name: "the built-in name",
+			rule: &companyPolicyRule{BaseRule: lint.NewBaseRule("MD009", "no-trailing-spaces", "Company policy.", []string{"policy"}, false)},
+			want: policy("no-trailing-spaces"),
+		},
+		{
+			name: "a wrapper",
+			rule: struct{ lint.Rule }{builtIn},
+			want: reporter.SARIFRule{
+				ID:               "MD009",
+				Name:             builtIn.Name(),
+				ShortDescription: &reporter.SARIFMultiformatText{Text: builtIn.Description()},
+				FullDescription:  &reporter.SARIFMultiformatText{Text: builtIn.Description()},
+				DefaultConfig:    &reporter.SARIFRuleConfig{Level: "warning"},
+				Properties:       map[string]any{"tags": builtInTags},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
 			registry := lint.NewRegistry()
 			rules.RegisterAll(registry)
-			registry.Register(&companyPolicyRule{
-				BaseRule: lint.NewBaseRule("MD009", name, "Company policy.", []string{"policy"}, false),
-			})
+			registry.Register(tt.rule)
 
 			root := newGitWorkTree(t, false)
 			result := &runner.Result{Files: []runner.FileOutcome{
@@ -327,14 +368,7 @@ func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 			descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
 
 			require.Len(t, descriptors, 1)
-			assert.Equal(t, reporter.SARIFRule{
-				ID:               "MD009",
-				Name:             name,
-				ShortDescription: &reporter.SARIFMultiformatText{Text: "Company policy."},
-				FullDescription:  &reporter.SARIFMultiformatText{Text: "Company policy."},
-				DefaultConfig:    &reporter.SARIFRuleConfig{Level: "error"},
-				Properties:       map[string]any{"tags": []any{"policy"}},
-			}, descriptors[0])
+			assert.Equal(t, tt.want, descriptors[0])
 		})
 	}
 }

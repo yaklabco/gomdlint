@@ -221,8 +221,11 @@ type replacementRule struct {
 // TestPagesOfARuleThatReplacesABuiltinOne covers a registry with the
 // built-in rules, in which a custom rule then replaces MD009, under
 // another name or under the built-in rule's own, and a wrapper around the
-// built-in rule. None of them is the built-in rule, so their pages show no
-// example, no published page and no link to markdownlint's documentation.
+// built-in rule. None of them is the built-in rule, so their pages name the
+// rule but show no example, no published page address and no link to
+// markdownlint's documentation. Only those are suppressed: the registry
+// keeps the built-in rule's catalog entry for MD009, so the pages still
+// show its description, tags and options, as on main (plan item 89).
 func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 	builtIn, found := lint.DefaultRegistry.GetByID("MD009")
 	require.True(t, found)
@@ -253,14 +256,48 @@ func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 			require.NoError(t, ruledocs.WriteTextPage(&text, entry, ""))
 			require.NoError(t, ruledocs.WriteMarkdownPage(&markdown, entry))
 			for _, page := range []string{text.String(), markdown.String()} {
+				assert.Contains(t, page, tt.rule.Name(), "the page names the rule")
 				assert.NotContains(t, page, "This document breaks the rule", "no built-in example")
 				assert.NotContains(t, page, "md009.md", "no markdownlint link")
 			}
 		})
 	}
+}
 
-	for _, rule := range lint.DefaultRegistry.Rules() {
-		assert.True(t, ruledocs.IsBuiltInRule(rule), rule.ID())
+// TestIsBuiltInRule covers which rules count as built in: the rules that
+// RegisterAll registers, in the default registry and in a fresh one, but
+// not a custom rule under a built-in ID, under its name or another, a
+// wrapper around a built-in rule, or a rule under an ID of its own.
+func TestIsBuiltInRule(t *testing.T) {
+	builtIn, found := lint.DefaultRegistry.GetByID("MD009")
+	require.True(t, found)
+	custom := func(id, name string) lint.Rule {
+		return &replacementRule{lint.NewBaseRule(id, name, "Company policy.", nil, false)}
+	}
+	for _, tt := range []struct {
+		name string
+		rule lint.Rule
+		want bool
+	}{
+		{"the default registry's rule", builtIn, true},
+		{"a new instance of the built-in rule", rules.NewTrailingWhitespaceRule(), true},
+		{"gomdlint's own rule", rules.NewTableAlignmentRule(), true},
+		{"another name under a built-in ID", custom("MD009", "company-policy"), false},
+		{"the built-in name, another type", custom("MD009", "no-trailing-spaces"), false},
+		{"a wrapper", struct{ lint.Rule }{builtIn}, false},
+		{"an ID of its own", custom("ZZ001", "custom-rule"), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ruledocs.IsBuiltInRule(tt.rule))
+		})
+	}
+
+	fresh := lint.NewRegistry()
+	rules.RegisterAll(fresh)
+	for _, registry := range []*lint.Registry{lint.DefaultRegistry, fresh} {
+		for _, rule := range registry.Rules() {
+			assert.True(t, ruledocs.IsBuiltInRule(rule), rule.ID())
+		}
 	}
 }
 
