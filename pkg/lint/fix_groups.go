@@ -51,10 +51,13 @@ func (g *fixGroups) reserve(group int, fixes []pendingFix, ruleID string) []pend
 // was withheld or invalid. A group is fixed when every diagnostic the rule
 // reported in it is kept with a fix, and their edits do not overlap: they
 // become one edit that also writes the text between them back unchanged,
-// which is offered like any other fix and takes the place that reserve
-// kept, fixing each member. Each member keeps its own edits, written with
-// the file's line endings. Otherwise every member loses its fix and its
-// group, and the group's place among fixes is dropped.
+// which is offered like any other fix, and so is checked for line endings
+// as a whole, and takes the place that reserve kept, fixing each member.
+// Each member keeps its own edits, rewritten where the engine writes the
+// group's edit in other line endings (see writeMembers), so that the
+// members' edits together make exactly that edit. Otherwise every member
+// loses its fix and its group, and the group's place among fixes is
+// dropped.
 func (g *fixGroups) offer(
 	diags []Diagnostic,
 	fixes []pendingFix,
@@ -78,11 +81,16 @@ func (g *fixGroups) offer(
 		members[group] = append(members[group], idx)
 	}
 	for _, group := range order {
-		edits, ok := g.combine(diags, group, members[group], content)
-		for _, idx := range members[group] {
-			ok = ok && offers.endings.WriteNewlines(diags[idx].FixEdits)
+		pieces, ok := g.pieces(diags, group, members[group])
+		var combined fix.TextEdit
+		if ok {
+			combined, ok = fix.CombineEdits(content, pieceEdits(pieces))
 		}
-		ok = ok && offers.offer(edits, disabled)
+		written := []fix.TextEdit{combined}
+		ok = ok && offers.offer(written, disabled)
+		if ok && written[0].NewText != combined.NewText {
+			ok = writeMembers(diags, pieces, content, combined.NewText, written[0].NewText)
+		}
 		if !ok {
 			for _, idx := range members[group] {
 				diags[idx].FixEdits = nil
@@ -91,37 +99,200 @@ func (g *fixGroups) offer(
 			continue
 		}
 		if slot, reserved := g.slots[group]; reserved {
-			fixes[slot].edits = edits
+			fixes[slot].edits = written
 			fixes[slot].diagnostics = len(members[group])
 		}
 	}
 	return slices.DeleteFunc(fixes, func(pending pendingFix) bool { return len(pending.edits) == 0 })
 }
 
-// combine returns the one edit that makes the fixes of a group's members,
-// or false when a member of the group was dropped or has no fix, or two of
-// their edits overlap. An edit that several members carry is made once, as
-// a fix that several diagnostics share is applied once.
-func (g *fixGroups) combine(diags []Diagnostic, group int, members []int, content []byte) ([]fix.TextEdit, bool) {
+// groupPiece is one edit of a group's members and the members that carry
+// it, as indexes into the rule's diagnostics.
+type groupPiece struct {
+	edit   fix.TextEdit
+	owners []int
+}
+
+// pieces returns the distinct edits of a group's members in the order of
+// fix.SortEdits, or false when a member of the group was dropped or has no
+// fix. An edit that several members carry is one piece, made once, as a fix
+// that several diagnostics share is applied once.
+func (g *fixGroups) pieces(diags []Diagnostic, group int, members []int) ([]groupPiece, bool) {
 	if len(members) != g.sizes[group] {
 		return nil, false
 	}
-	var edits []fix.TextEdit
-	seen := make(map[fix.TextEdit]bool)
+	var pieces []groupPiece
+	index := make(map[fix.TextEdit]int)
 	for _, idx := range members {
 		if len(diags[idx].FixEdits) == 0 {
 			return nil, false
 		}
 		for _, edit := range diags[idx].FixEdits {
-			if !seen[edit] {
-				seen[edit] = true
-				edits = append(edits, edit)
+			if at, seen := index[edit]; seen {
+				pieces[at].owners = append(pieces[at].owners, idx)
+				continue
 			}
+			index[edit] = len(pieces)
+			pieces = append(pieces, groupPiece{edit: edit, owners: []int{idx}})
 		}
 	}
-	combined, ok := fix.CombineEdits(content, edits)
-	if !ok {
-		return nil, false
+	slices.SortStableFunc(pieces, func(a, b groupPiece) int {
+		if a.edit.StartOffset != b.edit.StartOffset {
+			return a.edit.StartOffset - b.edit.StartOffset
+		}
+		return a.edit.EndOffset - b.edit.EndOffset
+	})
+	return pieces, true
+}
+
+// pieceEdits returns the edits of pieces, in order.
+func pieceEdits(pieces []groupPiece) []fix.TextEdit {
+	edits := make([]fix.TextEdit, len(pieces))
+	for idx, piece := range pieces {
+		edits[idx] = piece.edit
 	}
-	return []fix.TextEdit{combined}, true
+	return edits
+}
+
+// writeMembers rewrites the edits of a group's members after the engine
+// wrote the group's edit, whose text was raw, as written, with other line
+// endings. Writing changes only line endings, one for one, so each piece's
+// text and each stretch of content between two pieces has its place in
+// written. Each piece gets its written text, and a stretch whose line
+// endings changed becomes one more edit, from its first changed byte to
+// its last, of the member that carries the piece before it. Applied
+// together, the members' edits then make written. It reports false when
+// raw and written do not line up so, which leaves the group without a fix.
+func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, written string) bool {
+	// bounds holds where each piece's text starts and ends in raw.
+	bounds := make([]int, 0, 2*len(pieces))
+	pos := 0
+	for idx, piece := range pieces {
+		if idx > 0 {
+			pos += piece.edit.StartOffset - pieces[idx-1].edit.EndOffset
+		}
+		bounds = append(bounds, pos)
+		pos += len(piece.edit.NewText)
+		bounds = append(bounds, pos)
+	}
+	at, ok := alignLineEndings(raw, written, bounds)
+	if !ok {
+		return false
+	}
+
+	edits := make(map[int][]fix.TextEdit)
+	for idx, piece := range pieces {
+		edit := piece.edit
+		edit.NewText = written[at[2*idx]:at[2*idx+1]]
+		for _, owner := range piece.owners {
+			edits[owner] = append(edits[owner], edit)
+		}
+		if idx+1 == len(pieces) {
+			continue
+		}
+		start, end := edit.EndOffset, pieces[idx+1].edit.StartOffset
+		if gap, changed := changedStretch(string(content[start:end]), written[at[2*idx+1]:at[2*idx+2]], start); changed {
+			edits[piece.owners[0]] = append(edits[piece.owners[0]], gap)
+		}
+	}
+	for owner, ownerEdits := range edits {
+		diags[owner].FixEdits = ownerEdits
+	}
+	return true
+}
+
+// alignLineEndings maps offsets of raw, given in ascending order, to the
+// offsets in written where the same text falls. written is raw with some
+// line endings ("\r\n", "\r" or "\n") written as other line endings. It
+// reports false when the two differ otherwise, or an offset inside a line
+// ending of raw falls in one that written changed.
+func alignLineEndings(raw, written string, offsets []int) ([]int, bool) {
+	at := make([]int, len(offsets))
+	next := 0
+	rawPos, writtenPos := 0, 0
+	for {
+		for next < len(offsets) && offsets[next] == rawPos {
+			at[next] = writtenPos
+			next++
+		}
+		if rawPos == len(raw) {
+			break
+		}
+		rawEnding := lineEndingLength(raw, rawPos)
+		if rawEnding == 0 {
+			if writtenPos == len(written) || written[writtenPos] != raw[rawPos] {
+				return nil, false
+			}
+			rawPos++
+			writtenPos++
+			continue
+		}
+		writtenEnding := lineEndingLength(written, writtenPos)
+		if writtenEnding == 0 {
+			return nil, false
+		}
+		if rawEnding == 2 && next < len(offsets) && offsets[next] == rawPos+1 {
+			// An offset between "\r" and "\n" keeps its place only when the
+			// line ending stays as it was.
+			if raw[rawPos:rawPos+2] != written[writtenPos:writtenPos+writtenEnding] {
+				return nil, false
+			}
+			at[next] = writtenPos + 1
+			next++
+		}
+		rawPos += rawEnding
+		writtenPos += writtenEnding
+	}
+	return at, next == len(offsets) && writtenPos == len(written)
+}
+
+// lineEndingLength returns the length of the line ending that starts at
+// pos in text: 2 for "\r\n", 1 for "\r" or "\n", and 0 when none does.
+func lineEndingLength(text string, pos int) int {
+	switch {
+	case text[pos] == '\n':
+		return 1
+	case text[pos] != '\r':
+		return 0
+	case pos+1 < len(text) && text[pos+1] == '\n':
+		return 2
+	default:
+		return 1
+	}
+}
+
+// changedStretch returns the edit that turns old, the content at offset,
+// into written, from the first byte that differs to the last, or false
+// when the two are the same. The edit never starts or ends between the
+// "\r" and "\n" of a line ending.
+func changedStretch(old, written string, offset int) (fix.TextEdit, bool) {
+	if old == written {
+		return fix.TextEdit{}, false
+	}
+	prefix := 0
+	for prefix < len(old) && prefix < len(written) && old[prefix] == written[prefix] {
+		prefix++
+	}
+	for prefix > 0 && (splitsLineEnding(old, prefix) || splitsLineEnding(written, prefix)) {
+		prefix--
+	}
+	suffix := 0
+	for suffix < len(old)-prefix && suffix < len(written)-prefix &&
+		old[len(old)-1-suffix] == written[len(written)-1-suffix] {
+		suffix++
+	}
+	for suffix > 0 && (splitsLineEnding(old, len(old)-suffix) || splitsLineEnding(written, len(written)-suffix)) {
+		suffix--
+	}
+	return fix.TextEdit{
+		StartOffset: offset + prefix,
+		EndOffset:   offset + len(old) - suffix,
+		NewText:     written[prefix : len(written)-suffix],
+	}, true
+}
+
+// splitsLineEnding reports whether pos lies between the "\r" and "\n" of a
+// line ending of text.
+func splitsLineEnding(text string, pos int) bool {
+	return pos > 0 && pos < len(text) && text[pos-1] == '\r' && text[pos] == '\n'
 }

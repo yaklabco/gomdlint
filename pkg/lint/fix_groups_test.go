@@ -214,6 +214,100 @@ func TestEngine_KeepsFixGroupsOfDifferentRulesApart(t *testing.T) {
 	assert.Equal(t, "- a\n  - b\n  - c\n\ntext\n\n- d\n  - e\n  - f\n", string(fix.ApplyEdits([]byte(content), result.Edits)))
 }
 
+// applyReported applies the edits that the diagnostics of result report, an
+// edit that several of them carry once, as a consumer of a report does.
+func applyReported(t *testing.T, content string, result *lint.FileResult) string {
+	t.Helper()
+
+	var edits []fix.TextEdit
+	seen := make(map[fix.TextEdit]bool)
+	for _, diag := range result.Diagnostics {
+		for _, reported := range diag.FixEdits {
+			if !seen[reported] {
+				seen[reported] = true
+				edits = append(edits, reported)
+			}
+		}
+	}
+	prepared, err := fix.PrepareEdits(edits, len(content))
+	require.NoError(t, err)
+	return string(fix.ApplyEdits([]byte(content), prepared))
+}
+
+// The edits that the members of a group report give, applied together,
+// what --fix writes, even where the engine writes the text between them in
+// other line endings than the file has there.
+func TestEngine_ReportsTheEditsAFixGroupApplies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "line feeds",
+			content: "# L\n\n- a\n  * b\n  * c\n- d\n",
+			want:    "# L\n\n- a\n  - b\n  - c\n- d\n",
+		},
+		{
+			name:    "carriage returns and line feeds",
+			content: "# L\r\n\r\n- a\r\n  * b\r\n  * c\r\n- d\r\n",
+			want:    "# L\r\n\r\n- a\r\n  - b\r\n  - c\r\n- d\r\n",
+		},
+		{
+			// The engine writes the line feed after b, between the two
+			// members, as the file's dominant ending.
+			name:    "a line feed among carriage returns",
+			content: "# L\r\n\r\n- a\r\n  * b\n  * c\r\n- d\r\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rule := groupRule("TEST001",
+				groupMember("TEST001", 4, 1, edit(t, tt.content, "* b", "- b")),
+				groupMember("TEST001", 5, 1, edit(t, tt.content, "* c", "- c")))
+
+			result := lintMarkdown(t, tt.content, rule)
+
+			require.Len(t, result.Diagnostics, 2)
+			for _, diag := range result.Diagnostics {
+				assert.True(t, diag.HasFix(), "line %d", diag.StartLine)
+				assert.Equal(t, 1, diag.FixGroup, "line %d", diag.StartLine)
+			}
+			assert.Equal(t, 2, result.AcceptedFixes)
+			fixed := string(fix.ApplyEdits([]byte(tt.content), result.Edits))
+			if tt.want != "" {
+				assert.Equal(t, tt.want, fixed)
+			}
+			assert.Equal(t, fixed, applyReported(t, tt.content, result), "the reported edits give what --fix writes")
+		})
+	}
+}
+
+// A group is checked for line endings as the one edit the engine applies,
+// so members whose edits would join line endings only on their own are
+// fixed together.
+func TestEngine_ChecksTheLineEndingsOfAFixGroupTogether(t *testing.T) {
+	t.Parallel()
+
+	// Deleting x alone would put the carriage return before the line feed.
+	const content = "a\rx\nz\n"
+	rule := groupRule("TEST001",
+		groupMember("TEST001", 2, 1, fix.TextEdit{StartOffset: 2, EndOffset: 3}),
+		groupMember("TEST001", 2, 1, fix.TextEdit{StartOffset: 3, EndOffset: 3, NewText: "y"}))
+
+	result := lintMarkdown(t, content, rule)
+
+	require.Len(t, result.Diagnostics, 2)
+	assert.Equal(t, 2, result.FixableCount())
+	assert.Equal(t, 2, result.AcceptedFixes)
+	assert.Equal(t, "a\ry\nz\n", string(fix.ApplyEdits([]byte(content), result.Edits)))
+	assert.Equal(t, "a\ry\nz\n", applyReported(t, content, result))
+}
+
 // A rule's groups are fixed or withheld each on its own, and the fixes
 // between them keep their places.
 func TestEngine_DecidesEachFixGroupOfARuleOnItsOwn(t *testing.T) {
