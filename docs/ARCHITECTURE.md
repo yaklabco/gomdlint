@@ -441,6 +441,19 @@ MD037, MD049 and MD050 report both sides or markers of an emphasis, as
 markdownlint does, with the fix that changes both. Skipped and deferred
 fixes are proposed again in the next pass.
 
+The list rules MD004, MD005, MD007 and MD027 change some items together,
+since changing one alone would break the list, but such a group can hold a
+whole list. Its findings form a fix group (`Diagnostic.FixGroup`): each
+keeps the edit of its own line, so reports grow with the list, not with
+its square. The rule checks the group's fixes as one edit, which also
+writes the text between the items back unchanged, on its first finding
+(`listFixes` in `pkg/lint/rules`), and gives the members their edits only
+when that edit passes. The engine makes the members' edits that same edit,
+offers it once, resolves it in the place of the first member and counts
+each member as fixed (`fixGroups` in `pkg/lint/fix_groups.go`). When a
+member is suppressed or has no valid fix, or the engine withholds the edit,
+no member keeps a fix.
+
 A finding on a line where its rule is disabled is dropped, and a fix that
 changes the text of such a line is withheld from the findings that remain
 (`disabledLines` in `pkg/lint/engine.go`). Whole lines inserted at the

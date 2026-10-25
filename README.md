@@ -300,6 +300,16 @@ is one insertion. JSON and SARIF reports show such a fix on each finding,
 so a consumer that applies every reported fix must apply it once, as
 markdownlint's own fix application does.
 
+Some list fixes change several items together, because changing one alone
+would break the list: a different bullet starts a new list, so
+`unordered-list-style` (MD004) replaces the bullets of a list together,
+and `list-indent` (MD005), `ul-indent` (MD007) and
+`no-multiple-space-blockquote` (MD027) move items together when one cannot
+move without the others. Each finding of such a group carries the edit of
+its own line, as markdownlint's do, and `--fix` applies the edits of the
+group together or not at all. A consumer that applies only some of them
+can split or merge lists.
+
 The summary format shows aggregated statistics:
 
 ```text

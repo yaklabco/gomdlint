@@ -538,6 +538,14 @@ formats change. The first entries under Changed may need action.
 - **MD037**, **MD049**, **MD050**: Report each side or marker of an
   emphasis, as markdownlint does. Both findings carry the fix that changes
   both, which `--fix` applies once.
+- **MD004**, **MD005**, **MD007**, **MD027**: When items of a list must
+  change together, because changing one alone would break the list, each
+  finding now carries the edit of its own line, as markdownlint gives each
+  of them a fix, and `--fix` applies the edits of the group together or not
+  at all. Only the first finding carried a fix, one edit for the whole
+  group, so the others showed as not fixable in every output format while
+  `--fix` rewrote them, and the summary and `--fix` counted one fixed
+  finding. `--fix` writes the same text as before.
 - A fix that several findings of one rule carry is applied once and counts
   for each of them, and the rule checks it once. JSON and SARIF reports show
   it on each finding, so a consumer that applies every reported fix must
