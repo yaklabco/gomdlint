@@ -85,8 +85,9 @@ type FileResult struct {
 
 	// AcceptedFixes is the number of diagnostics whose fixes Edits holds. It
 	// can differ from len(Edits): one fix may take several edits, several
-	// diagnostics of one rule may share one fix, and the blank-line fixes of
-	// several diagnostics of one rule at one boundary share one.
+	// diagnostics of one rule may share one fix or form one fix group (see
+	// Diagnostic.FixGroup), and the blank-line fixes of several diagnostics
+	// of one rule at one boundary share one.
 	AcceptedFixes int
 
 	// SkippedEdits contains the edits of fixes that were not applied because
@@ -271,6 +272,8 @@ func (e *Engine) lintFile(
 
 		var invalid []error
 		disabled := newDisabledLines(snapshot, ruleStates)
+		groups := newFixGroups(diags)
+		first := len(result.Diagnostics)
 		for _, diag := range diags {
 			line := diag.StartLine
 			if line > 0 && line < len(ruleStates) && !ruleStates[line] {
@@ -303,19 +306,26 @@ func (e *Engine) lintFile(
 					invalid = append(invalid, fmt.Errorf("fix for line %d: %w", diag.StartLine, err))
 					diag.FixEdits = nil
 				} else {
-					// A withheld fix leaves its finding without a fix.
 					diag.FixEdits = edits
-					if !offers.offer(diag.FixEdits, disabled) {
+					switch {
+					case diag.FixGroup != 0:
+						// The group is offered once all its members are
+						// in; its fix keeps the place of its first member.
+						if rr.AutoFix {
+							fixes = groups.reserve(diag.FixGroup, fixes, rule.ID())
+						}
+					case !offers.offer(diag.FixEdits, disabled):
+						// A withheld fix leaves its finding without a fix.
 						diag.FixEdits = nil
-					}
-					// Collect the fix if auto-fix is enabled for this rule.
-					if rr.AutoFix && len(diag.FixEdits) > 0 {
+					case rr.AutoFix:
+						// Collect the fix if auto-fix is enabled for this rule.
 						fixes = append(fixes, pendingFix{ruleID: rule.ID(), edits: diag.FixEdits, diagnostics: 1})
 					}
 				}
 			}
 			result.Diagnostics = append(result.Diagnostics, diag)
 		}
+		fixes = groups.offer(result.Diagnostics[first:], fixes, content, offers, disabled)
 
 		if len(invalid) > 0 {
 			result.RuleErrors[rule.ID()] = &RuleError{
@@ -556,8 +566,8 @@ type pendingFix struct {
 	edits  []fix.TextEdit
 
 	// diagnostics is the number of diagnostics the fix fixes: one, or more
-	// for one rule's fixes with the same edits, or its blank-line insertions
-	// at one boundary, merged into one fix.
+	// for one rule's fixes with the same edits, its blank-line insertions
+	// at one boundary, merged into one fix, or the members of a fix group.
 	diagnostics int
 
 	// mergeConflict marks a blank-line insertion for a different container

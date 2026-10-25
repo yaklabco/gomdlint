@@ -51,6 +51,17 @@ type Diagnostic struct {
 
 	// FixEdits contains the text edits to fix this issue (may be empty).
 	FixEdits []fix.TextEdit
+
+	// FixGroup, when not 0, puts the fix of this diagnostic in a group with
+	// the fixes of the rule's other diagnostics in the file that have the
+	// same FixGroup. A rule groups fixes that are only safe together, such
+	// as the bullets of one list, where a different bullet starts a new
+	// list. The engine checks and applies a group as one fix, which fixes
+	// each of its diagnostics, or withholds the fix of every diagnostic in
+	// it: when one of them is suppressed, has no valid fix or overlaps
+	// another, or when the engine withholds the one fix. Each diagnostic
+	// keeps its own edits, so reports show what each of them changes.
+	FixGroup int
 }
 
 // HasFix returns true if this diagnostic has associated fix edits.
@@ -102,7 +113,8 @@ type Rule interface {
 	//   - Return diagnostics for each violation found.
 	//   - Attach fix edits to Diagnostic.FixEdits (if CanFix() is true). The
 	//     edits of one diagnostic are applied together or not at all, and
-	//     "\n" in their text is written with the file's line ending.
+	//     "\n" in their text is written with the file's line ending. Fixes
+	//     that are only safe together share a Diagnostic.FixGroup.
 	//   - Respect context cancellation.
 	//   - Return error only for internal failures, not violations.
 	Apply(ctx *RuleContext) ([]Diagnostic, error)
