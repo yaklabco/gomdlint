@@ -161,6 +161,17 @@ func RuleDescription(rule Rule, meta RuleMeta) string {
 	return rule.Description()
 }
 
+// RuleTags returns the tags that describe rule: the tags in meta, its
+// catalog entry, or the rule's own tags when meta lists none, as the zero
+// entry of a rule without one lists none. The result may share its array
+// with meta or the rule.
+func RuleTags(rule Rule, meta RuleMeta) []string {
+	if len(meta.Tags) > 0 {
+		return meta.Tags
+	}
+	return rule.Tags()
+}
+
 // clone returns a copy of meta that shares no slices with it.
 func (meta RuleMeta) clone() RuleMeta {
 	meta.Aliases = slices.Clone(meta.Aliases)

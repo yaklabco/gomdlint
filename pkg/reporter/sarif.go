@@ -495,7 +495,7 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 		return rule
 	}
 
-	meta, hasMeta := b.registry.Meta(ruleID) // A rule without an entry gets the zero entry.
+	meta, _ := b.registry.Meta(ruleID) // A rule without an entry gets the zero entry.
 	rule.Name = registered.Name()
 	if short, full := ruleDescriptions(registered, meta); short != "" {
 		rule.ShortDescription = &SARIFMultiformatText{Text: short}
@@ -507,10 +507,7 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	rule.HelpURI = ruledocs.PageURL(entry)
 	rule.Help = ruleHelp(entry)
 
-	tags := registered.Tags()
-	if hasMeta {
-		tags = append([]string{string(meta.Category)}, meta.Tags...)
-	}
+	tags := append([]string{string(meta.Category)}, lint.RuleTags(registered, meta)...)
 	if tags := uniqueTags(tags, sarifTagLimit); len(tags) > 0 {
 		rule.Properties = map[string]any{"tags": tags}
 	}

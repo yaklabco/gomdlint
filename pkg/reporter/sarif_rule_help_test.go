@@ -195,14 +195,41 @@ func TestSARIFReporter_OnlyBuiltinRulesLinkToAPage(t *testing.T) {
 	require.Len(t, descriptors, 2)
 	for _, descriptor := range descriptors {
 		assert.Empty(t, descriptor.HelpURI, "%s: no generated page", descriptor.Name)
-		if assert.NotNil(t, descriptor.Help, descriptor.Name) {
-			assert.True(t, strings.HasPrefix(descriptor.Help.Text, descriptor.Name+" ("+descriptor.ID+")"),
-				"%s: the page that explain prints: %q", descriptor.Name, descriptor.Help.Text)
-			assert.True(t, strings.HasPrefix(descriptor.Help.Markdown, "# "+descriptor.Name+"\n"),
-				"%s: the Markdown page: %q", descriptor.Name, descriptor.Help.Markdown)
+		require.NotNil(t, descriptor.Help, descriptor.Name)
+		assert.True(t, strings.HasPrefix(descriptor.Help.Text, descriptor.Name+" ("+descriptor.ID+")"),
+			"%s: the page that explain prints: %q", descriptor.Name, descriptor.Help.Text)
+		assert.True(t, strings.HasPrefix(descriptor.Help.Markdown, "# "+descriptor.Name+"\n"),
+			"%s: the Markdown page: %q", descriptor.Name, descriptor.Help.Markdown)
+		for _, help := range []string{descriptor.Help.Text, descriptor.Help.Markdown} {
+			assert.NotContains(t, help, "markdownlint/blob", "%s: markdownlint does not document it", descriptor.Name)
+			assert.NotContains(t, help, "This document breaks the rule", "%s: no built-in rule's example", descriptor.Name)
 		}
 	}
 	assert.Contains(t, descriptors[0].Help.Text, "Custom reasons.", "the catalog entry's rationale")
+	assert.Contains(t, descriptors[1].Help.Text, "markdownlint does not have this rule.",
+		"a custom rule under a built-in rule's ID")
+}
+
+// TestSARIFReporter_TagsFallBackToTheRule covers a custom rule whose
+// catalog entry lists no tags: it keeps the tags it reports itself, after
+// its category, as a rule without an entry does.
+func TestSARIFReporter_TagsFallBackToTheRule(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	untagged := lint.NewBaseRule("ZZ001", "untagged-entry", "A rule.", []string{"own", "tags"}, false)
+	registry.Register(&untagged)
+	registry.Describe(lint.RuleMeta{ID: "ZZ001", Name: "untagged-entry", Category: lint.CategoryCode})
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "ZZ001", StartLine: 1}),
+	}}
+
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry}, result).Runs[0].Tool.Driver.Rules
+
+	require.Len(t, descriptors, 1)
+	assert.Equal(t, []any{"code", "own", "tags"}, descriptors[0].Properties["tags"])
 }
 
 // TestSARIFReporter_DescriptorsAreDeterministic reports every built-in rule

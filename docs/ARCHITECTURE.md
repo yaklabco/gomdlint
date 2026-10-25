@@ -766,7 +766,9 @@ lists them under each file's `notices`, and SARIF output records them as
   `internal/ruledocs`. A built-in rule's `helpUri` is its generated page,
   `ruledocs.RulePagesURL` plus `<name>.md`, on the main branch as the JSON
   Schema's `$id` is. Its tags are the rule's category, then its catalog
-  tags, at most 10, since GitHub code scanning keeps no more.
+  tags, at most 10, since GitHub code scanning keeps no more. Through
+  `internal/ruledocs`, `pkg/reporter` imports the built-in rules, so
+  `lint.DefaultRegistry`, which the reporter falls back to, holds them.
 - `diff` (`DiffReporter`): the unified diff the pipeline recorded, of the
   fixes `--fix` would make or, with `--fix`, made.
 
