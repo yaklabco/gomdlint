@@ -118,3 +118,22 @@ func TestLimit(t *testing.T) {
 		assert.Equal(t, tt.within, within, "%s: units into the character", tt.name)
 	}
 }
+
+func TestTrimSpace(t *testing.T) {
+	t.Parallel()
+
+	// The white space and line terminators of ECMAScript, which
+	// String.prototype.trim removes.
+	for _, char := range []rune{
+		'\t', '\n', '\v', '\f', '\r', ' ', 0x00A0, 0x1680, 0x2000, 0x200A,
+		0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF,
+	} {
+		assert.True(t, IsSpace(char), "U+%04X is white space", char)
+		assert.Empty(t, TrimSpace(string(char)+string(char)), "U+%04X is trimmed", char)
+	}
+	// Characters that Go or Unicode call white space and JavaScript does not.
+	for _, char := range []rune{0x0085, 0x180E, 0x200B, 0x2060, 'a'} {
+		assert.False(t, IsSpace(char), "U+%04X is not white space", char)
+	}
+	assert.Equal(t, "a \u0085b", TrimSpace("\u00a0\ufeff a \u0085b\u3000\t"))
+}

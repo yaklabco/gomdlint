@@ -165,6 +165,7 @@ func isListMarker(text []byte) bool {
 // definition's label, reads on. containers maps lines to their innermost
 // container (see blockLines).
 func (c *collector) parseDefinitionRun(run []definitionLine, containers map[int]*mdast.Node) {
+	c.paragraphs++
 	text, offsets := joinDefinitionLines(c.ctx.File.Content, run)
 	for pos := 0; pos < len(text); {
 		parsed, ok := parseDefinition(text, pos)
@@ -243,8 +244,10 @@ func (c *collector) addDefinition(parsed parsedDefinition, lines []definitionLin
 		Position: mdast.SourcePosition{
 			StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn,
 		},
-		Lines:     [2]int{first.number, last.number},
-		Removable: allNoMarker(lines),
+		Lines:         [2]int{first.number, last.number},
+		Removable:     allNoMarker(lines),
+		AngleBrackets: parsed.angleBrackets,
+		paragraph:     c.paragraphs,
 	}
 	if _, exists := c.ctx.Definitions[normalized]; exists {
 		def.IsDuplicate = true
@@ -266,6 +269,7 @@ func allNoMarker(lines []definitionLine) bool {
 // parsedDefinition is a link reference definition read from definition text.
 type parsedDefinition struct {
 	label, destination, title string
+	angleBrackets             bool
 	labelEnd                  int // offset of the ']' closing the label
 	end                       int // offset after the definition's last line ending
 }
@@ -290,6 +294,7 @@ func parseDefinition(text string, pos int) (parsedDefinition, bool) {
 	if strings.HasPrefix(parsed.destination, "<") {
 		// A pointy destination is written inside one pair of angle brackets.
 		parsed.destination = strings.TrimSuffix(parsed.destination[1:], ">")
+		parsed.angleBrackets = true
 	}
 
 	// The title is optional; without a valid one the destination must end the line.

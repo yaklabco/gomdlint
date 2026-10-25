@@ -278,7 +278,7 @@ func newGoldmarkInstance(flavor string, spans spanKey) goldmark.Markdown {
 	case FlavorGFM:
 		opts = append(opts,
 			goldmark.WithExtensions(
-				extension.GFM,
+				GFM,
 			),
 		)
 	case FlavorCommonMark:

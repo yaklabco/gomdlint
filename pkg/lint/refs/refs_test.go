@@ -345,7 +345,9 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 		{"shortcut", "[label]\n", []found{{StyleShortcut, "label", false}}},
 		{"image", "![alt][pic]\n", []found{{StyleFull, "pic", true}}},
 		{"escaped image marker", "\\![alt][pic]\n", []found{{StyleFull, "pic", false}}},
-		{"nested brackets in link text", "[a [b] c][d]\n", []found{{StyleShortcut, "b", false}, {StyleFull, "d", false}}},
+		// The failed pair inside leaves "]" in the text, so markdownlint
+		// records no full reference and "[d]" is a shortcut.
+		{"nested brackets in link text", "[a [b] c][d]\n", []found{{StyleShortcut, "b", false}, {StyleShortcut, "d", false}}},
 		{"brackets cannot form a shortcut label", "[a [b] c]\n", []found{{StyleShortcut, "b", false}}},
 		{"emphasis inside link text", "[*em*][ref]\n", []found{{StyleFull, "ref", false}}},
 		{"code span in a collapsed label", "[a `code`][]\n", []found{{StyleCollapsed, "a `code`", false}}},
@@ -382,6 +384,151 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCollect_UnresolvedReferencesAsMarkdownlint checks the unresolved
+// references recorded where the text of a bracket pair decides, as
+// markdownlint 0.41.1 records them (each want was its MD052 result with
+// shortcut_syntax and no ignored labels). markdownlint records no reference
+// whose text, trimmed as JavaScript trims it, is empty or holds a closing
+// bracket, and the brackets after such text start afresh. Brackets of
+// nothing but white space after a pair drop the pair too.
+func TestCollect_UnresolvedReferencesAsMarkdownlint(t *testing.T) {
+	type found struct {
+		style        ReferenceStyle
+		label        string
+		line, column int
+	}
+	tests := []struct {
+		markdown string
+		want     []found
+	}{
+		{"Use [ ][y] done.\n", []found{{StyleShortcut, "y", 1, 8}}},
+		{"Use [\f][y] done.\n", []found{{StyleShortcut, "y", 1, 8}}},
+		{"Use [\v\t][y] done.\n", []found{{StyleShortcut, "y", 1, 9}}},
+		{"Use [\xc2\xa0][y] done.\n", []found{{StyleShortcut, "y", 1, 9}}},
+		{"Use [\xe3\x80\x80][y] done.\n", []found{{StyleShortcut, "y", 1, 10}}},
+		{"Use [][y] done.\n", []found{{StyleShortcut, "y", 1, 7}}},
+		{"Use ![ ][y] done.\n", []found{{StyleShortcut, "y", 1, 9}}},
+		{"Use [ ][y][z] done.\n", []found{{StyleFull, "z", 1, 8}}},
+		{"Use [ ][y][] done.\n", []found{{StyleCollapsed, "y", 1, 8}}},
+		{"> Use [ ][y\n> z] done.\n", []found{{StyleShortcut, "y\n> z", 1, 10}}},
+		{"[a [b] c][d]\n", []found{{StyleShortcut, "b", 1, 4}, {StyleShortcut, "d", 1, 10}}},
+		{"[*em*][ref]\n", []found{{StyleFull, "ref", 1, 1}}},
+		{"[a\\]b][d]\n", []found{{StyleFull, "d", 1, 1}}},
+		{"[\xc2\xa0]\n", nil},
+		{"[a][\xc2\xa0]\n", nil},
+		{"[a][ ]\n", nil},
+		{"[a][\t]\n", nil},
+		{"[a][]\n", []found{{StyleCollapsed, "a", 1, 1}}},
+		// Brackets right after a reference join it: markdownlint reads one
+		// reference from the start of the first, with the last label, or
+		// none when the last brackets hold nothing but white space.
+		{"Use [x][y][z] done.\n", []found{{StyleFull, "z", 1, 5}}},
+		{"Use [x][y][z][w] done.\n", []found{{StyleFull, "w", 1, 5}}},
+		{"Use [x][y][] done.\n", []found{{StyleCollapsed, "y", 1, 5}}},
+		{"Use [x][y][z][] done.\n", []found{{StyleCollapsed, "z", 1, 5}}},
+		{"Use [x][][y] done.\n", []found{{StyleFull, "y", 1, 5}}},
+		{"Use [x]![y] done.\n", []found{{StyleFull, "y", 1, 5}}},
+		{"Use [x][]![y] done.\n", []found{{StyleFull, "y", 1, 5}}},
+		{"Use [x][y][ ] done.\n", nil},
+		{"Use [x][y][\xc2\xa0] done.\n", nil},
+		{"Use [a][b][x][\xc2\xa0] done.\n", nil},
+		{"Use [x] [y][z] done.\n", []found{{StyleShortcut, "x", 1, 5}, {StyleFull, "z", 1, 9}}},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.markdown), func(t *testing.T) {
+			file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			var got []found
+			for _, usage := range Collect(file.Root, file).Usages {
+				if usage.Unresolved {
+					got = append(got, found{usage.Style, usage.Label, usage.Position.StartLine, usage.Position.StartColumn})
+				}
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+			for idx := range tt.want {
+				if got[idx] != tt.want[idx] {
+					t.Errorf("reference %d = %+v, want %+v", idx, got[idx], tt.want[idx])
+				}
+			}
+		})
+	}
+}
+
+// TestMarkdownlintKey checks the key markdownlint's normalizeReference makes
+// of a label: lowercased as JavaScript lowercases, trimmed as JavaScript
+// trims, and each run of white space made one space. It folds no case, so
+// "Straße" and "strasse" keep different keys.
+func TestMarkdownlintKey(t *testing.T) {
+	tests := map[string]string{
+		"Label":                "label",
+		"  A \t\n B  ":         "a b",
+		"Straße":               "straße",
+		"STRASSE":              "strasse",
+		"\u0130":               "i\u0307",
+		"\f":                   "",
+		"\u00a0x\u3000y\ufeff": "x y",
+		"a\u0085b":             "a\u0085b",
+	}
+	for label, want := range tests {
+		if got := MarkdownlintKey(label); got != want {
+			t.Errorf("MarkdownlintKey(%q) = %q, want %q", label, got, want)
+		}
+	}
+}
+
+// TestFootnoteTextUnknownParagraph checks that a definition whose paragraph
+// is unknown, as in a Context built by hand, is never footnote text.
+func TestFootnoteTextUnknownParagraph(t *testing.T) {
+	ctx := NewContext(nil)
+	ctx.AllDefinitions = []*ReferenceDefinition{{Label: "^1", Lines: [2]int{1, 1}}, {Label: "y", Lines: [2]int{2, 2}}}
+	if text := FootnoteText(ctx); len(text) != 0 {
+		t.Errorf("FootnoteText = %v, want none", text)
+	}
+}
+
+// TestMicromarkLabel checks which labels micromark reads: any that holds a
+// character other than a space, a tab or a line ending.
+func TestMicromarkLabel(t *testing.T) {
+	for label, want := range map[string]bool{
+		"": false, " ": false, "\t": false, " \r\n ": false,
+		"\f": true, "\v": true, "\xc2\xa0": true, "x": true, " x ": true,
+	} {
+		if got := MicromarkLabel(label); got != want {
+			t.Errorf("MicromarkLabel(%q) = %v, want %v", label, got, want)
+		}
+	}
+}
+
+// TestMarkdownlintDefinitions checks the definitions keyed as markdownlint
+// keys them: the first definition of each key, with the destination as
+// markdownlint reads it, which is empty in angle brackets.
+func TestMarkdownlintDefinitions(t *testing.T) {
+	content := "Text.\n\n[X]: /first\n[x]: /second\n[ Y  z ]: #\n[w]: <#>\n[v]: \\#\n"
+	file, err := goldmark.New("gfm").Parse(context.Background(), "test.md", []byte(content))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	definitions := MarkdownlintDefinitions(Collect(file.Root, file))
+	want := map[string]string{"x": "/first", "y z": "#", "w": "", "v": "\\#"}
+	if len(definitions) != len(want) {
+		t.Fatalf("got %d definitions, want %d", len(definitions), len(want))
+	}
+	for key, destination := range want {
+		def, found := definitions[key]
+		if !found {
+			t.Errorf("no definition for %q", key)
+			continue
+		}
+		if got := MarkdownlintDestination(def); got != destination {
+			t.Errorf("destination of %q = %q, want %q", key, got, destination)
+		}
 	}
 }
 

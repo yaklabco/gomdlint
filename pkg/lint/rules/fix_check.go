@@ -11,7 +11,6 @@ import (
 
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
-	gmext "github.com/yuin/goldmark/extension"
 	gmextast "github.com/yuin/goldmark/extension/ast"
 	gmtext "github.com/yuin/goldmark/text"
 
@@ -480,7 +479,7 @@ func newFixCheck(file *mdast.FileSnapshot, flavor config.Flavor) *fixCheck {
 // newFixCheckOf returns a fixCheck for file, whose content as the checks read
 // it is content (see checkedContent).
 func newFixCheckOf(file *mdast.FileSnapshot, content []byte, flavor config.Flavor) *fixCheck {
-	markdowns := []goldmark.Markdown{goldmark.New(goldmark.WithExtensions(gmext.GFM))}
+	markdowns := []goldmark.Markdown{goldmark.New(goldmark.WithExtensions(gmparser.GFM))}
 	if flavor != config.FlavorGFM {
 		markdowns = append(markdowns, goldmark.New())
 	}

@@ -1012,6 +1012,29 @@ Some of its fix checks are also stricter than they need to be.
   folding, as GitHub and goldmark do, so `[Straße][]` uses
   `[STRASSE]: /url`. markdownlint lowercases labels instead, so it reports
   `[Straße][]` as undefined and the definition as unused.
+- gomdlint reads task list checkboxes where GFM does, and markdownlint reads
+  none. So for `- [x] done` with a `[x]: /url` definition, markdownlint
+  reads a shortcut link, which `link-image-style` (MD054) can report and
+  which uses the definition for `link-image-reference-definitions` (MD053).
+- goldmark reads `[x][ ]` as a collapsed reference to `x`, where micromark
+  reads `[x]` as text and goes on to read what follows. So in
+  `[x][ ](/url)` with `x` defined, `no-space-in-links` (MD039),
+  `no-empty-links` (MD042), `link-fragments` (MD051) and `link-image-style`
+  (MD054) miss the link `[ ](/url)` that markdownlint reads. Earlier
+  releases read `- [x][ ](#)` as a checkbox and a link, and reported that
+  link.
+- A GFM footnote definition whose text starts a paragraph takes the lines
+  after it into its note, so link reference definitions in that paragraph,
+  such as `[y]: /url` right below `[^1]: note`, are no definitions to
+  micromark. goldmark reads them as definitions. MD039, MD042 and MD054
+  read no link to such a definition when the footnote's label is `^` and
+  ASCII letters, digits and hyphens and its text is no heading, thematic
+  break, list item, fence, math or directive. With another label or text,
+  and in `link-fragments` (MD051), `reference-links-images` (MD052) and
+  `link-image-reference-definitions` (MD053), they are read as goldmark
+  reads them. `[^1]` is a call to markdownlint only where MD052 counts the
+  footnote definition, which it does not when the definition comes right
+  after a link reference definition.
 - gomdlint reads a markdownlint comment split over two lines, which
   markdownlint ignores, and ignores markdownlint comments inside code
   blocks, which markdownlint honours.
