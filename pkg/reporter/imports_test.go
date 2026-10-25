@@ -1,10 +1,10 @@
 package reporter_test
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -20,9 +20,25 @@ const (
 	repositoryRoot = "../.."
 )
 
-// goTool returns the go command of the toolchain that runs the tests.
-func goTool() string {
-	return filepath.Join(runtime.GOROOT(), "bin", "go")
+// runGo runs the go command with args in dir, with env added to the
+// environment, and returns its standard output. It fails the test with
+// the command's standard error when the command fails, and skips the
+// test when there is no go command on PATH.
+func runGo(t *testing.T, dir string, env []string, args ...string) string {
+	t.Helper()
+
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go command on PATH")
+	}
+	cmd := exec.Command(goTool, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	require.NoError(t, err, "go %s: %s", strings.Join(args, " "), stderr.String())
+	return string(out)
 }
 
 // TestReporterDoesNotImportTheBuiltinRules checks the import graph of
@@ -34,10 +50,8 @@ func goTool() string {
 func TestReporterDoesNotImportTheBuiltinRules(t *testing.T) {
 	t.Parallel()
 
-	out, err := exec.Command(goTool(), "list", "-deps", "-f", "{{.ImportPath}}", modulePath+"/pkg/reporter").Output()
-	require.NoError(t, err)
+	deps := strings.Fields(runGo(t, ".", nil, "list", "-deps", "-f", "{{.ImportPath}}", modulePath+"/pkg/reporter"))
 
-	deps := strings.Fields(string(out))
 	require.True(t, slices.Contains(deps, modulePath+"/pkg/lint"), "the listing holds the reporter's dependencies")
 	for _, forbidden := range []string{modulePath + "/pkg/lint/rules", modulePath + "/internal/ruledocs"} {
 		assert.False(t, slices.Contains(deps, forbidden), "pkg/reporter imports %s", forbidden)
@@ -89,7 +103,8 @@ func TestReporterKeepsRulesRegisteredWhileInitializing(t *testing.T) {
 
 	root, err := filepath.Abs(repositoryRoot)
 	require.NoError(t, err)
-	goVersion := moduleGoVersion(t, root)
+	goVersion := strings.TrimSpace(runGo(t, root, []string{"GOWORK=off"}, "list", "-m", "-f", "{{.GoVersion}}"))
+	require.NotEmpty(t, goVersion, "go.mod declares a Go version")
 
 	dir := t.TempDir()
 	files := map[string]string{
@@ -105,26 +120,8 @@ func TestReporterKeepsRulesRegisteredWhileInitializing(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 	}
 
-	run := exec.Command(goTool(), "run", ".")
-	run.Dir = dir
-	run.Env = append(os.Environ(), "GOWORK="+filepath.Join(dir, "go.work"), "GOFLAGS=", "GOTOOLCHAIN=local")
-	out, err := run.CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	env := []string{"GOWORK=" + filepath.Join(dir, "go.work"), "GOFLAGS=", "GOTOOLCHAIN=local"}
+	out := runGo(t, dir, env, "run", "-mod=readonly", ".")
 
-	assert.Equal(t, "company-policy\n", string(out))
-}
-
-// moduleGoVersion returns the Go version that the go.mod at root declares.
-func moduleGoVersion(t *testing.T, root string) string {
-	t.Helper()
-
-	content, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	require.NoError(t, err)
-	for line := range strings.Lines(string(content)) {
-		if version, found := strings.CutPrefix(strings.TrimSpace(line), "go "); found {
-			return version
-		}
-	}
-	require.FailNow(t, "go.mod declares no Go version")
-	return ""
+	assert.Equal(t, "company-policy\n", out)
 }

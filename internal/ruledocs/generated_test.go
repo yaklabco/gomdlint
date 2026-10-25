@@ -255,6 +255,8 @@ func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 				assert.NotContains(t, page, "This document breaks the rule", "no built-in example")
 				assert.NotContains(t, page, "md009.md", "no markdownlint link")
 				if tt.keepMeta {
+					assert.Contains(t, page, "br_spaces", "the catalog's options")
+					assert.Contains(t, page, "whitespace", "the catalog's tags and words")
 					continue
 				}
 				assert.Contains(t, page, "Company policy.")
