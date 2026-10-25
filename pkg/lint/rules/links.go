@@ -11,10 +11,12 @@ import (
 
 	gmutil "github.com/yuin/goldmark/util"
 
+	"github.com/yaklabco/gomdlint/internal/jstext"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/lint/mdscan"
+	"github.com/yaklabco/gomdlint/pkg/lint/refs"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 )
 
@@ -154,13 +156,14 @@ func (r *LinkSpacesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error)
 	}
 
 	links := ctx.Links()
+	micromark := &micromarkLinks{ctx: ctx}
 	diags := make([]lint.Diagnostic, 0, len(links))
 
 	for _, link := range links {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
-		if isAutolinkNode(link) {
+		if isAutolinkNode(link) || !micromark.reads(link) {
 			continue
 		}
 
@@ -231,6 +234,52 @@ func isSameLineSpace(r rune) bool {
 	return r != '\n' && r != '\r' && unicode.IsSpace(r)
 }
 
+// micromarkLinks tells which links and images of a document micromark, and
+// so markdownlint, reads as links and images.
+type micromarkLinks struct {
+	ctx *lint.RuleContext
+	// footnotes holds the footnote definitions micromark is certain to
+	// read (see certainFootnoteLabels), built on first use.
+	footnotes map[string]bool
+}
+
+// reads reports whether micromark reads link, a link or image, as one.
+// Three references are links to goldmark alone: one whose label micromark
+// reads as no label, such as "[ ]" or "[x][ ]" (see refs.MicromarkLabel); a
+// shortcut reference right before a "[", which goldmark reads when the "["
+// opens no label it can close, as in "[x][y" at the end of a line, and
+// micromark never does; and one whose label calls a GFM footnote, such as
+// "[x][^n]" with "[^n]: note", which goldmark reads as a link reference
+// definition. Only a plain footnote label and a footnote definition that
+// micromark is certain to read count (see plainFootnoteLabel).
+func (m *micromarkLinks) reads(link *mdast.Node) bool {
+	if link.Inline == nil || link.Inline.Link == nil {
+		return true
+	}
+	label := link.Inline.Link.ReferenceLabel
+	switch link.Inline.Link.ReferenceStyle {
+	case mdast.RefStyleFull, mdast.RefStyleCollapsed:
+	case mdast.RefStyleShortcut:
+		if file := link.File; file != nil {
+			if end := link.SourceRange().EndOffset; end >= 0 && end < len(file.Content) && file.Content[end] == '[' {
+				return false
+			}
+		}
+	case mdast.RefStyleInline, mdast.RefStyleAutolink:
+		return true
+	}
+	if !refs.MicromarkLabel(label) {
+		return false
+	}
+	if footnote, ok := strings.CutPrefix(label, "^"); ok && plainFootnoteLabel(footnote) {
+		if m.footnotes == nil {
+			m.footnotes = certainFootnoteLabels(m.ctx)
+		}
+		return !m.footnotes[labelKey(label)]
+	}
+	return true
+}
+
 // isAutolinkNode reports whether a link node is an autolink, which has no link text brackets.
 func isAutolinkNode(node *mdast.Node) bool {
 	return node.Inline != nil && node.Inline.Link != nil && node.Inline.Link.ReferenceStyle == mdast.RefStyleAutolink
@@ -264,13 +313,19 @@ func NewEmptyLinkRule() *EmptyLinkRule {
 // ("#"), as markdownlint does: an inline link is empty when its destination
 // is missing or "#", and a reference link when its definition's destination
 // is "#". Links with empty text but a destination are not empty.
+//
+// markdownlint finds a reference link's definition by its label as written,
+// trimmed, among the definitions keyed by refs.MarkdownlintKey, and so does
+// MD042: "[X]" with "[x]: #" is not reported, though the link resolves.
 func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	if ctx.Root == nil {
 		return nil, nil
 	}
 
 	links := ctx.Links()
+	micromark := &micromarkLinks{ctx: ctx}
 	diags := make([]lint.Diagnostic, 0, len(links))
+	var definitions map[string]*refs.ReferenceDefinition
 
 	for _, link := range links {
 		if ctx.Cancelled() {
@@ -281,18 +336,30 @@ func (r *EmptyLinkRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) 
 		if link.Inline != nil && link.Inline.Link != nil {
 			style = link.Inline.Link.ReferenceStyle
 		}
-		if style == mdast.RefStyleAutolink {
+		if style == mdast.RefStyleAutolink || !micromark.reads(link) {
 			continue
 		}
 
 		var msg string
-		switch destination := strings.TrimSpace(lint.LinkDestination(link)); {
-		case destination == "#":
+		switch style {
+		case mdast.RefStyleFull, mdast.RefStyleCollapsed, mdast.RefStyleShortcut:
+			if definitions == nil {
+				definitions = refs.MarkdownlintDefinitions(ctx.RefContext())
+			}
+			def := definitions[jstext.TrimSpace(link.Inline.Link.ReferenceLabel)]
+			if def == nil || refs.MarkdownlintDestination(def) != "#" {
+				continue
+			}
 			msg = "Link has empty fragment"
-		case destination == "" && style == mdast.RefStyleInline:
-			msg = "Link has empty destination"
 		default:
-			continue
+			switch destination := strings.TrimSpace(lint.LinkDestination(link)); destination {
+			case "#":
+				msg = "Link has empty fragment"
+			case "":
+				msg = "Link has empty destination"
+			default:
+				continue
+			}
 		}
 
 		diag := lint.NewDiagnostic(r.ID(), link, msg).

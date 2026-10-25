@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -184,19 +185,23 @@ func TestLinkSpacesRule_ReportsEachSide(t *testing.T) {
 }
 
 // TestLinkSpacesRule_LinksAfterTaskCheckboxes checks MD039 where a list
-// item starts with brackets. The parser reads them as a task checkbox as
-// goldmark does, at the start of the item's first block, a heading
-// included, so "[ ](/url)" there is no link, as on main, though markdownlint,
-// which reads no checkboxes, reports it. A link after a checkbox is checked.
+// item starts with brackets. The parser reads them as a task checkbox only
+// at the start of a paragraph and before white space and more text, as GFM
+// does, so "[ ](/url)" in a heading or right after the marker is a link
+// whose text is a space, which markdownlint 0.41.1 reports on each side. A
+// link after a checkbox is checked.
 func TestLinkSpacesRule_LinksAfterTaskCheckboxes(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
 		wantColumns []int
 	}{
-		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{}},
-		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{}},
-		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{}},
+		{name: "heading in a list item", input: "- ## [ ](/url).\n", wantColumns: []int{7, 7}},
+		{name: "quoted heading in a list item", input: "> - ## [ ](/url).\n", wantColumns: []int{9, 9}},
+		{name: "link right after the brackets", input: "- [ ](https://example.org)\n", wantColumns: []int{4, 4}},
+		{name: "link with a tab as its text", input: "- [\t](/url)\n", wantColumns: []int{4, 4}},
+		{name: "full reference with a space as its text", input: "- [ ][y]\n\n[y]: /u\n", wantColumns: []int{4, 4}},
+		{name: "brackets before text", input: "- [ ]text\n", wantColumns: []int{}},
 		{name: "checkbox before parenthesized text", input: "- [ ] (https://example.org)\n", wantColumns: []int{}},
 		{name: "checkbox before a link", input: "- [ ] [ text ](/url)\n", wantColumns: []int{8, 13}},
 	}
@@ -261,6 +266,107 @@ func TestLinkSpacesRule_Fix(t *testing.T) {
 			if got := string(fix.ApplyEdits([]byte(tt.input), prepared)); got != tt.want {
 				t.Errorf("fixed = %q, want %q", got, tt.want)
 			}
+		})
+	}
+}
+
+// TestLinkRulesReadNoLinkWithBlankLabels checks MD039, MD042 and MD054 on
+// references whose label is nothing but spaces, tabs and line endings, which
+// goldmark resolves when a definition's label is nothing but white space
+// with a form feed, and from which micromark, and so markdownlint 0.41.1,
+// makes no link. A label of form feeds is a label to micromark. Each want is
+// markdownlint's result.
+func TestLinkRulesReadNoLinkWithBlankLabels(t *testing.T) {
+	refStyles := map[string]any{"full": false, "collapsed": false, "shortcut": false}
+	tests := []struct {
+		rule        lint.Rule
+		input       string
+		options     map[string]any
+		wantColumns []int
+	}{
+		{rule: NewLinkSpacesRule(), input: "- [\t]text\n\n[\f]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ ] here.\n\n[\f]: /u\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ ][] here.\n\n[\f]: /u\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ x ][ ] here.\n\n[ x ]: /u\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ][\t] here.\n\n[y]: /u\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [\f] here.\n\n[\f]: /u\n", wantColumns: []int{6, 6}},
+		{rule: NewEmptyLinkRule(), input: "- [\t]text\n\n[\f]: #\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [] here.\n\n[\f]: #\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [\f] here.\n\n[\f]: #\n", wantColumns: []int{5}},
+		{rule: NewLinkImageStyleRule(), input: "Use [] here.\n\n[\f]: /u\n", options: refStyles, wantColumns: []int{}},
+		{rule: NewLinkImageStyleRule(), input: "Use [ ][] here.\n\n[\f]: /u\n", options: refStyles, wantColumns: []int{}},
+		// goldmark makes a shortcut link of brackets right before a "["
+		// that closes no label; micromark makes none.
+		{rule: NewLinkSpacesRule(), input: "Use [ x ][y\nz.\n\n[ x ]: /u\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ x ][\n\n[ x ]: /u\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [x][y\nz.\n\n[x]: #\n", wantColumns: []int{}},
+		{rule: NewLinkImageStyleRule(), input: "Use [x][y\nz.\n\n[x]: /u\n", options: refStyles, wantColumns: []int{}},
+		{rule: NewLinkImageStyleRule(), input: "Use [x] [y\nz.\n\n[x]: /u\n", options: refStyles, wantColumns: []int{5}},
+		// micromark reads "[^n]" as a call of the footnote "[^n]: note"
+		// defines, which goldmark reads as a link reference definition.
+		{rule: NewLinkSpacesRule(), input: "- [ ][^n] done\n\n[^n]: note\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ x ][^n] here.\n\n[^n]: /u\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [x][^n] here.\n\n[^n]: #\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [^n] here.\n\n[^n]: #\n", wantColumns: []int{}},
+		{rule: NewEmptyLinkRule(), input: "Use [^n][] here.\n\n[^n]: #\n", wantColumns: []int{}},
+		{rule: NewLinkImageStyleRule(), input: "Use [x][^n] here.\n\n[^n]: /u\n", options: refStyles, wantColumns: []int{}},
+		{rule: NewLinkImageStyleRule(), input: "Use ![x][^n] here.\n\n[^n]: /u\n", options: refStyles, wantColumns: []int{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rule.ID()+" "+strconv.Quote(tt.input), func(t *testing.T) {
+			diags := applyRuleWithOptions(t, tt.rule, tt.input, tt.options)
+			columns := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				require.Equal(t, 1, diag.StartLine)
+				columns = append(columns, diag.StartColumn)
+			}
+			assert.Equal(t, tt.wantColumns, columns)
+		})
+	}
+}
+
+// TestEmptyLinkRule_MarkdownlintLookup checks how MD042 finds the definition
+// of a reference link, as markdownlint 0.41.1 does: it looks the label up as
+// written, trimmed but not lowercased, among definitions keyed by
+// refs.MarkdownlintKey, so a label in upper case or with a run of white
+// space finds no definition even where the parser resolves the link. A
+// definition in angle brackets has no destination for markdownlint. Each
+// want is markdownlint's result.
+func TestEmptyLinkRule_MarkdownlintLookup(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantColumns []int
+	}{
+		{input: "Use [X] here.\n\n[x]: #\n", wantColumns: []int{}},
+		{input: "Use [x] here.\n\n[X]: #\n", wantColumns: []int{5}},
+		{input: "Use [x][Y] here.\n\n[y]: #\n", wantColumns: []int{}},
+		{input: "Use [X][y] here.\n\n[y]: #\n", wantColumns: []int{5}},
+		{input: "Use [X][] here.\n\n[x]: #\n", wantColumns: []int{}},
+		{input: "Use [x][] here.\n\n[x]: #\n", wantColumns: []int{5}},
+		{input: "Use [ x ] here.\n\n[x]: #\n", wantColumns: []int{5}},
+		{input: "Use [a  b] here.\n\n[a b]: #\n", wantColumns: []int{}},
+		{input: "Use [a\tb] here.\n\n[a b]: #\n", wantColumns: []int{}},
+		{input: "Use [Stra\xc3\x9fe] here.\n\n[strasse]: #\n", wantColumns: []int{}},
+		{input: "Use [\xc3\x9f] here.\n\n[\xc3\x9f]: #\n", wantColumns: []int{5}},
+		{input: "Use [x] here.\n\n[ X ]: #\n", wantColumns: []int{5}},
+		{input: "Use [x] here.\n\n[x]: <#>\n", wantColumns: []int{}},
+		{input: "Use [x] here.\n\n[x]: \\#\n", wantColumns: []int{}},
+		{input: "Use [x] here.\n\n[x]: #\n[X]: /u\n", wantColumns: []int{5}},
+		{input: "Use [x] here.\n\n[X]: /u\n[x]: #\n", wantColumns: []int{}},
+		{input: "Use [\f] here.\n\n[\f]: #\n", wantColumns: []int{5}},
+		{input: "- # [X]\n\n[x]: #\n", wantColumns: []int{}},
+		{input: "- # [x]\n\n[x]: #\n", wantColumns: []int{5}},
+		{input: "- [X][y] done\n\n[Y]: #\n", wantColumns: []int{3}},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.input), func(t *testing.T) {
+			diags := applyRuleWithOptions(t, NewEmptyLinkRule(), tt.input, nil)
+			columns := make([]int, 0, len(diags))
+			for _, diag := range diags {
+				require.Equal(t, 1, diag.StartLine)
+				columns = append(columns, diag.StartColumn)
+			}
+			assert.Equal(t, tt.wantColumns, columns)
 		})
 	}
 }

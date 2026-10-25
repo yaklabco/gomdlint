@@ -21,8 +21,7 @@ import (
 
 // checkboxDocuments are documents at the edges of where micromark,
 // cmark-gfm and goldmark read task checkboxes, with the number of
-// checkboxes the parser reads in each, which is the number goldmark's own
-// task list extension reads.
+// checkboxes the parser reads in each (see gmparser.GFM).
 var checkboxDocuments = []struct {
 	input string
 	boxes int
@@ -31,9 +30,12 @@ var checkboxDocuments = []struct {
 	{"-  [\t] task\n", 1},
 	{"1. [\t] task\n", 1},
 	{"> - [\t] task\n", 1},
-	{"- [\f] done\n", 1},
-	{"- [x]foo\n", 1},
-	{"- ## [ ](/url).\n", 1},
+	{"- [\f] done\n", 0},
+	{"- [x]foo\n", 0},
+	{"- ## [ ](/url).\n", 0},
+	{"- [x](https://example.com)\n", 0},
+	{"- [x] \n", 0},
+	{"- [x] foo\n  ---\n", 0},
 	{"- [\n  ] task\n", 0},
 	{"- [\n   ] task\n", 0},
 	{"> - [\n> ] task\n", 0},
@@ -235,11 +237,19 @@ func TestFixKeepsCheckboxes(t *testing.T) {
 	}
 }
 
+// gfmCheckboxLinePattern matches the first line of a paragraph, as goldmark
+// holds it, that GFM starts with a task checkbox: the brackets followed by
+// a line ending, or by spaces and tabs and more text. goldmark trims the
+// white space that ends a paragraph from its last line.
+var gfmCheckboxLinePattern = regexp.MustCompile(`^\[[ \txX]\](?:[\r\n]|[ \t]+[^ \t])`)
+
 // TestParserReadsCheckboxesAsGoldmark checks that the parser reads the task
 // checkboxes that goldmark's own GFM extension reads, at the same offsets
 // and checked alike, in every document of the checkbox corpus and in its
-// expected outputs. The parser builds on that extension, so this pins its
-// configuration and the mapping of checkbox nodes.
+// expected outputs, except those GFM does not read: in a heading, or with
+// the brackets not followed as GFM requires (gfmCheckboxLinePattern). The
+// parser hands goldmark's checkbox parser only the brackets GFM reads, so
+// this pins its configuration and the mapping of checkbox nodes.
 func TestParserReadsCheckboxesAsGoldmark(t *testing.T) {
 	type place struct {
 		offset  int
@@ -261,7 +271,15 @@ func TestParserReadsCheckboxesAsGoldmark(t *testing.T) {
 			source := []byte(input)
 			want := []place{}
 			for _, box := range goldmarkCheckboxes(reference.Parser().Parse(gmtext.NewReader(source))) {
-				want = append(want, place{offset: box.Parent().Lines().At(0).Start, checked: box.IsChecked})
+				block := box.Parent()
+				if kind := block.Kind(); kind != gmast.KindParagraph && kind != gmast.KindTextBlock {
+					continue
+				}
+				first := block.Lines().At(0)
+				if !gfmCheckboxLinePattern.Match(first.Value(source)) {
+					continue
+				}
+				want = append(want, place{offset: first.Start, checked: box.IsChecked})
 			}
 			file, err := gmparser.New(gmparser.FlavorGFM).Parse(context.Background(), "test.md", source)
 			require.NoError(t, err)

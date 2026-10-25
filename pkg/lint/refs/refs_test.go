@@ -345,7 +345,9 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 		{"shortcut", "[label]\n", []found{{StyleShortcut, "label", false}}},
 		{"image", "![alt][pic]\n", []found{{StyleFull, "pic", true}}},
 		{"escaped image marker", "\\![alt][pic]\n", []found{{StyleFull, "pic", false}}},
-		{"nested brackets in link text", "[a [b] c][d]\n", []found{{StyleShortcut, "b", false}, {StyleFull, "d", false}}},
+		// The failed pair inside leaves "]" in the text, so markdownlint
+		// records no full reference and "[d]" is a shortcut.
+		{"nested brackets in link text", "[a [b] c][d]\n", []found{{StyleShortcut, "b", false}, {StyleShortcut, "d", false}}},
 		{"brackets cannot form a shortcut label", "[a [b] c]\n", []found{{StyleShortcut, "b", false}}},
 		{"emphasis inside link text", "[*em*][ref]\n", []found{{StyleFull, "ref", false}}},
 		{"code span in a collapsed label", "[a `code`][]\n", []found{{StyleCollapsed, "a `code`", false}}},
@@ -371,6 +373,80 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 			for _, usage := range Collect(file.Root, file).Usages {
 				if usage.Unresolved {
 					got = append(got, found{usage.Style, usage.Label, usage.IsImage})
+				}
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+			for idx := range tt.want {
+				if got[idx] != tt.want[idx] {
+					t.Errorf("reference %d = %+v, want %+v", idx, got[idx], tt.want[idx])
+				}
+			}
+		})
+	}
+}
+
+// TestCollect_UnresolvedReferencesAsMarkdownlint checks the unresolved
+// references recorded where the text of a bracket pair decides, as
+// markdownlint 0.41.1 records them (each want was its MD052 result with
+// shortcut_syntax and no ignored labels). markdownlint records no reference
+// whose text, trimmed as JavaScript trims it, is empty or holds a closing
+// bracket, and the brackets after such text start afresh. Brackets of
+// nothing but white space after a pair drop the pair too.
+func TestCollect_UnresolvedReferencesAsMarkdownlint(t *testing.T) {
+	type found struct {
+		style        ReferenceStyle
+		label        string
+		line, column int
+	}
+	tests := []struct {
+		markdown string
+		want     []found
+	}{
+		{"Use [ ][y] done.\n", []found{{StyleShortcut, "y", 1, 8}}},
+		{"Use [\f][y] done.\n", []found{{StyleShortcut, "y", 1, 8}}},
+		{"Use [\v\t][y] done.\n", []found{{StyleShortcut, "y", 1, 9}}},
+		{"Use [\xc2\xa0][y] done.\n", []found{{StyleShortcut, "y", 1, 9}}},
+		{"Use [\xe3\x80\x80][y] done.\n", []found{{StyleShortcut, "y", 1, 10}}},
+		{"Use [][y] done.\n", []found{{StyleShortcut, "y", 1, 7}}},
+		{"Use ![ ][y] done.\n", []found{{StyleShortcut, "y", 1, 9}}},
+		{"Use [ ][y][z] done.\n", []found{{StyleFull, "z", 1, 8}}},
+		{"Use [ ][y][] done.\n", []found{{StyleCollapsed, "y", 1, 8}}},
+		{"> Use [ ][y\n> z] done.\n", []found{{StyleShortcut, "y\n> z", 1, 10}}},
+		{"[a [b] c][d]\n", []found{{StyleShortcut, "b", 1, 4}, {StyleShortcut, "d", 1, 10}}},
+		{"[*em*][ref]\n", []found{{StyleFull, "ref", 1, 1}}},
+		{"[a\\]b][d]\n", []found{{StyleFull, "d", 1, 1}}},
+		{"[\xc2\xa0]\n", nil},
+		{"[a][\xc2\xa0]\n", nil},
+		{"[a][ ]\n", nil},
+		{"[a][\t]\n", nil},
+		{"[a][]\n", []found{{StyleCollapsed, "a", 1, 1}}},
+		// Brackets right after a reference join it: markdownlint reads one
+		// reference from the start of the first, with the last label, or
+		// none when the last brackets hold nothing but white space.
+		{"Use [x][y][z] done.\n", []found{{StyleFull, "z", 1, 5}}},
+		{"Use [x][y][z][w] done.\n", []found{{StyleFull, "w", 1, 5}}},
+		{"Use [x][y][] done.\n", []found{{StyleCollapsed, "y", 1, 5}}},
+		{"Use [x][y][z][] done.\n", []found{{StyleCollapsed, "z", 1, 5}}},
+		{"Use [x][][y] done.\n", []found{{StyleFull, "y", 1, 5}}},
+		{"Use [x]![y] done.\n", []found{{StyleFull, "y", 1, 5}}},
+		{"Use [x][]![y] done.\n", []found{{StyleFull, "y", 1, 5}}},
+		{"Use [x][y][ ] done.\n", nil},
+		{"Use [x][y][\xc2\xa0] done.\n", nil},
+		{"Use [a][b][x][\xc2\xa0] done.\n", nil},
+		{"Use [x] [y][z] done.\n", []found{{StyleShortcut, "x", 1, 5}, {StyleFull, "z", 1, 9}}},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.markdown), func(t *testing.T) {
+			file, err := goldmark.New("commonmark").Parse(context.Background(), "test.md", []byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			var got []found
+			for _, usage := range Collect(file.Root, file).Usages {
+				if usage.Unresolved {
+					got = append(got, found{usage.Style, usage.Label, usage.Position.StartLine, usage.Position.StartColumn})
 				}
 			}
 			if len(got) != len(tt.want) {

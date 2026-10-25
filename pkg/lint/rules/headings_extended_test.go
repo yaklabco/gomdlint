@@ -1314,10 +1314,21 @@ func TestNoTrailingPunctuationRule_KeepsHeadingContent(t *testing.T) {
 		{name: "period after default ignorable characters alone", input: "## \u200b\u2060\u034f\ufe0f.\n"},
 		{name: "period after an emoji with a variation selector", input: "## \u2764\ufe0f.\n", wantFixed: "## \u2764\ufe0f\n"},
 		{name: "period after a letter with a combining mark", input: "## e\u0301.\n", wantFixed: "## e\u0301\n"},
-		// goldmark reads "[ ]", "[x]" or "[X]" at the start of a list item's
-		// first block as a task checkbox even in a heading. GFM reads it as
-		// text or as a link, so "[ ](/url)" is a link that shows nothing.
+		// goldmark's own task list extension reads "[ ]", "[x]" or "[X]" at
+		// the start of a list item's first block as a task checkbox even in a
+		// heading, and so does a goldmark renderer. GFM reads it as text or
+		// as a link, so "[ ](/url)" is a link that shows nothing, and "[x]"
+		// alone shows nothing to goldmark.
 		{name: "period after a link with a space as its text in a list item", input: "- ## [ ](/url).\n"},
+		{name: "period after checked brackets alone in a list item", input: "- ## [x].\n"},
+		{name: "period after checked capital brackets alone in a list item", input: "- ## [X].\n"},
+		{name: "period after brackets holding a tab alone in a list item", input: "- ## [\t].\n"},
+		{name: "period after checked brackets alone in a setext heading", input: "- [x].\n  ---\n"},
+		{name: "period after checked brackets alone after an empty first line", input: "-\n  ## [x].\n"},
+		{name: "period after checked brackets alone after a definition", input: "- [c]: /url\n  ## [x].\n",
+			wantFixed: "- [c]: /url\n  ## [x]\n"},
+		{name: "period after checked brackets and a reference in a list item", input: "- ## [x][ref].\n\n[ref]: /url\n",
+			wantFixed: "- ## [x][ref]\n\n[ref]: /url\n"},
 		{name: "period after a link with a tab as its text in a list item", input: "- ## [\t](/url).\n"},
 		{name: "period after a link with a space as its text in a quoted list item", input: "> - ## [ ](/url).\n"},
 		{name: "period after a reference link with a space as its text in a list item",

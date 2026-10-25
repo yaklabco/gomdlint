@@ -773,35 +773,69 @@ func trailingPunctuationFix(
 }
 
 // headingShowsContent reports whether a heading still shows something once
-// MD026 deletes everything in it from offset on, both as goldmark reads the
-// heading and as GFM does. The readings differ in one place only: goldmark
-// reads "[ ]", "[x]" or "[X]" at the start of a list item's first block as a
-// task checkbox even when that block is a heading, where GFM reads text or a
-// link (see checkboxShowsText). Everything else in the heading is read by
-// the same inline parser with the same definitions, so goldmark's reading
-// must show content after the checkbox, which shows nothing itself, and GFM
-// must show something where goldmark read the checkbox. A heading left
-// showing nothing renders differently and gets another anchor.
+// MD026 deletes everything in it from offset on, both as GFM reads the
+// heading, which the tree holds, and as goldmark's own task list extension
+// and a goldmark renderer read it. The readings differ in one place only:
+// goldmark reads "[ ]", "[x]" or "[X]" at the start of a list item's first
+// block as a task checkbox even when that block is a heading, where GFM
+// reads text or a link (see goldmarkHeadingCheckbox). goldmark's reading
+// must then show content after the checkbox, which shows nothing itself
+// (see showsContentAfter). A heading left showing nothing renders
+// differently and gets another anchor.
 func headingShowsContent(file *mdast.FileSnapshot, heading *mdast.Node, offset int) bool {
-	if first := heading.FirstChild; first != nil && first.Kind == mdast.NodeTaskCheckbox &&
-		!checkboxShowsText(file, first) {
+	if end, ok := goldmarkHeadingCheckbox(file, heading); ok && !showsContentAfter(file, heading, end, offset) {
 		return false
 	}
 	return showsContent(file, heading, offset)
 }
 
-// checkboxShowsText reports whether GFM shows something where goldmark read
-// a task checkbox at the start of a heading. GFM reads a checkbox only in a
-// paragraph, so it reads the brackets as text or as the text of a link:
-// "[x]" and "[X]" show their letter either way, and "[ ]" shows its brackets
-// unless "(" or "[" follows, where it can start a link whose text is only
-// whitespace and which shows nothing.
-func checkboxShowsText(file *mdast.FileSnapshot, checkbox *mdast.Node) bool {
-	if checkbox.Inline != nil && checkbox.Inline.Checked {
-		return true
+// goldmarkHeadingCheckbox returns the end of the task checkbox that
+// goldmark's own task list extension reads at the start of a heading: the
+// heading is the first child of a list item, with no link reference
+// definition before it in the item, and its inline content starts with "[",
+// a space, tab, form feed, "x" or "X", and "]".
+func goldmarkHeadingCheckbox(file *mdast.FileSnapshot, heading *mdast.Node) (int, bool) {
+	item := heading.Parent
+	if item == nil || item.Kind != mdast.NodeListItem || item.FirstChild != heading || heading.FirstChild == nil ||
+		heading.SourceRange().StartOffset != item.ContentRange().StartOffset {
+		return 0, false
 	}
-	end := checkbox.SourceRange().EndOffset
-	return end >= len(file.Content) || (file.Content[end] != '(' && file.Content[end] != '[')
+	start := heading.FirstChild.SourceRange().StartOffset
+	const markerLength = len("[ ]")
+	if start < 0 || start+markerLength > len(file.Content) {
+		return 0, false
+	}
+	marker := file.Content[start : start+markerLength]
+	if marker[0] != '[' || marker[2] != ']' || !strings.ContainsRune(" \t\fxX", rune(marker[1])) {
+		return 0, false
+	}
+	return start + markerLength, true
+}
+
+// showsContentAfter reports whether a heading shows something between the
+// end of the checkbox goldmark reads at its start and offset, as goldmark
+// reads it. goldmark reads what follows the checkbox afresh, so where the
+// tree holds one node that starts with the checkbox's brackets, text or a
+// link, the source after them is text to goldmark: the rest of the text, or
+// the destination or label of the link.
+func showsContentAfter(file *mdast.FileSnapshot, heading *mdast.Node, end, offset int) bool {
+	for child := heading.FirstChild; child != nil; child = child.Next {
+		span := child.SourceRange()
+		if span.StartOffset >= offset || span.EndOffset > len(file.Content) {
+			break
+		}
+		switch {
+		case span.EndOffset <= end:
+		case span.StartOffset < end:
+			if (child.Kind == mdast.NodeText || child.Kind == mdast.NodeLink) &&
+				showsText(file.Content[end:min(span.EndOffset, offset)]) {
+				return true
+			}
+		case showsChild(file, child, offset):
+			return true
+		}
+	}
+	return false
 }
 
 // showsContent reports whether the inline content of node that starts before
@@ -814,21 +848,27 @@ func showsContent(file *mdast.FileSnapshot, node *mdast.Node, offset int) bool {
 		if span.StartOffset >= offset || span.EndOffset > len(file.Content) {
 			break
 		}
-		switch child.Kind {
-		case mdast.NodeCodeSpan, mdast.NodeImage:
+		if showsChild(file, child, offset) {
 			return true
-		case mdast.NodeText:
-			if showsText(file.Content[span.StartOffset:min(span.EndOffset, offset)]) {
-				return true
-			}
-		case mdast.NodeHTMLInline, mdast.NodeTaskCheckbox:
-		default:
-			if showsContent(file, child, offset) {
-				return true
-			}
 		}
 	}
 	return false
+}
+
+// showsChild reports whether child, an inline node that starts before
+// offset, shows something before offset (see showsContent).
+func showsChild(file *mdast.FileSnapshot, child *mdast.Node, offset int) bool {
+	switch child.Kind {
+	case mdast.NodeCodeSpan, mdast.NodeImage:
+		return true
+	case mdast.NodeText:
+		span := child.SourceRange()
+		return showsText(file.Content[span.StartOffset:min(span.EndOffset, offset)])
+	case mdast.NodeHTMLInline, mdast.NodeTaskCheckbox:
+		return false
+	default:
+		return showsContent(file, child, offset)
+	}
 }
 
 // showsText reports whether source text renders a visible character: one

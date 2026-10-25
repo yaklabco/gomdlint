@@ -169,6 +169,7 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 	}
 
 	var footnotes map[string]bool
+	var definitions map[string]*refs.ReferenceDefinition
 	var diags []lint.Diagnostic
 
 	for _, usage := range refCtx.Usages {
@@ -199,6 +200,15 @@ func (r *ReferenceLinkImagesRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnosti
 		// reported.
 		if !usage.Unresolved || usage.ResolvedDefinition != nil || ignoredSet[usage.NormalizedLabel] ||
 			(usage.Style == refs.StyleShortcut && !includeShortcut) {
+			continue
+		}
+		// markdownlint finds the label defined when it has a definition
+		// under refs.MarkdownlintKey, which trims and collapses white
+		// space outside ASCII too, so neither does MD052 report it.
+		if definitions == nil {
+			definitions = refs.MarkdownlintDefinitions(refCtx)
+		}
+		if definitions[refs.MarkdownlintKey(usage.Label)] != nil {
 			continue
 		}
 		diags = append(diags, r.undefinedLabel(ctx, usage))
@@ -1141,23 +1151,50 @@ func (r *LinkImageStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, er
 
 	refCtx := ctx.RefContext()
 	var diags []lint.Diagnostic
+	var definitions map[string]*refs.ReferenceDefinition
+	micromark := &micromarkLinks{ctx: ctx}
 
 	for _, usage := range refCtx.Usages {
 		if ctx.Cancelled() {
 			return diags, ctx.Ctx.Err()
 		}
 
-		// Reference syntax the parser left as text is not a link or image,
-		// and markdownlint reads no reference whose label is nothing but
-		// white space (see refs.BlankLabel).
-		if usage.Unresolved || (isReferenceStyle(usage.Style) && refs.BlankLabel(usage.Label)) {
+		// Reference syntax the parser left as text is not a link or image.
+		if usage.Unresolved {
 			continue
+		}
+		// markdownlint finds a reference's definition by its label as
+		// written, neither trimmed nor lowercased, among the definitions
+		// keyed by refs.MarkdownlintKey, and reports no reference whose
+		// label finds none or whose definition, as it reads it, has no
+		// destination. So "[X]" with "[x]: /url" is not reported. Nor is
+		// a reference that is no link to markdownlint (see micromarkLinks).
+		// markdownlint reads an inline link or image without a destination,
+		// such as "[x]()", as a shortcut reference to its text as written.
+		style, label := usage.Style, usage.Label
+		if style == refs.StyleInline && usage.Destination == "" && usage.Node != nil {
+			start, end, ok := linkTextSpan(ctx.File.Content, usage.Node)
+			if !ok {
+				continue
+			}
+			style, label = refs.StyleShortcut, string(ctx.File.Content[start:end])
+		} else if isReferenceStyle(style) && (!refs.MicromarkLabel(label) ||
+			(usage.Node != nil && !micromark.reads(usage.Node))) {
+			continue
+		}
+		if isReferenceStyle(style) {
+			if definitions == nil {
+				definitions = refs.MarkdownlintDefinitions(refCtx)
+			}
+			if def := definitions[label]; def == nil || refs.MarkdownlintDestination(def) == "" {
+				continue
+			}
 		}
 
 		allowed := true
 		var msg string
 
-		switch usage.Style {
+		switch style {
 		case refs.StyleAutolink:
 			if !allowAutolink {
 				allowed = false

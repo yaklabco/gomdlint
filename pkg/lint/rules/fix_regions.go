@@ -10,7 +10,6 @@ import (
 
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
-	gmext "github.com/yuin/goldmark/extension"
 	gmextast "github.com/yuin/goldmark/extension/ast"
 	goldparser "github.com/yuin/goldmark/parser"
 	gmtext "github.com/yuin/goldmark/text"
@@ -397,7 +396,7 @@ func regionMarkdowns(flavor config.Flavor) []goldmark.Markdown {
 // CommonMark, built on first use.
 func recordingInstances() (goldmark.Markdown, goldmark.Markdown) {
 	recordingOnce.Do(func() {
-		recordingGFM = goldmark.New(goldmark.WithExtensions(gmext.GFM))
+		recordingGFM = goldmark.New(goldmark.WithExtensions(gmparser.GFM))
 		recordingGFM.Parser().AddOptions(recordingOption{})
 		recordingCommonMark = goldmark.New()
 		recordingCommonMark.Parser().AddOptions(recordingOption{})
