@@ -57,9 +57,12 @@ func (g *fixGroups) reserve(group int, fixes []pendingFix, ruleID string) []pend
 // as a whole, and takes the place that reserve kept, fixing each member.
 // Each member keeps its own edits, rewritten where the engine writes the
 // group's edit in other line endings (see writeMembers), so that the
-// members' edits together make exactly that edit. Otherwise every member
-// loses its fix and its group, and the group's place among fixes is
-// dropped.
+// members' edits together make exactly that edit. Where they cannot, as
+// when a member's boundary falls inside a line ending that writing changed
+// or two members' edits are written alike, each member reports the whole
+// written edit, which a consumer applies once. A group that is not fixed
+// leaves every member without its fix and its group, and the group's place
+// among fixes is dropped.
 func (g *fixGroups) offer(
 	diags []Diagnostic,
 	fixes []pendingFix,
@@ -90,8 +93,13 @@ func (g *fixGroups) offer(
 		}
 		written := []fix.TextEdit{combined}
 		ok = ok && offers.offer(written, disabled)
-		if ok && written[0].NewText != combined.NewText {
-			ok = writeMembers(diags, pieces, content, combined.NewText, written[0].NewText)
+		if ok && written[0].NewText != combined.NewText &&
+			!writeMembers(diags, pieces, content, combined.NewText, written[0].NewText) {
+			// The members' own edits cannot show the written edit, so each
+			// reports all of it, which a consumer applies once.
+			for _, idx := range members[group] {
+				diags[idx].FixEdits = []fix.TextEdit{written[0]}
+			}
 		}
 		if !ok {
 			for _, idx := range members[group] {
@@ -187,6 +195,7 @@ func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, 
 	}
 
 	edits := make(map[int][]fix.TextEdit)
+	derived := len(pieces)
 	for idx, piece := range pieces {
 		edit := piece.edit
 		edit.NewText = written[at[2*idx]:at[2*idx+1]]
@@ -199,7 +208,19 @@ func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, 
 		start, end := edit.EndOffset, pieces[idx+1].edit.StartOffset
 		if gap, changed := changedStretch(content[start:end], written[at[2*idx+1]:at[2*idx+2]], start); changed {
 			edits[piece.owners[0]] = append(edits[piece.owners[0]], gap)
+			derived++
 		}
+	}
+	// Edits that writing made alike would be applied once by a consumer
+	// that applies an edit several findings carry once.
+	distinct := make(map[fix.TextEdit]bool)
+	for _, ownerEdits := range edits {
+		for _, edit := range ownerEdits {
+			distinct[edit] = true
+		}
+	}
+	if len(distinct) != derived {
+		return false
 	}
 	for owner, ownerEdits := range edits {
 		diags[owner].FixEdits = ownerEdits

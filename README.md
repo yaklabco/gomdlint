@@ -311,11 +311,13 @@ group together or not at all. In a file with mixed line endings, `--fix`
 can write a line ending between the items of a group in another ending,
 and the finding before such a line ending carries that change too, so the
 edits of a group together give what `--fix` writes, with insertions at one
-offset in the order of the report. A consumer that applies only some of
-them can split or merge lists. JSON reports give such a finding a
-`fixGroup` number, and SARIF reports give its result a `fixGroup`
-property: the findings of one rule in one file with the same number form
-one group.
+offset in the order of the report. Where the edits of single findings
+cannot show what `--fix` writes there, every finding of the group carries
+the group's whole edit, which a consumer applies once. A consumer that
+applies only some of them can split or merge lists. JSON reports give
+such a finding a `fixGroup` number, and SARIF reports give its result a
+`fixGroup` property: the findings of one rule in one file with the same
+number form one group.
 
 The summary format shows aggregated statistics:
 

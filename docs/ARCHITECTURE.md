@@ -455,8 +455,11 @@ as fixed (`fixGroups` in `pkg/lint/fix_groups.go`). Where writing the edit
 changes line endings, the members' edits take the written text, and a
 changed line ending between two members becomes an edit of the member
 before it (`writeMembers`), so the reported edits of a group together make
-the edit `--fix` applies. When a member is suppressed or has no valid fix,
-or the engine withholds the edit, no member keeps a fix.
+the edit `--fix` applies. Where the members' edits cannot show it, as when
+writing turns two members' insertions into the same text, every member
+reports the whole written edit instead, which a consumer applies once, as
+any edit that several findings share. When a member is suppressed or has
+no valid fix, or the engine withholds the edit, no member keeps a fix.
 
 A finding on a line where its rule is disabled is dropped, and a fix that
 changes the text of such a line is withheld from the findings that remain

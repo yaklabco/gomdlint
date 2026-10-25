@@ -295,6 +295,58 @@ func TestEngine_ReportsTheEditsAFixGroupApplies(t *testing.T) {
 	}
 }
 
+// Where the members' own edits cannot show what the engine writes, each
+// member reports the group's whole edit, which a consumer applies once.
+func TestEngine_ReportsTheWholeEditWhereMembersCannotShowIt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		edits   []fix.TextEdit
+		want    string
+	}{
+		{
+			// Both insertions are written as "\r\n", and two identical
+			// reported edits would be applied once.
+			name:    "insertions written alike",
+			content: "x\r\n",
+			edits:   []fix.TextEdit{{StartOffset: 0, EndOffset: 0, NewText: "\n"}, {StartOffset: 0, EndOffset: 0, NewText: "\r\n"}},
+			want:    "\r\n\r\nx\r\n",
+		},
+		{
+			// The "\r" of the file and the "\n" of the second edit make
+			// "\r\n" in the group's text, which is written as "\r", so the
+			// end of the first edit has no place in the written text.
+			name:    "boundary inside a rewritten line ending",
+			content: "a\rb\nz\n",
+			edits:   []fix.TextEdit{{StartOffset: 0, EndOffset: 1, NewText: "A"}, {StartOffset: 2, EndOffset: 3, NewText: "\nB"}},
+			want:    "A\rB\nz\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var diags []lint.Diagnostic
+			for _, member := range tt.edits {
+				diags = append(diags, groupMember("TEST001", 1, 1, member))
+			}
+
+			result := lintMarkdown(t, tt.content, groupRule("TEST001", diags...))
+
+			require.Len(t, result.Diagnostics, len(tt.edits))
+			for _, diag := range result.Diagnostics {
+				assert.True(t, diag.HasFix())
+				assert.Equal(t, 1, diag.FixGroup)
+			}
+			assert.Equal(t, len(tt.edits), result.AcceptedFixes)
+			assert.Equal(t, tt.want, string(fix.ApplyEdits([]byte(tt.content), result.Edits)))
+			assert.Equal(t, tt.want, applyReported(t, tt.content, result), "the reported edits give what --fix writes")
+		})
+	}
+}
+
 // A group is checked for line endings as the one edit the engine applies,
 // so members whose edits would join line endings only on their own are
 // fixed together.
