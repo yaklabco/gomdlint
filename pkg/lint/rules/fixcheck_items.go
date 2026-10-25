@@ -39,7 +39,7 @@ func (c *fixChecker) regionLayout() *docLayout {
 // changes a list's tightness changes the document, and no intent allows it.
 // decided is false when the item window cannot stand for the document, and
 // checkWindow decides.
-func (c *fixChecker) itemWindow(edits []fix.TextEdit, intents []fixIntent) (window windowCheck, decided, ok bool) {
+func (c *fixChecker) itemWindow(edits []fix.TextEdit, intents []fixIntent) (windowCheck, bool, bool) {
 	layout := c.regionLayout()
 	if layout == nil {
 		return windowCheck{}, false, false
@@ -114,7 +114,7 @@ func (c *fixChecker) itemWindow(edits []fix.TextEdit, intents []fixIntent) (wind
 	if !ok {
 		return windowCheck{}, false, false
 	}
-	window = windowCheck{
+	window := windowCheck{
 		before: summarizeNodes(beforeDoc, beforeNodes, layout.base+from-1-len(opener.text)),
 		after:  summarizeNodes(afterDoc, afterNodes, 0),
 		start:  layout.base + from,

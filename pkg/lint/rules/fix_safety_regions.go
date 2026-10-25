@@ -367,23 +367,11 @@ func (m *outlineModel) writeList(
 func (m *outlineModel) writeItem(
 	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int, places outlinePlaces,
 ) bool {
-	item := m.items[index]
-	groups, ok := m.placeBlocks(node, len(item.bounds), item.groupOf)
-	if !ok {
-		return false
+	parts, ok := m.writeGroups(out, file, node, places, itemScope, index)
+	if ok {
+		m.itemParts[index] = parts
 	}
-	var parts regionParts
-	writeOutlineItem(out, node.Kind.String(), blockOutlineAttrs(file, node, m.verifier.allow))
-	for _, nodes := range groups {
-		parts.add(out.Len(), len(m.slugs))
-		for _, child := range nodes {
-			m.writeBlock(out, file, child, places, itemScope, index)
-		}
-	}
-	parts.add(out.Len(), len(m.slugs))
-	out.WriteString(outlineClose)
-	m.itemParts[index] = parts
-	return true
+	return ok
 }
 
 // writeQuote writes the outline of a top-level blockquote, as writeOutline
@@ -393,23 +381,42 @@ func (m *outlineModel) writeItem(
 func (m *outlineModel) writeQuote(
 	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, index int, places outlinePlaces,
 ) bool {
-	quote := m.quotes[index]
-	groups, ok := m.placeBlocks(node, len(quote.bounds), quote.groupOf)
+	parts, ok := m.writeGroups(out, file, node, places, quoteScope, index)
+	if ok {
+		m.quoteParts[index] = parts
+	}
+	return ok
+}
+
+// writeGroups writes the outline of node, the top-level blockquote or the
+// item at index at, by kind, as writeOutline does, and returns where the
+// blocks of each of its groups start, with the end. It writes nothing and
+// returns false when its blocks cannot be placed in its groups.
+func (m *outlineModel) writeGroups(
+	out *strings.Builder, file *mdast.FileSnapshot, node *mdast.Node, places outlinePlaces, kind scopeKind, at int,
+) (regionParts, bool) {
+	var count int
+	var groupOf func(int) int
+	if kind == itemScope {
+		count, groupOf = len(m.items[at].bounds), m.items[at].groupOf
+	} else {
+		count, groupOf = len(m.quotes[at].bounds), m.quotes[at].groupOf
+	}
+	groups, ok := m.placeBlocks(node, count, groupOf)
 	if !ok {
-		return false
+		return regionParts{}, false
 	}
 	var parts regionParts
 	writeOutlineItem(out, node.Kind.String(), blockOutlineAttrs(file, node, m.verifier.allow))
 	for _, nodes := range groups {
 		parts.add(out.Len(), len(m.slugs))
 		for _, child := range nodes {
-			m.writeBlock(out, file, child, places, quoteScope, index)
+			m.writeBlock(out, file, child, places, kind, at)
 		}
 	}
 	parts.add(out.Len(), len(m.slugs))
 	out.WriteString(outlineClose)
-	m.quoteParts[index] = parts
-	return true
+	return parts, true
 }
 
 // writeTable writes the outline of a table, as writeOutline does, with its
