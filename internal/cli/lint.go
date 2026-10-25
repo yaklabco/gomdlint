@@ -294,7 +294,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		WorkingDir:   workDir,
 		ToolVersion:  flags.toolVersion,
 		Registry:     registry,
-		RuleHelp:     ruledocs.RuleHelp, // SARIF rule help: the pages that explain prints.
+		RuleHelp:     ruledocs.RuleHelp(registry), // SARIF rule help: the pages that explain prints.
 		BuiltInRule:  ruledocs.IsBuiltInRule,
 	})
 	if err != nil {

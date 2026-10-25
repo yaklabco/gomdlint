@@ -53,7 +53,7 @@ func describeEveryBuiltinRule(t *testing.T) ([]reporter.SARIFRule, *lint.Registr
 
 	opts := reporter.Options{
 		WorkingDir: root, Registry: registry,
-		RuleHelp: ruledocs.RuleHelp, BuiltInRule: ruledocs.IsBuiltInRule,
+		RuleHelp: ruledocs.RuleHelp(registry), BuiltInRule: ruledocs.IsBuiltInRule,
 	}
 	descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
 	require.Len(t, descriptors, len(catalog))
@@ -196,7 +196,7 @@ func TestSARIFReporter_OnlyBuiltinRulesLinkToAPage(t *testing.T) {
 		),
 	}}
 
-	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}, result).Runs[0].Tool.Driver.Rules
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp(registry)}, result).Runs[0].Tool.Driver.Rules
 
 	require.Len(t, descriptors, 2)
 	for _, descriptor := range descriptors {
@@ -252,7 +252,7 @@ func TestSARIFReporter_DescriptorsAreDeterministic(t *testing.T) {
 	}
 	root := newGitWorkTree(t, false)
 	result := &runner.Result{Files: []runner.FileOutcome{sarifFile(filepath.Join(root, "a.md"), "x\n", diags...)}}
-	opts := reporter.Options{WorkingDir: root, Registry: registry, ToolVersion: "v1.2.3", RuleHelp: ruledocs.RuleHelp}
+	opts := reporter.Options{WorkingDir: root, Registry: registry, ToolVersion: "v1.2.3", RuleHelp: ruledocs.RuleHelp(registry)}
 
 	first := string(reportSARIF(t, opts, result))
 	second := string(reportSARIF(t, opts, result))
@@ -363,7 +363,7 @@ func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 			}}
 			opts := reporter.Options{
 				WorkingDir: root, Registry: registry,
-				RuleHelp: ruledocs.RuleHelp, BuiltInRule: ruledocs.IsBuiltInRule,
+				RuleHelp: ruledocs.RuleHelp(registry), BuiltInRule: ruledocs.IsBuiltInRule,
 			}
 			descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
 
@@ -394,7 +394,7 @@ func TestSARIFReporter_CustomIDsKeepTheirCatalogEntries(t *testing.T) {
 		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "ZZ001", StartLine: 1}),
 	}}
 	opts := reporter.Options{
-		WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp,
+		WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp(registry),
 		BuiltInRule: func(lint.Rule) bool { return false },
 	}
 	descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules

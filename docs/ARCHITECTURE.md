@@ -764,8 +764,9 @@ lists them under each file's `notices`, and SARIF output records them as
   adds the rationale and the fix text. Its tags are the rule's category,
   then its catalog tags, at most 10, since GitHub code scanning keeps no
   more. Help is opt-in through `reporter.Options.RuleHelp`, which
-  `gomdlint lint` sets to `ruledocs.RuleHelp`. Then `help` is the page that
-  `gomdlint explain` prints, in text and Markdown, and a built-in rule's
+  `gomdlint lint` sets to `ruledocs.RuleHelp(registry)`. Then `help` is the
+  page that `gomdlint explain` prints, in text and Markdown, with the rule
+  keyed as generated configurations key it, and a built-in rule's
   `helpUri` is its generated page, `ruledocs.RulePagesURL` plus
   `<name>.md`, on the main branch as the JSON Schema's `$id` is. Without
   it, descriptors carry neither. `pkg/reporter` does not import

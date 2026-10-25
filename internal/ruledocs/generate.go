@@ -69,22 +69,29 @@ func PageURL(entry Entry) string {
 	return RulePagesURL + url.PathEscape(entry.Name) + ".md"
 }
 
-// RuleHelp documents rule for a SARIF rule descriptor. meta is the rule's
-// catalog entry, or the zero entry when it has none. It returns the page
-// that explain prints, as text, and the page that explain --format
-// markdown prints, both for the rule's built-in state. It also returns the
-// address of the rule's generated page (see PageURL), or "" for a rule
+// RuleHelp returns the function that documents a rule of registry for a
+// SARIF rule descriptor, with the signature of reporter.Options.RuleHelp.
+// The function takes the rule and its catalog entry, or the zero entry
+// when it has none. It returns the page that explain prints, as text, and
+// the page that explain --format markdown prints, both for the rule's
+// built-in state and keyed as generated configurations key the rule in
+// registry (see ConfigKey), or by ID when registry is nil. It also returns
+// the address of the rule's generated page (see PageURL), or "" for a rule
 // without one. It reports false when a page cannot be written, as when the
 // rule's embedded example does not parse, which the tests of this package
-// rule out for the built-in rules. Its signature is that of
-// reporter.Options.RuleHelp.
-func RuleHelp(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
-	entry := NewEntry(rule, meta)
-	var text, markdown strings.Builder
-	if WriteTextPage(&text, entry, "") != nil || WriteMarkdownPage(&markdown, entry) != nil {
-		return "", "", "", false
+// rule out for the built-in rules.
+func RuleHelp(registry *lint.Registry) func(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
+	return func(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
+		entry := NewEntry(rule, meta)
+		if registry != nil {
+			entry.ConfigKey = ConfigKey(registry, rule.ID())
+		}
+		var text, markdown strings.Builder
+		if WriteTextPage(&text, entry, "") != nil || WriteMarkdownPage(&markdown, entry) != nil {
+			return "", "", "", false
+		}
+		return text.String(), markdown.String(), PageURL(entry), true
 	}
-	return text.String(), markdown.String(), PageURL(entry), true
 }
 
 // ReferenceDirs returns the directories that hold the files of the rule

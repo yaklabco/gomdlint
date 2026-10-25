@@ -48,6 +48,8 @@ func TestLint_SARIFDescribesRulesWithHelp(t *testing.T) {
 	assert.True(t, strings.HasPrefix(descriptors[0].Help.Text, "no-trailing-spaces (MD009)"), descriptors[0].Help.Text)
 	assert.True(t, strings.HasPrefix(descriptors[0].Help.Markdown, "# no-trailing-spaces\n"), descriptors[0].Help.Markdown)
 	assert.Equal(t, "https://github.com/yaklabco/gomdlint/blob/main/docs/rules/no-trailing-spaces.md", descriptors[0].HelpURI)
+	assert.Contains(t, descriptors[0].Help.Text, "Options, under rules.no-trailing-spaces.options:",
+		"keyed by name, as explain and generated configurations key the rule")
 }
 
 // companyPolicyRule is a custom rule that reports the first line of every
