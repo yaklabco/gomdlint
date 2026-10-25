@@ -77,13 +77,7 @@ type UnorderedListStyleRule struct {
 // NewUnorderedListStyleRule creates a new unordered list style rule.
 func NewUnorderedListStyleRule() *UnorderedListStyleRule {
 	return &UnorderedListStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD004",
-			"unordered-list-style",
-			"Unordered list style should be consistent",
-			[]string{"lists", "style"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD004")),
 	}
 }
 
@@ -356,13 +350,7 @@ type OrderedListIncrementRule struct {
 // NewOrderedListIncrementRule creates a new ordered list increment rule.
 func NewOrderedListIncrementRule() *OrderedListIncrementRule {
 	return &OrderedListIncrementRule{
-		BaseRule: lint.NewBaseRule(
-			"MD029",
-			"ol-prefix",
-			"Ordered list item prefix",
-			[]string{"ol"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD029")),
 	}
 }
 

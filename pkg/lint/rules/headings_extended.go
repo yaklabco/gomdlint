@@ -25,13 +25,7 @@ type NoMissingSpaceATXRule struct {
 // NewNoMissingSpaceATXRule creates a new no-missing-space-atx rule.
 func NewNoMissingSpaceATXRule() *NoMissingSpaceATXRule {
 	return &NoMissingSpaceATXRule{
-		BaseRule: lint.NewBaseRule(
-			"MD018",
-			"no-missing-space-atx",
-			"No space after hash on ATX style heading",
-			[]string{"atx", "headings", "spaces"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD018")),
 	}
 }
 
@@ -138,13 +132,7 @@ type NoMultipleSpaceATXRule struct {
 // NewNoMultipleSpaceATXRule creates a new no-multiple-space-atx rule.
 func NewNoMultipleSpaceATXRule() *NoMultipleSpaceATXRule {
 	return &NoMultipleSpaceATXRule{
-		BaseRule: lint.NewBaseRule(
-			"MD019",
-			"no-multiple-space-atx",
-			"Multiple spaces after hash on ATX style heading",
-			[]string{"atx", "headings", "spaces"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD019")),
 	}
 }
 
@@ -216,13 +204,7 @@ type NoMissingSpaceClosedATXRule struct {
 // NewNoMissingSpaceClosedATXRule creates a new no-missing-space-closed-atx rule.
 func NewNoMissingSpaceClosedATXRule() *NoMissingSpaceClosedATXRule {
 	return &NoMissingSpaceClosedATXRule{
-		BaseRule: lint.NewBaseRule(
-			"MD020",
-			"no-missing-space-closed-atx",
-			"No space inside hashes on closed ATX style heading",
-			[]string{"atx_closed", "headings", "spaces"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD020")),
 	}
 }
 
@@ -356,13 +338,7 @@ type NoMultipleSpaceClosedATXRule struct {
 // NewNoMultipleSpaceClosedATXRule creates a new no-multiple-space-closed-atx rule.
 func NewNoMultipleSpaceClosedATXRule() *NoMultipleSpaceClosedATXRule {
 	return &NoMultipleSpaceClosedATXRule{
-		BaseRule: lint.NewBaseRule(
-			"MD021",
-			"no-multiple-space-closed-atx",
-			"Multiple spaces inside hashes on closed ATX style heading",
-			[]string{"atx_closed", "headings", "spaces"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD021")),
 	}
 }
 
@@ -428,13 +404,7 @@ type HeadingStartLeftRule struct {
 // NewHeadingStartLeftRule creates a new heading-start-left rule.
 func NewHeadingStartLeftRule() *HeadingStartLeftRule {
 	return &HeadingStartLeftRule{
-		BaseRule: lint.NewBaseRule(
-			"MD023",
-			"heading-start-left",
-			"Headings must start at the beginning of the line",
-			[]string{"headings", "spaces"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD023")),
 	}
 }
 
@@ -503,13 +473,7 @@ type NoDuplicateHeadingRule struct {
 // NewNoDuplicateHeadingRule creates a new no-duplicate-heading rule.
 func NewNoDuplicateHeadingRule() *NoDuplicateHeadingRule {
 	return &NoDuplicateHeadingRule{
-		BaseRule: lint.NewBaseRule(
-			"MD024",
-			"no-duplicate-heading",
-			"Multiple headings with the same content",
-			[]string{"headings"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD024")),
 	}
 }
 
@@ -656,13 +620,7 @@ type NoTrailingPunctuationRule struct {
 // NewNoTrailingPunctuationRule creates a new no-trailing-punctuation rule.
 func NewNoTrailingPunctuationRule() *NoTrailingPunctuationRule {
 	return &NoTrailingPunctuationRule{
-		BaseRule: lint.NewBaseRule(
-			"MD026",
-			"no-trailing-punctuation",
-			"Trailing punctuation in heading",
-			[]string{"headings"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD026")),
 	}
 }
 

@@ -26,13 +26,7 @@ type ReversedLinkRule struct {
 // NewReversedLinkRule creates a new reversed link rule.
 func NewReversedLinkRule() *ReversedLinkRule {
 	return &ReversedLinkRule{
-		BaseRule: lint.NewBaseRule(
-			"MD011",
-			"no-reversed-links",
-			"Reversed link syntax (text)[url] should be [text](url)",
-			[]string{"links"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD011")),
 	}
 }
 
@@ -147,13 +141,7 @@ type LinkSpacesRule struct {
 // NewLinkSpacesRule creates a new link spaces rule.
 func NewLinkSpacesRule() *LinkSpacesRule {
 	return &LinkSpacesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD039",
-			"no-space-in-links",
-			"Link text should not have leading or trailing spaces",
-			[]string{"links", "whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD039")),
 	}
 }
 
@@ -268,13 +256,7 @@ type EmptyLinkRule struct {
 // NewEmptyLinkRule creates a new empty link rule.
 func NewEmptyLinkRule() *EmptyLinkRule {
 	return &EmptyLinkRule{
-		BaseRule: lint.NewBaseRule(
-			"MD042",
-			"no-empty-links",
-			"Links should have both text and destination",
-			[]string{"links"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD042")),
 	}
 }
 
@@ -331,13 +313,7 @@ type ImageAltTextRule struct {
 // NewImageAltTextRule creates a new image alt text rule.
 func NewImageAltTextRule() *ImageAltTextRule {
 	return &ImageAltTextRule{
-		BaseRule: lint.NewBaseRule(
-			"MD045",
-			"no-alt-text",
-			"Images should have alt text",
-			[]string{"links", "images", "accessibility"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD045")),
 	}
 }
 
@@ -470,13 +446,7 @@ type LinkDestinationStyleRule struct {
 // NewLinkDestinationStyleRule creates a new link destination style rule.
 func NewLinkDestinationStyleRule() *LinkDestinationStyleRule {
 	return &LinkDestinationStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MDL001",
-			"link-destination-style",
-			"Link destination style should be consistent",
-			[]string{"links", "style"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MDL001")),
 	}
 }
 

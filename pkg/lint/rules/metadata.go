@@ -23,13 +23,7 @@ type FirstLineHeadingRule struct {
 // NewFirstLineHeadingRule creates a new first line heading rule.
 func NewFirstLineHeadingRule() *FirstLineHeadingRule {
 	return &FirstLineHeadingRule{
-		BaseRule: lint.NewBaseRule(
-			"MD041",
-			"first-line-heading",
-			"First line in a file should be a top-level heading",
-			[]string{"headings", "metadata"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD041")),
 	}
 }
 
@@ -226,13 +220,7 @@ type HeadingBlankLinesRule struct {
 // NewHeadingBlankLinesRule creates a new heading blank lines rule.
 func NewHeadingBlankLinesRule() *HeadingBlankLinesRule {
 	return &HeadingBlankLinesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD022",
-			"heading-blank-lines",
-			"Headings should be surrounded by blank lines",
-			[]string{"headings", "whitespace", "blank_lines"},
-			true, // Auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD022")),
 	}
 }
 
@@ -501,13 +489,7 @@ type RequiredHeadingsRule struct {
 // NewRequiredHeadingsRule creates a new required headings rule.
 func NewRequiredHeadingsRule() *RequiredHeadingsRule {
 	return &RequiredHeadingsRule{
-		BaseRule: lint.NewBaseRule(
-			"MD043",
-			"required-headings",
-			"Required heading structure",
-			[]string{"headings"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD043")),
 	}
 }
 
@@ -641,13 +623,7 @@ type ProperNamesRule struct {
 // NewProperNamesRule creates a new proper names rule.
 func NewProperNamesRule() *ProperNamesRule {
 	return &ProperNamesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD044",
-			"proper-names",
-			"Proper names should have the correct capitalization",
-			[]string{"spelling"},
-			true, // Auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD044")),
 	}
 }
 

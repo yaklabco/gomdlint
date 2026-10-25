@@ -7,6 +7,8 @@ func emphasisCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD037", Name: "no-space-in-emphasis", Tags: []string{"whitespace", "emphasis"}, Fixable: true,
+			RuleTags:    []string{"emphasis", "whitespace"},
+			Summary:     "Spaces inside emphasis markers",
 			Description: "Emphasis markers touch the text they wrap, as in **bold**.",
 			Rationale:   "With a space inside, the markers do not make emphasis and show as literal * or _ characters.",
 			Fix: "The fix deletes the spaces inside the markers. gomdlint reports a pair without a fix " +
@@ -15,6 +17,7 @@ func emphasisCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD049", Name: "emphasis-style", Tags: []string{"emphasis"}, Fixable: true,
+			Summary:     "Emphasis style should be consistent",
 			Description: "All italic text uses one marker, *text* or _text_, except * inside a word.",
 			Rationale: "One italic marker throughout makes the source easier to read. " +
 				"Underscores do not mark emphasis inside a word, so * stays allowed there.",
@@ -24,6 +27,7 @@ func emphasisCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD050", Name: "strong-style", Tags: []string{"emphasis"}, Fixable: true,
+			Summary:     "Strong style should be consistent",
 			Description: "All bold text uses one marker, **text** or __text__, except ** inside a word.",
 			Rationale: "One bold marker throughout makes the source easier to read. " +
 				"Underscores do not mark emphasis inside a word, so ** stays allowed there.",

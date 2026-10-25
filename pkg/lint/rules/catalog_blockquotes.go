@@ -7,6 +7,8 @@ func blockquotesCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD027", Name: "no-multiple-space-blockquote", Tags: []string{"blockquote", "whitespace", "indentation"}, Fixable: true,
+			RuleTags:    []string{"blockquote", "indentation", "whitespace"},
+			Summary:     "Multiple spaces after blockquote symbol",
 			Description: "Outside code and list item text, at most one space follows a blockquote's >.",
 			Rationale: "Extra spaces after > make the quote harder to read. " +
 				"At the start of a block, five spaces after > make an indented code block.",
@@ -15,6 +17,7 @@ func blockquotesCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD028", Name: "no-blanks-blockquote", Tags: []string{"blockquote", "whitespace"},
+			Summary:     "Blank line inside blockquote",
 			Description: "No blank line sits between two blockquotes.",
 			Rationale: "Parsers disagree about whether a blank line ends a blockquote, " +
 				"so the quotes may render as one or as two.",

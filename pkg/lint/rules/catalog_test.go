@@ -76,6 +76,136 @@ func TestCatalogEntriesMatchTheirRules(t *testing.T) {
 	}
 }
 
+// TestRulesTakeTheirMetadataFromTheCatalog checks that every built-in rule
+// reports the ID, name, description, tags and fix flag of its catalog
+// entry, both in a registry that RegisterAll fills and in
+// lint.DefaultRegistry, which the package's init fills once the catalog
+// variables are initialized.
+func TestRulesTakeTheirMetadataFromTheCatalog(t *testing.T) {
+	registries := []struct {
+		label    string
+		registry *lint.Registry
+	}{
+		{"RegisterAll", catalogRegistry(t)},
+		{"DefaultRegistry", lint.DefaultRegistry},
+	}
+
+	for _, tc := range registries {
+		for _, meta := range Catalog() {
+			rule, ok := tc.registry.GetByID(meta.ID)
+			if !assert.True(t, ok, "%s: %s is registered", tc.label, meta.ID) {
+				continue
+			}
+			// This repeats NewBaseRuleFromMeta's fallback to Tags, which
+			// TestNewBaseRuleFromMetaWithoutRuleTags in pkg/lint covers.
+			ruleTags := meta.RuleTags
+			if ruleTags == nil {
+				ruleTags = meta.Tags
+			}
+			assert.Equal(t, meta.ID, rule.ID(), "%s: %s: ID", tc.label, meta.ID)
+			assert.Equal(t, meta.Name, rule.Name(), "%s: %s: name", tc.label, meta.ID)
+			assert.Equal(t, meta.Summary, rule.Description(), "%s: %s: description", tc.label, meta.ID)
+			assert.Equal(t, ruleTags, rule.Tags(), "%s: %s: tags", tc.label, meta.ID)
+			assert.Equal(t, meta.Fixable, rule.CanFix(), "%s: %s: fix flag", tc.label, meta.ID)
+		}
+	}
+}
+
+// TestCatalogSummaries checks the summary of every catalog entry, which its
+// rule reports as its own description: a phrase on one line.
+func TestCatalogSummaries(t *testing.T) {
+	for _, meta := range Catalog() {
+		assert.NotEmpty(t, meta.Summary, "%s: summary", meta.ID)
+		assert.Equal(t, strings.TrimSpace(meta.Summary), meta.Summary, "%s: summary has no surrounding space", meta.ID)
+		assert.False(t, strings.ContainsFunc(meta.Summary, unicode.IsControl), "%s: summary fits on one line", meta.ID)
+		assert.Less(t, utf8.RuneCountInString(meta.Summary), maxDescriptionLength,
+			"%s: summary stays under %d characters", meta.ID, maxDescriptionLength)
+		if meta.RuleTags != nil {
+			assert.NotEqual(t, meta.Tags, meta.RuleTags, "%s: RuleTags is set only where it differs from Tags", meta.ID)
+		}
+	}
+}
+
+// TestConstructorsAskForTheirOwnEntries pins the catalog entry that each
+// constructor builds its rule from. A constructor that asked for another
+// rule's entry would take that rule's whole identity, and the metadata
+// tests would still pass, as the rule would match the entry it asked for.
+func TestConstructorsAskForTheirOwnEntries(t *testing.T) {
+	constructors := []struct {
+		id        string
+		construct func() lint.Rule
+	}{
+		{"MD001", func() lint.Rule { return NewHeadingIncrementRule() }},
+		{"MD003", func() lint.Rule { return NewHeadingStyleRule() }},
+		{"MD004", func() lint.Rule { return NewUnorderedListStyleRule() }},
+		{"MD005", func() lint.Rule { return NewListIndentRule() }},
+		{"MD007", func() lint.Rule { return NewULIndentRule() }},
+		{"MD009", func() lint.Rule { return NewTrailingWhitespaceRule() }},
+		{"MD010", func() lint.Rule { return NewHardTabsRule() }},
+		{"MD011", func() lint.Rule { return NewReversedLinkRule() }},
+		{"MD012", func() lint.Rule { return NewMultipleBlankLinesRule() }},
+		{"MD013", func() lint.Rule { return NewMaxLineLengthRule() }},
+		{"MD014", func() lint.Rule { return NewCommandsShowOutputRule() }},
+		{"MD018", func() lint.Rule { return NewNoMissingSpaceATXRule() }},
+		{"MD019", func() lint.Rule { return NewNoMultipleSpaceATXRule() }},
+		{"MD020", func() lint.Rule { return NewNoMissingSpaceClosedATXRule() }},
+		{"MD021", func() lint.Rule { return NewNoMultipleSpaceClosedATXRule() }},
+		{"MD022", func() lint.Rule { return NewHeadingBlankLinesRule() }},
+		{"MD023", func() lint.Rule { return NewHeadingStartLeftRule() }},
+		{"MD024", func() lint.Rule { return NewNoDuplicateHeadingRule() }},
+		{"MD025", func() lint.Rule { return NewSingleH1Rule() }},
+		{"MD026", func() lint.Rule { return NewNoTrailingPunctuationRule() }},
+		{"MD027", func() lint.Rule { return NewNoMultipleSpaceBlockquoteRule() }},
+		{"MD028", func() lint.Rule { return NewNoBlanksBlockquoteRule() }},
+		{"MD029", func() lint.Rule { return NewOrderedListIncrementRule() }},
+		{"MD030", func() lint.Rule { return NewListMarkerSpaceRule() }},
+		{"MD031", func() lint.Rule { return NewBlanksAroundFencesRule() }},
+		{"MD032", func() lint.Rule { return NewBlanksAroundListsRule() }},
+		{"MD033", func() lint.Rule { return NewInlineHTMLRule() }},
+		{"MD034", func() lint.Rule { return NewNoBareURLsRule() }},
+		{"MD035", func() lint.Rule { return NewHRStyleRule() }},
+		{"MD036", func() lint.Rule { return NewNoEmphasisAsHeadingRule() }},
+		{"MD037", func() lint.Rule { return NewNoSpaceInEmphasisRule() }},
+		{"MD038", func() lint.Rule { return NewNoSpaceInCodeRule() }},
+		{"MD039", func() lint.Rule { return NewLinkSpacesRule() }},
+		{"MD040", func() lint.Rule { return NewCodeBlockLanguageRule() }},
+		{"MD041", func() lint.Rule { return NewFirstLineHeadingRule() }},
+		{"MD042", func() lint.Rule { return NewEmptyLinkRule() }},
+		{"MD043", func() lint.Rule { return NewRequiredHeadingsRule() }},
+		{"MD044", func() lint.Rule { return NewProperNamesRule() }},
+		{"MD045", func() lint.Rule { return NewImageAltTextRule() }},
+		{"MD046", func() lint.Rule { return NewCodeBlockStyleRule() }},
+		{"MD047", func() lint.Rule { return NewFinalNewlineRule() }},
+		{"MD048", func() lint.Rule { return NewCodeFenceStyleRule() }},
+		{"MD049", func() lint.Rule { return NewEmphasisStyleRule() }},
+		{"MD050", func() lint.Rule { return NewStrongStyleRule() }},
+		{"MD051", func() lint.Rule { return NewLinkFragmentsRule() }},
+		{"MD052", func() lint.Rule { return NewReferenceLinkImagesRule() }},
+		{"MD053", func() lint.Rule { return NewLinkImageRefDefsRule() }},
+		{"MD054", func() lint.Rule { return NewLinkImageStyleRule() }},
+		{"MD055", func() lint.Rule { return NewTablePipeStyleRule() }},
+		{"MD056", func() lint.Rule { return NewTableColumnCountRule() }},
+		{"MD058", func() lint.Rule { return NewTableBlankLinesRule() }},
+		{"MD059", func() lint.Rule { return NewDescriptiveLinkTextRule() }},
+		{"MD060", func() lint.Rule { return NewTableColumnStyleRule() }},
+		{"MDL001", func() lint.Rule { return NewLinkDestinationStyleRule() }},
+		{"MDL003", func() lint.Rule { return NewTableAlignmentRule() }},
+	}
+
+	assert.Len(t, constructors, builtInRuleCount)
+	for _, tc := range constructors {
+		assert.Equal(t, tc.id, tc.construct().ID(), "the constructor of %s builds it from its own entry", tc.id)
+	}
+}
+
+func TestCatalogEntry(t *testing.T) {
+	for _, meta := range Catalog() {
+		assert.Equal(t, meta, catalogEntry(meta.ID))
+	}
+	assert.PanicsWithValue(t, `rules: no catalog entry for rule "MD999"`, func() { catalogEntry("MD999") },
+		"a constructor for a rule without an entry fails at once")
+}
+
 func TestCatalogIdentifiersNameOneRule(t *testing.T) {
 	owners := make(map[string]string) // lower-cased ID, name or alias -> rule ID
 	claim := func(identifier, id string) {

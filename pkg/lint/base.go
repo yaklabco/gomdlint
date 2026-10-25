@@ -1,6 +1,10 @@
 package lint
 
-import "github.com/yaklabco/gomdlint/pkg/config"
+import (
+	"slices"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
+)
 
 // BaseRule provides a default implementation of the Rule interface.
 // Embed this in rule implementations and override methods as needed.
@@ -24,6 +28,18 @@ func NewBaseRule(id, name, desc string, tags []string, fixable bool) BaseRule {
 		tags:    tags,
 		fixable: fixable,
 	}
+}
+
+// NewBaseRuleFromMeta creates a BaseRule from the rule's catalog entry: its
+// ID, name and fix flag, its summary as the rule's description, and its
+// RuleTags, or its Tags when it has none, as the rule's tags. The rule keeps
+// its own copy of the tags.
+func NewBaseRuleFromMeta(meta RuleMeta) BaseRule {
+	tags := meta.RuleTags
+	if tags == nil {
+		tags = meta.Tags
+	}
+	return NewBaseRule(meta.ID, meta.Name, meta.Summary, slices.Clone(tags), meta.Fixable)
 }
 
 // ID returns the unique identifier for this rule.

@@ -19,13 +19,7 @@ type BlanksAroundFencesRule struct {
 // NewBlanksAroundFencesRule creates a new blanks-around-fences rule.
 func NewBlanksAroundFencesRule() *BlanksAroundFencesRule {
 	return &BlanksAroundFencesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD031",
-			"blanks-around-fences",
-			"Fenced code blocks should be surrounded by blank lines",
-			[]string{"blank_lines", "code"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD031")),
 	}
 }
 
@@ -144,13 +138,7 @@ type NoSpaceInCodeRule struct {
 // NewNoSpaceInCodeRule creates a new no-space-in-code rule.
 func NewNoSpaceInCodeRule() *NoSpaceInCodeRule {
 	return &NoSpaceInCodeRule{
-		BaseRule: lint.NewBaseRule(
-			"MD038",
-			"no-space-in-code",
-			"Spaces inside code span elements",
-			[]string{"code", "whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD038")),
 	}
 }
 

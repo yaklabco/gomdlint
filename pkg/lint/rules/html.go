@@ -22,13 +22,7 @@ type InlineHTMLRule struct {
 // NewInlineHTMLRule creates a new inline HTML rule.
 func NewInlineHTMLRule() *InlineHTMLRule {
 	return &InlineHTMLRule{
-		BaseRule: lint.NewBaseRule(
-			"MD033",
-			"no-inline-html",
-			"Inline HTML should be avoided or restricted to allowed elements",
-			[]string{"html"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD033")),
 	}
 }
 

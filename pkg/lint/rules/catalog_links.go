@@ -8,12 +8,14 @@ func linksCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD011", Name: "no-reversed-links", Tags: []string{"links"}, Fixable: true,
+			Summary:     "Reversed link syntax (text)[url] should be [text](url)",
 			Description: "Inline links put the text in brackets and the URL in parentheses: [text](url).",
 			Rationale:   "The reversed form (text)[url] is not a link, so its brackets and parentheses show as text.",
 			Fix:         "The fix swaps the two parts into the [text](url) form. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD034", Name: "no-bare-urls", Tags: []string{"links", "url"}, Fixable: true,
+			Summary:     "Bare URL used",
 			Description: "Outside code and HTML, URLs and email addresses sit in angle brackets or links.",
 			Rationale:   "Some Markdown parsers do not turn a bare URL or email address into a link.",
 			Fix: "The fix wraps the URL in angle brackets. gomdlint reports a URL without a fix " +
@@ -22,18 +24,23 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD039", Name: "no-space-in-links", Tags: []string{"whitespace", "links"}, Fixable: true,
+			RuleTags:    []string{"links", "whitespace"},
+			Summary:     "Link text should not have leading or trailing spaces",
 			Description: "Link text has no spaces just inside its brackets.",
 			Rationale:   "The spaces end up inside the rendered link, where they serve no purpose.",
 			Fix:         "The fix deletes the spaces. gomdlint reports some links without a fix, such as one whose text ends in a line break. " + noFixNearCheckbox,
 		},
 		{
 			ID: "MD042", Name: "no-empty-links", Tags: []string{"links"},
+			Summary:     "Links should have both text and destination",
 			Description: "Inline links have a destination, and no link points at just #.",
 			Rationale:   "An empty link looks clickable but leads nowhere.",
 			Fix:         "There is no automatic fix. Only the author knows where the link should go.",
 		},
 		{
 			ID: "MD045", Name: "no-alt-text", Tags: []string{"accessibility", "images"},
+			RuleTags:    []string{"links", "images", "accessibility"},
+			Summary:     "Images should have alt text",
 			Description: "Markdown images have alt text, and HTML images have alt or aria-hidden=\"true\".",
 			Rationale: "Alt text describes an image for people who cannot see it, such as screen reader users. " +
 				"In HTML, an empty alt or aria-hidden=\"true\" marks an image that screen readers skip.",
@@ -41,6 +48,7 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD051", Name: "link-fragments", Tags: []string{"links"},
+			Summary:     "Link fragments should be valid",
 			Description: "Links to a #fragment point at a heading or anchor in the same file, or at #top.",
 			Rationale: "A heading's anchor changes when the heading is renamed or removed, " +
 				"and a link to the old anchor goes nowhere. In HTML, an element's id attribute, " +
@@ -49,6 +57,8 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD052", Name: "reference-links-images", Tags: []string{"images", "links"},
+			RuleTags:    []string{"links", "images"},
+			Summary:     "Reference links and images should use defined labels",
 			Description: "Labels in [text][label] and [label][] references are defined, except x.",
 			Rationale: "A reference with an undefined label renders as plain text in brackets. " +
 				"Shortcut references such as [label] are not checked, because plain text in brackets looks the same. " +
@@ -57,6 +67,8 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD053", Name: "link-image-reference-definitions", Tags: []string{"images", "links"}, Fixable: true,
+			RuleTags:    []string{"links", "images"},
+			Summary:     "Link and image reference definitions should be needed",
 			Description: "Every reference definition is used and defined once, except [//] comments.",
 			Rationale: "Definitions render nothing, so an unused one is dead text. " +
 				"Only the first of duplicate definitions takes effect, so the others change nothing. " +
@@ -69,6 +81,8 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD054", Name: "link-image-style", Tags: []string{"images", "links"},
+			RuleTags:    []string{"links", "images"},
+			Summary:     "Link and image style should be consistent",
 			Description: "Links and images use only the allowed styles. By default, all are allowed.",
 			Rationale: "A project may prefer one way of writing links. Autolinks show raw URLs, " +
 				"inline links take room in the source, and reference links need a definition elsewhere.",
@@ -76,12 +90,16 @@ func linksCatalog() []lint.RuleMeta {
 		},
 		{
 			ID: "MD059", Name: "descriptive-link-text", Tags: []string{"accessibility", "links"},
+			RuleTags:    []string{"links", "accessibility"},
+			Summary:     "Link text should be descriptive",
 			Description: "Link text describes its target instead of saying \"click here\" or \"more\".",
 			Rationale:   "Screen readers sometimes read a link without the text around it, so the link text alone has to make sense.",
 			Fix:         "There is no automatic fix. Only the author knows what the link should say.",
 		},
 		{
 			ID: "MDL001", Name: "link-destination-style", Tags: []string{"links", "url"},
+			RuleTags:    []string{"links", "style"},
+			Summary:     "Link destination style should be consistent",
 			Description: "Relative links and local file: URLs are not mixed in one document.",
 			Rationale: "Relative and absolute links behave differently when a file moves or a repository is forked. " +
 				"One kind keeps that behavior the same for every link that could take either form. " +

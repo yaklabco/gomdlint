@@ -152,13 +152,7 @@ type TablePipeStyleRule struct {
 // NewTablePipeStyleRule creates a new table pipe style rule.
 func NewTablePipeStyleRule() *TablePipeStyleRule {
 	return &TablePipeStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD055",
-			"table-pipe-style",
-			"Table pipe style should be consistent",
-			[]string{"table"},
-			false, // Not auto-fixable (complex).
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD055")),
 	}
 }
 
@@ -250,13 +244,7 @@ type TableColumnCountRule struct {
 // NewTableColumnCountRule creates a new table column count rule.
 func NewTableColumnCountRule() *TableColumnCountRule {
 	return &TableColumnCountRule{
-		BaseRule: lint.NewBaseRule(
-			"MD056",
-			"table-column-count",
-			"Table rows should have consistent column counts",
-			[]string{"table"},
-			false, // Not auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD056")),
 	}
 }
 
@@ -308,13 +296,7 @@ type TableAlignmentRule struct {
 // NewTableAlignmentRule creates a new table alignment rule.
 func NewTableAlignmentRule() *TableAlignmentRule {
 	return &TableAlignmentRule{
-		BaseRule: lint.NewBaseRule(
-			"MDL003",
-			"table-alignment",
-			"Table delimiter row should be properly formatted",
-			[]string{"tables", "gfm"},
-			true, // Auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MDL003")),
 	}
 }
 
@@ -372,13 +354,7 @@ type TableBlankLinesRule struct {
 // NewTableBlankLinesRule creates a new table blank lines rule.
 func NewTableBlankLinesRule() *TableBlankLinesRule {
 	return &TableBlankLinesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD058",
-			"blanks-around-tables",
-			"Tables should be surrounded by blank lines",
-			[]string{"table"},
-			true, // Auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD058")),
 	}
 }
 
@@ -537,13 +513,7 @@ type TableColumnStyleRule struct {
 // NewTableColumnStyleRule creates a new table column style rule.
 func NewTableColumnStyleRule() *TableColumnStyleRule {
 	return &TableColumnStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD060",
-			"table-column-style",
-			"Table column style should be consistent",
-			[]string{"table"},
-			false, // Not auto-fixable (style preference).
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD060")),
 	}
 }
 

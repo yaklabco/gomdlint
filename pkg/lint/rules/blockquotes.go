@@ -20,13 +20,7 @@ type NoMultipleSpaceBlockquoteRule struct {
 // NewNoMultipleSpaceBlockquoteRule creates a new no-multiple-space-blockquote rule.
 func NewNoMultipleSpaceBlockquoteRule() *NoMultipleSpaceBlockquoteRule {
 	return &NoMultipleSpaceBlockquoteRule{
-		BaseRule: lint.NewBaseRule(
-			"MD027",
-			"no-multiple-space-blockquote",
-			"Multiple spaces after blockquote symbol",
-			[]string{"blockquote", "indentation", "whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD027")),
 	}
 }
 
@@ -289,13 +283,7 @@ type NoBlanksBlockquoteRule struct {
 // NewNoBlanksBlockquoteRule creates a new no-blanks-blockquote rule.
 func NewNoBlanksBlockquoteRule() *NoBlanksBlockquoteRule {
 	return &NoBlanksBlockquoteRule{
-		BaseRule: lint.NewBaseRule(
-			"MD028",
-			"no-blanks-blockquote",
-			"Blank line inside blockquote",
-			[]string{"blockquote", "whitespace"},
-			false, // Not auto-fixable - requires human decision.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD028")),
 	}
 }
 

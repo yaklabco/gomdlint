@@ -291,6 +291,10 @@ formats change. The first entries under Changed may need action.
   the first word of a fence's info string.
 - `init --full` documents every rule with its default state and severity,
   and `init --format json` writes the same settings as the YAML template.
+- Go API: `lint.NewBaseRuleFromMeta` builds a `lint.BaseRule` from a rule's
+  catalog entry, and `lint.RuleMeta` gains `Summary` and `RuleTags`, the
+  description and tags that the rule reports itself. Every built-in rule is
+  built from its entry, so the catalog is the only copy of its metadata.
 
 ### Fixed
 

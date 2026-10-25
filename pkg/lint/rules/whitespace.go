@@ -20,13 +20,7 @@ type TrailingWhitespaceRule struct {
 // NewTrailingWhitespaceRule creates a new trailing whitespace rule.
 func NewTrailingWhitespaceRule() *TrailingWhitespaceRule {
 	return &TrailingWhitespaceRule{
-		BaseRule: lint.NewBaseRule(
-			"MD009",
-			"no-trailing-spaces",
-			"Lines should not have trailing spaces",
-			[]string{"whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD009")),
 	}
 }
 
@@ -232,13 +226,7 @@ type FinalNewlineRule struct {
 // NewFinalNewlineRule creates a new final newline rule.
 func NewFinalNewlineRule() *FinalNewlineRule {
 	return &FinalNewlineRule{
-		BaseRule: lint.NewBaseRule(
-			"MD047",
-			"single-trailing-newline",
-			"Files should end with a single newline character",
-			[]string{"blank_lines"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD047")),
 	}
 }
 
@@ -379,13 +367,7 @@ type MultipleBlankLinesRule struct {
 // NewMultipleBlankLinesRule creates a new multiple blank lines rule.
 func NewMultipleBlankLinesRule() *MultipleBlankLinesRule {
 	return &MultipleBlankLinesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD012",
-			"no-multiple-blank-lines",
-			"Multiple consecutive blank lines should be collapsed",
-			[]string{"whitespace", "layout"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD012")),
 	}
 }
 
