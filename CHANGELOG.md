@@ -768,6 +768,12 @@ formats change. The first entries under Changed may need action.
   list; 400 fences and 400 headings right next to text in one item, which
   MD031 and MD022 fix, took 8 and 11 seconds. Each now takes a quarter of a
   second or less. Findings, fixes and fixed output stay as they were.
+- The rules whose fix checks compare the whole document share, within one
+  lint of a file, the parse of the document and what the checks derive from
+  it alone, where each rule parsed the document again. The 1 MB document
+  made of the repository's Markdown took 6.8 seconds to lint and now takes
+  3.2, and 11.3 seconds to fix, now 5.9. Findings, fixes and fixed output
+  stay as they were.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or

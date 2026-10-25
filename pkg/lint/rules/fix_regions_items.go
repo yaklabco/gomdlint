@@ -57,9 +57,6 @@ type layoutItem struct {
 	// which makes the list loose.
 	loose, own bool
 	flagged    []int
-	// openers holds the opener of an item region that starts at each group,
-	// found on first use (see itemOpener).
-	openers []itemOpener
 }
 
 // itemOpener is the text that a region of an item's groups starting at one
@@ -255,10 +252,13 @@ func (l *docLayout) fitItemRegion(reg region) (region, bool) {
 // it; of several, the first that holds is taken.
 func (l *docLayout) itemOpener(at, group int) *itemOpener {
 	item := l.items[at]
-	if item.openers == nil {
-		item.openers = make([]itemOpener, len(item.bounds))
+	if l.openers == nil {
+		l.openers = make([][]itemOpener, len(l.items))
 	}
-	opener := &item.openers[group]
+	if l.openers[at] == nil {
+		l.openers[at] = make([]itemOpener, len(item.bounds))
+	}
+	opener := &l.openers[at][group]
 	if opener.checked {
 		return opener
 	}

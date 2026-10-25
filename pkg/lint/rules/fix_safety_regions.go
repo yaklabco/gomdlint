@@ -180,14 +180,14 @@ func listTokens(file *mdast.FileSnapshot, list *mdast.Node, allow fixAllowance) 
 }
 
 // buildOutlineModel cuts the outline of original, the verifier's parse of
-// the document, into the parts that regions replace. It returns nil when
-// region checks cannot be used: when the layout cannot be built, a top-level
-// block of the parse cannot be placed in a group, or the outline written in
-// parts is not the verifier's. A list, blockquote or table whose parts are
-// not the layout's takes no regions of its own: its regions become those of
-// its container.
-func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *outlineModel {
-	layout := newDocLayoutFlags(recordingMarkdown(verifier.parser.Flavor()), verifier.content, true)
+// the document, into the parts that regions replace, with layout, a view of
+// the document's region layout (see originalLayout), or nil when the layout
+// could not be built. It returns nil when region checks cannot be used:
+// when the layout cannot be built, a top-level block of the parse cannot be
+// placed in a group, or the outline written in parts is not the verifier's.
+// A list, blockquote or table whose parts are not the layout's takes no
+// regions of its own: its regions become those of its container.
+func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot, layout *docLayout) *outlineModel {
 	if layout == nil {
 		return nil
 	}
@@ -235,27 +235,21 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 	model.groups.add(out.Len(), len(model.slugs))
 	out.WriteString(outlineClose)
 	// A list, blockquote, table or item without parts takes no regions of
-	// its own.
-	for idx, item := range layout.items {
-		if model.itemParts[idx].starts == nil {
-			item.regions = false
-		}
-	}
-	for idx, list := range layout.lists {
-		if list.regions && model.listParts[idx].items.starts == nil {
-			list.regions = false
-		}
-	}
-	for idx, quote := range layout.quotes {
-		if model.quoteParts[idx].starts == nil {
-			quote.regions = false
-		}
-	}
-	for idx, table := range layout.tables {
-		if model.tableParts[idx].starts == nil {
-			table.regions = false
-		}
-	}
+	// its own. The view shares its lists, blockquotes, tables and items with
+	// the layout the rules of the lint share, so it takes copies of those
+	// it changes.
+	layout.items = withoutRegions(layout.items, func(idx int, item *layoutItem) bool {
+		return item.regions && model.itemParts[idx].starts == nil
+	}, func(item *layoutItem) { item.regions = false })
+	layout.lists = withoutRegions(layout.lists, func(idx int, list *layoutList) bool {
+		return list.regions && model.listParts[idx].items.starts == nil
+	}, func(list *layoutList) { list.regions = false })
+	layout.quotes = withoutRegions(layout.quotes, func(idx int, quote *layoutQuote) bool {
+		return quote.regions && model.quoteParts[idx].starts == nil
+	}, func(quote *layoutQuote) { quote.regions = false })
+	layout.tables = withoutRegions(layout.tables, func(idx int, table *layoutTable) bool {
+		return table.regions && model.tableParts[idx].starts == nil
+	}, func(table *layoutTable) { table.regions = false })
 	model.body = out.String()
 	model.history = recordAnchors(model.slugs)
 	model.anchors = strings.Join(model.history.anchors, "\x00")
@@ -263,6 +257,27 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot) *out
 		return nil
 	}
 	return model
+}
+
+// withoutRegions returns parts with a copy of each part that off picks,
+// changed by disable to take no regions. It returns parts itself when off
+// picks none, and otherwise a new slice, so that neither parts nor the parts
+// it holds are changed.
+func withoutRegions[P any](parts []*P, off func(int, *P) bool, disable func(*P)) []*P {
+	changed := parts
+	cloned := false
+	for idx, part := range parts {
+		if !off(idx, part) {
+			continue
+		}
+		if !cloned {
+			changed, cloned = slices.Clone(parts), true
+		}
+		copied := *part
+		disable(&copied)
+		changed[idx] = &copied
+	}
+	return changed
 }
 
 // placeBlocks returns the blocks of parent in the groups that groupOf finds
