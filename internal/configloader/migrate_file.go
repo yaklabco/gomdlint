@@ -172,7 +172,7 @@ func (r *MigrationResult) ruleKey(id string) string {
 	if r.keyRegistry == nil {
 		return id
 	}
-	return r.keyRegistry.ConfigKey(id)
+	return ruledocs.ConfigKey(r.keyRegistry, id)
 }
 
 // writeRuleSection writes rules under the key section, each keyed by its

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,11 +75,46 @@ func YAMLToJSON(yamlContent []byte) ([]byte, error) {
 		return nil, fmt.Errorf("marshal JSON: %w", err)
 	}
 
-	// The encoder escapes the line and paragraph separators, which YAML
-	// reads as line breaks, but not NEL, which YAML reads as one too. JSON
-	// holds NEL only inside strings, so escaping each keeps the JSON's
-	// meaning and lets YAML, which reads JSON too, read it back the same.
-	return bytes.ReplaceAll(buf.Bytes(), []byte("\u0085"), []byte(`\u0085`)), nil
+	return escapeForYAML(buf.Bytes()), nil
+}
+
+// escapeForYAML returns encoded, JSON, with each character that YAML reads
+// as a line break or does not allow written as a JSON escape, such as
+// \u0085 for NEL: the encoder escapes the line and paragraph separators
+// and the C0 controls, but not NEL, DEL, the C1 controls or U+FFFE and
+// U+FFFF. JSON holds such characters only inside strings, so the escapes
+// keep its meaning and let YAML, which reads JSON too, read it back the
+// same.
+func escapeForYAML(encoded []byte) []byte {
+	var out bytes.Buffer
+	for len(encoded) > 0 {
+		char, size := utf8.DecodeRune(encoded)
+		if yamlAllows(char) || (char == utf8.RuneError && size == 1) {
+			out.Write(encoded[:size])
+		} else {
+			fmt.Fprintf(&out, `\u%04x`, char)
+		}
+		encoded = encoded[size:]
+	}
+	return out.Bytes()
+}
+
+// yamlAllows reports whether YAML reads char, a character of a JSON string,
+// as itself: a printable ASCII character, or one of U+00A0 to U+D7FF,
+// U+E000 to U+FFFD or beyond U+FFFF other than the line and paragraph
+// separators. A tab or a line break of JSON's own layout passes too.
+func yamlAllows(char rune) bool {
+	switch {
+	case char == '\t' || char == '\n' || char == '\r':
+		return true
+	case char == '\u2028' || char == '\u2029':
+		return false
+	case char >= 0x20 && char <= 0x7e:
+		return true
+	default:
+		return (char >= 0xa0 && char <= 0xd7ff) || (char >= 0xe000 && char <= 0xfffd) ||
+			(char >= 0x10000 && char <= unicode.MaxRune)
+	}
 }
 
 // ToYAMLWithHeader serializes the configuration with a header comment.

@@ -42,7 +42,7 @@ type Entry struct {
 
 	// ConfigKey is the key under which generated configurations name the
 	// rule: its name, or its ID when another rule of the registry shares
-	// the name (see lint.Registry.ConfigKey).
+	// the name or YAML cannot hold the name as a key (see ConfigKey).
 	ConfigKey string
 }
 
@@ -77,7 +77,7 @@ func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
 		Default:  State{Enabled: rule.DefaultEnabled(), Severity: rule.DefaultSeverity()},
 		State:    State{Enabled: rr.Enabled, Severity: rr.Severity},
 
-		ConfigKey: registry.ConfigKey(rule.ID()),
+		ConfigKey: ConfigKey(registry, rule.ID()),
 	}
 }
 

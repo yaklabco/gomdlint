@@ -233,16 +233,17 @@ rules:
 
 // TestYAMLToJSONEscapesYAMLLineBreaks covers strings that hold characters
 // that YAML reads as line breaks, NEL and the line and paragraph
-// separators: the JSON escapes them, so that YAML, which reads JSON too,
-// reads it back the same.
+// separators, or does not allow, such as DEL, the C1 controls and U+FFFE:
+// the JSON escapes them, so that YAML, which reads JSON too, reads it back
+// the same.
 func TestYAMLToJSONEscapesYAMLLineBreaks(t *testing.T) {
 	t.Parallel()
 
-	content, err := config.YAMLToJSON([]byte("key: \"a\\Lb\\Pc\\Nd\"\n"))
+	content, err := config.YAMLToJSON([]byte("key: \"a\\Lb\\Pc\\Nd\\x7fe\\x9bf\\uFFFEg\"\n"))
 	require.NoError(t, err)
 
-	assert.Contains(t, string(content), `"a\u2028b\u2029c\u0085d"`)
+	assert.Contains(t, string(content), `"a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg"`)
 	var read map[string]string
 	require.NoError(t, yamlv3.Unmarshal(content, &read), string(content))
-	assert.Equal(t, map[string]string{"key": "a\u2028b\u2029c\u0085d"}, read)
+	assert.Equal(t, map[string]string{"key": "a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg"}, read)
 }

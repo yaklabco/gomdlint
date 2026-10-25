@@ -185,6 +185,8 @@ func TestMigrationFileWritesAwkwardNames(t *testing.T) {
 		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
 		`back\slash`, "ünïcødé", "- item", "[flow]", "&anchor", "", strings.Repeat("a long words ", 20),
 		"\na", "\ta\nb", "a\u2028b", "a\u2029b", "<<", "zero\u200bwidth", "nel\u0085x",
+		"esc\x1bx", "del\x7fx", "c1\u0080\u009b\u009fx", "surrogate\xed\xa0\x80x", "bad\xffbyte", "\ufffe",
+		strings.Repeat("x", 1025), strings.Repeat("long-name ", 120),
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
@@ -229,4 +231,19 @@ func TestMigrationHeaderKeepsTheSourceNameInAComment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, cfg.Flavor)
 	assert.Contains(t, header, "# Migrated from: x flavor: commonmark.json\n")
+}
+
+// TestMigrationFileOfASourceNamedWithControlCharacters covers a source file
+// whose name holds characters that YAML does not allow in a comment, such
+// as ESC and DEL: the header writes them as escapes, so the file loads.
+func TestMigrationFileOfASourceNamedWithControlCharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config\x1b\x7f\u0085\u0099\xff.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"MD013": false}`), 0o600))
+	converted, err := ConvertMarkdownlintConfig(path)
+	require.NoError(t, err)
+
+	content, err := converted.FileContent(filepath.Join(t.TempDir(), ".gomdlint.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "# Migrated from: config\\x1b\\x7f \\u0099\\xff.json\n")
+	assertLoadsAsConverted(t, converted, filepath.Join(t.TempDir(), ".gomdlint.yml"), content)
 }

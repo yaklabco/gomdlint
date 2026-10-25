@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -305,6 +306,8 @@ func awkwardScalars() []string {
 		`back\slash`, "ünïcødé", "auto_fix: false\nreset_options: true", "- item", "[flow]", "&anchor", "",
 		strings.Repeat("a long words ", 20),
 		"\na", "\ta\nb", "\n", "a\u2028b", "a\u2029b", "<<", "zero\u200bwidth", "nel\u0085x",
+		"esc\x1bx", "del\x7fx", "c1\u0080\u009b\u009fx", "surrogate\xed\xa0\x80x", "bad\xffbyte", "\ufffe",
+		strings.Repeat("x", 1025), strings.Repeat("long-name ", 120),
 		strings.Repeat("a long words ", 20) + "\nand a break",
 	}
 }
@@ -373,7 +376,10 @@ func TestConfigTemplateFullWritesAwkwardScalars(t *testing.T) {
 		require.True(t, found, "%q", key)
 		awkward, isAwkward := rule.(*awkwardRule)
 		require.True(t, isAwkward, "%q", key)
-		want := map[string]any{"value": awkward.value, awkward.value: []any{awkward.value, "plain"}}
+		// A string that is no valid UTF-8 is written with U+FFFD in place
+		// of each invalid byte, as YAML holds only UTF-8.
+		value := validUTF8(awkward.value)
+		want := map[string]any{"value": value, value: []any{value, "plain"}}
 		if awkward.value == "" {
 			want["follows"] = "" // An empty DefaultFrom follows no option.
 		}
@@ -456,4 +462,16 @@ func TestConfigTemplateMinimalWritesAwkwardNames(t *testing.T) {
 		named[rule.ID()] = true
 	}
 	assert.Equal(t, map[string]bool{"MD001": true, "MD013": true, "MD033": true}, named)
+}
+
+// validUTF8 returns text with U+FFFD in place of each byte that is no
+// UTF-8, as encoding/json writes it.
+func validUTF8(text string) string {
+	var out strings.Builder
+	for len(text) > 0 {
+		char, size := utf8.DecodeRuneInString(text)
+		out.WriteRune(char)
+		text = text[size:]
+	}
+	return out.String()
 }
