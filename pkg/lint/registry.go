@@ -38,6 +38,11 @@ type Registry struct {
 	byName map[string]Rule
 	meta   map[string]RuleMeta // rule ID -> catalog entry
 
+	// described holds the last entry that Describe recorded for each ID,
+	// which Register does not drop, so the words of an entry that no longer
+	// describes its ID's rule stay known (see Register).
+	described map[string]RuleMeta
+
 	// index serves every lookup of identifiers, tags and names. Every
 	// change sets it to nil, and the next lookup builds a new one. A built
 	// index never changes, so a reader may use it after releasing the lock.
@@ -134,15 +139,22 @@ func NewRegistry() *Registry {
 		byID:   make(map[string]Rule),
 		byName: make(map[string]Rule),
 		meta:   make(map[string]RuleMeta),
+
+		described: make(map[string]RuleMeta),
 	}
 }
 
 // Register adds a rule to the registry.
 // If a rule with the same ID already exists, it is replaced, and the name
 // of the replaced rule no longer resolves unless the new rule uses it too.
-// A replacement under another name also drops the replaced rule's catalog
-// entry (see Describe), which describes that rule, not the new one, so its
-// aliases and tags no longer resolve to the new rule either.
+// Registering a rule whose name differs from the name in its ID's catalog
+// entry drops the entry (see Describe), which describes another rule, such
+// as the one it replaces, so the entry's aliases and tags no longer
+// resolve to it. They
+// stay words that markdownlint knows, in markdownlint comments and
+// configs. A replacement under the same name, such as another
+// implementation of the rule, keeps the whole entry: its description and
+// options too.
 //
 // markdownlint 0.41.1 rejects a set of custom rules in which a name equals
 // another name, or a tag equals a name, in upper case (validateRuleList in
@@ -164,9 +176,9 @@ func (r *Registry) Register(rule Rule) {
 		if named, ok := r.byName[old.Name()]; ok && named.ID() == old.ID() {
 			delete(r.byName, old.Name())
 		}
-		if old.Name() != rule.Name() {
-			delete(r.meta, rule.ID())
-		}
+	}
+	if meta, ok := r.meta[rule.ID()]; ok && meta.Name != "" && meta.Name != rule.Name() {
+		delete(r.meta, rule.ID()) // The entry names another rule.
 	}
 
 	r.byID[rule.ID()] = rule
@@ -183,6 +195,7 @@ func (r *Registry) Describe(meta RuleMeta) {
 	defer r.mu.Unlock()
 
 	r.meta[meta.ID] = meta.clone()
+	r.described[meta.ID] = r.meta[meta.ID]
 	r.index = nil
 }
 
@@ -515,8 +528,8 @@ func (r *Registry) buildIndex() *ruleIndex {
 
 	// The catalog's words come from every entry, registered or not, so that
 	// a word means the same in a registry that holds only some of the rules.
-	for _, id := range slices.Sorted(maps.Keys(r.meta)) {
-		build.addCatalogEntry(r.meta[id])
+	for _, id := range slices.Sorted(maps.Keys(r.described)) {
+		build.addCatalogEntry(r.described[id])
 	}
 
 	// The first claim on a key wins, so claim IDs, then names, then aliases.

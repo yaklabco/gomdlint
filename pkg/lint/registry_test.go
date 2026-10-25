@@ -301,6 +301,32 @@ func TestRegistry_ReplacementUnderAnotherNameDropsTheEntry(t *testing.T) {
 	rule, ok := reg.Lookup("company-policy")
 	require.True(t, ok)
 	assert.Equal(t, "MD009", rule.ID())
+
+	// markdownlint still knows the replaced rule's words, so they are no
+	// unknown words in markdownlint comments and configs.
+	for _, word := range []string{"no-trailing-spaces", "trailing-spaces", "whitespace"} {
+		_, known := reg.MarkdownlintConfigRuleIDs(word)
+		assert.True(t, known, "%s stays a word that markdownlint knows", word)
+	}
+}
+
+// TestRegistry_EntryDescribedBeforeAReplacement covers an entry described
+// for a rule before it replaces a described rule under the same ID: the
+// entry describes the new rule, which keeps it.
+func TestRegistry_EntryDescribedBeforeAReplacement(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockRule{id: "MD009", name: "no-trailing-spaces"})
+	reg.Describe(RuleMeta{ID: "MD009", Name: "no-trailing-spaces", Aliases: []string{"trailing-spaces"}})
+
+	reg.Describe(RuleMeta{ID: "MD009", Name: "company-policy", Aliases: []string{"policy"}})
+	reg.Register(&mockRule{id: "MD009", name: "company-policy"})
+
+	meta, ok := reg.Meta("MD009")
+	require.True(t, ok, "the entry describes the new rule")
+	assert.Equal(t, "company-policy", meta.Name)
+	rule, ok := reg.Lookup("policy")
+	require.True(t, ok, "the new entry's alias")
+	assert.Equal(t, "company-policy", rule.Name())
 }
 
 func TestRegistry_DescribeReplacesEntry(t *testing.T) {
