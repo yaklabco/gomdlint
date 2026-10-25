@@ -829,12 +829,21 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma delta epsilon\n",
 		},
 		{
-			name:     "wraps a footnote after a footnote with a line break element",
+			// Any footnote beside a tag withholds the fixes.
+			name:     "no fix in a footnote after a footnote with a line break element",
 			flavor:   goldmark.FlavorGFM,
 			input:    "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta gamma delta epsilon\n",
 			maxLen:   20,
+			wantFix:  false,
+			wantText: "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "wraps a footnote in a document without tags",
+			flavor:   goldmark.FlavorGFM,
+			input:    "See [^1] and [^2].\n\n[^1]: 1 < 2\n\n[^2]: alpha beta gamma delta epsilon\n",
+			maxLen:   20,
 			wantFix:  true,
-			wantText: "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta\ngamma delta epsilon\n",
+			wantText: "See [^1] and [^2].\n\n[^1]: 1 < 2\n\n[^2]: alpha beta\ngamma delta epsilon\n",
 		},
 		{
 			// GitHub renders TOML front matter as Markdown, where the code

@@ -499,13 +499,10 @@ rule's `"\n"` is a line ending of its own there, as the engine writes it.
   `htmlHiddenFromCheck` adds the raw HTML that the signature's parsers
   cannot see but GitHub renders: in a document with a `<` that may start a
   tag (`hasTagStart`), TOML or JSON front matter, which the parsers blank,
-  and footnotes, which they do not read. Such a document with a `[^` is
-  parsed once more with goldmark's footnote block parser
-  (`fix_footnotes.go`), and keeps no fix when that parse finds raw HTML
-  that is not benign, when a `[^` where a definition may start is one that
-  goldmark does not read as cmark-gfm does (`blockAfterLabel`, a tab before
-  the label), or when an HTML block in a definition spans a line of spaces,
-  which ends the definition for cmark-gfm (`splitByBlankLine`).
+  and a `[^` anywhere, which may start a footnote, which they do not read.
+  Such a document keeps no fix. goldmark and cmark-gfm disagree on which
+  footnote definitions there are, where they end and how their blocks
+  read, so the check does not try to find the footnotes GitHub sees.
   `list_fix_safety.go` plans list item moves together, so that moves which
   are only safe together form one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through

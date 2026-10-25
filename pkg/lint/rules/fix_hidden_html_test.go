@@ -1,303 +1,190 @@
 package rules
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
-// TestFixCheckKeepsNoFixBesideFootnoteHTML checks raw HTML in GFM footnotes.
-// The check's parsers do not read footnotes: they read "[^1]: <code>" as a
-// link reference definition and an indented footnote paragraph as code, and
-// see no raw HTML there. GitHub writes a footnote's raw HTML after the
-// document, where the browser opens the element again for the footnotes
-// after it, so a document with raw HTML in a footnote that is not benign
-// keeps no fix. Benign HTML in a footnote, and footnotes without HTML,
-// leave the fixes to the check.
-func TestFixCheckKeepsNoFixBesideFootnoteHTML(t *testing.T) {
-	runFixCheckCases(t, []fixCheckCase{
-		{
-			name:  "wrapping a footnote after a footnote with raw HTML",
-			input: "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: false,
-		},
-		{
-			name:   "wrapping a footnote after a footnote with raw HTML in CommonMark",
-			flavor: config.FlavorCommonMark,
-			input:  "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma\n",
-			old:    "beta gamma", new: "beta\ngamma",
-			want: false,
-		},
-		{
-			name:  "wrapping a paragraph after a footnote with raw HTML",
-			input: "See [^1].\n\n[^1]: <code>\n\nalpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: false,
-		},
-		{
-			name:  "wrapping a footnote after a footnote whose code block holds raw HTML",
-			input: "See [^1] and [^2].\n\n[^1]: First.\n\n    Second <code>open\n\n[^2]: alpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: false,
-		},
-		{
-			// GitHub folds the case of footnote labels, as goldmark does not,
-			// so it writes this footnote and the code element in it.
-			name:  "wrapping a footnote after a footnote with raw HTML whose label differs in case",
-			input: "See [^a] and [^b].\n\n[^A]: <code>\n\n[^b]: alpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: false,
-		},
-		{
-			// GitHub drops a footnote without a reference, but the check does
-			// not match references, so it reads every footnote.
-			name:  "wrapping a paragraph after an unreferenced footnote with raw HTML",
-			input: "Text.\n\n[^1]: <code>\n\nalpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: false,
-		},
-		{
-			name:  "wrapping a paragraph after a footnote with benign HTML",
-			input: "See [^1].\n\n[^1]: a<br>b\n\nalpha beta\n",
-			old:   "alpha beta", new: "alpha\nbeta",
-			want: true,
-		},
-		{
-			name:  "wrapping a footnote beside a footnote with benign HTML",
-			input: "See [^1] and [^2].\n\n[^1]: a<br>b <!-- note -->\n\n[^2]: alpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: true,
-		},
-		{
-			name:  "wrapping a footnote in a document without HTML",
-			input: "See [^1] and [^2].\n\n[^1]: First.\n\n    Second code\n\n[^2]: alpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: true,
-		},
-		{
-			name:  "wrapping a footnote in a document whose only < is text",
-			input: "See [^1] and [^2], where 1 < 2.\n\n[^1]: First.\n\n[^2]: alpha beta gamma\n",
-			old:   "beta gamma", new: "beta\ngamma",
-			want: true,
-		},
-	})
-}
-
-// TestFixCheckKeepsNoFixBesideUnreadFootnotes checks documents with a line
-// that may start a footnote definition that goldmark does not read as one,
-// while cmark-gfm, which GitHub uses, may: goldmark rejects a "[" in a
-// label, even in backticks, and reads the indented continuation as code,
-// where it sees no raw HTML. Such a document keeps no fix when it holds a
-// "<", and keeps its fixes otherwise.
-func TestFixCheckKeepsNoFixBesideUnreadFootnotes(t *testing.T) {
+// TestFixCheckKeepsNoFixBesideFootnotesWithTags checks documents that hold
+// a "[^" and a "<" that may start a tag. The check's parsers do not read
+// footnotes: they read "[^1]: <code>" as a link reference definition and an
+// indented footnote paragraph as code, and see no raw HTML there, while
+// GitHub writes a footnote's raw HTML after the document, where the browser
+// opens the element again for the footnotes after it. goldmark and
+// cmark-gfm, which GitHub uses, also disagree on which footnote definitions
+// there are and where they end. So such a document keeps no fix, wherever
+// the "[^" and the "<" are, even when all its raw HTML is benign.
+func TestFixCheckKeepsNoFixBesideFootnotesWithTags(t *testing.T) {
 	const later = "\n\n[^b]: alpha beta gamma\n"
 	cases := []fixCheckCase{
+		{name: "footnote after a footnote with raw HTML", input: "See [^1] and [^b].\n\n[^1]: <code>" + later},
+		{
+			name:   "footnote after a footnote with raw HTML in CommonMark",
+			flavor: config.FlavorCommonMark,
+			input:  "See [^1] and [^b].\n\n[^1]: <code>" + later,
+		},
+		{name: "paragraph after a footnote with raw HTML", input: "See [^1].\n\n[^1]: <code>\n\nalpha beta gamma\n"},
+		{
+			name:  "footnote after a footnote whose code block holds raw HTML",
+			input: "See [^1] and [^b].\n\n[^1]: First.\n\n    Second <code>open" + later,
+		},
+		{
+			// GitHub folds the case of footnote labels, as goldmark does not.
+			name:  "footnote after a footnote with raw HTML whose label differs in case",
+			input: "See [^a] and [^b].\n\n[^A]: <code>" + later,
+		},
+		{name: "paragraph after an unreferenced footnote with raw HTML", input: "Text.\n\n[^1]: <code>\n\nalpha beta gamma\n"},
+		{name: "footnote beside a footnote with benign HTML", input: "See [^1] and [^b].\n\n[^1]: a<br>b <!-- note -->" + later},
+		{name: "paragraph after a footnote with benign HTML", input: "See [^1].\n\n[^1]: a<br>b\n\nalpha beta gamma\n"},
+		{name: "footnote that starts with an autolink", input: "See [^a] and [^b].\n\n[^a]: <https://example.com>" + later},
 		{
 			name: "label with a bracket in backticks, beside benign HTML",
 			input: "Intro a<br>b.\n\nSee [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open" +
 				later,
 		},
+		{name: "label with a bracket in backticks", input: "See [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open" + later},
+		{name: "label with an escaped bracket", input: "See [^a\\]] and [^b].\n\n[^a\\]]: First.\n\n    Second <code>open" + later},
+		{name: "label with spaces", input: "See [^a b] and [^b].\n\n[^a b]: First.\n\n    Second <code>open" + later},
+		{name: "label that spans two lines", input: "See [^b].\n\n[^a\nc]: First.\n\n    Second <code>open" + later},
+		{name: "definition in a blockquote", input: "See [^a`[`] and [^b].\n\n> [^a`[`]: First.\n>\n>     Second <code>open" + later},
+		{name: "definition in a list item", input: "See [^a`[`] and [^b].\n\n- [^a`[`]: First.\n\n      Second <code>open" + later},
 		{
-			name:  "label with a bracket in backticks, with no other HTML",
-			input: "See [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open" + later,
-		},
-		// cmark-gfm may read none of the next three labels either. The
-		// loose test withholds the fixes all the same.
-		{
-			name:  "label with an escaped bracket",
-			input: "See [^a\\]] and [^b].\n\n[^a\\]]: First.\n\n    Second <code>open" + later,
-		},
-		{
-			name:  "label with spaces",
-			input: "See [^a b] and [^b].\n\n[^a b]: First.\n\n    Second <code>open" + later,
-		},
-		{
-			name:  "label that spans two lines",
-			input: "See [^b].\n\n[^a\nc]: First.\n\n    Second <code>open" + later,
-		},
-		{
-			name:  "definition in a blockquote",
-			input: "See [^a`[`] and [^b].\n\n> [^a`[`]: First.\n>\n>     Second <code>open" + later,
-		},
-		{
-			name:  "definition in a list item",
-			input: "See [^a`[`] and [^b].\n\n- [^a`[`]: First.\n\n      Second <code>open" + later,
-		},
-		{
-			// cmark-gfm opens the second definition inside the first.
-			name:  "definition that goldmark does not read inside one it reads",
+			name:  "definition inside another one",
 			input: "See [^x], [^a`[`] and [^b].\n\n[^x]: [^a`[`]: First.\n\n        Second <code>open" + later,
 		},
+		{name: "definitions after nested ones", input: "See [^x], [^c] and [^b].\n\n[^x]: [^y]: z\n\n[^c]: <code>" + later},
+		{name: "definition whose text follows four spaces", input: "See [^a] and [^b].\n\n[^a]:     x<code>open" + later},
+		{name: "definition whose text follows tabs", input: "See [^a] and [^b].\n\n[^a]:\t\tx<code>open" + later},
+		{name: "definition that starts an ordered list", input: "See [^a] and [^b].\n\n[^a]: 10. x\n\n        <code>open" + later},
+		{name: "definition whose label holds an escaped bracket", input: "See [^a\\] and [^b].\n\n[^a\\]: <code>]: text" + later},
+		{name: "definition after a tab in a blockquote", input: "See [^a] and [^b].\n\n>\t[^a]: <![CDATA[" + later},
+		{name: "definition after a tab in a list item", input: "See [^a] and [^b].\n\n- item\n\t[^a]: <div title=\"x" + later},
+		{name: "comment in a definition split by a line of spaces", input: "See [^a] and [^b].\n\n[^a]: <!--\n  \n    -->" + later},
 		{
-			name:  "definition that goldmark does not read in a list inside one it reads",
-			input: "See [^x], [^a`[`] and [^b].\n\n[^x]: - [^a`[`]: First.\n\n            Second <code>open" + later,
+			name:  "comment in a definition in a blockquote split by an empty quote line",
+			input: "See [^a] and [^b].\n\n> [^a]: x\n>     <!--\n>\n>     -->" + later,
 		},
 		{
-			// goldmark's footnote extension moves the definitions it closes
-			// into a list beside the first one closed, which here lies inside
-			// x, and so drops every later definition from the document.
-			name:  "definitions after nested ones that goldmark reads",
-			input: "See [^x], [^c] and [^b].\n\n[^x]: [^y]: z\n\n[^c]: <code>" + later,
+			// goldmark reads a table that cmark-gfm does not, as its delimiter
+			// row has another width, and so a code span that hides the tag.
+			name:  "table in a definition that only goldmark reads",
+			input: "See [^a] and [^b].\n\n[^a]: `span\n    | - | - |\n    `<code>`" + later,
 		},
 		{
-			// cmark-gfm skips the spaces after the label, while goldmark reads
-			// an indented code block there, and the other parsers a link
-			// reference definition: none of them shows the code element.
-			name:  "definition whose text follows four spaces",
-			input: "See [^a] and [^b].\n\n[^a]:     x<code>open" + later,
-		},
-		{
-			name:  "definition whose text follows tabs",
-			input: "See [^a] and [^b].\n\n[^a]:\t\tx<code>open" + later,
-		},
-		{
-			name:  "definition in a blockquote whose text follows four spaces",
-			input: "See [^a] and [^b].\n\n> [^a]:     x<code>open" + later,
-		},
-		{
-			name:  "more definitions nested on one line than the footnote parse reads",
-			input: "See [^a].\n\n" + strings.Repeat("[^a]: ", maxFootnoteNesting+1) + "x <br>" + later,
-		},
-		{
-			name:  "definition in a list item whose text follows four spaces",
-			input: "See [^a] and [^b].\n\n- [^a]:     x<code>open" + later,
-		},
-		{
-			// cmark-gfm drops the space before the list marker, so its item
-			// holds the indented line as text, where goldmark reads code.
-			name:  "definition that starts an ordered list",
-			input: "See [^a] and [^b].\n\n[^a]: 10. x\n\n        <code>open" + later,
-		},
-		{
-			name:  "definition that starts a bullet list after spaces",
-			input: "See [^a] and [^b].\n\n[^a]:   - x\n\n        <code>open" + later,
-		},
-		{
-			name:  "definition that starts an ordered list after spaces",
-			input: "See [^a] and [^b].\n\n[^a]:   1. x\n\n         <code>open" + later,
-		},
-		{
-			name:  "definition that starts a bullet list with spaces after its marker",
-			input: "See [^a] and [^b].\n\n[^a]: -    x\n\n         <code>open" + later,
-		},
-		{
-			// goldmark reads an escaped bracket in a label, cmark-gfm ends
-			// the label there and reads the rest as text.
-			name:  "definition whose label holds an escaped bracket",
-			input: "See [^a\\] and [^b].\n\n[^a\\]: <code>]: text" + later,
+			name:  "comment in a definition in a list item split by a line of spaces, with CRLF line endings",
+			input: "See [^a] and [^b].\r\n\r\n- [^a]: <!--\r\n  \r\n      -->\r\n\r\n[^b]: alpha beta gamma\r\n",
 		},
 		{
 			name: "label with a bracket in backticks, with CRLF line endings",
 			input: strings.ReplaceAll("Intro a<br>b.\n\nSee [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open"+
 				later, "\n", "\r\n"),
 		},
+		{name: "footnote with raw HTML, with CR line endings", input: "See [^1] and [^b].\r\r[^1]: <code>\r\r[^b]: alpha beta gamma\r"},
 		{
-			// A container takes part of the tab, and goldmark starts the
-			// definition's text that many columns early, in "]: <![CDATA[",
-			// a paragraph. cmark-gfm reads an HTML block.
-			name:  "definition after a tab in a blockquote",
-			input: "See [^a] and [^b].\n\n>\t[^a]: <![CDATA[" + later,
+			// The reference is no definition, and no renderer reads one here,
+			// but any "[^" counts.
+			name:  "undefined reference beside a link reference definition",
+			input: "Intro a<br>b.\n\n[^a] is an undefined reference.\n[x]: /url\n\nalpha beta gamma\n",
 		},
-		{
-			name:  "definition after a tab in a list item",
-			input: "See [^a] and [^b].\n\n- item\n\t[^a]: <div title=\"x" + later,
-		},
-		{
-			name: "definition after a tab in a list item, beside benign HTML",
-			input: "See [^a] and [^b].\n\n- item\n\t[^a]: <br>\n\t    \\<style>p { white-space: pre }\\</style>\n\n" +
-				"Intro a<br>b." + later,
-		},
-		{
-			// cmark-gfm ends a definition at a line of spaces, which ends
-			// the comment in it. goldmark reads one comment.
-			name:  "comment in a definition split by a line of spaces",
-			input: "See [^a] and [^b].\n\n[^a]: <!--\n  \n    -->" + later,
-		},
-		{
-			name:  "comment in a definition's second block split by a line of spaces",
-			input: "See [^a] and [^b].\n\n[^a]: x\n    <!--\n \n    -->" + later,
-		},
-		{
-			name:  "comment in a definition in a blockquote split by an empty quote line",
-			input: "See [^a] and [^b].\n\n> [^a]: x\n>     <!--\n>\n>     -->" + later,
-		},
+		{name: "definition shown in a code block", input: "Intro a<br>b.\n\n```markdown\n[^a]: Note.\n```\n\nalpha beta gamma\n"},
+		{name: "footnote syntax in a code span", input: "Write `[^1]` for a note, a<br>b.\n\nalpha beta gamma\n"},
+	}
+	starts := map[string]string{
+		"a link":           "[Source](https://example.com)",
+		"a number":         "2019 study",
+		"a code span":      "`code` here",
+		"a heading":        "# Heading",
+		"a fence":          "```go",
+		"a table row":      "a | b",
+		"a paragraph":      "  text",
+		"a list":           "- x",
+		"a blockquote":     "> x",
+		"an HTML block":    "<div>",
+		"a thematic break": "___",
+	}
+	for name, start := range starts {
+		cases = append(cases, fixCheckCase{
+			name:  "footnote that starts with " + name + ", beside benign HTML",
+			input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: " + start + later,
+		})
 	}
 	for idx := range cases {
 		cases[idx].old, cases[idx].new = "beta gamma", "beta\ngamma"
 	}
-	cases = append(cases, fixCheckCase{
-		name:  "unread definition in a document with no HTML",
-		input: "See [^a`[`].\n\n[^a`[`]: First.\n\n    Second code" + later,
-		old:   "beta gamma", new: "beta\ngamma",
-		want: true,
-	}, fixCheckCase{
-		// A line of spaces ends the definition for cmark-gfm, and only the
-		// paragraphs around it differ, which hold no raw HTML.
-		name:  "definition with paragraphs split by a line of spaces, beside benign HTML",
-		input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: x\n  \n    more text" + later,
-		old:   "beta gamma", new: "beta\ngamma",
-		want: true,
-	}, fixCheckCase{
-		name:  "comment in a definition split by an empty line, beside benign HTML",
-		input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: <!--\n\n    -->" + later,
-		old:   "beta gamma", new: "beta\ngamma",
-		want: true,
-	}, fixCheckCase{
-		// No "<" starts a tag, so no renderer reads raw HTML anywhere.
-		name:  "unread definition in a document whose only < starts no tag",
-		input: "See [^a`[`], where 1 < 2 and {{< x >}}.\n\n[^a`[`]: First.\n\n    Second code" + later,
-		old:   "beta gamma", new: "beta\ngamma",
-		want: true,
-	}, fixCheckCase{
-		// The test for places where a definition may start is loose: it
-		// finds the one in the code block, which no renderer reads.
-		name:  "definition shown in a code block, beside benign HTML",
-		input: "Intro a<br>b.\n\n```markdown\n[^a`[`]: Note.\n```" + later,
-		old:   "beta gamma", new: "beta\ngamma",
-		want: false,
-	})
 	runFixCheckCases(t, cases)
 }
 
-// TestFixCheckKeepsFixesBesideFootnotesThatStartAParagraph checks that a
-// footnote whose text starts a paragraph, a heading or another block whose
-// later lines do not depend on the column the text starts at keeps the
-// fixes of a document with benign HTML. cmark-gfm skips the spaces after
-// the label and goldmark keeps them, which moves only the columns of the
-// first line: they matter for a list item, a blockquote and code indented
-// by a tab or four spaces, and for nothing else.
-func TestFixCheckKeepsFixesBesideFootnotesThatStartAParagraph(t *testing.T) {
-	starts := map[string]string{
-		"an autolink":                 "<https://example.com>",
-		"a link":                      "[Source](https://example.com)",
-		"a link reference definition": "[x]: https://example.com",
-		"an image":                    "![a](x.png)",
-		"a number":                    "2019 study",
-		"a decimal number":            "2019.5 percent",
-		"emphasis":                    "*Emphasis* here",
-		"strong emphasis":             "__Strong__ here",
-		"a code span":                 "`code` here",
-		"an escape":                   "\\- not a list",
-		"a heading":                   "# Heading",
-		"a thematic break":            "___",
-		"a table row":                 "a | b",
-		"an equals sign":              "= x",
-		"a fence":                     "```go",
-		"a tilde fence":               "~~~",
-		"two spaces and a paragraph":  "  text",
-	}
-	var cases []fixCheckCase
-	for name, start := range starts {
-		cases = append(cases, fixCheckCase{
-			name:  "footnote that starts with " + name,
-			input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: " + start + "\n\n[^b]: alpha beta gamma\n",
+// TestFixCheckKeepsFixesBesideFootnotesWithoutTags checks that a document
+// with a "[^" but no "<" that may start a tag is checked as on main, and so
+// keeps the fixes that leave its rendering unchanged.
+func TestFixCheckKeepsFixesBesideFootnotesWithoutTags(t *testing.T) {
+	const later = "\n\n[^b]: alpha beta gamma\n"
+	runFixCheckCases(t, []fixCheckCase{
+		{
+			name:  "wrapping a footnote in a document without HTML",
+			input: "See [^1] and [^b].\n\n[^1]: First.\n\n    Second code" + later,
 			old:   "beta gamma", new: "beta\ngamma",
 			want: true,
-		})
-	}
-	runFixCheckCases(t, cases)
+		},
+		{
+			name:  "wrapping beside a definition goldmark does not read",
+			input: "See [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second code" + later,
+			old:   "beta gamma", new: "beta\ngamma",
+			want: true,
+		},
+		{
+			// No "<" starts a tag, so no renderer reads raw HTML anywhere.
+			name:  "wrapping a footnote in a document whose only < starts no tag",
+			input: "See [^1] and [^b], where 1 < 2, a <- b and {{< x >}}.\n\n[^1]: First." + later,
+			old:   "beta gamma", new: "beta\ngamma",
+			want: true,
+		},
+		{
+			name:   "wrapping a footnote in CommonMark",
+			flavor: config.FlavorCommonMark,
+			input:  "See [^1] and [^b].\n\n[^1]: First." + later,
+			old:    "beta gamma", new: "beta\ngamma",
+			want: true,
+		},
+		{
+			// The check still withholds a fix that changes the rendering.
+			name:  "splitting a footnote paragraph",
+			input: "See [^1] and [^b].\n\n[^1]: First." + later,
+			old:   "beta gamma", new: "beta\n\ngamma",
+			want: false,
+		},
+	})
+}
+
+// TestFixCheckKeepsFixesBesideTagsWithoutFootnotes checks that a document
+// with a "<" that may start a tag but no "[^" is checked as on main: benign
+// raw HTML leaves the fixes to the check, and other raw HTML withholds them.
+func TestFixCheckKeepsFixesBesideTagsWithoutFootnotes(t *testing.T) {
+	runFixCheckCases(t, []fixCheckCase{
+		{
+			name:  "wrapping beside benign HTML",
+			input: "Line<br> and <img src=\"a.png\">, x^2 and [a ^b](c).\n\nalpha beta gamma\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: true,
+		},
+		{
+			name:  "wrapping beside a caret after a bracket with a space",
+			input: "See [ ^1] and a<br>b.\n\nalpha beta gamma\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: true,
+		},
+		{
+			name:  "wrapping beside other HTML",
+			input: "Press <kbd>x</kbd>.\n\nalpha beta gamma\n",
+			old:   "beta gamma", new: "beta\ngamma",
+			want: false,
+		},
+	})
 }
 
 // TestFixCheckKeepsNoFixBesideHTMLInFrontMatter checks front matter that
@@ -319,7 +206,6 @@ func TestFixCheckKeepsNoFixBesideHTMLInFrontMatter(t *testing.T) {
 		{name: "TOML front matter before an indented line", input: "+++\ntitle = \"x\"\n+++\n    <code>\n" + body},
 		{name: "JSON front matter before an indented line", input: "{\n\"a\": 1\n}\n    <code>\n" + body},
 		{name: "TOML front matter that opens a list", input: "+++\n- x\n+++\n\n    <code>\n" + body},
-		{name: "TOML front matter that defines a footnote", input: "+++\n[^a]: x\n+++\n\n    <code>\n\nSee [^a].\n" + body},
 		{name: "TOML front matter with an end tag", input: "+++\ntitle = \"a</b>\"\n+++\n" + body},
 		{name: "TOML front matter with a comment", input: "+++\n+++\n\n<!-- x -->\n" + body},
 		{name: "TOML front matter with a processing instruction", input: "+++\n+++\n\n<?x?>\n" + body},
@@ -334,4 +220,27 @@ func TestFixCheckKeepsNoFixBesideHTMLInFrontMatter(t *testing.T) {
 		cases[idx].old, cases[idx].new = "beta gamma", "beta\ngamma"
 	}
 	runFixCheckCases(t, cases)
+}
+
+// TestHasTagStart checks which "<" may start raw HTML.
+func TestHasTagStart(t *testing.T) {
+	tests := map[string]bool{
+		"":               false,
+		"1 < 2":          false,
+		"a <= b, c <- d": false,
+		"{{< x >}}":      false,
+		"ends with <":    false,
+		"<3 and <<":      false,
+		"<b>":            true,
+		"x</b>":          true,
+		"<!-- c -->":     true,
+		"<?x?>":          true,
+		"<https://x>":    true,
+		"1 < 2 <Z":       true,
+	}
+	for input, want := range tests {
+		t.Run(strconv.Quote(input), func(t *testing.T) {
+			assert.Equal(t, want, hasTagStart([]byte(input)))
+		})
+	}
 }

@@ -590,21 +590,6 @@ func (c *fixCheck) unchanged(changed []byte) bool {
 // leaves it out, and the front matter lines are blanked before parsing. It
 // also reports whether every raw HTML region is benign for every parser.
 func (c *fixCheck) signatures(content []byte) ([]string, bool) {
-	content, source, frontMatter := signatureSource(content)
-	signatures := make([]string, len(c.markdowns))
-	benign := true
-	for idx, markdown := range c.markdowns {
-		doc := markdown.Parser().Parse(gmtext.NewReader(source))
-		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source)
-		benign = benign && htmlRegionsBenign(doc, source)
-	}
-	return signatures, benign
-}
-
-// signatureSource returns content without a byte order mark, the source
-// the signature's parsers read, which is that content with the lines of its
-// front matter blanked, and the length of the front matter.
-func signatureSource(content []byte) ([]byte, []byte, int) {
 	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
 	frontMatter := frontMatterLength(content)
 	source := bytes.Clone(content)
@@ -613,7 +598,14 @@ func signatureSource(content []byte) ([]byte, []byte, int) {
 			source[idx] = ' '
 		}
 	}
-	return content, source, frontMatter
+	signatures := make([]string, len(c.markdowns))
+	benign := true
+	for idx, markdown := range c.markdowns {
+		doc := markdown.Parser().Parse(gmtext.NewReader(source))
+		signatures[idx] = fmt.Sprintf("FM%q", content[:frontMatter]) + goldmarkSignature(doc, source)
+		benign = benign && htmlRegionsBenign(doc, source)
+	}
+	return signatures, benign
 }
 
 // The lines that open and close YAML and TOML front matter.
@@ -740,8 +732,8 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 // htmlHiddenFromCheck reports whether content may hold raw HTML that is not
 // benign where the signature's parsers read none, though GitHub renders it.
 // Such a document keeps no fix, like one whose raw HTML is not benign (see
-// keepSafeFixes). It looks only at content where a "<" may start a tag (see
-// hasTagStart), as all raw HTML starts so, and finds three places:
+// keepSafeFixes). It looks only at content with a "<" that may start a tag
+// (see hasTagStart), as all raw HTML starts so, and finds two cases:
 //
 //   - TOML and JSON front matter. The parsers blank front matter, but GitHub
 //     renders "+++" and "{" front matter as Markdown, where raw HTML may open
@@ -750,19 +742,16 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 //     raw HTML after it, such as an indented line that the parsers read as
 //     code. GitHub shows YAML front matter as a table, so it is left to the
 //     check.
-//   - Raw HTML in a GFM footnote. The parsers do not read footnotes: they may
-//     read "[^1]: <code>" as a link reference definition and an indented
-//     footnote paragraph as code. GitHub writes footnotes after the
-//     document, where the browser opens a formatting element again for the
-//     footnotes after it. So content with a "[^" is parsed once more with a
-//     parser that reads every footnote definition, whatever references it,
-//     and its raw HTML must be benign too.
-//   - A "[^" where a footnote definition may start that goldmark does not
-//     read as cmark-gfm, which GitHub uses, does (see parseFootnotes). Its
-//     raw HTML may look like code or text to goldmark. The test for such
-//     places finds more than any renderer reads, such as a definition shown
-//     in a code block, which costs fixes in documents that also hold a "<"
-//     that may start a tag.
+//   - A "[^" anywhere, which may start a GFM footnote. The parsers do not
+//     read footnotes: they may read "[^1]: <code>" as a link reference
+//     definition and an indented footnote paragraph as code, and see no raw
+//     HTML there. GitHub writes footnotes after the document, where the
+//     browser opens a formatting element again for the footnotes after it.
+//     goldmark and cmark-gfm, which GitHub uses, also disagree on which
+//     labels make a definition, where a definition ends, and how the blocks
+//     in it read, so no second parse can show what GitHub sees. A "[^" that
+//     starts no footnote, such as one in a code span or an undefined
+//     reference, costs the fixes all the same.
 func htmlHiddenFromCheck(content []byte) bool {
 	content = bytes.TrimPrefix(content, []byte(mdast.ByteOrderMark))
 	if !hasTagStart(content) {
@@ -772,12 +761,7 @@ func htmlHiddenFromCheck(content []byte) bool {
 	if frontMatter > 0 && !bytes.HasPrefix(content, []byte(yamlFrontMatterFence)) {
 		return true
 	}
-	if !hasTagStart(content[frontMatter:]) || !bytes.Contains(content[frontMatter:], []byte("[^")) {
-		return false
-	}
-	_, source, _ := signatureSource(content)
-	doc, unread := parseFootnotes(source)
-	return unread || !htmlRegionsBenign(doc, source)
+	return bytes.Contains(content, []byte("[^"))
 }
 
 // hasTagStart reports whether text holds a "<" that may start raw HTML for
