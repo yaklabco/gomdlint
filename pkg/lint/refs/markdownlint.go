@@ -84,7 +84,7 @@ func startsParagraph(def *ReferenceDefinition) bool {
 		orderedListMarker(word),
 		strings.HasPrefix(word, "```") || strings.HasPrefix(word, "~~~"),
 		strings.HasPrefix(word, "$$"),
-		def.Title == "" && mayBeDirective(word),
+		mayBeDirective(word),
 		strings.ContainsAny(word[:1], "><["):
 		return false
 	}
@@ -96,9 +96,12 @@ func startsParagraph(def *ReferenceDefinition) bool {
 // colons, a name, and an optional label in brackets and attributes in
 // braces. A name starts with a character other than ASCII punctuation, goes
 // on with letters, digits, "-" and "_", and does not end with "-" or "_".
-// What follows the name counts when it starts a label or attributes that
-// the word closes, without telling their content apart, so that a line
-// micromark might read as a directive keeps goldmark's reading.
+// Where micromark's rules need more, this errs toward a directive, so that
+// a line micromark might read as one keeps goldmark's reading: a character
+// outside ASCII counts as a letter, what follows the name counts when it
+// starts a label or attributes that the word closes, without their content
+// told apart, and a title, which may stand on a later line that a
+// container directive leaves out, does not count.
 func mayBeDirective(word string) bool {
 	rest := strings.TrimLeft(word, ":")
 	if len(word)-len(rest) < len("::") {
