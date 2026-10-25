@@ -758,8 +758,8 @@ formats change. The first entries under Changed may need action.
   400 tables right after text, which `blanks-around-tables` (MD058) fixes,
   took 4.4 seconds to lint, and 5 seconds with the tables in a nested loose
   list; 400 fences and 400 headings right next to text in one item, which
-  MD031 and MD022 fix, took 8 and 11 seconds. Each now takes about a tenth
-  of a second. Findings, fixes and fixed output stay as they were.
+  MD031 and MD022 fix, took 8 and 11 seconds. Each now takes a quarter of a
+  second or less. Findings, fixes and fixed output stay as they were.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or
