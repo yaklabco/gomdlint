@@ -483,3 +483,20 @@ func TestDocLayoutFieldsAreSharedOrScratch(t *testing.T) {
 	assert.Equal(t, []string{"units", "openers", "labels", "work"}, fieldNames(reflect.TypeFor[layoutScratch]()),
 		"the fields each view has its own of")
 }
+
+// TestFixVerifierParsesOriginalOnceWithoutSharing checks that a verifier
+// whose context shares nothing, as one that the engine did not make, parses
+// the original once, as it did before the rules shared values.
+func TestFixVerifierParsesOriginalOnceWithoutSharing(t *testing.T) {
+	t.Parallel()
+
+	content := []byte(sharedChecksDoc)
+	file, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "doc.md", content)
+	require.NoError(t, err)
+	counts := &originalParses{}
+	ctx := context.WithValue(context.Background(), originalParsesKey{}, counts)
+	verifier := newFixVerifier(lint.NewRuleContext(ctx, file, config.NewConfig(), nil), fixAllowance{})
+
+	assert.True(t, verifier.parsed)
+	assert.Equal(t, 1, counts.checks, "parses of the original with a check's parser")
+}

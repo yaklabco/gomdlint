@@ -107,14 +107,11 @@ func originalOutline(ctx *lint.RuleContext) (docOutline, bool) {
 }
 
 // verifierOutline returns the outline that fixVerifier compares with allow
-// of the original document of the file of ctx, which must parse (see
-// originalDocument).
-func verifierOutline(ctx *lint.RuleContext, allow fixAllowance) string {
+// of original, the original document of the file of ctx as
+// originalDocument returns it. The caller passes the parse it has, so that
+// a context that shares nothing parses the original once.
+func verifierOutline(ctx *lint.RuleContext, original *mdast.FileSnapshot, allow fixAllowance) string {
 	return lint.SharedValue(ctx, verifierOutlineKey{flavor: checkFlavor(ctx), allow: allow}, func() string {
-		original, ok := originalDocument(ctx)
-		if !ok {
-			return ""
-		}
 		return documentOutline(original, allow)
 	})
 }

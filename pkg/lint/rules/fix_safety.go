@@ -389,7 +389,7 @@ func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier 
 	// fixed copies, so both outlines come from the same flavor. The rules of
 	// a lint share that parse and its outline (see originalDocument).
 	if original, ok := originalDocument(ruleCtx); ok {
-		verifier.original, verifier.parsed = verifierOutline(ruleCtx, allow), true
+		verifier.original, verifier.parsed = verifierOutline(ruleCtx, original, allow), true
 		verifier.originalFile = original
 	}
 	return verifier
