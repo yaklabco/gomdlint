@@ -170,6 +170,24 @@ func TestReferenceFiles(t *testing.T) {
 	assert.True(t, ruledocs.IsGenerated(files["docs/schema/gomdlint.schema.json"]))
 }
 
+// TestRuleHelpKeysRulesAsExplainDoes covers the key that RuleHelp's pages
+// write for a rule: its config key in the registry, as explain writes it,
+// with lint.DefaultRegistry for a nil registry.
+func TestRuleHelpKeysRulesAsExplainDoes(t *testing.T) {
+	rule, found := lint.DefaultRegistry.GetByID("MD009")
+	require.True(t, found)
+	meta, found := lint.DefaultRegistry.Meta("MD009")
+	require.True(t, found)
+
+	for _, registry := range []*lint.Registry{lint.DefaultRegistry, nil} {
+		text, markdown, uri, ok := ruledocs.RuleHelp(registry)(rule, meta)
+		require.True(t, ok)
+		assert.Contains(t, text, "Options, under rules.no-trailing-spaces.options:", "a nil registry is the default one")
+		assert.Contains(t, markdown, "rules.no-trailing-spaces.options")
+		assert.Equal(t, ruledocs.RulePagesURL+"no-trailing-spaces.md", uri)
+	}
+}
+
 // TestPageURL covers the published address of each rule's page: the page
 // that ReferenceFiles writes, on main of the repository, as the JSON
 // Schema's $id is. A rule without a generated page has no address.

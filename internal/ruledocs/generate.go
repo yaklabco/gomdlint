@@ -75,17 +75,17 @@ func PageURL(entry Entry) string {
 // when it has none. It returns the page that explain prints, as text, and
 // the page that explain --format markdown prints, both for the rule's
 // built-in state and keyed as generated configurations key the rule in
-// registry (see ConfigKey), or by ID when registry is nil. It also returns
-// the address of the rule's generated page (see PageURL), or "" for a rule
-// without one. It reports false when a page cannot be written, as when the
-// rule's embedded example does not parse, which the tests of this package
-// rule out for the built-in rules.
+// registry (see ConfigKey), or in lint.DefaultRegistry when registry is
+// nil, as the SARIF reporter falls back to it too. Pass the registry given
+// as reporter.Options.Registry. The function also returns the address of
+// the rule's generated page (see PageURL), or "" for a rule without one. It
+// reports false when a page cannot be written, as when the rule's embedded
+// example does not parse, which the tests of this package rule out for the
+// built-in rules.
 func RuleHelp(registry *lint.Registry) func(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
 	return func(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
 		entry := NewEntry(rule, meta)
-		if registry != nil {
-			entry.ConfigKey = ConfigKey(registry, rule.ID())
-		}
+		entry.ConfigKey = ConfigKey(cmp.Or(registry, lint.DefaultRegistry), rule.ID())
 		var text, markdown strings.Builder
 		if WriteTextPage(&text, entry, "") != nil || WriteMarkdownPage(&markdown, entry) != nil {
 			return "", "", "", false

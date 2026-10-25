@@ -79,9 +79,10 @@ func newEntry(registry *lint.Registry, rr lint.ResolvedRule) Entry {
 }
 
 // NewEntry documents rule, with meta, its catalog entry, in its built-in
-// state, as Entries documents it without a configuration. A rule without a
-// catalog entry takes the zero entry, and its own description and, when it
-// declares them, its own options (see lint.OptionDeclarer).
+// state, as Entries documents it without a configuration, except that it
+// has no ConfigKey, which takes a registry: set it with ConfigKey. A rule
+// without a catalog entry takes the zero entry, and its own description
+// and, when it declares them, its own options (see lint.OptionDeclarer).
 func NewEntry(rule lint.Rule, meta lint.RuleMeta) Entry {
 	meta.ID = rule.ID()
 	meta.Name = rule.Name()
