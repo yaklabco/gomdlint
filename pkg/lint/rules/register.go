@@ -4,17 +4,8 @@ import "github.com/yaklabco/gomdlint/pkg/lint"
 
 // RegisterAll registers all built-in rules with the given registry, with
 // their catalog entries, so that the registry resolves each rule's aliases
-// and tags. It records the entries before it registers the rules, so that
-// each built-in rule owns its entry, and a rule of another type that later
-// replaces a built-in rule does not get the built-in rule's entry (see
-// lint.Registry.Register). Other changes to the same registry must not
-// run while RegisterAll does: one that lands between an entry and its
-// rule could take the entry.
+// and tags.
 func RegisterAll(registry *lint.Registry) {
-	for _, meta := range Catalog() {
-		registry.Describe(meta)
-	}
-
 	// Whitespace rules
 	registry.Register(NewTrailingWhitespaceRule()) // MD009
 	registry.Register(NewHardTabsRule())           // MD010
@@ -95,6 +86,10 @@ func RegisterAll(registry *lint.Registry) {
 	registry.Register(NewLinkImageRefDefsRule())    // MD053
 	registry.Register(NewLinkImageStyleRule())      // MD054
 	registry.Register(NewDescriptiveLinkTextRule()) // MD059
+
+	for _, meta := range Catalog() {
+		registry.Describe(meta)
+	}
 }
 
 // init registers all built-in rules with the default registry.
