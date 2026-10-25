@@ -44,16 +44,15 @@ type verifierOutlineKey struct {
 // parser of flavor reads it.
 type layoutKey struct{ flavor string }
 
-// parsedDocument is a parse of a document; ok is false when the parse
-// failed, and file is nil.
-type parsedDocument struct {
+// sharedParse is the shared parse of the original, or nil when the parse
+// failed.
+type sharedParse struct {
 	file *mdast.FileSnapshot
-	ok   bool
 }
 
-// outlineOfOriginal is the outline that fixChecker compares of the
+// sharedOutline is the shared outline that fixChecker compares of the
 // original; ok is false when the original did not parse.
-type outlineOfOriginal struct {
+type sharedOutline struct {
 	outline docOutline
 	ok      bool
 }
@@ -73,7 +72,7 @@ func checkFlavor(ctx *lint.RuleContext) string {
 // with the file's path. ok is false when the parse fails.
 func originalDocument(ctx *lint.RuleContext) (*mdast.FileSnapshot, bool) {
 	flavor := checkFlavor(ctx)
-	parsed := lint.SharedValue(ctx, originalKey{flavor}, func() parsedDocument {
+	parsed := lint.SharedValue(ctx, originalKey{flavor}, func() sharedParse {
 		parseCtx := ctx.Ctx
 		if parseCtx == nil {
 			parseCtx = context.Background()
@@ -86,32 +85,36 @@ func originalDocument(ctx *lint.RuleContext) (*mdast.FileSnapshot, bool) {
 		countOriginalParse(parseCtx, false)
 		file, err := gmparser.New(flavor).Parse(parseCtx, path, content)
 		if err != nil || file == nil || file.Root == nil {
-			return parsedDocument{}
+			return sharedParse{}
 		}
-		return parsedDocument{file: file, ok: true}
+		return sharedParse{file: file}
 	})
-	return parsed.file, parsed.ok
+	return parsed.file, parsed.file != nil
 }
 
 // originalOutline returns the outline that fixChecker compares of the
 // original document of the file of ctx. ok is false when the original does
 // not parse.
 func originalOutline(ctx *lint.RuleContext) (docOutline, bool) {
-	shared := lint.SharedValue(ctx, checkerOutlineKey{checkFlavor(ctx)}, func() outlineOfOriginal {
+	shared := lint.SharedValue(ctx, checkerOutlineKey{checkFlavor(ctx)}, func() sharedOutline {
 		file, ok := originalDocument(ctx)
 		if !ok {
-			return outlineOfOriginal{}
+			return sharedOutline{}
 		}
-		return outlineOfOriginal{outline: outlineOf(file), ok: true}
+		return sharedOutline{outline: outlineOf(file), ok: true}
 	})
 	return shared.outline, shared.ok
 }
 
 // verifierOutline returns the outline that fixVerifier compares with allow
-// of original, the original document of the file of ctx as
-// originalDocument returns it.
-func verifierOutline(ctx *lint.RuleContext, original *mdast.FileSnapshot, allow fixAllowance) string {
+// of the original document of the file of ctx, which must parse (see
+// originalDocument).
+func verifierOutline(ctx *lint.RuleContext, allow fixAllowance) string {
 	return lint.SharedValue(ctx, verifierOutlineKey{flavor: checkFlavor(ctx), allow: allow}, func() string {
+		original, ok := originalDocument(ctx)
+		if !ok {
+			return ""
+		}
 		return documentOutline(original, allow)
 	})
 }
@@ -134,7 +137,9 @@ func originalLayout(ctx *lint.RuleContext) *docLayout {
 
 // originalParsesKey is the context key under which a test counts the
 // parses of the whole original document that the fix checks make (see
-// countOriginalParse).
+// countOriginalParse). The builds above are the only places where the
+// checks of fixChecker and fixVerifier parse the whole original, so the
+// counts bound how often they do.
 type originalParsesKey struct{}
 
 // originalParses counts the parses of the whole original document that the

@@ -857,44 +857,55 @@ type docLayout struct {
 	// and itemIndex the index in items of each item node.
 	items     []*layoutItem
 	itemIndex map[gmast.Node]int
-	// openers holds, for each item, the opener of an item region that
-	// starts at each of its groups, found on first use (see itemOpener).
-	openers [][]itemOpener
 	// tables holds the tables with body rows that are top-level blocks,
 	// blocks of a top-level blockquote or blocks of an item, in the order the
 	// layout meets them, and tableIndex the index in tables of each table
 	// node.
 	tables     []*layoutTable
 	tableIndex map[gmast.Node]int
-	// units holds the parts of the lists, tables, blockquotes and items that
-	// regions can take, built on first use (see unitIndex).
-	units []layoutUnit
 	// refs holds the link reference definitions in the order the parser
 	// added them, and refIndex the definition each label resolves to.
-	// lookups holds the labels that links looked up, each once, and labels,
-	// built on first use, indexes the definitions and the lookups by label
-	// (see Definitions).
+	// lookups holds the labels that links looked up, each once (see
+	// Definitions).
 	refs     []recordedRef
 	refIndex map[string]goldparser.Reference
 	lookups  []string
-	labels   *labelIndex
-	// work counts what region checks have done, which tests bound.
-	work regionWork
 	// tableFlags is passed to every parse of the layout (see
 	// newDocLayoutFlags).
 	tableFlags bool
+	// layoutScratch holds what a check finds and counts as it goes, apart
+	// from what the layout knows of the document, so that a view can start
+	// with none of it (see view). Every other field is set when the layout
+	// is built and never changed.
+	layoutScratch
+}
+
+// layoutScratch is what a check that uses a layout finds and counts as it
+// goes.
+type layoutScratch struct {
+	// units holds the parts of the lists, tables, blockquotes and items that
+	// regions can take, built on first use (see unitIndex).
+	units []layoutUnit
+	// openers holds, for each item, the opener of an item region that
+	// starts at each of its groups, found on first use (see itemOpener).
+	openers [][]itemOpener
+	// labels, built on first use, indexes the definitions and the lookups
+	// by label (see indexByLabel).
+	labels *labelIndex
+	// work counts what region checks have done, which tests bound.
+	work regionWork
 }
 
 // view returns a copy of the layout for one check: it shares what the
 // layout knows of the document, which no check changes, and has its own
-// region units, item openers, label index and work counts, which a check
-// finds and adds to as it goes. It returns nil for a nil layout.
+// scratch, empty, for what the check finds and counts as it goes. It
+// returns nil for a nil layout.
 func (l *docLayout) view() *docLayout {
 	if l == nil {
 		return nil
 	}
 	view := *l
-	view.units, view.openers, view.labels, view.work = nil, nil, nil, regionWork{}
+	view.layoutScratch = layoutScratch{}
 	return &view
 }
 

@@ -72,12 +72,6 @@ func TestFixChecksParseOriginalOncePerLint(t *testing.T) {
 	}
 }
 
-// allowances lists every allowance that a rule checks its fixes with.
-var allowances = []fixAllowance{
-	{}, {linkTextSpace: true}, {codeSpanSpace: true}, {autolinks: true},
-	{codeInfo: true}, {prompts: true}, {reversedLinks: true},
-}
-
 // sharedProbe is a rule that runs after every built-in rule, since rules
 // run in order of ID, and checks each value that the fix checks of the lint
 // shared against the value built again the way each rule built it before
@@ -101,7 +95,11 @@ func newSharedProbe(t *testing.T) *sharedProbe {
 }
 
 // cached returns the value of key that a rule before the probe shared, and
-// false when no rule shared one.
+// false when no rule shared one. Asking keeps a zero value for a key that
+// no rule shared, so the probe asks for each key once and reads no shared
+// value of a key it asked for after that.
+//
+//nolint:ireturn // T is the caller's own type, which need not be an interface.
 func cached[T any](ctx *lint.RuleContext, key any) (T, bool) {
 	built := false
 	value := lint.SharedValue(ctx, key, func() T {
@@ -114,7 +112,6 @@ func cached[T any](ctx *lint.RuleContext, key any) (T, bool) {
 
 func (p *sharedProbe) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	t := p.t
-	t.Helper()
 	flavor := checkFlavor(ctx)
 	content := checkedContent(ctx.File.Content)
 	parseCtx := context.Background()
@@ -127,17 +124,16 @@ func (p *sharedProbe) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 	freshOutline := outlineOf(unnamed)
 	assert.Equal(t, freshOutline, outlineOf(fresh), "the path of a parse does not change its outline")
 
-	if parsed, ok := cached[parsedDocument](ctx, originalKey{flavor}); ok {
+	if parsed, ok := cached[sharedParse](ctx, originalKey{flavor}); ok {
 		p.compared["parse"]++
-		assert.True(t, parsed.ok)
 		assert.True(t, reflect.DeepEqual(fresh, parsed.file), "shared parse of the original")
 	}
-	if shared, ok := cached[outlineOfOriginal](ctx, checkerOutlineKey{flavor}); ok {
+	if shared, ok := cached[sharedOutline](ctx, checkerOutlineKey{flavor}); ok {
 		p.compared["checker outline"]++
 		assert.True(t, shared.ok)
 		assert.True(t, reflect.DeepEqual(freshOutline, shared.outline), "shared fixChecker outline")
 	}
-	for _, allow := range allowances {
+	for _, allow := range outlineAllowances {
 		if shared, ok := cached[string](ctx, verifierOutlineKey{flavor: flavor, allow: allow}); ok {
 			p.compared["verifier outline"]++
 			assert.Equal(t, documentOutline(fresh, allow), shared, "shared fixVerifier outline for %+v", allow)
@@ -148,19 +144,21 @@ func (p *sharedProbe) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic, error) {
 		p.compared["layout"]++
 		assertSameLayout(t, freshLayout, base)
 		if base != nil {
-			assert.Nil(t, base.units, "no check builds units on the shared layout")
-			assert.Nil(t, base.openers, "no check finds item openers on the shared layout")
-			assert.Nil(t, base.labels, "no check builds labels on the shared layout")
-			assert.Equal(t, regionWork{}, base.work, "no check counts work on the shared layout")
+			assert.Equal(t, layoutScratch{}, base.layoutScratch, "no check finds or counts on the shared layout")
 		}
 		// An outline model built on a view of the shared layout is the one
 		// built on a layout of its own, and leaves the shared layout as it was.
-		for _, allow := range allowances {
-			verifier := newFixVerifier(ctx, allow)
-			shared := buildOutlineModel(verifier, fresh, originalLayout(ctx))
+		for _, allow := range outlineAllowances {
+			verifier := &fixVerifier{
+				ctx: parseCtx, rule: ctx, file: ctx.File, content: content, parser: goldmark.New(flavor),
+				allow: allow, original: documentOutline(fresh, allow), parsed: true,
+			}
 			own := buildOutlineModel(verifier, fresh, newDocLayoutFlags(recordingMarkdown(flavor), content, true))
+			shared := buildOutlineModel(verifier, fresh, base.view())
 			assertSameModel(t, own, shared)
-			p.compared["model"]++
+			if own != nil {
+				p.compared["model"]++
+			}
 		}
 		assertSameLayout(t, freshLayout, base)
 	}
@@ -216,7 +214,7 @@ func TestFixChecksShareValuesBuiltAsBefore(t *testing.T) {
 			engine := lint.NewEngine(goldmark.New(string(flavor)), registry)
 			for _, doc := range docs {
 				content := []byte(doc)
-				for pass := 0; pass < 2; pass++ {
+				for range 2 {
 					result, err := engine.LintFile(context.Background(), "doc.md", content, cfg)
 					require.NoError(t, err)
 					require.Empty(t, result.RuleErrors)
@@ -230,6 +228,7 @@ func TestFixChecksShareValuesBuiltAsBefore(t *testing.T) {
 				assert.Positive(t, probe.compared[kind], "shared values compared: %s", kind)
 			}
 			assert.Positive(t, probe.flavorsDiffer, "files whose outlines differ by flavor")
+			t.Logf("shared values compared: %v; files whose outlines differ by flavor: %d", probe.compared, probe.flavorsDiffer)
 		})
 	}
 }
@@ -377,4 +376,109 @@ func refTexts(refs []recordedRef) []string {
 // refText describes a definition.
 func refText(ref goldparser.Reference) string {
 	return fmt.Sprintf("%q %q %q", ref.Label(), ref.Destination(), ref.Title())
+}
+
+func TestWithoutRegions(t *testing.T) {
+	t.Parallel()
+
+	newItems := func() []*layoutItem {
+		return []*layoutItem{{index: 0, regions: true}, {index: 1, regions: true}, {index: 2, regions: false}}
+	}
+	disable := func(item *layoutItem) { item.regions = false }
+	tests := []struct {
+		name string
+		off  func(int, *layoutItem) bool
+		want []bool
+	}{
+		{name: "none", off: func(int, *layoutItem) bool { return false }, want: []bool{true, true, false}},
+		{name: "one", off: func(idx int, _ *layoutItem) bool { return idx == 1 }, want: []bool{true, false, false}},
+		{name: "all", off: func(int, *layoutItem) bool { return true }, want: []bool{false, false, false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			items := newItems()
+			kept := slices.Clone(items)
+			got := withoutRegions(items, tt.off, disable)
+
+			regions := make([]bool, len(got))
+			for idx, item := range got {
+				regions[idx] = item.regions
+				assert.Equal(t, idx, item.index, "item %d keeps its fields", idx)
+			}
+			assert.Equal(t, tt.want, regions)
+			assert.Equal(t, kept, items, "the slice passed in holds the same items")
+			for idx, item := range items {
+				assert.Equal(t, idx != 2, item.regions, "item %d passed in keeps its regions", idx)
+			}
+			if tt.name == "none" {
+				assert.Same(t, &items[0], &got[0], "a slice with no changes is returned as it is")
+			} else {
+				assert.NotSame(t, &items[0], &got[0], "a slice with changes is a new slice")
+			}
+		})
+	}
+}
+
+// TestOutlineModelLeavesSharedLayout builds outline models on views of one
+// layout, with parses that place no parts in some of the layout's lists,
+// tables and items, so that the models take no regions from those, and
+// checks that the layout keeps its regions.
+func TestOutlineModelLeavesSharedLayout(t *testing.T) {
+	t.Parallel()
+
+	docs := []string{
+		"# T\n\n- item\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n\n  text\n\n- other\n",
+		"# T\n\n| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n\n> - one\n>\n>   | a | b |\n>   | - | - |\n>   | 1 | 2 |\n",
+	}
+	for _, doc := range docs {
+		content := []byte(doc)
+		// A layout read as GFM, and parses read as CommonMark, which has no
+		// tables.
+		base := newDocLayoutFlags(recordingMarkdown(goldmark.FlavorGFM), content, true)
+		require.NotNil(t, base)
+		original, err := goldmark.New(goldmark.FlavorCommonMark).Parse(context.Background(), "doc.md", content)
+		require.NoError(t, err)
+		cleared := 0
+		for range 2 {
+			verifier := &fixVerifier{
+				ctx: context.Background(), content: content, parser: goldmark.New(goldmark.FlavorCommonMark),
+				original: documentOutline(original, fixAllowance{}), parsed: true,
+			}
+			view := base.view()
+			buildOutlineModel(verifier, original, view)
+			for idx, table := range view.tables {
+				if !table.regions && base.tables[idx].regions {
+					cleared++
+				}
+			}
+		}
+		assert.Positive(t, cleared, "the models take no regions from a table of %q", doc)
+		assertSameLayout(t, newDocLayoutFlags(recordingMarkdown(goldmark.FlavorGFM), content, true), base)
+	}
+}
+
+// TestDocLayoutFieldsAreSharedOrScratch lists the fields of docLayout. A
+// layout is shared by the checks of a lint, which each take a view of it:
+// a field that a check sets as it goes belongs in layoutScratch, which a
+// view starts empty, and every other field must be set when the layout is
+// built and never changed. A new field must be placed in one of the two.
+func TestDocLayoutFieldsAreSharedOrScratch(t *testing.T) {
+	t.Parallel()
+
+	fieldNames := func(typ reflect.Type) []string {
+		names := make([]string, typ.NumField())
+		for idx := range typ.NumField() {
+			names[idx] = typ.Field(idx).Name
+		}
+		return names
+	}
+	assert.Equal(t, []string{
+		"markdown", "source", "base", "frontMatter", "frontLimit", "firstLineFree", "nodes", "bounds",
+		"afterClosed", "groupNodes", "lists", "listIndex", "quotes", "quoteIndex", "items", "itemIndex",
+		"tables", "tableIndex", "refs", "refIndex", "lookups", "tableFlags", "layoutScratch",
+	}, fieldNames(reflect.TypeFor[docLayout]()), "the fields shared by the views of a layout")
+	assert.Equal(t, []string{"units", "openers", "labels", "work"}, fieldNames(reflect.TypeFor[layoutScratch]()),
+		"the fields each view has its own of")
 }

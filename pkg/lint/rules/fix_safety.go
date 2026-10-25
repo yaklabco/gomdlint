@@ -360,10 +360,10 @@ type fixVerifier struct {
 	original string
 	parsed   bool // whether the original content parsed
 	// originalFile is the parse of the original content, which the rules of
-	// a lint share and none changes, kept until regions builds model from
-	// it, and model the outline cut into regions
-	// (see outlineModel), built on first use; nil where region checks cannot
-	// be used.
+	// a lint share and none changes, for regions to build model from, and
+	// model the outline cut into regions (see outlineModel), built on first
+	// use; nil where region checks cannot be used. The shared parse lives
+	// as long as the lint of the file.
 	originalFile *mdast.FileSnapshot
 	model        *outlineModel
 	modeled      bool
@@ -389,7 +389,7 @@ func newFixVerifier(ruleCtx *lint.RuleContext, allow fixAllowance) *fixVerifier 
 	// fixed copies, so both outlines come from the same flavor. The rules of
 	// a lint share that parse and its outline (see originalDocument).
 	if original, ok := originalDocument(ruleCtx); ok {
-		verifier.original, verifier.parsed = verifierOutline(ruleCtx, original, allow), true
+		verifier.original, verifier.parsed = verifierOutline(ruleCtx, allow), true
 		verifier.originalFile = original
 	}
 	return verifier
@@ -458,7 +458,8 @@ func (v *fixVerifier) regions() *outlineModel {
 		if v.originalFile != nil {
 			v.model = buildOutlineModel(v, v.originalFile, originalLayout(v.rule))
 		}
-		// The model keeps what it compares; the parse can go.
+		// The model keeps what it compares; the verifier needs the parse no
+		// more, though the lint keeps it for the rules after this one.
 		v.originalFile = nil
 	}
 	return v.model

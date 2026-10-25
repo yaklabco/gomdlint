@@ -181,13 +181,12 @@ func listTokens(file *mdast.FileSnapshot, list *mdast.Node, allow fixAllowance) 
 
 // buildOutlineModel cuts the outline of original, the verifier's parse of
 // the document, into the parts that regions replace, with layout, a view of
-// the document's region layout (see originalLayout), or nil when it could
-// not be built. It returns nil when region checks cannot be used: when the
-// layout cannot be built, a top-level
-// block of the parse cannot be placed in a group, or the outline written in
-// parts is not the verifier's. A list, blockquote or table whose parts are
-// not the layout's takes no regions of its own: its regions become those of
-// its container.
+// the document's region layout (see originalLayout), or nil when the layout
+// could not be built. It returns nil when region checks cannot be used:
+// when the layout cannot be built, a top-level block of the parse cannot be
+// placed in a group, or the outline written in parts is not the verifier's.
+// A list, blockquote or table whose parts are not the layout's takes no
+// regions of its own: its regions become those of its container.
 func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot, layout *docLayout) *outlineModel {
 	if layout == nil {
 		return nil
@@ -261,9 +260,10 @@ func buildOutlineModel(verifier *fixVerifier, original *mdast.FileSnapshot, layo
 }
 
 // withoutRegions returns parts with a copy of each part that off picks,
-// changed by clear to take no regions. It returns parts itself when off
-// picks none, and otherwise a new slice, so that the parts are not changed.
-func withoutRegions[P any](parts []*P, off func(int, *P) bool, clear func(*P)) []*P {
+// changed by disable to take no regions. It returns parts itself when off
+// picks none, and otherwise a new slice, so that neither parts nor the parts
+// it holds are changed.
+func withoutRegions[P any](parts []*P, off func(int, *P) bool, disable func(*P)) []*P {
 	changed := parts
 	cloned := false
 	for idx, part := range parts {
@@ -274,7 +274,7 @@ func withoutRegions[P any](parts []*P, off func(int, *P) bool, clear func(*P)) [
 			changed, cloned = slices.Clone(parts), true
 		}
 		copied := *part
-		clear(&copied)
+		disable(&copied)
 		changed[idx] = &copied
 	}
 	return changed
