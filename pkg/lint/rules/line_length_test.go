@@ -819,8 +819,8 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta gamma\ndelta epsilon\n",
 		},
 		{
-			// GitHub writes the code element after the document, where the
-			// browser opens it again around the next footnote.
+			// cmark-gfm writes the footnotes after the document, and the code
+			// element left open in the first holds the next one.
 			name:     "no fix in a footnote after a footnote with raw HTML",
 			flavor:   goldmark.FlavorGFM,
 			input:    "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma delta epsilon\n",

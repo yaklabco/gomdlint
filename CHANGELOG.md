@@ -711,12 +711,13 @@ formats change. The first entries under Changed may need action.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or
-  JSON front matter. Their fix check read `[^1]: <code>` as a link
-  reference definition and blanked front matter, so it kept a wrap or a
-  whitespace fix that GitHub shows inside the code element. A document with
-  a `<` that may start a tag now keeps no fix of these rules when it holds
-  `[^` anywhere or has TOML or JSON front matter. Documents without such a
-  `<` keep their fixes, as before.
+  JSON front matter. Their fix check read `[^1]: <!--` as a link reference
+  definition and blanked front matter, so it kept a wrap or a whitespace
+  fix next to HTML that GitHub writes as an open comment or element. A
+  document with a `<` that may start raw HTML, which an autolink does not,
+  now keeps no fix of these rules when it holds `[^` anywhere or has TOML
+  or JSON front matter. Documents without such a `<` keep their fixes, as
+  before.
 - goldmark moves to v1.8.6, past GO-2026-5320, a flaw in its HTML renderer
   that gomdlint never calls. Releases build with Go 1.26.9, which govulncheck
   finds free of GO-2026-4602, reachable through `filepath.WalkDir` with Go

@@ -1,4 +1,4 @@
-complex.input.md:46:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style)
+complex.input.md:46:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style) [fixable]
 complex.input.md:47:1 warning Unordered list bullet '*' does not match expected '-' (MD004/unordered-list-style)
 complex.input.md:113:1 warning Fenced code block has no language specified (MD040/fenced-code-language)
 complex.input.md:123:1 warning Code block style 'indented' does not match expected 'fenced' (MD046/code-block-style)
@@ -20,4 +20,4 @@ complex.input.md:215:11 warning Table pipe spacing does not match style compact 
 complex.input.md:215:25 warning Table pipe spacing does not match style compact (MD060/table-column-style)
 complex.input.md:215:25 warning Table pipe spacing does not match style compact (MD060/table-column-style)
 complex.input.md:215:37 warning Table pipe spacing does not match style compact (MD060/table-column-style)
-complex.input.md:278:81 warning Line length 98 exceeds maximum 80 (MD013/line-length)
+complex.input.md:278:81 warning Line length 98 exceeds maximum 80 (MD013/line-length) [fixable]

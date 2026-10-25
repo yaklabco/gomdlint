@@ -43,7 +43,10 @@ const individualFixChecks = 16
 // the HTML as well as after it, which no signature models: a final line
 // ending, for one, joins the value of a textarea left open. Whitespace,
 // well-formed comments such as markdownlint directives, and br, wbr, hr and
-// img tags leave the fixes to the signature.
+// img tags leave the fixes to the signature. Raw HTML that the signature's
+// parsers cannot see, in GFM footnotes and in TOML or JSON front matter,
+// may not be benign, so a document that may hold it keeps no fix either
+// (see htmlHiddenFromCheck).
 //
 // The engine may apply only some of the fixes, after a directive, a conflict
 // or the last pass, so every fix must be safe on its own. When a rule reports
@@ -456,6 +459,10 @@ type fixCheck struct {
 	// benign whether all its raw HTML is benign. Both are set on first use.
 	baseline []string
 	benign   bool
+	// hidden reports whether raw HTML may hide in footnotes or front matter
+	// (see htmlHiddenFromCheck), and hiddenChecked whether it is set.
+	hidden        bool
+	hiddenChecked bool
 	// models holds the region model of the original for each parser, nil
 	// where region checks cannot be used; modeled reports whether they are
 	// built.
@@ -539,8 +546,17 @@ func (c *fixCheck) ensureModels() {
 }
 
 // htmlBenign reports whether all raw HTML of the original content is
-// benign, so that its fixes can be judged by the render signature.
+// benign, so that its fixes can be judged by the render signature. Raw HTML
+// that may hide in footnotes or front matter counts as not benign (see
+// htmlHiddenFromCheck), which is found before the content is parsed.
 func (c *fixCheck) htmlBenign() bool {
+	if !c.hiddenChecked {
+		c.hiddenChecked = true
+		c.hidden = htmlHiddenFromCheck(c.content)
+	}
+	if c.hidden {
+		return false
+	}
 	c.ensureBaseline()
 	return c.benign
 }
@@ -561,13 +577,10 @@ func (c *fixCheck) keepsTogether(diags []lint.Diagnostic, indexes []int) bool {
 }
 
 // ensureBaseline parses the original content once, for its render
-// signatures and whether its raw HTML is benign. Raw HTML that the
-// signature's parsers do not see, but GitHub renders, counts as not benign
-// (see htmlHiddenFromCheck).
+// signatures and whether its raw HTML is benign.
 func (c *fixCheck) ensureBaseline() {
 	if c.baseline == nil {
 		c.baseline, c.benign = c.signatures(c.content)
-		c.benign = c.benign && !htmlHiddenFromCheck(c.content)
 	}
 }
 
@@ -730,10 +743,10 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 }
 
 // htmlHiddenFromCheck reports whether content may hold raw HTML that is not
-// benign where the signature's parsers read none, though GitHub renders it.
-// Such a document keeps no fix, like one whose raw HTML is not benign (see
-// keepSafeFixes). It looks only at content with a "<" that may start a tag
-// (see hasTagStart), as all raw HTML starts so, and finds two cases:
+// benign in GFM footnotes or front matter, where the signature's parsers
+// read none. Such a document keeps no fix, like one whose raw HTML is not
+// benign (see keepSafeFixes). It looks only at content with a "<" that may
+// start raw HTML (see hasTagStart), and finds two cases:
 //
 //   - TOML and JSON front matter. The parsers blank front matter, but GitHub
 //     renders "+++" and "{" front matter as Markdown, where raw HTML may open
@@ -743,11 +756,11 @@ func htmlRegionsBenign(doc gmast.Node, source []byte) bool {
 //     code. GitHub shows YAML front matter as a table, so it is left to the
 //     check.
 //   - A "[^" anywhere, which may start a GFM footnote. The parsers do not
-//     read footnotes: they may read "[^1]: <code>" as a link reference
+//     read footnotes: they may read "[^1]: <!--" as a link reference
 //     definition and an indented footnote paragraph as code, and see no raw
-//     HTML there. GitHub writes footnotes after the document, where the
-//     browser opens a formatting element again for the footnotes after it.
-//     goldmark and cmark-gfm, which GitHub uses, also disagree on which
+//     HTML there. cmark-gfm, which GitHub uses, writes footnotes after the
+//     document, where a comment or an element left open in one holds the
+//     footnotes after it. goldmark and cmark-gfm also disagree on which
 //     labels make a definition, where a definition ends, and how the blocks
 //     in it read, so no second parse can show what GitHub sees. A "[^" that
 //     starts no footnote, such as one in a code span or an undefined
@@ -757,17 +770,21 @@ func htmlHiddenFromCheck(content []byte) bool {
 	if !hasTagStart(content) {
 		return false
 	}
-	frontMatter := frontMatterLength(content)
-	if frontMatter > 0 && !bytes.HasPrefix(content, []byte(yamlFrontMatterFence)) {
+	if (bytes.HasPrefix(content, []byte(tomlFrontMatterFence)) || bytes.HasPrefix(content, []byte("{"))) &&
+		frontMatterLength(content) > 0 {
 		return true
 	}
 	return bytes.Contains(content, []byte("[^"))
 }
 
 // hasTagStart reports whether text holds a "<" that may start raw HTML for
-// some renderer: one that an ASCII letter, "/", "!" or "?" follows, as in a
-// start or end tag, a comment, a declaration, CDATA or a processing
-// instruction. Any other "<", as in "1 < 2" or "{{< x >}}", is text.
+// a Markdown renderer: "<!" or "<?", which may start a comment, a
+// declaration, CDATA or a processing instruction, or "<" or "</" and a tag
+// name, ASCII letters, digits and hyphens after a letter, that whitespace,
+// "/", ">" or the end of text follows, as in a start or end tag. Any other
+// "<" is text for every renderer, as in "1 < 2" or "{{< x >}}", or starts
+// an autolink, such as "<https://example.com>" or "<user@example.com>",
+// whose name a ":" or an "@" ends.
 func hasTagStart(text []byte) bool {
 	for pos := 0; pos < len(text); {
 		idx := bytes.IndexByte(text[pos:], '<')
@@ -775,7 +792,19 @@ func hasTagStart(text []byte) bool {
 			return false
 		}
 		pos += idx + 1
-		if pos < len(text) && (isASCIILetter(text[pos]) || strings.IndexByte("/!?", text[pos]) >= 0) {
+		if pos < len(text) && (text[pos] == '!' || text[pos] == '?') {
+			return true
+		}
+		if pos < len(text) && text[pos] == '/' {
+			pos++
+		}
+		if pos == len(text) || !isASCIILetter(text[pos]) {
+			continue
+		}
+		for pos < len(text) && (isASCIILetter(text[pos]) || isASCIIDigit(text[pos]) || text[pos] == '-') {
+			pos++
+		}
+		if pos == len(text) || strings.IndexByte(" \t\n\r\f\v/>", text[pos]) >= 0 {
 			return true
 		}
 	}

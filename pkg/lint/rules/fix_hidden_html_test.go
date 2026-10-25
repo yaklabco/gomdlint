@@ -41,7 +41,7 @@ func TestFixCheckKeepsNoFixBesideFootnotesWithTags(t *testing.T) {
 		{name: "paragraph after an unreferenced footnote with raw HTML", input: "Text.\n\n[^1]: <code>\n\nalpha beta gamma\n"},
 		{name: "footnote beside a footnote with benign HTML", input: "See [^1] and [^b].\n\n[^1]: a<br>b <!-- note -->" + later},
 		{name: "paragraph after a footnote with benign HTML", input: "See [^1].\n\n[^1]: a<br>b\n\nalpha beta gamma\n"},
-		{name: "footnote that starts with an autolink", input: "See [^a] and [^b].\n\n[^a]: <https://example.com>" + later},
+		{name: "footnote that starts with an autolink, beside benign HTML", input: "See [^a] and [^b].\n\nIntro a<br>b.\n\n[^a]: <https://example.com>" + later},
 		{
 			name: "label with a bracket in backticks, beside benign HTML",
 			input: "Intro a<br>b.\n\nSee [^a`[`] and [^b].\n\n[^a`[`]: First.\n\n    Second <code>open" +
@@ -152,6 +152,13 @@ func TestFixCheckKeepsFixesBesideFootnotesWithoutTags(t *testing.T) {
 			want: true,
 		},
 		{
+			// An autolink is no raw HTML.
+			name:  "wrapping a footnote in a document whose only < start autolinks",
+			input: "See [^1] and [^b], <https://example.com> and <user@example.com>.\n\n[^1]: First." + later,
+			old:   "beta gamma", new: "beta\ngamma",
+			want: true,
+		},
+		{
 			// The check still withholds a fix that changes the rendering.
 			name:  "splitting a footnote paragraph",
 			input: "See [^1] and [^b].\n\n[^1]: First." + later,
@@ -208,7 +215,12 @@ func TestFixCheckKeepsNoFixBesideHTMLInFrontMatter(t *testing.T) {
 		{name: "TOML front matter that opens a list", input: "+++\n- x\n+++\n\n    <code>\n" + body},
 		{name: "TOML front matter with an end tag", input: "+++\ntitle = \"a</b>\"\n+++\n" + body},
 		{name: "TOML front matter with a comment", input: "+++\n+++\n\n<!-- x -->\n" + body},
-		{name: "TOML front matter with a processing instruction", input: "+++\n+++\n\n<?x?>\n" + body},
+		{name: "TOML front matter with a processing instruction", input: "+++\n<?x?>\n+++\n" + body},
+		{name: "TOML front matter with CRLF line endings", input: "+++\r\n<code>open\r\n+++\r\n" + body},
+		{name: "JSON front matter after a byte order mark", input: "\uFEFF{\n\"a\": \"<code>open\"\n}\n" + body},
+		{name: "TOML front matter whose fences have trailing spaces", input: "+++  \n<code>open\n+++  \n" + body},
+		// An autolink is no raw HTML.
+		{name: "TOML front matter before an autolink", input: "+++\ntitle = \"x\"\n+++\n\nSee <https://example.com>.\n" + body, want: true},
 		// No "<" starts a tag, so no renderer reads raw HTML anywhere.
 		{name: "TOML front matter before a Hugo shortcode", input: "+++\ntitle = \"x\"\n+++\n\n{{< figure src=\"a.png\" >}}\n" + body, want: true},
 		{name: "TOML front matter with a comparison", input: "+++\ntitle = \"1 < 2\"\n+++\n\nWhen 1 <= 2 or a <- b.\n" + body, want: true},
@@ -225,18 +237,31 @@ func TestFixCheckKeepsNoFixBesideHTMLInFrontMatter(t *testing.T) {
 // TestHasTagStart checks which "<" may start raw HTML.
 func TestHasTagStart(t *testing.T) {
 	tests := map[string]bool{
-		"":               false,
-		"1 < 2":          false,
-		"a <= b, c <- d": false,
-		"{{< x >}}":      false,
-		"ends with <":    false,
-		"<3 and <<":      false,
-		"<b>":            true,
-		"x</b>":          true,
-		"<!-- c -->":     true,
-		"<?x?>":          true,
-		"<https://x>":    true,
-		"1 < 2 <Z":       true,
+		"":                   false,
+		"1 < 2":              false,
+		"a <= b, c <- d":     false,
+		"{{< x >}}":          false,
+		"ends with <":        false,
+		"<3 and <<":          false,
+		"<b>":                true,
+		"x</b>":              true,
+		"<!-- c -->":         true,
+		"<?x?>":              true,
+		"<https://x>":        false,
+		"<user@example.com>": false,
+		"<a_b>":              false,
+		"<\u00e9>":           false,
+		"<1>":                false,
+		"1 < 2 <Z":           true,
+		"<div":               true,
+		"<a\nhref=x>":        true,
+		"<a\fb>":             true,
+		"<code\v>":           true,
+		"<br/>":              true,
+		"</b >":              true,
+		"<a-b>":              true,
+		"<![CDATA[x]]>":      true,
+		"<!DOCTYPE html>":    true,
 	}
 	for input, want := range tests {
 		t.Run(strconv.Quote(input), func(t *testing.T) {
