@@ -84,11 +84,46 @@ func hasDuplicateEdit(edits []fix.TextEdit) bool {
 	return false
 }
 
+// randomGroupMembers spreads distinct edits over two or more members, one
+// or more edits each, and now and then gives an edit to a second member
+// too, which then shares it. It returns the members' edits and the edits
+// in the order they first appear, member by member, which is the order the
+// engine makes insertions at one offset in.
+func randomGroupMembers(rng *rand.Rand, edits []fix.TextEdit) ([][]fix.TextEdit, []fix.TextEdit) {
+	count := 2 + rng.Intn(len(edits)-1)
+	members := make([][]fix.TextEdit, count)
+	for idx, edit := range edits {
+		owner := idx
+		if idx >= count {
+			owner = rng.Intn(count)
+		}
+		members[owner] = append(members[owner], edit)
+		if rng.Intn(4) == 0 {
+			other := rng.Intn(count)
+			if other != owner {
+				members[other] = append(members[other], edit)
+			}
+		}
+	}
+	var order []fix.TextEdit
+	seen := make(map[fix.TextEdit]bool)
+	for _, memberEdits := range members {
+		for _, edit := range memberEdits {
+			if !seen[edit] {
+				seen[edit] = true
+				order = append(order, edit)
+			}
+		}
+	}
+	return members, order
+}
+
 // TestEngine_FixGroupsReportWhatTheyApply checks, on random groups of
 // edits in text with mixed line endings, that the engine fixes a group
 // exactly when it fixes the one edit the group makes, offered as a single
 // fix, that it applies that same edit, and that every edit the group's
-// members report, an identical one once, gives what it applies.
+// members report, an identical one once, gives what it applies. Members
+// carry one or more edits, and some share an edit.
 func TestEngine_FixGroupsReportWhatTheyApply(t *testing.T) {
 	t.Parallel()
 
@@ -97,34 +132,33 @@ func TestEngine_FixGroupsReportWhatTheyApply(t *testing.T) {
 	for range 4000 {
 		content := randomGroupContent(rng)
 		edits := randomGroupEdits(rng, content)
-		// Members that carry the same edit share it, which the group makes
-		// once, so the edits differ here.
 		if len(edits) < 2 || hasDuplicateEdit(edits) {
 			continue
 		}
-		combined, ok := fix.CombineEdits([]byte(content), edits)
+		memberEdits, order := randomGroupMembers(rng, edits)
+		combined, ok := fix.CombineEdits([]byte(content), order)
 		if !ok {
 			continue
 		}
 		var members []lint.Diagnostic
-		for _, edit := range edits {
-			members = append(members, groupMember("TEST001", 1, 1, edit))
+		for _, own := range memberEdits {
+			members = append(members, groupMember("TEST001", 1, 1, own...))
 		}
 		grouped := lintMarkdown(t, content, groupRule("TEST001", members...))
 		single := lintMarkdown(t, content, groupRule("TEST001", fixDiag("TEST001", combined)))
 		checked++
 
 		require.Equal(t, single.AcceptedFixes > 0, grouped.AcceptedFixes > 0,
-			"content %q edits %+v: the group is fixed exactly when its one edit is", content, edits)
-		require.Equal(t, single.Edits, grouped.Edits, "content %q edits %+v", content, edits)
+			"content %q members %+v: the group is fixed exactly when its one edit is", content, memberEdits)
+		require.Equal(t, single.Edits, grouped.Edits, "content %q members %+v", content, memberEdits)
 		if grouped.AcceptedFixes == 0 {
 			continue
 		}
 		fixed++
-		require.Equal(t, len(edits), grouped.AcceptedFixes)
+		require.Equal(t, len(members), grouped.AcceptedFixes)
 		applied := string(fix.ApplyEdits([]byte(content), grouped.Edits))
 		require.Equal(t, applied, applyReported(t, content, grouped),
-			"content %q edits %+v: the reported edits give what --fix writes", content, edits)
+			"content %q members %+v: the reported edits give what --fix writes", content, memberEdits)
 	}
 	t.Logf("checked %d groups, %d fixed", checked, fixed)
 	require.Greater(t, fixed, 1000)

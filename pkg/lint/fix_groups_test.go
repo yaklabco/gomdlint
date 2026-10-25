@@ -244,6 +244,8 @@ func TestEngine_ReportsTheEditsAFixGroupApplies(t *testing.T) {
 		name    string
 		content string
 		want    string
+		// members holds the edits each member reports, when set.
+		members [][]fix.TextEdit
 	}{
 		{
 			name:    "line feeds",
@@ -261,6 +263,11 @@ func TestEngine_ReportsTheEditsAFixGroupApplies(t *testing.T) {
 			name:    "a line feed among carriage returns",
 			content: "# L\r\n\r\n- a\r\n  * b\n  * c\r\n- d\r\n",
 			want:    "# L\r\n\r\n- a\r\n  - b\r\n  - c\r\n- d\r\n",
+			// The first member also reports the line ending after b.
+			members: [][]fix.TextEdit{
+				{{StartOffset: 14, EndOffset: 17, NewText: "- b"}, {StartOffset: 17, EndOffset: 18, NewText: "\r\n"}},
+				{{StartOffset: 20, EndOffset: 23, NewText: "- c"}},
+			},
 		},
 		{
 			// With a lone carriage return, the engine keeps each line
@@ -291,6 +298,9 @@ func TestEngine_ReportsTheEditsAFixGroupApplies(t *testing.T) {
 				assert.Equal(t, tt.want, fixed)
 			}
 			assert.Equal(t, fixed, applyReported(t, tt.content, result), "the reported edits give what --fix writes")
+			for idx, want := range tt.members {
+				assert.Equal(t, want, result.Diagnostics[idx].FixEdits, "member %d", idx)
+			}
 		})
 	}
 }
@@ -339,6 +349,7 @@ func TestEngine_ReportsTheWholeEditWhereMembersCannotShowIt(t *testing.T) {
 			for _, diag := range result.Diagnostics {
 				assert.True(t, diag.HasFix())
 				assert.Equal(t, 1, diag.FixGroup)
+				assert.Equal(t, result.Edits, diag.FixEdits, "each member reports the whole edit")
 			}
 			assert.Equal(t, len(tt.edits), result.AcceptedFixes)
 			assert.Equal(t, tt.want, string(fix.ApplyEdits([]byte(tt.content), result.Edits)))

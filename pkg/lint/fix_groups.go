@@ -168,11 +168,15 @@ func pieceEdits(pieces []groupPiece) []fix.TextEdit {
 // wrote the text of the group's edit, raw, as written, which has other line
 // endings in places. Writing changes only line endings, one for one, so
 // each piece's text and each stretch of content between two pieces has its
-// place in written. Each piece gets its written text, and a stretch whose line
-// endings changed becomes one more edit, from its first changed byte to
-// its last, of the member that carries the piece before it. Applied
-// together, the members' edits then make written. It reports false when
-// raw and written do not line up so, which leaves the group without a fix.
+// place in written. Each piece gets its written text, and a stretch whose
+// line endings changed becomes one more edit, from its first changed byte
+// to its last, of the member that carries the piece before it. Applied
+// together, an edit that several members carry once, the members' edits
+// then make written. It reports false, and leaves the members' edits as
+// they were, when their own edits cannot show written: when a piece's
+// boundary falls inside a line ending that writing changed, or when
+// writing made two of the edits alike. The caller then gives each member
+// the whole written edit.
 func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, written string) bool {
 	// bounds holds where each piece's text starts and ends in raw, which is
 	// checked to hold the pieces in this order.
@@ -186,6 +190,8 @@ func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, 
 		built.WriteString(piece.edit.NewText)
 		bounds = append(bounds, built.Len())
 	}
+	// pieces and fix.CombineEdits sort alike, so this holds; it guards
+	// against the two orders drifting apart.
 	if built.String() != raw {
 		return false
 	}
