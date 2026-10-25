@@ -62,7 +62,9 @@ type Diagnostic struct {
 	// their FixGroup: when one of them is suppressed, has no valid fix or
 	// overlaps another, or when the engine withholds the one fix. Each
 	// diagnostic keeps its own edits, so reports show what each of them
-	// changes, with the group, which a consumer applies together.
+	// changes, with the group, which a consumer applies together. Where the
+	// engine writes the one fix in other line endings, it rewrites the
+	// members' edits to match, so together they make that fix.
 	FixGroup int
 }
 

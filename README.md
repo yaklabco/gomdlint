@@ -307,7 +307,11 @@ and `list-indent` (MD005), `ul-indent` (MD007) and
 `no-multiple-space-blockquote` (MD027) move items together when one cannot
 move without the others. Each finding of such a group carries the edit of
 its own line, as markdownlint's do, and `--fix` applies the edits of the
-group together or not at all. A consumer that applies only some of them
+group together or not at all. In a file with mixed line endings, `--fix`
+writes the line endings between the items of a group in the file's main
+one, and the finding before such a line ending carries that change too, so
+the edits of a group together give what `--fix` writes. A consumer that
+applies only some of them
 can split or merge lists. JSON reports give such a finding a `fixGroup`
 number, and SARIF reports give its result a `fixGroup` property: the
 findings of one rule in one file with the same number form one group.
