@@ -239,11 +239,11 @@ formats change. The first entries under Changed may need action.
   `--category` and `--tag` filters of `gomdlint rules`.
 - A rule reference under `docs/rules` has a page for each rule and an index,
   generated from the catalog, and the README's rule list is generated with
-  it. The heading, list, layout, code, blockquote, HTML and spelling rules
-  have examples, shown on their pages and by `gomdlint explain`: a document
-  that breaks the rule, what gomdlint reports, and the fixed document or one
-  that follows the rule. The golden tests generate the reports and fixed
-  documents, so the examples show tested output.
+  it. Every rule has an example, shown on its page and by
+  `gomdlint explain`: a document that breaks the rule, what gomdlint
+  reports, and the fixed document or one that follows the rule. The golden
+  tests generate the reports and fixed documents, so the examples show
+  tested output.
 - `docs/schema/gomdlint.schema.json` is a JSON Schema of the configuration,
   generated from the catalog. Editors that read it, such as VS Code with the
   YAML extension, complete rule names, IDs, markdownlint names and options,

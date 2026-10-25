@@ -26,6 +26,30 @@ finding without a fix when the fix would change a line with one character in
 brackets, such as \[x\] or \[1\], or the lines around it up to a blank line,
 because it could add or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+See the (installation guide)[docs/install.md].
+```
+
+gomdlint reports:
+
+```text
+3:9 Reversed link syntax detected
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+See the [installation guide](docs/install.md).
+```
+
 ## Configure
 
 Under `rules`, `no-reversed-links: false` turns the rule off and

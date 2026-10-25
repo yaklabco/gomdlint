@@ -33,6 +33,32 @@ Set them under `rules.link-destination-style.options`.
 
 There is no automatic fix.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+- [Install](docs/install.md)
+- [Configure](file:///home/ana/gomdlint/docs/configure.md)
+```
+
+gomdlint reports:
+
+```text
+4:3 Link uses absolute URL, but relative URLs are expected
+```
+
+This document follows the rule:
+
+```markdown
+# Guide
+
+- [Install](docs/install.md)
+- [Configure](docs/configure.md)
+```
+
 ## Configure
 
 ```yaml

@@ -1,0 +1,1 @@
+example.input.md:3:5 warning Link has empty fragment (MD042/no-empty-links)

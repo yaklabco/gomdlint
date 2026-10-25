@@ -31,6 +31,42 @@ Set them under `rules.link-fragments.options`.
 
 There is no automatic fix. Only the author knows the intended target.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+## Install
+
+Run the installer, then [set your options](#configuration).
+
+## Configure
+
+Write a .gomdlint.yml file.
+```
+
+gomdlint reports:
+
+```text
+5:25 Link fragment '#configuration' does not match any heading
+```
+
+This document follows the rule:
+
+```markdown
+# Guide
+
+## Install
+
+Run the installer, then [set your options](#configure).
+
+## Configure
+
+Write a .gomdlint.yml file.
+```
+
 ## Configure
 
 ```yaml

@@ -1,0 +1,1 @@
+example.input.md:5:25 warning Link fragment '#configuration' does not match any heading (MD051/link-fragments)

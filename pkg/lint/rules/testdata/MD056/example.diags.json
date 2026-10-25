@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD056",
+    "name": "table-column-count",
+    "line": 5,
+    "column": 23,
+    "message": "Too few cells, row will be missing data: expected 3, found 2",
+    "severity": "warning",
+    "fixable": false
+  }
+]

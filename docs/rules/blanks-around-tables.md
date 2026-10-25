@@ -27,6 +27,37 @@ fix when the fix would change a line with one character in brackets, such as
 \[x\] or \[1\], or the lines around it up to a blank line, because it could add
 or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Rules
+
+The rules that fix what they find:
+| Name | ID |
+| --- | --- |
+| no-hard-tabs | MD010 |
+```
+
+gomdlint reports:
+
+```text
+4:1 Missing blank line before table
+```
+
+The fix changes it to:
+
+```markdown
+# Rules
+
+The rules that fix what they find:
+
+| Name | ID |
+| --- | --- |
+| no-hard-tabs | MD010 |
+```
+
 ## Configure
 
 Under `rules`, `blanks-around-tables: false` turns the rule off and

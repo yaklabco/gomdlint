@@ -1,0 +1,1 @@
+example.input.md:4:3 warning Link uses absolute URL, but relative URLs are expected (MDL001/link-destination-style)

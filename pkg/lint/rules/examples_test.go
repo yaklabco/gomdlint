@@ -17,31 +17,16 @@ import (
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
 
-// examplesPending lists the categories whose rules do not all have examples
-// yet. The rule reference gains examples a few categories at a time, so
-// that each set gets a real review. Remove a category once every rule in
-// it has its examples: TestEveryRuleHasExamples fails while a category
-// here has them all.
-var examplesPending = []lint.Category{
-	lint.CategoryLinks,
-	lint.CategoryTables,
-	lint.CategoryEmphasis,
-}
-
-// TestEveryRuleHasExamples checks that every rule outside the pending
-// categories has an example document that breaks it, with the findings
-// that the rule reports there. A rule that fixes what it finds shows the
-// fixed document. A rule that cannot shows a document that follows it
-// instead.
+// TestEveryRuleHasExamples checks that every rule has an example document
+// that breaks it, with the findings that the rule reports there. A rule
+// that fixes what it finds shows the fixed document. A rule that cannot
+// shows a document that follows it instead.
 func TestEveryRuleHasExamples(t *testing.T) {
-	missing := make(map[lint.Category]int)
 	for _, meta := range Catalog() {
 		example, found, err := RuleExample(meta.ID)
 		require.NoError(t, err, meta.ID)
 		if !found {
-			missing[meta.Category]++
-			assert.Contains(t, examplesPending, meta.Category,
-				"%s (%s) has no example: write testdata/%s/example.input.md", meta.ID, meta.Name, meta.ID)
+			t.Errorf("%s (%s) has no example: write testdata/%s/example.input.md", meta.ID, meta.Name, meta.ID)
 			continue
 		}
 
@@ -54,11 +39,6 @@ func TestEveryRuleHasExamples(t *testing.T) {
 			assert.NotEmpty(t, example.Good,
 				"%s cannot fix what it finds, so it needs testdata/%s/example_good.input.md", meta.ID, meta.ID)
 		}
-	}
-
-	for _, category := range examplesPending {
-		assert.Positive(t, missing[category],
-			"every %s rule has examples now: remove the category from examplesPending", category)
 	}
 }
 

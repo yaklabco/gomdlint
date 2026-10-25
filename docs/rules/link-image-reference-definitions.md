@@ -36,6 +36,35 @@ change a line with one character in brackets, such as \[x\] or \[1\], or the
 lines around it up to a blank line, because it could add or remove a task list
 checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+Read the [installation guide][install] first.
+
+[install]: docs/install.md
+[usage]: docs/usage.md
+```
+
+gomdlint reports:
+
+```text
+6:1 Unused reference definition [usage]
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+Read the [installation guide][install] first.
+
+[install]: docs/install.md
+```
+
 ## Configure
 
 ```yaml

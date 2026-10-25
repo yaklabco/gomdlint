@@ -1,0 +1,1 @@
+example.input.md:6:1 warning Unused reference definition [usage] (MD053/link-image-reference-definitions) [fixable]

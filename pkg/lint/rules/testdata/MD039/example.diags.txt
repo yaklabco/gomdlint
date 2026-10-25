@@ -1,0 +1,2 @@
+example.input.md:3:11 warning Link text has leading spaces (MD039/no-space-in-links) [fixable]
+example.input.md:3:30 warning Link text has trailing spaces (MD039/no-space-in-links) [fixable]

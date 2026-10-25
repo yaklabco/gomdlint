@@ -33,6 +33,31 @@ change a line with one character in brackets, such as \[x\] or \[1\], or the
 lines around it up to a blank line, because it could add or remove a task list
 checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+Fixes are *safe* by default and _never_ change code blocks.
+```
+
+gomdlint reports:
+
+```text
+3:33 Emphasis style "underscore" does not match expected "asterisk"
+3:39 Emphasis style "underscore" does not match expected "asterisk"
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+Fixes are *safe* by default and *never* change code blocks.
+```
+
 ## Configure
 
 ```yaml

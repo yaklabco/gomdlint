@@ -28,6 +28,30 @@ finding without a fix when the fix would change a line with one character in
 brackets, such as \[x\] or \[1\], or the lines around it up to a blank line,
 because it could add or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Support
+
+Report bugs at https://github.com/yaklabco/gomdlint/issues.
+```
+
+gomdlint reports:
+
+```text
+3:16 Bare URL used
+```
+
+The fix changes it to:
+
+```markdown
+# Support
+
+Report bugs at <https://github.com/yaklabco/gomdlint/issues>.
+```
+
 ## Configure
 
 Under `rules`, `no-bare-urls: false` turns the rule off and

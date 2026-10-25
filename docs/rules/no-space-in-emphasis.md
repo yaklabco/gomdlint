@@ -28,6 +28,31 @@ report a finding without a fix when the fix would change a line with one
 character in brackets, such as \[x\] or \[1\], or the lines around it up to a
 blank line, because it could add or remove a task list checkbox.
 
+## Example
+
+This document breaks the rule:
+
+```markdown
+# Guide
+
+Run gomdlint ** before ** you commit.
+```
+
+gomdlint reports:
+
+```text
+3:16 Spaces inside emphasis markers
+3:23 Spaces inside emphasis markers
+```
+
+The fix changes it to:
+
+```markdown
+# Guide
+
+Run gomdlint **before** you commit.
+```
+
 ## Configure
 
 Under `rules`, `no-space-in-emphasis: false` turns the rule off and

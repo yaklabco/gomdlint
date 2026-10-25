@@ -1,0 +1,11 @@
+[
+  {
+    "rule": "MD034",
+    "name": "no-bare-urls",
+    "line": 3,
+    "column": 16,
+    "message": "Bare URL used",
+    "severity": "warning",
+    "fixable": true
+  }
+]

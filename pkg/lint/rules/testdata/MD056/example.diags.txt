@@ -1,0 +1,1 @@
+example.input.md:5:23 warning Too few cells, row will be missing data: expected 3, found 2 (MD056/table-column-count)

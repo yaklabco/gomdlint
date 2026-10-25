@@ -1,0 +1,1 @@
+example.input.md:3:8 warning Autolinks are not allowed (MD054/link-image-style)

@@ -1,0 +1,1 @@
+example.input.md:3:9 warning Reversed link syntax detected (MD011/no-reversed-links) [fixable]
