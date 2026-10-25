@@ -92,7 +92,7 @@ func NewEntry(rule lint.Rule, meta lint.RuleMeta) Entry {
 	}
 
 	builtIn := State{Enabled: rule.DefaultEnabled(), Severity: rule.DefaultSeverity()}
-	return Entry{RuleMeta: meta, Default: builtIn, State: builtIn, isBuiltIn: isBuiltInRule(rule)}
+	return Entry{RuleMeta: meta, Default: builtIn, State: builtIn, isBuiltIn: IsBuiltInRule(rule)}
 }
 
 // configKey returns the key under which generated configurations name the
@@ -121,16 +121,18 @@ var builtInRules = sync.OnceValue(func() map[string]builtInRule {
 	return builtIn
 })
 
-// isBuiltInRule reports whether rule is the built-in rule with its ID: a
+// IsBuiltInRule reports whether rule is the built-in rule with its ID: a
 // rule of the built-in rule's type, under its name. A custom rule may take
-// a built-in rule's ID, under another name or under the built-in name.
-func isBuiltInRule(rule lint.Rule) bool {
+// a built-in rule's ID, under another name or under the built-in name, and
+// a wrapper around a built-in rule has another type. Its signature is that
+// of reporter.Options.BuiltInRule.
+func IsBuiltInRule(rule lint.Rule) bool {
 	builtIn, found := builtInRules()[rule.ID()]
 	return found && builtIn.name == rule.Name() && builtIn.ruleType == reflect.TypeOf(rule)
 }
 
 // builtIn reports whether the entry documents a built-in rule (see
-// isBuiltInRule). Only a built-in rule has an example, a generated page
+// IsBuiltInRule). Only a built-in rule has an example, a generated page
 // and, for one of markdownlint's rules, markdownlint's documentation.
 func (e *Entry) builtIn() bool {
 	return e.isBuiltIn

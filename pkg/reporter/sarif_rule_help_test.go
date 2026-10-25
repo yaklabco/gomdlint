@@ -51,7 +51,11 @@ func describeEveryBuiltinRule(t *testing.T) ([]reporter.SARIFRule, *lint.Registr
 	root := newGitWorkTree(t, false)
 	result := &runner.Result{Files: []runner.FileOutcome{sarifFile(filepath.Join(root, "a.md"), "x\n", diags...)}}
 
-	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}, result).Runs[0].Tool.Driver.Rules
+	opts := reporter.Options{
+		WorkingDir: root, Registry: registry,
+		RuleHelp: ruledocs.RuleHelp, BuiltInRule: ruledocs.IsBuiltInRule,
+	}
+	descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
 	require.Len(t, descriptors, len(catalog))
 	return descriptors, registry
 }
@@ -167,8 +171,10 @@ func TestSARIFReporter_KeepsTenTags(t *testing.T) {
 
 // TestSARIFReporter_OnlyBuiltinRulesLinkToAPage covers rules without a
 // generated page: a custom rule with a catalog entry, and a custom rule
-// that takes a built-in rule's ID under another name. Both get the help
-// that explain prints for them, but no help URI.
+// that takes a built-in rule's ID under another name. Without
+// Options.BuiltInRule, both get the help that explain prints for them,
+// but no help URI. TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne
+// covers the gomdlint command's options.
 func TestSARIFReporter_OnlyBuiltinRulesLinkToAPage(t *testing.T) {
 	t.Parallel()
 
@@ -280,20 +286,23 @@ func TestSARIFReporter_HelpIsOptIn(t *testing.T) {
 	assert.Empty(t, descriptor.HelpURI)
 }
 
-// companyPolicyRule is a custom rule that declares an option of its own.
+// companyPolicyRule is a custom implementation of a rule, of its own type.
 type companyPolicyRule struct {
 	lint.BaseRule
 }
 
-// DeclaredOptions declares the rule's one option.
-func (r *companyPolicyRule) DeclaredOptions() []lint.OptionSpec {
-	return []lint.OptionSpec{{Name: "company_mode", Type: lint.OptionBoolean, Default: false}}
+// DefaultSeverity reports the rule's findings as errors.
+func (r *companyPolicyRule) DefaultSeverity() config.Severity {
+	return config.SeverityError
 }
 
 // TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne covers a registry
 // with the built-in rules in which a custom rule then replaces MD009, under
-// another name or under the built-in rule's own: its descriptor describes
-// it, not the built-in rule, and its options are its own.
+// another name or as another implementation under the built-in rule's own
+// name. The registry still holds the built-in rule's catalog entry for
+// MD009, but the custom rule is not the built-in one, so its descriptor
+// describes the rule itself: its own description, tags and default
+// severity, with no help and no help URI.
 func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 	t.Parallel()
 
@@ -307,32 +316,25 @@ func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
 				BaseRule: lint.NewBaseRule("MD009", name, "Company policy.", []string{"policy"}, false),
 			})
 
-			_, issues, declared := registry.NormalizeOptions("MD009", map[string]any{"company_mode": true})
-			assert.True(t, declared, "the rule declares its options")
-			assert.Empty(t, issues, "company_mode is the rule's own option")
-
 			root := newGitWorkTree(t, false)
 			result := &runner.Result{Files: []runner.FileOutcome{
 				sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD009", StartLine: 1}),
 			}}
-			opts := reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}
+			opts := reporter.Options{
+				WorkingDir: root, Registry: registry,
+				RuleHelp: ruledocs.RuleHelp, BuiltInRule: ruledocs.IsBuiltInRule,
+			}
 			descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
 
 			require.Len(t, descriptors, 1)
-			descriptor := descriptors[0]
-			assert.Equal(t, name, descriptor.Name)
-			assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.ShortDescription)
-			assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.FullDescription)
-			assert.Equal(t, []any{"policy"}, descriptor.Properties["tags"], "the rule's own tags")
-			assert.Empty(t, descriptor.HelpURI)
-			require.NotNil(t, descriptor.Help)
-			for _, help := range []string{descriptor.Help.Text, descriptor.Help.Markdown} {
-				assert.Contains(t, help, "Company policy.")
-				assert.Contains(t, help, "company_mode", "the rule's own option")
-				for _, builtIn := range []string{"br_spaces", "whitespace", "trailing whitespace", "md009.md"} {
-					assert.NotContains(t, help, builtIn, "the built-in rule's words")
-				}
-			}
+			assert.Equal(t, reporter.SARIFRule{
+				ID:               "MD009",
+				Name:             name,
+				ShortDescription: &reporter.SARIFMultiformatText{Text: "Company policy."},
+				FullDescription:  &reporter.SARIFMultiformatText{Text: "Company policy."},
+				DefaultConfig:    &reporter.SARIFRuleConfig{Level: "error"},
+				Properties:       map[string]any{"tags": []any{"policy"}},
+			}, descriptors[0])
 		})
 	}
 }

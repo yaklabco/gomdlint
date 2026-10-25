@@ -74,6 +74,15 @@ type Options struct {
 	// in the built-in rules, which register themselves in
 	// lint.DefaultRegistry as they initialize.
 	RuleHelp RuleHelpFunc
+
+	// BuiltInRule reports whether a registered rule is the built-in rule
+	// with its ID, rather than a custom rule that took a built-in rule's ID,
+	// which the registry may still hold the built-in rule's catalog entry
+	// for. Formats that describe rules describe such a custom rule from the
+	// rule itself, with no help. When nil, every rule's catalog entry is
+	// taken to describe it. The gomdlint command sets it to the check that
+	// gomdlint explain uses.
+	BuiltInRule func(rule lint.Rule) bool
 }
 
 // RuleHelpFunc documents rule, whose catalog entry is meta, or the zero

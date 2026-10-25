@@ -290,6 +290,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		ToolVersion:  flags.toolVersion,
 		Registry:     registry,
 		RuleHelp:     ruledocs.RuleHelp, // SARIF rule help: the pages that explain prints.
+		BuiltInRule:  ruledocs.IsBuiltInRule,
 	})
 	if err != nil {
 		return withExitCode(ExitInternalError, fmt.Errorf("create reporter: %w", err))

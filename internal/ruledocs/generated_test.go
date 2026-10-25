@@ -213,30 +213,32 @@ func TestPagesOfACustomRuleUnderABuiltinID(t *testing.T) {
 	}
 }
 
-// replacementRule is a custom rule that replaces a built-in one, and
-// declares an option of its own.
+// replacementRule is a custom rule that replaces a built-in one.
 type replacementRule struct {
 	lint.BaseRule
 }
 
-// DeclaredOptions declares the rule's one option.
-func (r *replacementRule) DeclaredOptions() []lint.OptionSpec {
-	return []lint.OptionSpec{{Name: "company_mode", Type: lint.OptionBoolean, Default: false, Description: "Use the company mode."}}
-}
-
 // TestPagesOfARuleThatReplacesABuiltinOne covers a registry with the
 // built-in rules, in which a custom rule then replaces MD009, under
-// another name or under the built-in rule's own: its pages describe it,
-// with its own description and options, not the built-in rule, and show
-// no example and no published page, as the rule is not the built-in one.
+// another name or under the built-in rule's own, and a wrapper around the
+// built-in rule. None of them is the built-in rule, so their pages show no
+// example, no published page and no link to markdownlint's documentation.
 func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
-	for _, ruleName := range []string{"company-policy", "no-trailing-spaces"} {
-		t.Run(ruleName, func(t *testing.T) {
+	builtIn, found := lint.DefaultRegistry.GetByID("MD009")
+	require.True(t, found)
+	for _, tt := range []struct {
+		name string
+		rule lint.Rule
+	}{
+		{"another name", &replacementRule{lint.NewBaseRule("MD009", "company-policy", "Company policy.", nil, false)}},
+		{"the built-in name", &replacementRule{lint.NewBaseRule("MD009", "no-trailing-spaces", "Company policy.", nil, false)}},
+		{"a wrapper", struct{ lint.Rule }{builtIn}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			registry := lint.NewRegistry()
 			rules.RegisterAll(registry)
-			registry.Register(&replacementRule{
-				BaseRule: lint.NewBaseRule("MD009", ruleName, "Company policy.", []string{"policy"}, false),
-			})
+			registry.Register(tt.rule)
+			assert.False(t, ruledocs.IsBuiltInRule(tt.rule))
 
 			var entry ruledocs.Entry
 			for _, candidate := range ruledocs.Entries(registry, nil) {
@@ -244,7 +246,7 @@ func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 					entry = candidate
 				}
 			}
-			require.Equal(t, ruleName, entry.Name)
+			require.Equal(t, tt.rule.Name(), entry.Name)
 			assert.Empty(t, ruledocs.PageURL(entry), "not the built-in rule")
 
 			var text, markdown bytes.Buffer
@@ -253,12 +255,12 @@ func TestPagesOfARuleThatReplacesABuiltinOne(t *testing.T) {
 			for _, page := range []string{text.String(), markdown.String()} {
 				assert.NotContains(t, page, "This document breaks the rule", "no built-in example")
 				assert.NotContains(t, page, "md009.md", "no markdownlint link")
-				assert.Contains(t, page, "Company policy.")
-				assert.Contains(t, page, "company_mode", "the rule's own option")
-				assert.NotContains(t, page, "br_spaces", "no built-in options")
-				assert.NotContains(t, page, "whitespace", "no built-in tags or words")
 			}
 		})
+	}
+
+	for _, rule := range lint.DefaultRegistry.Rules() {
+		assert.True(t, ruledocs.IsBuiltInRule(rule), rule.ID())
 	}
 }
 

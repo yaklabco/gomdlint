@@ -601,11 +601,7 @@ descriptors read each description through `lint.RuleDescription`, which
 falls back to the rule's own `Description()` when the entry has none. A tag
 may cover several rules, as in markdownlint. gomdlint's own rules, MDL001
 and MDL003, take tags from markdownlint's vocabulary. `RegisterAll` records
-each entry with `Registry.Describe` before it registers the rules. An
-entry describes one rule, of one Go type and name, and the registry hides
-it while another rule is registered under its ID, such as a custom
-implementation or a wrapper, until that rule's own entry is described.
-Catalog tests check that every
+each entry with `Registry.Describe`. Catalog tests check that every
 registered rule has exactly one entry, that each rule's ID, name,
 description, tags and fix flag match its entry, that each ID, name and
 alias names one rule and no tag spells one of them, and that tags and
@@ -776,7 +772,12 @@ lists them under each file's `notices`, and SARIF output records them as
   `internal/ruledocs` or the built-in rules, whose package registers them
   in `lint.DefaultRegistry` as it initializes: a program's own rules
   registered there under built-in IDs would be replaced. A test checks the
-  reporter's import graph.
+  reporter's import graph. `reporter.Options.BuiltInRule`, which
+  `gomdlint lint` sets to `ruledocs.IsBuiltInRule`, tells the built-in rules
+  from custom rules under built-in IDs, which a matching Go type and name
+  identify. A custom rule under a built-in ID is described from the rule
+  itself, with no help, as the registry may still hold the built-in rule's
+  catalog entry for its ID.
 - `diff` (`DiffReporter`): the unified diff the pipeline recorded, of the
   fixes `--fix` would make or, with `--fix`, made.
 
@@ -929,9 +930,9 @@ sequenceDiagram
     participant engine as Engine
     participant rule as NewRule
 
-    init->>registry: Describe(catalog entry)
     init->>rule: NewMyRule()
     init->>registry: Register(rule)
+    init->>registry: Describe(catalog entry)
     Note over registry: Stores by ID and name, with aliases and tags from the catalog
 
     engine->>registry: Rules()

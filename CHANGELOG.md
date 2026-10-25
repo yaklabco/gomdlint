@@ -327,10 +327,11 @@ formats change. The first entries under Changed may need action.
   the rule's category followed by its markdownlint tags from the catalog,
   at most 10, the number GitHub code scanning keeps. Go API: programs that
   use `pkg/reporter` directly get help only by setting the new
-  `reporter.Options.RuleHelp`, and `lint.TagsFor` gives a rule's catalog
-  tags. `pkg/reporter` does not register the built-in rules, so such a
-  program imports `pkg/lint/rules` or sets `reporter.Options.Registry` for
-  descriptors to describe them.
+  `reporter.Options.RuleHelp`, and tell custom rules under built-in IDs
+  from the built-in rules only by setting `reporter.Options.BuiltInRule`.
+  `lint.TagsFor` gives a rule's catalog tags. `pkg/reporter` does not
+  register the built-in rules, so such a program imports `pkg/lint/rules`
+  or sets `reporter.Options.Registry` for descriptors to describe them.
 
 ### Fixed
 
