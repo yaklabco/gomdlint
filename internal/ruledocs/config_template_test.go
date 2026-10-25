@@ -293,3 +293,157 @@ func TestConfigTemplateFullQuotesKeys(t *testing.T) {
 		}
 	}
 }
+
+// awkwardScalars are strings that YAML reads as something else, or cannot
+// hold as written on one line: keywords, numbers, dates, indicators,
+// spaces at either end, line breaks, tabs, quotes, backslashes, characters
+// beyond ASCII and the empty string.
+func awkwardScalars() []string {
+	return []string{
+		"null", "~", "true", "yes", "off", "123", "0x1F", "1e3", "2026-10-25", ".inf",
+		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
+		`back\slash`, "ünïcødé", "auto_fix: false\nreset_options: true", "- item", "[flow]", "&anchor", "",
+		strings.Repeat("a long words ", 20),
+	}
+}
+
+// awkwardRule is a custom rule whose name and option default are awkward
+// scalars, with the scalar as the option's only allowed value too.
+type awkwardRule struct {
+	lint.BaseRule
+	value string
+}
+
+func (r *awkwardRule) DeclaredOptions() []lint.OptionSpec {
+	return []lint.OptionSpec{
+		{Name: "value", Type: lint.OptionString, Default: r.value, Values: []string{r.value}},
+		{Name: "unset", Type: lint.OptionString},
+		{Name: "follows", Type: lint.OptionString, Default: r.value, DefaultFrom: "value"},
+	}
+}
+
+// awkwardRegistry returns a registry of one custom rule for each awkward
+// scalar, named by it, with it as its option's default, its category and
+// its description.
+func awkwardRegistry() *lint.Registry {
+	registry := lint.NewRegistry()
+	for idx, scalar := range awkwardScalars() {
+		id := fmt.Sprintf("XX%03d", idx+1)
+		registry.Register(&awkwardRule{BaseRule: lint.NewBaseRule(id, scalar, scalar, nil, false), value: scalar})
+	}
+	return registry
+}
+
+// TestConfigTemplateFullWritesAwkwardScalars covers rules whose names and
+// option defaults YAML would misread if written as they are: the full
+// template parses, in YAML and in JSON, with one key per rule that names
+// that rule, and uncommenting every commented setting gives each rule its
+// default severity and options, and nothing else.
+func TestConfigTemplateFullWritesAwkwardScalars(t *testing.T) {
+	registry := awkwardRegistry()
+	entries := ruledocs.Entries(registry, nil)
+
+	for _, asJSON := range []bool{false, true} {
+		content, err := ruledocs.ConfigTemplate(entries, ruledocs.TemplateOptions{Full: true, JSON: asJSON})
+		require.NoError(t, err, "JSON %t", asJSON)
+
+		var parsed struct {
+			Rules map[string]map[string]any `json:"rules" yaml:"rules"`
+		}
+		require.NoError(t, yaml.Unmarshal(content, &parsed), "JSON %t:\n%s", asJSON, content)
+		assertKeysNameTheirRules(t, registry, parsed.Rules, fmt.Sprintf("JSON %t", asJSON))
+		for key, settings := range parsed.Rules {
+			assert.Equal(t, map[string]any{"enabled": true}, settings, "JSON %t: %q", asJSON, key)
+		}
+	}
+
+	content, err := ruledocs.ConfigTemplate(entries, ruledocs.TemplateOptions{Full: true})
+	require.NoError(t, err)
+	uncommented := uncommentRuleSettings(string(content))
+	cfg, err := config.FromYAML([]byte(uncommented))
+	require.NoError(t, err, uncommented)
+	require.Len(t, cfg.Rules, len(entries), uncommented)
+	for key, settings := range cfg.Rules {
+		rule, found := registry.Lookup(key)
+		require.True(t, found, "%q", key)
+		value := rule.(*awkwardRule).value //nolint:forcetypeassert // Every rule of the registry is one.
+		assert.Equal(t, map[string]any{"value": value}, withoutNulls(settings.Options), "%q", key)
+		require.NotNil(t, settings.Severity, "%q", key)
+		assert.Equal(t, string(config.SeverityWarning), *settings.Severity, "%q", key)
+		assert.Nil(t, settings.AutoFix, "%q: a default adds no setting", key)
+		assert.False(t, settings.ResetOptions, "%q: a default adds no setting", key)
+	}
+}
+
+// assertKeysNameTheirRules checks that keys, the rule keys of a generated
+// configuration, hold one key for each rule of registry, and that each key
+// names a different rule.
+func assertKeysNameTheirRules[V any](t *testing.T, registry *lint.Registry, keys map[string]V, what string) {
+	t.Helper()
+
+	assert.Len(t, keys, len(registry.IDs()), "%s: one key per rule", what)
+	named := make(map[string]bool, len(keys))
+	for key := range keys {
+		rule, found := registry.Lookup(key)
+		if assert.True(t, found, "%s: %q names a rule", what, key) {
+			named[rule.ID()] = true
+		}
+	}
+	assert.Len(t, named, len(registry.IDs()), "%s: each key names another rule", what)
+}
+
+// uncommentRuleSettings returns content, a full template, with the
+// commented settings of each rule, its severity and options, uncommented.
+func uncommentRuleSettings(content string) string {
+	var out strings.Builder
+	for line := range strings.Lines(content) {
+		if rest, ok := strings.CutPrefix(line, "    # "); ok {
+			line = "    " + rest
+		}
+		out.WriteString(line)
+	}
+	return out.String()
+}
+
+// withoutNulls returns options without the options that are null, which
+// leave the option unset.
+func withoutNulls(options map[string]any) map[string]any {
+	kept := make(map[string]any, len(options))
+	for name, value := range options {
+		if value != nil {
+			kept[name] = value
+		}
+	}
+	return kept
+}
+
+// TestConfigTemplateMinimalWritesAwkwardNames covers the minimal
+// template's example when its rules have names that YAML would misread,
+// such as null: uncommented, the example loads, and each key names its
+// rule.
+func TestConfigTemplateMinimalWritesAwkwardNames(t *testing.T) {
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	for id, name := range map[string]string{"MD001": "null", "MD013": "a: b", "MD033": "line\nbreak"} {
+		registry.Register(&quietRule{lint.NewBaseRule(id, name, "", nil, false)})
+	}
+	content, err := ruledocs.ConfigTemplate(ruledocs.Entries(registry, nil), ruledocs.TemplateOptions{})
+	require.NoError(t, err)
+
+	var example strings.Builder
+	_, rest, found := strings.Cut(string(content), "\n# rules:\n")
+	require.True(t, found)
+	example.WriteString("rules:\n")
+	for line := range strings.Lines(rest) {
+		example.WriteString(strings.TrimPrefix(line, "# "))
+	}
+	cfg, err := config.FromYAML([]byte(example.String()))
+	require.NoError(t, err, example.String())
+	named := make(map[string]bool)
+	for key := range cfg.Rules {
+		rule, found := registry.Lookup(key)
+		require.True(t, found, "%q", key)
+		named[rule.ID()] = true
+	}
+	assert.Equal(t, map[string]bool{"MD001": true, "MD013": true, "MD033": true}, named)
+}

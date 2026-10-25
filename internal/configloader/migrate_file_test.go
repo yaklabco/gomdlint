@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -167,5 +169,45 @@ func TestMigrationFileKeysCollidingNamesByID(t *testing.T) {
 		assert.Contains(t, loaded.RuleDefaults, "MD013", name)
 		assert.NotContains(t, loaded.RuleDefaults, "MD900", name)
 		assert.Len(t, loaded.RuleDefaults, len(converted.Config.RuleDefaults), name)
+	}
+}
+
+// TestMigrationFileWritesAwkwardNames covers a registry whose rules have
+// names that YAML would misread if written as they are, keywords, numbers,
+// dates, indicators, spaces at either end, line breaks, quotes and the
+// empty string among them: the file that migrate writes parses, in YAML
+// and in JSON, with one key per rule in each section, and loads through
+// that registry to exactly the converted settings.
+func TestMigrationFileWritesAwkwardNames(t *testing.T) {
+	names := []string{
+		"null", "~", "true", "yes", "off", "123", "0x1F", "1e3", "2026-10-25", ".inf",
+		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
+		`back\slash`, "ünïcødé", "- item", "[flow]", "&anchor", "", strings.Repeat("a long words ", 20),
+	}
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	ids := registry.IDs()
+	settings := []string{`"default": true`}
+	for idx, name := range names {
+		registry.Register(&lengthRule{lint.NewBaseRule(ids[idx], name, "", nil, false)})
+		settings = append(settings, strconv.Quote(ids[idx])+": false")
+	}
+	converted := convertSettings(t, "{"+strings.Join(settings, ", ")+"}")
+	converted.keyRegistry = registry
+
+	for _, file := range []string{".gomdlint.yml", ".gomdlint.json"} {
+		content, err := converted.FileContent(filepath.Join(t.TempDir(), file))
+		require.NoError(t, err, file)
+
+		var sections map[string]map[string]any
+		require.NoError(t, yaml.Unmarshal(content, &sections), "%s:\n%s", file, content)
+		assert.Len(t, sections["rules"], len(converted.Config.Rules), "%s: one key per rule", file)
+		assert.Len(t, sections["rule_defaults"], len(converted.Config.RuleDefaults), "%s: one key per rule", file)
+
+		loaded, err := config.FromYAML(content)
+		require.NoError(t, err, file)
+		require.NoError(t, normalizeRuleKeys(loaded, registry), file)
+		assert.Equal(t, withoutEmptyOptions(t, converted.Config.Rules), withoutEmptyOptions(t, loaded.Rules), file)
+		assert.Equal(t, withoutEmptyOptions(t, converted.Config.RuleDefaults), withoutEmptyOptions(t, loaded.RuleDefaults), file)
 	}
 }

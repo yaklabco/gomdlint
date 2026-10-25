@@ -3,6 +3,7 @@ package ruledocs
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -235,10 +236,17 @@ func yamlValue(value any) string {
 }
 
 // flowStyle writes the lists and mappings of node, and of its children, on
-// one line.
+// one line, and its strings that hold line breaks or other control
+// characters double-quoted, with escapes, as YAML writes them on one line
+// only so.
 func flowStyle(node *yaml.Node) {
-	if node.Kind == yaml.SequenceNode || node.Kind == yaml.MappingNode {
+	switch node.Kind {
+	case yaml.SequenceNode, yaml.MappingNode:
 		node.Style |= yaml.FlowStyle
+	case yaml.ScalarNode:
+		if strings.ContainsFunc(node.Value, unicode.IsControl) {
+			node.Style = yaml.DoubleQuotedStyle
+		}
 	}
 	for _, child := range node.Content {
 		flowStyle(child)

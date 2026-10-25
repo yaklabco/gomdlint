@@ -3,7 +3,6 @@ package ruledocs
 import (
 	"cmp"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -44,17 +43,18 @@ func ConfigHeader(lines ...string) string {
 	return header.String()
 }
 
-// plainKey matches a rule key that YAML reads as written, without quotes.
-var plainKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
-
-// yamlKey writes key, a rule key, as a YAML mapping key: as it is, or in
-// double quotes when YAML would read it otherwise, as a custom rule's name
-// with spaces, a colon or a # would be.
+// yamlKey writes key, a rule key, as a YAML mapping key on one line, as
+// the YAML encoder writes it (see yamlValue): as it is, or quoted when YAML
+// would read it otherwise, as it would a custom rule's name such as null,
+// 123, a: b, or one with a line break or spaces at either end.
 func yamlKey(key string) string {
-	if plainKey.MatchString(key) {
-		return key
-	}
-	return strconv.Quote(key)
+	return yamlValue(key)
+}
+
+// commentText writes text on one line of a comment, with each run of
+// whitespace, line breaks among them, as one space.
+func commentText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // RuleKeyWidth returns the width of the widest of the lines that
@@ -74,7 +74,7 @@ func RuleKeyWidth(keys []string) int {
 // A key that YAML would not read as written is quoted.
 func RuleKeyLine(key, id string, width int) string {
 	written := yamlKey(key) + ":"
-	return "  " + written + strings.Repeat(" ", max(0, width-utf8.RuneCountInString(written))) + "  # " + id + "\n"
+	return "  " + written + strings.Repeat(" ", max(0, width-utf8.RuneCountInString(written))) + "  # " + commentText(id) + "\n"
 }
 
 // minimalSettings are the settings of the minimal template, after the
@@ -224,7 +224,7 @@ func writeTemplateRules(buf *strings.Builder, entries []Entry) {
 		if idx > 0 {
 			buf.WriteString("\n")
 		}
-		buf.WriteString(ruleComment + group.title() + "\n")
+		buf.WriteString(ruleComment + commentText(group.title()) + "\n")
 		names := make([]string, len(group.entries))
 		for idx, entry := range group.entries {
 			names[idx] = entry.configKey()
@@ -241,7 +241,7 @@ func writeTemplateRules(buf *strings.Builder, entries []Entry) {
 func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 	buf.WriteString("\n")
 	if entry.Description != "" {
-		for _, line := range wrap(entry.Description, lineWidth, ruleComment, ruleComment) {
+		for _, line := range wrap(commentText(entry.Description), lineWidth, ruleComment, ruleComment) {
 			buf.WriteString(line + "\n")
 		}
 	}
@@ -259,19 +259,26 @@ func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 
 // templateOption writes spec, an option, as a commented line of the full
 // template shows it: its name and default, with the values it allows, or
-// where its default comes from, in a trailing comment. An option whose
-// default is another option's value shows no value, which would stop it
-// following that option once the line is uncommented.
+// where its default comes from, in a trailing comment. The name, the
+// default and the values are written as the YAML encoder writes them on
+// one line (see yamlValue), so that the line, uncommented, sets the option
+// to its default and nothing else. An option whose default is another
+// option's value shows no value, which would stop it following that option
+// once the line is uncommented.
 func templateOption(spec lint.OptionSpec) string {
-	line := spec.Name + ":"
+	line := yamlKey(spec.Name) + ":"
 	if spec.Default != nil && spec.DefaultFrom == "" {
 		line += " " + yamlValue(spec.Default)
 	}
 	switch {
 	case spec.DefaultFrom != "":
-		line += "  # defaults to the value of " + spec.DefaultFrom
+		line += "  # defaults to the value of " + yamlValue(spec.DefaultFrom)
 	case len(spec.Values) > 0:
-		line += "  # " + strings.Join(spec.Values, ", ")
+		values := make([]string, len(spec.Values))
+		for idx, value := range spec.Values {
+			values[idx] = yamlValue(value)
+		}
+		line += "  # " + strings.Join(values, ", ")
 	case spec.Default == nil:
 		line += "  # unset by default"
 	}
