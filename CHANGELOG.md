@@ -341,10 +341,13 @@ formats change. The first entries under Changed may need action.
   of a heading and right before other text, which hid links from the link
   rules. So `- ## [ ](/url).` gets the two MD039 findings markdownlint gives
   it, and `- [x](https://example.com)` is a link, not a checkbox before a
-  bare URL that MD034 reported. One case now reports less: in
+  bare URL that MD034 reported. Two cases change for the worse: in
   `- [x][ ](#)` with `x` defined, goldmark reads `[x][ ]` as a collapsed
-  reference instead of a checkbox and a link, so MD039 and MD042 miss the
-  link `[ ](#)` that markdownlint reads after `[x]`.
+  reference instead of a checkbox and a link, so MD039, MD042, MD051 and
+  MD054 miss the link `[ ](#)` that markdownlint reads after `[x]`; and in
+  `- [x][^n]`, MD052 reports the footnote call when `[^n]: note` comes
+  right after a link reference definition, where markdownlint reads a
+  footnote.
 - **MD039**, **MD042**, **MD054**: Skip references that markdownlint reads
   as no link: one whose label is nothing but spaces, tabs and line endings,
   such as `[ ]` when a definition's label is a form feed, a shortcut right

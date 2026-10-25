@@ -307,7 +307,9 @@ looks definitions up by its own key, so the link rules read references as
 markdownlint does (`pkg/lint/refs/markdownlint.go`): MD042, MD052 and MD054
 look a label up as markdownlint does, and MD039, MD042 and MD054 skip a
 reference whose label micromark reads as no label, a shortcut right before
-a `[`, and a call of a GFM footnote.
+a `[`, a call of a GFM footnote, and a reference whose only definitions
+micromark reads as the text of a footnote (`FootnoteText`), which
+`MarkdownlintDefinitions` leaves out too.
 
 goldmark 1.8 gives each link reference definition a node, which the mapper
 leaves out of the tree. It also reads some lists as loose that CommonMark
