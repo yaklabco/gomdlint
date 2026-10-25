@@ -611,6 +611,12 @@ formats change. The first entries under Changed may need action.
 - The summary lists rules and files with equal counts in rule ID and path
   order, where the order used to change from run to run.
 - Help output follows `--color`.
+- A custom rule that replaces a built-in rule under its ID, under another
+  name, as another implementation under the same name, or as a wrapper, is
+  no longer documented as the built-in rule: `explain` shows no example,
+  generated page or markdownlint link for it, and its SARIF descriptor
+  takes its description, tags and default severity from the rule itself,
+  with no help or help URI.
 - Config files can turn backups off, `severity_default` applies, and the
   rule flags accept rule names.
 - A rule configured under both its ID and a name is an error that names both
