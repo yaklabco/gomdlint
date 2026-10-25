@@ -2,9 +2,7 @@ package rules
 
 import (
 	"bytes"
-	"cmp"
 	"math"
-	"slices"
 	"sort"
 	"strings"
 
@@ -155,7 +153,7 @@ func (p *listShiftPlan) fixes(edits map[*mdast.Node]fix.TextEdit) map[*mdast.Nod
 		if len(groupEdits) != len(group) {
 			continue
 		}
-		if combined, ok := combineEdits(p.file.Content, groupEdits); ok {
+		if combined, ok := fix.CombineEdits(p.file.Content, groupEdits); ok {
 			result[group[0]] = combined
 		}
 	}
@@ -251,33 +249,6 @@ func checkedItems(item *mdast.Node) []*mdast.Node {
 		}
 	}
 	return checked
-}
-
-// combineEdits merges edits that do not overlap into one edit that also
-// rewrites the text between them unchanged, so that they are applied
-// together or not at all.
-func combineEdits(content []byte, edits []fix.TextEdit) (fix.TextEdit, bool) {
-	if len(edits) == 0 {
-		return fix.TextEdit{}, false
-	}
-	sorted := slices.Clone(edits)
-	slices.SortFunc(sorted, func(a, b fix.TextEdit) int { return cmp.Compare(a.StartOffset, b.StartOffset) })
-	var text strings.Builder
-	for idx, edit := range sorted {
-		if idx > 0 {
-			prev := sorted[idx-1]
-			if edit.StartOffset < prev.EndOffset {
-				return fix.TextEdit{}, false
-			}
-			text.Write(content[prev.EndOffset:edit.StartOffset])
-		}
-		text.WriteString(edit.NewText)
-	}
-	return fix.TextEdit{
-		StartOffset: sorted[0].StartOffset,
-		EndOffset:   sorted[len(sorted)-1].EndOffset,
-		NewText:     text.String(),
-	}, true
 }
 
 // hasLineDirectives reports whether a file holds an inline directive that

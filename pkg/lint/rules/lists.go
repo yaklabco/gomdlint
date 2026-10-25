@@ -285,7 +285,7 @@ func bulletFixes(file *mdast.FileSnapshot, mismatches []bulletMismatch, unsafeLi
 		if len(edits) != len(group) {
 			continue
 		}
-		if combined, ok := combineEdits(file.Content, edits); ok {
+		if combined, ok := fix.CombineEdits(file.Content, edits); ok {
 			fixes[group[0].item] = combined
 		}
 	}
