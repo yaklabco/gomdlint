@@ -75,13 +75,13 @@ type Options struct {
 	// lint.DefaultRegistry as they initialize.
 	RuleHelp RuleHelpFunc
 
-	// BuiltInRule reports whether a registered rule is the built-in rule
-	// with its ID, rather than a custom rule that took a built-in rule's ID,
-	// which the registry may still hold the built-in rule's catalog entry
-	// for. Formats that describe rules describe such a custom rule from the
-	// rule itself, with no help. When nil, every rule's catalog entry is
-	// taken to describe it. The gomdlint command sets it to the check that
-	// gomdlint explain uses.
+	// BuiltInRule reports whether rule is gomdlint's built-in rule for its
+	// ID. Formats that describe rules ask it only about rules under
+	// markdownlint's or gomdlint's own IDs. A rule it rejects is described
+	// from the rule itself, without the registry's catalog entry for that
+	// ID and without help, even when the entry was described for that rule
+	// itself. When nil, every rule is described from its catalog entry. The
+	// gomdlint command sets it to the check that gomdlint explain uses.
 	BuiltInRule func(rule lint.Rule) bool
 }
 

@@ -295,11 +295,10 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 
 	if result != nil {
 		builder := &sarifRunBuilder{
-			run:      &run,
-			registry: r.registry,
-			locator:  locator,
-			ruleHelp: r.opts.RuleHelp,
-
+			run:         &run,
+			registry:    r.registry,
+			locator:     locator,
+			ruleHelp:    r.opts.RuleHelp,
 			builtInRule: r.opts.BuiltInRule,
 			ruleIndex:   make(map[string]int),
 		}
@@ -495,8 +494,9 @@ const sarifTagLimit = 10
 // default severity and tags, and, from Options.RuleHelp when it is set,
 // its help and the address of a page about it. A custom rule under a
 // built-in rule's ID (see replacesBuiltIn) is described from the rule
-// itself, with no help. A rule the registry does not know is identified by
-// its ID and fallbackName only.
+// itself, with no help, ignoring the registry's catalog entry for the ID,
+// even one described for that rule itself. A rule the registry does not
+// know is identified by its ID and fallbackName only.
 func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	rule := SARIFRule{ID: ruleID, Name: fallbackName}
 
