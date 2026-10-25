@@ -354,6 +354,19 @@ func TestLinkRulesReadMicromarkLinks(t *testing.T) {
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^a b]: note\n[y]: /u\n", wantColumns: []int{6, 8}},
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: note\n  [y]: #\n", wantColumns: []int{}},
 		{rule: NewEmptyLinkRule(), input: "Use [ y ] here.\n\n[^n]: note\n    [y]: #\n", wantColumns: []int{}},
+		// A footnote whose text starts another block than a paragraph,
+		// such as a heading, a thematic break, a list or a fence, takes
+		// no definition below it.
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: #\n[y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewEmptyLinkRule(), input: "Use [ y ] here.\n\n[^n]: #\n[y]: #\n", wantColumns: []int{5}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ***\n[y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: -\n[y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: 1.\n[y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ```\n[y]: #\n", wantColumns: []int{6, 8}},
+		{rule: NewLinkImageStyleRule(), input: "Use [a][y] here.\n\n[^n]: #\n[y]: /u\n", options: refStyles, wantColumns: []int{5}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: #foo\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: 1999\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: --\n[y]: #\n", wantColumns: []int{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.rule.ID()+" "+strconv.Quote(tt.input), func(t *testing.T) {

@@ -32,7 +32,8 @@ func MicromarkLabel(label string) bool {
 
 // FootnoteText returns the definitions of ctx that micromark, which
 // markdownlint parses with, reads as the text of a GFM footnote: each one
-// after a footnote definition, such as "[^1]: note", in the paragraph that
+// after a footnote definition whose text starts a paragraph (see
+// startsParagraph), such as "[^1]: note", in the paragraph that
 // goldmark reads the two from. The footnote holds a paragraph, which takes
 // the lines below it until a blank line or the start of another block, and
 // a link reference definition cannot interrupt a paragraph. goldmark, which
@@ -47,7 +48,7 @@ func FootnoteText(ctx *Context) map[*ReferenceDefinition]bool {
 			paragraph, inFootnote = def.paragraph, false
 		}
 		if footnote, ok := strings.CutPrefix(def.Label, "^"); ok && PlainFootnoteLabel(footnote) {
-			inFootnote = true
+			inFootnote = startsParagraph(def)
 			continue
 		}
 		if inFootnote {
@@ -58,6 +59,60 @@ func FootnoteText(ctx *Context) map[*ReferenceDefinition]bool {
 		}
 	}
 	return text
+}
+
+// startsParagraph reports whether the text of def, a footnote definition
+// that goldmark reads as a link reference definition, starts a paragraph,
+// which takes the lines below it, rather than another block: an ATX
+// heading such as "[^1]: #", a thematic break, a list item, a fence, a
+// blockquote, HTML, math or a directive. goldmark reads the text as a
+// destination and an optional title, so the destination is the text's first
+// word. Text that may start another block, such as a "<" or "[" at its
+// start, counts as none, so that the definitions below keep goldmark's
+// reading.
+func startsParagraph(def *ReferenceDefinition) bool {
+	word := def.Destination
+	if def.AngleBrackets || word == "" {
+		return false
+	}
+	switch {
+	case strings.Trim(word, "#") == "" && len(word) <= maxATXLevel,
+		def.Title == "" && len(word) >= minThematicBreak && strings.Count(word, word[:1]) == len(word) &&
+			strings.ContainsAny(word[:1], "*-_"),
+		word == "-" || word == "+" || word == "*",
+		orderedListMarker(word),
+		strings.HasPrefix(word, "```") || strings.HasPrefix(word, "~~~"),
+		strings.HasPrefix(word, "$$") || strings.HasPrefix(word, ":::"),
+		strings.ContainsAny(word[:1], "><["):
+		return false
+	}
+	return true
+}
+
+// Limits of the blocks startsParagraph tells apart: the deepest ATX
+// heading and the shortest thematic break.
+const (
+	maxATXLevel      = 6
+	minThematicBreak = 3
+)
+
+// maxOrderedMarkerDigits is CommonMark's limit on the digits of an ordered
+// list item's number.
+const maxOrderedMarkerDigits = 9
+
+// orderedListMarker reports whether word is an ordered list item marker:
+// one to nine digits and "." or ")".
+func orderedListMarker(word string) bool {
+	digits := word[:len(word)-1]
+	if last := word[len(word)-1]; (last != '.' && last != ')') || digits == "" || len(digits) > maxOrderedMarkerDigits {
+		return false
+	}
+	for idx := range len(digits) {
+		if !isASCIIDigit(digits[idx]) {
+			return false
+		}
+	}
+	return true
 }
 
 // PlainFootnoteLabel reports whether a footnote label, after its "^", is
