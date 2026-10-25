@@ -7,6 +7,7 @@ func spellingCatalog() []lint.RuleMeta {
 	return []lint.RuleMeta{
 		{
 			ID: "MD044", Name: "proper-names", Tags: []string{"spelling"}, Fixable: true,
+			Summary:     "Proper names should have the correct capitalization",
 			Description: "Outside URLs, proper names match the configured capitals, none by default.",
 			Rationale: "Wrong capitalization of a proper name, such as Javascript for JavaScript, is usually a mistake. " +
 				"As in markdownlint, names in email addresses and fence info strings are not checked either.",

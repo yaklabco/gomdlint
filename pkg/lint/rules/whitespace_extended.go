@@ -17,13 +17,7 @@ type HardTabsRule struct {
 // NewHardTabsRule creates a new hard tabs rule.
 func NewHardTabsRule() *HardTabsRule {
 	return &HardTabsRule{
-		BaseRule: lint.NewBaseRule(
-			"MD010",
-			"no-hard-tabs",
-			"Hard tabs should not be used",
-			[]string{"hard_tab", "whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD010")),
 	}
 }
 

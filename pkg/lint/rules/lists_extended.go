@@ -19,13 +19,7 @@ type ListIndentRule struct {
 // NewListIndentRule creates a new list-indent rule.
 func NewListIndentRule() *ListIndentRule {
 	return &ListIndentRule{
-		BaseRule: lint.NewBaseRule(
-			"MD005",
-			"list-indent",
-			"Inconsistent indentation for list items at the same level",
-			[]string{"bullet", "indentation", "ul"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD005")),
 	}
 }
 
@@ -224,13 +218,7 @@ type ULIndentRule struct {
 // NewULIndentRule creates a new ul-indent rule.
 func NewULIndentRule() *ULIndentRule {
 	return &ULIndentRule{
-		BaseRule: lint.NewBaseRule(
-			"MD007",
-			"ul-indent",
-			"Unordered list indentation",
-			[]string{"bullet", "indentation", "ul"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD007")),
 	}
 }
 
@@ -318,13 +306,7 @@ type ListMarkerSpaceRule struct {
 // NewListMarkerSpaceRule creates a new list-marker-space rule.
 func NewListMarkerSpaceRule() *ListMarkerSpaceRule {
 	return &ListMarkerSpaceRule{
-		BaseRule: lint.NewBaseRule(
-			"MD030",
-			"list-marker-space",
-			"Spaces after list markers",
-			[]string{"ol", "ul", "whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD030")),
 	}
 }
 
@@ -470,13 +452,7 @@ type BlanksAroundListsRule struct {
 // NewBlanksAroundListsRule creates a new blanks-around-lists rule.
 func NewBlanksAroundListsRule() *BlanksAroundListsRule {
 	return &BlanksAroundListsRule{
-		BaseRule: lint.NewBaseRule(
-			"MD032",
-			"blanks-around-lists",
-			"Lists should be surrounded by blank lines",
-			[]string{"blank_lines", "bullet", "ol", "ul"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD032")),
 	}
 }
 

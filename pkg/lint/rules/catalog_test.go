@@ -76,6 +76,60 @@ func TestCatalogEntriesMatchTheirRules(t *testing.T) {
 	}
 }
 
+// TestRulesTakeTheirMetadataFromTheCatalog checks that every built-in rule
+// reports the ID, name, description, tags and fix flag of its catalog
+// entry, both in a registry that RegisterAll fills and in
+// lint.DefaultRegistry, which the package's init fills once the catalog
+// variables are initialized.
+func TestRulesTakeTheirMetadataFromTheCatalog(t *testing.T) {
+	registries := []struct {
+		label    string
+		registry *lint.Registry
+	}{
+		{"RegisterAll", catalogRegistry(t)},
+		{"DefaultRegistry", lint.DefaultRegistry},
+	}
+
+	for _, tc := range registries {
+		for _, meta := range Catalog() {
+			rule, ok := tc.registry.GetByID(meta.ID)
+			if !assert.True(t, ok, "%s: %s is registered", tc.label, meta.ID) {
+				continue
+			}
+			ruleTags := meta.RuleTags
+			if ruleTags == nil {
+				ruleTags = meta.Tags
+			}
+			assert.Equal(t, meta.ID, rule.ID(), "%s: %s: ID", tc.label, meta.ID)
+			assert.Equal(t, meta.Name, rule.Name(), "%s: %s: name", tc.label, meta.ID)
+			assert.Equal(t, meta.Summary, rule.Description(), "%s: %s: description", tc.label, meta.ID)
+			assert.Equal(t, ruleTags, rule.Tags(), "%s: %s: tags", tc.label, meta.ID)
+			assert.Equal(t, meta.Fixable, rule.CanFix(), "%s: %s: fix flag", tc.label, meta.ID)
+		}
+	}
+}
+
+// TestCatalogSummaries checks the summary of every catalog entry, which its
+// rule reports as its own description: a phrase on one line.
+func TestCatalogSummaries(t *testing.T) {
+	for _, meta := range Catalog() {
+		assert.NotEmpty(t, meta.Summary, "%s: summary", meta.ID)
+		assert.Equal(t, strings.TrimSpace(meta.Summary), meta.Summary, "%s: summary has no surrounding space", meta.ID)
+		assert.False(t, strings.ContainsFunc(meta.Summary, unicode.IsControl), "%s: summary fits on one line", meta.ID)
+		if meta.RuleTags != nil {
+			assert.NotEqual(t, meta.Tags, meta.RuleTags, "%s: RuleTags is set only where it differs from Tags", meta.ID)
+		}
+	}
+}
+
+func TestCatalogEntry(t *testing.T) {
+	for _, meta := range Catalog() {
+		assert.Equal(t, meta, catalogEntry(meta.ID))
+	}
+	assert.PanicsWithValue(t, `rules: no catalog entry for rule "MD999"`, func() { catalogEntry("MD999") },
+		"a constructor for a rule without an entry fails at once")
+}
+
 func TestCatalogIdentifiersNameOneRule(t *testing.T) {
 	owners := make(map[string]string) // lower-cased ID, name or alias -> rule ID
 	claim := func(identifier, id string) {

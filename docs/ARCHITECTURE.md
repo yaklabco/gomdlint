@@ -574,7 +574,15 @@ markdownlint's first name where that differs (`MarkdownlintName`), its
 category, markdownlint's tags for it, and whether it can fix. It also holds
 three plain-text fields: what correct Markdown looks like under the default
 options (`Description`), why the rule matters (`Rationale`), and what its
-fix changes and which findings get no fix (`Fix`). Categories group the
+fix changes and which findings get no fix (`Fix`). The catalog is the only
+copy of a rule's metadata: each constructor builds its rule from the entry
+with `lint.NewBaseRuleFromMeta`, which takes the rule's ID, name and fix
+flag, its short `Summary` as the rule's `Description()`, and gomdlint's own
+tags for it (`RuleTags`, or `Tags` where they are the same) as its
+`Tags()`. Configuration templates and SARIF rule properties show those
+own tags and summaries. `catalogByID` indexes the entries in a
+package-level variable, which Go initializes before the package's `init`
+registers the rules. Categories group the
 rules in listings, such as `gomdlint rules`, and in documentation, such as
 the rule reference, in the order of `lint.Categories`, and
 `Category.Title` names them in headings. They are not accepted where a rule
@@ -586,13 +594,14 @@ falls back to the rule's own `Description()` when the entry has none. A tag
 may cover several rules, as in markdownlint. gomdlint's own rules, MDL001
 and MDL003, take tags from markdownlint's vocabulary. `RegisterAll` records
 each entry with `Registry.Describe`. Catalog tests check that every
-registered rule has exactly one entry, that names and fix flags match the
-rules, that each ID, name and alias names one rule and no tag spells one of
-them, and that tags and aliases equal markdownlint v0.41.0's table, which
-is stored as test data. Further tests check that the three texts are plain
-one-line prose, that descriptions stay under 80 characters, and that a fix
-text names the findings its rule reports without a fix. They also lint
-inputs that pin the claims the texts make.
+registered rule has exactly one entry, that each rule's ID, name,
+description, tags and fix flag match its entry, that each ID, name and
+alias names one rule and no tag spells one of them, and that tags and
+aliases equal markdownlint v0.41.0's table, which is stored as test data.
+Further tests check that the three texts are plain one-line prose, that
+descriptions stay under 80 characters, and that a fix text names the
+findings its rule reports without a fix. They also lint inputs that pin the
+claims the texts make.
 
 The registry resolves names through the catalog:
 
@@ -912,12 +921,14 @@ sequenceDiagram
 Steps:
 
 1. Create file in `pkg/lint/rules/` (e.g., `my_rule.go`)
-2. Embed `lint.BaseRule` for default implementations
-3. Implement `Apply(ctx *RuleContext) ([]Diagnostic, error)`
-4. Register in `register.go`: `registry.Register(NewMyRule())`
-5. Add its catalog entry to the `catalog_<category>.go` file of its category:
-   ID, name, markdownlint aliases and tags, whether it can fix, and its
+2. Add its catalog entry to the `catalog_<category>.go` file of its category:
+   ID, name, markdownlint aliases and tags, gomdlint's own tags where they
+   differ (`RuleTags`), whether it can fix, its short summary, and its
    description, rationale and fix text, which the catalog tests check
+3. Embed `lint.BaseRule`, built from the entry with
+   `lint.NewBaseRuleFromMeta(catalogEntry("MY001"))`
+4. Implement `Apply(ctx *RuleContext) ([]Diagnostic, error)`
+5. Register in `register.go`: `registry.Register(NewMyRule())`
 6. If the rule fixes, pass its diagnostics through the fix check of the
    family it belongs to before returning them
 7. Add golden fixtures under `pkg/lint/rules/testdata/<RULE_ID>/` (see

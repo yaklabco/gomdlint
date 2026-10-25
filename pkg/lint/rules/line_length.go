@@ -22,13 +22,7 @@ type MaxLineLengthRule struct {
 // NewMaxLineLengthRule creates a new max line length rule.
 func NewMaxLineLengthRule() *MaxLineLengthRule {
 	return &MaxLineLengthRule{
-		BaseRule: lint.NewBaseRule(
-			"MD013",
-			"line-length",
-			"Line length should not exceed the configured maximum",
-			[]string{"line_length"},
-			true, // Auto-fixable via line wrapping.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD013")),
 	}
 }
 

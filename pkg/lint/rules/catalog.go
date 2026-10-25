@@ -3,6 +3,7 @@ package rules
 import (
 	"cmp"
 	"slices"
+	"strconv"
 
 	"github.com/yaklabco/gomdlint/pkg/lint"
 )
@@ -27,6 +28,37 @@ const noFixNearCheckbox = "gomdlint may report a finding without a fix when the 
 	"one character in brackets, such as [x] or [1], or the lines around it up to a blank line, " +
 	"because it could add or remove a task list checkbox."
 
+// catalogByID holds the catalog entry of every built-in rule, by rule ID.
+// Each rule's constructor builds the rule from its entry (see catalogEntry).
+// Go initializes every package-level variable of a package before it runs
+// any of the package's init functions, so this map is filled before init
+// registers the rules, and before any other package can construct one.
+//
+//nolint:gochecknoglobals // Read-only lookup table, built once from Catalog.
+var catalogByID = indexCatalog(Catalog())
+
+// indexCatalog returns the entries of catalog by rule ID.
+func indexCatalog(catalog []lint.RuleMeta) map[string]lint.RuleMeta {
+	byID := make(map[string]lint.RuleMeta, len(catalog))
+	for _, meta := range catalog {
+		byID[meta.ID] = meta
+	}
+	return byID
+}
+
+// catalogEntry returns the catalog entry of the built-in rule with the given
+// ID, from which its constructor builds the rule with
+// lint.NewBaseRuleFromMeta. It panics for an ID without an entry, which
+// only a constructor whose rule the catalog lacks asks for. init calls
+// every constructor, so such a rule fails every test and every run at once.
+func catalogEntry(id string) lint.RuleMeta {
+	meta, ok := catalogByID[id]
+	if !ok {
+		panic("rules: no catalog entry for rule " + strconv.Quote(id))
+	}
+	return meta
+}
+
 // catalogSection is the part of the catalog that one catalog_<category>.go
 // file lists.
 type catalogSection struct {
@@ -36,8 +68,8 @@ type catalogSection struct {
 
 // Catalog returns the catalog entry of every built-in rule, in rule ID
 // order: its ID, name, markdownlint aliases, category, markdownlint tags,
-// whether it can fix what it finds, and what it checks, why, and what its
-// fix does. Each catalog_<category>.go file lists the rules of one
+// gomdlint's own tags where they differ, whether it can fix what it finds,
+// its summary, and what it checks, why, and what its fix does. Each catalog_<category>.go file lists the rules of one
 // category.
 func Catalog() []lint.RuleMeta {
 	sections := []catalogSection{

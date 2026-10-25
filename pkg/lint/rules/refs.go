@@ -27,13 +27,7 @@ type LinkFragmentsRule struct {
 // NewLinkFragmentsRule creates a new link fragments rule.
 func NewLinkFragmentsRule() *LinkFragmentsRule {
 	return &LinkFragmentsRule{
-		BaseRule: lint.NewBaseRule(
-			"MD051",
-			"link-fragments",
-			"Link fragments should be valid",
-			[]string{"links"},
-			false, // Not auto-fixable
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD051")),
 	}
 }
 
@@ -141,13 +135,7 @@ type ReferenceLinkImagesRule struct {
 // NewReferenceLinkImagesRule creates a new reference links/images rule.
 func NewReferenceLinkImagesRule() *ReferenceLinkImagesRule {
 	return &ReferenceLinkImagesRule{
-		BaseRule: lint.NewBaseRule(
-			"MD052",
-			"reference-links-images",
-			"Reference links and images should use defined labels",
-			[]string{"links", "images"},
-			false, // Not auto-fixable
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD052")),
 	}
 }
 
@@ -813,13 +801,7 @@ type LinkImageRefDefsRule struct {
 // NewLinkImageRefDefsRule creates a new link/image reference definitions rule.
 func NewLinkImageRefDefsRule() *LinkImageRefDefsRule {
 	return &LinkImageRefDefsRule{
-		BaseRule: lint.NewBaseRule(
-			"MD053",
-			"link-image-reference-definitions",
-			"Link and image reference definitions should be needed",
-			[]string{"links", "images"},
-			true, // Auto-fixable (can remove unused/duplicate definitions)
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD053")),
 	}
 }
 
@@ -1134,13 +1116,7 @@ type LinkImageStyleRule struct {
 // NewLinkImageStyleRule creates a new link/image style rule.
 func NewLinkImageStyleRule() *LinkImageStyleRule {
 	return &LinkImageStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD054",
-			"link-image-style",
-			"Link and image style should be consistent",
-			[]string{"links", "images"},
-			false, // Not auto-fixable
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD054")),
 	}
 }
 
@@ -1271,13 +1247,7 @@ type DescriptiveLinkTextRule struct {
 // NewDescriptiveLinkTextRule creates a new descriptive link text rule.
 func NewDescriptiveLinkTextRule() *DescriptiveLinkTextRule {
 	return &DescriptiveLinkTextRule{
-		BaseRule: lint.NewBaseRule(
-			"MD059",
-			"descriptive-link-text",
-			"Link text should be descriptive",
-			[]string{"links", "accessibility"},
-			false, // Not auto-fixable
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD059")),
 	}
 }
 

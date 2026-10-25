@@ -22,13 +22,7 @@ type NoBareURLsRule struct {
 // NewNoBareURLsRule creates a new no-bare-urls rule.
 func NewNoBareURLsRule() *NoBareURLsRule {
 	return &NoBareURLsRule{
-		BaseRule: lint.NewBaseRule(
-			"MD034",
-			"no-bare-urls",
-			"Bare URL used",
-			[]string{"links", "url"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD034")),
 	}
 }
 

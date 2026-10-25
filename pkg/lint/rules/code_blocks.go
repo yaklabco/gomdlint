@@ -21,13 +21,7 @@ type CodeBlockLanguageRule struct {
 // NewCodeBlockLanguageRule creates a new code block language rule.
 func NewCodeBlockLanguageRule() *CodeBlockLanguageRule {
 	return &CodeBlockLanguageRule{
-		BaseRule: lint.NewBaseRule(
-			"MD040",
-			"fenced-code-language",
-			"Fenced code blocks should have a language specified",
-			[]string{"code"},
-			true, // Auto-fixable via language detection.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD040")),
 	}
 }
 
@@ -264,13 +258,7 @@ type CodeBlockStyleRule struct {
 // NewCodeBlockStyleRule creates a new code block style rule.
 func NewCodeBlockStyleRule() *CodeBlockStyleRule {
 	return &CodeBlockStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD046",
-			"code-block-style",
-			"Code block style should be consistent",
-			[]string{"code", "style"},
-			false, // Not auto-fixable (complex transformation).
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD046")),
 	}
 }
 
@@ -343,13 +331,7 @@ type CodeFenceStyleRule struct {
 // NewCodeFenceStyleRule creates a new code fence style rule.
 func NewCodeFenceStyleRule() *CodeFenceStyleRule {
 	return &CodeFenceStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD048",
-			"code-fence-style",
-			"Code fence style should be consistent",
-			[]string{"code", "style"},
-			true, // Auto-fixable.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD048")),
 	}
 }
 
@@ -447,13 +429,7 @@ type CommandsShowOutputRule struct {
 // NewCommandsShowOutputRule creates a new commands-show-output rule.
 func NewCommandsShowOutputRule() *CommandsShowOutputRule {
 	return &CommandsShowOutputRule{
-		BaseRule: lint.NewBaseRule(
-			"MD014",
-			"commands-show-output",
-			"Dollar signs used before commands without showing output",
-			[]string{"code"},
-			true, // Auto-fixable
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD014")),
 	}
 }
 

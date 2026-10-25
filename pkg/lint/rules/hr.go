@@ -25,13 +25,7 @@ type HRStyleRule struct {
 // NewHRStyleRule creates a new hr-style rule.
 func NewHRStyleRule() *HRStyleRule {
 	return &HRStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD035",
-			"hr-style",
-			"Horizontal rule style",
-			[]string{"hr"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD035")),
 	}
 }
 

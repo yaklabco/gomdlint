@@ -24,13 +24,7 @@ type NoEmphasisAsHeadingRule struct {
 // NewNoEmphasisAsHeadingRule creates a new no-emphasis-as-heading rule.
 func NewNoEmphasisAsHeadingRule() *NoEmphasisAsHeadingRule {
 	return &NoEmphasisAsHeadingRule{
-		BaseRule: lint.NewBaseRule(
-			"MD036",
-			"no-emphasis-as-heading",
-			"Emphasis used instead of a heading",
-			[]string{"emphasis", "headings"},
-			true, // Auto-fixable - infers heading level from context.
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD036")),
 	}
 }
 
@@ -223,13 +217,7 @@ type NoSpaceInEmphasisRule struct {
 // NewNoSpaceInEmphasisRule creates a new no-space-in-emphasis rule.
 func NewNoSpaceInEmphasisRule() *NoSpaceInEmphasisRule {
 	return &NoSpaceInEmphasisRule{
-		BaseRule: lint.NewBaseRule(
-			"MD037",
-			"no-space-in-emphasis",
-			"Spaces inside emphasis markers",
-			[]string{"emphasis", "whitespace"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD037")),
 	}
 }
 
@@ -572,13 +560,7 @@ type EmphasisStyleRule struct {
 // NewEmphasisStyleRule creates a new emphasis-style rule.
 func NewEmphasisStyleRule() *EmphasisStyleRule {
 	return &EmphasisStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD049",
-			"emphasis-style",
-			"Emphasis style should be consistent",
-			[]string{"emphasis"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD049")),
 	}
 }
 
@@ -601,13 +583,7 @@ type StrongStyleRule struct {
 // NewStrongStyleRule creates a new strong-style rule.
 func NewStrongStyleRule() *StrongStyleRule {
 	return &StrongStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD050",
-			"strong-style",
-			"Strong style should be consistent",
-			[]string{"emphasis"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD050")),
 	}
 }
 

@@ -116,7 +116,9 @@
 // markdownlint aliases, category and markdownlint tags, and whether it can
 // fix what it finds. The registry resolves rule names and aliases, and
 // inline directives resolve tags, through these entries. Each
-// catalog_<category>.go file lists the rules of one category.
+// catalog_<category>.go file lists the rules of one category. The catalog
+// is the only copy of each rule's metadata: every constructor builds its
+// rule from the rule's entry with lint.NewBaseRuleFromMeta.
 //
 // Each rule follows the lint.Rule interface and uses the RuleContext,
 // DiagnosticBuilder, and EditBuilder infrastructure.

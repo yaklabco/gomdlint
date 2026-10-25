@@ -18,13 +18,7 @@ type HeadingIncrementRule struct {
 // NewHeadingIncrementRule creates a new heading increment rule.
 func NewHeadingIncrementRule() *HeadingIncrementRule {
 	return &HeadingIncrementRule{
-		BaseRule: lint.NewBaseRule(
-			"MD001",
-			"heading-increment",
-			"Heading levels should only increment by one level at a time",
-			[]string{"headings"},
-			false,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD001")),
 	}
 }
 
@@ -80,13 +74,7 @@ type SingleH1Rule struct {
 // NewSingleH1Rule creates a new single H1 rule.
 func NewSingleH1Rule() *SingleH1Rule {
 	return &SingleH1Rule{
-		BaseRule: lint.NewBaseRule(
-			"MD025",
-			"single-h1",
-			"Multiple top-level headings in the same document",
-			[]string{"headings"},
-			false,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD025")),
 	}
 }
 
@@ -169,13 +157,7 @@ type HeadingStyleRule struct {
 // NewHeadingStyleRule creates a new heading style rule.
 func NewHeadingStyleRule() *HeadingStyleRule {
 	return &HeadingStyleRule{
-		BaseRule: lint.NewBaseRule(
-			"MD003",
-			"heading-style",
-			"Heading style should be consistent",
-			[]string{"headings", "style"},
-			true,
-		),
+		BaseRule: lint.NewBaseRuleFromMeta(catalogEntry("MD003")),
 	}
 }
 
