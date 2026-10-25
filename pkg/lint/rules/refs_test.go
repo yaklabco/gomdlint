@@ -2001,8 +2001,8 @@ func TestLinkImageRefDefsRule_ByteOrderMark(t *testing.T) {
 			require.Len(t, plain, 2)
 			marked := applyRuleWithOptions(t, NewLinkImageRefDefsRule(), mdast.ByteOrderMark+input, nil)
 			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
-			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, input, plain),
-				applyAllFixEdits(t, mdast.ByteOrderMark+input, marked))
+			require.Equal(t, mdast.ByteOrderMark+applyAllEdits(t, input, plain),
+				applyAllEdits(t, mdast.ByteOrderMark+input, marked))
 		})
 	}
 }

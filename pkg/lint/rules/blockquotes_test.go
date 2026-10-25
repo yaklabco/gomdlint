@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
 )
@@ -184,13 +183,7 @@ func TestNoMultipleSpaceBlockquoteRule(t *testing.T) {
 			assert.Len(t, diags, tt.wantDiags)
 
 			if tt.wantDiags > 0 && tt.wantFix != "" {
-				var allEdits []fix.TextEdit
-				for _, d := range diags {
-					allEdits = append(allEdits, d.FixEdits...)
-				}
-				prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-				require.NoError(t, err)
-				fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+				fixed := []byte(applyAllEdits(t, tt.input, diags))
 				assert.Equal(t, tt.wantFix, string(fixed))
 
 				// The fixed text keeps its structure and leaves nothing to fix.

@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
-	"github.com/yaklabco/gomdlint/pkg/fix"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
 	"github.com/yaklabco/gomdlint/pkg/parser/goldmark"
@@ -40,23 +39,12 @@ func applyRuleWithOptions(t *testing.T, rule lint.Rule, input string, options ma
 	return diags
 }
 
-func applyAllFixEdits(t *testing.T, input string, diags []lint.Diagnostic) string {
-	t.Helper()
-	var edits []fix.TextEdit
-	for _, diag := range diags {
-		edits = append(edits, diag.FixEdits...)
-	}
-	prepared, err := fix.PrepareEdits(edits, len(input))
-	require.NoError(t, err)
-	return string(fix.ApplyEdits([]byte(input), prepared))
-}
-
 func TestSetextHeadingBlankLinesFixKeepsUnderline(t *testing.T) {
 	input := "# Title\n\nSetext heading\n--------------\nParagraph.\n"
 	diags := applyCompatibilityRule(t, NewHeadingBlankLinesRule(), input)
 	require.Len(t, diags, 1)
 	require.Equal(t, 3, diags[0].StartLine)
-	require.Equal(t, "# Title\n\nSetext heading\n--------------\n\nParagraph.\n", applyAllFixEdits(t, input, diags))
+	require.Equal(t, "# Title\n\nSetext heading\n--------------\n\nParagraph.\n", applyAllEdits(t, input, diags))
 }
 
 func TestHeadingAfterSetextHeadingIsAdjacentHeading(t *testing.T) {
@@ -91,7 +79,7 @@ func TestCodeFenceStyleFixRewritesBothFences(t *testing.T) {
 	diags := applyCompatibilityRule(t, NewCodeFenceStyleRule(), input)
 	require.Len(t, diags, 1)
 	require.Equal(t, 7, diags[0].StartLine)
-	require.Equal(t, "# Title\n\n```\na\n```\n\n```\nb\n```\n", applyAllFixEdits(t, input, diags))
+	require.Equal(t, "# Title\n\n```\na\n```\n\n```\nb\n```\n", applyAllEdits(t, input, diags))
 }
 
 func TestCodeFenceStyleFixReplacesWholeClosingRun(t *testing.T) {
@@ -120,7 +108,7 @@ func TestCodeFenceStyleFixReplacesWholeClosingRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			diags := applyRuleWithOptions(t, NewCodeFenceStyleRule(), tt.input, map[string]any{"style": "backtick"})
 			require.Len(t, diags, 1)
-			fixed := applyAllFixEdits(t, tt.input, diags)
+			fixed := applyAllEdits(t, tt.input, diags)
 			require.Equal(t, tt.want, fixed)
 			require.Empty(t, applyRuleWithOptions(t, NewCodeFenceStyleRule(), fixed, map[string]any{"style": "backtick"}))
 		})
@@ -171,7 +159,7 @@ func TestCommandsShowOutputReadsTheContentSpan(t *testing.T) {
 				lines = append(lines, diag.StartLine)
 			}
 			require.Equal(t, tt.lines, lines)
-			require.Equal(t, tt.want, applyAllFixEdits(t, tt.input, diags))
+			require.Equal(t, tt.want, applyAllEdits(t, tt.input, diags))
 		})
 	}
 	require.Empty(t, applyCompatibilityRule(t, NewCommandsShowOutputRule(), "# Title\n\n```sh\n```\n"), "an empty block has no commands")
@@ -204,7 +192,7 @@ func TestEmphasisAsHeadingKeepsWordsAcrossLines(t *testing.T) {
 	input := "# Title\n\n**Bold\ntext**\n\nMore.\n"
 	diags := applyCompatibilityRule(t, NewNoEmphasisAsHeadingRule(), input)
 	require.Empty(t, diags)
-	require.Equal(t, input, applyAllFixEdits(t, input, diags))
+	require.Equal(t, input, applyAllEdits(t, input, diags))
 }
 
 func TestStrikethroughIsNotEmphasisAsHeading(t *testing.T) {
@@ -243,7 +231,7 @@ func TestOrderedListFixKeepsParenthesisDelimiter(t *testing.T) {
 	diags := applyCompatibilityRule(t, NewOrderedListIncrementRule(), input)
 	require.Len(t, diags, 1)
 	require.Equal(t, "Use 3) instead", diags[0].Suggestion)
-	require.Equal(t, "# Title\n\n1) one\n2) two\n3) three\n", applyAllFixEdits(t, input, diags))
+	require.Equal(t, "# Title\n\n1) one\n2) two\n3) three\n", applyAllEdits(t, input, diags))
 }
 
 func TestBlanksBetweenBlockquotesAroundQuotedCode(t *testing.T) {
@@ -301,7 +289,7 @@ func TestRulesIgnoreByteOrderMark(t *testing.T) {
 			require.Len(t, plain, tt.count, "without a byte order mark")
 			marked := applyRuleWithOptions(t, tt.rule, mdast.ByteOrderMark+tt.input, tt.options)
 			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
-			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, tt.input, plain), applyAllFixEdits(t, mdast.ByteOrderMark+tt.input, marked))
+			require.Equal(t, mdast.ByteOrderMark+applyAllEdits(t, tt.input, plain), applyAllEdits(t, mdast.ByteOrderMark+tt.input, marked))
 		})
 	}
 }

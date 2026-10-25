@@ -502,13 +502,7 @@ func TestListIndentRule_Fix(t *testing.T) {
 			assert.Len(t, diags, tt.wantDiags)
 
 			// Collect and apply fixes
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+			fixed := []byte(applyAllEdits(t, tt.input, diags))
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
@@ -669,13 +663,7 @@ func TestULIndentRule_Fix(t *testing.T) {
 			assert.Len(t, diags, tt.wantDiags)
 
 			// Collect and apply fixes
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+			fixed := []byte(applyAllEdits(t, tt.input, diags))
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
@@ -857,13 +845,7 @@ func TestListMarkerSpaceRule_Fix(t *testing.T) {
 			assert.Len(t, diags, tt.wantDiags)
 
 			// Collect and apply fixes
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+			fixed := []byte(applyAllEdits(t, tt.input, diags))
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
@@ -1048,13 +1030,7 @@ func TestBlanksAroundListsRule_Fix(t *testing.T) {
 			assert.Len(t, diags, tt.wantDiags)
 
 			// Collect and apply fixes
-			var allEdits []fix.TextEdit
-			for _, d := range diags {
-				allEdits = append(allEdits, d.FixEdits...)
-			}
-			prepared, err := fix.PrepareEdits(allEdits, len(tt.input))
-			require.NoError(t, err)
-			fixed := fix.ApplyEdits([]byte(tt.input), prepared)
+			fixed := []byte(applyAllEdits(t, tt.input, diags))
 			assert.Equal(t, tt.wantFix, string(fixed))
 
 			// Verify idempotency - re-running on fixed content should produce no diagnostics
@@ -1173,8 +1149,14 @@ func TestListIndentationFixesPreserveStructure(t *testing.T) {
 				ruleCtx := lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil)
 				diags, err := rule.Apply(ruleCtx)
 				require.NoError(t, err)
+				// The engine applies a fix that several findings of one
+				// rule share once.
+				shared := make(map[string]bool)
 				for _, diag := range diags {
-					edits = append(edits, diag.FixEdits...)
+					if key := editsKey(diag.FixEdits); !shared[key] {
+						shared[key] = true
+						edits = append(edits, diag.FixEdits...)
+					}
 				}
 			}
 			accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(tt.input))

@@ -880,8 +880,8 @@ func TestTableRulesIgnoreByteOrderMark(t *testing.T) {
 			require.Len(t, plain, tt.count, "without a byte order mark")
 			marked := applyRuleWithOptions(t, tt.rule, mdast.ByteOrderMark+tt.input, nil)
 			require.Equal(t, diagnosticLines(plain), diagnosticLines(marked))
-			require.Equal(t, mdast.ByteOrderMark+applyAllFixEdits(t, tt.input, plain),
-				applyAllFixEdits(t, mdast.ByteOrderMark+tt.input, marked))
+			require.Equal(t, mdast.ByteOrderMark+applyAllEdits(t, tt.input, plain),
+				applyAllEdits(t, mdast.ByteOrderMark+tt.input, marked))
 		})
 	}
 }
