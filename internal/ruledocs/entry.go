@@ -33,7 +33,9 @@ type State struct {
 
 // Entry documents one registered rule: its catalog entry, with the rule's
 // own ID, name, fix flag and, where the entry has none, description, and
-// the rule's state.
+// the rule's state. Take an Entry from Entries or NewEntry, which record
+// whether its rule is a built-in rule: only then do its pages show an
+// example, a published page and markdownlint's documentation.
 type Entry struct {
 	lint.RuleMeta
 

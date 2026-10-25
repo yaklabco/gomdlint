@@ -328,7 +328,9 @@ formats change. The first entries under Changed may need action.
   at most 10, the number GitHub code scanning keeps. Go API: programs that
   use `pkg/reporter` directly get help only by setting the new
   `reporter.Options.RuleHelp`, and `lint.TagsFor` gives a rule's catalog
-  tags.
+  tags. `pkg/reporter` does not register the built-in rules, so such a
+  program imports `pkg/lint/rules` or sets `reporter.Options.Registry` for
+  descriptors to describe them.
 
 ### Fixed
 

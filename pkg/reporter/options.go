@@ -61,7 +61,10 @@ type Options struct {
 	// Registry supplies rule metadata (descriptions, tags and default
 	// severities) to formats that describe rules, such as SARIF. Rule
 	// descriptions come from the rules' catalog entries where the entries
-	// have them. When nil, lint.DefaultRegistry is used.
+	// have them. When nil, lint.DefaultRegistry is used. This package does
+	// not register the built-in rules there: a program that uses it
+	// without the gomdlint command imports pkg/lint/rules for them, or
+	// sets Registry.
 	Registry RuleLookup
 
 	// RuleHelp documents rules for formats that carry help for each rule,

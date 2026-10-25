@@ -69,14 +69,15 @@ func PageURL(entry Entry) string {
 	return RulePagesURL + url.PathEscape(entry.Name) + ".md"
 }
 
-// RuleHelp documents rule, whose catalog entry is meta, or the zero entry
-// when it has none, for a SARIF rule descriptor: as the page that explain
-// prints, in text, and that explain --format markdown prints, in its
-// built-in state, with the address of its generated page (see PageURL),
-// "" for a rule without one. It reports false when a page cannot be
-// written, as when the rule's embedded example does not parse, which the
-// tests of this package rule out for the built-in rules. Its signature is
-// that of reporter.Options.RuleHelp.
+// RuleHelp documents rule for a SARIF rule descriptor. meta is the rule's
+// catalog entry, or the zero entry when it has none. It returns the page
+// that explain prints, as text, and the page that explain --format
+// markdown prints, both for the rule's built-in state. It also returns the
+// address of the rule's generated page (see PageURL), or "" for a rule
+// without one. It reports false when a page cannot be written, as when the
+// rule's embedded example does not parse, which the tests of this package
+// rule out for the built-in rules. Its signature is that of
+// reporter.Options.RuleHelp.
 func RuleHelp(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
 	entry := NewEntry(rule, meta)
 	var text, markdown strings.Builder
