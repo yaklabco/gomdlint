@@ -16,6 +16,7 @@ import (
 	"github.com/yaklabco/gomdlint/internal/display"
 	"github.com/yaklabco/gomdlint/internal/ignore"
 	"github.com/yaklabco/gomdlint/internal/logging"
+	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/internal/ui/pretty"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -288,6 +289,7 @@ func runLint(cmd *cobra.Command, args []string, cfg *config.Config, flags *lintF
 		WorkingDir:   workDir,
 		ToolVersion:  flags.toolVersion,
 		Registry:     registry,
+		RuleHelp:     ruledocs.RuleHelp, // SARIF rule help: the pages that explain prints.
 	})
 	if err != nil {
 		return withExitCode(ExitInternalError, fmt.Errorf("create reporter: %w", err))

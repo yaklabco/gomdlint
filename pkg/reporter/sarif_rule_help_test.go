@@ -51,7 +51,7 @@ func describeEveryBuiltinRule(t *testing.T) ([]reporter.SARIFRule, *lint.Registr
 	root := newGitWorkTree(t, false)
 	result := &runner.Result{Files: []runner.FileOutcome{sarifFile(filepath.Join(root, "a.md"), "x\n", diags...)}}
 
-	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry}, result).Runs[0].Tool.Driver.Rules
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}, result).Runs[0].Tool.Driver.Rules
 	require.Len(t, descriptors, len(catalog))
 	return descriptors, registry
 }
@@ -190,7 +190,7 @@ func TestSARIFReporter_OnlyBuiltinRulesLinkToAPage(t *testing.T) {
 		),
 	}}
 
-	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry}, result).Runs[0].Tool.Driver.Rules
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}, result).Runs[0].Tool.Driver.Rules
 
 	require.Len(t, descriptors, 2)
 	for _, descriptor := range descriptors {
@@ -246,9 +246,71 @@ func TestSARIFReporter_DescriptorsAreDeterministic(t *testing.T) {
 	}
 	root := newGitWorkTree(t, false)
 	result := &runner.Result{Files: []runner.FileOutcome{sarifFile(filepath.Join(root, "a.md"), "x\n", diags...)}}
-	opts := reporter.Options{WorkingDir: root, Registry: registry, ToolVersion: "v1.2.3"}
+	opts := reporter.Options{WorkingDir: root, Registry: registry, ToolVersion: "v1.2.3", RuleHelp: ruledocs.RuleHelp}
 
 	first := string(reportSARIF(t, opts, result))
 	second := string(reportSARIF(t, opts, result))
 	assert.Equal(t, first, second)
+}
+
+// TestSARIFReporter_HelpIsOptIn covers a reporter without Options.RuleHelp:
+// descriptors keep their name, descriptions, default level and catalog
+// tags, but carry no help and no help URI, as the reporter does not render
+// rule pages itself.
+func TestSARIFReporter_HelpIsOptIn(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD004", StartLine: 1}),
+	}}
+
+	descriptors := decodeSARIF(t, reporter.Options{WorkingDir: root, Registry: registry}, result).Runs[0].Tool.Driver.Rules
+
+	require.Len(t, descriptors, 1)
+	descriptor := descriptors[0]
+	assert.Equal(t, "unordered-list-style", descriptor.Name)
+	assert.NotNil(t, descriptor.ShortDescription)
+	assert.NotNil(t, descriptor.FullDescription)
+	assert.NotNil(t, descriptor.DefaultConfig)
+	assert.Equal(t, []any{"lists", "bullet", "ul"}, descriptor.Properties["tags"], "the category, then the catalog tags")
+	assert.Nil(t, descriptor.Help)
+	assert.Empty(t, descriptor.HelpURI)
+}
+
+// TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne covers a registry
+// with the built-in rules in which a custom rule then replaces MD009 under
+// another name: its descriptor describes it, not the built-in rule.
+func TestSARIFReporter_DescribesARuleThatReplacesABuiltinOne(t *testing.T) {
+	t.Parallel()
+
+	registry := lint.NewRegistry()
+	rules.RegisterAll(registry)
+	custom := lint.NewBaseRule("MD009", "company-policy", "Company policy.", []string{"policy"}, false)
+	registry.Register(&custom)
+
+	root := newGitWorkTree(t, false)
+	result := &runner.Result{Files: []runner.FileOutcome{
+		sarifFile(filepath.Join(root, "a.md"), "x\n", lint.Diagnostic{RuleID: "MD009", StartLine: 1}),
+	}}
+
+	opts := reporter.Options{WorkingDir: root, Registry: registry, RuleHelp: ruledocs.RuleHelp}
+	descriptors := decodeSARIF(t, opts, result).Runs[0].Tool.Driver.Rules
+
+	require.Len(t, descriptors, 1)
+	descriptor := descriptors[0]
+	assert.Equal(t, "company-policy", descriptor.Name)
+	assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.ShortDescription)
+	assert.Equal(t, &reporter.SARIFMultiformatText{Text: "Company policy."}, descriptor.FullDescription)
+	assert.Equal(t, []any{"policy"}, descriptor.Properties["tags"], "the rule's own tags")
+	assert.Empty(t, descriptor.HelpURI)
+	require.NotNil(t, descriptor.Help)
+	for _, help := range []string{descriptor.Help.Text, descriptor.Help.Markdown} {
+		assert.Contains(t, help, "Company policy.")
+		for _, builtIn := range []string{"br_spaces", "whitespace", "trailing whitespace", "md009.md"} {
+			assert.NotContains(t, help, builtIn, "the built-in rule's words")
+		}
+	}
 }

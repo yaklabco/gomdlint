@@ -63,7 +63,21 @@ type Options struct {
 	// descriptions come from the rules' catalog entries where the entries
 	// have them. When nil, lint.DefaultRegistry is used.
 	Registry RuleLookup
+
+	// RuleHelp documents rules for formats that carry help for each rule,
+	// such as SARIF's help and helpUri. When nil, rule descriptors carry no
+	// help. The gomdlint command sets it to the renderer of
+	// gomdlint explain, which this package does not import: it would bring
+	// in the built-in rules, which register themselves in
+	// lint.DefaultRegistry as they initialize.
+	RuleHelp RuleHelpFunc
 }
+
+// RuleHelpFunc documents rule, whose catalog entry is meta, or the zero
+// entry for a rule without one: it returns the rule's help as plain text
+// and as Markdown, and the address of a page about the rule, or "" for a
+// rule without one. It reports false when it has no help for the rule.
+type RuleHelpFunc func(rule lint.Rule, meta lint.RuleMeta) (text, markdown, uri string, ok bool)
 
 // RuleLookup finds a rule and its catalog entry by the rule's ID.
 // *lint.Registry implements it.

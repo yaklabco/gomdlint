@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/yaklabco/gomdlint/internal/display"
-	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	"github.com/yaklabco/gomdlint/pkg/mdast"
@@ -299,6 +298,7 @@ func (r *SARIFReporter) buildOutput(result *runner.Result) *SARIFOutput {
 			run:       &run,
 			registry:  r.registry,
 			locator:   locator,
+			ruleHelp:  r.opts.RuleHelp,
 			ruleIndex: make(map[string]int),
 		}
 		for _, file := range result.Files {
@@ -356,6 +356,9 @@ type sarifRunBuilder struct {
 	run      *SARIFRun
 	registry RuleLookup
 	locator  *artifactLocator
+
+	// ruleHelp documents rules for their descriptors, or is nil.
+	ruleHelp RuleHelpFunc
 
 	// ruleIndex maps each described rule ID to its position in
 	// tool.driver.rules.
@@ -484,9 +487,9 @@ const sarifTagLimit = 10
 
 // describeRule returns the SARIF description of a rule, taking its metadata
 // from the registry and the rule's catalog entry: its name, descriptions,
-// default severity, tags, the page that explain prints for it as help, and,
-// for a built-in rule, the address of its generated page. A rule the
-// registry does not know is identified by its ID and fallbackName only.
+// default severity and tags, and, from Options.RuleHelp when it is set,
+// its help and the address of a page about it. A rule the registry does
+// not know is identified by its ID and fallbackName only.
 func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	rule := SARIFRule{ID: ruleID, Name: fallbackName}
 
@@ -503,9 +506,12 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	}
 	rule.DefaultConfig = &SARIFRuleConfig{Level: severityToSARIFLevel(registered.DefaultSeverity())}
 
-	entry := ruledocs.NewEntry(registered, meta)
-	rule.HelpURI = ruledocs.PageURL(entry)
-	rule.Help = ruleHelp(entry)
+	if b.ruleHelp != nil {
+		if text, markdown, uri, documented := b.ruleHelp(registered, meta); documented {
+			rule.Help = &SARIFMultiformatText{Text: text, Markdown: markdown}
+			rule.HelpURI = uri
+		}
+	}
 
 	candidates := append([]string{string(meta.Category)}, lint.TagsFor(registered, meta)...)
 	if tags := uniqueTags(candidates, sarifTagLimit); len(tags) > 0 {
@@ -513,19 +519,6 @@ func (b *sarifRunBuilder) describeRule(ruleID, fallbackName string) SARIFRule {
 	}
 
 	return rule
-}
-
-// ruleHelp returns the page of entry's rule that gomdlint explain prints, as
-// text, and that explain --format markdown prints, as Markdown, both without
-// a configuration. It returns nil when a page cannot be written, as when
-// the rule's embedded example does not parse, which the rule documentation
-// tests rule out for the built-in rules.
-func ruleHelp(entry ruledocs.Entry) *SARIFMultiformatText {
-	var text, markdown strings.Builder
-	if ruledocs.WriteTextPage(&text, entry, "") != nil || ruledocs.WriteMarkdownPage(&markdown, entry) != nil {
-		return nil
-	}
-	return &SARIFMultiformatText{Text: text.String(), Markdown: markdown.String()}
 }
 
 // ruleDescriptions returns the short and the full SARIF description of rule,

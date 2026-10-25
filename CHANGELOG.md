@@ -325,7 +325,10 @@ formats change. The first entries under Changed may need action.
   the rule as `help`, in text and Markdown, and a built-in rule's generated
   page under `docs/rules` on the main branch as `helpUri`. Their tags are
   the rule's category followed by its markdownlint tags from the catalog,
-  at most 10, the number GitHub code scanning keeps.
+  at most 10, the number GitHub code scanning keeps. Go API: programs that
+  use `pkg/reporter` directly get help only by setting the new
+  `reporter.Options.RuleHelp`, and `lint.TagsFor` gives a rule's catalog
+  tags.
 
 ### Fixed
 

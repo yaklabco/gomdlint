@@ -15,6 +15,7 @@ import (
 	gmtext "github.com/yuin/goldmark/text"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // The rule reference is the documentation that the catalog and the rules'
@@ -66,6 +67,23 @@ func PageURL(entry Entry) string {
 		return ""
 	}
 	return RulePagesURL + url.PathEscape(entry.Name) + ".md"
+}
+
+// RuleHelp documents rule, whose catalog entry is meta, or the zero entry
+// when it has none, for a SARIF rule descriptor: as the page that explain
+// prints, in text, and that explain --format markdown prints, in its
+// built-in state, with the address of its generated page (see PageURL),
+// "" for a rule without one. It reports false when a page cannot be
+// written, as when the rule's embedded example does not parse, which the
+// tests of this package rule out for the built-in rules. Its signature is
+// that of reporter.Options.RuleHelp.
+func RuleHelp(rule lint.Rule, meta lint.RuleMeta) (string, string, string, bool) {
+	entry := NewEntry(rule, meta)
+	var text, markdown strings.Builder
+	if WriteTextPage(&text, entry, "") != nil || WriteMarkdownPage(&markdown, entry) != nil {
+		return "", "", "", false
+	}
+	return text.String(), markdown.String(), PageURL(entry), true
 }
 
 // ReferenceDirs returns the directories that hold the files of the rule
