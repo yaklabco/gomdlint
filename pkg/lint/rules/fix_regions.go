@@ -207,8 +207,9 @@ import (
 // document's line before it: the rest of the marker line when that is the
 // line before; an empty ATX heading, which closes on the next line whatever
 // it holds, when the line before is blank in the item or holds a block that
-// closes alone; or, after a closed fence, a fence that the line before
-// closes. The opener holds when its parse, with the region's first line
+// closes alone; or, after a block that the line before closes, the opening
+// of a fence or of an HTML block that the line closes. The opener holds
+// when its parse, with the region's first line
 // after it, has one list in each container of the chain, with the
 // document's marker and kind, holding one item with the document's content
 // offset, and starts a group of the item at that line as the document
@@ -633,8 +634,8 @@ func (recordingOption) SetParserOption(cfg *goldparser.Config) {
 
 // recordingBlockParser records the line where each block opens, where a
 // group starts with a top-level block that opens while only a closed block
-// is open (see Groups), and where the groups of a top-level blockquote start
-// (see Quote regions).
+// is open (see Groups), and where the groups of a top-level blockquote and
+// of each list item start (see Quote regions and Item regions).
 type recordingBlockParser struct {
 	goldparser.BlockParser
 }
@@ -810,8 +811,9 @@ func children(node gmast.Node) []gmast.Node {
 
 // docLayout is what region checks know of the original document from how one
 // parser reads it, whatever a check compares: where its groups, the groups
-// of its top-level blockquotes, the items of its lists and the rows of its
-// tables start, its link reference definitions, and where edits may start
+// of its top-level blockquotes and of its list items, the items of its lists
+// and the rows of its tables start, its link reference definitions, and
+// where edits may start
 // without reaching the front matter. It selects, merges, grows and parses
 // the regions that edits need.
 type docLayout struct {
@@ -841,9 +843,10 @@ type docLayout struct {
 	afterClosed []bool
 	groupNodes  []int
 	// lists holds the lists with items that are top-level blocks, blocks of
-	// a top-level blockquote or blocks of an item of such a list, at any
-	// depth, in the order the layout meets them, a list before the lists in
-	// its items, and listIndex the index in lists of each list node.
+	// a top-level blockquote or blocks of an item with a prefix of such a
+	// list, at any depth, in the order the layout meets them, a list before
+	// the lists in its items, and listIndex the index in lists of each list
+	// node.
 	lists     []*layoutList
 	listIndex map[gmast.Node]int
 	// quotes holds the top-level blockquotes, in document order, and
@@ -1351,8 +1354,9 @@ func (l *docLayout) firstLineOK(line []byte) bool {
 }
 
 // regionParts is where the parts of a signature or an outline that regions
-// replace start: for each group of the document or of a blockquote, each
-// item of a list or each body row of a table, and for the end, the offset
+// replace start: for each group of the document, of a blockquote or of a
+// list item, each item of a list or each body row of a table, and for the
+// end, the offset
 // where its part starts and the index of its first heading.
 type regionParts struct {
 	starts, headings []int
@@ -1470,7 +1474,7 @@ func (l *docLayout) outer(reg region) (region, bool) {
 		return scopePart(l.tables[reg.at].parent), true
 	case itemRegion:
 		item := l.items[reg.at]
-		return region{kind: listRegion, at: item.list, first: item.item, last: item.item}, true
+		return region{kind: listRegion, at: item.list, first: item.number, last: item.number}, true
 	default:
 		return region{}, false
 	}
@@ -1786,9 +1790,9 @@ func (l *docLayout) mergeRegions(regions []region) []region {
 // many groups or items, or the region that stands for a quote, item or list
 // region that would reach the last group of its blockquote or item or the
 // last items of its list (see fitted). A table region becomes the region of
-// its container: its
-// rows parse as in the document whatever rows come with them, so more rows
-// would not make it hold. A region that ends the document stays.
+// its container: its rows parse as in the document whatever rows come with
+// them, so more rows would not make it hold. A region that ends the
+// document stays.
 func (l *docLayout) grow(reg region) region {
 	size := reg.last - reg.first + 1
 	switch reg.kind {
@@ -1805,15 +1809,16 @@ func (l *docLayout) grow(reg region) region {
 // regionParse is a region parsed with its edits.
 type regionParse struct {
 	// holds reports whether the region parsed as part of the document: a
-	// group region left no block open, a quote region left no block of its
-	// blockquote open, the items of a list region opened as in the
-	// document, the paragraph of a table region's table stayed open (see
-	// parseRegion). undecided reports that the region cannot be checked on
-	// its own.
+	// group region left no block open, a quote or item region left no
+	// block of its blockquote or item open, the items of a list region
+	// opened as in the document, the paragraph of a table region's table
+	// stayed open (see parseRegion). undecided reports that the region
+	// cannot be checked on its own.
 	holds, undecided bool
 	// source is the text parsed, and blocks the region's top-level blocks,
-	// the blocks of a quote region's blockquote, the items of a list region
-	// or the body rows of a table region.
+	// the blocks of a quote region's blockquote or of an item region's item
+	// after its opener's, the items of a list region or the body rows of a
+	// table region.
 	source []byte
 	blocks []gmast.Node
 	// refsSame reports whether the region adds the link reference
@@ -1869,8 +1874,8 @@ func (p regionParse) retained() int {
 
 // heldParse returns the parse of a region that holds, whose text is source,
 // the region's own text ending at end, and whose blocks are blocks, from the
-// record of its parse, which it
-// consumes: whether it adds the definitions that the original has between
+// record of its parse, which it consumes: whether it adds the definitions
+// that the original has between
 // from and to, copies of those it adds when it does not, and the labels its
 // links looked up, each once. The copies share no memory with the parse,
 // which a cached outcome drops, so the cache holds what it counts.

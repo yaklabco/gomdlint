@@ -283,32 +283,50 @@ func checkItemRegions(t *testing.T, rng *rand.Rand, documents int) {
 	assert.Positive(t, windows, "item windows decide some edit sets")
 }
 
+// itemCommentsDocument returns a document with one list item that holds,
+// after its first paragraph, HTML comments over several lines, each followed
+// right away by a line of text that ends in trailing spaces, which MD009
+// fixes. No blank line separates a comment from the text after it.
+func itemCommentsDocument(comments int) []byte {
+	var doc strings.Builder
+	doc.WriteString("# Title\n\n- outer\n\n")
+	for idx := range comments {
+		fmt.Fprintf(&doc, "  <!--\n  comment %d\n  -->\n  text %d   \n", idx, idx)
+	}
+	doc.WriteString("- end\n")
+	return []byte(doc.String())
+}
+
 // TestRegionParsesGrowInListItems checks that region checks parse text that
 // grows with the document, not with its square, when the fixes of a document
 // sit in one list item: blank lines before tables that follow text in the
 // item or in a loose list nested in it, and around fences and headings that
-// text runs into. Each fix is checked on its own; four times the document
+// text runs into, and trailing spaces on text right after HTML comments. Each fix is checked on its own; four times the document
 // must take about four times the bytes, not sixteen.
 func TestRegionParsesGrowInListItems(t *testing.T) {
 	const small, factor = 30, 4
 	both := []config.Flavor{config.FlavorGFM, config.FlavorCommonMark}
 	gfm := []config.Flavor{config.FlavorGFM}
+	blankLines := func(needs func(prev, line string) bool) func(string) []fix.TextEdit {
+		return func(input string) []fix.TextEdit { return blankLineEdits(input, needs) }
+	}
 	for _, doc := range []struct {
 		name     string
 		generate func(int) []byte
-		needs    func(prev, line string) bool
+		edits    func(string) []fix.TextEdit
 		perBlock int
 		flavors  []config.Flavor
 	}{
-		{name: "tables in a list item", generate: itemTablesDocument, needs: tableBlankLines, perBlock: 1, flavors: gfm},
-		{name: "tables in a nested list", generate: nestedTablesDocument, needs: tableBlankLines, perBlock: 1, flavors: gfm},
-		{name: "fences in a list item", generate: itemFencesDocument, needs: fenceBlankLines, perBlock: 2, flavors: both},
-		{name: "headings in a list item", generate: itemHeadingsDocument, needs: headingBlankLines, perBlock: 2, flavors: both},
+		{name: "tables in a list item", generate: itemTablesDocument, edits: blankLines(tableBlankLines), perBlock: 1, flavors: gfm},
+		{name: "tables in a nested list", generate: nestedTablesDocument, edits: blankLines(tableBlankLines), perBlock: 1, flavors: gfm},
+		{name: "fences in a list item", generate: itemFencesDocument, edits: blankLines(fenceBlankLines), perBlock: 2, flavors: both},
+		{name: "headings in a list item", generate: itemHeadingsDocument, edits: blankLines(headingBlankLines), perBlock: 2, flavors: both},
+		{name: "comments in a list item", generate: itemCommentsDocument, edits: trailingSpaceEdits, perBlock: 1, flavors: both},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			parsed := func(n int) int {
 				input := string(doc.generate(n))
-				edits := blankLineEdits(input, doc.needs)
+				edits := doc.edits(input)
 				require.Len(t, edits, doc.perBlock*n)
 				total := 0
 				for _, flavor := range doc.flavors {

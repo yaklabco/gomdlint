@@ -23,10 +23,10 @@ const openerSteps = 3
 // layoutItem is an item of a list of the layout.
 type layoutItem struct {
 	// index is the item's index in items, group the document group that
-	// holds it, and list and item the index of its list in lists and its
-	// number in the list.
+	// holds it, list the index of its list in lists and number its place in
+	// the list.
 	index, group int
-	list, item   int
+	list, number int
 	// line is the source offset of the item's marker line, content where its
 	// content starts on that line, and offset the content offset goldmark
 	// gives the item, which decides how the lines after it continue it.
@@ -37,9 +37,10 @@ type layoutItem struct {
 	// own.
 	prefix []byte
 	// regions reports whether item regions may be used for this item: it
-	// has a prefix, and the parse placed two groups or more in it, in order,
-	// the first on its marker line, whose first block lies in the first
-	// group.
+	// has a prefix, the parse placed two groups or more in it, in order, the
+	// first on its marker line, its first block lies in the first group, and
+	// it makes its list loose exactly when its own flag or a block it counts
+	// in flagged does.
 	regions bool
 	// bounds, afterClosed, blank, nodes and groupNodes hold the item's
 	// groups as those of a layoutQuote hold a blockquote's; without regions,
@@ -75,20 +76,21 @@ type itemOpener struct {
 // of the item that holds the list, and nil for a list of the document or of
 // a top-level blockquote.
 func (l *docLayout) addItems(list *gmast.List, model *layoutList, rec *parseRecord, parentPrefix []byte) {
-	number := 0
+	var nodes []*gmast.ListItem
 	for node := list.FirstChild(); node != nil; node = node.NextSibling() {
-		listItem, ok := node.(*gmast.ListItem)
-		if !ok {
-			continue
+		if listItem, ok := node.(*gmast.ListItem); ok {
+			nodes = append(nodes, listItem)
 		}
-		item := newLayoutItem(listItem, rec, l.source, model, number, len(l.items), parentPrefix)
+	}
+	// The items' places come from the list's marker lines, one for each item.
+	if len(nodes) != len(model.lines) {
+		model.regions = false
+	}
+	for number, node := range nodes {
+		item := newLayoutItem(node, rec, l.source, model, number, len(l.items), parentPrefix)
 		l.itemIndex[node] = item.index
 		l.items = append(l.items, item)
 		model.items = append(model.items, item.index)
-		number++
-	}
-	if number != len(model.lines) {
-		model.regions = false
 	}
 	for _, at := range model.items {
 		item := l.items[at]
@@ -111,7 +113,7 @@ func newLayoutItem(
 	node *gmast.ListItem, rec *parseRecord, source []byte, list *layoutList, number, index int, parentPrefix []byte,
 ) *layoutItem {
 	item := &layoutItem{
-		index: index, group: list.group, list: list.index, item: number, offset: node.Offset,
+		index: index, group: list.group, list: list.index, number: number, offset: node.Offset,
 		nodes: children(node), own: node.PreviousSibling() != nil && node.HasBlankPreviousLines(),
 	}
 	if number < len(list.lines) {
@@ -210,8 +212,8 @@ func itemPrefix(
 
 // groupOf returns the group of the item that holds the line starting at
 // offset; a line before the first group's is counted in it.
-func (c *layoutItem) groupOf(offset int) int {
-	return sort.SearchInts(c.bounds[1:], offset+1)
+func (it *layoutItem) groupOf(offset int) int {
+	return sort.SearchInts(it.bounds[1:], offset+1)
 }
 
 // itemRegionFits reports whether an item region lies in groups that item
@@ -245,11 +247,12 @@ func (l *docLayout) fitItemRegion(reg region) (region, bool) {
 // document has it before the group's first line, ending with the line before
 // it in the document: the rest of the marker line when that is the line
 // before; else, when a block that closes alone is open or the line before is
-// blank, an empty ATX heading and that line; else, after a closed fence,
-// that fence opened and the line before, which closes it. The opener holds
-// when its parse, followed by the group's first line, opens the item's
-// chain as the document does and starts a group of the item on that line
-// as the document starts it.
+// blank, an empty ATX heading and that line; else, after a block that the
+// line before closes, a fence or an HTML block that the line closes, opened,
+// and that line (see closingOpeners). The opener holds when its parse,
+// followed by the group's first line, opens the item's chain as the document
+// does and starts a group of the item on that line as the document starts
+// it; of several, the first that holds is taken.
 func (l *docLayout) itemOpener(at, group int) *itemOpener {
 	item := l.items[at]
 	if item.openers == nil {
@@ -263,40 +266,91 @@ func (l *docLayout) itemOpener(at, group int) *itemOpener {
 	start := item.bounds[group]
 	prevStart := lineStartIn(l.source, start-1)
 	prev := l.source[prevStart:start]
-	var text []byte
+	var candidates [][]byte
 	switch {
 	case prevStart == item.line:
-		text = slices.Concat(item.prefix, l.source[item.content:start])
+		candidates = append(candidates, slices.Concat(item.prefix, l.source[item.content:start]))
 	case item.afterClosed[group] || item.blank[group]:
-		text = slices.Concat(item.prefix, []byte("#\n"), prev)
+		candidates = append(candidates, slices.Concat(item.prefix, []byte("#\n"), prev))
 	default:
-		fence := closingFence(prev)
-		if fence == nil {
-			return opener
+		for _, open := range closingOpeners(prev) {
+			candidates = append(candidates, slices.Concat(item.prefix, open, []byte("\n"), prev))
 		}
-		text = slices.Concat(item.prefix, fence, []byte("\n"), prev)
 	}
-	check := slices.Concat(text, l.source[start:nextLineStart(l.source, start)])
+	line := l.source[start:nextLineStart(l.source, start)]
+	for _, text := range candidates {
+		if skip, ok := l.openerHolds(at, group, text, line); ok {
+			opener.text, opener.skip = text, skip
+			break
+		}
+	}
+	return opener
+}
+
+// openerHolds reports whether text opens the item at index at as the
+// document has it before the first line of its group at index group, which
+// is line: parsed with line after it, it opens the item's chain as the
+// document does, and starts a group of the item at line as the document
+// starts it there. skip is the number of the item's blocks before that
+// group.
+func (l *docLayout) openerHolds(at, group int, text, line []byte) (int, bool) {
+	item := l.items[at]
+	check := slices.Concat(text, line)
 	l.work.parsed += len(check)
 	parsed := parseRecorded(l.markdown, check, l.refIndex, false, l.tableFlags)
 	node, ok := l.parsedContainer(parsed.doc, itemScope, at)
 	if !ok {
-		return opener
+		return 0, false
 	}
 	for _, opened := range parsed.rec.items[node] {
 		if opened.offset != len(text) {
 			continue
 		}
 		if opened.afterClosed != item.afterClosed[group] || opened.opened.HasBlankPreviousLines() != item.blank[group] {
-			return opener
+			return 0, false
 		}
 		counts, found := groupBlocks(children(node), []groupStart{opened})
-		if found {
-			opener.text, opener.skip = text, counts[0]
+		if !found {
+			return 0, false
 		}
-		return opener
+		return counts[0], true
 	}
-	return opener
+	return 0, false
+}
+
+// htmlClosers pairs the end conditions of the HTML blocks that goldmark
+// closes on a later line than their first with a line that opens such a
+// block and does not close it.
+//
+//nolint:gochecknoglobals // a fixed table, read only.
+var htmlClosers = []struct{ closes, opens string }{
+	{"-->", "<!--"},
+	{"?>", "<?"},
+	{"]]>", "<![CDATA["},
+	{"</pre>", "<pre>"},
+	{"</script>", "<script>"},
+	{"</style>", "<style>"},
+	{"</textarea>", "<textarea>"},
+	{">", "<!A"},
+}
+
+// closingOpeners returns the lines that open a block that line closes on
+// a later line than its first: a fence of the characters of a line that
+// closes a fence, or the opening of each HTML block whose end condition the
+// line holds. The opener's parse decides which of them, if any, stands for
+// the document.
+func closingOpeners(line []byte) [][]byte {
+	if fence := closingFence(line); fence != nil {
+		return [][]byte{fence}
+	}
+	lower := bytes.ToLower(line)
+	var opens [][]byte
+	for _, closer := range htmlClosers {
+		if bytes.Contains(lower, []byte(closer.closes)) {
+			opens = append(opens, []byte(closer.opens))
+		}
+	}
+	return opens
 }
 
 // closingFence returns the fence characters of a line that closes a fence, and
@@ -490,8 +544,8 @@ func (t itemTally) minus(other itemTally) itemTally {
 
 // tallyOf returns the tally of one item region of the item, which holds a
 // block that follows a blank line when blank is set.
-func (c *layoutItem) tallyOf(reg region, blank bool) itemTally {
-	tally := itemTally{regions: 1, inside: c.flagged[reg.last+1] - c.flagged[reg.first]}
+func (it *layoutItem) tallyOf(reg region, blank bool) itemTally {
+	tally := itemTally{regions: 1, inside: it.flagged[reg.last+1] - it.flagged[reg.first]}
 	if blank {
 		tally.blank = 1
 	}
@@ -505,15 +559,15 @@ func (c *layoutItem) tallyOf(reg region, blank bool) itemTally {
 // not the list's first item, a block of the original outside its regions
 // after its first block follows a blank line, or a region holds such a
 // block.
-func (c *layoutItem) contribution(tally itemTally) (int, int) {
+func (it *layoutItem) contribution(tally itemTally) (int, int) {
 	if tally.regions == 0 {
 		return 0, 0
 	}
 	inside, loosening := 0, 0
-	if c.loose {
+	if it.loose {
 		inside = 1
 	}
-	if c.own || c.flagged[len(c.flagged)-1]-tally.inside > 0 || tally.blank > 0 {
+	if it.own || it.flagged[len(it.flagged)-1]-tally.inside > 0 || tally.blank > 0 {
 		loosening = 1
 	}
 	return inside, loosening
