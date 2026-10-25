@@ -36,7 +36,7 @@ func ConfigHeader(lines ...string) string {
 	var header strings.Builder
 	header.WriteString("# yaml-language-server: $schema=" + SchemaURL + "\n# gomdlint configuration\n")
 	for _, line := range lines {
-		header.WriteString("# " + line + "\n")
+		header.WriteString("# " + commentText(line) + "\n")
 	}
 	header.WriteString("# Rule keys are the names that 'gomdlint rules' lists. IDs such as MD013 also work.\n" +
 		"# See: https://github.com/yaklabco/gomdlint\n")

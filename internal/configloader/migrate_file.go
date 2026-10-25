@@ -64,13 +64,16 @@ type writtenRule struct {
 }
 
 // writtenSettings are the settings of a rule as a migrated config writes
-// them, without the unset ones.
+// them, without the unset ones. The options are the node of the options
+// (see ruledocs.YAMLNode), so that the encoder writes strings that a line
+// of YAML cannot hold as they are, such as one with a line break, in
+// double quotes.
 type writtenSettings struct {
-	Enabled      *bool          `yaml:"enabled,omitempty"`
-	Severity     *string        `yaml:"severity,omitempty"`
-	AutoFix      *bool          `yaml:"auto_fix,omitempty"`
-	ResetOptions bool           `yaml:"reset_options,omitempty"`
-	Options      map[string]any `yaml:"options,omitempty"`
+	Enabled      *bool      `yaml:"enabled,omitempty"`
+	Severity     *string    `yaml:"severity,omitempty"`
+	AutoFix      *bool      `yaml:"auto_fix,omitempty"`
+	ResetOptions bool       `yaml:"reset_options,omitempty"`
+	Options      *yaml.Node `yaml:"options,omitempty"`
 }
 
 // ruleSettingsYAML writes the rule settings of the conversion as YAML,
@@ -204,14 +207,21 @@ func writeRuleSection(buf *bytes.Buffer, section string, rules []writtenRule) er
 // encodeRuleSettings writes the settings of one rule as a YAML mapping,
 // without the unset ones.
 func encodeRuleSettings(settings config.RuleConfig) (string, error) {
+	written := writtenSettings{
+		Enabled: settings.Enabled, Severity: settings.Severity, AutoFix: settings.AutoFix,
+		ResetOptions: settings.ResetOptions,
+	}
+	if len(settings.Options) > 0 {
+		options, err := ruledocs.YAMLNode(settings.Options, false)
+		if err != nil {
+			return "", fmt.Errorf("encode options: %w", err)
+		}
+		written.Options = options
+	}
 	var buf bytes.Buffer
 	encoder := yaml.NewEncoder(&buf)
 	encoder.SetIndent(config.YAMLIndent())
-	err := encoder.Encode(writtenSettings{
-		Enabled: settings.Enabled, Severity: settings.Severity, AutoFix: settings.AutoFix,
-		ResetOptions: settings.ResetOptions, Options: settings.Options,
-	})
-	if err != nil {
+	if err := encoder.Encode(written); err != nil {
 		return "", fmt.Errorf("encode settings: %w", err)
 	}
 	if err := encoder.Close(); err != nil {

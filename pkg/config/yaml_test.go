@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 )
@@ -228,4 +229,20 @@ rules:
 		require.NoError(t, err)
 		assert.NotNil(t, cfg.Rules)
 	})
+}
+
+// TestYAMLToJSONEscapesYAMLLineBreaks covers strings that hold characters
+// that YAML reads as line breaks, NEL and the line and paragraph
+// separators: the JSON escapes them, so that YAML, which reads JSON too,
+// reads it back the same.
+func TestYAMLToJSONEscapesYAMLLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	content, err := config.YAMLToJSON([]byte("key: \"a\\Lb\\Pc\\Nd\"\n"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(content), `"a\u2028b\u2029c\u0085d"`)
+	var read map[string]string
+	require.NoError(t, yamlv3.Unmarshal(content, &read), string(content))
+	assert.Equal(t, map[string]string{"key": "a\u2028b\u2029c\u0085d"}, read)
 }

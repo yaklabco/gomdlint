@@ -3,9 +3,6 @@ package ruledocs
 import (
 	"fmt"
 	"strings"
-	"unicode"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
@@ -188,16 +185,16 @@ func exampleConfig(entry Entry) []string {
 	}
 	return []string{
 		"rules:",
-		"  " + entry.Name + ":",
+		"  " + yamlKey(entry.configKey()) + ":",
 		"    options:",
-		"      " + spec.Name + ": " + yamlValue(spec.Default),
+		"      " + yamlKey(spec.Name) + ": " + yamlValue(spec.Default),
 	}
 }
 
 // switchText says how a configuration turns the rule off, or on, and
 // changes its severity, and how a flag turns it off or on for one run.
 func switchText(entry Entry, words pageWords) string {
-	name := entry.Name
+	name, key := entry.Name, yamlKey(entry.configKey())
 	other := config.SeverityError
 	if entry.Default.Severity == config.SeverityError {
 		other = config.SeverityWarning
@@ -205,12 +202,12 @@ func switchText(entry Entry, words pageWords) string {
 	if !entry.Default.Enabled {
 		return fmt.Sprintf("Under %s, %s turns the rule on and %s turns it on with severity %s. "+
 			"The flag %s turns it on for one run.",
-			words.literal("rules"), words.literal(name+": true"), words.literal(name+": "+string(other)), other,
+			words.literal("rules"), words.literal(key+": true"), words.literal(key+": "+string(other)), other,
 			words.literal("--enable "+name))
 	}
 	return fmt.Sprintf("Under %s, %s turns the rule off and %s reports its findings as %ss. "+
 		"The flag %s turns it off for one run.",
-		words.literal("rules"), words.literal(name+": false"), words.literal(name+": "+string(other)), other,
+		words.literal("rules"), words.literal(key+": false"), words.literal(key+": "+string(other)), other,
 		words.literal("--disable "+name))
 }
 
@@ -218,39 +215,6 @@ func switchText(entry Entry, words pageWords) string {
 // line after it.
 func directive(entry Entry) string {
 	return "<!-- markdownlint-disable-next-line " + entry.directiveName() + " -->"
-}
-
-// yamlValue writes value as a configuration file holds it, in YAML, with
-// lists on one line, such as [x].
-func yamlValue(value any) string {
-	var node yaml.Node
-	if err := node.Encode(value); err != nil {
-		return fmt.Sprint(value)
-	}
-	flowStyle(&node)
-	encoded, err := yaml.Marshal(&node)
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return strings.TrimSuffix(string(encoded), "\n")
-}
-
-// flowStyle writes the lists and mappings of node, and of its children, on
-// one line, and its strings that hold line breaks or other control
-// characters double-quoted, with escapes, as YAML writes them on one line
-// only so.
-func flowStyle(node *yaml.Node) {
-	switch node.Kind {
-	case yaml.SequenceNode, yaml.MappingNode:
-		node.Style |= yaml.FlowStyle
-	case yaml.ScalarNode:
-		if strings.ContainsFunc(node.Value, unicode.IsControl) {
-			node.Style = yaml.DoubleQuotedStyle
-		}
-	}
-	for _, child := range node.Content {
-		flowStyle(child)
-	}
 }
 
 // joinWords joins words into a list in prose, with conjunction before the

@@ -304,11 +304,14 @@ func awkwardScalars() []string {
 		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
 		`back\slash`, "ünïcødé", "auto_fix: false\nreset_options: true", "- item", "[flow]", "&anchor", "",
 		strings.Repeat("a long words ", 20),
+		"\na", "\ta\nb", "\n", "a\u2028b", "a\u2029b", "zero\u200bwidth", "nel\u0085x",
+		strings.Repeat("a long words ", 20) + "\nand a break",
 	}
 }
 
-// awkwardRule is a custom rule whose name and option default are awkward
-// scalars, with the scalar as the option's only allowed value too.
+// awkwardRule is a custom rule whose name, option defaults and an option's
+// name are awkward scalars, with the scalar as an option's only allowed
+// value and as the option that another follows.
 type awkwardRule struct {
 	lint.BaseRule
 	value string
@@ -318,18 +321,20 @@ func (r *awkwardRule) DeclaredOptions() []lint.OptionSpec {
 	return []lint.OptionSpec{
 		{Name: "value", Type: lint.OptionString, Default: r.value, Values: []string{r.value}},
 		{Name: "unset", Type: lint.OptionString},
-		{Name: "follows", Type: lint.OptionString, Default: r.value, DefaultFrom: "value"},
+		{Name: "follows", Type: lint.OptionString, Default: r.value, DefaultFrom: r.value},
+		{Name: r.value, Type: lint.OptionStringList, Default: []string{r.value, "plain"}},
 	}
 }
 
 // awkwardRegistry returns a registry of one custom rule for each awkward
-// scalar, named by it, with it as its option's default, its category and
+// scalar, named by it, with it as its options' defaults, its category and
 // its description.
 func awkwardRegistry() *lint.Registry {
 	registry := lint.NewRegistry()
 	for idx, scalar := range awkwardScalars() {
 		id := fmt.Sprintf("XX%03d", idx+1)
 		registry.Register(&awkwardRule{BaseRule: lint.NewBaseRule(id, scalar, scalar, nil, false), value: scalar})
+		registry.Describe(lint.RuleMeta{ID: id, Name: scalar, Description: scalar, Category: lint.Category(scalar)})
 	}
 	return registry
 }
@@ -366,8 +371,13 @@ func TestConfigTemplateFullWritesAwkwardScalars(t *testing.T) {
 	for key, settings := range cfg.Rules {
 		rule, found := registry.Lookup(key)
 		require.True(t, found, "%q", key)
-		value := rule.(*awkwardRule).value //nolint:forcetypeassert // Every rule of the registry is one.
-		assert.Equal(t, map[string]any{"value": value}, withoutNulls(settings.Options), "%q", key)
+		awkward, isAwkward := rule.(*awkwardRule)
+		require.True(t, isAwkward, "%q", key)
+		want := map[string]any{"value": awkward.value, awkward.value: []any{awkward.value, "plain"}}
+		if awkward.value == "" {
+			want["follows"] = "" // An empty DefaultFrom follows no option.
+		}
+		assert.Equal(t, want, withoutNulls(settings.Options), "%q", key)
 		require.NotNil(t, settings.Severity, "%q", key)
 		assert.Equal(t, string(config.SeverityWarning), *settings.Severity, "%q", key)
 		assert.Nil(t, settings.AutoFix, "%q: a default adds no setting", key)

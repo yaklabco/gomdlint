@@ -63,8 +63,8 @@ func YAMLToJSON(yamlContent []byte) ([]byte, error) {
 	}
 
 	// People edit config files by hand, so <, > and & stay as they are
-	// instead of becoming < escapes. Encode ends the file with a
-	// newline.
+	// instead of becoming escapes such as <. Encode ends the file with
+	// a newline.
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
@@ -73,7 +73,11 @@ func YAMLToJSON(yamlContent []byte) ([]byte, error) {
 		return nil, fmt.Errorf("marshal JSON: %w", err)
 	}
 
-	return buf.Bytes(), nil
+	// The encoder escapes the line and paragraph separators, which YAML
+	// reads as line breaks, but not NEL, which YAML reads as one too. JSON
+	// holds NEL only inside strings, so escaping each keeps the JSON's
+	// meaning and lets YAML, which reads JSON too, read it back the same.
+	return bytes.ReplaceAll(buf.Bytes(), []byte("\u0085"), []byte(`\u0085`)), nil
 }
 
 // ToYAMLWithHeader serializes the configuration with a header comment.

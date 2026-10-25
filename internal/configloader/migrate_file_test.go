@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -183,6 +184,7 @@ func TestMigrationFileWritesAwkwardNames(t *testing.T) {
 		"null", "~", "true", "yes", "off", "123", "0x1F", "1e3", "2026-10-25", ".inf",
 		"a: b", "#x", " lead", "trail ", "line\nbreak", "tab\there", `say "hi"`, "it's",
 		`back\slash`, "ünïcødé", "- item", "[flow]", "&anchor", "", strings.Repeat("a long words ", 20),
+		"\na", "\ta\nb", "a\u2028b", "a\u2029b", "zero\u200bwidth", "nel\u0085x",
 	}
 	registry := lint.NewRegistry()
 	rules.RegisterAll(registry)
@@ -192,8 +194,13 @@ func TestMigrationFileWritesAwkwardNames(t *testing.T) {
 		registry.Register(&lengthRule{lint.NewBaseRule(ids[idx], name, "", nil, false)})
 		settings = append(settings, strconv.Quote(ids[idx])+": false")
 	}
+	// MD043's headings hold every name, and "\n" too, as option values.
+	headings, err := json.Marshal(append(slices.Clone(names), "\n"))
+	require.NoError(t, err)
+	settings = append(settings, `"MD043": {"headings": `+string(headings)+`}`)
 	converted := convertSettings(t, "{"+strings.Join(settings, ", ")+"}")
 	converted.keyRegistry = registry
+	require.Len(t, converted.Config.Rules["MD043"].Options["headings"], len(names)+1)
 
 	for _, file := range []string{".gomdlint.yml", ".gomdlint.json"} {
 		content, err := converted.FileContent(filepath.Join(t.TempDir(), file))
@@ -210,4 +217,16 @@ func TestMigrationFileWritesAwkwardNames(t *testing.T) {
 		assert.Equal(t, withoutEmptyOptions(t, converted.Config.Rules), withoutEmptyOptions(t, loaded.Rules), file)
 		assert.Equal(t, withoutEmptyOptions(t, converted.Config.RuleDefaults), withoutEmptyOptions(t, loaded.RuleDefaults), file)
 	}
+}
+
+// TestMigrationHeaderKeepsTheSourceNameInAComment covers a source file
+// whose name holds a line break: the header keeps it in its comment, so
+// that the name sets nothing.
+func TestMigrationHeaderKeepsTheSourceNameInAComment(t *testing.T) {
+	header := migrationHeader("dir/x\nflavor: commonmark.json")
+
+	cfg, err := config.FromYAML([]byte(header))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Flavor)
+	assert.Contains(t, header, "# Migrated from: x flavor: commonmark.json\n")
 }
