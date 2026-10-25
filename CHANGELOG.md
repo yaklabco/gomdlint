@@ -180,6 +180,21 @@ formats change. The first entries under Changed may need action.
   `lint.IsGomdlintOnlyRule` now reports only gomdlint's own rules, MDL001
   and MDL003, so a custom rule under an ID such as MDL900 takes
   markdownlint's `default` key and tags as other custom rules do.
+- `gomdlint init` and `gomdlint migrate` key rules by name, such as
+  `line-length`, where they used to write IDs such as `MD013`. IDs still
+  work as keys. `init --full` lists the rules by category, with each rule's
+  ID in a comment, its description from the rule catalog, and each option
+  with its default as a comment. It used to print each rule's older short
+  description. `migrate` leaves out unset settings and empty options, and
+  marks the rules that a markdownlint tag sets and gomdlint's own rules
+  with comments. The YAML files start with the line that points editors at
+  the configuration's JSON Schema.
+- Library: configuration templates moved from `pkg/config` to
+  `internal/ruledocs`, so `config.GenerateTemplate`,
+  `config.TemplateOptions`, `config.RuleInfo`, `config.RuleInfoProvider`,
+  `config.DefaultRuleInfoProvider`, `config.DefaultTemplateHeader` and
+  `lint.RuleInfos` are gone. `config.YAMLToJSON` converts a YAML
+  configuration to JSON.
 
 ### Added
 
