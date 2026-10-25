@@ -819,6 +819,49 @@ func TestMaxLineLengthRule_AutofixSafety(t *testing.T) {
 			wantText: "Line<br> more\n\n<img src=\"a.png\">\n\nalpha beta gamma\ndelta epsilon\n",
 		},
 		{
+			// cmark-gfm writes the footnotes after the document, and the code
+			// element left open in the first holds the next one.
+			name:     "no fix in a footnote after a footnote with raw HTML",
+			flavor:   goldmark.FlavorGFM,
+			input:    "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "See [^1] and [^2].\n\n[^1]: <code>\n\n[^2]: alpha beta gamma delta epsilon\n",
+		},
+		{
+			// Any footnote beside a tag withholds the fixes.
+			name:     "no fix in a footnote after a footnote with a line break element",
+			flavor:   goldmark.FlavorGFM,
+			input:    "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "See [^1] and [^2].\n\n[^1]: a<br>b\n\n[^2]: alpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "wraps a footnote in a document without tags",
+			flavor:   goldmark.FlavorGFM,
+			input:    "See [^1] and [^2].\n\n[^1]: 1 < 2\n\n[^2]: alpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  true,
+			wantText: "See [^1] and [^2].\n\n[^1]: 1 < 2\n\n[^2]: alpha beta\ngamma delta epsilon\n",
+		},
+		{
+			// GitHub renders TOML front matter as Markdown, where the code
+			// element holds the rest of the page.
+			name:     "no fix after TOML front matter with raw HTML",
+			input:    "+++\ntitle = \"<code>open\"\n+++\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  false,
+			wantText: "+++\ntitle = \"<code>open\"\n+++\n\nalpha beta gamma delta epsilon\n",
+		},
+		{
+			name:     "wraps after TOML front matter without HTML",
+			input:    "+++\ntitle = \"open\"\n+++\n\nalpha beta gamma delta epsilon\n",
+			maxLen:   20,
+			wantFix:  true,
+			wantText: "+++\ntitle = \"open\"\n+++\n\nalpha beta gamma\ndelta epsilon\n",
+		},
+		{
 			name:     "no fix inside code",
 			input:    "```\nthis is code that is long and must not wrap at all\n```\n",
 			maxLen:   30,

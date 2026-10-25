@@ -889,10 +889,19 @@ Some of its fix checks are also stricter than they need to be.
   and `align`, `width`, `size` and `noshade` on `hr`, each used once. So
   `<br>` keeps the fixes, while `<br onclick="noop()">`, an end tag such as
   `</br>`, a comment with `--` inside it, or one inline `<kbd>` withholds
-  them. The rules are `unordered-list-style` (MD004), `list-indent`
-  (MD005), `ul-indent` (MD007), `no-trailing-spaces` (MD009),
-  `no-hard-tabs` (MD010), `no-multiple-blank-lines` (MD012), `line-length`
-  (MD013), `no-multiple-space-blockquote` (MD027), `ol-prefix` (MD029),
+  them. A document with a `<` that may start raw HTML gets no fix either
+  when it also holds `[^` anywhere, even with only `<br>` tags. Such a `<`
+  comes before `!`, `?`, or a tag name and whitespace, `/`, `>` or the end
+  of the file, so an autolink such as `<https://example.com>` does not
+  count. GitHub writes the HTML of GFM footnotes after the document, and
+  gomdlint does not read footnotes as GitHub does, so it treats any `[^` as
+  a possible footnote, including one in a code span or an undefined
+  reference. The same holds for a document with TOML or JSON front matter,
+  which GitHub renders as Markdown, and such a `<` anywhere. The rules are
+  `unordered-list-style` (MD004), `list-indent` (MD005), `ul-indent` (MD007),
+  `no-trailing-spaces` (MD009), `no-hard-tabs` (MD010),
+  `no-multiple-blank-lines` (MD012), `line-length` (MD013),
+  `no-multiple-space-blockquote` (MD027), `ol-prefix` (MD029),
   `list-marker-space` (MD030), `blanks-around-lists` (MD032) and
   `single-trailing-newline` (MD047). Their findings are still reported.
 - `blanks-around-tables` (MD058) reports a table in a list without a fix

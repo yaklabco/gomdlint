@@ -496,6 +496,14 @@ rule's `"\n"` is a line ending of its own there, as the engine writes it.
   attributes that `benignAttribute` allows, each used once (`benignHTML`),
   keeps none of these rules' fixes, because no signature models how a style
   sheet, an event handler or an element left open changes the page.
+  `htmlHiddenFromCheck` adds the raw HTML that the signature's parsers
+  cannot see in two places GitHub renders: in a document with a `<` that
+  may start raw HTML (`hasTagStart`), TOML or JSON front matter, which the
+  parsers blank, and a `[^` anywhere, which may start a footnote, which
+  they do not read.
+  Such a document keeps no fix. goldmark and cmark-gfm disagree on which
+  footnote definitions there are, where they end and how their blocks
+  read, so the check does not try to find the footnotes GitHub sees.
   `list_fix_safety.go` plans list item moves together, so that moves which
   are only safe together form one fix.
 - `fix_safety.go` serves the code, link, reference and table rules, through
