@@ -51,6 +51,8 @@ func indexCatalog(catalog []lint.RuleMeta) map[string]lint.RuleMeta {
 // lint.NewBaseRuleFromMeta. It panics for an ID without an entry, which
 // only a constructor whose rule the catalog lacks asks for. init calls
 // every constructor, so such a rule fails every test and every run at once.
+// The entry shares its slices with catalogByID, so callers must not change
+// them.
 func catalogEntry(id string) lint.RuleMeta {
 	meta, ok := catalogByID[id]
 	if !ok {
@@ -69,8 +71,8 @@ type catalogSection struct {
 // Catalog returns the catalog entry of every built-in rule, in rule ID
 // order: its ID, name, markdownlint aliases, category, markdownlint tags,
 // gomdlint's own tags where they differ, whether it can fix what it finds,
-// its summary, and what it checks, why, and what its fix does. Each catalog_<category>.go file lists the rules of one
-// category.
+// its summary, and what it checks, why, and what its fix does. Each
+// catalog_<category>.go file lists the rules of one category.
 func Catalog() []lint.RuleMeta {
 	sections := []catalogSection{
 		{lint.CategoryHeadings, headingsCatalog()},

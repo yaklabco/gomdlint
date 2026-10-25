@@ -105,8 +105,9 @@ type RuleMeta struct {
 	// RuleTags are the tags that the rule reports itself (Rule.Tags), where
 	// they differ from Tags: gomdlint's own classification of the rule,
 	// which configuration templates and SARIF rule properties show. A rule
-	// built from an entry without them reports Tags (see
-	// NewBaseRuleFromMeta).
+	// built from an entry without them (nil) reports Tags (see
+	// NewBaseRuleFromMeta). An empty, non-nil RuleTags gives the rule no
+	// tags.
 	RuleTags []string
 
 	// Fixable reports whether the rule can fix what it finds, as the rule's

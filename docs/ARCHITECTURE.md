@@ -579,12 +579,12 @@ copy of a rule's metadata: each constructor builds its rule from the entry
 with `lint.NewBaseRuleFromMeta`, which takes the rule's ID, name and fix
 flag, its short `Summary` as the rule's `Description()`, and gomdlint's own
 tags for it (`RuleTags`, or `Tags` where they are the same) as its
-`Tags()`. Configuration templates and SARIF rule properties show those
-own tags and summaries. `catalogByID` indexes the entries in a
-package-level variable, which Go initializes before the package's `init`
-registers the rules. Categories group the
-rules in listings, such as `gomdlint rules`, and in documentation, such as
-the rule reference, in the order of `lint.Categories`, and
+`Tags()`. Configuration templates show the summaries, and both templates
+and SARIF rule properties show the own tags. `catalogByID` indexes the
+entries in a package-level variable, which Go initializes before the
+package's `init` registers the rules. Categories group the rules in
+listings, such as `gomdlint rules`, and in documentation, such as the rule
+reference, in the order of `lint.Categories`, and
 `Category.Title` names them in headings. They are not accepted where a rule
 can be named, though `gomdlint explain` takes them. The registry keeps rule
 ID order, and only display code sorts by category and name.
