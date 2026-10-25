@@ -243,8 +243,9 @@ func (c *collector) addDefinition(parsed parsedDefinition, lines []definitionLin
 		Position: mdast.SourcePosition{
 			StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn,
 		},
-		Lines:     [2]int{first.number, last.number},
-		Removable: allNoMarker(lines),
+		Lines:         [2]int{first.number, last.number},
+		Removable:     allNoMarker(lines),
+		AngleBrackets: parsed.angleBrackets,
 	}
 	if _, exists := c.ctx.Definitions[normalized]; exists {
 		def.IsDuplicate = true
@@ -266,6 +267,7 @@ func allNoMarker(lines []definitionLine) bool {
 // parsedDefinition is a link reference definition read from definition text.
 type parsedDefinition struct {
 	label, destination, title string
+	angleBrackets             bool
 	labelEnd                  int // offset of the ']' closing the label
 	end                       int // offset after the definition's last line ending
 }
@@ -290,6 +292,7 @@ func parseDefinition(text string, pos int) (parsedDefinition, bool) {
 	if strings.HasPrefix(parsed.destination, "<") {
 		// A pointy destination is written inside one pair of angle brackets.
 		parsed.destination = strings.TrimSuffix(parsed.destination[1:], ">")
+		parsed.angleBrackets = true
 	}
 
 	// The title is optional; without a valid one the destination must end the line.

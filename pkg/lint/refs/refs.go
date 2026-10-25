@@ -66,6 +66,10 @@ type ReferenceDefinition struct {
 	// rest of the document's structure unchanged: the lines hold nothing but
 	// the definition and its container prefix, and no list item marker.
 	Removable bool
+
+	// AngleBrackets reports whether the destination is written in angle
+	// brackets, such as "</url>"; Destination leaves them out.
+	AngleBrackets bool
 }
 
 // ReferenceUsage represents a link or image in the document.

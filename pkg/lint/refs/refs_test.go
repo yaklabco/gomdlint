@@ -385,6 +385,67 @@ func TestCollect_UnresolvedReferences(t *testing.T) {
 	}
 }
 
+// TestMarkdownlintKey checks the key markdownlint's normalizeReference makes
+// of a label: lowercased as JavaScript lowercases, trimmed as JavaScript
+// trims, and each run of white space made one space. It folds no case, so
+// "Straße" and "strasse" keep different keys.
+func TestMarkdownlintKey(t *testing.T) {
+	tests := map[string]string{
+		"Label":                "label",
+		"  A \t\n B  ":         "a b",
+		"Straße":               "straße",
+		"STRASSE":              "strasse",
+		"\u0130":               "i\u0307",
+		"\f":                   "",
+		"\u00a0x\u3000y\ufeff": "x y",
+		"a\u0085b":             "a\u0085b",
+	}
+	for label, want := range tests {
+		if got := MarkdownlintKey(label); got != want {
+			t.Errorf("MarkdownlintKey(%q) = %q, want %q", label, got, want)
+		}
+	}
+}
+
+// TestMicromarkLabel checks which labels micromark reads: any that holds a
+// character other than a space, a tab or a line ending.
+func TestMicromarkLabel(t *testing.T) {
+	for label, want := range map[string]bool{
+		"": false, " ": false, "\t": false, " \r\n ": false,
+		"\f": true, "\v": true, "\xc2\xa0": true, "x": true, " x ": true,
+	} {
+		if got := MicromarkLabel(label); got != want {
+			t.Errorf("MicromarkLabel(%q) = %v, want %v", label, got, want)
+		}
+	}
+}
+
+// TestMarkdownlintDefinitions checks the definitions keyed as markdownlint
+// keys them: the first definition of each key, with the destination as
+// markdownlint reads it, which is empty in angle brackets.
+func TestMarkdownlintDefinitions(t *testing.T) {
+	content := "Text.\n\n[X]: /first\n[x]: /second\n[ Y  z ]: #\n[w]: <#>\n[v]: \\#\n"
+	file, err := goldmark.New("gfm").Parse(context.Background(), "test.md", []byte(content))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	definitions := MarkdownlintDefinitions(Collect(file.Root, file))
+	want := map[string]string{"x": "/first", "y z": "#", "w": "", "v": "\\#"}
+	if len(definitions) != len(want) {
+		t.Fatalf("got %d definitions, want %d", len(definitions), len(want))
+	}
+	for key, destination := range want {
+		def, found := definitions[key]
+		if !found {
+			t.Errorf("no definition for %q", key)
+			continue
+		}
+		if got := MarkdownlintDestination(def); got != destination {
+			t.Errorf("destination of %q = %q, want %q", key, got, destination)
+		}
+	}
+}
+
 func TestCollect_Definitions(t *testing.T) {
 	markdown := "Para text\n[notadef]: /in-paragraph\n\n" +
 		"> [quoted]: /quoted \"Quoted title\"\n" +
