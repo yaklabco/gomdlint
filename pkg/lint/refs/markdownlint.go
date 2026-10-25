@@ -66,11 +66,13 @@ func FootnoteText(ctx *Context) map[*ReferenceDefinition]bool {
 // that goldmark reads as a link reference definition, starts a paragraph,
 // which takes the lines below it, rather than another block: an ATX
 // heading such as "[^1]: #", a thematic break, a list item, a fence, a
-// blockquote, HTML, math or a directive (see mayBeDirective).
-// goldmark reads the text as a destination and an optional title, so the
-// destination is the text's first word. Text that may start another block,
-// such as a "<" or "[" at its start, counts as none, so that the
-// definitions below keep goldmark's reading.
+// blockquote, HTML, math or a directive (see mayBeDirective). goldmark
+// reads the text as a destination and an optional title, so the
+// destination is the text's first word. A directive has nothing after it
+// on its line, so a title on the same line makes the word none; a title on
+// a later line may stand under a container directive. Text that may start
+// another block, such as a "<" or "[" at its start, counts as none, so that
+// the definitions below keep goldmark's reading.
 func startsParagraph(def *ReferenceDefinition) bool {
 	word := def.Destination
 	if def.AngleBrackets || word == "" {
@@ -84,7 +86,7 @@ func startsParagraph(def *ReferenceDefinition) bool {
 		orderedListMarker(word),
 		strings.HasPrefix(word, "```") || strings.HasPrefix(word, "~~~"),
 		strings.HasPrefix(word, "$$"),
-		mayBeDirective(word),
+		(def.Title == "" || def.Lines[0] != def.Lines[1]) && mayBeDirective(word),
 		strings.ContainsAny(word[:1], "><["):
 		return false
 	}
@@ -98,10 +100,9 @@ func startsParagraph(def *ReferenceDefinition) bool {
 // on with letters, digits, "-" and "_", and does not end with "-" or "_".
 // Where micromark's rules need more, this errs toward a directive, so that
 // a line micromark might read as one keeps goldmark's reading: a character
-// outside ASCII counts as a letter, what follows the name counts when it
-// starts a label or attributes that the word closes, without their content
-// told apart, and a title, which may stand on a later line that a
-// container directive leaves out, does not count.
+// outside ASCII counts as a letter, and what follows the name counts when
+// it starts a label or attributes that the word closes, without their
+// content told apart.
 func mayBeDirective(word string) bool {
 	rest := strings.TrimLeft(word, ":")
 	if len(word)-len(rest) < len("::") {

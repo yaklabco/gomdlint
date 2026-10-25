@@ -384,8 +384,12 @@ func TestLinkRulesReadMicromarkLinks(t *testing.T) {
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ::x]\n[y]: #\n", wantColumns: []int{}},
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ::x[\n[y]: #\n", wantColumns: []int{}},
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ::x{\n[y]: #\n", wantColumns: []int{}},
-		// A title after a directive may be on a later line, which a container
-		// directive leaves to the definitions below it.
+		// A title on the line of the directive makes it none. A title on a later
+		// line may stand under a container directive, which leaves the
+		// definitions below it alone.
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ::x \"t\"\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: :::x \"t\"\n[y]: #\n", wantColumns: []int{}},
+		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: ::x[a] (t)\n[y]: #\n", wantColumns: []int{}},
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: :::x\n    \"t\"\n[y]: #\n", wantColumns: []int{6, 8}},
 		{rule: NewLinkImageStyleRule(), input: "Use [a][y] here.\n\n[^n]: #\n[y]: /u\n", options: refStyles, wantColumns: []int{5}},
 		{rule: NewLinkSpacesRule(), input: "Use [ y ] here.\n\n[^n]: #foo\n[y]: #\n", wantColumns: []int{}},
