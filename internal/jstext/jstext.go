@@ -10,6 +10,7 @@ package jstext
 import (
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -72,6 +73,33 @@ func Decode(text string) string {
 	}
 
 	return out.String()
+}
+
+// IsSpace reports whether char is white space or a line terminator to
+// JavaScript, which String.prototype.trim removes and a regular
+// expression's \s matches: tab, line feed, vertical tab, form feed,
+// carriage return, a space separator, U+2028, U+2029 or U+FEFF. U+0085,
+// which unicode.IsSpace accepts, is not.
+func IsSpace(char rune) bool {
+	switch char {
+	case '\t', '\n', '\v', '\f', '\r', lineSeparator, paragraphSeparator, byteOrderMark:
+		return true
+	}
+	return unicode.Is(unicode.Zs, char)
+}
+
+// The line terminators U+2028 and U+2029 and the byte order mark U+FEFF,
+// which JavaScript reads as white space.
+const (
+	lineSeparator      = 0x2028
+	paragraphSeparator = 0x2029
+	byteOrderMark      = 0xFEFF
+)
+
+// TrimSpace returns text without the leading and trailing white space that
+// JavaScript's String.prototype.trim removes (see IsSpace).
+func TrimSpace(text string) string {
+	return strings.TrimFunc(text, IsSpace)
 }
 
 // ByteOffset returns the byte offset in text of the character that holds
