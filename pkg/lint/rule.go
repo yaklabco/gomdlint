@@ -64,7 +64,9 @@ type Diagnostic struct {
 	// diagnostic keeps its own edits, so reports show what each of them
 	// changes, with the group, which a consumer applies together. Where the
 	// engine writes the one fix in other line endings, it rewrites the
-	// members' edits to match, so together they make that fix.
+	// members' edits to match, so together they make that fix. Insertions
+	// of several members at one offset are made in the order the rule
+	// reports the members.
 	FixGroup int
 }
 

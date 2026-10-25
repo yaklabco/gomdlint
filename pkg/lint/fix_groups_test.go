@@ -260,6 +260,14 @@ func TestEngine_ReportsTheEditsAFixGroupApplies(t *testing.T) {
 			// members, as the file's dominant ending.
 			name:    "a line feed among carriage returns",
 			content: "# L\r\n\r\n- a\r\n  * b\n  * c\r\n- d\r\n",
+			want:    "# L\r\n\r\n- a\r\n  - b\r\n  - c\r\n- d\r\n",
+		},
+		{
+			// With a lone carriage return, the engine keeps each line
+			// ending of the text it rewrites.
+			name:    "a lone carriage return among line feeds",
+			content: "# L\n\n- a\n  * b\r  * c\n- d\n",
+			want:    "# L\n\n- a\n  - b\r  - c\n- d\n",
 		},
 	}
 	for _, tt := range tests {

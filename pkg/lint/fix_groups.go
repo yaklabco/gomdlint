@@ -1,7 +1,9 @@
 package lint
 
 import (
+	"cmp"
 	"slices"
+	"strings"
 
 	"github.com/yaklabco/gomdlint/pkg/fix"
 )
@@ -137,10 +139,10 @@ func (g *fixGroups) pieces(diags []Diagnostic, group int, members []int) ([]grou
 		}
 	}
 	slices.SortStableFunc(pieces, func(a, b groupPiece) int {
-		if a.edit.StartOffset != b.edit.StartOffset {
-			return a.edit.StartOffset - b.edit.StartOffset
+		if c := cmp.Compare(a.edit.StartOffset, b.edit.StartOffset); c != 0 {
+			return c
 		}
-		return a.edit.EndOffset - b.edit.EndOffset
+		return cmp.Compare(a.edit.EndOffset, b.edit.EndOffset)
 	})
 	return pieces, true
 }
@@ -155,25 +157,29 @@ func pieceEdits(pieces []groupPiece) []fix.TextEdit {
 }
 
 // writeMembers rewrites the edits of a group's members after the engine
-// wrote the group's edit, whose text was raw, as written, with other line
-// endings. Writing changes only line endings, one for one, so each piece's
-// text and each stretch of content between two pieces has its place in
-// written. Each piece gets its written text, and a stretch whose line
+// wrote the text of the group's edit, raw, as written, which has other line
+// endings in places. Writing changes only line endings, one for one, so
+// each piece's text and each stretch of content between two pieces has its
+// place in written. Each piece gets its written text, and a stretch whose line
 // endings changed becomes one more edit, from its first changed byte to
 // its last, of the member that carries the piece before it. Applied
 // together, the members' edits then make written. It reports false when
 // raw and written do not line up so, which leaves the group without a fix.
 func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, written string) bool {
-	// bounds holds where each piece's text starts and ends in raw.
+	// bounds holds where each piece's text starts and ends in raw, which is
+	// checked to hold the pieces in this order.
 	bounds := make([]int, 0, 2*len(pieces))
-	pos := 0
+	var built strings.Builder
 	for idx, piece := range pieces {
 		if idx > 0 {
-			pos += piece.edit.StartOffset - pieces[idx-1].edit.EndOffset
+			built.Write(content[pieces[idx-1].edit.EndOffset:piece.edit.StartOffset])
 		}
-		bounds = append(bounds, pos)
-		pos += len(piece.edit.NewText)
-		bounds = append(bounds, pos)
+		bounds = append(bounds, built.Len())
+		built.WriteString(piece.edit.NewText)
+		bounds = append(bounds, built.Len())
+	}
+	if built.String() != raw {
+		return false
 	}
 	at, ok := alignLineEndings(raw, written, bounds)
 	if !ok {
@@ -191,7 +197,7 @@ func writeMembers(diags []Diagnostic, pieces []groupPiece, content []byte, raw, 
 			continue
 		}
 		start, end := edit.EndOffset, pieces[idx+1].edit.StartOffset
-		if gap, changed := changedStretch(string(content[start:end]), written[at[2*idx+1]:at[2*idx+2]], start); changed {
+		if gap, changed := changedStretch(content[start:end], written[at[2*idx+1]:at[2*idx+2]], start); changed {
 			edits[piece.owners[0]] = append(edits[piece.owners[0]], gap)
 		}
 	}
@@ -227,11 +233,14 @@ func alignLineEndings(raw, written string, offsets []int) ([]int, bool) {
 			writtenPos++
 			continue
 		}
+		if writtenPos == len(written) {
+			return nil, false
+		}
 		writtenEnding := lineEndingLength(written, writtenPos)
 		if writtenEnding == 0 {
 			return nil, false
 		}
-		if rawEnding == 2 && next < len(offsets) && offsets[next] == rawPos+1 {
+		for rawEnding == 2 && next < len(offsets) && offsets[next] == rawPos+1 {
 			// An offset between "\r" and "\n" keeps its place only when the
 			// line ending stays as it was.
 			if raw[rawPos:rawPos+2] != written[writtenPos:writtenPos+writtenEnding] {
@@ -261,14 +270,15 @@ func lineEndingLength(text string, pos int) int {
 	}
 }
 
-// changedStretch returns the edit that turns old, the content at offset,
+// changedStretch returns the edit that turns content, the file at offset,
 // into written, from the first byte that differs to the last, or false
 // when the two are the same. The edit never starts or ends between the
 // "\r" and "\n" of a line ending.
-func changedStretch(old, written string, offset int) (fix.TextEdit, bool) {
-	if old == written {
+func changedStretch(content []byte, written string, offset int) (fix.TextEdit, bool) {
+	if string(content) == written {
 		return fix.TextEdit{}, false
 	}
+	old := string(content)
 	prefix := 0
 	for prefix < len(old) && prefix < len(written) && old[prefix] == written[prefix] {
 		prefix++
