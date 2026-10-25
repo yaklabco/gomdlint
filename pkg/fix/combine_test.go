@@ -54,6 +54,17 @@ func TestCombineEdits(t *testing.T) {
 			ok:   true,
 		},
 		{
+			// An insertion at the start of a replacement goes before it, as
+			// the validator orders them.
+			name: "insertion at the start of a replacement",
+			edits: []fix.TextEdit{
+				{StartOffset: 0, EndOffset: 1, NewText: "A"},
+				{StartOffset: 0, EndOffset: 0, NewText: "B"},
+			},
+			want: fix.TextEdit{StartOffset: 0, EndOffset: 1, NewText: "BA"},
+			ok:   true,
+		},
+		{
 			name: "overlapping edits",
 			edits: []fix.TextEdit{
 				{StartOffset: 4, EndOffset: 7, NewText: "x"},
