@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/yaklabco/gomdlint/internal/ruledocs"
 	"github.com/yaklabco/gomdlint/pkg/config"
 	"github.com/yaklabco/gomdlint/pkg/lint"
 	_ "github.com/yaklabco/gomdlint/pkg/lint/rules" // Register rules
@@ -431,19 +432,20 @@ func TestGeneratedTemplatesLoadCleanly(t *testing.T) {
 	t.Parallel()
 
 	// Each template loads under the name init writes it to.
-	for _, opts := range []config.TemplateOptions{
-		{Format: "yaml"},
-		{Format: "yaml", Full: true},
-		{Format: "json"},
-		{Format: "json", Full: true},
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)
+	for _, opts := range []ruledocs.TemplateOptions{
+		{},
+		{Full: true},
+		{JSON: true},
+		{JSON: true, Full: true},
 	} {
-		content, err := config.GenerateTemplate(opts)
+		content, err := ruledocs.ConfigTemplate(entries, opts)
 		if err != nil {
-			t.Fatalf("GenerateTemplate(%+v) error = %v", opts, err)
+			t.Fatalf("ConfigTemplate(%+v) error = %v", opts, err)
 		}
 
 		name := ".gomdlint.yml"
-		if opts.Format == "json" {
+		if opts.JSON {
 			name = ".gomdlint.json"
 		}
 		result, err := loadProjectFile(t, name, string(content))

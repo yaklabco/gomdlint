@@ -9,7 +9,8 @@ import (
 
 	"github.com/yaklabco/gomdlint/internal/configloader"
 	"github.com/yaklabco/gomdlint/internal/logging"
-	"github.com/yaklabco/gomdlint/pkg/config"
+	"github.com/yaklabco/gomdlint/internal/ruledocs"
+	"github.com/yaklabco/gomdlint/pkg/lint"
 )
 
 // configFilePermissions is the file mode for configuration files (world-readable).
@@ -103,13 +104,13 @@ func runInit(flags *initFlags) error {
 		logger.Warn("overwriting existing file", logging.FieldPath, outputPath)
 	}
 
-	// Generate template
-	opts := config.TemplateOptions{
-		Full:   flags.full,
-		Format: format,
+	// Generate the template, documenting the built-in rules.
+	opts := ruledocs.TemplateOptions{
+		Full: flags.full,
+		JSON: format == templateJSON,
 	}
 
-	content, err := config.GenerateTemplate(opts)
+	content, err := ruledocs.ConfigTemplate(ruledocs.Entries(lint.DefaultRegistry, nil), opts)
 	if err != nil {
 		return withExitCode(ExitInternalError, fmt.Errorf("generate template: %w", err))
 	}

@@ -85,11 +85,12 @@ func TestSchemaAcceptsTheRepositoryConfigs(t *testing.T) {
 func TestSchemaAcceptsTheConfigsGomdlintWrites(t *testing.T) {
 	schema := compileSchema(t)
 
+	entries := ruledocs.Entries(lint.DefaultRegistry, nil)
 	for _, full := range []bool{false, true} {
-		for _, format := range []string{"yaml", "json"} {
-			content, err := config.GenerateTemplate(config.TemplateOptions{Full: full, Format: format})
+		for _, asJSON := range []bool{false, true} {
+			content, err := ruledocs.ConfigTemplate(entries, ruledocs.TemplateOptions{Full: full, JSON: asJSON})
 			require.NoError(t, err)
-			assert.NoError(t, validateYAML(t, schema, content), "init, full %t, %s", full, format)
+			assert.NoError(t, validateYAML(t, schema, content), "init, full %t, JSON %t", full, asJSON)
 		}
 	}
 

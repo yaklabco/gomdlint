@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -70,7 +71,7 @@ func (c *Config) RuleSettingsToJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return templateToJSON(yamlBytes)
+	return YAMLToJSON(yamlBytes)
 }
 
 // ToJSON serializes the configuration to indented JSON: the settings ToYAML
@@ -85,7 +86,31 @@ func (c *Config) ToJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return templateToJSON(yamlBytes)
+	return YAMLToJSON(yamlBytes)
+}
+
+// YAMLToJSON converts yamlContent, a configuration file in YAML, to
+// indented JSON. JSON has no comments, so the JSON holds exactly the
+// settings that the YAML sets, and what the YAML documents in comments is
+// left out. Keys come in sorted order.
+func YAMLToJSON(yamlContent []byte) ([]byte, error) {
+	settings := map[string]any{}
+	if err := yaml.Unmarshal(yamlContent, &settings); err != nil {
+		return nil, fmt.Errorf("parse YAML: %w", err)
+	}
+
+	// People edit config files by hand, so <, > and & stay as they are
+	// instead of becoming < escapes. Encode ends the file with a
+	// newline.
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(settings); err != nil {
+		return nil, fmt.Errorf("marshal JSON: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 // ToYAMLWithHeader serializes the configuration with a header comment.

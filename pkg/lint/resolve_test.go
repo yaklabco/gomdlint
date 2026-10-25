@@ -14,6 +14,16 @@ const (
 	testRuleID2 = "MD002"
 )
 
+// offByDefaultRule is a rule that is disabled by default with error
+// severity.
+type offByDefaultRule struct {
+	lint.BaseRule
+}
+
+func (r *offByDefaultRule) DefaultEnabled() bool { return false }
+
+func (r *offByDefaultRule) DefaultSeverity() config.Severity { return config.SeverityError }
+
 // testRule is a simple rule implementation for testing.
 type testRule struct {
 	lint.BaseRule

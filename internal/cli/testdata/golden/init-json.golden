@@ -1,0 +1,7 @@
+exit code 0
+-- stdout --
+-- stderr --
+-- .gomdlint.json --
+{
+  "flavor": "gfm"
+}

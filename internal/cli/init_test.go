@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -79,9 +80,10 @@ func requireDefaultResolution(t *testing.T, cfg *config.Config) {
 }
 
 // TestInit_FullTemplateDocumentsEveryRule covers "init --full": every
-// registered rule is listed, keyed by ID, with its real default enabled
-// state, and its default severity as a comment, so the file changes
-// nothing until it is edited and severity_default still works.
+// registered rule is listed, keyed by name with its ID in a comment, with
+// its real default enabled state, and its default severity as a comment,
+// so the file changes nothing until it is edited and severity_default
+// still works.
 func TestInit_FullTemplateDocumentsEveryRule(t *testing.T) {
 	path, content := initTemplate(t, ".gomdlint.yml", "--full")
 
@@ -94,18 +96,14 @@ func TestInit_FullTemplateDocumentsEveryRule(t *testing.T) {
 	require.NotEmpty(t, ids)
 	assert.Len(t, parsed.Rules, len(ids), "every registered rule is listed")
 	for _, rule := range lint.DefaultRegistry.Rules() {
-		settings, ok := parsed.Rules[rule.ID()]
-		if !assert.True(t, ok, "%s is missing", rule.ID()) {
+		settings, ok := parsed.Rules[rule.Name()]
+		if !assert.True(t, ok, "%s is missing", rule.Name()) {
 			continue
 		}
-		assert.Equal(t, map[string]any{"enabled": rule.DefaultEnabled()}, settings, rule.ID())
-		for _, want := range []string{
-			"  # " + rule.ID() + ": " + rule.Name() + "\n",
-			"  " + rule.ID() + ":\n    enabled: " + strconv.FormatBool(rule.DefaultEnabled()) +
-				"\n    # severity: " + string(rule.DefaultSeverity()) + "\n",
-		} {
-			assert.Contains(t, content, want)
-		}
+		assert.Equal(t, map[string]any{"enabled": rule.DefaultEnabled()}, settings, rule.Name())
+		assert.Regexp(t, `\n  `+regexp.QuoteMeta(rule.Name())+`: +# `+rule.ID()+`\n`+
+			`    enabled: `+strconv.FormatBool(rule.DefaultEnabled())+`\n`+
+			`    # severity: `+string(rule.DefaultSeverity())+`\n`, content)
 	}
 
 	requireDefaultResolution(t, loadTemplate(t, path))
@@ -138,8 +136,8 @@ func TestInit_FullTemplateEnablesEveryRule(t *testing.T) {
 			}
 			require.NoError(t, tt.unmarshal([]byte(content), &parsed), content)
 			assert.Len(t, parsed.Rules, len(lint.DefaultRegistry.IDs()), "every registered rule is listed")
-			for _, id := range lint.DefaultRegistry.IDs() {
-				assert.Equal(t, map[string]bool{"enabled": true}, parsed.Rules[id], id)
+			for _, rule := range lint.DefaultRegistry.Rules() {
+				assert.Equal(t, map[string]bool{"enabled": true}, parsed.Rules[rule.Name()], rule.Name())
 			}
 		})
 	}
@@ -169,7 +167,7 @@ func TestInit_JSONTemplates(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(content), &parsed), content)
 		assert.Len(t, parsed.Rules, len(lint.DefaultRegistry.IDs()), "every registered rule is listed")
 		for _, rule := range lint.DefaultRegistry.Rules() {
-			assert.Equal(t, map[string]any{"enabled": rule.DefaultEnabled()}, parsed.Rules[rule.ID()], rule.ID())
+			assert.Equal(t, map[string]any{"enabled": rule.DefaultEnabled()}, parsed.Rules[rule.Name()], rule.Name())
 		}
 
 		requireDefaultResolution(t, loadTemplate(t, path))
