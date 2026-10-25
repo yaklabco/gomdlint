@@ -225,3 +225,19 @@ func TestSharedValue_WithoutEngineBuildsEachTime(t *testing.T) {
 		t.Fatalf("builds = %d, want 2: a context the engine did not make shares nothing", builds)
 	}
 }
+
+func TestSharedValue_KeepsNilInterfaceValues(t *testing.T) {
+	t.Parallel()
+
+	builds := 0
+	share := func(ctx *lint.RuleContext) {
+		if value := lint.SharedValue(ctx, sharedKey{"nil"}, func() any { builds++; return nil }); value != nil {
+			t.Errorf("value = %v, want nil", value)
+		}
+	}
+	lintWith(t, newSharingRule("TEST001", share), newSharingRule("TEST002", share))
+
+	if builds != 1 {
+		t.Fatalf("builds = %d, want 1: a nil value is kept like any other", builds)
+	}
+}

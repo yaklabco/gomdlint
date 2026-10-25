@@ -43,8 +43,8 @@ func SharedValue[T any](rc *RuleContext, key any, build func() T) T {
 		return build()
 	}
 	if held, found := shared.values[key]; found {
-		if value, ok := held.(T); ok {
-			return value
+		if entry, ok := held.(sharedEntry[T]); ok {
+			return entry.value
 		}
 		return build()
 	}
@@ -52,6 +52,12 @@ func SharedValue[T any](rc *RuleContext, key any, build func() T) T {
 	if rc.Ctx != nil && rc.Ctx.Err() != nil {
 		return value
 	}
-	shared.values[key] = value
+	shared.values[key] = sharedEntry[T]{value: value}
 	return value
+}
+
+// sharedEntry holds a shared value with its type, so that a nil interface
+// value is kept as a value of T and not taken for a value of another type.
+type sharedEntry[T any] struct {
+	value T
 }
