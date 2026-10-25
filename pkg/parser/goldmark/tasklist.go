@@ -25,10 +25,18 @@ import (
 // micromark-extension-gfm-task-list-item reads one). Anywhere else the
 // brackets are text or the start of a link: "- ## [ ](/url)" holds a link
 // whose text is a space, and "- [x](https://example.com)" a link to the
-// address.
+// address. This is GitHub's reading; markdownlint parses with no task list
+// extension and reads no checkbox anywhere.
 //
 //nolint:gochecknoglobals // A stateless extension, like goldmark's extension.GFM.
 var GFM goldmark.Extender = gfmExtension{}
+
+// The priorities goldmark's own task list extension gives its checkbox
+// parser and renderer.
+const (
+	taskCheckBoxParserPriority   = 0
+	taskCheckBoxRendererPriority = 500
+)
 
 type gfmExtension struct{}
 
@@ -39,10 +47,10 @@ func (gfmExtension) Extend(markdown goldmark.Markdown) {
 	extension.Table.Extend(markdown)
 	extension.Strikethrough.Extend(markdown)
 	markdown.Parser().AddOptions(parser.WithInlineParsers(
-		util.Prioritized(taskCheckBoxParser{}, 0),
+		util.Prioritized(taskCheckBoxParser{}, taskCheckBoxParserPriority),
 	))
 	markdown.Renderer().AddOptions(renderer.WithNodeRenderers(
-		util.Prioritized(extension.NewTaskCheckBoxHTMLRenderer(), 500),
+		util.Prioritized(extension.NewTaskCheckBoxHTMLRenderer(), taskCheckBoxRendererPriority),
 	))
 }
 
@@ -60,8 +68,6 @@ func (taskCheckBoxParser) Trigger() []byte {
 // Parse returns a checkbox when the brackets at the reader start a
 // paragraph and are followed as GFM requires (see taskMarker), and nil
 // otherwise. goldmark makes each paragraph of a tight list a text block.
-//
-//nolint:ireturn // goldmark's parser.InlineParser interface fixes this signature.
 func (taskCheckBoxParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
 	if kind := parent.Kind(); kind != ast.KindParagraph && kind != ast.KindTextBlock {
 		return nil
