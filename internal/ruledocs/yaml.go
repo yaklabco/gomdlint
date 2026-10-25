@@ -3,15 +3,17 @@ package ruledocs
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/yaklabco/gomdlint/pkg/config"
 )
 
 // YAMLNode returns the YAML node of value, a value that a configuration
@@ -75,6 +77,9 @@ func YAMLNode(value any, flow bool) (*yaml.Node, error) {
 			node.Content = append(node.Content, keyNode, item)
 		}
 		return node, nil
+	case reflect.Chan, reflect.Func, reflect.Complex64, reflect.Complex128, reflect.UnsafePointer:
+		// The encoder panics on these, rather than returning an error.
+		return nil, fmt.Errorf("encode %v as YAML: %w", value, errNoYAML)
 	default:
 	}
 	var node yaml.Node
@@ -83,6 +88,9 @@ func YAMLNode(value any, flow bool) (*yaml.Node, error) {
 	}
 	return &node, nil
 }
+
+// errNoYAML reports a value that YAML has no form for, such as a function.
+var errNoYAML = errors.New("YAML has no form for the value")
 
 // stringNode returns the YAML node of text, a string (see YAMLNode).
 func stringNode(text string) *yaml.Node {
@@ -117,9 +125,8 @@ func yamlValue(value any) string {
 			}
 		}
 	}
-	if encoded, err := json.Marshal(value); err == nil && utf8.Valid(encoded) {
-		// JSON leaves NEL as it is, which YAML reads as a line break.
-		return strings.ReplaceAll(string(encoded), "\u0085", `\u0085`)
+	if encoded, err := json.Marshal(value); err == nil {
+		return string(config.EscapeJSONForYAML(encoded))
 	}
 	return strconv.Quote(fmt.Sprint(value))
 }

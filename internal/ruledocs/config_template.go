@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -58,7 +57,9 @@ func yamlKey(key string) string {
 // YAML allows only some characters in a comment, so each character that it
 // does not allow is written as an escape that shows its code, as Go writes
 // it: \xNN below U+0080, such as \x1b for ESC, and \uNNNN above, such as
-// \u0099 or \ufffe. A byte that is no UTF-8 is written as \xNN too.
+// \u0099 or \ufffe. A byte that is no UTF-8 is written as \xNN too. The
+// escapes read like text that holds them, which a comment does not need to
+// tell apart.
 func commentText(text string) string {
 	collapsed := strings.Join(strings.Fields(text), " ")
 	var out strings.Builder
@@ -67,9 +68,9 @@ func commentText(text string) string {
 		switch {
 		case char == utf8.RuneError && size == 1:
 			fmt.Fprintf(&out, "\\x%02x", collapsed[0])
-		case !yamlPrintable(char) && char < utf8.RuneSelf:
+		case !config.YAMLPrintable(char) && char < utf8.RuneSelf:
 			fmt.Fprintf(&out, "\\x%02x", char)
-		case !yamlPrintable(char):
+		case !config.YAMLPrintable(char):
 			fmt.Fprintf(&out, "\\u%04x", char)
 		default:
 			out.WriteRune(char)
@@ -79,27 +80,15 @@ func commentText(text string) string {
 	return out.String()
 }
 
-// yamlPrintable reports whether YAML allows char in a stream, such as in a
-// comment: a tab, a line break, a printable ASCII character, NEL, or a
-// character of U+00A0 to U+D7FF, U+E000 to U+FFFD or beyond U+FFFF (the
-// c-printable characters of YAML 1.2).
-func yamlPrintable(char rune) bool {
-	switch {
-	case char == '\t' || char == '\n' || char == '\r' || char == '\u0085':
-		return true
-	case char >= 0x20 && char <= 0x7e:
-		return true
-	case char >= 0xa0 && char <= 0xd7ff, char >= 0xe000 && char <= 0xfffd, char >= 0x10000 && char <= unicode.MaxRune:
-		return true
-	default:
-		return false
-	}
-}
-
-// maxImplicitKey is the length, in bytes, of the longest key that YAML
-// reads as an implicit key, as in key: value. YAML 1.2 limits an implicit
-// key to 1024 characters, which are at least as many bytes.
+// maxImplicitKey is the length, in characters, of the longest key that
+// YAML reads as an implicit key, as in key: value.
 const maxImplicitKey = 1024
+
+// fitsImplicitKey reports whether written, a key as YAML writes it, is
+// short enough for YAML to read as an implicit key.
+func fitsImplicitKey(written string) bool {
+	return utf8.RuneCountInString(written) <= maxImplicitKey
+}
 
 // ConfigKey returns the key under which generated configurations name the
 // rule of registry with the given ID: its key in the registry (see
@@ -108,7 +97,7 @@ const maxImplicitKey = 1024
 // key may be (see maxImplicitKey).
 func ConfigKey(registry *lint.Registry, id string) string {
 	key := registry.ConfigKey(id)
-	if key != id && (!utf8.ValidString(key) || len(yamlKey(key)) > maxImplicitKey) {
+	if key != id && (!utf8.ValidString(key) || !fitsImplicitKey(yamlKey(key))) {
 		return id
 	}
 	return key
@@ -327,10 +316,11 @@ func writeTemplateRule(buf *strings.Builder, entry Entry, keyWidth int) {
 // writes it, than an implicit key may be (see maxImplicitKey) is written as
 // an explicit entry on two lines: ? and the name, then : and the value.
 func templateOption(spec lint.OptionSpec) []string {
-	var lines []string
-	line := yamlKey(spec.Name) + ":"
-	if len(line) > maxImplicitKey {
-		lines, line = []string{"? " + yamlKey(spec.Name)}, ":"
+	lines := make([]string, 0, 2) // An explicit entry takes two lines.
+	key := yamlKey(spec.Name)
+	line := key + ":"
+	if !fitsImplicitKey(key) {
+		lines, line = append(lines, "? "+key), ":"
 	}
 	if spec.Default != nil && spec.DefaultFrom == "" {
 		line += " " + yamlValue(spec.Default)

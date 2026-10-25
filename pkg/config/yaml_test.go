@@ -231,19 +231,19 @@ rules:
 	})
 }
 
-// TestYAMLToJSONEscapesYAMLLineBreaks covers strings that hold characters
+// TestYAMLToJSONEscapesWhatYAMLReadsOtherwise covers strings that hold characters
 // that YAML reads as line breaks, NEL and the line and paragraph
-// separators, or does not allow, such as DEL, the C1 controls and U+FFFE:
-// the JSON escapes them, so that YAML, which reads JSON too, reads it back
-// the same.
-func TestYAMLToJSONEscapesYAMLLineBreaks(t *testing.T) {
+// separators, or does not allow, such as DEL, the C1 controls, U+FFFE and
+// U+FFFF: the JSON escapes them, so that YAML, which reads JSON too, reads
+// it back the same. A character beyond U+FFFF stays as it is.
+func TestYAMLToJSONEscapesWhatYAMLReadsOtherwise(t *testing.T) {
 	t.Parallel()
 
-	content, err := config.YAMLToJSON([]byte("key: \"a\\Lb\\Pc\\Nd\\x7fe\\x9bf\\uFFFEg\"\n"))
+	content, err := config.YAMLToJSON([]byte("key: \"a\\Lb\\Pc\\Nd\\x7fe\\x9bf\\uFFFEg\\uFFFFh\\U0001F600i\"\n"))
 	require.NoError(t, err)
 
-	assert.Contains(t, string(content), `"a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg"`)
+	assert.Contains(t, string(content), `"a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg\uffffh😀i"`)
 	var read map[string]string
 	require.NoError(t, yamlv3.Unmarshal(content, &read), string(content))
-	assert.Equal(t, map[string]string{"key": "a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg"}, read)
+	assert.Equal(t, map[string]string{"key": "a\u2028b\u2029c\u0085d\u007fe\u009bf\ufffeg\uffffh\U0001F600i"}, read)
 }
