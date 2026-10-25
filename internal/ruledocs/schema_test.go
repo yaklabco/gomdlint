@@ -80,8 +80,7 @@ func TestSchemaAcceptsTheRepositoryConfigs(t *testing.T) {
 // TestSchemaAcceptsTheConfigsGomdlintWrites validates the configurations
 // that gomdlint writes against the schema: the templates of gomdlint init,
 // in YAML and JSON, minimal and full, and a markdownlint configuration that
-// gomdlint migrate translates, which writes every rule setting, unset ones
-// as null.
+// gomdlint migrate translates, which keys rules by name.
 func TestSchemaAcceptsTheConfigsGomdlintWrites(t *testing.T) {
 	schema := compileSchema(t)
 
@@ -163,8 +162,7 @@ func TestSchemaAgreesWithTheLoader(t *testing.T) {
 		{name: "an empty ignore pattern", yaml: "ignore: [\"\"]\n"},
 
 		// yaml.v3 reads a null as the zero value, so gomdlint loads every
-		// setting as unset, and gomdlint migrate writes unset rule settings
-		// as null.
+		// null setting as unset.
 		{name: "null settings", yaml: "flavor:\nseverity_default:\nrules:\nrule_defaults:\nignore:\n" +
 			"gitignore:\ndefault_ignores:\nbackups:\n", valid: true},
 		{name: "null backup settings", yaml: "backups:\n  enabled:\n  mode:\n", valid: true},

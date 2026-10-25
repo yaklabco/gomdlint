@@ -260,9 +260,8 @@ func optionSchema(spec lint.OptionSpec, description string, inverted bool) schem
 }
 
 // nullable returns the types of a setting of JSON type kind, or null.
-// yaml.v3 reads a null as the zero value, so gomdlint reads a null setting
-// as one that is not set, and gomdlint migrate writes unset rule settings
-// as null.
+// yaml.v3 reads a null as the zero value, so gomdlint reads a null setting,
+// which people may write, as one that is not set.
 func nullable(kind string) []string {
 	return []string{kind, "null"}
 }

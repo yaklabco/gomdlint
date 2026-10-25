@@ -37,43 +37,6 @@ func encodeYAML(value any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ruleSettings holds the rule settings of a configuration, under the keys
-// that Config gives them.
-type ruleSettings struct {
-	Rules        map[string]RuleConfig `yaml:"rules,omitempty"`
-	RuleDefaults map[string]RuleConfig `yaml:"rule_defaults,omitempty"`
-}
-
-// RuleSettingsToYAML serializes the rule settings of the configuration,
-// rules and rule_defaults, and nothing else, after header unless it is
-// empty. It suits a configuration that sets nothing but rules, such as a
-// migrated markdownlint configuration: a file that holds it leaves every
-// other setting to the layers below it, where ToYAML would write settings
-// it does not set, such as an empty ignore list.
-func (c *Config) RuleSettingsToYAML(header string) ([]byte, error) {
-	if c == nil {
-		return nil, nil
-	}
-	yamlBytes, err := encodeYAML(ruleSettings{Rules: c.Rules, RuleDefaults: c.RuleDefaults})
-	if err != nil {
-		return nil, err
-	}
-	return withHeader(header, yamlBytes), nil
-}
-
-// RuleSettingsToJSON is RuleSettingsToYAML in JSON, which has no comments,
-// and so no header.
-func (c *Config) RuleSettingsToJSON() ([]byte, error) {
-	if c == nil {
-		return nil, nil
-	}
-	yamlBytes, err := c.RuleSettingsToYAML("")
-	if err != nil {
-		return nil, err
-	}
-	return YAMLToJSON(yamlBytes)
-}
-
 // ToJSON serializes the configuration to indented JSON: the settings ToYAML
 // writes, under the same keys, so a JSON config file reads back the same.
 // JSON has no comments.
