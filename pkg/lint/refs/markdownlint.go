@@ -65,11 +65,11 @@ func FootnoteText(ctx *Context) map[*ReferenceDefinition]bool {
 // that goldmark reads as a link reference definition, starts a paragraph,
 // which takes the lines below it, rather than another block: an ATX
 // heading such as "[^1]: #", a thematic break, a list item, a fence, a
-// blockquote, HTML, math or a directive. goldmark reads the text as a
-// destination and an optional title, so the destination is the text's first
-// word. Text that may start another block, such as a "<" or "[" at its
-// start, counts as none, so that the definitions below keep goldmark's
-// reading.
+// blockquote, HTML, math or a directive, which "::" and a name starts.
+// goldmark reads the text as a destination and an optional title, so the
+// destination is the text's first word. Text that may start another block,
+// such as a "<" or "[" at its start, counts as none, so that the
+// definitions below keep goldmark's reading.
 func startsParagraph(def *ReferenceDefinition) bool {
 	word := def.Destination
 	if def.AngleBrackets || word == "" {
@@ -82,7 +82,7 @@ func startsParagraph(def *ReferenceDefinition) bool {
 		word == "-" || word == "+" || word == "*",
 		orderedListMarker(word),
 		strings.HasPrefix(word, "```") || strings.HasPrefix(word, "~~~"),
-		strings.HasPrefix(word, "$$") || strings.HasPrefix(word, ":::"),
+		strings.HasPrefix(word, "$$") || strings.HasPrefix(word, "::") && len(word) > len("::"),
 		strings.ContainsAny(word[:1], "><["):
 		return false
 	}
