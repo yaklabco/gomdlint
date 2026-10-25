@@ -243,6 +243,7 @@ func (e *Engine) lintFile(
 	validator := fix.NewValidator(content)
 	offers := &fixOffers{content: content, root: snapshot.Root, endings: fix.NewLineEndingWriter(content, lineEnding)}
 	var fixes []pendingFix
+	shared := newSharedValues(snapshot)
 
 	// Run each rule.
 	declared := e.Registry.lookups().options
@@ -263,6 +264,7 @@ func (e *Engine) lintFile(
 		ruleCtx := NewRuleContext(ctx, snapshot, cfg, rr.Config)
 		ruleCtx.Registry = e.Registry
 		ruleCtx.lineEnding = lineEnding
+		ruleCtx.shared = shared
 
 		diags, err := applyRule(ctx, rule, ruleCtx, path)
 		if err != nil {

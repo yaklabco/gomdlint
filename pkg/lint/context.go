@@ -53,6 +53,10 @@ type RuleContext struct {
 	// recordOptionRead, when set, receives the key of every option that
 	// the rule reads. See RecordOptionReads.
 	recordOptionRead func(key string)
+
+	// shared holds the values that the rules of this lint of the file
+	// share, set by the engine (see SharedValue).
+	shared *sharedValues
 }
 
 // RecordOptionReads makes rc call record with the key of every option that
