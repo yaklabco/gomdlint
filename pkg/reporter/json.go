@@ -121,6 +121,12 @@ type JSONDiagnostic struct {
 	Suggestion  string    `json:"suggestion,omitempty"`
 	Fixable     bool      `json:"fixable"`
 	Fixes       []JSONFix `json:"fixes,omitempty"`
+
+	// FixGroup, when not 0, puts the fix in a group with the fixes of the
+	// file's other diagnostics of the same rule that have the same FixGroup.
+	// Each fixes its own finding, but they are only safe together: --fix
+	// applies them together or not at all, and so must a consumer.
+	FixGroup int `json:"fixGroup,omitempty"`
 }
 
 // JSONFix represents a proposed fix.
@@ -249,6 +255,9 @@ func (r *JSONReporter) buildOutput(result *runner.Result) *JSONOutput {
 						EndColumn:   diag.EndColumn,
 						Suggestion:  diag.Suggestion,
 						Fixable:     len(diag.FixEdits) > 0,
+					}
+					if jsonDiag.Fixable {
+						jsonDiag.FixGroup = diag.FixGroup
 					}
 
 					for _, edit := range diag.FixEdits {

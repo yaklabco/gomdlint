@@ -21,7 +21,8 @@
               "endOffset": 12,
               "newText": "-"
             }
-          ]
+          ],
+          "fixGroup": 1
         },
         {
           "ruleId": "MD004",
@@ -40,7 +41,8 @@
               "endOffset": 18,
               "newText": "-"
             }
-          ]
+          ],
+          "fixGroup": 1
         }
       ]
     },
@@ -64,7 +66,8 @@
               "endOffset": 9,
               "newText": "-"
             }
-          ]
+          ],
+          "fixGroup": 1
         },
         {
           "ruleId": "MD007",
@@ -83,7 +86,8 @@
               "endOffset": 18,
               "newText": "  -"
             }
-          ]
+          ],
+          "fixGroup": 1
         }
       ]
     }
