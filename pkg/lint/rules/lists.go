@@ -154,7 +154,7 @@ func (r *UnorderedListStyleRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnostic
 		}
 	}
 
-	return keepSafeFixes(ctx, r.bulletDiagnostics(ctx, mismatches)), nil
+	return r.bulletDiagnostics(ctx, mismatches), nil
 }
 
 // sublistStyle returns the style expected at a nesting level, fixing the
@@ -200,7 +200,8 @@ func listNesting(list *mdast.Node) int {
 // list sits next to another bullet list, the differing bullet is what keeps
 // the two lists apart, and when the replacements would turn the line into a
 // thematic break, the list items would disappear. See bulletFixes for how the
-// replacements of a list are grouped.
+// replacements of a list are grouped. The fixes are checked with
+// keepSafeFixes.
 func (r *UnorderedListStyleRule) bulletDiagnostics(ctx *lint.RuleContext, mismatches []bulletMismatch) []lint.Diagnostic {
 	replacements := make(map[int]map[int]byte)
 	for _, mismatch := range mismatches {
@@ -219,6 +220,7 @@ func (r *UnorderedListStyleRule) bulletDiagnostics(ctx *lint.RuleContext, mismat
 	fixes := bulletFixes(ctx.File, mismatches, unsafeLines)
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	items := make([]*mdast.Node, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		msg := fmt.Sprintf("Unordered list bullet '%s' does not match expected '%s'", mismatch.actual, mismatch.expected)
 		var diagBuilder *lint.DiagnosticBuilder
@@ -230,7 +232,7 @@ func (r *UnorderedListStyleRule) bulletDiagnostics(ctx *lint.RuleContext, mismat
 				EndLine: mismatch.marker.Line, EndColumn: column + 1,
 			}
 			diagBuilder = lint.NewDiagnosticAt(r.ID(), ctx.File.Path, pos, msg)
-			if edit, ok := fixes[mismatch.item]; ok {
+			if edit, ok := fixes.checked(mismatch.item); ok {
 				diagBuilder = diagBuilder.WithFix(editFix(edit))
 			}
 		case mismatch.item.SourcePosition().IsValid():
@@ -242,19 +244,22 @@ func (r *UnorderedListStyleRule) bulletDiagnostics(ctx *lint.RuleContext, mismat
 			WithSeverity(config.SeverityWarning).
 			WithSuggestion(fmt.Sprintf("Use '%s' as the bullet marker", mismatch.expected)).
 			Build())
+		items = append(items, mismatch.item)
 	}
+	diags = keepSafeFixes(ctx, diags)
+	fixes.share(diags, items)
 	return diags
 }
 
 // bulletFixes returns the fixes for the bullet mismatches, by the item whose
 // diagnostic carries each one. A different bullet starts a new list, so
 // replacing only some bullets of a list would split it: the bullets of a
-// list are replaced together by one edit on the diagnostic of its first
-// mismatch, or not at all. A list is not fixed when one of its bullets cannot
-// be replaced or when it sits next to another bullet list. When directives
-// can suppress some diagnostics but not others, only lists of one item are
-// fixed, because the fix of a longer list could rewrite a suppressed line.
-func bulletFixes(file *mdast.FileSnapshot, mismatches []bulletMismatch, unsafeLines map[int]bool) map[*mdast.Node]fix.TextEdit {
+// list form a fix group, replaced together or not at all (see listFixes).
+// A list is not fixed when one of its bullets cannot be replaced or when it
+// sits next to another bullet list. When directives can suppress some
+// diagnostics but not others, only lists of one item are fixed, because the
+// fix of a longer list could rewrite a suppressed line.
+func bulletFixes(file *mdast.FileSnapshot, mismatches []bulletMismatch, unsafeLines map[int]bool) *listFixes {
 	byList := make(map[*mdast.Node][]bulletMismatch)
 	var lists []*mdast.Node
 	for _, mismatch := range mismatches {
@@ -265,12 +270,13 @@ func bulletFixes(file *mdast.FileSnapshot, mismatches []bulletMismatch, unsafeLi
 	}
 
 	independent := hasLineDirectives(file)
-	fixes := make(map[*mdast.Node]fix.TextEdit)
+	fixes := newListFixes(file.Content)
 	for _, list := range lists {
 		group := byList[list]
 		if adjacentToBulletList(list) || len(group) != len(lint.ListItems(list)) || (independent && len(group) > 1) {
 			continue
 		}
+		items := make([]*mdast.Node, 0, len(group))
 		edits := make([]fix.TextEdit, 0, len(group))
 		for _, mismatch := range group {
 			if !mismatch.found || unsafeLines[mismatch.marker.Line] {
@@ -281,13 +287,12 @@ func bulletFixes(file *mdast.FileSnapshot, mismatches []bulletMismatch, unsafeLi
 				EndOffset:   mismatch.marker.End,
 				NewText:     mismatch.expected,
 			})
+			items = append(items, mismatch.item)
 		}
 		if len(edits) != len(group) {
 			continue
 		}
-		if combined, ok := fix.CombineEdits(file.Content, edits); ok {
-			fixes[group[0].item] = combined
-		}
+		fixes.add(items, edits)
 	}
 	return fixes
 }
@@ -444,6 +449,7 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 	fixes := plan.fixes(moved)
 
 	diags := make([]lint.Diagnostic, 0, len(mismatches))
+	items := make([]*mdast.Node, 0, len(mismatches))
 	for _, mismatch := range mismatches {
 		var edit *fix.TextEdit
 		if allowRenumbering && !mismatch.startChanges {
@@ -451,13 +457,16 @@ func (r *OrderedListIncrementRule) Apply(ctx *lint.RuleContext) ([]lint.Diagnost
 				// The number keeps its width, so no column changes.
 				numbered := numberEdit(mismatch)
 				edit = &numbered
-			} else if planned, ok := fixes[mismatch.item]; ok {
+			} else if planned, ok := fixes.checked(mismatch.item); ok {
 				edit = &planned
 			}
 		}
 		diags = append(diags, r.numberDiagnostic(ctx, mismatch, edit))
+		items = append(items, mismatch.item)
 	}
-	return keepSafeFixes(ctx, diags), nil
+	diags = keepSafeFixes(ctx, diags)
+	fixes.share(diags, items)
+	return diags, nil
 }
 
 // numberEdit returns the edit that replaces the digits of an item's number.

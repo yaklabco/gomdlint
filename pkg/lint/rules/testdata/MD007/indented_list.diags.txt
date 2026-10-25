@@ -1,4 +1,4 @@
 indented_list.input.md:3:1 warning Unordered list indentation 2 does not match expected 0 (MD007/ul-indent) [fixable]
-indented_list.input.md:4:1 warning Unordered list indentation 4 does not match expected 2 (MD007/ul-indent)
-indented_list.input.md:5:1 warning Unordered list indentation 2 does not match expected 0 (MD007/ul-indent)
-indented_list.input.md:6:1 warning Unordered list indentation 3 does not match expected 0 (MD007/ul-indent)
+indented_list.input.md:4:1 warning Unordered list indentation 4 does not match expected 2 (MD007/ul-indent) [fixable]
+indented_list.input.md:5:1 warning Unordered list indentation 2 does not match expected 0 (MD007/ul-indent) [fixable]
+indented_list.input.md:6:1 warning Unordered list indentation 3 does not match expected 0 (MD007/ul-indent) [fixable]

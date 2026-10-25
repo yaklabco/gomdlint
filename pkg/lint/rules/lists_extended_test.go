@@ -1150,13 +1150,9 @@ func TestListIndentationFixesPreserveStructure(t *testing.T) {
 				diags, err := rule.Apply(ruleCtx)
 				require.NoError(t, err)
 				// The engine applies a fix that several findings of one
-				// rule share once.
-				shared := make(map[string]bool)
-				for _, diag := range diags {
-					if key := editsKey(diag.FixEdits); !shared[key] {
-						shared[key] = true
-						edits = append(edits, diag.FixEdits...)
-					}
+				// rule share, or a fix group, as one fix.
+				for _, fixEdits := range ruleFixes(t, tt.input, diags) {
+					edits = append(edits, fixEdits...)
 				}
 			}
 			accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(tt.input))

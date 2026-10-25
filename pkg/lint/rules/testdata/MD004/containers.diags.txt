@@ -1,3 +1,3 @@
 containers.input.md:8:3 warning Unordered list bullet '-' does not match expected '*' (MD004/unordered-list-style) [fixable]
-containers.input.md:9:3 warning Unordered list bullet '-' does not match expected '*' (MD004/unordered-list-style)
+containers.input.md:9:3 warning Unordered list bullet '-' does not match expected '*' (MD004/unordered-list-style) [fixable]
 containers.input.md:14:3 warning Unordered list bullet '-' does not match expected '*' (MD004/unordered-list-style) [fixable]

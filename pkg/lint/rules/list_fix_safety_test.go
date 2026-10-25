@@ -117,6 +117,85 @@ func TestListFixesKeepSuppressedItems(t *testing.T) {
 	}
 }
 
+// TestListFixGroups covers the list fixes that change several items at once,
+// because changing one item alone would break the list. Each finding that
+// such a fix resolves carries the edit of its own line, as markdownlint
+// gives each of them a fix, in one fix group, which the engine applies as
+// one fix and counts once for each finding.
+func TestListFixGroups(t *testing.T) {
+	tests := []struct {
+		name  string
+		rule  lint.Rule
+		input string
+		want  string
+	}{
+		{
+			// Replacing one bullet of the nested list alone would split it.
+			name:  "MD004 nested list",
+			rule:  NewUnorderedListStyleRule(),
+			input: "# L\n\n- a\n  * b\n  * c\n- d\n",
+			want:  "# L\n\n- a\n  - b\n  - c\n- d\n",
+		},
+		{
+			// Moving b alone would take it out of a, and moving a alone
+			// would leave b too deep to nest in it.
+			name:  "MD007 nested item",
+			rule:  NewULIndentRule(),
+			input: "# L\n\n   - a\n     - b\n",
+			want:  "# L\n\n- a\n  - b\n",
+		},
+		{
+			name:  "MD007 three levels",
+			rule:  NewULIndentRule(),
+			input: "# L\n\n- a\n    - b\n        - c\n    - d\n",
+			want:  "# L\n\n- a\n  - b\n    - c\n  - d\n",
+		},
+		{
+			name:  "MD005 ordered items",
+			rule:  NewListIndentRule(),
+			input: "# L\n\n1. a\n  2. b\n   3. c\n",
+			want:  "# L\n\n1. a\n2. b\n3. c\n",
+		},
+		{
+			// Removing the space before a alone would nest c in a.
+			name:  "MD027 quoted list",
+			rule:  NewNoMultipleSpaceBlockquoteRule(),
+			input: "# L\n\n>   - a\n>     - b\n>   - c\n",
+			want:  "# L\n\n> - a\n>     - b\n> - c\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := goldmark.New(goldmark.FlavorGFM).Parse(context.Background(), "test.md", []byte(tt.input))
+			require.NoError(t, err)
+			diags, err := tt.rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), nil))
+			require.NoError(t, err)
+			require.Greater(t, len(diags), 1, "the input should have several findings")
+			require.NotZero(t, diags[0].FixGroup, "the fixes should form a group")
+			for _, diag := range diags {
+				assert.Equal(t, diags[0].FixGroup, diag.FixGroup, "line %d", diag.StartLine)
+				require.Len(t, diag.FixEdits, 1, "line %d", diag.StartLine)
+				line := snapshot.Lines[diag.StartLine-1]
+				assert.True(t, line.StartOffset <= diag.FixEdits[0].StartOffset && diag.FixEdits[0].EndOffset <= line.NewlineStart,
+					"line %d should carry the edit of its own line, got %+v", diag.StartLine, diag.FixEdits[0])
+			}
+			assert.Equal(t, tt.want, applyAllEdits(t, tt.input, diags))
+
+			registry := lint.NewRegistry()
+			registry.Register(tt.rule)
+			engine := lint.NewEngine(goldmark.New(goldmark.FlavorGFM), registry)
+			cfg := config.NewConfig()
+			cfg.Fix = true
+			result, err := engine.LintFile(context.Background(), "test.md", []byte(tt.input), cfg)
+			require.NoError(t, err)
+			assert.Equal(t, len(diags), result.FixableCount(), "every finding is fixable")
+			assert.Equal(t, len(diags), result.AcceptedFixes, "every finding is fixed")
+			assert.Equal(t, tt.want, string(fix.ApplyEdits([]byte(tt.input), result.Edits)))
+		})
+	}
+}
+
 // TestListShiftFixesApplyInOnePass checks that moves that depend on each
 // other are still fixed together in a single pass.
 func TestListShiftFixesApplyInOnePass(t *testing.T) {
@@ -228,20 +307,22 @@ func TestListFixesAreSafeInAnySubset(t *testing.T) {
 			}
 			diags, err := tt.rule.Apply(lint.NewRuleContext(context.Background(), snapshot, config.NewConfig(), ruleCfg))
 			require.NoError(t, err)
-			fixable := filterFixableDiags(diags)
+			// The engine applies a fix that several findings share, or a
+			// fix group, as one fix, so each is applied or dropped whole.
+			fixes := ruleFixes(t, tt.input, diags)
 			if tt.noFix {
-				assert.Empty(t, fixable)
+				assert.Empty(t, fixes)
 				return
 			}
-			require.NotEmpty(t, fixable, "the input should have fixes")
-			require.Less(t, len(fixable), 12, "too many fixes to try every subset")
+			require.NotEmpty(t, fixes, "the input should have fixes")
+			require.Less(t, len(fixes), 12, "too many fixes to try every subset")
 
 			want := listShape(t, tt.input)
-			for subset := 1; subset < 1<<len(fixable); subset++ {
+			for subset := 1; subset < 1<<len(fixes); subset++ {
 				var edits []fix.TextEdit
-				for idx, diag := range fixable {
+				for idx, fixEdits := range fixes {
 					if subset&(1<<idx) != 0 {
-						edits = append(edits, diag.FixEdits...)
+						edits = append(edits, fixEdits...)
 					}
 				}
 				accepted, _, _, err := fix.PrepareEditsFiltered(edits, len(tt.input))

@@ -134,15 +134,14 @@ func (p *listShiftPlan) resolve() map[*mdast.Node]listShift {
 }
 
 // fixes turns the edits that make the accepted shifts, one per item, into
-// the edits the diagnostics carry. Any fix may be dropped while others are
+// the fixes the diagnostics carry. Any fix may be dropped while others are
 // applied: a directive can suppress a diagnostic, and a conflict with another
 // rule's edit can skip a fix. So shifts that are only safe together form a
-// group whose changes are made by a single edit, on the diagnostic of the
-// group's first item, and the other items of the group get no fix. Shifts
-// that are safe on their own keep one fix each. A group with an item that has
-// no edit gets no fix at all.
-func (p *listShiftPlan) fixes(edits map[*mdast.Node]fix.TextEdit) map[*mdast.Node]fix.TextEdit {
-	result := make(map[*mdast.Node]fix.TextEdit)
+// fix group, applied whole or not at all (see listFixes). Shifts that are
+// safe on their own keep one fix each. A group with an item that has no edit
+// gets no fix at all.
+func (p *listShiftPlan) fixes(edits map[*mdast.Node]fix.TextEdit) *listFixes {
+	result := newListFixes(p.file.Content)
 	for _, group := range p.groups() {
 		groupEdits := make([]fix.TextEdit, 0, len(group))
 		for _, item := range group {
@@ -150,11 +149,8 @@ func (p *listShiftPlan) fixes(edits map[*mdast.Node]fix.TextEdit) map[*mdast.Nod
 				groupEdits = append(groupEdits, edit)
 			}
 		}
-		if len(groupEdits) != len(group) {
-			continue
-		}
-		if combined, ok := fix.CombineEdits(p.file.Content, groupEdits); ok {
-			result[group[0]] = combined
+		if len(groupEdits) == len(group) {
+			result.add(group, groupEdits)
 		}
 	}
 	return result
