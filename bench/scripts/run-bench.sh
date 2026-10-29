@@ -225,22 +225,33 @@ run_gomdlint() {
 }
 
 run_markdownlint() {
+    # The report must come from this run, so that a run that stops before
+    # writing one cannot pass for a run without findings.
+    rm -f "$OUT_FILE.json"
     timed_run "${LINT_ENV[@]}" "$MARKDOWNLINT_BIN" --json --output "$OUT_FILE.json" -- "${FILES[@]}"
     case "$RUN_EXIT" in
         0 | 1) ;;
         *) fail_run "markdownlint failed on $repo with exit status $RUN_EXIT" ;;
     esac
-    # markdownlint-cli writes an empty file when it finds nothing. It lints
-    # every file it is given, as none is a directory or a glob and the
-    # working directory has no .markdownlintignore.
+    # markdownlint-cli writes the report even when it finds nothing, as an
+    # empty file. It lints every file it is given, as none is a directory or
+    # a glob and the working directory has no .markdownlintignore.
+    [ -f "$OUT_FILE.json" ] ||
+        fail_run "markdownlint wrote no report for $repo (exit status $RUN_EXIT)"
     if [ -s "$OUT_FILE.json" ]; then
-        M_ISSUES=$(jq 'length' "$OUT_FILE.json") || fail_run "markdownlint wrote no JSON report for $repo"
+        M_ISSUES=$(jq -e 'if type == "array" then length else error("not an array") end' "$OUT_FILE.json") ||
+            fail_run "markdownlint wrote no JSON report for $repo"
         M_FILES_WITH=$(jq '[.[].fileName] | unique | length' "$OUT_FILE.json")
     else
         M_ISSUES=0
         M_FILES_WITH=0
     fi
     rm -f "$OUT_FILE.json"
+    # markdownlint-cli exits 1 for findings, and also when it rejects its
+    # command line, so exit 1 must come with findings.
+    if [ "$RUN_EXIT" -eq 1 ] && [ "$M_ISSUES" -eq 0 ]; then
+        fail_run "markdownlint exited with status 1 and reported no findings for $repo"
+    fi
     M_FILES=$FILE_COUNT
 }
 

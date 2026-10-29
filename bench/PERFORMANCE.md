@@ -82,7 +82,10 @@ A failure is found in minutes instead of after the slow markdownlint runs.
 - Both tools write JSON, which the script reads for the counts of files
   and findings, so writing the report is part of each timed run.
 - A run fails unless the tool exits 0 or 1 and its report shows the files
-  linted. gomdlint's report must also show no rule failures.
+  linted. gomdlint's report must also show no rule failures. markdownlint
+  must write a new report in each run, and an exit status of 1 must come
+  with findings, since markdownlint-cli also exits 1 when it rejects its
+  command line.
 
 ### Timing
 
