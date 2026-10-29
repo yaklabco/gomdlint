@@ -284,26 +284,40 @@ prepare_repo() {
     REPO_REAL=$(cd "$repo_path" && pwd -P)
     ln -sfn "$REPO_REAL" "$LINT_CWD/repo"
 
-    # Tracked files that a .gitignore matches, which gomdlint skips. gomdlint
-    # reads only .gitignore files, not the global excludes file or
-    # .git/info/exclude, so neither may drop a file from the list.
-    local ignored
-    ignored=$(git -C "$REPO_REAL" ls-files -c -i --exclude-per-directory=.gitignore -- '*.md' '*.markdown')
+    # The tracked files, and those of them that a .gitignore matches, which
+    # gomdlint skips. gomdlint reads only .gitignore files, not the global
+    # excludes file or .git/info/exclude, so neither may drop a file from
+    # the list. Both lists are NUL-separated, as git quotes unusual names
+    # in its other output, and go through files, so that a git failure
+    # stops the script.
+    local tracked_list="$WORK_DIR/tracked.list0" ignored_list="$WORK_DIR/ignored.list0"
+    git -C "$REPO_REAL" ls-files -z -- '*.md' '*.markdown' >"$tracked_list"
+    git -C "$REPO_REAL" ls-files -z -c -i --exclude-per-directory=.gitignore \
+        -- '*.md' '*.markdown' >"$ignored_list"
 
-    local file
+    local file ignored=() next=0
+    while IFS= read -r -d '' file; do
+        ignored+=("$file")
+    done <"$ignored_list"
+
+    # git lists both in the order of its index, so the ignored files come
+    # up in the tracked list in their own order, and one pass finds them.
     FILES=()
     while IFS= read -r -d '' file; do
+        if [ "$next" -lt "${#ignored[@]}" ] && [ "$file" = "${ignored[$next]}" ]; then
+            next=$((next + 1))
+            continue
+        fi
         case "/$file" in
             */.* | */node_modules/* | */vendor/*) continue ;;
         esac
-        if [ -n "$ignored" ] && grep -qxF -- "$file" <<<"$ignored"; then
-            continue
-        fi
         # gomdlint lints a link to a file, and skips a broken link.
         if [ -f "$REPO_REAL/$file" ]; then
             FILES+=("repo/$file")
         fi
-    done < <(git -C "$REPO_REAL" ls-files -z -- '*.md' '*.markdown')
+    done <"$tracked_list"
+    [ "$next" -eq "${#ignored[@]}" ] ||
+        bench_die "git listed ${ignored[$next]} of $repo as ignored, but not in the order of the tracked files"
     FILE_COUNT=${#FILES[@]}
     [ "$FILE_COUNT" -gt 0 ] || bench_die "$repo has no Markdown files"
     printf '%s\n' "${FILES[@]#repo/}" | LC_ALL=C sort >"$WORK_DIR/expected.list"
