@@ -25,12 +25,23 @@ echo ""
 
 FAILED_REPOS=()
 
+# update_repo moves a cached clone to the newest commit of its remote's
+# default branch. A shallow clone lacks the history that a fast-forward
+# needs once upstream has moved on, so it fetches the new tip alone and
+# resets the checkout to it. The clone is disposable: local changes and
+# untracked files go.
+update_repo() {
+    git -C "$1" fetch --depth 1 origin HEAD &&
+        git -C "$1" reset --hard FETCH_HEAD &&
+        git -C "$1" clean -ffdx
+}
+
 for repo in "${REPOS[@]}"; do
     repo_path=$(bench_repo_dir "$repo")
 
     if [ -d "$repo_path/.git" ]; then
         echo "Updating $repo..."
-        if ! git -C "$repo_path" pull --ff-only --depth 1; then
+        if ! update_repo "$repo_path"; then
             echo "  Warning: failed to update $repo"
             FAILED_REPOS+=("$repo")
         fi
