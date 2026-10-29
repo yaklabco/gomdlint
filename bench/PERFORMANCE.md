@@ -48,6 +48,18 @@ failure, so every gomdlint time was the 0.02 s of a failed start.
 - markdownlint-cli 0.49.0 with markdownlint 0.41.1 on Node.js v22.23.3
 - One timed run per tool and repository (`BENCH_RUNS=1`)
 
+The repositories were measured at these commits:
+
+| Repository | Commit |
+| --- | --- |
+| kubernetes/website | `aaf7026d3548fa28f591c3135480f0b42ab391da` |
+| microsoft/vscode-docs | `300e4a8e71c329dfa2e5d43f861ab159798bff77` |
+| facebook/react | `16a1d5d780b9cbbe2e1ac5f3dc6db8df6e7983ec` |
+| rust-lang/book | `2771df165f092a4fbb9f46b5b2e7450f19010adb` |
+| DavidAnson/markdownlint | `5dd44fe44481cfbc8c6fee955719773fa17dc5d5` |
+
+Each result file records them as `revision` for each repository.
+
 golang/website is left out. markdownlint 0.41.1 stops with an error in
 MD042 on `_content/doc/modules/publishing.md`, so markdownlint-cli cannot
 lint the repository.
@@ -84,8 +96,8 @@ A failure is found in minutes instead of after the slow markdownlint runs.
   directory either. gomdlint gets an empty config file with `--config`,
   which takes the place of the project config it would look for there.
   markdownlint-cli gets `--configPointer` with a key that no config file
-  holds, so its rules get an empty configuration whatever `.markdownlintrc`
-  it finds.
+  holds, so its rules get an empty configuration, and an empty
+  `.markdownlintrc` in the working directory, so it reads none above it.
 - Environment variables that start with `GOMDLINT_` or `markdownlint_`,
   in any case, are removed, since markdownlint-cli reads its prefix in any
   case. The run stops if `/etc/gomdlint` or a markdownlint config in `/etc`

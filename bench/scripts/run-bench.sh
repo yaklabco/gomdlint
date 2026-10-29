@@ -125,6 +125,10 @@ LINT_ENV=(env HOME="$LINT_HOME" XDG_CONFIG_HOME="$LINT_HOME/.config")
 LINT_GOMDLINT_CONFIG="$WORK_DIR/gomdlint.yml"
 : >"$LINT_GOMDLINT_CONFIG"
 LINT_MARKDOWNLINT_POINTER=/gomdlint-bench-default-rules
+# run-con still reads the first .markdownlintrc it finds before it applies
+# the pointer, and a malformed one stops markdownlint-cli. An empty one in
+# the working directory ends that search there.
+echo '{}' >"$LINT_CWD/.markdownlintrc"
 
 # Versions
 GOMDLINT_VERSION=$("$GOMDLINT_BIN" version) || bench_die "$GOMDLINT_BIN version failed"
@@ -345,8 +349,11 @@ prepare_repo() {
     # link, so the path of a file on the list is its real path.
     local regular=${#FILES[@]} targets=() target alias i j
     for ((i = 0; i < ${#links[@]}; i++)); do
-        target=$(readlink -f -- "$REPO_REAL/${links[$i]}") ||
+        # The x keeps a newline that ends the name, which $( ) would drop.
+        target=$(readlink -f -- "$REPO_REAL/${links[$i]}" && echo x) ||
             bench_die "cannot resolve the link ${links[$i]} in $repo"
+        target=${target%x}
+        target=${target%$'\n'}
         targets+=("$target")
         alias=0
         if [[ "$target" == "$REPO_REAL/"* ]]; then
@@ -421,6 +428,7 @@ speedups=()
 
 for repo in "${REPOS[@]}"; do
     prepare_repo
+    revision=$(git -C "$REPO_REAL" rev-parse HEAD) || bench_die "cannot read the revision of $repo"
 
     g_times=() g_mems=() m_times=() m_mems=()
     for ((i = 1; i <= RUNS; i++)); do
@@ -465,6 +473,7 @@ for repo in "${REPOS[@]}"; do
 
     jq -n -c \
         --arg repo "$repo" \
+        --arg revision "$revision" \
         --argjson file_count "$FILE_COUNT" \
         --argjson g_time "$g_time" --argjson g_mem "$g_mem" \
         --argjson g_issues "$G_ISSUES" --argjson g_files "$G_FILES" --argjson g_with "$G_FILES_WITH" \
@@ -473,6 +482,7 @@ for repo in "${REPOS[@]}"; do
         --argjson g_runs "$(printf '%s\n' "${g_times[@]}" | jq -s -c .)" \
         --argjson m_runs "$(printf '%s\n' "${m_times[@]}" | jq -s -c .)" \
         '{($repo): {
+            revision: $revision,
             file_count: $file_count,
             gomdlint: {time_ms: $g_time, memory_kb: $g_mem, issues: $g_issues,
                        files_linted: $g_files, files_with_issues: $g_with, run_times_ms: $g_runs},
