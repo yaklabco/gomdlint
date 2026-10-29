@@ -76,6 +76,12 @@ A failure is found in minutes instead of after the slow markdownlint runs.
 - Both tools run from an empty directory with an empty `HOME` and
   `XDG_CONFIG_HOME`, so neither reads a config file from the repository or
   the user, and both use their default rules.
+- Neither reads a config file from the directories above the working
+  directory either. gomdlint gets an empty config file with `--config`,
+  which takes the place of the project config it would look for there.
+  markdownlint-cli gets `--configPointer` with a key that no config file
+  holds, so its rules get an empty configuration whatever `.markdownlintrc`
+  it finds.
 - `GOMDLINT_*` and `markdownlint_*` environment variables are removed, and
   the run stops if `/etc/gomdlint` or a markdownlint config in `/etc`
   exists.

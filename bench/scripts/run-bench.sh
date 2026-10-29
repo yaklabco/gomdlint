@@ -24,7 +24,8 @@ set -euo pipefail
 # and vendor directories that gomdlint skips. The script fails unless
 # gomdlint linted exactly the files on that list. Both run from an empty
 # directory with an empty HOME, so neither reads a config file from the
-# repository or the user, and both use their default rules.
+# repository or the user, and both are told to ignore the config files in
+# the directories above, so both use their default rules.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bench/scripts/lib.sh
@@ -101,6 +102,16 @@ LINT_CWD="$WORK_DIR/cwd"
 LINT_HOME="$WORK_DIR/home"
 mkdir -p "$LINT_CWD" "$LINT_HOME"
 LINT_ENV=(env HOME="$LINT_HOME" XDG_CONFIG_HOME="$LINT_HOME/.config")
+
+# An empty working directory is not enough: gomdlint looks for a project
+# config in the directories above it too, and markdownlint-cli, through
+# run-con, for a .markdownlintrc. gomdlint gets an empty config file with
+# --config, which takes the place of the project config. markdownlint-cli
+# gets --configPointer naming a key that no config file holds, so its rules
+# get an empty configuration, the defaults, whatever files run-con finds.
+LINT_GOMDLINT_CONFIG="$WORK_DIR/gomdlint.yml"
+: >"$LINT_GOMDLINT_CONFIG"
+LINT_MARKDOWNLINT_POINTER=/gomdlint-bench-default-rules
 
 # Versions
 GOMDLINT_VERSION=$("$GOMDLINT_BIN" version) || bench_die "$GOMDLINT_BIN version failed"
@@ -193,7 +204,7 @@ median() {
 # --strict) and markdownlint-cli. Anything else is a failure.
 run_gomdlint() {
     timed_run "${LINT_ENV[@]}" GOMAXPROCS="$PROCS" "$GOMDLINT_BIN" lint \
-        --format json --jobs "$PROCS" "$@" -- "$REPO_REAL"
+        --config "$LINT_GOMDLINT_CONFIG" --format json --jobs "$PROCS" "$@" -- "$REPO_REAL"
     case "$RUN_EXIT" in
         0 | 1) ;;
         *) fail_run "gomdlint failed on $repo with exit status $RUN_EXIT" ;;
@@ -228,7 +239,8 @@ run_markdownlint() {
     # The report must come from this run, so that a run that stops before
     # writing one cannot pass for a run without findings.
     rm -f "$OUT_FILE.json"
-    timed_run "${LINT_ENV[@]}" "$MARKDOWNLINT_BIN" --json --output "$OUT_FILE.json" -- "${FILES[@]}"
+    timed_run "${LINT_ENV[@]}" "$MARKDOWNLINT_BIN" --json --output "$OUT_FILE.json" \
+        --configPointer "$LINT_MARKDOWNLINT_POINTER" -- "${FILES[@]}"
     case "$RUN_EXIT" in
         0 | 1) ;;
         *) fail_run "markdownlint failed on $repo with exit status $RUN_EXIT" ;;
