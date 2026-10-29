@@ -807,6 +807,12 @@ formats change. The first entries under Changed may need action.
   document made of the repository's Markdown took 6.8 seconds to lint and
   now takes 3.2, and 11.3 seconds to fix, now 5.9. Findings, fixes and
   fixed output stay as they were.
+- Linting many files named on the command line no longer takes time that
+  grows with the square of their number. Each named path limits where fixes
+  are written, and the check for every file resolved each of those paths
+  again. `gomdlint lint $(git ls-files '*.md')` over 8,000 files took 46
+  seconds and now takes under one, about as long as linting their
+  directory. Findings, fixes and fixed output stay as they were.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or
