@@ -19,7 +19,7 @@ internal/               Application-specific wiring (not importable)
   jstext/               UTF-16 lengths of text, as markdownlint measures them
   jsonc/                JSON with comments and trailing commas, as markdownlint-cli2 reads it
   logging/              Structured logging setup
-  ruledocs/             Rule listings, rule pages, the rule reference and the config schema
+  ruledocs/             Rule listings, rule pages, the rule reference, the config schema and the init templates
   ui/                   Terminal output styling (Lipgloss)
 pkg/                    Reusable library packages
   mdast/                Markdown AST types and the source span contract
@@ -613,12 +613,17 @@ horizontal-rule rules check a fix on the blocks around it; when those make
 a large window, as one long list item does, they check it on the item's
 groups instead, after the same opener (`fixcheck_items.go`).
 
-Besides its fix checks, each rule that offers fixes parses the whole
-document again for its checker. The code, link, reference and table rules
-parse it for the outline (`fix_safety.go`), and the list and whitespace
-rules for the render signature (`fix_check.go`). The heading, emphasis,
-horizontal rule and proper name rules parse it for their block summaries
-(`fixcheck.go`), and once more to check their fixes together.
+Besides their fix checks, the rules that offer fixes need the original
+document parsed whole. The code, link, reference and table rules
+(`fix_safety.go`) and the heading, emphasis, horizontal rule and proper
+name rules (`fixcheck.go`) share, within one lint of a file, the parse of
+the original, the outlines and block summaries derived from it alone, and
+its region layout, through `lint.SharedValue` (`fix_shared.go`). Each of
+the heading, emphasis, horizontal rule and proper name rules still checks
+the fixes it keeps together on the whole document. The list and
+whitespace rules (`fix_check.go`) still build their baseline render
+signatures and region models once per rule, parsing the document with
+each parser they compare: GFM, and CommonMark too under `commonmark`.
 
 ## Rule Catalog and Registry
 
@@ -636,8 +641,8 @@ copy of a rule's metadata: each constructor builds its rule from the entry
 with `lint.NewBaseRuleFromMeta`, which takes the rule's ID, name and fix
 flag, its short `Summary` as the rule's `Description()`, and gomdlint's own
 tags for it (`RuleTags`, or `Tags` where they are the same) as its
-`Tags()`. Configuration templates show the summaries, and both templates
-and SARIF rule properties show the own tags. `catalogByID` indexes the
+`Tags()`. Configuration templates show the catalog descriptions, and SARIF
+rule properties show the category and the catalog tags. `catalogByID` indexes the
 entries in a package-level variable, which Go initializes before the
 package's `init` registers the rules. Categories group the rules in
 listings, such as `gomdlint rules`, and in documentation, such as the rule

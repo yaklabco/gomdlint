@@ -733,8 +733,9 @@ golden files cannot show:
 
 ## Current Coverage
 
-618 golden tests from 309 inputs: 304 per-rule scenarios across all 55 rules and
-5 real-world documents, each with a round trip, and 20 sidecar configs.
+768 golden tests from 384 inputs: 379 per-rule scenarios across all 55 rules,
+73 of them the examples of the rule reference, and 5 real-world documents,
+each with a round trip, and 25 sidecar configs.
 
 Coverage varies by rule. Every rule except MD040 and MD047 has a `basic`
 case, and those two have other cases that report findings. Every rule has a
@@ -746,7 +747,7 @@ case, 24 a `multiple` case, 13 a `code_block_immunity` case, 12 a `nested`
 case, 12 a `containers` case, 3 an `adjacent` case, and only 5 a `unicode`
 case (MD009, MD013, MD026, MD037 and MD038). Nine fixable rules have no
 `frontmatter` case (MD020, MD021, MD035, MD044, MD047, MD049, MD050, MD058
-and MDL003), and MD050 has only `basic` and `clean`.
+and MDL003), and MD050 has only `basic`, `clean` and `example`.
 
 ```bash
 # Run all golden tests
