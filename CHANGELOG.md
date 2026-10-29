@@ -816,6 +816,14 @@ formats change. The first entries under Changed may need action.
   that gomdlint never calls. Releases build with Go 1.26.9, which govulncheck
   finds free of GO-2026-4602, reachable through `filepath.WalkDir` with Go
   1.25.4.
+- The README and `bench/PERFORMANCE.md` claimed gomdlint was 507 times
+  faster than markdownlint. The comparison script ran an older gomdlint that
+  rejected its profiling flags and exited at once, and hid the failure, so
+  every gomdlint time was that of a failed start. The script now stops on
+  any failure of either tool, checks that both lint the same files, and
+  times them by the wall clock where GNU time is missing. Measured again on
+  five repositories, gomdlint takes from a quarter to a twelfth of
+  markdownlint-cli's time, 6.1 times less on average, with 8 workers.
 - A release runs the tests and govulncheck first, so a tag on a failing
   commit publishes nothing. The Homebrew formula declares the MIT license
   instead of Apache-2.0.
