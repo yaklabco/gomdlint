@@ -9,8 +9,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
+	"sync/atomic"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -201,6 +205,10 @@ type PipelineOptions struct {
 	// linted but not fixed and is marked Skipped, so linting a tree never
 	// changes a file outside it through a link. Empty means no restriction.
 	// Hard links are not affected: they are the same file under another name.
+	// A pipeline resolves the roots once and reuses them, for as long as it
+	// lives, for every file that passes the same roots, so a link among them
+	// keeps the target it first had. Do not change the slice while files are
+	// processed with it.
 	WriteRoots []string
 }
 
@@ -257,39 +265,116 @@ func resolveFile(path string) (string, error) {
 	return target, nil
 }
 
-// writeRoot picks the directory that every operation on target is confined
-// to, and target's path relative to it: the write root that contains
-// target, or target's own directory when that root is the file itself or
-// no roots are set. It reports false when roots are set and none contains
-// target.
-func writeRoot(target string, roots []string) (string, string, bool) {
-	dir, name := filepath.Dir(target), filepath.Base(target)
-	if len(roots) == 0 {
-		return dir, name, true
-	}
-	for _, root := range roots {
-		resolved := resolvePath(root)
-		if !pathWithin(target, resolved) {
-			continue
-		}
-		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
-			if rel, err := filepath.Rel(resolved, target); err == nil {
-				return resolved, rel, true
-			}
-		}
-		return dir, name, true
-	}
-	return dir, name, false
+// writeRootSet holds write roots resolved once, and finds the root of a
+// file by looking up the file and each of its directories, so the cost of a
+// file does not grow with the number of roots.
+type writeRootSet struct {
+	// passed is the slice the roots came in and given a copy of it, to
+	// recognize the roots of a later file of the same run.
+	passed []string
+	given  []string
+	roots  []writeRootEntry
+	// first maps the key of each resolved root to its first position.
+	first map[string]int
+	// foldCase compares paths without regard to case, as filepath.Rel does
+	// on Windows.
+	foldCase bool
 }
 
-// pathWithin reports whether path is root or lies below it. Both must be
-// absolute and clean.
-func pathWithin(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || filepath.IsAbs(rel) {
-		return false
+type writeRootEntry struct {
+	path string
+	dir  bool
+}
+
+func newWriteRootSet(roots []string, foldCase bool) *writeRootSet {
+	set := &writeRootSet{
+		passed:   roots,
+		given:    slices.Clone(roots),
+		roots:    make([]writeRootEntry, 0, len(roots)),
+		first:    make(map[string]int, len(roots)),
+		foldCase: foldCase,
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	for pos, root := range roots {
+		resolved := resolvePath(root)
+		info, err := os.Stat(resolved)
+		set.roots = append(set.roots, writeRootEntry{path: resolved, dir: err == nil && info.IsDir()})
+		// Key the root as filepath.Dir writes the directories of a file
+		// inside it: a UNC share root such as \\host\share gains the
+		// separator that Dir keeps.
+		key := rootKey(filepath.Dir(filepath.Join(resolved, "x")), foldCase)
+		if _, seen := set.first[key]; !seen {
+			set.first[key] = pos
+		}
+	}
+	return set
+}
+
+// rootKey returns path in the form that tells whether two clean paths name
+// the same place, as filepath.Rel compares them: as written, or with each
+// letter replaced by the smallest letter that strings.EqualFold matches it
+// to when foldCase is set.
+func rootKey(path string, foldCase bool) string {
+	if !foldCase {
+		return path
+	}
+	return strings.Map(func(r rune) rune {
+		smallest := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			smallest = min(smallest, f)
+		}
+		return smallest
+	}, path)
+}
+
+// find picks the directory that every operation on target is confined to,
+// and target's path relative to it: the first write root that contains
+// target, or target's own directory when that root is the file itself or
+// no roots are set. It reports false when roots are set and none contains
+// target. Target must be absolute and clean.
+func (s *writeRootSet) find(target string) (string, string, bool) {
+	dir, name := filepath.Dir(target), filepath.Base(target)
+	if len(s.roots) == 0 {
+		return dir, name, true
+	}
+	// A root contains target when it is target or one of its directories.
+	best := -1
+	for path := target; ; {
+		if pos, ok := s.first[rootKey(path, s.foldCase)]; ok && (best < 0 || pos < best) {
+			best = pos
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			break
+		}
+		path = parent
+	}
+	if best < 0 {
+		return dir, name, false
+	}
+	if root := s.roots[best]; root.dir {
+		if rel, err := filepath.Rel(root.path, target); err == nil {
+			return root.path, rel, true
+		}
+	}
+	return dir, name, true
+}
+
+// sameSlice reports whether a and b are one slice: the same elements in
+// the same memory.
+func sameSlice(a, b []string) bool {
+	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
+}
+
+// resolvedWriteRoots returns roots resolved, reusing the set of the
+// previous file when its roots are the same slice, as the runner passes
+// for every file of a run, or an equal one.
+func (p *Pipeline) resolvedWriteRoots(roots []string) *writeRootSet {
+	if set := p.writeRoots.Load(); set != nil && (sameSlice(set.passed, roots) || slices.Equal(set.given, roots)) {
+		return set
+	}
+	set := newWriteRootSet(roots, runtime.GOOS == "windows")
+	p.writeRoots.Store(set)
+	return set
 }
 
 // DefaultPipelineOptions returns sensible defaults.
@@ -310,6 +395,10 @@ type Pipeline struct {
 	// beforeWrite, when set, runs after every check and right before the
 	// backup and write. Tests use it to change the file system at that point.
 	beforeWrite func()
+
+	// writeRoots holds the resolved write roots of the last file processed.
+	// It makes a Pipeline unsafe to copy.
+	writeRoots atomic.Pointer[writeRootSet]
 }
 
 // NewPipeline creates a new safety pipeline with the given engine.
@@ -377,7 +466,7 @@ func (p *Pipeline) processFile(
 	if err != nil {
 		return nil, categorizeError(err)
 	}
-	rootDir, name, inside := writeRoot(target, opts.WriteRoots)
+	rootDir, name, inside := p.resolvedWriteRoots(opts.WriteRoots).find(target)
 	pinned, err := fsutil.Pin(rootDir, name)
 	if err != nil {
 		return nil, categorizeError(err)

@@ -5,7 +5,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -240,4 +245,166 @@ func TestPipeline_WritesThePinnedFileWhenALinkMovesBeforeTheWrite(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, "y\n", string(got), "the file that was read and checked is the one fixed")
 	assert.True(t, result.Written)
+}
+
+func TestPipeline_ResolvesTheWriteRootsOnce(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	docs := filepath.Join(dir, "docs")
+	require.NoError(t, os.Mkdir(docs, 0o755))
+	pipeline := NewPipeline(NewEngine(stubParser{}, NewRegistry()))
+
+	roots := []string{docs}
+	first := pipeline.resolvedWriteRoots(roots)
+	assert.Same(t, first, pipeline.resolvedWriteRoots(roots), "the roots of every file of a run are resolved once")
+	assert.Same(t, first, pipeline.resolvedWriteRoots(slices.Clone(roots)), "an equal list of roots is the same set")
+
+	changed := pipeline.resolvedWriteRoots([]string{dir})
+	assert.NotSame(t, first, changed, "other roots are resolved again")
+	rootDir, name, inside := changed.find(filepath.Join(resolvePath(dir), "a.md"))
+	assert.Equal(t, resolvePath(dir), rootDir)
+	assert.Equal(t, "a.md", name)
+	assert.True(t, inside)
+}
+
+func TestWriteRootSet_Find(t *testing.T) {
+	t.Parallel()
+
+	dir := resolvePath(t.TempDir())
+	docs := filepath.Join(dir, "docs")
+	guide := filepath.Join(docs, "guide")
+	require.NoError(t, os.MkdirAll(guide, 0o755))
+	file := filepath.Join(guide, "a.md")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "docs2"), 0o755))
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(docs, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	top := filepath.VolumeName(dir) + string(filepath.Separator)
+	relFromTop, err := filepath.Rel(top, file)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		roots      []string
+		wantDir    string
+		wantName   string
+		wantInside bool
+	}{
+		{name: "no roots", roots: nil, wantDir: guide, wantName: "a.md", wantInside: true},
+		{name: "a directory root", roots: []string{docs}, wantDir: docs,
+			wantName: filepath.Join("guide", "a.md"), wantInside: true},
+		{name: "the first root that holds the file", roots: []string{dir, guide}, wantDir: dir,
+			wantName: filepath.Join("docs", "guide", "a.md"), wantInside: true},
+		{name: "a repeated root", roots: []string{guide, dir, guide}, wantDir: guide, wantName: "a.md", wantInside: true},
+		{name: "the file as its root", roots: []string{file, dir}, wantDir: guide, wantName: "a.md", wantInside: true},
+		{name: "a link to a directory", roots: []string{link}, wantDir: docs,
+			wantName: filepath.Join("guide", "a.md"), wantInside: true},
+		{name: "the top directory", roots: []string{top}, wantDir: top, wantName: relFromTop, wantInside: true},
+		{name: "a sibling that shares a prefix", roots: []string{filepath.Join(dir, "docs2")}, wantDir: guide, wantName: "a.md"},
+		{name: "a root that does not exist", roots: []string{filepath.Join(dir, "other")}, wantDir: guide, wantName: "a.md"},
+		{name: "a missing root around the file", roots: []string{filepath.Join(guide, "a.md", "b")}, wantDir: guide,
+			wantName: "a.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rootDir, name, inside := newWriteRootSet(tt.roots, false).find(file)
+			assert.Equal(t, tt.wantDir, rootDir)
+			assert.Equal(t, tt.wantName, name)
+			assert.Equal(t, tt.wantInside, inside)
+		})
+	}
+}
+
+func TestWriteRootSet_FindFoldsCaseWhenAsked(t *testing.T) {
+	t.Parallel()
+
+	// Roots that do not exist hold the file without being its directory, so
+	// the answer is the same on every system.
+	base := resolvePath(t.TempDir())
+	target := filepath.Join(base, "docs", "a.md")
+	roots := []string{filepath.Join(base, "Other"), filepath.Join(base, "DOCS")}
+
+	_, _, inside := newWriteRootSet(roots, true).find(target)
+	assert.True(t, inside, "DOCS holds docs/a.md when case is folded")
+	_, _, inside = newWriteRootSet(roots, false).find(target)
+	assert.False(t, inside, "DOCS does not hold docs/a.md when case counts")
+}
+
+func TestWriteRootSet_FindUnderAUNCShareRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("UNC paths exist only on Windows")
+	}
+
+	_, _, inside := newWriteRootSet([]string{`\\host\share`}, true).find(`\\host\share\a.md`)
+	assert.True(t, inside, `\\host\share holds \\host\share\a.md`)
+}
+
+func TestRootKey_MatchesWhatFilepathRelComparesOnWindows(t *testing.T) {
+	t.Parallel()
+
+	names := []string{"docs", "DOCS", "Docs", "dOcS", "doc", "kelvin", "\u212aelvin", "KELVIN",
+		"ſtraße", "STRASSE", "Straße", "ǅ", "ǆ", "Ǆ", "\xff", "\xfe", "\ufffd"}
+	for _, a := range names {
+		for _, b := range names {
+			assert.Equal(t, strings.EqualFold(a, b), rootKey(a, true) == rootKey(b, true), "%q and %q", a, b)
+			assert.Equal(t, a == b, rootKey(a, false) == rootKey(b, false), "%q and %q", a, b)
+		}
+	}
+}
+
+// TestWriteRootSet_FindDoesNotGrowWithTheRoots guards the lookup of a
+// file's write root. Every file named on the command line is a root, so a
+// lookup that scans the roots makes a run quadratic in the number of paths.
+// The test times the same lookups among many roots and among eight times as
+// many; a scan takes about eight times as long for the larger set. The
+// fastest of several rounds counts, so a busy machine rarely matters, and
+// the test does not run in parallel with others.
+func TestWriteRootSet_FindDoesNotGrowWithTheRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing")
+	}
+
+	const (
+		small    = 500
+		factor   = 8
+		lookups  = 20000
+		rounds   = 5
+		maxRatio = 3
+	)
+	base := resolvePath(t.TempDir())
+	paths := func(n int) []string {
+		roots := make([]string, n)
+		for i := range roots {
+			roots[i] = filepath.Join(base, "docs", "f"+strconv.Itoa(i)+".md")
+		}
+		return roots
+	}
+	timeFinds := func(set *writeRootSet, targets []string) time.Duration {
+		start := time.Now()
+		for i := range lookups {
+			if _, _, inside := set.find(targets[i%len(targets)]); !inside {
+				t.Fatalf("%s must lie inside its own root", targets[i%len(targets)])
+			}
+		}
+		return time.Since(start)
+	}
+
+	few, many := paths(small), paths(factor*small)
+	fewSet, manySet := newWriteRootSet(few, false), newWriteRootSet(many, false)
+	targets := many[factor*small-small:]
+	bestFew, bestMany := time.Duration(1<<63-1), time.Duration(1<<63-1)
+	for range rounds {
+		bestFew = min(bestFew, timeFinds(fewSet, few))
+		bestMany = min(bestMany, timeFinds(manySet, targets))
+	}
+	ratio := float64(bestMany) / float64(bestFew)
+	t.Logf("%d lookups among %d roots in %v, among %d in %v, ratio %.2f",
+		lookups, small, bestFew, factor*small, bestMany, ratio)
+	require.Less(t, ratio, float64(maxRatio), "finding a write root grows with the number of roots")
 }
