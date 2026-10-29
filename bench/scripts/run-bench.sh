@@ -254,9 +254,11 @@ prepare_repo() {
     REPO_REAL=$(cd "$repo_path" && pwd -P)
     ln -sfn "$REPO_REAL" "$LINT_CWD/repo"
 
-    # Tracked files that a .gitignore matches, which gomdlint skips.
+    # Tracked files that a .gitignore matches, which gomdlint skips. gomdlint
+    # reads only .gitignore files, not the global excludes file or
+    # .git/info/exclude, so neither may drop a file from the list.
     local ignored
-    ignored=$(git -C "$REPO_REAL" ls-files -c -i --exclude-standard -- '*.md' '*.markdown')
+    ignored=$(git -C "$REPO_REAL" ls-files -c -i --exclude-per-directory=.gitignore -- '*.md' '*.markdown')
 
     local file
     FILES=()
