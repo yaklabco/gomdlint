@@ -19,13 +19,13 @@ set -euo pipefail
 #
 # Both tools lint the same files. gomdlint lints the repository directory,
 # as it is usually run, and so walks it and reads its .gitignore files.
-# markdownlint lints the list of the Markdown files (.md and .markdown) that
-# git tracks, without the hidden files and directories and the node_modules
-# and vendor directories that gomdlint skips. The script fails unless
-# gomdlint linted exactly the files on that list. Both run from an empty
-# directory with an empty HOME, so neither reads a config file from the
-# repository or the user, and both are told to ignore the config files in
-# the directories above, so both use their default rules.
+# markdownlint lints the list of the Markdown files (.md and .markdown, in
+# any case) that git tracks, without the hidden files and directories and
+# the node_modules and vendor directories that gomdlint skips. The script
+# fails unless gomdlint linted exactly the files on that list. Both run
+# from an empty directory with an empty HOME, so neither reads a config
+# file from the repository or the user, and both are told to ignore the
+# config files in the directories above, so both use their default rules.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bench/scripts/lib.sh
@@ -274,6 +274,10 @@ run_markdownlint() {
     M_FILES=$FILE_COUNT
 }
 
+# The Markdown files, as git pathspecs. gomdlint matches the .md and
+# .markdown extensions in any case, so the pathspecs do too.
+MARKDOWN_PATHSPECS=(':(icase)*.md' ':(icase)*.markdown')
+
 # prepare_repo sets repo_path and REPO_REAL for the repository in $repo,
 # points the "repo" link in LINT_CWD at it, and sets FILES to its Markdown
 # files as paths through that link, which keeps markdownlint's command line
@@ -291,9 +295,9 @@ prepare_repo() {
     # in its other output, and go through files, so that a git failure
     # stops the script.
     local tracked_list="$WORK_DIR/tracked.list0" ignored_list="$WORK_DIR/ignored.list0"
-    git -C "$REPO_REAL" ls-files -z -- '*.md' '*.markdown' >"$tracked_list"
+    git -C "$REPO_REAL" ls-files -z -- "${MARKDOWN_PATHSPECS[@]}" >"$tracked_list"
     git -C "$REPO_REAL" ls-files -z -c -i --exclude-per-directory=.gitignore \
-        -- '*.md' '*.markdown' >"$ignored_list"
+        -- "${MARKDOWN_PATHSPECS[@]}" >"$ignored_list"
 
     local file ignored=() next=0
     while IFS= read -r -d '' file; do

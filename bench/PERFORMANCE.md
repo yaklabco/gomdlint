@@ -62,10 +62,11 @@ clones into `~/.cache/gomdlint-compare/repos/<org>__<repo>`.
 
 gomdlint lints the repository directory, as it is usually run, so it walks
 the tree and reads its `.gitignore` files. markdownlint gets the list of the
-Markdown files (`.md` and `.markdown`) that git tracks, without hidden files
-and directories, the `node_modules` and `vendor` directories, and the files
-a `.gitignore` file ignores, which gomdlint skips. The list is one argument
-list, and the script stops if it would exceed the system's limit.
+Markdown files (`.md` and `.markdown`, in any case) that git tracks,
+without hidden files and directories, the `node_modules` and `vendor`
+directories, and the files a `.gitignore` file ignores, which gomdlint
+skips. The list is one argument list, and the script stops if it would
+exceed the system's limit.
 
 Before timing anything, the script lints every repository once with
 gomdlint and stops unless gomdlint linted exactly the files on the list.
