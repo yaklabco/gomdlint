@@ -9,8 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
+	"unicode"
 
 	"github.com/yaklabco/gomdlint/internal/logging"
 	"github.com/yaklabco/gomdlint/pkg/config"
@@ -197,32 +199,85 @@ type PipelineOptions struct {
 	// WriteRoots limits where fixes are written: a file is fixed only if its
 	// fully resolved path (every symbolic link along it followed, whether
 	// the file itself or a directory above it) lies inside one of these
-	// paths, directories or files (see WriteRoots). Otherwise the file is
+	// paths, directories or files (see NewWriteRoots). Otherwise the file is
 	// linted but not fixed and is marked Skipped, so linting a tree never
-	// changes a file outside it through a link. Empty means no restriction.
-	// Hard links are not affected: they are the same file under another name.
-	WriteRoots []string
+	// changes a file outside it through a link. Nil or no roots means no
+	// restriction. Hard links are not affected: they are the same file under
+	// another name.
+	WriteRoots *WriteRoots
 }
 
-// WriteRoots returns the paths that PipelineOptions.WriteRoots should hold
-// for a run over paths: each path made absolute (relative paths start from
-// workingDir, or the current directory when it is empty) with symbolic links
-// resolved, so a link named on the command line allows its target.
-func WriteRoots(workingDir string, paths []string) []string {
+// WriteRoots holds the write roots of a run, resolved once when it is made
+// and never changed after, so a link among them keeps the target it had
+// then. It finds the root of a file by looking up the file and each of its
+// directories, so the cost of a file does not grow with the number of
+// roots. It is safe for concurrent use.
+type WriteRoots struct {
+	roots []writeRootEntry
+	// first maps the key of each resolved root to its first position.
+	first map[string]int
+	// foldCase compares paths without regard to case, as filepath.Rel does
+	// on Windows.
+	foldCase bool
+}
+
+type writeRootEntry struct {
+	path string
+	dir  bool
+}
+
+// NewWriteRoots returns the write roots for a run over paths: each path made
+// absolute (relative paths start from workingDir, or the current directory
+// when it is empty) with symbolic links resolved, so a link named on the
+// command line allows its target.
+func NewWriteRoots(workingDir string, paths []string) *WriteRoots {
 	if workingDir == "" {
 		if wd, err := os.Getwd(); err == nil {
 			workingDir = wd
 		}
 	}
 
-	roots := make([]string, 0, len(paths))
+	absolute := make([]string, 0, len(paths))
 	for _, path := range paths {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(workingDir, path)
 		}
-		roots = append(roots, resolvePath(path))
+		absolute = append(absolute, path)
+	}
+	return newWriteRoots(absolute, runtime.GOOS == "windows")
+}
+
+func newWriteRoots(paths []string, foldCase bool) *WriteRoots {
+	roots := &WriteRoots{
+		roots:    make([]writeRootEntry, 0, len(paths)),
+		first:    make(map[string]int, len(paths)),
+		foldCase: foldCase,
+	}
+	for pos, path := range paths {
+		resolved := resolvePath(path)
+		info, err := os.Stat(resolved)
+		roots.roots = append(roots.roots, writeRootEntry{path: resolved, dir: err == nil && info.IsDir()})
+		// Key the root as filepath.Dir writes the directories of a file
+		// inside it: a UNC share root such as \\host\share gains the
+		// separator that Dir keeps.
+		key := rootKey(filepath.Dir(filepath.Join(resolved, "x")), foldCase)
+		if _, seen := roots.first[key]; !seen {
+			roots.first[key] = pos
+		}
 	}
 	return roots
+}
+
+// Paths returns the resolved roots, in the order they were given.
+func (w *WriteRoots) Paths() []string {
+	if w == nil {
+		return nil
+	}
+	paths := make([]string, len(w.roots))
+	for i, root := range w.roots {
+		paths[i] = root.path
+	}
+	return paths
 }
 
 // resolvePath returns path as an absolute path with symbolic links resolved,
@@ -257,39 +312,54 @@ func resolveFile(path string) (string, error) {
 	return target, nil
 }
 
-// writeRoot picks the directory that every operation on target is confined
-// to, and target's path relative to it: the write root that contains
-// target, or target's own directory when that root is the file itself or
-// no roots are set. It reports false when roots are set and none contains
-// target.
-func writeRoot(target string, roots []string) (string, string, bool) {
-	dir, name := filepath.Dir(target), filepath.Base(target)
-	if len(roots) == 0 {
-		return dir, name, true
+// rootKey returns path in the form that tells whether two clean paths name
+// the same place, as filepath.Rel compares them: as written, or with each
+// letter replaced by the smallest letter that strings.EqualFold matches it
+// to when foldCase is set.
+func rootKey(path string, foldCase bool) string {
+	if !foldCase {
+		return path
 	}
-	for _, root := range roots {
-		resolved := resolvePath(root)
-		if !pathWithin(target, resolved) {
-			continue
+	return strings.Map(func(r rune) rune {
+		smallest := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			smallest = min(smallest, f)
 		}
-		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
-			if rel, err := filepath.Rel(resolved, target); err == nil {
-				return resolved, rel, true
-			}
-		}
-		return dir, name, true
-	}
-	return dir, name, false
+		return smallest
+	}, path)
 }
 
-// pathWithin reports whether path is root or lies below it. Both must be
-// absolute and clean.
-func pathWithin(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || filepath.IsAbs(rel) {
-		return false
+// find picks the directory that every operation on target is confined to,
+// and target's path relative to it: the first write root that contains
+// target, or target's own directory when that root is the file itself or
+// no roots are set. It reports false when roots are set and none contains
+// target. Target must be absolute and clean.
+func (w *WriteRoots) find(target string) (string, string, bool) {
+	dir, name := filepath.Dir(target), filepath.Base(target)
+	if w == nil || len(w.roots) == 0 {
+		return dir, name, true
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	// A root contains target when it is target or one of its directories.
+	best := -1
+	for path := target; ; {
+		if pos, ok := w.first[rootKey(path, w.foldCase)]; ok && (best < 0 || pos < best) {
+			best = pos
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			break
+		}
+		path = parent
+	}
+	if best < 0 {
+		return dir, name, false
+	}
+	if root := w.roots[best]; root.dir {
+		if rel, err := filepath.Rel(root.path, target); err == nil {
+			return root.path, rel, true
+		}
+	}
+	return dir, name, true
 }
 
 // DefaultPipelineOptions returns sensible defaults.
@@ -377,7 +447,7 @@ func (p *Pipeline) processFile(
 	if err != nil {
 		return nil, categorizeError(err)
 	}
-	rootDir, name, inside := writeRoot(target, opts.WriteRoots)
+	rootDir, name, inside := opts.WriteRoots.find(target)
 	pinned, err := fsutil.Pin(rootDir, name)
 	if err != nil {
 		return nil, categorizeError(err)

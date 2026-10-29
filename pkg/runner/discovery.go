@@ -108,7 +108,7 @@ func discover(ctx context.Context, opts Options) (*discovery, error) {
 	return found, nil
 }
 
-// fileKey groups paths that might name the same file. Hard links and a
+// fileKey groups paths that might name the same file: hard links and a
 // symlink's target share size and modification time, so os.SameFile only
 // compares paths within a group.
 type fileKey struct {
@@ -116,16 +116,54 @@ type fileKey struct {
 	modTime int64
 }
 
+// fileIdentity is the identity that os.SameFile compares, where the system
+// gives one: the device and inode numbers, or the volume and file index on
+// Windows.
+type fileIdentity struct {
+	dev uint64
+	ino uint64
+}
+
 // groupFiles groups the paths that name one file, so that one worker
 // processes them in turn and a write through one path never races a read or
 // write through another. paths must be sorted; each group is sorted too.
 func groupFiles(paths []string) [][]string {
-	type identity struct {
+	return groupFilesBy(paths, fileID, os.SameFile)
+}
+
+// groupFilesBy groups paths as groupFiles does, reading each file's
+// identity with identify and comparing files with sameFile. Among files of
+// one size and time, a file with an identity is compared only with the
+// files of the same identity and with the files whose identity could not be
+// read, and a file without one with every file, so a missing identity never
+// splits the paths of one file. identify must give two files one identity
+// whenever sameFile reports them the same.
+func groupFilesBy(
+	paths []string,
+	identify func(string, fs.FileInfo) (uint64, uint64, bool),
+	sameFile func(fs.FileInfo, fs.FileInfo) bool,
+) [][]string {
+	type seen struct {
 		info  fs.FileInfo
 		group int // into groups
 	}
+	type bucket struct {
+		known   map[fileIdentity][]seen
+		unknown []seen
+		all     []seen
+	}
+	// groupOf returns the group of the first candidate that is the same
+	// file as info, or -1.
+	groupOf := func(info fs.FileInfo, candidates []seen) int {
+		for _, candidate := range candidates {
+			if sameFile(info, candidate.info) {
+				return candidate.group
+			}
+		}
+		return -1
+	}
 	var groups [][]string
-	identities := make(map[fileKey][]identity)
+	buckets := make(map[fileKey]*bucket)
 
 	for _, path := range paths {
 		info, err := os.Stat(path)
@@ -135,17 +173,31 @@ func groupFiles(paths []string) [][]string {
 		}
 
 		key := fileKey{size: info.Size(), modTime: info.ModTime().UnixNano()}
-		group := -1
-		for _, seen := range identities[key] {
-			if os.SameFile(info, seen.info) {
-				group = seen.group
-				break
+		inBucket := buckets[key]
+		if inBucket == nil {
+			inBucket = &bucket{known: make(map[fileIdentity][]seen)}
+			buckets[key] = inBucket
+		}
+		dev, ino, identified := identify(path, info)
+		id := fileIdentity{dev: dev, ino: ino}
+		var group int
+		if identified {
+			if group = groupOf(info, inBucket.known[id]); group < 0 {
+				group = groupOf(info, inBucket.unknown)
 			}
+		} else {
+			group = groupOf(info, inBucket.all)
 		}
 		if group < 0 {
 			group = len(groups)
 			groups = append(groups, nil)
-			identities[key] = append(identities[key], identity{info: info, group: group})
+			entry := seen{info: info, group: group}
+			inBucket.all = append(inBucket.all, entry)
+			if identified {
+				inBucket.known[id] = append(inBucket.known[id], entry)
+			} else {
+				inBucket.unknown = append(inBucket.unknown, entry)
+			}
 		}
 		groups[group] = append(groups[group], path)
 	}

@@ -279,7 +279,7 @@ func TestPipeline_WritesSymlinkTargetsOnlyInsideTheRoots(t *testing.T) {
 			}
 
 			pipeline := newTestPipeline(replaceFirstRule("TEST001", "x", "y"))
-			opts := lint.PipelineOptions{Fix: true, WriteRoots: tt.roots(linkDir, targetDir)}
+			opts := lint.PipelineOptions{Fix: true, WriteRoots: lint.NewWriteRoots("", tt.roots(linkDir, targetDir))}
 
 			result, err := pipeline.ProcessFile(context.Background(), link, fixConfig(), opts)
 			require.NoError(t, err)
@@ -325,7 +325,7 @@ func TestPipeline_DoesNotWriteThroughSymlinkedDirectories(t *testing.T) {
 	}
 
 	pipeline := newTestPipeline(replaceFirstRule("TEST001", "x", "y"))
-	opts := lint.PipelineOptions{Fix: true, WriteRoots: []string{root}}
+	opts := lint.PipelineOptions{Fix: true, WriteRoots: lint.NewWriteRoots("", []string{root})}
 
 	// The file itself is not a link; a directory on its path is.
 	result, err := pipeline.ProcessFile(context.Background(), filepath.Join(root, "sub", "doc.md"), fixConfig(), opts)
@@ -368,7 +368,7 @@ func TestPipeline_RefusesWhenThePathIsRetargetedDuringProcessing(t *testing.T) {
 	pipeline := lint.NewPipeline(lint.NewEngine(retargeting, registry))
 
 	result, err := pipeline.ProcessFile(context.Background(), link, fixConfig(),
-		lint.PipelineOptions{Fix: true, WriteRoots: []string{dir}})
+		lint.PipelineOptions{Fix: true, WriteRoots: lint.NewWriteRoots("", []string{dir})})
 	require.NoError(t, err)
 
 	assert.True(t, result.Skipped)
@@ -402,8 +402,8 @@ func TestWriteRoots(t *testing.T) {
 		return resolvedPath
 	}
 
-	assert.Equal(t, []string{resolved(workDir)}, lint.WriteRoots(workDir, []string{"."}))
-	assert.Equal(t, []string{resolved(docs), resolved(target)}, lint.WriteRoots(workDir, []string{"docs", link}),
+	assert.Equal(t, []string{resolved(workDir)}, lint.NewWriteRoots(workDir, []string{"."}).Paths())
+	assert.Equal(t, []string{resolved(docs), resolved(target)}, lint.NewWriteRoots(workDir, []string{"docs", link}).Paths(),
 		"relative paths resolve from the working directory and a named link resolves to its target")
 }
 

@@ -191,6 +191,11 @@ formats change. The first entries under Changed may need action.
   markdownlint tag sets and gomdlint's own rules with comments. The YAML
   files start with the line that points editors at the configuration's
   JSON Schema.
+- Library: `lint.PipelineOptions.WriteRoots` holds a `*lint.WriteRoots`,
+  which `lint.NewWriteRoots` makes once for a run from the paths it lints,
+  in place of the `[]string` that the `lint.WriteRoots` function returned.
+  The roots are resolved when they are made and never change after, so a
+  caller that changes its slice of paths cannot change where a run writes.
 - Library: configuration templates moved from `pkg/config` to
   `internal/ruledocs`, so `config.GenerateTemplate`,
   `config.TemplateOptions`, `config.RuleInfo`, `config.RuleInfoProvider`,
@@ -807,6 +812,16 @@ formats change. The first entries under Changed may need action.
   document made of the repository's Markdown took 6.8 seconds to lint and
   now takes 3.2, and 11.3 seconds to fix, now 5.9. Findings, fixes and
   fixed output stay as they were.
+- Linting many files named on the command line no longer takes time that
+  grows with the square of their number. Each named path limits where fixes
+  are written, and the check for every file resolved each of those paths
+  again. `gomdlint lint $(git ls-files '*.md')` over 8,000 files took 46
+  seconds and now takes under one, about as long as linting their
+  directory. Where the system gives files an identity, as Unix and Windows
+  do, files that share a size and modification time, as files extracted
+  from an archive often do, are no longer each compared with all the others
+  to find the paths that name one file. Findings, fixes and fixed output
+  stay as they were.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or
