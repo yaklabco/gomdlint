@@ -733,8 +733,9 @@ golden files cannot show:
 
 ## Current Coverage
 
-618 golden tests from 309 inputs: 304 per-rule scenarios across all 55 rules and
-5 real-world documents, each with a round trip, and 20 sidecar configs.
+768 golden tests from 384 inputs: 379 per-rule scenarios across all 55 rules,
+73 of them the examples of the rule reference, and 5 real-world documents,
+each with a round trip, and 25 sidecar configs.
 
 Coverage varies by rule. Every rule except MD040 and MD047 has a `basic`
 case, and those two have other cases that report findings. Every rule has a

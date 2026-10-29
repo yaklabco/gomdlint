@@ -352,7 +352,11 @@ SARIF output follows SARIF 2.1.0. Its file locations are relative to the
 root of the Git working tree, as GitHub code scanning expects, and its
 columns count UTF-16 code units. Each rule descriptor gives the rule's
 one-line description as `shortDescription`, and the description, the reason
-for the rule and what its fix does as `fullDescription`.
+for the rule and what its fix does as `fullDescription`. Its `help` holds the
+page that `gomdlint explain` prints for the rule, as text and as Markdown,
+and its `helpUri` links to the rule's page under `docs/rules` on GitHub.
+Its `tags` are the rule's category followed by its markdownlint tags, at
+most 10, the number GitHub code scanning keeps.
 
 ### Color
 
@@ -469,6 +473,13 @@ file's directory. Patterns from a user or system config, the environment or
 `--ignore` are relative to the working directory. Run-time settings such as
 `--fix`, `--format` and `--jobs` are command-line flags, and a config file
 that sets one gets a warning.
+
+Three more settings in a config file shape a run. `gitignore: false` lints
+the files that `.gitignore` files ignore, as `--no-gitignore` does, and
+`default_ignores: false` lints `node_modules` and `vendor` directories, as
+`--no-default-ignores` does. `backups` sets the backups of fixed files:
+`enabled: false` turns them off, as `--no-backups` does, and `mode` is
+`sidecar`, a `<file>.gomdlint.bak` next to the file, or `none`.
 
 ### Defaults
 
@@ -852,11 +863,12 @@ the `security-events: write` permission.
 | `gomdlint completion <shell>` | Generate a shell completion script |
 | `gomdlint version` | Show version information |
 
-`gomdlint rules` lists the rules by category, sorted by name. Each row shows
-a rule's name, ID, whether it can fix what it finds, its status and what it
-checks. The status is `off` or the severity of the rule's findings, under
-the configuration that `gomdlint lint` would load in the current directory
-or from `--config`. `--defaults` shows the built-in settings instead.
+`gomdlint rules` lists the rules by category, sorted by name, or by ID when
+`--rule-format` puts the ID first. Each row shows a rule's name, ID, whether
+it can fix what it finds, its status and what it checks. The status is
+`off` or the severity of the rule's findings, under the configuration that
+`gomdlint lint` would load in the current directory or from `--config`.
+`--defaults` shows the built-in settings instead.
 
 Words select the rules that hold each of them in their name, ID,
 markdownlint name, category, tags or description, ignoring case.
@@ -896,6 +908,14 @@ more spaces make a hard line break. In code blocks it is part of the code.
 `gomdlint completion` writes a script for bash, zsh, fish or powershell.
 Release archives and the Homebrew formula include the bash, zsh and fish
 completions.
+
+`gomdlint init` and `gomdlint migrate` refuse to replace an existing file
+unless given `-f` or `--force`. For `lint`, `--compact` writes JSON and
+SARIF output without indentation, `--per-file` prints a table for each
+file with findings under `--format table`, and `--cpuprofile`,
+`--memprofile` and `--trace` write Go CPU and memory profiles and an
+execution trace to the files they name. `--debug`, on any command, turns
+on debug logging.
 
 ## Known Limitations
 
@@ -1154,10 +1174,12 @@ gomdlint/
     cli/               # Cobra commands and flag handling
     configloader/      # Config discovery, loading, merging and migration
     display/           # UTF-16 columns and paths for reporters
-    jstext/            # UTF-16 lengths of text, as markdownlint measures them
     editdistance/      # Edit distance for rule name suggestions
     ignore/            # gitignore matching for directory walks
+    jsonc/             # JSON with comments, as markdownlint-cli2 reads it
+    jstext/            # UTF-16 lengths of text, as markdownlint measures them
     logging/           # Structured logging setup
+    ruledocs/          # Rule listings, rule pages, reference, schema, init templates
     ui/pretty/         # Lipgloss-based styled output
   pkg/
     analysis/          # Result aggregation and statistics

@@ -203,6 +203,9 @@ formats change. The first entries under Changed may need action.
 
 ### Added
 
+- Library: `lint.SharedValue` returns a value that the first rule of a lint
+  of a file builds, such as a parse of the document, to every later rule of
+  that lint that asks for it under the same key.
 - Library: `lint.Registry.ConfigKey` returns the key under which generated
   configs name a rule: its name, or its ID when another registered rule
   shares the name.
@@ -796,9 +799,11 @@ formats change. The first entries under Changed may need action.
   list; 400 fences and 400 headings right next to text in one item, which
   MD031 and MD022 fix, took 8 and 11 seconds. Each now takes a quarter of a
   second or less. Findings, fixes and fixed output stay as they were.
-- The rules whose fix checks compare the whole document share, within one
-  lint of a file, the parse of the document and what the checks derive from
-  it alone, where each rule parsed the document again. The 1 MB document
+- The code, link, reference, table, heading, emphasis, horizontal rule and
+  proper name rules share, within one lint of a file, the parse of the
+  document that their fix checks compare with and what the checks derive
+  from it alone, where each rule parsed the document again. The list and
+  whitespace rules still parse it once each. The 1 MB document
   made of the repository's Markdown took 6.8 seconds to lint and now takes
   3.2, and 11.3 seconds to fix, now 5.9. Findings, fixes and fixed output
   stay as they were.
