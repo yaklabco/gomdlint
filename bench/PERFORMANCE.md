@@ -82,8 +82,9 @@ A failure is found in minutes instead of after the slow markdownlint runs.
   markdownlint-cli gets `--configPointer` with a key that no config file
   holds, so its rules get an empty configuration whatever `.markdownlintrc`
   it finds.
-- `GOMDLINT_*` and `markdownlint_*` environment variables are removed, and
-  the run stops if `/etc/gomdlint` or a markdownlint config in `/etc`
+- Environment variables that start with `GOMDLINT_` or `markdownlint_`,
+  in any case, are removed, since markdownlint-cli reads its prefix in any
+  case. The run stops if `/etc/gomdlint` or a markdownlint config in `/etc`
   exists.
 - Both tools write JSON, which the script reads for the counts of files
   and findings, so writing the report is part of each timed run.

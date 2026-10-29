@@ -61,12 +61,19 @@ command -v jq >/dev/null || bench_die "jq not found"
 command -v git >/dev/null || bench_die "git not found"
 
 # Settings in the environment or in system config files would change the
-# rules a linter runs, so neither tool may see any. export -n keeps the
-# script's own variables, such as GOMDLINT_BIN.
+# rules a linter runs, so neither tool may see any. markdownlint-cli's
+# run-con matches its markdownlint_ prefix in any case, so both prefixes
+# are matched that way. export -n keeps the script's own variables, such
+# as GOMDLINT_BIN.
+exported=$(compgen -e)
+shopt -s nocasematch
 while read -r name; do
-    # shellcheck disable=SC2163 # name holds the name of the variable
-    export -n "$name"
-done < <(compgen -e | grep -E '^(GOMDLINT_|markdownlint_)' || true)
+    if [[ "$name" == gomdlint_* || "$name" == markdownlint_* ]]; then
+        # shellcheck disable=SC2163 # name holds the name of the variable
+        export -n "$name"
+    fi
+done <<<"$exported"
+shopt -u nocasematch
 for path in /etc/gomdlint /etc/markdownlint /etc/markdownlintrc; do
     [ ! -e "$path" ] || bench_die "$path would configure a linter; the benchmark needs default rules"
 done
