@@ -68,9 +68,10 @@ full history so that GoReleaser can read the tags. It installs Go from
 
 `compare.yml` benchmarks gomdlint against markdownlint-cli every Sunday at
 03:00 UTC and when it is started by hand. It builds gomdlint, installs
-markdownlint-cli from npm, and clones the repositories listed in
-`bench/repos.txt` into a cached directory. It then runs
-`bench/scripts/run-bench.sh` and `bench/scripts/generate-plots.sh`. The
+markdownlint-cli 0.49.0 from npm, which bundles markdownlint 0.41, and
+clones the repositories listed in `bench/repos.txt` into a cached
+directory. It then runs `bench/scripts/run-bench.sh` on the gomdlint it
+built, and `bench/scripts/generate-plots.sh`. The
 workflow uploads `bench/results/` as the artifact
 `comparison-results-<run number>` and keeps it for 90 days.
 `stave bench:compare` runs the same comparison locally.

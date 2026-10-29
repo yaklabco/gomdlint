@@ -309,36 +309,61 @@ func (Bench) Default() error {
 	)
 }
 
-// Compare benchmarks gomdlint against markdownlint.
+// Compare benchmarks gomdlint against markdownlint. BENCH_REPOS, BENCH_RUNS
+// and the other settings of bench/scripts/run-bench.sh pass through.
 func (Bench) Compare() error {
 	fmt.Println("Running gomdlint vs markdownlint comparison...")
 	st.Deps(Build)
-	if err := checkCompareDepends(); err != nil {
+	if err := checkCompareDepends(true); err != nil {
 		return err
 	}
-	if err := sh.RunV("bench/scripts/clone-repos.sh"); err != nil {
+	env, err := benchEnv()
+	if err != nil {
+		return err
+	}
+	if err := sh.RunWithV(env, "bench/scripts/clone-repos.sh"); err != nil {
 		return fmt.Errorf("clone repos: %w", err)
 	}
-	if err := sh.RunV("bench/scripts/run-bench.sh"); err != nil {
+	if err := sh.RunWithV(env, "bench/scripts/run-bench.sh"); err != nil {
 		return fmt.Errorf("run benchmarks: %w", err)
 	}
-	if err := sh.RunV("bench/scripts/generate-plots.sh"); err != nil {
+	if err := sh.RunWithV(env, "bench/scripts/generate-plots.sh"); err != nil {
 		return fmt.Errorf("generate charts: %w", err)
 	}
 	return nil
 }
 
-// Fast runs a quick comparison on smallest repos only.
+// fastBenchRepo is the smallest repository in bench/repos.txt.
+const fastBenchRepo = "DavidAnson/markdownlint"
+
+// Fast runs a quick comparison, once, on the smallest repository only.
 func (Bench) Fast() error {
 	fmt.Println("Running quick gomdlint vs markdownlint comparison...")
 	st.Deps(Build)
-	if err := checkCompareDepends(); err != nil {
+	if err := checkCompareDepends(false); err != nil {
 		return err
 	}
-	if err := sh.RunV("bench/scripts/clone-repos.sh"); err != nil {
+	env, err := benchEnv()
+	if err != nil {
+		return err
+	}
+	env["BENCH_RUNS"] = "1"
+	env["BENCH_REPOS"] = fastBenchRepo
+	if err := sh.RunWithV(env, "bench/scripts/clone-repos.sh"); err != nil {
 		return fmt.Errorf("clone repos: %w", err)
 	}
-	return sh.RunWithV(map[string]string{"BENCH_RUNS": "1"}, "bench/scripts/run-bench.sh")
+	return sh.RunWithV(env, "bench/scripts/run-bench.sh")
+}
+
+// benchEnv returns the environment of the comparison scripts. It points
+// GOMDLINT_BIN at the binary that Build made, so that the comparison never
+// measures another gomdlint on the PATH.
+func benchEnv() (map[string]string, error) {
+	bin, err := filepath.Abs(filepath.Join("bin", "gomdlint"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve gomdlint binary: %w", err)
+	}
+	return map[string]string{"GOMDLINT_BIN": bin}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -381,33 +406,29 @@ func findInstalledBinary(name string) (string, error) {
 	return filepath.Join(gopath, "bin", name), nil
 }
 
-// checkCompareDepends verifies required tools are installed for benchmarking.
-func checkCompareDepends() error {
-	tools := []struct {
+// checkCompareDepends verifies that the tools the comparison needs are
+// installed. Charts need gnuplot. GNU time is optional: without it,
+// run-bench.sh measures wall time and no memory. MARKDOWNLINT_BIN names
+// the markdownlint binary when it is not the one on the PATH.
+func checkCompareDepends(charts bool) error {
+	type tool struct {
 		name    string
 		cmd     string
 		args    []string
 		install string
-	}{
-		{"markdownlint", "markdownlint", []string{"--version"}, "npm install -g markdownlint-cli"},
+	}
+	tools := []tool{
+		{"markdownlint", cmp.Or(os.Getenv("MARKDOWNLINT_BIN"), "markdownlint"), []string{"--version"},
+			"npm install -g markdownlint-cli@0.49.0, or set MARKDOWNLINT_BIN"},
 		{"jq", "jq", []string{"--version"}, "brew install jq"},
-		{"gnuplot", "gnuplot", []string{"--version"}, "brew install gnuplot"},
+	}
+	if charts {
+		tools = append(tools, tool{"gnuplot", "gnuplot", []string{"--version"}, "brew install gnuplot"})
 	}
 
-	hasGtime := exec.Command("which", "gtime").Run() == nil //nolint:gosec // args are constant
-	hasGnuTime := false
-	if !hasGtime {
-		// --version may exit non-zero on some implementations; we only inspect output content.
-		out, _ := exec.Command("/usr/bin/time", "--version").CombinedOutput() //nolint:gosec // args are constant
-		hasGnuTime = strings.Contains(string(out), "GNU")
-	}
-	if !hasGtime && !hasGnuTime {
-		return errors.New("GNU time required; install with: brew install gnu-time")
-	}
-
-	for _, tool := range tools {
-		if err := exec.Command(tool.cmd, tool.args...).Run(); err != nil { //nolint:gosec // args are constant
-			return fmt.Errorf("%s not found; install with: %s", tool.name, tool.install)
+	for _, t := range tools {
+		if err := exec.Command(t.cmd, t.args...).Run(); err != nil { //nolint:gosec // the user sets MARKDOWNLINT_BIN
+			return fmt.Errorf("%s (%s): %w; install with: %s", t.name, t.cmd, err, t.install)
 		}
 	}
 	return nil

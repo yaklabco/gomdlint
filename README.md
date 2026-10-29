@@ -10,15 +10,15 @@ epic work, this project would not have been possible.
 
 | Feature | gomdlint | markdownlint |
 | --- | --- | --- |
-| **Performance** | **507x faster** average | baseline |
+| **Performance** | **4 to 12x faster**, 6.1x on average | baseline |
 | **Auto-fixable** | 67% (37 of 55 rules) | Limited |
 | **Language** | Go | Node.js |
 
-gomdlint is **dramatically faster** than markdownlint. Benchmarks run on
-real-world repositories in January 2026 showed an average **507x speedup**,
-with improvements ranging from 72x to over 1100x depending on repository
-size. 37 of 55 rules support automatic fixing. Built in Go with no runtime
-dependencies.
+gomdlint is **faster** than markdownlint. On the Markdown of five
+open-source repositories, measured in October 2026, it took from a quarter
+to a twelfth of markdownlint-cli's time, **6.1x less** on average, with 8
+workers where markdownlint-cli uses one process. 37 of 55 rules support
+automatic fixing. Built in Go with no runtime dependencies.
 
 See [bench/PERFORMANCE.md](bench/PERFORMANCE.md) for detailed benchmark
 methodology and results.

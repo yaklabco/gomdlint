@@ -1,231 +1,540 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run benchmarks comparing gomdlint vs markdownlint
-# Outputs JSON results and terminal summary
+# Benchmark gomdlint against markdownlint-cli on the repositories in
+# bench/repos.txt, cloned by clone-repos.sh. Writes a JSON result file and
+# prints a summary. Any linter failure stops the run with an error, so a
+# result file only ever holds complete measurements.
+#
+# Environment:
+#   GOMDLINT_BIN       gomdlint binary under test (default: gomdlint on PATH)
+#   MARKDOWNLINT_BIN   markdownlint-cli binary (default: markdownlint on PATH)
+#   BENCH_RUNS         timed runs per tool and repository, median kept (default: 3)
+#   BENCH_REPOS        org/repo entries from repos.txt to run, separated by
+#                      spaces or commas (default: all of them)
+#   BENCH_GOMAXPROCS   GOMAXPROCS and --jobs for gomdlint (default: 8)
+#   BENCH_PROFILE      1 to write gomdlint profiles in an extra, untimed run (default: 1)
+#   BENCH_RESULTS_DIR  where results go (default: bench/results)
+#   GOMDLINT_COMPARE_CACHE  repository cache (default: ~/.cache/gomdlint-compare)
+#
+# Both tools lint the same files. gomdlint lints the repository directory,
+# as it is usually run, and so walks it and reads its .gitignore files.
+# markdownlint lints the list of the Markdown files (.md and .markdown, in
+# any case) that git tracks, without the hidden files and directories and
+# the node_modules and vendor directories that gomdlint skips. The script
+# fails unless gomdlint linted exactly the files on that list. Both run
+# from an empty directory with an empty HOME, so neither reads a config
+# file from the repository or the user, and both are told to ignore the
+# config files in the directories above, so both use their default rules.
 
-CACHE_DIR="${GOMDLINT_COMPARE_CACHE:-$HOME/.cache/gomdlint-compare}"
-REPOS_DIR="$CACHE_DIR/repos"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="$SCRIPT_DIR/../results"
+# shellcheck source=bench/scripts/lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+RESULTS_DIR="${BENCH_RESULTS_DIR:-$SCRIPT_DIR/../results}"
+# gomdlint runs from another directory and writes its profiles here, so the
+# path must not be relative to this one.
+case "$RESULTS_DIR" in
+    /*) ;;
+    *) RESULTS_DIR="$PWD/$RESULTS_DIR" ;;
+esac
 RUNS="${BENCH_RUNS:-3}"
+PROCS="${BENCH_GOMAXPROCS:-8}"
+PROFILE="${BENCH_PROFILE:-1}"
+GOMDLINT_BIN="${GOMDLINT_BIN:-gomdlint}"
+MARKDOWNLINT_BIN="${MARKDOWNLINT_BIN:-markdownlint}"
 
-# Detect GNU time
-if command -v gtime &>/dev/null; then
-    TIME_CMD="gtime"
-elif /usr/bin/time --version 2>&1 | grep -q GNU; then
-    TIME_CMD="/usr/bin/time"
-else
-    echo "Error: GNU time required. Install with: brew install gnu-time (macOS)"
-    exit 1
-fi
+[[ "$RUNS" =~ ^[1-9][0-9]*$ ]] || bench_die "BENCH_RUNS must be a positive integer, not '$RUNS'"
+[[ "$PROCS" =~ ^[1-9][0-9]*$ ]] || bench_die "BENCH_GOMAXPROCS must be a positive integer, not '$PROCS'"
+[[ "$PROFILE" =~ ^[01]$ ]] || bench_die "BENCH_PROFILE must be 0 or 1, not '$PROFILE'"
 
-# Check tools exist
-command -v gomdlint &>/dev/null || { echo "Error: gomdlint not found"; exit 1; }
-command -v markdownlint &>/dev/null || { echo "Error: markdownlint not found. Install: npm i -g markdownlint-cli"; exit 1; }
-command -v jq &>/dev/null || { echo "Error: jq not found"; exit 1; }
-
-# Setup results directory
-RUN_TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-mkdir -p "$RESULTS_DIR/raw" "$RESULTS_DIR/plots"
-TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-RESULT_FILE="$RESULTS_DIR/raw/$RUN_TIMESTAMP.json"
-PROFILE_DIR="$RESULTS_DIR/profiles/$RUN_TIMESTAMP"
-mkdir -p "$PROFILE_DIR"
-
-# Get versions
-GOMDLINT_VERSION=$(gomdlint version 2>/dev/null | grep -oE 'version=[^ ]+' | cut -d= -f2 || echo "unknown")
-MARKDOWNLINT_VERSION=$(markdownlint --version 2>/dev/null || echo "unknown")
-
-echo "gomdlint vs markdownlint comparison"
-echo "===================================="
-echo "gomdlint version: $GOMDLINT_VERSION"
-echo "markdownlint version: $MARKDOWNLINT_VERSION"
-echo "Runs per tool: $RUNS"
-echo ""
-
-# Function to run and time a linter
-run_linter() {
-    local linter="$1"
-    local repo_path="$2"
-    local repo_name="$3"
-    local tmp_time=$(mktemp)
-    local tmp_out=$(mktemp)
-
-    # Run with GNU time
-    # Note: gomdlint accepts directories, markdownlint needs file list via find
-    if [ "$linter" = "gomdlint" ]; then
-        # Create profile directory for this repo
-        local profile_base="$PROFILE_DIR/$repo_name"
-        mkdir -p "$profile_base"
-        $TIME_CMD -f '%e %M' -o "$tmp_time" gomdlint lint \
-            --cpuprofile="$profile_base/cpu.pprof" \
-            --memprofile="$profile_base/mem.pprof" \
-            --trace="$profile_base/trace.out" \
-            "$repo_path" >"$tmp_out" 2>&1 || true
-    else
-        # markdownlint: use find to get recursive file list
-        $TIME_CMD -f '%e %M' -o "$tmp_time" bash -c "find \"$repo_path\" -name '*.md' -type f -print0 | xargs -0 markdownlint" >"$tmp_out" 2>&1 || true
-    fi
-
-    local time_sec mem_kb time_ms
-    if [ -s "$tmp_time" ]; then
-        # GNU time writes timing on last line (error message on first line if command failed)
-        read -r time_sec mem_kb < <(tail -1 "$tmp_time") || { time_sec=0; mem_kb=0; }
-    else
-        time_sec=0
-        mem_kb=0
-    fi
-    rm -f "$tmp_time" "$tmp_out"
-
-    # Handle empty values
-    : "${time_sec:=0}"
-    : "${mem_kb:=0}"
-
-    # Convert to milliseconds (use awk for robustness)
-    time_ms=$(echo "$time_sec" | awk '{printf "%.0f", $1 * 1000}' 2>/dev/null || echo "0")
-    echo "$time_ms $mem_kb"
+# resolve_bin prints the absolute path of a command, since the linters run
+# from another directory.
+resolve_bin() {
+    local path
+    path=$(command -v "$1") || bench_die "$2 not found: $1"
+    case "$path" in
+        /*) ;;
+        *) path="$PWD/$path" ;;
+    esac
+    printf '%s\n' "$path"
 }
 
-# Function to get median of runs
-median_run() {
-    local linter="$1"
-    local repo_path="$2"
-    local repo_name="$3"
-    local times_file=$(mktemp)
-    local mems_file=$(mktemp)
+GOMDLINT_BIN=$(resolve_bin "$GOMDLINT_BIN" "gomdlint (set GOMDLINT_BIN)")
+MARKDOWNLINT_BIN=$(resolve_bin "$MARKDOWNLINT_BIN" \
+    "markdownlint (set MARKDOWNLINT_BIN, or npm install --prefix <dir> markdownlint-cli)")
+command -v jq >/dev/null || bench_die "jq not found"
+command -v git >/dev/null || bench_die "git not found"
 
-    for ((i=1; i<=RUNS; i++)); do
-        result=$(run_linter "$linter" "$repo_path" "$repo_name")
-        echo "$result" | cut -d' ' -f1 >> "$times_file"
-        echo "$result" | cut -d' ' -f2 >> "$mems_file"
-    done
-
-    # Sort and get median
-    local sorted_time sorted_mem
-    sorted_time=$(sort -n "$times_file" | head -n $((RUNS / 2 + 1)) | tail -1)
-    sorted_mem=$(sort -n "$mems_file" | head -n $((RUNS / 2 + 1)) | tail -1)
-
-    rm -f "$times_file" "$mems_file"
-
-    # Default to 0 if empty
-    echo "${sorted_time:-0} ${sorted_mem:-0}"
-}
-
-# Count issues for a linter
-count_issues() {
-    local linter="$1"
-    local repo_path="$2"
-
-    # Use subshell to isolate pipefail (linters exit non-zero when they find issues)
-    if [ "$linter" = "gomdlint" ]; then
-        (gomdlint lint "$repo_path" 2>/dev/null || true) | wc -l | tr -d ' '
-    else
-        (find "$repo_path" -name '*.md' -type f -print0 | xargs -0 markdownlint 2>/dev/null || true) | wc -l | tr -d ' '
+# Settings in the environment or in system config files would change the
+# rules a linter runs, so neither tool may see any. markdownlint-cli's
+# run-con matches its markdownlint_ prefix in any case, so both prefixes
+# are matched that way. export -n keeps the script's own variables, such
+# as GOMDLINT_BIN.
+exported=$(compgen -e)
+shopt -s nocasematch
+while read -r name; do
+    if [[ "$name" == gomdlint_* || "$name" == markdownlint_* ]]; then
+        # shellcheck disable=SC2163 # name holds the name of the variable
+        export -n "$name"
     fi
-}
+done <<<"$exported"
+shopt -u nocasematch
+for path in /etc/gomdlint /etc/markdownlint /etc/markdownlintrc; do
+    [ ! -e "$path" ] || bench_die "$path would configure a linter; the benchmark needs default rules"
+done
 
-# Initialize JSON
-echo "{" > "$RESULT_FILE"
-echo "  \"timestamp\": \"$TIMESTAMP\"," >> "$RESULT_FILE"
-echo "  \"gomdlint_version\": \"$GOMDLINT_VERSION\"," >> "$RESULT_FILE"
-echo "  \"markdownlint_version\": \"$MARKDOWNLINT_VERSION\"," >> "$RESULT_FILE"
-echo "  \"runs\": $RUNS," >> "$RESULT_FILE"
-echo "  \"repos\": {" >> "$RESULT_FILE"
-
-# Print header
-printf "%-30s %8s %12s %12s %8s\n" "Repository" "Files" "gomdlint" "markdownlint" "Speedup"
-printf "%-30s %8s %12s %12s %8s\n" "----------" "-----" "--------" "------------" "-------"
-
-first_repo=true
-total_speedup=0
-repo_count=0
-
-# Process each repo
-for repo_path in "$REPOS_DIR"/*/; do
-    repo_name=$(basename "$repo_path")
-
-    # Count markdown files
-    file_count=$(find "$repo_path" -name "*.md" -type f | wc -l | tr -d ' ')
-
-    if [ "$file_count" -eq 0 ]; then
-        continue
-    fi
-
-    # Run benchmarks
-    gomdlint_result=$(median_run "gomdlint" "$repo_path" "$repo_name")
-    gomdlint_time=$(echo "$gomdlint_result" | cut -d' ' -f1)
-    gomdlint_mem=$(echo "$gomdlint_result" | cut -d' ' -f2)
-    gomdlint_issues=$(count_issues "gomdlint" "$repo_path")
-
-    markdownlint_result=$(median_run "markdownlint" "$repo_path" "$repo_name")
-    markdownlint_time=$(echo "$markdownlint_result" | cut -d' ' -f1)
-    markdownlint_mem=$(echo "$markdownlint_result" | cut -d' ' -f2)
-    markdownlint_issues=$(count_issues "markdownlint" "$repo_path")
-
-    # Ensure numeric values (default to 0)
-    gomdlint_time=${gomdlint_time:-0}
-    gomdlint_mem=${gomdlint_mem:-0}
-    markdownlint_time=${markdownlint_time:-0}
-    markdownlint_mem=${markdownlint_mem:-0}
-
-    # Calculate speedup (use awk for robustness)
-    if [ "${gomdlint_time:-0}" -gt 0 ] 2>/dev/null; then
-        speedup=$(awk "BEGIN {printf \"%.1f\", $markdownlint_time / $gomdlint_time}")
-    else
-        speedup="N/A"
-    fi
-
-    # Format times for display
-    gomdlint_display=$(awk "BEGIN {printf \"%.2fs\", ${gomdlint_time:-0} / 1000}")
-    markdownlint_display=$(awk "BEGIN {printf \"%.2fs\", ${markdownlint_time:-0} / 1000}")
-
-    printf "%-30s %8d %12s %12s %7sx\n" "$repo_name" "$file_count" "$gomdlint_display" "$markdownlint_display" "$speedup"
-
-    # Add to JSON
-    if [ "$first_repo" = true ]; then
-        first_repo=false
-    else
-        echo "," >> "$RESULT_FILE"
-    fi
-
-    # Ensure issue counts are numeric
-    gomdlint_issues=${gomdlint_issues:-0}
-    markdownlint_issues=${markdownlint_issues:-0}
-
-    cat >> "$RESULT_FILE" <<EOF
-    "$repo_name": {
-      "file_count": $file_count,
-      "gomdlint": { "time_ms": ${gomdlint_time:-0}, "memory_kb": ${gomdlint_mem:-0}, "issues": ${gomdlint_issues:-0} },
-      "markdownlint": { "time_ms": ${markdownlint_time:-0}, "memory_kb": ${markdownlint_mem:-0}, "issues": ${markdownlint_issues:-0} }
-    }
-EOF
-
-    if [ "$speedup" != "N/A" ]; then
-        total_speedup=$(awk "BEGIN {print $total_speedup + $speedup}")
-        repo_count=$((repo_count + 1))
+# Memory needs GNU time, whose -f %M reports the peak resident set size.
+# Without it, wall time comes from the shell's clock and memory is not
+# measured.
+GNU_TIME=""
+for candidate in gtime "$(type -P time || true)"; do
+    [ -n "$candidate" ] || continue
+    if "$candidate" --version 2>&1 | grep -q GNU; then
+        GNU_TIME=$(command -v "$candidate")
+        break
     fi
 done
 
-# Close JSON
-echo "" >> "$RESULT_FILE"
-echo "  }" >> "$RESULT_FILE"
-echo "}" >> "$RESULT_FILE"
+# now_us sets NOW_US to the current time in microseconds, without a
+# subshell when the shell has EPOCHREALTIME (bash 5).
+now_us() {
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+        NOW_US=${EPOCHREALTIME/[.,]/}
+    else
+        NOW_US=$(date +%s%N)
+        [[ "$NOW_US" =~ ^[0-9]+$ ]] || bench_die "no clock with sub-second resolution: use bash 5 or GNU date"
+        NOW_US=$((NOW_US / 1000))
+    fi
+}
+now_us
 
-# Print summary
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/gomdlint-bench.XXXXXX")
+trap 'rm -rf "$WORK_DIR"' EXIT
+LINT_CWD="$WORK_DIR/cwd"
+LINT_HOME="$WORK_DIR/home"
+mkdir -p "$LINT_CWD" "$LINT_HOME"
+LINT_ENV=(env HOME="$LINT_HOME" XDG_CONFIG_HOME="$LINT_HOME/.config")
+
+# An empty working directory is not enough: gomdlint looks for a project
+# config in the directories above it too, and markdownlint-cli, through
+# run-con, for a .markdownlintrc. gomdlint gets an empty config file with
+# --config, which takes the place of the project config. markdownlint-cli
+# gets --configPointer naming a key that no config file holds, so its rules
+# get an empty configuration, the defaults, whatever files run-con finds.
+LINT_GOMDLINT_CONFIG="$WORK_DIR/gomdlint.yml"
+: >"$LINT_GOMDLINT_CONFIG"
+LINT_MARKDOWNLINT_POINTER=/gomdlint-bench-default-rules
+# run-con still reads the first .markdownlintrc it finds before it applies
+# the pointer, and a malformed one stops markdownlint-cli. An empty one in
+# the working directory ends that search there.
+echo '{}' >"$LINT_CWD/.markdownlintrc"
+
+# Versions
+GOMDLINT_VERSION=$("$GOMDLINT_BIN" version) || bench_die "$GOMDLINT_BIN version failed"
+GOMDLINT_REVISION=$(go version -m "$GOMDLINT_BIN" 2>/dev/null |
+    awk -F'\t' '$2 == "build" && $3 ~ /^vcs.revision=/ { sub(/^vcs.revision=/, "", $3); print $3 }' || true)
+MARKDOWNLINT_VERSION=$("$MARKDOWNLINT_BIN" --version) || bench_die "$MARKDOWNLINT_BIN --version failed"
+MARKDOWNLINT_LIB_VERSION="unknown"
+cli_dir=$(dirname "$(readlink -f "$MARKDOWNLINT_BIN")")
+for pkg in "$cli_dir/node_modules/markdownlint/package.json" "$cli_dir/../markdownlint/package.json"; do
+    if [ -f "$pkg" ]; then
+        MARKDOWNLINT_LIB_VERSION=$(jq -r .version "$pkg")
+        break
+    fi
+done
+NODE_VERSION=$(node --version 2>/dev/null || echo "unknown")
+
+# A command substitution, so that an error in the list stops the script.
+repo_list=$(bench_repo_list)
+REPOS=()
+while read -r repo; do
+    REPOS+=("$repo")
+done <<<"$repo_list"
+[ ${#REPOS[@]} -gt 0 ] || bench_die "no repositories selected"
+
+RUN_TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+RESULT_FILE="$RESULTS_DIR/raw/$RUN_TIMESTAMP.json"
+PROFILE_DIR="$RESULTS_DIR/profiles/$RUN_TIMESTAMP"
+
+echo "gomdlint vs markdownlint comparison"
+echo "===================================="
+echo "gomdlint:         $GOMDLINT_VERSION"
+echo "  binary:         $GOMDLINT_BIN"
+echo "  revision:       ${GOMDLINT_REVISION:-unknown}"
+echo "  GOMAXPROCS:     $PROCS (--jobs $PROCS)"
+echo "markdownlint-cli: $MARKDOWNLINT_VERSION (markdownlint $MARKDOWNLINT_LIB_VERSION, node $NODE_VERSION)"
+echo "  binary:         $MARKDOWNLINT_BIN"
+if [ -n "$GNU_TIME" ]; then
+    echo "Timing:           wall clock; peak memory from $GNU_TIME"
+else
+    echo "Timing:           wall clock; memory unavailable (no GNU time)"
+fi
+echo "Runs per tool:    $RUNS (median)"
+echo "Repositories:     ${REPOS[*]}"
 echo ""
-if [ "$repo_count" -gt 0 ]; then
-    avg_speedup=$(awk "BEGIN {printf \"%.1f\", $total_speedup / $repo_count}")
+
+# timed_run runs a command from LINT_CWD with its output in OUT_FILE and
+# ERR_FILE, and sets RUN_MS, RUN_KB (empty without GNU time) and RUN_EXIT.
+OUT_FILE="$WORK_DIR/out"
+ERR_FILE="$WORK_DIR/err"
+TIME_FILE="$WORK_DIR/time"
+GNU_TIME_CMD=("$GNU_TIME" -f '%M' -o "$TIME_FILE")
+timed_run() {
+    local start status=0
+    RUN_KB=""
+    now_us
+    start=$NOW_US
+    if [ -n "$GNU_TIME" ]; then
+        (cd "$LINT_CWD" && "${GNU_TIME_CMD[@]}" "$@") >"$OUT_FILE" 2>"$ERR_FILE" || status=$?
+    else
+        (cd "$LINT_CWD" && "$@") >"$OUT_FILE" 2>"$ERR_FILE" || status=$?
+    fi
+    now_us
+    RUN_MS=$(((NOW_US - start + 500) / 1000))
+    RUN_EXIT=$status
+    if [ -n "$GNU_TIME" ]; then
+        # GNU time puts "Command exited with non-zero status" first.
+        RUN_KB=$(tail -n 1 "$TIME_FILE")
+        [[ "$RUN_KB" =~ ^[0-9]+$ ]] || bench_die "GNU time wrote no peak memory: $(cat "$TIME_FILE")"
+    fi
+}
+
+# fail_run stops the benchmark after a linter failed, showing its output.
+fail_run() {
+    echo "" >&2
+    echo "Error: $1" >&2
+    echo "--- stderr (last 20 lines) ---" >&2
+    tail -n 20 "$ERR_FILE" >&2 || true
+    echo "--- stdout (first 20 lines) ---" >&2
+    head -n 20 "$OUT_FILE" >&2 || true
+    exit 1
+}
+
+# median prints the median of its arguments (the upper one for an even count).
+median() {
+    printf '%s\n' "$@" | sort -n | sed -n "$(($# / 2 + 1))p"
+}
+
+# Exit codes that mean the linter ran to the end: 0 for no errors and 1 for
+# errors found, for both gomdlint (internal/cli/exitcodes.go; 2 needs
+# --strict) and markdownlint-cli. Anything else is a failure.
+run_gomdlint() {
+    timed_run "${LINT_ENV[@]}" GOMAXPROCS="$PROCS" "$GOMDLINT_BIN" lint \
+        --config "$LINT_GOMDLINT_CONFIG" --format json --jobs "$PROCS" "$@" -- "$REPO_REAL"
+    case "$RUN_EXIT" in
+        0 | 1) ;;
+        *) fail_run "gomdlint failed on $repo with exit status $RUN_EXIT" ;;
+    esac
+    local summary
+    summary=$(jq -e -c '.summary
+        | select([.filesChecked, .totalIssues, .filesWithIssues, .filesErrored, .ruleErrors]
+            | all(type == "number"))' "$OUT_FILE" 2>/dev/null) ||
+        fail_run "gomdlint wrote no JSON report with the summary this script reads for $repo"
+    G_FILES=$(jq -r '.filesChecked' <<<"$summary")
+    G_ISSUES=$(jq -r '.totalIssues' <<<"$summary")
+    G_FILES_WITH=$(jq -r '.filesWithIssues' <<<"$summary")
+    local errored rule_errors
+    errored=$(jq -r '.filesErrored' <<<"$summary")
+    rule_errors=$(jq -r '.ruleErrors' <<<"$summary")
+    [ "$G_FILES" -gt 0 ] || fail_run "gomdlint linted no files in $repo"
+    [ "$errored" -eq 0 ] || fail_run "gomdlint could not lint $errored files in $repo"
+    [ "$rule_errors" -eq 0 ] || fail_run "$rule_errors gomdlint rule failures in $repo"
+
+    # The report lists every file linted, by its absolute path, as the
+    # repository lies outside the working directory.
+    jq -r --arg root "$REPO_REAL/" '.files[].path | ltrimstr($root)' "$OUT_FILE" |
+        LC_ALL=C sort >"$WORK_DIR/linted.list"
+    if ! cmp -s "$WORK_DIR/expected.list" "$WORK_DIR/linted.list"; then
+        echo "Files markdownlint gets (<) and files gomdlint linted (>), first 20 differences:" >&2
+        diff "$WORK_DIR/expected.list" "$WORK_DIR/linted.list" | grep '^[<>]' | head -n 20 >&2 || true
+        fail_run "gomdlint linted $G_FILES files in $repo, not the $FILE_COUNT on the list markdownlint gets"
+    fi
+}
+
+# MARKDOWNLINT_CMD is markdownlint's command line without the files.
+MARKDOWNLINT_CMD=("${LINT_ENV[@]}" "$MARKDOWNLINT_BIN" --json --output "$OUT_FILE.json"
+    --configPointer "$LINT_MARKDOWNLINT_POINTER" --)
+
+run_markdownlint() {
+    # The report must come from this run, so that a run that stops before
+    # writing one cannot pass for a run without findings.
+    rm -f "$OUT_FILE.json"
+    timed_run "${MARKDOWNLINT_CMD[@]}" "${FILES[@]}"
+    case "$RUN_EXIT" in
+        0 | 1) ;;
+        *) fail_run "markdownlint failed on $repo with exit status $RUN_EXIT" ;;
+    esac
+    # markdownlint-cli writes the report even when it finds nothing, as an
+    # empty file. It lints every file it is given, as none is a directory or
+    # a glob and the working directory has no .markdownlintignore.
+    [ -f "$OUT_FILE.json" ] ||
+        fail_run "markdownlint wrote no report for $repo (exit status $RUN_EXIT)"
+    if [ -s "$OUT_FILE.json" ]; then
+        M_ISSUES=$(jq -e 'if type == "array" then length else error("not an array") end' "$OUT_FILE.json") ||
+            fail_run "markdownlint wrote no JSON report for $repo"
+        M_FILES_WITH=$(jq '[.[].fileName] | unique | length' "$OUT_FILE.json")
+    else
+        M_ISSUES=0
+        M_FILES_WITH=0
+    fi
+    rm -f "$OUT_FILE.json"
+    # markdownlint-cli exits 1 for findings, and also when it rejects its
+    # command line, so exit 1 must come with findings.
+    if [ "$RUN_EXIT" -eq 1 ] && [ "$M_ISSUES" -eq 0 ]; then
+        fail_run "markdownlint exited with status 1 and reported no findings for $repo"
+    fi
+    M_FILES=$FILE_COUNT
+}
+
+# The Markdown files, as git pathspecs. gomdlint matches the .md and
+# .markdown extensions in any case, so the pathspecs do too.
+MARKDOWN_PATHSPECS=(':(icase)*.md' ':(icase)*.markdown')
+
+# prepare_repo sets repo_path and REPO_REAL for the repository in $repo,
+# points the "repo" link in LINT_CWD at it, and sets FILES to its Markdown
+# files as paths through that link, which keeps markdownlint's command line
+# short. It also writes the sorted list of the files to expected.list.
+prepare_repo() {
+    repo_path=$(bench_repo_dir "$repo")
+    [ -d "$repo_path/.git" ] || bench_die "$repo is not cloned at $repo_path; run clone-repos.sh"
+    REPO_REAL=$(cd "$repo_path" && pwd -P)
+    ln -sfn "$REPO_REAL" "$LINT_CWD/repo"
+
+    # The tracked files, and those of them that a .gitignore matches, which
+    # gomdlint skips. gomdlint reads only .gitignore files, not the global
+    # excludes file or .git/info/exclude, so neither may drop a file from
+    # the list. Both lists are NUL-separated, as git quotes unusual names
+    # in its other output, and go through files, so that a git failure
+    # stops the script.
+    local tracked_list="$WORK_DIR/tracked.list0" ignored_list="$WORK_DIR/ignored.list0"
+    git -C "$REPO_REAL" ls-files -z -- "${MARKDOWN_PATHSPECS[@]}" >"$tracked_list"
+    git -C "$REPO_REAL" ls-files -z -c -i --exclude-per-directory=.gitignore \
+        -- "${MARKDOWN_PATHSPECS[@]}" >"$ignored_list"
+
+    local file ignored=() next=0
+    while IFS= read -r -d '' file; do
+        ignored+=("$file")
+    done <"$ignored_list"
+
+    # git lists both in the order of its index, so the ignored files come
+    # up in the tracked list in their own order, and one pass finds them.
+    local links=()
+    FILES=()
+    while IFS= read -r -d '' file; do
+        if [ "$next" -lt "${#ignored[@]}" ] && [ "$file" = "${ignored[$next]}" ]; then
+            next=$((next + 1))
+            continue
+        fi
+        case "/$file" in
+            */.* | */node_modules/* | */vendor/*) continue ;;
+        esac
+        # gomdlint lints a link to a file, and skips a broken link.
+        if [ ! -f "$REPO_REAL/$file" ]; then
+            continue
+        elif [ -L "$REPO_REAL/$file" ]; then
+            links+=("$file")
+        else
+            FILES+=("repo/$file")
+        fi
+    done <"$tracked_list"
+    [ "$next" -eq "${#ignored[@]}" ] ||
+        bench_die "git listed ${ignored[$next]} of $repo as ignored, but not in the order of the tracked files"
+
+    # gomdlint lints a file once however many of its paths it finds. Of a
+    # file and the links to it, it keeps the file, and of links alone, the
+    # first in sorted order (dropAliases in pkg/runner/discovery.go). git
+    # lists the links in that order. A tracked file never lies below a
+    # link, so the path of a file on the list is its real path.
+    local regular=${#FILES[@]} targets=() target alias i j
+    for ((i = 0; i < ${#links[@]}; i++)); do
+        # The x keeps a newline that ends the name, which $( ) would drop.
+        target=$(readlink -f -- "$REPO_REAL/${links[$i]}" && echo x) ||
+            bench_die "cannot resolve the link ${links[$i]} in $repo"
+        target=${target%x}
+        target=${target%$'\n'}
+        targets+=("$target")
+        alias=0
+        if [[ "$target" == "$REPO_REAL/"* ]]; then
+            for ((j = 0; j < regular; j++)); do
+                if [ "${FILES[$j]}" = "repo/${target#"$REPO_REAL/"}" ]; then
+                    alias=1
+                    break
+                fi
+            done
+        fi
+        for ((j = 0; j < i; j++)); do
+            [ "${targets[$j]}" != "$target" ] || alias=1
+        done
+        [ "$alias" -eq 1 ] || FILES+=("repo/${links[$i]}")
+    done
+    FILE_COUNT=${#FILES[@]}
+    [ "$FILE_COUNT" -gt 0 ] || bench_die "$repo has no Markdown files"
+    printf '%s\n' "${FILES[@]#repo/}" | LC_ALL=C sort >"$WORK_DIR/expected.list"
+
+    check_command_size
+}
+
+# check_command_size stops the run when markdownlint's command line for the
+# files in FILES would not fit in ARG_MAX. execve counts every argument and
+# environment string with its NUL, and a pointer to each. The variables
+# that env sets count twice, as arguments and as environment, and each line
+# of env's output counts as a variable, so a value with a newline counts
+# more than once. The margin covers what the count leaves out: the
+# interpreter that the kernel and env add for markdownlint-cli's script,
+# the name of the executable, and the changes cd makes to PWD and OLDPWD.
+check_command_size() {
+    local args=("${MARKDOWNLINT_CMD[@]}" "${FILES[@]}")
+    if [ -n "$GNU_TIME" ]; then
+        args=("${GNU_TIME_CMD[@]}" "${args[@]}")
+    fi
+    local set_env=("${LINT_ENV[@]:1}")
+    local arg_bytes env_bytes set_bytes env_count pointer_size need limit
+    arg_bytes=$(printf '%s\0' "${args[@]}" | wc -c)
+    set_bytes=$(printf '%s\0' "${set_env[@]}" | wc -c)
+    env_bytes=$(env | wc -c)
+    env_count=$(env | wc -l)
+    pointer_size=$(($(getconf LONG_BIT) / 8))
+    need=$((arg_bytes + env_bytes + set_bytes +
+        pointer_size * (${#args[@]} + 1 + env_count + ${#set_env[@]} + 1) + 16384))
+    limit=$(getconf ARG_MAX)
+    [ "$need" -le "$limit" ] ||
+        bench_die "markdownlint's command line for the $FILE_COUNT files of $repo needs $need bytes, over the $limit of ARG_MAX"
+}
+
+REPO_RESULTS="$WORK_DIR/repos.jsonl"
+: >"$REPO_RESULTS"
+
+# Check every repository with one untimed gomdlint run before timing any,
+# so that a failure or a file set that differs stops the run in minutes
+# instead of after hours of markdownlint runs.
+echo "Checking that both tools get the same files..."
+for repo in "${REPOS[@]}"; do
+    prepare_repo
+    run_gomdlint
+    printf "  %-26s %7d files\n" "$repo" "$FILE_COUNT"
+done
+echo ""
+
+printf "%-26s %7s %10s %13s %8s %10s %13s\n" \
+    "Repository" "Files" "gomdlint" "markdownlint" "Speedup" "gomdlint" "markdownlint"
+printf "%-26s %7s %10s %13s %8s %10s %13s\n" \
+    "" "" "time" "time" "" "findings" "findings"
+printf "%-26s %7s %10s %13s %8s %10s %13s\n" \
+    "----------" "-----" "--------" "------------" "-------" "--------" "------------"
+
+speedups=()
+
+for repo in "${REPOS[@]}"; do
+    prepare_repo
+    revision=$(git -C "$REPO_REAL" rev-parse HEAD) || bench_die "cannot read the revision of $repo"
+
+    g_times=() g_mems=() m_times=() m_mems=()
+    for ((i = 1; i <= RUNS; i++)); do
+        run_gomdlint
+        g_times+=("$RUN_MS")
+        g_mems+=("$RUN_KB")
+        if [ "$i" -gt 1 ] && [ "$G_ISSUES" != "$g_first_issues" ]; then
+            bench_die "gomdlint found $g_first_issues and then $G_ISSUES issues in $repo"
+        fi
+        g_first_issues=$G_ISSUES
+
+        run_markdownlint
+        m_times+=("$RUN_MS")
+        m_mems+=("$RUN_KB")
+        if [ "$i" -gt 1 ] && [ "$M_ISSUES" != "$m_first_issues" ]; then
+            bench_die "markdownlint found $m_first_issues and then $M_ISSUES issues in $repo"
+        fi
+        m_first_issues=$M_ISSUES
+    done
+
+    g_time=$(median "${g_times[@]}")
+    m_time=$(median "${m_times[@]}")
+    g_mem=null
+    m_mem=null
+    if [ -n "$GNU_TIME" ]; then
+        g_mem=$(median "${g_mems[@]}")
+        m_mem=$(median "${m_mems[@]}")
+    fi
+
+    speedup=$(awk -v m="$m_time" -v g="$g_time" 'BEGIN { if (g > 0) printf "%.1f", m / g; else print "N/A" }')
+    [ "$speedup" = "N/A" ] || speedups+=("$speedup")
+
+    printf "%-26s %7d %10s %13s %7sx %10d %13d\n" "$repo" "$FILE_COUNT" \
+        "$(awk -v t="$g_time" 'BEGIN { printf "%.2fs", t / 1000 }')" \
+        "$(awk -v t="$m_time" 'BEGIN { printf "%.2fs", t / 1000 }')" \
+        "$speedup" "$G_ISSUES" "$M_ISSUES"
+    printf "  files seen: gomdlint %d, markdownlint %d; files with findings: gomdlint %d, markdownlint %d\n" \
+        "$G_FILES" "$M_FILES" "$G_FILES_WITH" "$M_FILES_WITH"
+    if [ -n "$GNU_TIME" ]; then
+        printf "  peak memory: gomdlint %d KB, markdownlint %d KB\n" "$g_mem" "$m_mem"
+    fi
+
+    jq -n -c \
+        --arg repo "$repo" \
+        --arg revision "$revision" \
+        --argjson file_count "$FILE_COUNT" \
+        --argjson g_time "$g_time" --argjson g_mem "$g_mem" \
+        --argjson g_issues "$G_ISSUES" --argjson g_files "$G_FILES" --argjson g_with "$G_FILES_WITH" \
+        --argjson m_time "$m_time" --argjson m_mem "$m_mem" \
+        --argjson m_issues "$M_ISSUES" --argjson m_files "$M_FILES" --argjson m_with "$M_FILES_WITH" \
+        --argjson g_runs "$(printf '%s\n' "${g_times[@]}" | jq -s -c .)" \
+        --argjson m_runs "$(printf '%s\n' "${m_times[@]}" | jq -s -c .)" \
+        '{($repo): {
+            revision: $revision,
+            file_count: $file_count,
+            gomdlint: {time_ms: $g_time, memory_kb: $g_mem, issues: $g_issues,
+                       files_linted: $g_files, files_with_issues: $g_with, run_times_ms: $g_runs},
+            markdownlint: {time_ms: $m_time, memory_kb: $m_mem, issues: $m_issues,
+                           files_linted: $m_files, files_with_issues: $m_with, run_times_ms: $m_runs}
+        }}' >>"$REPO_RESULTS"
+
+    if [ "$PROFILE" = 1 ]; then
+        repo_profile="$PROFILE_DIR/${repo//\//__}"
+        mkdir -p "$repo_profile"
+        run_gomdlint --cpuprofile="$repo_profile/cpu.pprof" \
+            --memprofile="$repo_profile/mem.pprof" --trace="$repo_profile/trace.out"
+        for profile in cpu.pprof mem.pprof trace.out; do
+            [ -s "$repo_profile/$profile" ] || bench_die "gomdlint wrote no $profile for $repo"
+        done
+    fi
+done
+
+rm -f "$LINT_CWD/repo"
+
+mkdir -p "$RESULTS_DIR/raw"
+jq -n \
+    --arg timestamp "$TIMESTAMP" \
+    --arg gomdlint_version "$GOMDLINT_VERSION" \
+    --arg gomdlint_revision "${GOMDLINT_REVISION:-unknown}" \
+    --arg markdownlint_version "$MARKDOWNLINT_VERSION" \
+    --arg markdownlint_library_version "$MARKDOWNLINT_LIB_VERSION" \
+    --arg node_version "$NODE_VERSION" \
+    --arg platform "$(uname -sm)" \
+    --argjson cpus "$(getconf _NPROCESSORS_ONLN)" \
+    --argjson gomaxprocs "$PROCS" \
+    --arg memory "$([ -n "$GNU_TIME" ] && echo gnu-time || echo unavailable)" \
+    --argjson runs "$RUNS" \
+    --slurpfile repos "$REPO_RESULTS" \
+    '{timestamp: $timestamp, gomdlint_version: $gomdlint_version,
+      gomdlint_revision: $gomdlint_revision, markdownlint_version: $markdownlint_version,
+      markdownlint_library_version: $markdownlint_library_version, node_version: $node_version,
+      platform: $platform, cpus: $cpus, gomaxprocs: $gomaxprocs, timing: "wall-clock",
+      memory: $memory, runs: $runs, repos: ($repos | add)}' >"$RESULT_FILE"
+
+echo ""
+if [ ${#speedups[@]} -gt 0 ]; then
+    avg_speedup=$(printf '%s\n' "${speedups[@]}" | awk '{ s += $1 } END { printf "%.1f", s / NR }')
     echo "Average speedup: ${avg_speedup}x"
 fi
 
 echo ""
 echo "Results saved to: $RESULT_FILE"
-echo "Profiles saved to: $PROFILE_DIR"
+echo "$RESULT_FILE" >"$RESULTS_DIR/latest.txt"
 
-# Generate profile reports
-echo ""
-"$SCRIPT_DIR/generate-profiles.sh" "$PROFILE_DIR"
-
-# Update latest symlink
-echo "$RESULT_FILE" > "$RESULTS_DIR/latest.txt"
+if [ "$PROFILE" = 1 ]; then
+    echo "Profiles saved to: $PROFILE_DIR"
+    echo ""
+    "$SCRIPT_DIR/generate-profiles.sh" "$PROFILE_DIR"
+fi

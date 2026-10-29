@@ -30,25 +30,23 @@ jobs:
           sudo apt-get install -y gnuplot jq
 
       - name: Install markdownlint-cli
-        run: npm install -g markdownlint-cli
+        # 0.49.0 bundles markdownlint 0.41, the version gomdlint follows.
+        run: npm install -g markdownlint-cli@0.49.0
 
       - name: Cache benchmark repos
         uses: actions/cache@v6
         with:
           path: ~/.cache/gomdlint-compare
-          key: compare-repos-v1
+          key: compare-repos-v2
 
       - name: Build gomdlint
         run: go build -o gomdlint ./cmd/gomdlint
-
-      - name: Add gomdlint to PATH
-        run: echo "$PWD" >> "$GITHUB_PATH"
 
       - name: Clone benchmark repos
         run: ./bench/scripts/clone-repos.sh
 
       - name: Run comparison
-        run: ./bench/scripts/run-bench.sh
+        run: GOMDLINT_BIN="$PWD/gomdlint" ./bench/scripts/run-bench.sh
 
       - name: Generate charts
         run: ./bench/scripts/generate-plots.sh
