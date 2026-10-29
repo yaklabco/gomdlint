@@ -32,6 +32,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 RESULTS_DIR="${BENCH_RESULTS_DIR:-$SCRIPT_DIR/../results}"
+# gomdlint runs from another directory and writes its profiles here, so the
+# path must not be relative to this one.
+case "$RESULTS_DIR" in
+    /*) ;;
+    *) RESULTS_DIR="$PWD/$RESULTS_DIR" ;;
+esac
 RUNS="${BENCH_RUNS:-3}"
 PROCS="${BENCH_GOMAXPROCS:-8}"
 PROFILE="${BENCH_PROFILE:-1}"
