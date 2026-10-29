@@ -353,10 +353,10 @@ root of the Git working tree, as GitHub code scanning expects, and its
 columns count UTF-16 code units. Each rule descriptor gives the rule's
 one-line description as `shortDescription`, and the description, the reason
 for the rule and what its fix does as `fullDescription`. Its `help` holds the
-page that `gomdlint explain` prints for the rule, as text and as Markdown,
-and its `helpUri` links to the rule's page under `docs/rules` on GitHub.
-Its `tags` are the rule's category followed by its markdownlint tags, at
-most 10, the number GitHub code scanning keeps.
+page that `gomdlint explain --defaults` prints for the rule, as text and as
+Markdown, and its `helpUri` links to the rule's page under `docs/rules` on
+GitHub. Its `tags` are the rule's category followed by its markdownlint
+tags, at most 10, the number GitHub code scanning keeps.
 
 ### Color
 
@@ -914,8 +914,8 @@ unless given `-f` or `--force`. For `lint`, `--compact` writes JSON and
 SARIF output without indentation, `--per-file` prints a table for each
 file with findings under `--format table`, and `--cpuprofile`,
 `--memprofile` and `--trace` write Go CPU and memory profiles and an
-execution trace to the files they name. `--debug`, on any command, turns
-on debug logging.
+execution trace to the files they name. `--debug` turns on debug logging,
+except for `init` and `migrate`, which log at the info level.
 
 ## Known Limitations
 

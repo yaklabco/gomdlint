@@ -747,7 +747,7 @@ case, 24 a `multiple` case, 13 a `code_block_immunity` case, 12 a `nested`
 case, 12 a `containers` case, 3 an `adjacent` case, and only 5 a `unicode`
 case (MD009, MD013, MD026, MD037 and MD038). Nine fixable rules have no
 `frontmatter` case (MD020, MD021, MD035, MD044, MD047, MD049, MD050, MD058
-and MDL003), and MD050 has only `basic` and `clean`.
+and MDL003), and MD050 has only `basic`, `clean` and `example`.
 
 ```bash
 # Run all golden tests

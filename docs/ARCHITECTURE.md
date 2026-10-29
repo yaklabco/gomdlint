@@ -621,8 +621,9 @@ the original, the outlines and block summaries derived from it alone, and
 its region layout, through `lint.SharedValue` (`fix_shared.go`). Each of
 the heading, emphasis, horizontal rule and proper name rules still checks
 the fixes it keeps together on the whole document. The list and
-whitespace rules (`fix_check.go`) parse the document for the render
-signature once per rule.
+whitespace rules (`fix_check.go`) still build their baseline render
+signatures and region models once per rule, parsing the document with
+each parser they compare: GFM, and CommonMark too under `commonmark`.
 
 ## Rule Catalog and Registry
 
