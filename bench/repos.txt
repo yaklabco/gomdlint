@@ -4,7 +4,8 @@
 # Large documentation sites
 kubernetes/website
 microsoft/vscode-docs
-golang/website
+# golang/website is left out: markdownlint 0.41.1 stops with an error in
+# MD042 on _content/doc/modules/publishing.md, so it cannot be compared.
 
 # Popular projects with docs
 facebook/react
