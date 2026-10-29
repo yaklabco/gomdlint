@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
 Most rules now report what markdownlint 0.41 reports, with its defaults, and
 every fix is checked before it is applied. Several defaults and output
 formats change. The first entries under Changed may need action.
@@ -936,7 +938,8 @@ Initial release of gomdlint - a fast Markdown linter written in Go.
 - Environment variable overrides (`GOMDLINT_*`)
 - CommonMark and GFM flavor support
 
-[Unreleased]: https://github.com/yaklabco/gomdlint/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/yaklabco/gomdlint/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/yaklabco/gomdlint/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/yaklabco/gomdlint/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yaklabco/gomdlint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yaklabco/gomdlint/compare/v0.1.1...v0.2.0
