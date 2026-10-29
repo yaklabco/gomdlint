@@ -817,11 +817,11 @@ formats change. The first entries under Changed may need action.
   are written, and the check for every file resolved each of those paths
   again. `gomdlint lint $(git ls-files '*.md')` over 8,000 files took 46
   seconds and now takes under one, about as long as linting their
-  directory. Where the system gives files device and inode numbers,
-  files that share a size and modification time, as files extracted from
-  an archive often do, are no longer each compared with all the others to
-  find the paths that name one file. Findings, fixes and fixed output stay
-  as they were.
+  directory. Where the system gives files an identity, as Unix and Windows
+  do, files that share a size and modification time, as files extracted
+  from an archive often do, are no longer each compared with all the others
+  to find the paths that name one file. Findings, fixes and fixed output
+  stay as they were.
 - The list and whitespace rules that withhold every fix in a document with
   raw HTML other than comments and plain `br`, `wbr`, `hr` or `img` tags
   now count the raw HTML that GitHub renders in footnotes and in TOML or

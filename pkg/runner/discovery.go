@@ -109,9 +109,10 @@ func discover(ctx context.Context, opts Options) (*discovery, error) {
 }
 
 // fileKey groups paths that might name the same file. Hard links and a
-// symlink's target share size and modification time, and the device and
-// inode numbers where the system has them, so os.SameFile only compares
-// paths within a group. Without those numbers, files of one size and time
+// symlink's target share size and modification time, and the identity
+// that os.SameFile compares where the system gives one (the device and
+// inode numbers, or the volume and file index on Windows), so os.SameFile
+// only compares paths within a group. Without an identity, files of one size and time
 // share a group, and each is compared with the others.
 type fileKey struct {
 	size    int64
@@ -120,9 +121,9 @@ type fileKey struct {
 	ino     uint64
 }
 
-func fileKeyOf(info fs.FileInfo) fileKey {
+func fileKeyOf(path string, info fs.FileInfo) fileKey {
 	key := fileKey{size: info.Size(), modTime: info.ModTime().UnixNano()}
-	if dev, ino, ok := fileID(info); ok {
+	if dev, ino, ok := fileID(path, info); ok {
 		key.dev, key.ino = dev, ino
 	}
 	return key
@@ -146,7 +147,7 @@ func groupFiles(paths []string) [][]string {
 			continue
 		}
 
-		key := fileKeyOf(info)
+		key := fileKeyOf(path, info)
 		group := -1
 		for _, seen := range identities[key] {
 			if os.SameFile(info, seen.info) {

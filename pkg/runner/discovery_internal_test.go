@@ -3,7 +3,6 @@ package runner
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -17,11 +16,12 @@ import (
 // file share a key, so grouping compares a file with no other.
 func TestFileKeyOf_TellsFilesOfOneSizeAndTimeApart(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("os.Stat gives no file identity here")
-	}
-
 	dir := t.TempDir()
+	if info, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
+	} else if _, _, ok := fileID(dir, info); !ok {
+		t.Skip("this system gives files no identity")
+	}
 	first, second, link := filepath.Join(dir, "a.md"), filepath.Join(dir, "b.md"), filepath.Join(dir, "c.md")
 	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	for _, path := range []string{first, second} {
@@ -35,7 +35,7 @@ func TestFileKeyOf_TellsFilesOfOneSizeAndTimeApart(t *testing.T) {
 	key := func(path string) fileKey {
 		info, err := os.Stat(path)
 		require.NoError(t, err)
-		return fileKeyOf(info)
+		return fileKeyOf(path, info)
 	}
 	assert.NotEqual(t, key(first), key(second), "two files of one size and time")
 	assert.Equal(t, key(first), key(link), "two hard links to one file")
