@@ -68,7 +68,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	// Get pipeline options from config. Fixes only follow a symbolic link to
 	// a file inside the paths being linted.
 	pipelineOpts := lint.PipelineOptionsFromConfig(opts.Config)
-	pipelineOpts.WriteRoots = lint.WriteRoots(opts.WorkingDir, opts.effectivePaths())
+	pipelineOpts.WriteRoots = lint.NewWriteRoots(opts.WorkingDir, opts.effectivePaths())
 
 	// A run that fixes files records the diff of what it writes; a run that
 	// does not previews the fixes in a dry run.
