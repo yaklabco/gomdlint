@@ -306,6 +306,7 @@ prepare_repo() {
 
     # git lists both in the order of its index, so the ignored files come
     # up in the tracked list in their own order, and one pass finds them.
+    local links=()
     FILES=()
     while IFS= read -r -d '' file; do
         if [ "$next" -lt "${#ignored[@]}" ] && [ "$file" = "${ignored[$next]}" ]; then
@@ -316,12 +317,41 @@ prepare_repo() {
             */.* | */node_modules/* | */vendor/*) continue ;;
         esac
         # gomdlint lints a link to a file, and skips a broken link.
-        if [ -f "$REPO_REAL/$file" ]; then
+        if [ ! -f "$REPO_REAL/$file" ]; then
+            continue
+        elif [ -L "$REPO_REAL/$file" ]; then
+            links+=("$file")
+        else
             FILES+=("repo/$file")
         fi
     done <"$tracked_list"
     [ "$next" -eq "${#ignored[@]}" ] ||
         bench_die "git listed ${ignored[$next]} of $repo as ignored, but not in the order of the tracked files"
+
+    # gomdlint lints a file once however many of its paths it finds. Of a
+    # file and the links to it, it keeps the file, and of links alone, the
+    # first in sorted order (dropAliases in pkg/runner/discovery.go). git
+    # lists the links in that order. A tracked file never lies below a
+    # link, so the path of a file on the list is its real path.
+    local regular=${#FILES[@]} targets=() target alias i j
+    for ((i = 0; i < ${#links[@]}; i++)); do
+        target=$(readlink -f -- "$REPO_REAL/${links[$i]}") ||
+            bench_die "cannot resolve the link ${links[$i]} in $repo"
+        targets+=("$target")
+        alias=0
+        if [[ "$target" == "$REPO_REAL/"* ]]; then
+            for ((j = 0; j < regular; j++)); do
+                if [ "${FILES[$j]}" = "repo/${target#"$REPO_REAL/"}" ]; then
+                    alias=1
+                    break
+                fi
+            done
+        fi
+        for ((j = 0; j < i; j++)); do
+            [ "${targets[$j]}" != "$target" ] || alias=1
+        done
+        [ "$alias" -eq 1 ] || FILES+=("repo/${links[$i]}")
+    done
     FILE_COUNT=${#FILES[@]}
     [ "$FILE_COUNT" -gt 0 ] || bench_die "$repo has no Markdown files"
     printf '%s\n' "${FILES[@]#repo/}" | LC_ALL=C sort >"$WORK_DIR/expected.list"

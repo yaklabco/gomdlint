@@ -65,8 +65,10 @@ the tree and reads its `.gitignore` files. markdownlint gets the list of the
 Markdown files (`.md` and `.markdown`, in any case) that git tracks,
 without hidden files and directories, the `node_modules` and `vendor`
 directories, and the files a `.gitignore` file ignores, which gomdlint
-skips. The list is one argument list, and the script stops if it would
-exceed the system's limit.
+skips. gomdlint lints a file once when symbolic links name it too, so the
+list holds it once: by its own path when that is on the list, and otherwise
+by the first of the links. The list is one argument list, and the script
+stops if it would exceed the system's limit.
 
 Before timing anything, the script lints every repository once with
 gomdlint and stops unless gomdlint linted exactly the files on the list.
