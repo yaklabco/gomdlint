@@ -68,7 +68,8 @@ directories, and the files a `.gitignore` file ignores, which gomdlint
 skips. gomdlint lints a file once when symbolic links name it too, so the
 list holds it once: by its own path when that is on the list, and otherwise
 by the first of the links. The list is one argument list, and the script
-stops if it would exceed the system's limit.
+stops if the command line and the environment would exceed `ARG_MAX`,
+counting the pointers to the strings that `execve` stores too.
 
 Before timing anything, the script lints every repository once with
 gomdlint and stops unless gomdlint linted exactly the files on the list.

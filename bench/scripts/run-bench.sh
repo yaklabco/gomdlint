@@ -176,13 +176,14 @@ echo ""
 OUT_FILE="$WORK_DIR/out"
 ERR_FILE="$WORK_DIR/err"
 TIME_FILE="$WORK_DIR/time"
+GNU_TIME_CMD=("$GNU_TIME" -f '%M' -o "$TIME_FILE")
 timed_run() {
     local start status=0
     RUN_KB=""
     now_us
     start=$NOW_US
     if [ -n "$GNU_TIME" ]; then
-        (cd "$LINT_CWD" && "$GNU_TIME" -f '%M' -o "$TIME_FILE" "$@") >"$OUT_FILE" 2>"$ERR_FILE" || status=$?
+        (cd "$LINT_CWD" && "${GNU_TIME_CMD[@]}" "$@") >"$OUT_FILE" 2>"$ERR_FILE" || status=$?
     else
         (cd "$LINT_CWD" && "$@") >"$OUT_FILE" 2>"$ERR_FILE" || status=$?
     fi
@@ -248,12 +249,15 @@ run_gomdlint() {
     fi
 }
 
+# MARKDOWNLINT_CMD is markdownlint's command line without the files.
+MARKDOWNLINT_CMD=("${LINT_ENV[@]}" "$MARKDOWNLINT_BIN" --json --output "$OUT_FILE.json"
+    --configPointer "$LINT_MARKDOWNLINT_POINTER" --)
+
 run_markdownlint() {
     # The report must come from this run, so that a run that stops before
     # writing one cannot pass for a run without findings.
     rm -f "$OUT_FILE.json"
-    timed_run "${LINT_ENV[@]}" "$MARKDOWNLINT_BIN" --json --output "$OUT_FILE.json" \
-        --configPointer "$LINT_MARKDOWNLINT_POINTER" -- "${FILES[@]}"
+    timed_run "${MARKDOWNLINT_CMD[@]}" "${FILES[@]}"
     case "$RUN_EXIT" in
         0 | 1) ;;
         *) fail_run "markdownlint failed on $repo with exit status $RUN_EXIT" ;;
@@ -362,12 +366,34 @@ prepare_repo() {
     [ "$FILE_COUNT" -gt 0 ] || bench_die "$repo has no Markdown files"
     printf '%s\n' "${FILES[@]#repo/}" | LC_ALL=C sort >"$WORK_DIR/expected.list"
 
-    local arg_bytes env_bytes limit
-    arg_bytes=$(printf '%s\0' "${FILES[@]}" | wc -c)
+    check_command_size
+}
+
+# check_command_size stops the run when markdownlint's command line for the
+# files in FILES would not fit in ARG_MAX. execve counts every argument and
+# environment string with its NUL, and a pointer to each. The variables
+# that env sets count twice, as arguments and as environment, and each line
+# of env's output counts as a variable, so a value with a newline counts
+# more than once. The margin covers what the count leaves out: the
+# interpreter that the kernel and env add for markdownlint-cli's script,
+# the name of the executable, and the changes cd makes to PWD and OLDPWD.
+check_command_size() {
+    local args=("${MARKDOWNLINT_CMD[@]}" "${FILES[@]}")
+    if [ -n "$GNU_TIME" ]; then
+        args=("${GNU_TIME_CMD[@]}" "${args[@]}")
+    fi
+    local set_env=("${LINT_ENV[@]:1}")
+    local arg_bytes env_bytes set_bytes env_count pointer_size need limit
+    arg_bytes=$(printf '%s\0' "${args[@]}" | wc -c)
+    set_bytes=$(printf '%s\0' "${set_env[@]}" | wc -c)
     env_bytes=$(env | wc -c)
-    limit=$(($(getconf ARG_MAX) - env_bytes - 65536))
-    [ "$arg_bytes" -lt "$limit" ] ||
-        bench_die "the $FILE_COUNT file paths of $repo need $arg_bytes bytes, over the $limit the command line allows"
+    env_count=$(env | wc -l)
+    pointer_size=$(($(getconf LONG_BIT) / 8))
+    need=$((arg_bytes + env_bytes + set_bytes +
+        pointer_size * (${#args[@]} + 1 + env_count + ${#set_env[@]} + 1) + 16384))
+    limit=$(getconf ARG_MAX)
+    [ "$need" -le "$limit" ] ||
+        bench_die "markdownlint's command line for the $FILE_COUNT files of $repo needs $need bytes, over the $limit of ARG_MAX"
 }
 
 REPO_RESULTS="$WORK_DIR/repos.jsonl"
